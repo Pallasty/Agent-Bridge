@@ -1,7 +1,7 @@
 //! Built-in MCP tools — wrap the bridge's backend bundle and expose it to
 //! Claude Code (or any MCP client) over the `tools/call` channel.
 
-use ab_agent::SpawnConfig;
+use ab_agent::{GitWorktreeManager, SpawnConfig};
 use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result};
 use ab_mcp::{McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
 use ab_terminal::{OscEvent, OscParser, SplitDir};
@@ -530,6 +530,23 @@ impl McpTool for AgentSpawnTool {
     }
 }
 
+/// Resolve which `GitWorktreeManager` a tool call should use. If the caller
+/// provided an explicit `repo` argument we bind a fresh manager to it for
+/// this call only; otherwise fall back to the bridge-wide default (set by
+/// AGENT_BRIDGE_REPO at startup). This lets Claude hop between repos within
+/// a single session without restarting the MCP server.
+fn resolve_worktree(hub: &Hub, args: &Value) -> std::result::Result<GitWorktreeManager, ToolResult> {
+    if let Some(repo) = args.get("repo").and_then(|v| v.as_str()) {
+        return Ok(GitWorktreeManager::new(PathBuf::from(repo)));
+    }
+    match &hub.worktree {
+        Some(w) => Ok((**w).clone()),
+        None => Err(ToolResult::error(
+            "no 'repo' arg passed and no default worktree manager configured",
+        )),
+    }
+}
+
 pub struct WorktreeListTool { hub: Hub }
 impl WorktreeListTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
 #[async_trait]
@@ -539,18 +556,21 @@ impl McpTool for WorktreeListTool {
         ToolSchema {
             name: self.name().into(),
             description:
-                "List git worktrees rooted at the bridge's repo (set with the \
-                 AGENT_BRIDGE_REPO env var; defaults to the daemon's launch cwd). \
+                "List git worktrees of a repository. Pass `repo` to point at any local \
+                 git checkout for this call; if omitted, falls back to the bridge-wide \
+                 default (AGENT_BRIDGE_REPO env var, else the daemon's launch cwd). \
                  Lets the agent see what parallel branches are already in flight."
                     .into(),
-            input_schema: json!({ "type": "object", "properties": {} }),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "repo": { "type": "string", "description": "Absolute path to the repo (optional)." }
+                }
+            }),
         }
     }
-    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let w = match &self.hub.worktree {
-            Some(w) => w.clone(),
-            None => return Ok(ToolResult::error("no worktree manager configured")),
-        };
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let w = match resolve_worktree(&self.hub, &args) { Ok(w) => w, Err(e) => return Ok(e) };
         match w.list().await {
             Ok(rows) => Ok(ToolResult::json_text(&serde_json::to_value(rows).unwrap_or(Value::Null))),
             Err(e) => Ok(ToolResult::error(format!("worktree: {e}"))),
@@ -567,14 +587,16 @@ impl McpTool for WorktreeCreateTool {
         ToolSchema {
             name: self.name().into(),
             description:
-                "Create a new git worktree on a fresh branch. Use this when the agent \
-                 wants to try multiple approaches in parallel without polluting the \
-                 main checkout. Pair with `agent_spawn` to launch a sibling Claude in \
-                 the new worktree."
+                "Create a new git worktree on a fresh branch. Pass `repo` to target any \
+                 local git checkout; otherwise uses the bridge-wide default. Use this \
+                 when the agent wants to try multiple approaches in parallel without \
+                 polluting the main checkout. Pair with `agent_spawn` to launch a \
+                 sibling Claude in the new worktree."
                     .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
+                    "repo":   { "type": "string", "description": "Absolute path to the repo (optional)." },
                     "branch": { "type": "string" },
                     "path":   { "type": "string", "description": "Where to put the worktree dir." },
                     "base":   { "type": "string", "description": "Branch/commit to fork from. Defaults to HEAD." }
@@ -584,10 +606,7 @@ impl McpTool for WorktreeCreateTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let w = match &self.hub.worktree {
-            Some(w) => w.clone(),
-            None => return Ok(ToolResult::error("no worktree manager configured")),
-        };
+        let w = match resolve_worktree(&self.hub, &args) { Ok(w) => w, Err(e) => return Ok(e) };
         let branch = match args.get("branch").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => return Ok(ToolResult::error("missing 'branch'")),
@@ -613,11 +632,13 @@ impl McpTool for WorktreeRemoveTool {
         ToolSchema {
             name: self.name().into(),
             description:
-                "Remove a git worktree. Set `force=true` to clobber dirty working trees."
+                "Remove a git worktree. Pass `repo` to target any local git checkout; \
+                 set `force=true` to clobber dirty working trees."
                     .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
+                    "repo":  { "type": "string", "description": "Absolute path to the repo (optional)." },
                     "path":  { "type": "string" },
                     "force": { "type": "boolean", "default": false }
                 },
@@ -626,10 +647,7 @@ impl McpTool for WorktreeRemoveTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let w = match &self.hub.worktree {
-            Some(w) => w.clone(),
-            None => return Ok(ToolResult::error("no worktree manager configured")),
-        };
+        let w = match resolve_worktree(&self.hub, &args) { Ok(w) => w, Err(e) => return Ok(e) };
         let path = match args.get("path").and_then(|v| v.as_str()) {
             Some(s) => PathBuf::from(s),
             None => return Ok(ToolResult::error("missing 'path'")),

@@ -63,6 +63,11 @@ impl ChromiumCdpBackend {
                 if let Ok(path) = std::env::var("AGENT_BRIDGE_CHROME") {
                     cfg = cfg.chrome_executable(path);
                 }
+                // Per-process user-data-dir avoids SingletonLock collisions when
+                // multiple agent-bridge daemons (or stale lock files) coexist.
+                let user_data = std::env::temp_dir()
+                    .join(format!("agent-bridge-chrome-{}", std::process::id()));
+                cfg = cfg.user_data_dir(user_data);
 
                 let cfg = cfg
                     .build()
