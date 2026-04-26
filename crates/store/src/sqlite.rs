@@ -10,7 +10,7 @@ use tokio_rusqlite::{params, Connection};
 type RusqliteResult<T> = std::result::Result<T, tokio_rusqlite::rusqlite::Error>;
 use tracing::info;
 
-use crate::{NotificationRecord, StateStore, StoredSession};
+use crate::{NotificationRecord, StateStore, StoredSession, STDIO_CAP};
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at  INTEGER NOT NULL,
     ended_at    INTEGER
 );
+CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at DESC);
 
 CREATE TABLE IF NOT EXISTS notifications (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,6 +89,26 @@ impl SqliteStore {
                 "INSERT OR IGNORE INTO schema_meta(key, value) VALUES('version', '1')",
                 [],
             )?;
+
+            // ── v2 migration: add exit_code / stdout / stderr to sessions ──
+            // SQLite tolerates ALTER TABLE ADD COLUMN; we wrap in column-exists
+            // probes so re-running on a v2 db is a no-op.
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "1".to_string());
+            if cur.as_str() == "1" {
+                let _ = c.execute("ALTER TABLE sessions ADD COLUMN exit_code INTEGER", []);
+                let _ = c.execute("ALTER TABLE sessions ADD COLUMN stdout    TEXT",   []);
+                let _ = c.execute("ALTER TABLE sessions ADD COLUMN stderr    TEXT",   []);
+                c.execute(
+                    "UPDATE schema_meta SET value='2' WHERE key='version'",
+                    [],
+                )?;
+            }
             Ok(())
         })
         .await
@@ -96,6 +117,16 @@ impl SqliteStore {
         info!(path = %path.display(), "SqliteStore ready");
         Ok(Self { conn })
     }
+}
+
+/// Clamp `s` to at most `max` bytes, preserving UTF-8 boundaries.
+fn clamp(s: &str, max: usize) -> String {
+    if s.len() <= max { return s.to_string(); }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) { end -= 1; }
+    let mut out = s[..end].to_string();
+    out.push_str("\n…[truncated]…");
+    out
 }
 
 fn severity_to_str(s: NotifySeverity) -> &'static str {
@@ -144,9 +175,13 @@ impl StateStore for SqliteStore {
         self.conn
             .call(move |c| -> RusqliteResult<()> {
                 c.execute(
-                    "INSERT OR REPLACE INTO sessions(id, runtime_id, cwd, started_at, ended_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![s.id.as_str(), s.runtime_id, s.cwd, s.started_at, s.ended_at],
+                    "INSERT OR REPLACE INTO sessions
+                       (id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        s.id.as_str(), s.runtime_id, s.cwd, s.started_at, s.ended_at,
+                        s.exit_code, s.stdout, s.stderr
+                    ],
                 )?;
                 Ok(())
             })
@@ -161,7 +196,7 @@ impl StateStore for SqliteStore {
             .conn
             .call(move |c| -> RusqliteResult<Option<StoredSession>> {
                 let mut stmt = c.prepare(
-                    "SELECT id, runtime_id, cwd, started_at, ended_at
+                    "SELECT id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr
                      FROM sessions WHERE id=?1",
                 )?;
                 let r = stmt
@@ -172,6 +207,9 @@ impl StateStore for SqliteStore {
                             cwd: row.get(2)?,
                             started_at: row.get(3)?,
                             ended_at: row.get(4)?,
+                            exit_code: row.get(5)?,
+                            stdout: row.get(6)?,
+                            stderr: row.get(7)?,
                         })
                     })
                     .ok();
@@ -182,22 +220,26 @@ impl StateStore for SqliteStore {
         Ok(row)
     }
 
-    async fn list_sessions(&self) -> Result<Vec<StoredSession>> {
+    async fn list_sessions(&self, limit: u32) -> Result<Vec<StoredSession>> {
+        let limit = limit as i64;
         let rows = self
             .conn
-            .call(|c| -> RusqliteResult<Vec<StoredSession>> {
+            .call(move |c| -> RusqliteResult<Vec<StoredSession>> {
                 let mut stmt = c.prepare(
-                    "SELECT id, runtime_id, cwd, started_at, ended_at
-                     FROM sessions ORDER BY started_at DESC",
+                    "SELECT id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr
+                     FROM sessions ORDER BY started_at DESC LIMIT ?1",
                 )?;
                 let rows = stmt
-                    .query_map([], |row| {
+                    .query_map(params![limit], |row| {
                         Ok(StoredSession {
                             id: SessionId::from_raw(row.get::<_, String>(0)?),
                             runtime_id: row.get(1)?,
                             cwd: row.get(2)?,
                             started_at: row.get(3)?,
                             ended_at: row.get(4)?,
+                            exit_code: row.get(5)?,
+                            stdout: row.get(6)?,
+                            stderr: row.get(7)?,
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -206,6 +248,32 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("list_sessions: {e}")))?;
         Ok(rows)
+    }
+
+    async fn finalise_session(
+        &self,
+        id: &SessionId,
+        ended_at: i64,
+        exit_code: Option<i32>,
+        stdout: Option<String>,
+        stderr: Option<String>,
+    ) -> Result<()> {
+        let key = id.as_str().to_string();
+        let stdout = stdout.map(|s| clamp(&s, STDIO_CAP));
+        let stderr = stderr.map(|s| clamp(&s, STDIO_CAP));
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE sessions
+                        SET ended_at = ?2, exit_code = ?3, stdout = ?4, stderr = ?5
+                      WHERE id = ?1",
+                    params![key, ended_at, exit_code, stdout, stderr],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("finalise_session: {e}")))?;
+        Ok(())
     }
 
     async fn append_notification(&self, evt: &NotifyEvent) -> Result<()> {

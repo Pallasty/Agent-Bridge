@@ -69,7 +69,9 @@ async fn build_hub() -> Result<Hub> {
 
     let claude_bin =
         std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
-    let agent: Arc<dyn AgentRuntime> = Arc::new(ClaudeCodeRuntime::with_binary(claude_bin));
+    let agent: Arc<dyn AgentRuntime> = Arc::new(
+        ClaudeCodeRuntime::with_binary(claude_bin).with_store(store.clone()),
+    );
 
     let repo = std::env::var("AGENT_BRIDGE_REPO")
         .ok()

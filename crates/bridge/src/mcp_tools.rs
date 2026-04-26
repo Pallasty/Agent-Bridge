@@ -2,7 +2,7 @@
 //! Claude Code (or any MCP client) over the `tools/call` channel.
 
 use ab_agent::{GitWorktreeManager, SpawnConfig};
-use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result};
+use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
 use ab_mcp::{McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
 use ab_terminal::{OscEvent, OscParser, SplitDir};
 use async_trait::async_trait;
@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::hub::Hub;
 
@@ -661,6 +662,148 @@ impl McpTool for WorktreeRemoveTool {
 }
 
 // ===========================================================================
+//                       agent session inspection (v0.2)
+// ===========================================================================
+
+pub struct AgentSessionListTool { hub: Hub }
+impl AgentSessionListTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for AgentSessionListTool {
+    fn name(&self) -> &'static str { "agent_session_list" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "List recent agent sessions (default 20, max 1000). Returns one row \
+                 per spawn with id / runtime / cwd / started_at / ended_at / exit_code. \
+                 Use `agent_session_get(id)` to fetch the full stdout/stderr."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 20 }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20).min(1000) as u32;
+        let rows = store.list_sessions(limit).await?;
+        // Strip stdout/stderr to keep the listing compact.
+        let summary: Vec<Value> = rows.into_iter().map(|s| json!({
+            "id":          s.id.as_str(),
+            "runtime_id":  s.runtime_id,
+            "cwd":         s.cwd,
+            "started_at":  s.started_at,
+            "ended_at":    s.ended_at,
+            "exit_code":   s.exit_code,
+            "running":     s.ended_at.is_none(),
+            "stdout_len":  s.stdout.as_ref().map(|x| x.len()).unwrap_or(0),
+            "stderr_len":  s.stderr.as_ref().map(|x| x.len()).unwrap_or(0),
+        })).collect();
+        Ok(ToolResult::json_text(&Value::Array(summary)))
+    }
+}
+
+pub struct AgentSessionGetTool { hub: Hub }
+impl AgentSessionGetTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for AgentSessionGetTool {
+    fn name(&self) -> &'static str { "agent_session_get" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Fetch one agent session row by id, including the full captured \
+                 stdout and stderr (each clamped to 64 KiB). Returns null if the \
+                 session id is unknown."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let id = match args.get("id").and_then(|v| v.as_str()) {
+            Some(s) => SessionId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'id'")),
+        };
+        let row = store.load_session(&id).await?;
+        Ok(ToolResult::json_text(&serde_json::to_value(row).unwrap_or(Value::Null)))
+    }
+}
+
+pub struct AgentSessionWaitTool { hub: Hub }
+impl AgentSessionWaitTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for AgentSessionWaitTool {
+    fn name(&self) -> &'static str { "agent_session_wait" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Block until the given session has finished (ended_at != null) or \
+                 `timeout_secs` elapses. Polls the store every 500 ms. On success \
+                 returns the final row (with stdout/stderr); on timeout returns the \
+                 latest in-flight row plus `timed_out=true`."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id":           { "type": "string" },
+                    "timeout_secs": { "type": "integer", "minimum": 1, "maximum": 600, "default": 60 }
+                },
+                "required": ["id"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let id = match args.get("id").and_then(|v| v.as_str()) {
+            Some(s) => SessionId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'id'")),
+        };
+        let timeout = Duration::from_secs(
+            args.get("timeout_secs").and_then(|v| v.as_u64()).unwrap_or(60).min(600),
+        );
+        let deadline = Instant::now() + timeout;
+
+        loop {
+            let row = store.load_session(&id).await?;
+            match row.as_ref() {
+                Some(s) if s.ended_at.is_some() => {
+                    return Ok(ToolResult::json_text(&json!({
+                        "timed_out": false,
+                        "session": s,
+                    })));
+                }
+                _ => {}
+            }
+            if Instant::now() >= deadline {
+                return Ok(ToolResult::json_text(&json!({
+                    "timed_out": true,
+                    "session": row,
+                })));
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -682,6 +825,9 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(BrowserScreenshotTool::new(hub.clone())));
     // Agent + worktree surface
     reg.register(Arc::new(AgentSpawnTool::new(hub.clone())));
+    reg.register(Arc::new(AgentSessionListTool::new(hub.clone())));
+    reg.register(Arc::new(AgentSessionGetTool::new(hub.clone())));
+    reg.register(Arc::new(AgentSessionWaitTool::new(hub.clone())));
     reg.register(Arc::new(WorktreeListTool::new(hub.clone())));
     reg.register(Arc::new(WorktreeCreateTool::new(hub.clone())));
     reg.register(Arc::new(WorktreeRemoveTool::new(hub)));

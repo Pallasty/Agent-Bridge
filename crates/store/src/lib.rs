@@ -16,7 +16,17 @@ pub struct StoredSession {
     pub runtime_id: String,
     pub cwd: String,
     pub started_at: i64,
+    #[serde(default)]
     pub ended_at: Option<i64>,
+    /// Process exit code, populated once the agent finishes.
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    /// Captured stdout (truncated to STDIO_CAP bytes).
+    #[serde(default)]
+    pub stdout: Option<String>,
+    /// Captured stderr (truncated to STDIO_CAP bytes).
+    #[serde(default)]
+    pub stderr: Option<String>,
 }
 
 /// One persisted notification, with its server-assigned timestamp.
@@ -27,13 +37,29 @@ pub struct NotificationRecord {
     pub event: NotifyEvent,
 }
 
+/// Hard cap on stdout/stderr we persist per agent session, to keep the DB
+/// file from growing unbounded if a sub-agent goes haywire.
+pub const STDIO_CAP: usize = 64 * 1024;
+
 #[async_trait]
 pub trait StateStore: Send + Sync {
     async fn save_session(&self, session: &StoredSession) -> Result<()>;
 
     async fn load_session(&self, id: &SessionId) -> Result<Option<StoredSession>>;
 
-    async fn list_sessions(&self) -> Result<Vec<StoredSession>>;
+    /// List sessions newest-first, capped to `limit` rows.
+    async fn list_sessions(&self, limit: u32) -> Result<Vec<StoredSession>>;
+
+    /// Update an existing session row with its termination outcome.
+    /// Implementations should clamp `stdout`/`stderr` to [`STDIO_CAP`] bytes.
+    async fn finalise_session(
+        &self,
+        id: &SessionId,
+        ended_at: i64,
+        exit_code: Option<i32>,
+        stdout: Option<String>,
+        stderr: Option<String>,
+    ) -> Result<()>;
 
     async fn append_notification(&self, evt: &NotifyEvent) -> Result<()>;
 

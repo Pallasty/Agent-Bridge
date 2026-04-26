@@ -5,6 +5,64 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-04-26
+
+Closes the `agent_spawn` loop. Sub-agent stdout / stderr / exit_code are now
+persisted to SQLite; three new MCP tools let the parent agent (and the human)
+introspect every session that ever ran.
+
+### Added
+
+- **`agent_session_list(limit?)`** — newest-first summary of all sessions
+  (id / runtime / cwd / started_at / ended_at / exit_code, plus stdout/stderr
+  byte counts). stdout/stderr bodies omitted from this listing for token
+  economy.
+- **`agent_session_get(id)`** — full row including the captured stdout and
+  stderr (each clamped to 64 KiB).
+- **`agent_session_wait(id, timeout_secs?)`** — blocks (polls every 500 ms,
+  default 60 s, max 600 s) until the session finishes; returns the final row
+  on success, or `timed_out=true` plus the in-flight row on timeout.
+
+### Changed
+
+- `ClaudeCodeRuntime` accepts an optional [`StateStore`] (`with_store`). When
+  attached it writes an in-flight row at spawn and an UPDATE with
+  exit_code / stdout / stderr after the child exits.
+- `StateStore::list_sessions` now takes a `limit` (was unbounded).
+
+### Storage migration
+
+- **schema v1 → v2**: `sessions` gains `exit_code INTEGER`, `stdout TEXT`,
+  `stderr TEXT` columns. Migration is idempotent — existing rows keep their
+  data and get NULL values for the new columns. Bumps `schema_meta.version`
+  to `2`.
+
+### Tools surface
+
+| Group        | Count | Names |
+|--------------|------:|-------|
+| Notify       | 3 | `notify`, `notifications_recent`, `osc_parse` |
+| Terminal     | 3 | `terminal_list`, `terminal_send_keys`, `terminal_split` |
+| Browser      | 5 | `browser_navigate`, `browser_eval`, `browser_snapshot`, `browser_click`, `browser_screenshot` |
+| **Agent**    | **4** | `agent_spawn`, **`agent_session_list`**, **`agent_session_get`**, **`agent_session_wait`** |
+| Worktree     | 3 | `worktree_list`, `worktree_create`, `worktree_remove` |
+| **Total**    | **18** | (was 15 in v0.1.0) |
+
+### End-to-end verification
+
+End-to-end Python harness (`/tmp/v02_smoke.py`) drives a fresh `agent-bridge
+mcp` subprocess with `AGENT_BRIDGE_CLAUDE_BIN=/usr/bin/echo` (no API tokens
+spent), proves:
+
+1. `initialize` → server reports `agent-bridge / 0.1.0`
+2. `tools/list` → 18 tools registered, the 3 new `agent_session_*` present
+3. `agent_spawn` → returns session id, child runs to completion
+4. `agent_session_wait` → returns `timed_out=false` + final row including
+   `exit_code=0` and `stdout="-p this prompt becomes echo's argument\n"`
+5. `agent_session_list` / `agent_session_get` → roundtrip same row
+
+---
+
 ## [0.1.0] — 2026-04-26
 
 First public release. **Linux-native AI-agent control plane** reaching feature
