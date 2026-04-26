@@ -1,0 +1,72 @@
+//! Shared backend bundle used by both the JSON-RPC router and the MCP tools.
+
+use ab_agent::{AgentRuntime, GitWorktreeManager};
+use ab_browser::BrowserBackend;
+use ab_core::NotifyEvent;
+use ab_notifier::Notifier;
+use ab_store::StateStore;
+use ab_terminal::TerminalBackend;
+use std::sync::Arc;
+use tracing::warn;
+
+#[derive(Clone)]
+pub struct Hub {
+    pub notifiers: Vec<Arc<dyn Notifier>>,
+    pub store: Option<Arc<dyn StateStore>>,
+    pub terminal: Option<Arc<dyn TerminalBackend>>,
+    pub browser: Option<Arc<dyn BrowserBackend>>,
+    pub agent: Option<Arc<dyn AgentRuntime>>,
+    pub worktree: Option<Arc<GitWorktreeManager>>,
+}
+
+impl Hub {
+    pub fn builder() -> HubBuilder { HubBuilder::default() }
+
+    /// Persist (best-effort) and fan-out one notification.
+    pub async fn deliver(&self, evt: &NotifyEvent) -> (u32, bool) {
+        let mut persisted = false;
+        if let Some(store) = &self.store {
+            match store.append_notification(evt).await {
+                Ok(()) => persisted = true,
+                Err(e) => warn!(error = %e, "store: append_notification failed"),
+            }
+        }
+        let mut delivered = 0u32;
+        for n in &self.notifiers {
+            match n.send(evt).await {
+                Ok(()) => delivered += 1,
+                Err(e) => warn!(notifier = n.id(), error = %e, "notifier delivery failed"),
+            }
+        }
+        (delivered, persisted)
+    }
+}
+
+#[derive(Default)]
+pub struct HubBuilder {
+    notifiers: Vec<Arc<dyn Notifier>>,
+    store: Option<Arc<dyn StateStore>>,
+    terminal: Option<Arc<dyn TerminalBackend>>,
+    browser: Option<Arc<dyn BrowserBackend>>,
+    agent: Option<Arc<dyn AgentRuntime>>,
+    worktree: Option<Arc<GitWorktreeManager>>,
+}
+
+impl HubBuilder {
+    pub fn notifier(mut self, n: Arc<dyn Notifier>) -> Self { self.notifiers.push(n); self }
+    pub fn store(mut self, s: Arc<dyn StateStore>) -> Self { self.store = Some(s); self }
+    pub fn terminal(mut self, t: Arc<dyn TerminalBackend>) -> Self { self.terminal = Some(t); self }
+    pub fn browser(mut self, b: Arc<dyn BrowserBackend>) -> Self { self.browser = Some(b); self }
+    pub fn agent(mut self, a: Arc<dyn AgentRuntime>) -> Self { self.agent = Some(a); self }
+    pub fn worktree(mut self, w: Arc<GitWorktreeManager>) -> Self { self.worktree = Some(w); self }
+    pub fn build(self) -> Hub {
+        Hub {
+            notifiers: self.notifiers,
+            store: self.store,
+            terminal: self.terminal,
+            browser: self.browser,
+            agent: self.agent,
+            worktree: self.worktree,
+        }
+    }
+}

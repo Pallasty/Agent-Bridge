@@ -1,0 +1,17 @@
+[package]
+name = "ab-notifier"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ab-core.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+# Pure-Rust D-Bus client; no system libdbus required.
+zbus = { version = "5", default-features = false, features = ["tokio"] }

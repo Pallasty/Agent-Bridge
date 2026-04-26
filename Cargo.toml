@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/terminal",
+    "crates/browser",
+    "crates/notifier",
+    "crates/agent",
+    "crates/store",
+    "crates/mcp",
+    "crates/bridge",
+    "bin/agent-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+authors = ["agent-bridge contributors"]
+repository = "https://github.com/cedric/agent-bridge"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Misc utilities
+bytes = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+
+# Storage — pure Rust, bundled SQLite (no system libsqlite3 needed)
+tokio-rusqlite = { version = "0.6", features = ["bundled"] }
+
+# Browser automation via Chrome DevTools Protocol
+chromiumoxide = { version = "0.9", default-features = false, features = ["bytes"] }
+base64 = "0.22"
+dashmap = "6"
+
+# Internal crates
+ab-core = { path = "crates/core" }
+ab-terminal = { path = "crates/terminal" }
+ab-browser = { path = "crates/browser" }
+ab-notifier = { path = "crates/notifier" }
+ab-agent = { path = "crates/agent" }
+ab-store = { path = "crates/store" }
+ab-mcp = { path = "crates/mcp" }
+ab-bridge = { path = "crates/bridge" }
+
+[profile.dev]
+opt-level = 0
+debug = 1     # 减少 debug 体积，加快增量编译
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
