@@ -238,7 +238,12 @@ impl Router {
             Err(e) => return RpcResponse::fail(req.id, -32000, format!("browser: {e}")),
         };
         let path = p.get("path").and_then(|v| v.as_str()).map(|s| s.to_string())
-            .unwrap_or_else(|| format!("/tmp/agent-bridge-{}.png", page));
+            .unwrap_or_else(|| {
+                std::env::temp_dir()
+                    .join(format!("agent-bridge-{page}.png"))
+                    .to_string_lossy()
+                    .into_owned()
+            });
         if let Err(e) = tokio::fs::write(&path, &bytes).await {
             return RpcResponse::fail(req.id, -32000, format!("write {path}: {e}"));
         }

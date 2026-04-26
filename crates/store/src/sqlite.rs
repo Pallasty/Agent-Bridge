@@ -126,17 +126,30 @@ CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
 END;
 "#;
 
-/// Default database path: `$XDG_DATA_HOME/agent-bridge/state.db`,
-/// or `~/.local/share/agent-bridge/state.db` as a fallback.
+/// Default database path.
+///
+/// Linux: `$XDG_DATA_HOME/agent-bridge/state.db` → `~/.local/share/agent-bridge/state.db`.
+/// macOS: `~/Library/Application Support/agent-bridge/state.db`.
 pub fn default_db_path() -> PathBuf {
-    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-        return PathBuf::from(xdg).join("agent-bridge").join("state.db");
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+            return PathBuf::from(xdg).join("agent-bridge").join("state.db");
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home)
+                .join(".local/share/agent-bridge")
+                .join("state.db");
+        }
     }
+
+    #[cfg(target_os = "macos")]
     if let Ok(home) = std::env::var("HOME") {
         return PathBuf::from(home)
-            .join(".local/share/agent-bridge")
+            .join("Library/Application Support/agent-bridge")
             .join("state.db");
     }
+
     PathBuf::from("./agent-bridge-state.db")
 }
 

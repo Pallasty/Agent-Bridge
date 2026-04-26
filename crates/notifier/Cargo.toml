@@ -13,5 +13,6 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
-# Pure-Rust D-Bus client; no system libdbus required.
+# Pure-Rust D-Bus client (Linux only; not available on macOS/Windows).
+[target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5", default-features = false, features = ["tokio"] }
