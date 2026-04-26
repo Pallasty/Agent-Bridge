@@ -31,17 +31,33 @@ pub struct ToolContext {
     pub extras: HashMap<String, Value>,
 }
 
-/// One block in an MCP tool result. Today we only emit text; image/resource
-/// blocks can be added when needed.
+/// One block in an MCP tool result. Per the MCP spec the wire-format `type`
+/// discriminator uses lowercase strings (`"text"`, `"image"`, `"resource"`),
+/// hence the explicit `rename` attributes. The MCP image block also expects
+/// a camelCase `mimeType` field — annotated below.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type")]
 pub enum ContentBlock {
+    #[serde(rename = "text")]
     Text { text: String },
+
+    /// Inline image. `data` is the **base64-encoded** raw bytes (no
+    /// `data:` URL prefix). MCP-aware clients (Claude Code) will render
+    /// this directly into the model's context.
+    #[serde(rename = "image")]
+    Image {
+        data: String,
+        #[serde(rename = "mimeType")]
+        mime_type: String,
+    },
 }
 
 impl ContentBlock {
     pub fn text(s: impl Into<String>) -> Self {
         Self::Text { text: s.into() }
+    }
+    pub fn image(base64: impl Into<String>, mime: impl Into<String>) -> Self {
+        Self::Image { data: base64.into(), mime_type: mime.into() }
     }
 }
 
@@ -62,6 +78,22 @@ impl ToolResult {
     }
     pub fn json_text(v: &Value) -> Self {
         Self::text(serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
+    }
+    /// Build a result whose single block is an inline image.
+    pub fn image(base64: impl Into<String>, mime: impl Into<String>) -> Self {
+        Self { content: vec![ContentBlock::image(base64, mime)], is_error: false }
+    }
+    /// Image + a one-line text caption (some clients prefer the caption for
+    /// alt-text; both blocks are returned in `content`).
+    pub fn image_with_caption(
+        base64: impl Into<String>,
+        mime: impl Into<String>,
+        caption: impl Into<String>,
+    ) -> Self {
+        Self {
+            content: vec![ContentBlock::image(base64, mime), ContentBlock::text(caption)],
+            is_error: false,
+        }
     }
 }
 

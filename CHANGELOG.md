@@ -5,6 +5,59 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-04-26
+
+Two ergonomic upgrades that came straight out of using v0.2 in anger.
+
+### Added
+
+- **`agent_kill`** — send SIGTERM to a running session. The background wait
+  task still finalises the session row with the resulting exit code, so a
+  killed session remains queryable via `agent_session_get` (with whatever
+  partial stdout/stderr was captured up to the kill point).
+- **MCP image content block** — `ContentBlock::Image { data, mimeType }` per
+  MCP 2024-11-05 spec; `ToolResult::image` / `image_with_caption` helpers.
+- **`browser_screenshot inline=true`** now returns the PNG as a real MCP
+  image block (Claude renders it directly into context) plus a one-line
+  text caption — instead of a `data:image/png;base64,…` string.
+
+### Changed
+
+- `ClaudeCodeRuntime` keeps a `DashMap<SessionId, pid>` of live children;
+  the wait task removes entries on exit. This is the substrate `kill` uses.
+- Exit codes recorded by the store now encode signal-killed sessions as
+  **negative** numbers (e.g. `-15` for SIGTERM, `-9` for SIGKILL). On Unix
+  `std::process::ExitStatus::code()` returns `None` for signal kills, so
+  this is the agreed convention to keep the `exit_code` column non-null
+  when something *did* happen.
+
+### Tools surface
+
+| Group        | Count | New |
+|--------------|------:|-----|
+| Notify       | 3 |  |
+| Terminal     | 3 |  |
+| Browser      | 5 | (`browser_screenshot inline=true` now returns image block) |
+| **Agent**    | **5** | **`agent_kill`** |
+| Worktree     | 3 |  |
+| **Total**    | **19** | (was 18 in v0.2.0) |
+
+### End-to-end verification
+
+`/tmp/v03_smoke.py` drives a fresh `agent-bridge mcp` subprocess:
+
+1. `browser_navigate` + `browser_screenshot inline=true` →
+   2 content blocks: `image/png` (17 634 raw bytes, ~23 KB base64) +
+   text caption ✅
+2. `agent_spawn` → fake-claude blocker (`bash -c "echo …; sleep 30"`) →
+   `agent_session_get` confirms `ended_at == null` (running) →
+   `agent_kill` returns `SIGTERM sent` →
+   `agent_session_wait` returns within milliseconds with `exit_code = -15`,
+   captured stdout intact ✅
+3. Second `agent_kill` on the same id → `NotFound` error (idempotent) ✅
+
+---
+
 ## [0.2.0] — 2026-04-26
 
 Closes the `agent_spawn` loop. Sub-agent stdout / stderr / exit_code are now

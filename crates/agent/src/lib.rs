@@ -47,5 +47,14 @@ pub trait AgentRuntime: Send + Sync {
 
     async fn send_input(&self, session: &SessionId, text: &str) -> Result<()>;
 
+    /// Send SIGTERM to the underlying process. Idempotent — calling on an
+    /// already-finished session is a no-op (NotFound error). Default impl
+    /// rejects; runtimes that track child PIDs override.
+    async fn kill(&self, session: &SessionId) -> Result<()> {
+        Err(ab_core::Error::InvalidArgument(format!(
+            "kill not supported by this runtime (session {session})"
+        )))
+    }
+
     async fn capabilities(&self) -> AgentCapabilities;
 }

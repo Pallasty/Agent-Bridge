@@ -430,16 +430,23 @@ impl McpTool for BrowserScreenshotTool {
         ToolSchema {
             name: self.name().into(),
             description:
-                "Capture a full-page PNG screenshot. By default writes to /tmp and \
-                 returns the path; if `inline=true` returns base64 in-line (token-heavy, \
-                 only use for small viewports)."
+                "Capture a full-page PNG screenshot. Default mode writes the PNG \
+                 to /tmp and returns the file path (cheap, suitable for storage / \
+                 passing to other tools). Set `inline=true` to return the image as \
+                 a real MCP image content block — Claude renders it directly into \
+                 context (token-heavy, ~1k tokens per 100 KB; only use when you \
+                 actually need to *see* the page)."
                     .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "page":   { "type": "string" },
-                    "path":   { "type": "string", "description": "Optional output path." },
-                    "inline": { "type": "boolean", "default": false }
+                    "path":   { "type": "string", "description": "Optional output path (file mode only)." },
+                    "inline": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "If true, return the PNG as an MCP image block instead of writing a file."
+                    }
                 },
                 "required": ["page"]
             }),
@@ -461,7 +468,8 @@ impl McpTool for BrowserScreenshotTool {
         let inline = args.get("inline").and_then(|v| v.as_bool()).unwrap_or(false);
         if inline {
             let b64 = general_purpose::STANDARD.encode(&png);
-            return Ok(ToolResult::text(format!("data:image/png;base64,{b64}")));
+            let caption = format!("inline screenshot — {} bytes, image/png", png.len());
+            return Ok(ToolResult::image_with_caption(b64, "image/png", caption));
         }
         let path = args
             .get("path")
@@ -662,6 +670,50 @@ impl McpTool for WorktreeRemoveTool {
 }
 
 // ===========================================================================
+//                          agent_kill (v0.3)
+// ===========================================================================
+
+pub struct AgentKillTool { hub: Hub }
+impl AgentKillTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for AgentKillTool {
+    fn name(&self) -> &'static str { "agent_kill" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Send SIGTERM to a running agent session. Use when a sub-agent has \
+                 stalled, gone off-task, or you no longer need its result. The \
+                 background wait task will subsequently finalise the session row \
+                 with the SIGTERM exit code, so `agent_session_get(id)` afterwards \
+                 still shows what (partial) output was captured."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Session id from agent_spawn." }
+                },
+                "required": ["id"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let agent = match &self.hub.agent {
+            Some(a) => a.clone(),
+            None => return Ok(ToolResult::error("no agent runtime configured")),
+        };
+        let id = match args.get("id").and_then(|v| v.as_str()) {
+            Some(s) => SessionId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'id'")),
+        };
+        match agent.kill(&id).await {
+            Ok(()) => Ok(ToolResult::text(format!("SIGTERM sent to session {id}"))),
+            Err(e) => Ok(ToolResult::error(format!("kill: {e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                       agent session inspection (v0.2)
 // ===========================================================================
 
@@ -825,6 +877,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(BrowserScreenshotTool::new(hub.clone())));
     // Agent + worktree surface
     reg.register(Arc::new(AgentSpawnTool::new(hub.clone())));
+    reg.register(Arc::new(AgentKillTool::new(hub.clone())));
     reg.register(Arc::new(AgentSessionListTool::new(hub.clone())));
     reg.register(Arc::new(AgentSessionGetTool::new(hub.clone())));
     reg.register(Arc::new(AgentSessionWaitTool::new(hub.clone())));

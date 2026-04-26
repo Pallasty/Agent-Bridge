@@ -10,11 +10,16 @@
 //! `agent_spawn` loop: callers can later query `agent_session_get(id)` to
 //! retrieve the actual output.
 //!
+//! v0.3 addition: a per-runtime PID registry lets [`Self::kill`] send SIGTERM
+//! to in-flight sessions. Shells out to `/bin/kill -TERM <pid>` to avoid
+//! pulling in `libc` / `nix` for one syscall.
+//!
 //! Interactive PTY mode (live `send_input`) is P2 — needs `portable-pty`.
 
 use ab_core::{Error, Result, SessionId};
 use ab_store::{StateStore, StoredSession};
 use async_trait::async_trait;
+use dashmap::DashMap;
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -28,22 +33,32 @@ use crate::{AgentCapabilities, AgentRuntime, AgentSession, SpawnConfig};
 pub struct ClaudeCodeRuntime {
     binary: String,
     store: Option<Arc<dyn StateStore>>,
+    /// SessionId → PID of the live child process.
+    children: Arc<DashMap<String, u32>>,
 }
 
 impl Default for ClaudeCodeRuntime {
-    fn default() -> Self { Self { binary: "claude".into(), store: None } }
+    fn default() -> Self {
+        Self {
+            binary: "claude".into(),
+            store: None,
+            children: Arc::new(DashMap::new()),
+        }
+    }
 }
 
 impl ClaudeCodeRuntime {
     pub fn new() -> Self { Self::default() }
     pub fn with_binary(binary: impl Into<String>) -> Self {
-        Self { binary: binary.into(), store: None }
+        Self { binary: binary.into(), store: None, children: Arc::new(DashMap::new()) }
     }
-    /// Attach a [`StateStore`] so spawn / finalise rows are persisted.
     pub fn with_store(mut self, store: Arc<dyn StateStore>) -> Self {
         self.store = Some(store);
         self
     }
+
+    /// Number of in-flight sessions (testing / observability).
+    pub fn live_count(&self) -> usize { self.children.len() }
 }
 
 fn now_secs() -> i64 {
@@ -65,8 +80,6 @@ impl AgentRuntime for ClaudeCodeRuntime {
         let session_id = SessionId::new();
         let cwd = cfg.cwd.clone();
 
-        // Persist initial row (in-flight) so the session is queryable even
-        // before the child exits.
         if let Some(store) = &self.store {
             let initial = StoredSession {
                 id: session_id.clone(),
@@ -95,14 +108,18 @@ impl AgentRuntime for ClaudeCodeRuntime {
         let child = cmd
             .spawn()
             .map_err(|e| Error::Backend(format!("spawn claude: {e}")))?;
-        info!(session = %session_id, cwd = %cwd, "claude-code session started");
+        let pid = child.id().unwrap_or(0);
+        if pid != 0 {
+            self.children.insert(session_id.as_str().to_string(), pid);
+        }
+        info!(session = %session_id, pid, cwd = %cwd, "claude-code session started");
 
-        // Background drain + finalise. Logs a preview either way; persists the
-        // full output (clamped) when a store is attached.
         let sid_bg = session_id.clone();
         let store_bg = self.store.clone();
+        let children_bg = self.children.clone();
         tokio::spawn(async move {
             let out = child.wait_with_output().await;
+            children_bg.remove(sid_bg.as_str());
             let ended_at = now_secs();
             match out {
                 Ok(o) => {
@@ -115,12 +132,25 @@ impl AgentRuntime for ClaudeCodeRuntime {
                         stderr_preview = %truncate(&stderr, 200),
                         "claude-code session finished"
                     );
+                    // On Unix, status.code() is None when the child was killed
+                    // by a signal. Encode signals as negative exit codes
+                    // (e.g. SIGTERM = 15 → -15) so callers can distinguish
+                    // "exited normally with 0" from "killed by SIGTERM".
+                    let exit_code = o.status.code().or_else(|| {
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::process::ExitStatusExt;
+                            o.status.signal().map(|s| -(s as i32))
+                        }
+                        #[cfg(not(unix))]
+                        { None }
+                    });
                     if let Some(store) = store_bg {
                         let _ = store
                             .finalise_session(
                                 &sid_bg,
                                 ended_at,
-                                o.status.code(),
+                                exit_code,
                                 Some(stdout),
                                 Some(stderr),
                             )
@@ -159,10 +189,35 @@ impl AgentRuntime for ClaudeCodeRuntime {
         ))
     }
 
+    async fn kill(&self, session: &SessionId) -> Result<()> {
+        let pid = match self.children.get(session.as_str()) {
+            Some(p) => *p,
+            None => {
+                return Err(Error::NotFound(format!(
+                    "no live child for session {session} (already finished or unknown)"
+                )));
+            }
+        };
+        // Shell out to /bin/kill so we don't pull in libc/nix for one syscall.
+        let status = tokio::process::Command::new("/bin/kill")
+            .arg("-TERM")
+            .arg(pid.to_string())
+            .status()
+            .await
+            .map_err(|e| Error::Backend(format!("kill -TERM {pid}: {e}")))?;
+        if !status.success() {
+            return Err(Error::Backend(format!("/bin/kill exited with {status:?}")));
+        }
+        // Background wait task will see the child die, clean up `children` map,
+        // and finalise the session row with the SIGTERM exit code.
+        info!(session = %session, pid, "SIGTERM sent");
+        Ok(())
+    }
+
     async fn capabilities(&self) -> AgentCapabilities {
         AgentCapabilities {
             supports_mcp: true,
-            supports_teams: false, // future
+            supports_teams: false,
             supports_thinking: true,
         }
     }

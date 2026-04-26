@@ -9,6 +9,7 @@ dependencies = [
  "ab-core",
  "ab-store",
  "async-trait",
+ "dashmap",
  "serde",
  "serde_json",
  "tokio",
