@@ -5,6 +5,74 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-04-27
+
+Two ergonomic upgrades from using v0.4 in anger.
+
+### Added
+
+- **FTS5 full-text search for memories.** `memory_search` now uses SQLite's
+  built-in FTS5 virtual table with bm25 ranking, replacing the previous
+  `LIKE %query%` scan. Plain queries are tokenised + prefix-matched
+  (`PageRank graph` → `PageRank* graph*`); inputs containing FTS5 operators
+  (`"`, `*`, `:`, `(`, `)`, `AND`/`OR`/`NOT`/`NEAR`) pass through unchanged
+  for power users (`"exit code" OR sigterm`). Rankings blend bm25 with the
+  recency × frequency composite from v0.4.
+- **Filterable `agent_session_list`.** Optional arguments:
+  - `runtime_id` — exact match (`"claude-code"`).
+  - `cwd_prefix` — prefix-match the working directory.
+  - `state` — `"running"` (ended_at IS NULL) or `"finished"`.
+  - `exit_code` — exact match (negative for signal kills, e.g. `-15` =
+    SIGTERM, per the v0.3 convention).
+
+  All filters combine with AND.
+
+### Storage
+
+- **schema v3 → v4 migration**: creates `memories_fts` (FTS5 virtual table)
+  with `unicode61 remove_diacritics 2` tokeniser; INSERT/UPDATE/DELETE
+  triggers keep it in sync with the base table; backfills the index from
+  every existing memory row at upgrade time. Idempotent.
+
+### Tools surface
+
+| Group        | Count | Change |
+|--------------|------:|-------|
+| Notify       | 3 |  |
+| Terminal     | 3 |  |
+| Browser      | 5 |  |
+| Agent        | 5 | (`agent_session_list` gains 4 filter args) |
+| Worktree     | 3 |  |
+| Memory       | 6 | (`memory_search` now FTS5-backed) |
+| **Total**    | **25** | (no new tools — both upgrades are in-place) |
+
+### End-to-end verification
+
+`/tmp/v05_smoke.py`:
+
+1. `memory_search "AiOT"` → 1 hit, `lesson_aiot_not_to_reuse`, score 3.32
+2. `memory_search "PageRank graph"` → 2 hits, top is the lesson, score 3.11
+3. `memory_search '"exit code"'` (quoted phrase, operator path) → 2 hits
+4. `memory_search "Claude"` → 3 hits, top is `lesson_mcp_session_param_routing`
+   because bm25 ranks the most-frequent "Claude Code" mentions higher
+5. `memory_search "zzznonexistent"` → 0 hits ✅
+6. `agent_session_list state=running` → returns running fakes
+7. `agent_session_list cwd_prefix=/tmp/v05a` → only those rows
+8. `agent_session_list runtime_id=codex` → 0 (correct empty)
+9. `agent_session_list runtime_id=claude-code state=running` → AND combo
+10. `agent_session_list exit_code=-15 cwd_prefix=/tmp/v05` after kills →
+    matches the SIGTERMed bucket ✅
+
+### Known FTS5 corner
+
+The default `unicode61` tokeniser treats `_` as a token char, so
+`v0.4.0_birth` tokenises to `["v0", "4", "0_birth"]`. Searching for `birth`
+alone won't match — search for `0_birth` or just words from the body
+(the content text is fully indexed). A future v0.6 may switch to the
+`trigram` tokeniser if substring search becomes important.
+
+---
+
 ## [0.4.0] — 2026-04-27
 
 **Agent self-memory.** Cross-session persistence for the lessons / decisions /

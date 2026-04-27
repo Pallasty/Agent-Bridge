@@ -4,7 +4,7 @@
 use ab_agent::{GitWorktreeManager, SpawnConfig};
 use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
 use ab_mcp::{McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
-use ab_store::{CompactPolicy, MemoryListSort, MemoryRecord};
+use ab_store::{CompactPolicy, MemoryListSort, MemoryRecord, SessionFilter};
 use ab_terminal::{OscEvent, OscParser, SplitDir};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
@@ -729,12 +729,20 @@ impl McpTool for AgentSessionListTool {
             description:
                 "List recent agent sessions (default 20, max 1000). Returns one row \
                  per spawn with id / runtime / cwd / started_at / ended_at / exit_code. \
+                 All filters are optional and combine with AND: \
+                 `runtime_id` exact match, `cwd_prefix` prefix match, \
+                 `state` (\"running\"|\"finished\"), `exit_code` exact match \
+                 (use negative for signal kills, e.g. -15 = SIGTERM). \
                  Use `agent_session_get(id)` to fetch the full stdout/stderr."
                     .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 20 }
+                    "limit":      { "type": "integer", "minimum": 1, "maximum": 1000, "default": 20 },
+                    "runtime_id": { "type": "string",  "description": "e.g. 'claude-code'" },
+                    "cwd_prefix": { "type": "string",  "description": "Prefix-match the working dir." },
+                    "state":      { "type": "string",  "enum": ["running","finished"] },
+                    "exit_code":  { "type": "integer", "description": "Exact exit code (negative = signal)." }
                 }
             }),
         }
@@ -745,7 +753,17 @@ impl McpTool for AgentSessionListTool {
             None => return Ok(ToolResult::error("no store configured")),
         };
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20).min(1000) as u32;
-        let rows = store.list_sessions(limit).await?;
+        let filter = SessionFilter {
+            runtime_id: args.get("runtime_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            cwd_prefix: args.get("cwd_prefix").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            exited_only: args.get("state").and_then(|v| v.as_str()).and_then(|s| match s {
+                "finished" => Some(true),
+                "running"  => Some(false),
+                _ => None,
+            }),
+            exit_code: args.get("exit_code").and_then(|v| v.as_i64()).map(|n| n as i32),
+        };
+        let rows = store.list_sessions(&filter, limit).await?;
         // Strip stdout/stderr to keep the listing compact.
         let summary: Vec<Value> = rows.into_iter().map(|s| json!({
             "id":          s.id.as_str(),

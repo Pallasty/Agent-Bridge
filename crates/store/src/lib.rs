@@ -100,14 +100,34 @@ pub struct CompactPolicy {
     pub dry_run: bool,
 }
 
+/// Filters for `list_sessions` (v0.5). All None = match everything.
+/// Multiple filters combine with AND.
+#[derive(Debug, Clone, Default)]
+pub struct SessionFilter {
+    /// Match exact runtime_id (e.g. "claude-code").
+    pub runtime_id: Option<String>,
+    /// Match sessions whose cwd starts with this prefix.
+    pub cwd_prefix: Option<String>,
+    /// `Some(true)` → only finished sessions; `Some(false)` → only running;
+    /// `None` → both.
+    pub exited_only: Option<bool>,
+    /// Match exact exit_code (use negative for signal-killed; see v0.3 notes).
+    pub exit_code: Option<i32>,
+}
+
 #[async_trait]
 pub trait StateStore: Send + Sync {
     async fn save_session(&self, session: &StoredSession) -> Result<()>;
 
     async fn load_session(&self, id: &SessionId) -> Result<Option<StoredSession>>;
 
-    /// List sessions newest-first, capped to `limit` rows.
-    async fn list_sessions(&self, limit: u32) -> Result<Vec<StoredSession>>;
+    /// List sessions newest-first, capped to `limit` rows. Optional
+    /// [`SessionFilter`] narrows the result set.
+    async fn list_sessions(
+        &self,
+        filter: &SessionFilter,
+        limit: u32,
+    ) -> Result<Vec<StoredSession>>;
 
     /// Update an existing session row with its termination outcome.
     /// Implementations should clamp `stdout`/`stderr` to [`STDIO_CAP`] bytes.

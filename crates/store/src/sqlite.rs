@@ -11,8 +11,8 @@ type RusqliteResult<T> = std::result::Result<T, tokio_rusqlite::rusqlite::Error>
 use tracing::info;
 
 use crate::{
-    CompactPolicy, MemoryListSort, MemoryRecord, MemorySearchHit, NotificationRecord, StateStore,
-    StoredSession, MEMORY_CONTENT_CAP, STDIO_CAP,
+    CompactPolicy, MemoryListSort, MemoryRecord, MemorySearchHit, NotificationRecord,
+    SessionFilter, StateStore, StoredSession, MEMORY_CONTENT_CAP, STDIO_CAP,
 };
 
 const SCHEMA_V1: &str = r#"
@@ -71,6 +71,36 @@ CREATE INDEX IF NOT EXISTS idx_memories_kind          ON memories(kind);
 CREATE INDEX IF NOT EXISTS idx_memories_last_accessed ON memories(last_accessed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memories_updated_at    ON memories(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memories_access_count  ON memories(access_count DESC);
+"#;
+
+// ── FTS5 virtual table for memory.content + key, with auto-sync triggers ──
+//
+// FTS5 ships in rusqlite/bundled by default. We use the unicode61 tokenizer
+// (case-insensitive, accent-folding) and remove_diacritics=2 for best CJK
+// fallback (mostly tokenizes by char). Trigram tokenizer would be better
+// for substring search but unicode61 covers 99% of agent-memory needs.
+const SCHEMA_V4: &str = r#"
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    key UNINDEXED,
+    content,
+    tokenize = "unicode61 remove_diacritics 2"
+);
+
+-- Keep FTS in sync with the base table.
+CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+    INSERT INTO memories_fts(rowid, key, content)
+    VALUES (new.rowid, new.key, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, key, content)
+    VALUES ('delete', old.rowid, old.key, old.content);
+END;
+CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, key, content)
+    VALUES ('delete', old.rowid, old.key, old.content);
+    INSERT INTO memories_fts(rowid, key, content)
+    VALUES (new.rowid, new.key, new.content);
+END;
 "#;
 
 /// Default database path: `$XDG_DATA_HOME/agent-bridge/state.db`,
@@ -144,6 +174,28 @@ impl SqliteStore {
                     [],
                 )?;
             }
+
+            // ── v4 migration: FTS5 index on memories ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "3".to_string());
+            if cur.as_str() == "3" {
+                c.execute_batch(SCHEMA_V4)?;
+                // Backfill: copy every existing memory row into the FTS index.
+                c.execute(
+                    "INSERT INTO memories_fts(rowid, key, content)
+                     SELECT rowid, key, content FROM memories",
+                    [],
+                )?;
+                c.execute(
+                    "UPDATE schema_meta SET value='4' WHERE key='version'",
+                    [],
+                )?;
+            }
             Ok(())
         })
         .await
@@ -155,6 +207,51 @@ impl SqliteStore {
 }
 
 // ─── memory.* implementations ──────────────────────────────────────────
+
+/// Make a user query safe + useful for FTS5 MATCH.
+///
+/// FTS5 has its own tiny query language (operators AND/OR/NOT/NEAR, "phrase",
+/// `prefix*`, column filters). We let users pass either:
+/// - **Plain text** (whitespace-separated terms) — we add `*` for prefix
+///   matching on each term so partial words work as expected.
+/// - **Quoted phrases or anything containing FTS5 operators** — passed through
+///   unchanged so power users can write `"signal exit" OR sigterm`.
+///
+/// Heuristic: if the input contains FTS5 operator characters
+/// (`"`, `*`, `:`, `(`, `)`, ` AND `, ` OR `, ` NOT `, ` NEAR `) we trust it;
+/// otherwise we tokenise on whitespace and add `*` suffix to each term.
+fn sanitise_fts_query(q: &str) -> String {
+    let trimmed = q.trim();
+    let has_operator = trimmed.contains('"')
+        || trimmed.contains('*')
+        || trimmed.contains(':')
+        || trimmed.contains('(')
+        || trimmed.contains(')')
+        || trimmed.contains(" AND ")
+        || trimmed.contains(" OR ")
+        || trimmed.contains(" NOT ")
+        || trimmed.contains(" NEAR ");
+    if has_operator {
+        return trimmed.to_string();
+    }
+    // Plain-text path: tokenize, strip non-alphanumeric (FTS5 needs bare
+    // tokens; "term"* is not the same as term*), prefix-match each.
+    trimmed
+        .split_whitespace()
+        .filter_map(|t| {
+            let cleaned: String = t
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                .collect();
+            if cleaned.is_empty() {
+                None
+            } else {
+                Some(format!("{cleaned}*"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 fn now_secs() -> i64 {
     std::time::SystemTime::now()
@@ -279,28 +376,62 @@ impl StateStore for SqliteStore {
         Ok(row)
     }
 
-    async fn list_sessions(&self, limit: u32) -> Result<Vec<StoredSession>> {
-        let limit = limit as i64;
+    async fn list_sessions(
+        &self,
+        filter: &SessionFilter,
+        limit: u32,
+    ) -> Result<Vec<StoredSession>> {
+        let limit_i = limit as i64;
+        let f_runtime    = filter.runtime_id.clone();
+        let f_cwd_prefix = filter.cwd_prefix.clone();
+        let f_exited     = filter.exited_only;
+        let f_exit_code  = filter.exit_code;
+
         let rows = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<StoredSession>> {
+                // Build WHERE incrementally; bind params positionally.
+                // SQLite tolerates parameters bound but unused, so this stays
+                // simple: each filter contributes either an active condition
+                // or a no-op `?N IS NULL OR …` guard.
+                //
+                // For cwd_prefix we use `LIKE ?N || '%'` since an explicit `%`
+                // suffix lets us reuse the same string param.
+                let cwd_like = f_cwd_prefix.as_ref().map(|p| {
+                    let mut s = p.replace('%', r"\%").replace('_', r"\_");
+                    s.push('%');
+                    s
+                });
+
                 let mut stmt = c.prepare(
                     "SELECT id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr
-                     FROM sessions ORDER BY started_at DESC LIMIT ?1",
+                     FROM sessions
+                     WHERE (?1 IS NULL OR runtime_id = ?1)
+                       AND (?2 IS NULL OR cwd LIKE ?2 ESCAPE '\\')
+                       AND (?3 IS NULL
+                            OR (?3 = 1 AND ended_at IS NOT NULL)
+                            OR (?3 = 0 AND ended_at IS NULL))
+                       AND (?4 IS NULL OR exit_code = ?4)
+                     ORDER BY started_at DESC
+                     LIMIT ?5",
                 )?;
+                let exited_param: Option<i64> = f_exited.map(|b| if b { 1 } else { 0 });
                 let rows = stmt
-                    .query_map(params![limit], |row| {
-                        Ok(StoredSession {
-                            id: SessionId::from_raw(row.get::<_, String>(0)?),
-                            runtime_id: row.get(1)?,
-                            cwd: row.get(2)?,
-                            started_at: row.get(3)?,
-                            ended_at: row.get(4)?,
-                            exit_code: row.get(5)?,
-                            stdout: row.get(6)?,
-                            stderr: row.get(7)?,
-                        })
-                    })?
+                    .query_map(
+                        params![f_runtime, cwd_like, exited_param, f_exit_code, limit_i],
+                        |row| {
+                            Ok(StoredSession {
+                                id: SessionId::from_raw(row.get::<_, String>(0)?),
+                                runtime_id: row.get(1)?,
+                                cwd: row.get(2)?,
+                                started_at: row.get(3)?,
+                                ended_at: row.get(4)?,
+                                exit_code: row.get(5)?,
+                                stdout: row.get(6)?,
+                                stderr: row.get(7)?,
+                            })
+                        },
+                    )?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 Ok(rows)
             })
@@ -483,30 +614,36 @@ impl StateStore for SqliteStore {
         tags_any: &[String],
         limit: u32,
     ) -> Result<Vec<MemorySearchHit>> {
-        let q = query.to_string();
-        let q_pat = format!("%{}%", q.replace('%', r"\%").replace('_', r"\_"));
+        let q = query.trim().to_string();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        let fts_query = sanitise_fts_query(&q);
         let tags = tags_any.to_vec();
         let limit_i = limit as i64;
         let now = now_secs();
 
         let hits = self.conn
             .call(move |c| -> RusqliteResult<Vec<MemorySearchHit>> {
-                // Cast a wider net at the SQL layer (LIKE on key + content);
-                // tag intersection + final scoring/ranking happen in Rust where
-                // we have JSON parsing handy.
+                // FTS5 first: get candidate rowids ranked by bm25.
+                // Then JOIN back to memories for the full record.
+                // Final ranking blends bm25 (lower=better → invert) with
+                // recency + frequency, applied in Rust.
                 let mut stmt = c.prepare(
-                    "SELECT key, kind, content, tags, related_keys,
-                            created_at, updated_at, last_accessed_at, access_count
-                     FROM memories
-                     WHERE key LIKE ?1 ESCAPE '\\'
-                        OR content LIKE ?1 ESCAPE '\\'
+                    "SELECT m.key, m.kind, m.content, m.tags, m.related_keys,
+                            m.created_at, m.updated_at, m.last_accessed_at, m.access_count,
+                            bm25(memories_fts) AS bm25_score
+                     FROM memories_fts
+                     JOIN memories m ON m.rowid = memories_fts.rowid
+                     WHERE memories_fts MATCH ?1
+                     ORDER BY bm25_score
                      LIMIT ?2",
                 )?;
                 let rows = stmt
-                    .query_map(params![q_pat, limit_i * 4], |row| {
+                    .query_map(params![fts_query, limit_i * 4], |row| {
                         let tags_s: String = row.get(3)?;
                         let related_s: String = row.get(4)?;
-                        Ok(MemoryRecord {
+                        let rec = MemoryRecord {
                             key:              row.get(0)?,
                             kind:             row.get(1)?,
                             content:          row.get(2)?,
@@ -516,17 +653,24 @@ impl StateStore for SqliteStore {
                             updated_at:       row.get(6)?,
                             last_accessed_at: row.get(7)?,
                             access_count:     row.get::<_, i64>(8)? as u64,
-                        })
+                        };
+                        let bm25: f64 = row.get(9)?;
+                        Ok((rec, bm25))
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
 
                 let mut hits: Vec<MemorySearchHit> = rows
                     .into_iter()
-                    .filter(|r| {
+                    .filter(|(r, _)| {
                         tags.is_empty() || tags.iter().any(|t| r.tags.contains(t))
                     })
-                    .map(|r| {
-                        let score = memory_score(r.last_accessed_at, r.access_count, now);
+                    .map(|(r, bm25)| {
+                        // bm25 is negative (more negative = better match in SQLite).
+                        // Convert to positive "match strength", then mix with our
+                        // existing recency+frequency score.
+                        let match_strength = (-bm25).max(0.0);
+                        let score =
+                            match_strength + memory_score(r.last_accessed_at, r.access_count, now);
                         MemorySearchHit { record: r, score }
                     })
                     .collect();
