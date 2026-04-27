@@ -65,6 +65,18 @@ pub struct InitializeResult {
 pub struct ServerCapabilities {
     /// Empty object signals "tools supported"; absent means "not supported".
     pub tools: Option<ToolsCapability>,
+    /// Non-null signals resources are supported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resources: Option<ResourcesCapability>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ResourcesCapability {
+    #[serde(rename = "listChanged", skip_serializing_if = "Option::is_none")]
+    pub list_changed: Option<bool>,
+    /// Whether the server supports subscribing to resource updates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscribe: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

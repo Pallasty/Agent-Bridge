@@ -47,9 +47,10 @@ async fn main() -> Result<()> {
             serve(&socket, Router::new(hub)).await
         }
         Cmd::Mcp => {
+            let store = hub.store.clone();
             let registry = build_registry(hub);
             tracing::info!(tools = registry.list().len(), "starting MCP stdio server");
-            serve_stdio(registry, "agent-bridge", env!("CARGO_PKG_VERSION")).await;
+            serve_stdio(registry, store, "agent-bridge", env!("CARGO_PKG_VERSION")).await;
             Ok(())
         }
     }
