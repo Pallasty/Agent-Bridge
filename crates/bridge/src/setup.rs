@@ -159,16 +159,21 @@ fn merge_claude_settings(home: &Path, bin_dir: &Path) -> Result<()> {
         ),
     ];
 
-    for (event, _matcher, entry) in new_hooks {
+    for (event, matcher, entry) in new_hooks {
         let arr = hooks_obj
             .entry(*event)
             .or_insert(json!([]))
             .as_array_mut()
             .context("hook event entry is not an array")?;
 
-        // Check if our script is already registered for this event.
+        // Dedupe by (script_name, matcher): PreCompact has separate manual/auto
+        // entries that share the same script, so script-name alone is not enough.
         let script_name = script_name_for_event(event);
         let already = arr.iter().any(|item| {
+            let item_matcher = item.get("matcher").and_then(|m| m.as_str());
+            if item_matcher != *matcher {
+                return false;
+            }
             item.get("hooks")
                 .and_then(|h| h.as_array())
                 .map(|hooks| {
