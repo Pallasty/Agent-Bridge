@@ -2,7 +2,6 @@ use ab_agent::{AgentRuntime, ClaudeCodeRuntime, GitWorktreeManager};
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
-use ab_notifier::DbusNotifier;
 use ab_store::{default_db_path, SqliteStore, StateStore};
 use ab_terminal::{auto_backend, TerminalBackend};
 use anyhow::Result;
@@ -11,7 +10,7 @@ use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 #[derive(Parser, Debug)]
-#[command(version, about = "agent-bridge — Linux-native AI agent control plane")]
+#[command(version, about = "agent-bridge — Unix-native AI agent control plane")]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
@@ -62,7 +61,19 @@ async fn main() -> Result<()> {
 /// to (defaults to `$PWD`). `AGENT_BRIDGE_CLAUDE_BIN` overrides the claude
 /// binary path. `AGENT_BRIDGE_HEADLESS=1` for headless Chromium.
 async fn build_hub() -> Result<Hub> {
-    let dbus = DbusNotifier::connect().await?;
+    #[cfg(target_os = "linux")]
+    let notifier: Arc<dyn ab_notifier::Notifier> = {
+        use ab_notifier::DbusNotifier;
+        Arc::new(DbusNotifier::connect().await?)
+    };
+    #[cfg(target_os = "macos")]
+    let notifier: Arc<dyn ab_notifier::Notifier> = {
+        use ab_notifier::MacOsNotifier;
+        Arc::new(MacOsNotifier)
+    };
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    compile_error!("agent-bridge requires Linux or macOS");
+
     let store: Arc<dyn StateStore> = Arc::new(SqliteStore::open(&default_db_path()).await?);
     let terminal: Arc<dyn TerminalBackend> = auto_backend();
     tracing::info!(terminal_backend = %terminal.id(), "terminal backend selected");
@@ -81,7 +92,7 @@ async fn build_hub() -> Result<Hub> {
     let worktree = Arc::new(GitWorktreeManager::new(repo));
 
     Ok(Hub::builder()
-        .notifier(Arc::new(dbus))
+        .notifier(notifier)
         .store(store)
         .terminal(terminal)
         .browser(browser)

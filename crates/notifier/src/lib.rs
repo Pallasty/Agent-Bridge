@@ -7,9 +7,17 @@
 use ab_core::{NotifyEvent, Result};
 use async_trait::async_trait;
 
+#[cfg(target_os = "linux")]
 pub mod dbus;
 
+#[cfg(target_os = "macos")]
+pub mod macos_notifier;
+
+#[cfg(target_os = "linux")]
 pub use dbus::DbusNotifier;
+
+#[cfg(target_os = "macos")]
+pub use macos_notifier::MacOsNotifier;
 
 /// A delivery sink for [`NotifyEvent`]s.
 ///
