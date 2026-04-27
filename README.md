@@ -98,7 +98,7 @@ Claude then sees these **15 tools**:
 | `Notifier`         | `DbusNotifier`                                    | webhook, slack, pushover                  |
 | `BrowserBackend`   | `ChromiumCdpBackend` (chromiumoxide)              | webkitgtk, playwright, firefox-marionette |
 | `AgentRuntime`     | `ClaudeCodeRuntime` (one-shot)                    | codex, aider, gemini-cli, opencode        |
-| `TerminalBackend`  | `WezTermBackend`                                  | ghostty, zellij, tmux                     |
+| `TerminalBackend`  | `WezTermBackend`, `KittyBackend`, `ZellijBackend` | ghostty, tmux                             |
 | `StateStore`       | `SqliteStore` (rusqlite-bundled)                  | in-memory (tests), postgres (multi-host)  |
 | `McpTool`          | 15 built-in tools                                 | drop in any `Box<dyn McpTool>`            |
 
@@ -114,7 +114,24 @@ exactly one implementation (git itself), so adding a trait would be premature ab
 | `AGENT_BRIDGE_HEADLESS`   | (unset = headed)                           | `1` to launch Chromium headless       |
 | `AGENT_BRIDGE_CHROME`     | auto-detect                                | Path to chrome/chromium binary        |
 | `AGENT_BRIDGE_CLAUDE_BIN` | `claude`                                   | Override the claude CLI path          |
+| `AGENT_BRIDGE_TERMINAL`   | auto-detect                                | Force backend: `wezterm` \| `kitty` \| `zellij` |
+| `AGENT_BRIDGE_KITTY_SOCKET` | inherits `KITTY_LISTEN_ON`              | kitty IPC socket (e.g. `unix:/tmp/kitty-$USER`)|
 | `RUST_LOG`                | `info`                                     | Standard tracing-subscriber filter    |
+
+### Terminal backend auto-detection
+
+If `AGENT_BRIDGE_TERMINAL` is unset, the daemon picks a backend by inspecting
+the parent process environment:
+
+1. `ZELLIJ` is set                 → `ZellijBackend`  (session-granularity only)
+2. `KITTY_WINDOW_ID` is set        → `KittyBackend`   (per-window IDs via `kitten @`)
+3. otherwise                       → `WezTermBackend` (per-pane IDs via `wezterm cli`)
+
+Set `AGENT_BRIDGE_TERMINAL=kitty` (etc.) to override. Each backend requires
+its own runtime: `kitten` available + `allow_remote_control yes` for kitty,
+`wezterm` CLI in `$PATH` for wezterm, `zellij` CLI for zellij. Backends
+without their runtime present will surface clear errors only when the
+relevant `terminal_*` MCP tool is invoked, not at startup.
 
 ## Verified end-to-end
 

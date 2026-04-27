@@ -34,18 +34,13 @@ pub enum NotifySource {
     System,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NotifySeverity {
+    #[default]
     Info,
     Success,
     Warning,
     Error,
     Attention,
-}
-
-impl Default for NotifySeverity {
-    fn default() -> Self {
-        Self::Info
-    }
 }

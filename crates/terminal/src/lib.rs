@@ -1,7 +1,10 @@
 //! Terminal multiplexer abstraction + OSC parsing.
 //!
 //! - [`TerminalBackend`] trait — generic mux operations.
-//! - [`WezTermBackend`] — first concrete impl (wraps `wezterm cli`).
+//! - [`WezTermBackend`] — wraps `wezterm cli`.
+//! - [`KittyBackend`]  — wraps `kitten @` (kitty remote control).
+//! - [`ZellijBackend`] — wraps `zellij action` (session-granularity only).
+//! - [`auto_backend`]  — pick a backend from `AGENT_BRIDGE_TERMINAL` or env detection.
 //! - [`osc`] — pure-Rust streaming parser for OSC 9 / 99 / 777 notification
 //!   sequences, used by both the bridge daemon and integration glue.
 
@@ -9,12 +12,17 @@ use ab_core::{PaneId, Result};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
+pub mod kitty;
 pub mod osc;
 pub mod wezterm;
+pub mod zellij;
 
+pub use kitty::KittyBackend;
 pub use osc::{OscEvent, OscParser};
 pub use wezterm::WezTermBackend;
+pub use zellij::ZellijBackend;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pane {
@@ -54,4 +62,40 @@ pub trait TerminalBackend: Send + Sync {
     /// Stream lifecycle + OSC events. Backends without push semantics may
     /// return an empty/never-emitting stream.
     async fn subscribe(&self) -> Result<BoxStream<'static, TermEvent>>;
+}
+
+/// Pick a [`TerminalBackend`] from the environment.
+///
+/// Resolution order:
+/// 1. Explicit override: `AGENT_BRIDGE_TERMINAL` ∈ {`kitty`, `zellij`, `wezterm`}.
+/// 2. Auto-detect: `ZELLIJ` set → zellij; `KITTY_WINDOW_ID` set → kitty.
+/// 3. Fallback: wezterm (preserves pre-multi-backend behaviour).
+///
+/// Unknown override values silently fall through to the auto-detect step
+/// rather than panicking — prefer logging a warning at the call site.
+pub fn auto_backend() -> Arc<dyn TerminalBackend> {
+    let explicit = std::env::var("AGENT_BRIDGE_TERMINAL")
+        .ok()
+        .map(|s| s.trim().to_lowercase());
+
+    let chosen = match explicit.as_deref() {
+        Some("kitty") => "kitty",
+        Some("zellij") => "zellij",
+        Some("wezterm") => "wezterm",
+        _ => {
+            if std::env::var_os("ZELLIJ").is_some() {
+                "zellij"
+            } else if std::env::var_os("KITTY_WINDOW_ID").is_some() {
+                "kitty"
+            } else {
+                "wezterm"
+            }
+        }
+    };
+
+    match chosen {
+        "kitty" => Arc::new(KittyBackend::new()),
+        "zellij" => Arc::new(ZellijBackend::new()),
+        _ => Arc::new(WezTermBackend::new()),
+    }
 }

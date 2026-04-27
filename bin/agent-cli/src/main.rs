@@ -57,7 +57,7 @@ enum Cmd {
         cmd: OscCmd,
     },
 
-    /// Terminal multiplexer commands (requires WezTerm).
+    /// Terminal multiplexer commands (backend auto-selected: wezterm | kitty | zellij).
     Term {
         #[command(subcommand)]
         cmd: TermCmd,

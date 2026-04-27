@@ -4,7 +4,7 @@ use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
 use ab_notifier::DbusNotifier;
 use ab_store::{default_db_path, SqliteStore, StateStore};
-use ab_terminal::{TerminalBackend, WezTermBackend};
+use ab_terminal::{auto_backend, TerminalBackend};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
@@ -64,7 +64,8 @@ async fn main() -> Result<()> {
 async fn build_hub() -> Result<Hub> {
     let dbus = DbusNotifier::connect().await?;
     let store: Arc<dyn StateStore> = Arc::new(SqliteStore::open(&default_db_path()).await?);
-    let terminal: Arc<dyn TerminalBackend> = Arc::new(WezTermBackend::new());
+    let terminal: Arc<dyn TerminalBackend> = auto_backend();
+    tracing::info!(terminal_backend = %terminal.id(), "terminal backend selected");
     let browser: Arc<dyn BrowserBackend> = Arc::new(ChromiumCdpBackend::new());
 
     let claude_bin =
