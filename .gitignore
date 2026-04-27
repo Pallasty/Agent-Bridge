@@ -4,3 +4,15 @@
 .DS_Store
 *.sock
 /data
+
+# Editor / OS junk
+*.swp
+*~
+.idea/
+.vscode/
+
+# Local-only state
+*.db
+*.db-shm
+*.db-wal
+.worktrees/
