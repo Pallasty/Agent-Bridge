@@ -5,6 +5,41 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] — 2026-04-27
+
+**Hotfix.** v0.6.0 (and every prior version since v0.1) shipped a
+`ChromiumCdpBackend` that would *permanently hang* on any `browser_*` call
+once the underlying chrome process died (external `kill -9`, OOM, parent
+session ending, etc.). The cause: `OnceCell<Browser>` cached the handle
+forever with no health check; CDP itself has no inherent RPC timeout, so a
+dead websocket would block tasks indefinitely.
+
+### Fix
+
+- Replaced `Arc<OnceCell<Browser>>` with `Arc<RwLock<Option<Arc<Browser>>>>`.
+  `Browser` itself is not `Clone`, hence the inner `Arc`.
+- New `is_alive()` probe: 500 ms timeout-wrapped `browser.version()` over
+  CDP. Both timeout and protocol error count as "dead".
+- `ensure_browser()` now does a fast-path read-lock health check; if the
+  cached handle is missing or dead, it acquires the write lock,
+  double-checks (so two concurrent callers don't both relaunch), then spawns
+  a fresh chrome process.
+- Stale `pages` map is cleared on relaunch — old `PageId`s pointed at the
+  dead browser's targets and would all error anyway. Callers now get a
+  clean `NotFound` instead of a confusing CDP error.
+
+### Verification (`/tmp/v061_self_heal_test.py`)
+
+1. `browser_navigate https://example.com` → 11 chrome PIDs spawned, page id A
+2. `kill -9` all 11 chrome PIDs (simulates v0.6.0's failure mode)
+3. `browser_navigate https://example.com` again → **2.1 s** to relaunch +
+   navigate, page id B (B ≠ A)
+4. `browser_eval` on B → `document.title = "Example Domain"` ✅
+5. `browser_eval` on A → `isError=true: page id … not tracked` (expected,
+   stale cache cleared)
+
+---
+
 ## [0.6.0] — 2026-04-27
 
 **Memory portability.** Cross-machine sync for agent self-memory, decoupled

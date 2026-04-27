@@ -5,6 +5,20 @@
 //!   `AGENT_BRIDGE_HEADLESS=1` to switch to headless.
 //! - Pages are tracked in a [`DashMap`] keyed by [`PageId`]; the backend hands
 //!   the same id back to the caller for subsequent eval/click/screenshot.
+//!
+//! ## Self-healing (v0.6.1)
+//!
+//! v0.6.0 used [`OnceCell`] to lazily launch chrome exactly once per backend
+//! instance. That assumed chrome would never die, which is wrong: external
+//! `kill -9`, OOM, or a session ending would leave the OnceCell holding a
+//! dead websocket handle, and the next `browser_*` call would block forever
+//! because the CDP protocol has no inherent RPC timeout.
+//!
+//! v0.6.1 swaps `OnceCell<Browser>` for `RwLock<Option<Browser>>` and adds
+//! a 500 ms timeout-wrapped health probe (`browser.version()`) before reusing
+//! a cached handle. If the probe fails, we relaunch chrome and clear the
+//! stale `PageId → Page` map (the old page refs pointed at the dead
+//! browser's targets and would all error anyway).
 
 use ab_core::{Error, PageId, Result};
 use async_trait::async_trait;
@@ -16,21 +30,24 @@ use chromiumoxide::{Browser, BrowserConfig, Page};
 use dashmap::DashMap;
 use futures::StreamExt;
 use std::sync::Arc;
-use tokio::sync::OnceCell;
+use std::time::Duration;
+use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use crate::{A11yNode, BrowserBackend};
 
+const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
+
 #[derive(Clone)]
 pub struct ChromiumCdpBackend {
-    /// Lazily-initialised Chrome connection.
-    inner: Arc<OnceCell<Inner>>,
-    /// PageId → live Page handle.
+    /// Cached Chrome handle. `None` = not yet launched (or was relaunched
+    /// after death and is currently being rebuilt under the write lock).
+    /// Wrapped in [`Arc`] because `chromiumoxide::Browser` is not [`Clone`];
+    /// the Arc lets multiple async tasks share one handle cheaply.
+    inner: Arc<RwLock<Option<Arc<Browser>>>>,
+    /// PageId → live Page handle. Cleared on relaunch since old pages are
+    /// associated with the dead chrome's targets.
     pages: Arc<DashMap<String, Arc<Page>>>,
-}
-
-struct Inner {
-    _browser: Browser,
 }
 
 impl Default for ChromiumCdpBackend {
@@ -42,54 +59,101 @@ impl Default for ChromiumCdpBackend {
 impl ChromiumCdpBackend {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(OnceCell::new()),
+            inner: Arc::new(RwLock::new(None)),
             pages: Arc::new(DashMap::new()),
         }
     }
 
-    async fn ensure_browser(&self) -> Result<&Inner> {
-        self.inner
-            .get_or_try_init(|| async {
-                let headless = std::env::var("AGENT_BRIDGE_HEADLESS")
-                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                    .unwrap_or(false);
-
-                let mut cfg = BrowserConfig::builder();
-                if headless {
-                    // chromiumoxide's default is "headless" mode.
-                } else {
-                    cfg = cfg.with_head();
+    /// Returns a live [`Arc<Browser>`], launching (or relaunching) chrome if
+    /// needed. Cheap fast-path: a read lock + 500 ms health probe; only takes
+    /// the write lock when the cached handle is missing or dead.
+    async fn ensure_browser(&self) -> Result<Arc<Browser>> {
+        // Fast path: read lock, health-check the cached handle.
+        {
+            let guard = self.inner.read().await;
+            if let Some(b) = guard.as_ref() {
+                if Self::is_alive(b).await {
+                    return Ok(b.clone());
                 }
-                if let Ok(path) = std::env::var("AGENT_BRIDGE_CHROME") {
-                    cfg = cfg.chrome_executable(path);
-                }
-                // Per-process user-data-dir avoids SingletonLock collisions when
-                // multiple agent-bridge daemons (or stale lock files) coexist.
-                let user_data = std::env::temp_dir()
-                    .join(format!("agent-bridge-chrome-{}", std::process::id()));
-                cfg = cfg.user_data_dir(user_data);
+            }
+        }
 
-                let cfg = cfg
-                    .build()
-                    .map_err(|e| Error::Backend(format!("BrowserConfig build: {e}")))?;
+        // Slow path: take the write lock and (re)launch.
+        let mut guard = self.inner.write().await;
+        // Double-check after acquiring the write lock — another task may have
+        // beaten us here.
+        if let Some(b) = guard.as_ref() {
+            if Self::is_alive(b).await {
+                return Ok(b.clone());
+            }
+            warn!("cached chrome handle failed health check; relaunching");
+            // Stale pages reference the dead browser's targets — drop them so
+            // callers get a clean NotFound rather than a confusing CDP error.
+            self.pages.clear();
+        }
 
-                let (browser, mut handler) = Browser::launch(cfg)
-                    .await
-                    .map_err(|e| Error::Backend(format!("chrome launch: {e}")))?;
+        let browser = Arc::new(Self::launch_chrome().await?);
+        *guard = Some(browser.clone());
+        Ok(browser)
+    }
 
-                // Drive the handler stream to keep the websocket alive.
-                tokio::spawn(async move {
-                    while let Some(item) = handler.next().await {
-                        if let Err(e) = item {
-                            warn!(error = %e, "chromiumoxide handler error");
-                        }
-                    }
-                });
+    /// 500 ms timeout-wrapped probe via the CDP `Browser.getVersion` command.
+    /// Returns `false` for both timeout and protocol error — both mean the
+    /// handle is unusable.
+    async fn is_alive(browser: &Browser) -> bool {
+        match tokio::time::timeout(HEALTH_TIMEOUT, browser.version()).await {
+            Ok(Ok(_)) => true,
+            Ok(Err(e)) => {
+                debug!(error = %e, "browser.version() returned error → treating as dead");
+                false
+            }
+            Err(_) => {
+                debug!(timeout_ms = HEALTH_TIMEOUT.as_millis(), "browser.version() timed out");
+                false
+            }
+        }
+    }
 
-                info!(headless, "Chromium CDP backend ready");
-                Ok::<_, Error>(Inner { _browser: browser })
-            })
+    /// Spawn chrome + the chromiumoxide event handler. Honours
+    /// `AGENT_BRIDGE_HEADLESS` and `AGENT_BRIDGE_CHROME`. Each launch picks a
+    /// per-PID user-data-dir to avoid Chrome's `SingletonLock` collisions
+    /// when multiple agent-bridge daemons coexist.
+    async fn launch_chrome() -> Result<Browser> {
+        let headless = std::env::var("AGENT_BRIDGE_HEADLESS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        let mut cfg = BrowserConfig::builder();
+        if headless {
+            // chromiumoxide's default is "headless" mode.
+        } else {
+            cfg = cfg.with_head();
+        }
+        if let Ok(path) = std::env::var("AGENT_BRIDGE_CHROME") {
+            cfg = cfg.chrome_executable(path);
+        }
+        let user_data = std::env::temp_dir()
+            .join(format!("agent-bridge-chrome-{}", std::process::id()));
+        cfg = cfg.user_data_dir(user_data);
+
+        let cfg = cfg
+            .build()
+            .map_err(|e| Error::Backend(format!("BrowserConfig build: {e}")))?;
+
+        let (browser, mut handler) = Browser::launch(cfg)
             .await
+            .map_err(|e| Error::Backend(format!("chrome launch: {e}")))?;
+
+        tokio::spawn(async move {
+            while let Some(item) = handler.next().await {
+                if let Err(e) = item {
+                    warn!(error = %e, "chromiumoxide handler error");
+                }
+            }
+        });
+
+        info!(headless, "Chromium CDP backend ready");
+        Ok(browser)
     }
 
     fn page_handle(&self, page: &PageId) -> Result<Arc<Page>> {
@@ -107,9 +171,8 @@ impl BrowserBackend for ChromiumCdpBackend {
     }
 
     async fn navigate(&self, url: &str) -> Result<PageId> {
-        let inner = self.ensure_browser().await?;
-        let page = inner
-            ._browser
+        let browser = self.ensure_browser().await?;
+        let page = browser
             .new_page(url)
             .await
             .map_err(|e| Error::Backend(format!("new_page {url}: {e}")))?;
