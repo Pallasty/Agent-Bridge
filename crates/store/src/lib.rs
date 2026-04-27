@@ -115,6 +115,39 @@ pub struct SessionFilter {
     pub exit_code: Option<i32>,
 }
 
+/// Filters for `memory_export` (v0.6). All None = export everything.
+#[derive(Debug, Clone, Default)]
+pub struct MemoryExportFilter {
+    /// Only export memories of this kind.
+    pub kind: Option<String>,
+    /// Only export memories that carry at least one of these tags.
+    pub tags_any: Option<Vec<String>>,
+    /// Only export memories with `updated_at >= since_ts` (unix epoch secs).
+    pub since_ts: Option<i64>,
+}
+
+/// Conflict resolution policy for `memory_import` (v0.6).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportConflictPolicy {
+    /// If a row with the same `key` already exists, leave it alone.
+    #[default]
+    Skip,
+    /// Always overwrite the existing row with the imported one.
+    Overwrite,
+    /// Overwrite only when the imported `updated_at` is strictly greater.
+    NewerWins,
+}
+
+/// Per-row outcome of an import.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ImportReport {
+    pub inserted: u64,
+    pub updated: u64,
+    pub skipped: u64,
+    pub malformed: u64,
+}
+
 #[async_trait]
 pub trait StateStore: Send + Sync {
     async fn save_session(&self, session: &StoredSession) -> Result<()>;
@@ -179,4 +212,22 @@ pub trait StateStore: Send + Sync {
     /// Apply [`CompactPolicy`]; returns the keys that were (or would be)
     /// removed. Honours `dry_run`.
     async fn memory_compact(&self, policy: CompactPolicy) -> Result<Vec<String>>;
+
+    /// Export memories matching `filter` to a newline-delimited JSON file
+    /// (one [`MemoryRecord`] per line). Returns the number of rows written.
+    /// Caller is responsible for the path being writeable.
+    async fn memory_export(
+        &self,
+        filter: &MemoryExportFilter,
+        out_path: &std::path::Path,
+    ) -> Result<u64>;
+
+    /// Import memories from a JSONL file. Each line is parsed as a
+    /// [`MemoryRecord`]; malformed lines are counted but do not abort the
+    /// import. Conflict resolution per [`ImportConflictPolicy`].
+    async fn memory_import(
+        &self,
+        in_path: &std::path::Path,
+        policy: ImportConflictPolicy,
+    ) -> Result<ImportReport>;
 }

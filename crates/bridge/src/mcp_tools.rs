@@ -4,7 +4,10 @@
 use ab_agent::{GitWorktreeManager, SpawnConfig};
 use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
 use ab_mcp::{McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
-use ab_store::{CompactPolicy, MemoryListSort, MemoryRecord, SessionFilter};
+use ab_store::{
+    CompactPolicy, ImportConflictPolicy, MemoryExportFilter, MemoryListSort, MemoryRecord,
+    SessionFilter,
+};
 use ab_terminal::{OscEvent, OscParser, SplitDir};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
@@ -1138,6 +1141,116 @@ impl McpTool for MemoryCompactTool {
 }
 
 // ===========================================================================
+//                       memory portability (v0.6)
+// ===========================================================================
+
+pub struct MemoryExportTool { hub: Hub }
+impl MemoryExportTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for MemoryExportTool {
+    fn name(&self) -> &'static str { "memory_export" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Export memories to a newline-delimited JSON file (one record \
+                 per line — JSONL is grep-friendly and stable across versions). \
+                 Optional filters narrow what's exported. The output file can \
+                 then be moved across machines via any transport (scp, email \
+                 attachment, cloud drive, git repo) and consumed by \
+                 `memory_import` on the other side."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path":     { "type": "string", "description": "Absolute output path; parent dirs auto-created." },
+                    "kind":     { "type": "string", "description": "Optional kind filter." },
+                    "tags_any": { "type": "array", "items": {"type": "string"}, "description": "Match if memory has at least one tag." },
+                    "since_ts": { "type": "integer", "description": "Only memories with updated_at >= this unix-epoch seconds value." }
+                },
+                "required": ["path"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let path = match args.get("path").and_then(|v| v.as_str()) {
+            Some(s) => PathBuf::from(s),
+            None => return Ok(ToolResult::error("missing 'path'")),
+        };
+        let filter = MemoryExportFilter {
+            kind: args.get("kind").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            tags_any: args.get("tags_any").and_then(|v| v.as_array()).map(|a| {
+                a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()
+            }),
+            since_ts: args.get("since_ts").and_then(|v| v.as_i64()),
+        };
+        match store.memory_export(&filter, &path).await {
+            Ok(n) => Ok(ToolResult::json_text(&json!({
+                "exported": n,
+                "path": path.display().to_string(),
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("export: {e}"))),
+        }
+    }
+}
+
+pub struct MemoryImportTool { hub: Hub }
+impl MemoryImportTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for MemoryImportTool {
+    fn name(&self) -> &'static str { "memory_import" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Import memories from a JSONL file (the format `memory_export` \
+                 produces). `conflict_policy` decides what happens when a key \
+                 already exists locally:\n\
+                   - `skip` (default): keep local row\n\
+                   - `overwrite`: always replace with the imported row\n\
+                   - `newer_wins`: replace only if imported.updated_at is greater\n\
+                 Returns a per-row summary {inserted, updated, skipped, malformed}."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path":            { "type": "string" },
+                    "conflict_policy": {
+                        "type": "string",
+                        "enum": ["skip","overwrite","newer_wins"],
+                        "default": "skip"
+                    }
+                },
+                "required": ["path"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let path = match args.get("path").and_then(|v| v.as_str()) {
+            Some(s) => PathBuf::from(s),
+            None => return Ok(ToolResult::error("missing 'path'")),
+        };
+        let policy = match args.get("conflict_policy").and_then(|v| v.as_str()).unwrap_or("skip") {
+            "overwrite"  => ImportConflictPolicy::Overwrite,
+            "newer_wins" => ImportConflictPolicy::NewerWins,
+            _            => ImportConflictPolicy::Skip,
+        };
+        match store.memory_import(&path, policy).await {
+            Ok(report) => Ok(ToolResult::json_text(&serde_json::to_value(report).unwrap_or(Value::Null))),
+            Err(e) => Ok(ToolResult::error(format!("import: {e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -1172,7 +1285,9 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(MemorySearchTool::new(hub.clone())));
     reg.register(Arc::new(MemoryListTool::new(hub.clone())));
     reg.register(Arc::new(MemoryDeleteTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryCompactTool::new(hub)));
+    reg.register(Arc::new(MemoryCompactTool::new(hub.clone())));
+    reg.register(Arc::new(MemoryExportTool::new(hub.clone())));
+    reg.register(Arc::new(MemoryImportTool::new(hub)));
     reg
 }
 

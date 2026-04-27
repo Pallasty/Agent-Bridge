@@ -5,6 +5,93 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — 2026-04-27
+
+**Memory portability.** Cross-machine sync for agent self-memory, decoupled
+from any specific transport. Export to a newline-delimited JSON file; move
+that file via `scp` / email attachment / cloud drive / git repo / however;
+import on the other side with a conflict-resolution policy of your choosing.
+
+This is the prerequisite that makes v0.4 actually useful across more than
+one machine — without export/import, every Claude installation is a memory
+silo.
+
+### Added
+
+- **`memory_export(path, kind?, tags_any?, since_ts?)`** — write matching
+  memories to a JSONL file (one [`MemoryRecord`] per line). Parent
+  directories auto-created. Filters compose with AND.
+- **`memory_import(path, conflict_policy?)`** — read a JSONL file and
+  upsert each row. Policy is one of:
+  - `skip` (default) — keep local row on key conflict
+  - `overwrite` — always replace local with imported
+  - `newer_wins` — replace only if `imported.updated_at > local.updated_at`
+
+  Returns `{inserted, updated, skipped, malformed}`. Whole import runs in
+  one SQLite transaction — a single bad line is counted in `malformed` but
+  doesn't roll back the rest.
+
+### Why JSONL
+
+- **grep-friendly**: `grep '"kind":"lesson"' export.jsonl` works.
+- **Append-able**: future `memory_export --append` is trivial to add.
+- **Diff-able**: line-oriented JSON plays nicely with git, code review,
+  and `diff -u`.
+- **Stable across schema versions**: each line is a self-describing record;
+  if v0.7 adds a field, v0.6 importers ignore it; v0.7 importers fill in
+  defaults for missing fields.
+
+### Tools surface
+
+| Group        | Count | Change |
+|--------------|------:|-------|
+| Notify       | 3 |  |
+| Terminal     | 3 |  |
+| Browser      | 5 |  |
+| Agent        | 5 |  |
+| Worktree     | 3 |  |
+| Memory       | **8** | **`memory_export`, `memory_import`** |
+| **Total**    | **27** | (was 25 in v0.5.1) |
+
+### Cookbook: cross-machine sync recipes
+
+```bash
+# Export everything to a portable file
+mcp memory_export path=~/agent-bridge-backup.jsonl
+
+# Filter: only lessons, only since last week (1 689 786 000 ≈ epoch secs)
+mcp memory_export \
+    path=~/lessons-since-monday.jsonl \
+    kind=lesson \
+    since_ts=1689786000
+```
+
+Transport options (all work — pick what fits your habits):
+
+| Transport     | Setup cost | Sync feel       | Best for                     |
+|---------------|------------|-----------------|------------------------------|
+| `scp`         | 0          | manual, push    | one-off catch-up             |
+| `~/Dropbox/`  | already on | auto on save    | always-on personal           |
+| Git repo      | 5 min      | versioned merge | team / versioned audit trail |
+| Email         | 0          | message-style   | air-gapped backups           |
+| WebDAV / S3   | 30 min     | scriptable      | server fleets                |
+
+### End-to-end verification
+
+`/tmp/v06_smoke.py`:
+
+1. Plant 3 memories with shared tag
+2. `memory_export tags_any=[…]` → 3 rows, 670 bytes JSONL
+3. Inspect file → 3 lines, full schema present
+4. Delete originals; confirm gone
+5. `memory_import policy=skip` → `inserted=3, updated=0, skipped=0`
+6. Verify content + `access_count=1` round-tripped
+7. Modify local; `import policy=skip` → 3 skipped (local kept) ✅
+8. `import policy=overwrite` → 3 updated (export wins) ✅
+9. Bump local newer; `import policy=newer_wins` → 3 skipped (local kept) ✅
+
+---
+
 ## [0.5.1] — 2026-04-27
 
 **Hotfix.** v0.5.0 shipped with a broken FTS5 sync trigger that made

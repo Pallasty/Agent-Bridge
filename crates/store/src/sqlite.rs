@@ -11,8 +11,9 @@ type RusqliteResult<T> = std::result::Result<T, tokio_rusqlite::rusqlite::Error>
 use tracing::info;
 
 use crate::{
-    CompactPolicy, MemoryListSort, MemoryRecord, MemorySearchHit, NotificationRecord,
-    SessionFilter, StateStore, StoredSession, MEMORY_CONTENT_CAP, STDIO_CAP,
+    CompactPolicy, ImportConflictPolicy, ImportReport, MemoryExportFilter, MemoryListSort,
+    MemoryRecord, MemorySearchHit, NotificationRecord, SessionFilter, StateStore, StoredSession,
+    MEMORY_CONTENT_CAP, STDIO_CAP,
 };
 
 const SCHEMA_V1: &str = r#"
@@ -810,5 +811,158 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("memory_compact: {e}")))?;
         Ok(keys)
+    }
+
+    async fn memory_export(
+        &self,
+        filter: &MemoryExportFilter,
+        out_path: &std::path::Path,
+    ) -> Result<u64> {
+        let kind = filter.kind.clone();
+        let tags = filter.tags_any.clone();
+        let since = filter.since_ts;
+
+        let rows: Vec<MemoryRecord> = self.conn
+            .call(move |c| -> RusqliteResult<Vec<MemoryRecord>> {
+                let mut stmt = c.prepare(
+                    "SELECT key, kind, content, tags, related_keys,
+                            created_at, updated_at, last_accessed_at, access_count
+                     FROM memories
+                     WHERE (?1 IS NULL OR kind = ?1)
+                       AND (?2 IS NULL OR updated_at >= ?2)
+                     ORDER BY created_at ASC",
+                )?;
+                let rows = stmt
+                    .query_map(params![kind, since], |row| {
+                        let tags_s: String = row.get(3)?;
+                        let related_s: String = row.get(4)?;
+                        Ok(MemoryRecord {
+                            key:              row.get(0)?,
+                            kind:             row.get(1)?,
+                            content:          row.get(2)?,
+                            tags:             parse_str_array(&tags_s),
+                            related_keys:     parse_str_array(&related_s),
+                            created_at:       row.get(5)?,
+                            updated_at:       row.get(6)?,
+                            last_accessed_at: row.get(7)?,
+                            access_count:     row.get::<_, i64>(8)? as u64,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_export query: {e}")))?;
+
+        // Tag intersection done in Rust (JSON column).
+        let filtered: Vec<MemoryRecord> = rows
+            .into_iter()
+            .filter(|r| match &tags {
+                Some(want) if !want.is_empty() => want.iter().any(|t| r.tags.contains(t)),
+                _ => true,
+            })
+            .collect();
+
+        if let Some(parent) = out_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| Error::Backend(format!("mkdir {parent:?}: {e}")))?;
+        }
+        let mut buf = String::new();
+        for r in &filtered {
+            buf.push_str(&serde_json::to_string(r)?);
+            buf.push('\n');
+        }
+        tokio::fs::write(out_path, buf)
+            .await
+            .map_err(|e| Error::Backend(format!("write {out_path:?}: {e}")))?;
+        Ok(filtered.len() as u64)
+    }
+
+    async fn memory_import(
+        &self,
+        in_path: &std::path::Path,
+        policy: ImportConflictPolicy,
+    ) -> Result<ImportReport> {
+        let bytes = tokio::fs::read(in_path)
+            .await
+            .map_err(|e| Error::Backend(format!("read {in_path:?}: {e}")))?;
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+
+        let mut report = ImportReport::default();
+        // Parse first; we apply the conflict policy in a single transaction
+        // for atomicity (a malformed line shouldn't half-import).
+        let mut parsed: Vec<MemoryRecord> = Vec::new();
+        for line in text.lines() {
+            if line.trim().is_empty() { continue; }
+            match serde_json::from_str::<MemoryRecord>(line) {
+                Ok(r) => parsed.push(r),
+                Err(_) => report.malformed += 1,
+            }
+        }
+
+        let mut report = self.conn
+            .call(move |c| -> RusqliteResult<ImportReport> {
+                let tx = c.unchecked_transaction()?;
+                for r in &parsed {
+                    let existing: Option<i64> = tx
+                        .query_row(
+                            "SELECT updated_at FROM memories WHERE key = ?1",
+                            params![&r.key],
+                            |row| row.get(0),
+                        )
+                        .ok();
+                    let tags_s = serde_json::to_string(&r.tags).unwrap_or_else(|_| "[]".into());
+                    let related_s = serde_json::to_string(&r.related_keys).unwrap_or_else(|_| "[]".into());
+                    let content = clamp(&r.content, MEMORY_CONTENT_CAP);
+                    match existing {
+                        None => {
+                            // Brand-new row — insert with the imported timestamps verbatim.
+                            tx.execute(
+                                "INSERT INTO memories
+                                   (key, kind, content, tags, related_keys,
+                                    created_at, updated_at, last_accessed_at, access_count)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                                params![
+                                    r.key, r.kind, content, tags_s, related_s,
+                                    r.created_at, r.updated_at, r.last_accessed_at,
+                                    r.access_count as i64,
+                                ],
+                            )?;
+                            report.inserted += 1;
+                        }
+                        Some(existing_uat) => {
+                            let do_overwrite = match policy {
+                                ImportConflictPolicy::Skip => false,
+                                ImportConflictPolicy::Overwrite => true,
+                                ImportConflictPolicy::NewerWins => r.updated_at > existing_uat,
+                            };
+                            if do_overwrite {
+                                tx.execute(
+                                    "UPDATE memories SET
+                                        kind = ?2, content = ?3, tags = ?4, related_keys = ?5,
+                                        updated_at = ?6, last_accessed_at = ?7, access_count = ?8
+                                     WHERE key = ?1",
+                                    params![
+                                        r.key, r.kind, content, tags_s, related_s,
+                                        r.updated_at, r.last_accessed_at, r.access_count as i64,
+                                    ],
+                                )?;
+                                report.updated += 1;
+                            } else {
+                                report.skipped += 1;
+                            }
+                        }
+                    }
+                }
+                tx.commit()?;
+                Ok(report)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_import tx: {e}")))?;
+
+        // Adjust report.malformed (we updated this field outside the closure).
+        report.malformed += 0; // (already counted above; placeholder for clarity)
+        Ok(report)
     }
 }
