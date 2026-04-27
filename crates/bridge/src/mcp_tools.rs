@@ -906,10 +906,11 @@ impl McpTool for MemorySaveTool {
                 "type": "object",
                 "properties": {
                     "key":          { "type": "string", "description": "Unique stable id, e.g. 'v0.5_design' or 'agent_spawn_pitfall'." },
-                    "kind":         { "type": "string", "description": "lesson | decision | todo | context | …" },
+                    "kind":         { "type": "string", "description": "lesson | decision | todo | context | session_handoff | …" },
                     "content":      { "type": "string", "description": "Markdown / free text. Capped at 256 KiB." },
                     "tags":         { "type": "array", "items": { "type": "string" }, "default": [] },
-                    "related_keys": { "type": "array", "items": { "type": "string" }, "default": [] }
+                    "related_keys": { "type": "array", "items": { "type": "string" }, "default": [] },
+                    "scope":        { "type": "string", "description": "Visibility: omit/global=everywhere, project:/abs/path=cwd-scoped, domain:rust=tech-domain." }
                 },
                 "required": ["key", "kind", "content"]
             }),
@@ -935,10 +936,12 @@ impl McpTool for MemorySaveTool {
         let related_keys = args.get("related_keys").and_then(|v| v.as_array())
             .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
             .unwrap_or_default();
+        let scope = args.get("scope").and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty() && *s != "global")
+            .map(|s| s.to_string());
 
         let mem = MemoryRecord {
-            key: key.clone(), kind, content, tags, related_keys,
-            // The store handles all timestamps + access_count itself.
+            key: key.clone(), kind, content, tags, related_keys, scope,
             created_at: 0, updated_at: 0, last_accessed_at: 0, access_count: 0,
         };
         match store.memory_save(&mem).await {
@@ -1256,6 +1259,99 @@ impl McpTool for MemoryImportTool {
 }
 
 // ===========================================================================
+//                       memory graph edges (v0.6)
+// ===========================================================================
+
+pub struct MemoryLinkTool { hub: Hub }
+impl MemoryLinkTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for MemoryLinkTool {
+    fn name(&self) -> &'static str { "memory_link" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Create or update a directed edge between two memory records. \
+                 Edges are typed (relates | contradicts | supersedes | derived_from | implements) \
+                 and weighted (0.0–1.0, default 1.0). Use this to declare that one \
+                 memory causally implies, extends, or invalidates another — building a \
+                 traversable knowledge graph over time. Pairs with `memory_neighbors` to \
+                 walk the graph."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "from_key":  { "type": "string", "description": "Source memory key." },
+                    "to_key":    { "type": "string", "description": "Target memory key." },
+                    "edge_type": {
+                        "type": "string",
+                        "enum": ["relates","contradicts","supersedes","derived_from","implements"],
+                        "default": "relates"
+                    },
+                    "weight": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 1.0 }
+                },
+                "required": ["from_key", "to_key"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let from_key = match args.get("from_key").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => return Ok(ToolResult::error("missing 'from_key'")),
+        };
+        let to_key = match args.get("to_key").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => return Ok(ToolResult::error("missing 'to_key'")),
+        };
+        let edge_type = args.get("edge_type").and_then(|v| v.as_str()).unwrap_or("relates").to_string();
+        let weight = args.get("weight").and_then(|v| v.as_f64()).unwrap_or(1.0).clamp(0.0, 1.0);
+        match store.memory_link(&from_key, &to_key, &edge_type, weight).await {
+            Ok(()) => Ok(ToolResult::text(format!("linked '{from_key}' -{edge_type}-> '{to_key}' (weight={weight:.2})"))),
+            Err(e) => Ok(ToolResult::error(format!("memory_link: {e}"))),
+        }
+    }
+}
+
+pub struct MemoryNeighborsTool { hub: Hub }
+impl MemoryNeighborsTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for MemoryNeighborsTool {
+    fn name(&self) -> &'static str { "memory_neighbors" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Return all graph edges where the given key appears as source OR target. \
+                 Each edge has {from_key, to_key, edge_type, weight}. Use this to \
+                 traverse the memory graph: fetch a memory, then walk its neighbors \
+                 to find related/superseding/derived records without a keyword search."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "key": { "type": "string" } },
+                "required": ["key"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing 'key'")),
+        };
+        let edges = store.memory_neighbors(&key).await?;
+        Ok(ToolResult::json_text(&serde_json::to_value(edges).unwrap_or(Value::Null)))
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -1292,7 +1388,10 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(MemoryDeleteTool::new(hub.clone())));
     reg.register(Arc::new(MemoryCompactTool::new(hub.clone())));
     reg.register(Arc::new(MemoryExportTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryImportTool::new(hub)));
+    reg.register(Arc::new(MemoryImportTool::new(hub.clone())));
+    // v0.6: graph edges
+    reg.register(Arc::new(MemoryLinkTool::new(hub.clone())));
+    reg.register(Arc::new(MemoryNeighborsTool::new(hub)));
     reg
 }
 

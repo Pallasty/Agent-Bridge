@@ -58,11 +58,30 @@ pub struct MemoryRecord {
     pub tags: Vec<String>,
     #[serde(default)]
     pub related_keys: Vec<String>,
+    /// Visibility scope. `None` / `"global"` = visible everywhere.
+    /// `"project:/abs/path"` = only when cwd matches.
+    /// `"domain:rust"` = technology-domain grouping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     pub last_accessed_at: i64,
     pub access_count: u64,
 }
+
+/// A directed edge between two memory records.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEdge {
+    pub from_key: String,
+    pub to_key: String,
+    /// Relationship type: relates | contradicts | supersedes | derived_from | implements
+    pub edge_type: String,
+    /// Optional strength weight (0.0–1.0). Default 1.0.
+    #[serde(default = "default_weight")]
+    pub weight: f64,
+}
+
+fn default_weight() -> f64 { 1.0 }
 
 /// One hit from `memory_search`. Carries a coarse score so callers can
 /// re-rank if needed.
@@ -200,12 +219,37 @@ pub trait StateStore: Send + Sync {
         limit: u32,
     ) -> Result<Vec<MemorySearchHit>>;
 
+    /// List memories. `scope` filters to records visible in the given context:
+    /// returns records whose scope is None/global OR matches the provided scope.
+    /// Pass `scope = None` to skip filtering (return all).
     async fn list_memories(
         &self,
         kind: Option<&str>,
         sort: MemoryListSort,
         limit: u32,
     ) -> Result<Vec<MemoryRecord>>;
+
+    /// List memories visible in a given context scope (e.g. "project:/path").
+    /// Returns records with scope=None, scope="global", or scope matching `ctx`.
+    async fn list_memories_in_scope(
+        &self,
+        ctx: &str,
+        kind: Option<&str>,
+        sort: MemoryListSort,
+        limit: u32,
+    ) -> Result<Vec<MemoryRecord>>;
+
+    /// Create or update a directed edge between two memory records.
+    async fn memory_link(
+        &self,
+        from_key: &str,
+        to_key: &str,
+        edge_type: &str,
+        weight: f64,
+    ) -> Result<()>;
+
+    /// Return all edges where `key` is `from_key` or `to_key`.
+    async fn memory_neighbors(&self, key: &str) -> Result<Vec<MemoryEdge>>;
 
     async fn memory_delete(&self, key: &str) -> Result<bool>;
 

@@ -11,9 +11,9 @@ type RusqliteResult<T> = std::result::Result<T, tokio_rusqlite::rusqlite::Error>
 use tracing::info;
 
 use crate::{
-    CompactPolicy, ImportConflictPolicy, ImportReport, MemoryExportFilter, MemoryListSort,
-    MemoryRecord, MemorySearchHit, NotificationRecord, SessionFilter, StateStore, StoredSession,
-    MEMORY_CONTENT_CAP, STDIO_CAP,
+    CompactPolicy, ImportConflictPolicy, ImportReport, MemoryEdge, MemoryExportFilter,
+    MemoryListSort, MemoryRecord, MemorySearchHit, NotificationRecord, SessionFilter, StateStore,
+    StoredSession, MEMORY_CONTENT_CAP, STDIO_CAP,
 };
 
 const SCHEMA_V1: &str = r#"
@@ -104,6 +104,22 @@ CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
     INSERT INTO memories_fts(rowid, key, content)
     VALUES (new.rowid, new.key, new.content);
 END;
+"#;
+
+// v0.7: scope column on memories + memory_edges graph table
+const SCHEMA_V6: &str = r#"
+ALTER TABLE memories ADD COLUMN scope TEXT;
+
+CREATE TABLE IF NOT EXISTS memory_edges (
+    from_key  TEXT    NOT NULL,
+    to_key    TEXT    NOT NULL,
+    edge_type TEXT    NOT NULL DEFAULT 'relates',
+    weight    REAL    NOT NULL DEFAULT 1.0,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (from_key, to_key, edge_type)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_edges_from ON memory_edges(from_key);
+CREATE INDEX IF NOT EXISTS idx_memory_edges_to   ON memory_edges(to_key);
 "#;
 
 // v0.5.1 hotfix: replace the broken triggers v0.5.0 may have installed.
@@ -245,6 +261,22 @@ impl SqliteStore {
                 c.execute_batch(SCHEMA_V5)?;
                 c.execute(
                     "UPDATE schema_meta SET value='5' WHERE key='version'",
+                    [],
+                )?;
+            }
+
+            // ── v6: scope column + memory_edges graph table ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "5".to_string());
+            if cur.as_str() == "5" {
+                c.execute_batch(SCHEMA_V6)?;
+                c.execute(
+                    "UPDATE schema_meta SET value='6' WHERE key='version'",
                     [],
                 )?;
             }
@@ -583,23 +615,24 @@ impl StateStore for SqliteStore {
         let content = clamp(&mem.content, MEMORY_CONTENT_CAP);
         let tags = serde_json::to_string(&mem.tags)?;
         let related = serde_json::to_string(&mem.related_keys)?;
+        let scope = mem.scope.clone();
         let now = now_secs();
 
         self.conn
             .call(move |c| -> RusqliteResult<()> {
-                // Preserve the original created_at if the row already exists.
                 c.execute(
                     "INSERT INTO memories
-                       (key, kind, content, tags, related_keys,
+                       (key, kind, content, tags, related_keys, scope,
                         created_at, updated_at, last_accessed_at, access_count)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?6, 0)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0)
                      ON CONFLICT(key) DO UPDATE SET
                         kind          = excluded.kind,
                         content       = excluded.content,
                         tags          = excluded.tags,
                         related_keys  = excluded.related_keys,
+                        scope         = excluded.scope,
                         updated_at    = excluded.updated_at",
-                    params![key, kind, content, tags, related, now],
+                    params![key, kind, content, tags, related, scope, now],
                 )?;
                 Ok(())
             })
@@ -615,7 +648,7 @@ impl StateStore for SqliteStore {
         let row = self.conn
             .call(move |c| -> RusqliteResult<Option<MemoryRecord>> {
                 let mut stmt = c.prepare(
-                    "SELECT key, kind, content, tags, related_keys,
+                    "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count
                      FROM memories WHERE key = ?1",
                 )?;
@@ -629,10 +662,11 @@ impl StateStore for SqliteStore {
                             content:          row.get(2)?,
                             tags:             parse_str_array(&tags_s),
                             related_keys:     parse_str_array(&related_s),
-                            created_at:       row.get(5)?,
-                            updated_at:       row.get(6)?,
-                            last_accessed_at: row.get(7)?,
-                            access_count:     row.get::<_, i64>(8)? as u64,
+                            scope:            row.get(5)?,
+                            created_at:       row.get(6)?,
+                            updated_at:       row.get(7)?,
+                            last_accessed_at: row.get(8)?,
+                            access_count:     row.get::<_, i64>(9)? as u64,
                         })
                     })
                     .ok();
@@ -682,7 +716,7 @@ impl StateStore for SqliteStore {
                 // Final ranking blends bm25 (lower=better → invert) with
                 // recency + frequency, applied in Rust.
                 let mut stmt = c.prepare(
-                    "SELECT m.key, m.kind, m.content, m.tags, m.related_keys,
+                    "SELECT m.key, m.kind, m.content, m.tags, m.related_keys, m.scope,
                             m.created_at, m.updated_at, m.last_accessed_at, m.access_count,
                             bm25(memories_fts) AS bm25_score
                      FROM memories_fts
@@ -701,12 +735,13 @@ impl StateStore for SqliteStore {
                             content:          row.get(2)?,
                             tags:             parse_str_array(&tags_s),
                             related_keys:     parse_str_array(&related_s),
-                            created_at:       row.get(5)?,
-                            updated_at:       row.get(6)?,
-                            last_accessed_at: row.get(7)?,
-                            access_count:     row.get::<_, i64>(8)? as u64,
+                            scope:            row.get(5)?,
+                            created_at:       row.get(6)?,
+                            updated_at:       row.get(7)?,
+                            last_accessed_at: row.get(8)?,
+                            access_count:     row.get::<_, i64>(9)? as u64,
                         };
-                        let bm25: f64 = row.get(9)?;
+                        let bm25: f64 = row.get(10)?;
                         Ok((rec, bm25))
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -741,7 +776,18 @@ impl StateStore for SqliteStore {
         sort: MemoryListSort,
         limit: u32,
     ) -> Result<Vec<MemoryRecord>> {
+        self.list_memories_in_scope("", kind, sort, limit).await
+    }
+
+    async fn list_memories_in_scope(
+        &self,
+        ctx: &str,
+        kind: Option<&str>,
+        sort: MemoryListSort,
+        limit: u32,
+    ) -> Result<Vec<MemoryRecord>> {
         let kind = kind.map(|s| s.to_string());
+        let ctx = ctx.to_string();
         let limit_i = limit as i64;
         let order = match sort {
             MemoryListSort::Recent   => "last_accessed_at DESC",
@@ -751,17 +797,33 @@ impl StateStore for SqliteStore {
 
         let rows = self.conn
             .call(move |c| -> RusqliteResult<Vec<MemoryRecord>> {
+                // When ctx is empty, return all records (no scope filter).
+                // When ctx is provided, return records that are:
+                //   - global/unscoped (scope IS NULL or scope = 'global')
+                //   - exactly matching the ctx scope
+                //   - project-scoped where ctx starts with the project path
+                let scope_clause = if ctx.is_empty() {
+                    "1=1".to_string()
+                } else {
+                    format!(
+                        "(scope IS NULL OR scope = 'global' \
+                          OR scope = ?3 \
+                          OR (scope LIKE 'project:%' AND ?3 LIKE (SUBSTR(scope, 9) || '%')))"
+                    )
+                };
                 let sql = format!(
-                    "SELECT key, kind, content, tags, related_keys,
+                    "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
+                       AND {scope_clause}
                      ORDER BY {order}
                      LIMIT ?2"
                 );
                 let mut stmt = c.prepare(&sql)?;
+                let ctx_param: Option<&str> = if ctx.is_empty() { None } else { Some(&ctx) };
                 let rows = stmt
-                    .query_map(params![kind, limit_i], |row| {
+                    .query_map(params![kind, limit_i, ctx_param], |row| {
                         let tags_s: String = row.get(3)?;
                         let related_s: String = row.get(4)?;
                         Ok(MemoryRecord {
@@ -770,18 +832,72 @@ impl StateStore for SqliteStore {
                             content:          row.get(2)?,
                             tags:             parse_str_array(&tags_s),
                             related_keys:     parse_str_array(&related_s),
-                            created_at:       row.get(5)?,
-                            updated_at:       row.get(6)?,
-                            last_accessed_at: row.get(7)?,
-                            access_count:     row.get::<_, i64>(8)? as u64,
+                            scope:            row.get(5)?,
+                            created_at:       row.get(6)?,
+                            updated_at:       row.get(7)?,
+                            last_accessed_at: row.get(8)?,
+                            access_count:     row.get::<_, i64>(9)? as u64,
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 Ok(rows)
             })
             .await
-            .map_err(|e| Error::Backend(format!("list_memories: {e}")))?;
+            .map_err(|e| Error::Backend(format!("list_memories_in_scope: {e}")))?;
         Ok(rows)
+    }
+
+    async fn memory_link(
+        &self,
+        from_key: &str,
+        to_key: &str,
+        edge_type: &str,
+        weight: f64,
+    ) -> Result<()> {
+        let from = from_key.to_string();
+        let to = to_key.to_string();
+        let etype = edge_type.to_string();
+        let now = now_secs();
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "INSERT INTO memory_edges (from_key, to_key, edge_type, weight, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)
+                     ON CONFLICT(from_key, to_key, edge_type) DO UPDATE SET
+                        weight = excluded.weight",
+                    params![from, to, etype, weight, now],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_link: {e}")))?;
+        Ok(())
+    }
+
+    async fn memory_neighbors(&self, key: &str) -> Result<Vec<MemoryEdge>> {
+        let key = key.to_string();
+        let edges = self.conn
+            .call(move |c| -> RusqliteResult<Vec<MemoryEdge>> {
+                let mut stmt = c.prepare(
+                    "SELECT from_key, to_key, edge_type, weight FROM memory_edges
+                     WHERE from_key = ?1 OR to_key = ?1
+                     ORDER BY weight DESC",
+                )?;
+                let rows = stmt
+                    .query_map(params![key], |row| {
+                        Ok(MemoryEdge {
+                            from_key:  row.get(0)?,
+                            to_key:    row.get(1)?,
+                            edge_type: row.get(2)?,
+                            weight:    row.get(3)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_neighbors: {e}")))?;
+        Ok(edges)
     }
 
     async fn memory_delete(&self, key: &str) -> Result<bool> {
@@ -838,7 +954,7 @@ impl StateStore for SqliteStore {
         let rows: Vec<MemoryRecord> = self.conn
             .call(move |c| -> RusqliteResult<Vec<MemoryRecord>> {
                 let mut stmt = c.prepare(
-                    "SELECT key, kind, content, tags, related_keys,
+                    "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
@@ -855,10 +971,11 @@ impl StateStore for SqliteStore {
                             content:          row.get(2)?,
                             tags:             parse_str_array(&tags_s),
                             related_keys:     parse_str_array(&related_s),
-                            created_at:       row.get(5)?,
-                            updated_at:       row.get(6)?,
-                            last_accessed_at: row.get(7)?,
-                            access_count:     row.get::<_, i64>(8)? as u64,
+                            scope:            row.get(5)?,
+                            created_at:       row.get(6)?,
+                            updated_at:       row.get(7)?,
+                            last_accessed_at: row.get(8)?,
+                            access_count:     row.get::<_, i64>(9)? as u64,
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -933,11 +1050,11 @@ impl StateStore for SqliteStore {
                             // Brand-new row — insert with the imported timestamps verbatim.
                             tx.execute(
                                 "INSERT INTO memories
-                                   (key, kind, content, tags, related_keys,
+                                   (key, kind, content, tags, related_keys, scope,
                                     created_at, updated_at, last_accessed_at, access_count)
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                                 params![
-                                    r.key, r.kind, content, tags_s, related_s,
+                                    r.key, r.kind, content, tags_s, related_s, r.scope,
                                     r.created_at, r.updated_at, r.last_accessed_at,
                                     r.access_count as i64,
                                 ],
@@ -954,10 +1071,11 @@ impl StateStore for SqliteStore {
                                 tx.execute(
                                     "UPDATE memories SET
                                         kind = ?2, content = ?3, tags = ?4, related_keys = ?5,
-                                        updated_at = ?6, last_accessed_at = ?7, access_count = ?8
+                                        scope = ?6, updated_at = ?7, last_accessed_at = ?8,
+                                        access_count = ?9
                                      WHERE key = ?1",
                                     params![
-                                        r.key, r.kind, content, tags_s, related_s,
+                                        r.key, r.kind, content, tags_s, related_s, r.scope,
                                         r.updated_at, r.last_accessed_at, r.access_count as i64,
                                     ],
                                 )?;

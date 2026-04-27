@@ -70,6 +70,7 @@ name = "ab-mcp"
 version = "0.1.0"
 dependencies = [
  "ab-core",
+ "ab-store",
  "async-trait",
  "serde",
  "serde_json",
