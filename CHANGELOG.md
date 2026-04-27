@@ -5,6 +5,36 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] — 2026-04-27
+
+**Hotfix.** v0.5.0 shipped with a broken FTS5 sync trigger that made
+`memory_delete` (and any DELETE-then-INSERT path on `memories`) raise
+`SQL logic error`.
+
+### Root cause
+
+We created a content-stored FTS5 virtual table (`memories_fts` with no
+`content=` clause) but used the contentless table's special `INSERT INTO
+fts(fts, ...) VALUES('delete', ...)` command in the AFTER DELETE / AFTER
+UPDATE triggers. That command is only valid on contentless FTS5 tables.
+For content-stored tables the standard pattern is
+`DELETE FROM fts WHERE rowid = old.rowid`.
+
+### Fix
+
+- `SCHEMA_V4` rewritten with the correct trigger pattern (for new installs).
+- New **schema v5** migration drops + recreates the broken triggers on
+  databases already at v4. Bumps `schema_meta.version` to `5`. Idempotent.
+
+### Verification
+
+`/tmp/hotfix_check.py` proves: previously-stuck `memory_delete` now succeeds;
+fresh save→delete round-trip works; FTS index correctly drops the row
+(post-delete search returns 0); pre-existing memories remain searchable
+(no regression).
+
+---
+
 ## [0.5.0] — 2026-04-27
 
 Two ergonomic upgrades from using v0.4 in anger.

@@ -79,6 +79,11 @@ CREATE INDEX IF NOT EXISTS idx_memories_access_count  ON memories(access_count D
 // (case-insensitive, accent-folding) and remove_diacritics=2 for best CJK
 // fallback (mostly tokenizes by char). Trigram tokenizer would be better
 // for substring search but unicode61 covers 99% of agent-memory needs.
+//
+// Sync triggers: this is a **content-stored** FTS5 table (no `content=` arg
+// in the CREATE), so deletes use the standard `DELETE FROM fts WHERE rowid`
+// pattern, NOT the contentless `INSERT … VALUES ('delete', …)` command.
+// (v0.5.0 shipped with the wrong pattern — see v0.5.1 fix below.)
 const SCHEMA_V4: &str = r#"
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     key UNINDEXED,
@@ -86,18 +91,35 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     tokenize = "unicode61 remove_diacritics 2"
 );
 
--- Keep FTS in sync with the base table.
 CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
     INSERT INTO memories_fts(rowid, key, content)
     VALUES (new.rowid, new.key, new.content);
 END;
 CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, key, content)
-    VALUES ('delete', old.rowid, old.key, old.content);
+    DELETE FROM memories_fts WHERE rowid = old.rowid;
 END;
 CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, key, content)
-    VALUES ('delete', old.rowid, old.key, old.content);
+    DELETE FROM memories_fts WHERE rowid = old.rowid;
+    INSERT INTO memories_fts(rowid, key, content)
+    VALUES (new.rowid, new.key, new.content);
+END;
+"#;
+
+// v0.5.1 hotfix: replace the broken triggers v0.5.0 may have installed.
+const SCHEMA_V5: &str = r#"
+DROP TRIGGER IF EXISTS memories_ai;
+DROP TRIGGER IF EXISTS memories_ad;
+DROP TRIGGER IF EXISTS memories_au;
+
+CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
+    INSERT INTO memories_fts(rowid, key, content)
+    VALUES (new.rowid, new.key, new.content);
+END;
+CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
+    DELETE FROM memories_fts WHERE rowid = old.rowid;
+END;
+CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
+    DELETE FROM memories_fts WHERE rowid = old.rowid;
     INSERT INTO memories_fts(rowid, key, content)
     VALUES (new.rowid, new.key, new.content);
 END;
@@ -193,6 +215,22 @@ impl SqliteStore {
                 )?;
                 c.execute(
                     "UPDATE schema_meta SET value='4' WHERE key='version'",
+                    [],
+                )?;
+            }
+
+            // ── v5 hotfix: replace v0.5.0's broken FTS5 sync triggers ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "4".to_string());
+            if cur.as_str() == "4" {
+                c.execute_batch(SCHEMA_V5)?;
+                c.execute(
+                    "UPDATE schema_meta SET value='5' WHERE key='version'",
                     [],
                 )?;
             }
