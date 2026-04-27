@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "mcp__ab__memory_save",
+      "mcp__ab__memory_get",
+      "mcp__ab__memory_search",
+      "mcp__ab__memory_list"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [],
+    "Stop": []
+  }
+}

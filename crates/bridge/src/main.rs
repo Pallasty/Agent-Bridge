@@ -9,6 +9,8 @@ use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
+mod setup;
+
 #[derive(Parser, Debug)]
 #[command(version, about = "agent-bridge — Unix-native AI agent control plane")]
 struct Cli {
@@ -22,6 +24,12 @@ enum Cmd {
     Daemon,
     /// Run as an MCP stdio server (for `claude mcp add agent-bridge ...`).
     Mcp,
+    /// Install Claude Code hooks and settings for the memory system.
+    ///
+    /// Copies the binary to ~/.local/bin/agent-bridge, writes three hook
+    /// scripts (UserPromptSubmit / PreCompact / Stop), and merges the hook
+    /// configuration into ~/.claude/settings.json.
+    Setup,
 }
 
 #[tokio::main]
@@ -29,9 +37,14 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let cmd = cli.cmd.unwrap_or(Cmd::Daemon);
 
+    // Setup runs synchronously, no async runtime needed beyond tokio's shell.
+    if matches!(cmd, Cmd::Setup) {
+        return setup::run();
+    }
+
     let log_layer = match cmd {
         Cmd::Mcp => tracing_subscriber::fmt::layer().with_writer(std::io::stderr).boxed(),
-        Cmd::Daemon => tracing_subscriber::fmt::layer().boxed(),
+        _ => tracing_subscriber::fmt::layer().boxed(),
     };
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
@@ -53,6 +66,7 @@ async fn main() -> Result<()> {
             serve_stdio(registry, store, "agent-bridge", env!("CARGO_PKG_VERSION")).await;
             Ok(())
         }
+        Cmd::Setup => unreachable!(),
     }
 }
 
