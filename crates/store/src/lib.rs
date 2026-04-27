@@ -41,6 +41,65 @@ pub struct NotificationRecord {
 /// file from growing unbounded if a sub-agent goes haywire.
 pub const STDIO_CAP: usize = 64 * 1024;
 
+/// Hard cap on a single memory's `content` field (256 KiB).
+pub const MEMORY_CONTENT_CAP: usize = 256 * 1024;
+
+/// One row in the `memories` table — Claude's cross-session note.
+///
+/// Hyperlink-style relationships only: `related_keys` is a list of other
+/// memory keys the author thinks are relevant. The store does NOT auto-resolve
+/// these — callers can fetch them with separate `get` calls.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryRecord {
+    pub key: String,
+    pub kind: String,
+    pub content: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub related_keys: Vec<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub last_accessed_at: i64,
+    pub access_count: u64,
+}
+
+/// One hit from `memory_search`. Carries a coarse score so callers can
+/// re-rank if needed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySearchHit {
+    pub record: MemoryRecord,
+    /// Composite score: matches × recency × usage. Higher = better.
+    pub score: f64,
+}
+
+/// Sort order for `list_memories`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryListSort {
+    /// `last_accessed_at DESC` — most recently touched first.
+    Recent,
+    /// `access_count DESC` — most-referenced first.
+    Frequent,
+    /// `created_at DESC` — newest first.
+    Newest,
+}
+
+impl Default for MemoryListSort {
+    fn default() -> Self { Self::Recent }
+}
+
+/// Compaction policy for `memory_compact`. Either condition removes a row.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompactPolicy {
+    /// Remove rows with `access_count < min_uses` (None = no threshold).
+    pub min_uses: Option<u64>,
+    /// Remove rows with `last_accessed_at < (now - older_than_secs)`.
+    pub older_than_secs: Option<i64>,
+    /// If true, return the matching keys without deleting.
+    pub dry_run: bool,
+}
+
 #[async_trait]
 pub trait StateStore: Send + Sync {
     async fn save_session(&self, session: &StoredSession) -> Result<()>;
@@ -64,4 +123,40 @@ pub trait StateStore: Send + Sync {
     async fn append_notification(&self, evt: &NotifyEvent) -> Result<()>;
 
     async fn recent_notifications(&self, limit: u32) -> Result<Vec<NotificationRecord>>;
+
+    // ─── memory.* — agent self-memory (v0.4) ───────────────────────────
+
+    /// Insert or replace a memory by key. Truncates `content` to
+    /// [`MEMORY_CONTENT_CAP`]. Updates `updated_at` to `now`; on first insert
+    /// `created_at` is also set, `access_count` starts at 0.
+    async fn memory_save(&self, mem: &MemoryRecord) -> Result<()>;
+
+    /// Fetch one memory by exact key. Implementations MUST atomically bump
+    /// `access_count` and `last_accessed_at` as a side effect of a successful
+    /// read (this is what makes "recency" and "frequency" meaningful for
+    /// later sorting/compaction).
+    async fn memory_get(&self, key: &str) -> Result<Option<MemoryRecord>>;
+
+    /// Substring search over `key` and `content`. Optional tag filter
+    /// (matches if ANY tag in `tags_any` is present). Hits are scored by
+    /// `matches × recency_weight × log(1 + access_count)`.
+    async fn memory_search(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+    ) -> Result<Vec<MemorySearchHit>>;
+
+    async fn list_memories(
+        &self,
+        kind: Option<&str>,
+        sort: MemoryListSort,
+        limit: u32,
+    ) -> Result<Vec<MemoryRecord>>;
+
+    async fn memory_delete(&self, key: &str) -> Result<bool>;
+
+    /// Apply [`CompactPolicy`]; returns the keys that were (or would be)
+    /// removed. Honours `dry_run`.
+    async fn memory_compact(&self, policy: CompactPolicy) -> Result<Vec<String>>;
 }

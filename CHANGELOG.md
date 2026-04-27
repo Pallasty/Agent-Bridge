@@ -5,6 +5,91 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-04-27
+
+**Agent self-memory.** Cross-session persistence for the lessons / decisions /
+todos / context that Claude (or any MCP-aware agent) accumulates while using
+agent-bridge. Inspired by — but deliberately *not* a port of — the cognitive
+graph memory in `/Data/CascadeProjects/AiOT`: that system optimises for 256-d
+latent embeddings + PageRank-on-graphs at large scale; we want plain notes
+indexed by key with optional hyperlink-style relationships, on the order of
+a few thousand entries per user-year.
+
+### Added
+
+- **`memory_save(key, kind, content, tags?, related_keys?)`** — upsert one
+  note. `key` is stable; same key overwrites content while preserving
+  `created_at`. `related_keys` is a JSON array of OTHER memory keys the author
+  thinks are causally linked (Web 1.0 hyperlinks, no graph algorithms).
+- **`memory_get(key)`** — fetch one row. **Side effect**: atomically bumps
+  `access_count` and `last_accessed_at`. This is what gives `memory_search`
+  ranking and `memory_compact` something to score against.
+- **`memory_search(query, tags_any?, limit?)`** — substring match over `key`
+  and `content`, optional tag intersection. Hits are scored
+  `recency_weight(30d half-life) + 0.3·ln(1 + access_count)` and ranked.
+- **`memory_list(kind?, sort?, limit?)`** — `sort` ∈ `recent | frequent |
+  newest`. Use this at session start with `kind="lesson"` to surface what
+  previous-you learned.
+- **`memory_delete(key)`** — drop one row by key.
+- **`memory_compact({min_uses?, older_than_days?, dry_run?})`** — prune
+  low-value rows; `dry_run=true` returns the keys that *would* be removed.
+
+### Storage
+
+- **schema v3 migration**: new `memories` table:
+  ```
+  key TEXT PK, kind TEXT, content TEXT, tags JSON, related_keys JSON,
+  created_at, updated_at, last_accessed_at, access_count
+  ```
+  Indexes on `kind`, `last_accessed_at DESC`, `updated_at DESC`,
+  `access_count DESC`. Idempotent migration — bumps `schema_meta.version`
+  to `3`; v2 databases upgrade in place at next open.
+- `MEMORY_CONTENT_CAP = 256 KiB` per row, clamped at write time.
+
+### Why not graph + PageRank?
+
+We considered AiOT's GraphMemoryBridge wholesale. Three things ruled it out:
+
+1. **Quantitative**: PageRank is a power-law algorithm; on a few-thousand-node
+   "graph" every node is "cold", the algorithm collapses to noise.
+2. **Intent mismatch**: Claude reaches for memory via keyword recall ≫ graph
+   walks ≫ vector similarity. SQL `LIKE` covers 90% of real lookups.
+3. **Cross-language cost**: AiOT is Python + Rust FFI. agent-bridge's
+   "zero system dependency" promise would die.
+
+Verdict: keep the *idea* of recency decay + access-count weighting +
+explicit relationships, ditch the algorithms.
+
+### Tools surface
+
+| Group        | Count | New |
+|--------------|------:|-----|
+| Notify       | 3 |  |
+| Terminal     | 3 |  |
+| Browser      | 5 |  |
+| Agent        | 5 |  |
+| Worktree     | 3 |  |
+| **Memory**   | **6** | **all of `memory_*`** |
+| **Total**    | **25** | (was 19 in v0.3.0) |
+
+### End-to-end verification
+
+`/tmp/v04_smoke.py` drives a fresh `agent-bridge mcp` subprocess through the
+full lifecycle:
+
+1. `tools/list` → 25 tools, the 6 `memory_*` present.
+2. `memory_save` × 3 (lesson + decision + todo with cross-references).
+3. `memory_get` twice on the lesson → `access_count` went `0 → 1 → 2`.
+4. `memory_search "exit_code"` → ranked the lesson first (score 1.330).
+5. `memory_search "v0" tags_any=["v0.3"]` → tag intersection works.
+6. `memory_list sort=frequent` → lesson (ac=2) tops decision/todo (ac=0).
+7. `memory_compact min_uses=10 dry_run=true` → reports 3 would-delete keys.
+8. `memory_get` confirms dry-run preserved the data.
+9. `memory_delete` × 3 → `{deleted: true}` for all.
+10. Final `memory_get` → `null`. Clean. ✅
+
+---
+
 ## [0.3.0] — 2026-04-26
 
 Two ergonomic upgrades that came straight out of using v0.2 in anger.

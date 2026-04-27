@@ -10,7 +10,10 @@ use tokio_rusqlite::{params, Connection};
 type RusqliteResult<T> = std::result::Result<T, tokio_rusqlite::rusqlite::Error>;
 use tracing::info;
 
-use crate::{NotificationRecord, StateStore, StoredSession, STDIO_CAP};
+use crate::{
+    CompactPolicy, MemoryListSort, MemoryRecord, MemorySearchHit, NotificationRecord, StateStore,
+    StoredSession, MEMORY_CONTENT_CAP, STDIO_CAP,
+};
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -52,6 +55,24 @@ CREATE TABLE IF NOT EXISTS tool_invocations (
 CREATE INDEX IF NOT EXISTS idx_tool_invocations_ts ON tool_invocations(ts DESC);
 "#;
 
+const SCHEMA_V3: &str = r#"
+CREATE TABLE IF NOT EXISTS memories (
+    key              TEXT    PRIMARY KEY,
+    kind             TEXT    NOT NULL,
+    content          TEXT    NOT NULL,
+    tags             TEXT    NOT NULL DEFAULT '[]',
+    related_keys     TEXT    NOT NULL DEFAULT '[]',
+    created_at       INTEGER NOT NULL,
+    updated_at       INTEGER NOT NULL,
+    last_accessed_at INTEGER NOT NULL,
+    access_count     INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_memories_kind          ON memories(kind);
+CREATE INDEX IF NOT EXISTS idx_memories_last_accessed ON memories(last_accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memories_updated_at    ON memories(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memories_access_count  ON memories(access_count DESC);
+"#;
+
 /// Default database path: `$XDG_DATA_HOME/agent-bridge/state.db`,
 /// or `~/.local/share/agent-bridge/state.db` as a fallback.
 pub fn default_db_path() -> PathBuf {
@@ -91,8 +112,6 @@ impl SqliteStore {
             )?;
 
             // ── v2 migration: add exit_code / stdout / stderr to sessions ──
-            // SQLite tolerates ALTER TABLE ADD COLUMN; we wrap in column-exists
-            // probes so re-running on a v2 db is a no-op.
             let cur: String = c
                 .query_row(
                     "SELECT value FROM schema_meta WHERE key='version'",
@@ -109,6 +128,22 @@ impl SqliteStore {
                     [],
                 )?;
             }
+
+            // ── v3 migration: memories table for agent self-memory ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "2".to_string());
+            if cur.as_str() == "2" {
+                c.execute_batch(SCHEMA_V3)?;
+                c.execute(
+                    "UPDATE schema_meta SET value='3' WHERE key='version'",
+                    [],
+                )?;
+            }
             Ok(())
         })
         .await
@@ -117,6 +152,30 @@ impl SqliteStore {
         info!(path = %path.display(), "SqliteStore ready");
         Ok(Self { conn })
     }
+}
+
+// ─── memory.* implementations ──────────────────────────────────────────
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Composite score for memory_search results.
+/// Each hit starts with a base of 1.0; recency multiplies by exp(-age_days/30),
+/// so a memory used today scores ~1.0×, one used 30d ago ~0.37×, 90d ago ~0.05×.
+/// Then +log(1+access_count) bumps frequently-touched memories.
+fn memory_score(last_accessed_at: i64, access_count: u64, now: i64) -> f64 {
+    let age_days = ((now - last_accessed_at).max(0) as f64) / 86_400.0;
+    let recency = (-age_days / 30.0).exp();
+    let frequency = (1.0 + access_count as f64).ln();
+    recency + 0.3 * frequency
+}
+
+fn parse_str_array(s: &str) -> Vec<String> {
+    serde_json::from_str(s).unwrap_or_default()
 }
 
 /// Clamp `s` to at most `max` bytes, preserving UTF-8 boundaries.
@@ -331,5 +390,243 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("recent_notifications: {e}")))?;
         Ok(rows)
+    }
+
+    // ─── memory.* (v0.4) ──────────────────────────────────────────────
+
+    async fn memory_save(&self, mem: &MemoryRecord) -> Result<()> {
+        let key = mem.key.clone();
+        let kind = mem.kind.clone();
+        let content = clamp(&mem.content, MEMORY_CONTENT_CAP);
+        let tags = serde_json::to_string(&mem.tags)?;
+        let related = serde_json::to_string(&mem.related_keys)?;
+        let now = now_secs();
+
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                // Preserve the original created_at if the row already exists.
+                c.execute(
+                    "INSERT INTO memories
+                       (key, kind, content, tags, related_keys,
+                        created_at, updated_at, last_accessed_at, access_count)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?6, 0)
+                     ON CONFLICT(key) DO UPDATE SET
+                        kind          = excluded.kind,
+                        content       = excluded.content,
+                        tags          = excluded.tags,
+                        related_keys  = excluded.related_keys,
+                        updated_at    = excluded.updated_at",
+                    params![key, kind, content, tags, related, now],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_save: {e}")))?;
+        Ok(())
+    }
+
+    async fn memory_get(&self, key: &str) -> Result<Option<MemoryRecord>> {
+        let key = key.to_string();
+        let now = now_secs();
+
+        let row = self.conn
+            .call(move |c| -> RusqliteResult<Option<MemoryRecord>> {
+                let mut stmt = c.prepare(
+                    "SELECT key, kind, content, tags, related_keys,
+                            created_at, updated_at, last_accessed_at, access_count
+                     FROM memories WHERE key = ?1",
+                )?;
+                let r = stmt
+                    .query_row(params![key], |row| {
+                        let tags_s: String = row.get(3)?;
+                        let related_s: String = row.get(4)?;
+                        Ok(MemoryRecord {
+                            key:              row.get(0)?,
+                            kind:             row.get(1)?,
+                            content:          row.get(2)?,
+                            tags:             parse_str_array(&tags_s),
+                            related_keys:     parse_str_array(&related_s),
+                            created_at:       row.get(5)?,
+                            updated_at:       row.get(6)?,
+                            last_accessed_at: row.get(7)?,
+                            access_count:     row.get::<_, i64>(8)? as u64,
+                        })
+                    })
+                    .ok();
+                // Bump access stats — even if the SELECT didn't find anything,
+                // UPDATE is a no-op so this is cheap and idempotent.
+                if r.is_some() {
+                    c.execute(
+                        "UPDATE memories
+                            SET access_count = access_count + 1,
+                                last_accessed_at = ?2
+                          WHERE key = ?1",
+                        params![key, now],
+                    )?;
+                }
+                Ok(r)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_get: {e}")))?;
+
+        // Reflect the bump in the returned record so callers see fresh values.
+        Ok(row.map(|mut r| {
+            r.access_count = r.access_count.saturating_add(1);
+            r.last_accessed_at = now;
+            r
+        }))
+    }
+
+    async fn memory_search(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+    ) -> Result<Vec<MemorySearchHit>> {
+        let q = query.to_string();
+        let q_pat = format!("%{}%", q.replace('%', r"\%").replace('_', r"\_"));
+        let tags = tags_any.to_vec();
+        let limit_i = limit as i64;
+        let now = now_secs();
+
+        let hits = self.conn
+            .call(move |c| -> RusqliteResult<Vec<MemorySearchHit>> {
+                // Cast a wider net at the SQL layer (LIKE on key + content);
+                // tag intersection + final scoring/ranking happen in Rust where
+                // we have JSON parsing handy.
+                let mut stmt = c.prepare(
+                    "SELECT key, kind, content, tags, related_keys,
+                            created_at, updated_at, last_accessed_at, access_count
+                     FROM memories
+                     WHERE key LIKE ?1 ESCAPE '\\'
+                        OR content LIKE ?1 ESCAPE '\\'
+                     LIMIT ?2",
+                )?;
+                let rows = stmt
+                    .query_map(params![q_pat, limit_i * 4], |row| {
+                        let tags_s: String = row.get(3)?;
+                        let related_s: String = row.get(4)?;
+                        Ok(MemoryRecord {
+                            key:              row.get(0)?,
+                            kind:             row.get(1)?,
+                            content:          row.get(2)?,
+                            tags:             parse_str_array(&tags_s),
+                            related_keys:     parse_str_array(&related_s),
+                            created_at:       row.get(5)?,
+                            updated_at:       row.get(6)?,
+                            last_accessed_at: row.get(7)?,
+                            access_count:     row.get::<_, i64>(8)? as u64,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                let mut hits: Vec<MemorySearchHit> = rows
+                    .into_iter()
+                    .filter(|r| {
+                        tags.is_empty() || tags.iter().any(|t| r.tags.contains(t))
+                    })
+                    .map(|r| {
+                        let score = memory_score(r.last_accessed_at, r.access_count, now);
+                        MemorySearchHit { record: r, score }
+                    })
+                    .collect();
+                hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+                hits.truncate(limit_i as usize);
+                Ok(hits)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_search: {e}")))?;
+        Ok(hits)
+    }
+
+    async fn list_memories(
+        &self,
+        kind: Option<&str>,
+        sort: MemoryListSort,
+        limit: u32,
+    ) -> Result<Vec<MemoryRecord>> {
+        let kind = kind.map(|s| s.to_string());
+        let limit_i = limit as i64;
+        let order = match sort {
+            MemoryListSort::Recent   => "last_accessed_at DESC",
+            MemoryListSort::Frequent => "access_count DESC, last_accessed_at DESC",
+            MemoryListSort::Newest   => "created_at DESC",
+        };
+
+        let rows = self.conn
+            .call(move |c| -> RusqliteResult<Vec<MemoryRecord>> {
+                let sql = format!(
+                    "SELECT key, kind, content, tags, related_keys,
+                            created_at, updated_at, last_accessed_at, access_count
+                     FROM memories
+                     WHERE (?1 IS NULL OR kind = ?1)
+                     ORDER BY {order}
+                     LIMIT ?2"
+                );
+                let mut stmt = c.prepare(&sql)?;
+                let rows = stmt
+                    .query_map(params![kind, limit_i], |row| {
+                        let tags_s: String = row.get(3)?;
+                        let related_s: String = row.get(4)?;
+                        Ok(MemoryRecord {
+                            key:              row.get(0)?,
+                            kind:             row.get(1)?,
+                            content:          row.get(2)?,
+                            tags:             parse_str_array(&tags_s),
+                            related_keys:     parse_str_array(&related_s),
+                            created_at:       row.get(5)?,
+                            updated_at:       row.get(6)?,
+                            last_accessed_at: row.get(7)?,
+                            access_count:     row.get::<_, i64>(8)? as u64,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("list_memories: {e}")))?;
+        Ok(rows)
+    }
+
+    async fn memory_delete(&self, key: &str) -> Result<bool> {
+        let key = key.to_string();
+        let n = self.conn
+            .call(move |c| -> RusqliteResult<usize> {
+                Ok(c.execute("DELETE FROM memories WHERE key = ?1", params![key])?)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_delete: {e}")))?;
+        Ok(n > 0)
+    }
+
+    async fn memory_compact(&self, policy: CompactPolicy) -> Result<Vec<String>> {
+        let CompactPolicy { min_uses, older_than_secs, dry_run } = policy;
+        let cutoff_lat = older_than_secs.map(|s| now_secs() - s);
+        let min_uses_i = min_uses.map(|n| n as i64);
+
+        let keys = self.conn
+            .call(move |c| -> RusqliteResult<Vec<String>> {
+                // Pick keys matching either condition.
+                let mut stmt = c.prepare(
+                    "SELECT key FROM memories
+                     WHERE (?1 IS NOT NULL AND access_count < ?1)
+                        OR (?2 IS NOT NULL AND last_accessed_at < ?2)",
+                )?;
+                let keys: Vec<String> = stmt
+                    .query_map(params![min_uses_i, cutoff_lat], |r| r.get::<_, String>(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                if !dry_run && !keys.is_empty() {
+                    let tx = c.unchecked_transaction()?;
+                    for k in &keys {
+                        tx.execute("DELETE FROM memories WHERE key = ?1", params![k])?;
+                    }
+                    tx.commit()?;
+                }
+                Ok(keys)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_compact: {e}")))?;
+        Ok(keys)
     }
 }

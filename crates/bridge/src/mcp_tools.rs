@@ -4,6 +4,7 @@
 use ab_agent::{GitWorktreeManager, SpawnConfig};
 use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
 use ab_mcp::{McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
+use ab_store::{CompactPolicy, MemoryListSort, MemoryRecord};
 use ab_terminal::{OscEvent, OscParser, SplitDir};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
@@ -856,6 +857,269 @@ impl McpTool for AgentSessionWaitTool {
 }
 
 // ===========================================================================
+//                       agent self-memory (v0.4)
+// ===========================================================================
+
+pub struct MemorySaveTool { hub: Hub }
+impl MemorySaveTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for MemorySaveTool {
+    fn name(&self) -> &'static str { "memory_save" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Persist one note to agent self-memory (cross-session). Use this to \
+                 record lessons, decisions, todos, or context the next-session-you \
+                 (or other Claude instances) should know. Same `key` overwrites — \
+                 `created_at` is preserved, `updated_at` bumps. `related_keys` is a \
+                 free-form list of OTHER memory keys you think are causally linked \
+                 (no graph algorithms — Claude declares relationships explicitly)."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key":          { "type": "string", "description": "Unique stable id, e.g. 'v0.5_design' or 'agent_spawn_pitfall'." },
+                    "kind":         { "type": "string", "description": "lesson | decision | todo | context | …" },
+                    "content":      { "type": "string", "description": "Markdown / free text. Capped at 256 KiB." },
+                    "tags":         { "type": "array", "items": { "type": "string" }, "default": [] },
+                    "related_keys": { "type": "array", "items": { "type": "string" }, "default": [] }
+                },
+                "required": ["key", "kind", "content"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => return Ok(ToolResult::error("missing or empty 'key'")),
+        };
+        let kind = match args.get("kind").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => return Ok(ToolResult::error("missing or empty 'kind'")),
+        };
+        let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let tags = args.get("tags").and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+        let related_keys = args.get("related_keys").and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+
+        let mem = MemoryRecord {
+            key: key.clone(), kind, content, tags, related_keys,
+            // The store handles all timestamps + access_count itself.
+            created_at: 0, updated_at: 0, last_accessed_at: 0, access_count: 0,
+        };
+        match store.memory_save(&mem).await {
+            Ok(()) => Ok(ToolResult::text(format!("saved memory '{key}'"))),
+            Err(e) => Ok(ToolResult::error(format!("memory: {e}"))),
+        }
+    }
+}
+
+pub struct MemoryGetTool { hub: Hub }
+impl MemoryGetTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for MemoryGetTool {
+    fn name(&self) -> &'static str { "memory_get" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Fetch one memory by exact key. Side effect: bumps the row's \
+                 access_count and last_accessed_at — this is what gives \
+                 `memory_search` ranking and `memory_compact` something to score \
+                 against. Returns null if the key is unknown."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "key": { "type": "string" } },
+                "required": ["key"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing 'key'")),
+        };
+        let row = store.memory_get(&key).await?;
+        Ok(ToolResult::json_text(&serde_json::to_value(row).unwrap_or(Value::Null)))
+    }
+}
+
+pub struct MemorySearchTool { hub: Hub }
+impl MemorySearchTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for MemorySearchTool {
+    fn name(&self) -> &'static str { "memory_search" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Substring search over memory keys + content. Optional `tags_any` \
+                 narrows to rows tagged with at least one of the listed tags. \
+                 Results ranked by composite score: `recency_weight + 0.3 * \
+                 ln(1 + access_count)` — most-recent + most-touched first."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query":    { "type": "string", "description": "Substring (case-sensitive on most SQLite builds)." },
+                    "tags_any": { "type": "array", "items": { "type": "string" }, "default": [] },
+                    "limit":    { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 }
+                },
+                "required": ["query"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let q = args.get("query").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let tags: Vec<String> = args.get("tags_any").and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20).min(200) as u32;
+        let hits = store.memory_search(&q, &tags, limit).await?;
+        Ok(ToolResult::json_text(&serde_json::to_value(hits).unwrap_or(Value::Null)))
+    }
+}
+
+pub struct MemoryListTool { hub: Hub }
+impl MemoryListTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for MemoryListTool {
+    fn name(&self) -> &'static str { "memory_list" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "List memories, optionally filtered by `kind`, sorted by one of \
+                 'recent' (default — last_accessed_at desc), 'frequent' \
+                 (access_count desc), or 'newest' (created_at desc). Use this at \
+                 session start with kind='lesson' to surface what previous-you \
+                 learned."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "kind":  { "type": "string", "description": "Optional kind filter." },
+                    "sort":  { "type": "string", "enum": ["recent","frequent","newest"], "default": "recent" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let kind = args.get("kind").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let sort = match args.get("sort").and_then(|v| v.as_str()).unwrap_or("recent") {
+            "frequent" => MemoryListSort::Frequent,
+            "newest"   => MemoryListSort::Newest,
+            _          => MemoryListSort::Recent,
+        };
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20).min(200) as u32;
+        let rows = store.list_memories(kind.as_deref(), sort, limit).await?;
+        Ok(ToolResult::json_text(&serde_json::to_value(rows).unwrap_or(Value::Null)))
+    }
+}
+
+pub struct MemoryDeleteTool { hub: Hub }
+impl MemoryDeleteTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for MemoryDeleteTool {
+    fn name(&self) -> &'static str { "memory_delete" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Delete a memory by key. Returns `{deleted: true}` if a row was removed.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "key": { "type": "string" } },
+                "required": ["key"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing 'key'")),
+        };
+        let removed = store.memory_delete(&key).await?;
+        Ok(ToolResult::json_text(&json!({ "deleted": removed })))
+    }
+}
+
+pub struct MemoryCompactTool { hub: Hub }
+impl MemoryCompactTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+#[async_trait]
+impl McpTool for MemoryCompactTool {
+    fn name(&self) -> &'static str { "memory_compact" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Prune low-value memories. A row is removed if EITHER threshold \
+                 matches: `min_uses` (access_count strictly less than) OR \
+                 `older_than_days` (last_accessed_at older than now - that many \
+                 days). Set `dry_run=true` to preview the keys that would be \
+                 deleted without actually removing them. Both thresholds default \
+                 to none — pass at least one to do anything."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "min_uses":        { "type": "integer", "minimum": 0 },
+                    "older_than_days": { "type": "integer", "minimum": 1 },
+                    "dry_run":         { "type": "boolean", "default": false }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let min_uses = args.get("min_uses").and_then(|v| v.as_u64());
+        let older_than_secs = args.get("older_than_days").and_then(|v| v.as_i64()).map(|d| d * 86_400);
+        let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        if min_uses.is_none() && older_than_secs.is_none() {
+            return Ok(ToolResult::error(
+                "at least one of `min_uses` or `older_than_days` must be set",
+            ));
+        }
+        let policy = CompactPolicy { min_uses, older_than_secs, dry_run };
+        let keys = store.memory_compact(policy).await?;
+        Ok(ToolResult::json_text(&json!({
+            "dry_run": dry_run,
+            "removed_count": keys.len(),
+            "removed_keys": keys,
+        })))
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -883,7 +1147,14 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(AgentSessionWaitTool::new(hub.clone())));
     reg.register(Arc::new(WorktreeListTool::new(hub.clone())));
     reg.register(Arc::new(WorktreeCreateTool::new(hub.clone())));
-    reg.register(Arc::new(WorktreeRemoveTool::new(hub)));
+    reg.register(Arc::new(WorktreeRemoveTool::new(hub.clone())));
+    // v0.4: agent self-memory
+    reg.register(Arc::new(MemorySaveTool::new(hub.clone())));
+    reg.register(Arc::new(MemoryGetTool::new(hub.clone())));
+    reg.register(Arc::new(MemorySearchTool::new(hub.clone())));
+    reg.register(Arc::new(MemoryListTool::new(hub.clone())));
+    reg.register(Arc::new(MemoryDeleteTool::new(hub.clone())));
+    reg.register(Arc::new(MemoryCompactTool::new(hub)));
     reg
 }
 
