@@ -182,9 +182,14 @@ enum EvolveCmd {
         json: bool,
     },
     /// Apply a targeted file edit inside an evolution worktree and commit it.
-    /// Reads the unified diff from stdin (or --patch). Creates the worktree
-    /// branch if --key names an existing proposal; otherwise treats --issue
-    /// as a one-shot propose+fix.
+    ///
+    /// Two modes:
+    ///   Patch mode  (default): reads unified diff from stdin or --patch.
+    ///   Edit mode   (--file + --old + --new): exact string replacement — no
+    ///               diff required; I read the file, replace, write, and commit.
+    ///
+    /// Creates the worktree branch if --key names an existing proposal;
+    /// otherwise --issue is required to create a new proposal on the fly.
     Fix {
         /// Memory key of an existing evolve proposal (from `evolve list`).
         /// If omitted, --issue is required to create a new proposal on the fly.
@@ -199,7 +204,21 @@ enum EvolveCmd {
         #[arg(long)]
         message: Option<String>,
 
-        /// Path to patch file. If omitted, reads unified diff from stdin.
+        // --- Edit mode (all three required together) ---
+        /// [Edit mode] Repo-relative path of the file to edit in the worktree.
+        #[arg(long)]
+        file: Option<PathBuf>,
+
+        /// [Edit mode] Exact string to find (must appear exactly once).
+        #[arg(long)]
+        old: Option<String>,
+
+        /// [Edit mode] Replacement string.
+        #[arg(long)]
+        new: Option<String>,
+
+        // --- Patch mode ---
+        /// [Patch mode] Path to .diff file. If omitted (and not edit mode), reads from stdin.
         #[arg(long)]
         patch: Option<PathBuf>,
 
@@ -575,7 +594,7 @@ async fn run_evolve(
             println!("  # when ready for review, notify user to merge or push");
         }
 
-        EvolveCmd::Fix { key, issue, message, patch, dry_run } => {
+        EvolveCmd::Fix { key, issue, message, file, old, new, patch, dry_run } => {
             let repo = find_repo_root(repo_hint)?;
             let store: Arc<dyn StateStore> = Arc::new(
                 SqliteStore::open(db_path)
@@ -613,35 +632,45 @@ async fn run_evolve(
                 (branch, wt, k, iss.to_string())
             };
 
-            // Read patch from file or stdin.
-            let patch_bytes = match &patch {
-                Some(p) => std::fs::read(p)
-                    .with_context(|| format!("read patch file {}", p.display()))?,
-                None => {
-                    use std::io::Read;
-                    let mut buf = Vec::new();
-                    std::io::stdin().read_to_end(&mut buf)?;
-                    buf
-                }
-            };
-            if patch_bytes.trim_ascii().is_empty() {
-                bail!("patch is empty — pipe a unified diff or use --patch <file>");
-            }
-
             let commit_msg = message.unwrap_or_else(|| {
                 let slug = slugify(&issue_text);
                 format!("evolve: {}", &slug[..slug.len().min(60)])
             });
+
+            // Determine mode: edit (--file+--old+--new) or patch (stdin/--patch).
+            let edit_mode = file.is_some() || old.is_some() || new.is_some();
+            if edit_mode && (file.is_none() || old.is_none() || new.is_none()) {
+                bail!("edit mode requires all three of --file, --old, and --new");
+            }
 
             println!("Evolution fix");
             println!("  key     : {mem_key}");
             println!("  branch  : {branch}");
             println!("  worktree: {}", wt_path.display());
             println!("  commit  : {commit_msg}");
+            if edit_mode {
+                println!("  mode    : edit (--file/--old/--new)");
+            }
 
             if dry_run {
-                println!("\npatch preview ({} bytes):", patch_bytes.len());
-                println!("{}", String::from_utf8_lossy(&patch_bytes).chars().take(800).collect::<String>());
+                if edit_mode {
+                    println!("\n  file : {}", file.as_ref().unwrap().display());
+                    println!("  old  : {:?}", old.as_deref().unwrap());
+                    println!("  new  : {:?}", new.as_deref().unwrap());
+                } else {
+                    let patch_bytes = match &patch {
+                        Some(p) => std::fs::read(p)
+                            .with_context(|| format!("read patch file {}", p.display()))?,
+                        None => {
+                            use std::io::Read;
+                            let mut buf = Vec::new();
+                            std::io::stdin().read_to_end(&mut buf)?;
+                            buf
+                        }
+                    };
+                    println!("\npatch preview ({} bytes):", patch_bytes.len());
+                    println!("{}", String::from_utf8_lossy(&patch_bytes).chars().take(800).collect::<String>());
+                }
                 println!("\n(dry-run — nothing created)");
                 return Ok(());
             }
@@ -660,18 +689,57 @@ async fn run_evolve(
                 }
             }
 
-            // Write patch to a temp file and apply.
-            let tmp = wt_path.join(".evolve_patch.diff");
-            std::fs::write(&tmp, &patch_bytes)?;
-            let apply = std::process::Command::new("git")
-                .args(["-C", wt_path.to_str().unwrap_or("."),
-                       "apply", "--index",
-                       tmp.to_str().unwrap_or(".")])
-                .status()
-                .context("git apply")?;
-            std::fs::remove_file(&tmp).ok();
-            if !apply.success() {
-                bail!("git apply failed — check that the diff is a clean unified diff against the current HEAD");
+            if edit_mode {
+                // Edit mode: read file, replace, write, git add.
+                let rel_path = file.unwrap();
+                let abs_path = wt_path.join(&rel_path);
+                let src = std::fs::read_to_string(&abs_path)
+                    .with_context(|| format!("read {}", abs_path.display()))?;
+                let old_str = old.unwrap();
+                let new_str = new.unwrap();
+                let count = src.matches(old_str.as_str()).count();
+                if count == 0 {
+                    bail!("--old string not found in {}", rel_path.display());
+                }
+                if count > 1 {
+                    bail!("--old string appears {count} times in {} — must be unique", rel_path.display());
+                }
+                let result = src.replacen(old_str.as_str(), &new_str, 1);
+                std::fs::write(&abs_path, result)?;
+                let add = std::process::Command::new("git")
+                    .args(["-C", wt_path.to_str().unwrap_or("."),
+                           "add", rel_path.to_str().unwrap_or(".")])
+                    .status()
+                    .context("git add")?;
+                if !add.success() { bail!("git add failed"); }
+                println!("edit applied: {}", rel_path.display());
+            } else {
+                // Patch mode: read diff from file or stdin, apply via git apply.
+                let patch_bytes = match &patch {
+                    Some(p) => std::fs::read(p)
+                        .with_context(|| format!("read patch file {}", p.display()))?,
+                    None => {
+                        use std::io::Read;
+                        let mut buf = Vec::new();
+                        std::io::stdin().read_to_end(&mut buf)?;
+                        buf
+                    }
+                };
+                if patch_bytes.trim_ascii().is_empty() {
+                    bail!("patch is empty — pipe a unified diff or use --patch <file>");
+                }
+                let tmp = wt_path.join(".evolve_patch.diff");
+                std::fs::write(&tmp, &patch_bytes)?;
+                let apply = std::process::Command::new("git")
+                    .args(["-C", wt_path.to_str().unwrap_or("."),
+                           "apply", "--index",
+                           tmp.to_str().unwrap_or(".")])
+                    .status()
+                    .context("git apply")?;
+                std::fs::remove_file(&tmp).ok();
+                if !apply.success() {
+                    bail!("git apply failed — check that the diff is a clean unified diff against current HEAD");
+                }
             }
 
             // Commit.

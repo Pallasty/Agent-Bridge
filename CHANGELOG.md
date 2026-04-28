@@ -5,6 +5,40 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] — 2026-04-28
+
+**Self-evolution release.** Closes the loop between "I hit a wall" and "I
+fixed it" — without manual diff generation or daemon intervention. Driven by
+two core pain points: (1) the evolve workflow required hand-crafted unified
+diffs; (2) the memory hook injected low-relevance records as the store grew.
+
+### Added
+
+- **`agent-cli evolve` subcommand family** — self-improvement proposal workflow:
+  - `evolve propose --issue --fix [--patch]` — creates an isolated git worktree
+    branch (`evolution/YYYYMMDD-<slug>`), records a `kind=evolution` memory entry.
+  - `evolve fix` — two modes:
+    - *Edit mode* (`--file --old --new`): exact string replacement in the
+      worktree file; no diff required. I read the file, replace, `git add`, commit.
+    - *Patch mode* (`--patch` or stdin): applies a unified diff via `git apply`.
+    Both modes create the worktree branch if absent (one-shot propose+fix).
+  - `evolve list` — shows open proposals only (`kind=evolution`; closed ones
+    are filtered).
+  - `evolve close <key> [--note]` — marks proposal as `kind=evolution_closed`;
+    removes `open` tag; appends resolution note.
+  - `--dry-run` on `propose` and `fix` previews without creating anything.
+
+### Fixed
+
+- **`ab-memory-hook` injection inside curator sub-agents.** The hook now exits
+  immediately when `AB_MEMORY_CURATOR=1` is set, preventing recursive context
+  bloat when `ab-precompact-hook` spawns a `claude -p` memory curator.
+- **Memory hook sort order degraded at scale.** With 100+ records the previous
+  `ORDER BY kind_tier, updated_at DESC` injected recently-written but never-
+  accessed records ahead of frequently-used ones. Changed to
+  `(access_count * 86400 + updated_at) DESC` within each kind tier — each
+  access lifts a record by the equivalent of one extra day of recency.
+
 ## [0.8.0] — 2026-04-28
 
 **AI ergonomics release.** No new user-facing features; instead, four small

@@ -55,7 +55,7 @@ ROWS=$(sqlite3 "$DB" \
      WHEN 'session_handoff'  THEN 3
      WHEN 'todo'             THEN 4
      ELSE 5 END,
-   updated_at DESC
+   (access_count * 86400 + updated_at) DESC
    LIMIT 80" 2>/dev/null) || exit 0
 
 [[ -z "$ROWS" ]] && exit 0
@@ -78,7 +78,7 @@ sqlite3 "$DB" \
        WHEN 'session_handoff'  THEN 3
        WHEN 'todo'             THEN 4
        ELSE 5 END,
-     updated_at DESC
+     (access_count * 86400 + updated_at) DESC
      LIMIT 80
    )" 2>/dev/null || true
 
