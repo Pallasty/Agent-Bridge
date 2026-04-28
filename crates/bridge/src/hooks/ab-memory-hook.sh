@@ -14,6 +14,10 @@
 DB="$HOME/.local/share/agent-bridge/state.db"
 [[ -f "$DB" ]] || exit 0
 
+# Skip memory injection inside curator sub-agents (PreCompact hook sets this)
+# to avoid recursive context bloat.
+[[ "${AB_MEMORY_CURATOR:-}" == "1" ]] && exit 0
+
 # Hook input is one line of JSON on stdin. Buffer it so subsequent reads
 # (none today, but future-proof) don't lose it; then extract session_id.
 # Falls back to env / PID if stdin is empty (manual invocation, etc.).
