@@ -4,6 +4,12 @@
 # Scope-aware: global + project-matching + domain memories are loaded.
 # Runs exactly once per session (lock file keyed on session_id).
 #
+# v0.9.1: split injection budget — domain memories get a reserved 20-slot
+# budget injected first; project/global memories fill the remaining 60 slots.
+# This prevents a large global memory store from crowding out domain knowledge.
+#
+# v0.9: project-scope sort priority (3-tier: kind → proj-match → recency×freq)
+# v0.8: access_count bump on injected rows; session_id from stdin payload.
 # v0.7.2: read session_id from Claude Code's hook JSON payload on stdin.
 # CLAUDE_SESSION_ID is NOT set in the hook env (verified empirically — see
 # `lesson_hook_session_id_from_stdin`), so the previous
@@ -38,54 +44,76 @@ touch "$LOCK"
 
 CWD="${PWD:-/}"
 
-SCOPE_SQL="(
-  scope IS NULL
-  OR scope = 'global'
-  OR scope = 'project:${CWD}'
-  OR (scope LIKE 'project:%' AND '${CWD}' LIKE (SUBSTR(scope, 9) || '%'))
-  OR scope LIKE 'domain:%'
-)"
+# Sort expression shared by both queries (within each kind tier):
+# access_count × 86400 gives each access the weight of one extra day of recency.
+FREQ_SORT="(access_count * 86400 + updated_at) DESC"
 
-ROWS=$(sqlite3 "$DB" \
-  "SELECT kind, key, tags, scope, substr(content,1,120) FROM memories
-   WHERE ${SCOPE_SQL}
-   ORDER BY CASE kind
+KIND_TIER="CASE kind
      WHEN 'lesson'           THEN 1
      WHEN 'decision'         THEN 2
      WHEN 'session_handoff'  THEN 3
      WHEN 'todo'             THEN 4
-     ELSE 5 END,
-   CASE WHEN scope = 'project:${CWD}'
+     ELSE 5 END"
+
+# Query 1: domain-scoped memories — reserved 20-slot budget, injected first.
+# These are cross-project transferable knowledge; they must appear regardless
+# of how large the global store grows.
+DOMAIN_ROWS=$(sqlite3 "$DB" \
+  "SELECT kind, key, tags, scope, substr(content,1,120) FROM memories
+   WHERE scope LIKE 'domain:%'
+   ORDER BY ${KIND_TIER}, ${FREQ_SORT}
+   LIMIT 20" 2>/dev/null) || true
+
+# Query 2: project-scoped + global memories — up to 60 slots.
+# 3-tier sort: kind → project-CWD match (0=match, 1=no match) → recency×freq.
+OTHER_SCOPE="(
+  scope IS NULL
+  OR scope = 'global'
+  OR scope = 'project:${CWD}'
+  OR (scope LIKE 'project:%' AND '${CWD}' LIKE (SUBSTR(scope, 9) || '%'))
+)"
+
+PROJ_MATCH="CASE WHEN scope = 'project:${CWD}'
           OR (scope LIKE 'project:%' AND '${CWD}' LIKE (SUBSTR(scope, 9) || '%'))
-        THEN 0 ELSE 1 END,
-   (access_count * 86400 + updated_at) DESC
-   LIMIT 80" 2>/dev/null) || exit 0
+        THEN 0 ELSE 1 END"
 
-[[ -z "$ROWS" ]] && exit 0
+OTHER_ROWS=$(sqlite3 "$DB" \
+  "SELECT kind, key, tags, scope, substr(content,1,120) FROM memories
+   WHERE ${OTHER_SCOPE}
+   ORDER BY ${KIND_TIER}, ${PROJ_MATCH}, ${FREQ_SORT}
+   LIMIT 60" 2>/dev/null) || true
 
-# v0.8: bump access_count + last_accessed_at on the rows we just injected
-# so the "Frequent" / "Recent" sorts (and compaction's healthy default) reflect
-# what is actually in front of Claude. We use the same WHERE clause; a small
-# race window where another writer inserts between SELECT and UPDATE is
-# acceptable — eventual consistency is fine for usage stats.
+# Merge: domain first, then project/global.
+if [[ -z "$DOMAIN_ROWS" && -z "$OTHER_ROWS" ]]; then exit 0; fi
+if [[ -n "$DOMAIN_ROWS" && -n "$OTHER_ROWS" ]]; then
+  ROWS="${DOMAIN_ROWS}"$'\n'"${OTHER_ROWS}"
+elif [[ -n "$DOMAIN_ROWS" ]]; then
+  ROWS="$DOMAIN_ROWS"
+else
+  ROWS="$OTHER_ROWS"
+fi
+
+# Bump access_count + last_accessed_at for both sets (mirrors the SELECTs above).
 sqlite3 "$DB" \
   "UPDATE memories
    SET access_count    = access_count + 1,
        last_accessed_at = CAST(strftime('%s','now') AS INTEGER)
    WHERE rowid IN (
      SELECT rowid FROM memories
-     WHERE ${SCOPE_SQL}
-     ORDER BY CASE kind
-       WHEN 'lesson'           THEN 1
-       WHEN 'decision'         THEN 2
-       WHEN 'session_handoff'  THEN 3
-       WHEN 'todo'             THEN 4
-       ELSE 5 END,
-     CASE WHEN scope = 'project:${CWD}'
-            OR (scope LIKE 'project:%' AND '${CWD}' LIKE (SUBSTR(scope, 9) || '%'))
-          THEN 0 ELSE 1 END,
-     (access_count * 86400 + updated_at) DESC
-     LIMIT 80
+     WHERE scope LIKE 'domain:%'
+     ORDER BY ${KIND_TIER}, ${FREQ_SORT}
+     LIMIT 20
+   )" 2>/dev/null || true
+
+sqlite3 "$DB" \
+  "UPDATE memories
+   SET access_count    = access_count + 1,
+       last_accessed_at = CAST(strftime('%s','now') AS INTEGER)
+   WHERE rowid IN (
+     SELECT rowid FROM memories
+     WHERE ${OTHER_SCOPE}
+     ORDER BY ${KIND_TIER}, ${PROJ_MATCH}, ${FREQ_SORT}
+     LIMIT 60
    )" 2>/dev/null || true
 
 python3 - "$ROWS" "$CWD" <<'PY'
