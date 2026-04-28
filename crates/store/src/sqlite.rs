@@ -797,26 +797,29 @@ impl StateStore for SqliteStore {
 
         let rows = self.conn
             .call(move |c| -> RusqliteResult<Vec<MemoryRecord>> {
-                // When ctx is empty, return all records (no scope filter).
-                // When ctx is provided, return records that are:
-                //   - global/unscoped (scope IS NULL or scope = 'global')
-                //   - exactly matching the ctx scope
-                //   - project-scoped where ctx starts with the project path
-                let scope_clause = if ctx.is_empty() {
-                    "1=1".to_string()
-                } else {
-                    format!(
-                        "(scope IS NULL OR scope = 'global' \
-                          OR scope = ?3 \
-                          OR (scope LIKE 'project:%' AND ?3 LIKE (SUBSTR(scope, 9) || '%')))"
-                    )
-                };
+                // Bind exactly 3 params unconditionally — `?3` (the scope ctx)
+                // is NULL when the caller didn't supply one, and the WHERE
+                // clause is written so a NULL `?3` short-circuits to "all
+                // records pass the scope filter". v0.7.0 had two SQL variants
+                // (one with `?3`, one without) but always bound 3 params,
+                // which raised "Got 3, needed 2" on the empty-ctx path
+                // (lesson_memory_list_scope_query_bug).
+                //
+                // When `?3` is provided, a record matches if:
+                //   - it's global/unscoped (scope IS NULL or 'global'), OR
+                //   - its scope equals `?3` exactly, OR
+                //   - it's project-scoped (`scope` begins with `project:`) and
+                //     `?3` is a path under that project.
                 let sql = format!(
                     "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
-                       AND {scope_clause}
+                       AND (?3 IS NULL
+                            OR scope IS NULL
+                            OR scope = 'global'
+                            OR scope = ?3
+                            OR (scope LIKE 'project:%' AND ?3 LIKE (SUBSTR(scope, 9) || '%')))
                      ORDER BY {order}
                      LIMIT ?2"
                 );
@@ -915,17 +918,36 @@ impl StateStore for SqliteStore {
         let CompactPolicy { min_uses, older_than_secs, dry_run } = policy;
         let cutoff_lat = older_than_secs.map(|s| now_secs() - s);
         let min_uses_i = min_uses.map(|n| n as i64);
+        // v0.7.1 fix (lesson_compact_or_logic_kills_new_memories): newly saved
+        // memories have access_count=0 and would match `access_count < 2` on
+        // the very next compact pass — so the v0.7 PreCompact curator+Stop-hook
+        // pipeline was deleting memories within seconds of saving them.
+        //
+        // Two-part fix:
+        //   1. OR → AND between the access-count and recency thresholds:
+        //      a row is only stale when *both* signals say so (low usage AND
+        //      not touched recently). Either condition alone is no longer
+        //      enough.
+        //   2. Hard-coded GRACE_SECS protects records created in the last
+        //      hour regardless of policy — defence-in-depth against hooks
+        //      that fire faster than memory has time to accumulate hits.
+        const GRACE_SECS: i64 = 3600;
+        let grace_cutoff = now_secs() - GRACE_SECS;
 
         let keys = self.conn
             .call(move |c| -> RusqliteResult<Vec<String>> {
-                // Pick keys matching either condition.
                 let mut stmt = c.prepare(
                     "SELECT key FROM memories
-                     WHERE (?1 IS NOT NULL AND access_count < ?1)
-                        OR (?2 IS NOT NULL AND last_accessed_at < ?2)",
+                     WHERE created_at < ?3
+                       AND (?1 IS NOT NULL OR ?2 IS NOT NULL)
+                       AND (?1 IS NULL OR access_count < ?1)
+                       AND (?2 IS NULL OR last_accessed_at < ?2)",
                 )?;
                 let keys: Vec<String> = stmt
-                    .query_map(params![min_uses_i, cutoff_lat], |r| r.get::<_, String>(0))?
+                    .query_map(
+                        params![min_uses_i, cutoff_lat, grace_cutoff],
+                        |r| r.get::<_, String>(0),
+                    )?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
 
                 if !dry_run && !keys.is_empty() {

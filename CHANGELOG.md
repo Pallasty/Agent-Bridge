@@ -5,6 +5,63 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] — 2026-04-28
+
+**Hotfix.** Two SQL bugs that v0.7.0 (commits `b71e2e2` + later) shipped to
+the memory layer were documented in
+`session_handoff_20260427` / `lesson_compact_or_logic_kills_new_memories` /
+`lesson_memory_list_scope_query_bug` but not yet fixed. This release closes
+both. Bugs #3 and #4 from the handoff (Stop-hook recursion + curator
+settings) were already correctly implemented in `ab-precompact-hook.sh` /
+`ab-session-end-hook.sh` / `memory-curator-settings.json`; we verified them
+during this pass and document them here.
+
+### Fixed
+
+- **`memory_compact` no longer eats fresh memories**
+  (`lesson_compact_or_logic_kills_new_memories`).
+  v0.7.0 used OR between `access_count < min_uses` and
+  `last_accessed_at < cutoff`, which deleted records the curator had just
+  saved (`access_count = 0` always satisfies `< 2`). Two-part fix:
+  - `OR → AND` between thresholds — both signals must agree before a row
+    is considered stale.
+  - **Hard-coded grace period of 1 h** on `created_at` — defence-in-depth
+    so any policy is incapable of removing brand-new memories regardless
+    of caller mistakes.
+- **`memory_list` no longer raises "Got 3, needed 2"**
+  (`lesson_memory_list_scope_query_bug`).
+  The scope clause was a string-template that didn't reference `?3` when
+  `ctx` was empty, but `query_map` always bound 3 params. Fix: the SQL
+  now always references `?3`, with a `?3 IS NULL OR …` guard so a missing
+  scope is a no-op filter rather than a compile-time mismatch.
+
+### Verified, no fix needed
+
+- **Stop hook recursion** (`lesson_stop_hook_fires_on_subagent_exit`):
+  `ab-session-end-hook.sh` line 6 already short-circuits via
+  `[[ -n "$AB_MEMORY_CURATOR" ]] && exit 0`; `ab-precompact-hook.sh`
+  line 106 sets that env var before launching the curator sub-agent.
+- **Curator-settings file path**: `setup.rs` writes
+  `~/.config/agent-bridge/memory-curator-settings.json`; the precompact
+  hook reads from the same path — the path mismatch hinted at in
+  `session_handoff_20260427` (`~/.claude/precompact-settings.json`) was
+  stale notes from an earlier draft and is no longer present in code.
+  The settings file's `hooks: { UserPromptSubmit: [], Stop: [] }` cleanly
+  suppresses recursion in the curator sub-agent.
+
+### Verification (`/tmp/v071_smoke.py`)
+
+1. `memory_list { limit: 5 }` → returns rows, no error  ✅ (was: SQL bind error)
+2. `memory_list { kind: "lesson", limit: 3 }` → also clean  ✅
+3. `memory_save { key: fresh-…, … }` then
+   `memory_compact { min_uses: 2, dry_run: true }` → fresh key NOT in
+   removal list (grace period protects records < 1 h old)  ✅
+4. `memory_compact { min_uses: 2, older_than_days: 30, dry_run: true }`
+   → 0 rows would be removed (AND with `last_accessed > 30 d ago` fails
+   for all our recent imports)  ✅
+
+---
+
 ## [0.6.1] — 2026-04-27
 
 **Hotfix.** v0.6.0 (and every prior version since v0.1) shipped a
