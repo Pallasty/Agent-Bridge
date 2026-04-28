@@ -2,12 +2,32 @@
 # UserPromptSubmit hook: inject agent-bridge memory index on first message.
 #
 # Scope-aware: global + project-matching + domain memories are loaded.
-# Runs exactly once per session (lock file keyed on CLAUDE_SESSION_ID).
+# Runs exactly once per session (lock file keyed on session_id).
+#
+# v0.7.2: read session_id from Claude Code's hook JSON payload on stdin.
+# CLAUDE_SESSION_ID is NOT set in the hook env (verified empirically — see
+# `lesson_hook_session_id_from_stdin`), so the previous
+# `${CLAUDE_SESSION_ID:-$$}` fallback collapsed to the bash PID and was
+# different on every invocation, defeating the once-per-session lock and
+# causing memory index to re-inject on every UserPromptSubmit.
 
 DB="$HOME/.local/share/agent-bridge/state.db"
 [[ -f "$DB" ]] || exit 0
 
-SESSION_ID="${CLAUDE_SESSION_ID:-$$}"
+# Hook input is one line of JSON on stdin. Buffer it so subsequent reads
+# (none today, but future-proof) don't lose it; then extract session_id.
+# Falls back to env / PID if stdin is empty (manual invocation, etc.).
+HOOK_PAYLOAD=$(cat 2>/dev/null || true)
+SESSION_ID=$(printf '%s' "$HOOK_PAYLOAD" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get("session_id", ""))
+except Exception:
+    pass
+' 2>/dev/null)
+SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-$$}}"
+
 LOCK="/tmp/ab-mem-injected-${SESSION_ID}"
 [[ -f "$LOCK" ]] && exit 0
 touch "$LOCK"

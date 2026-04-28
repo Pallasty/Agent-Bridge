@@ -5,6 +5,49 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.2] — 2026-04-28
+
+**Hotfix.** Two small bugs surfaced 30 minutes after v0.7.1 went live, both
+discovered while dogfooding the hooks + memory_search in a fresh Claude Code
+session.
+
+### Fixed
+
+- **`memory_search` no longer drops queries containing `.` or `-`.**
+  v0.5.1's `sanitise_fts_query` *stripped* every non-alphanumeric character
+  except `_` / `-`, then prefix-suffixed the remainder with `*`. So a user
+  query of `v0.7.1` collapsed to `v071*` and matched nothing — because FTS5's
+  default `unicode61` tokeniser had indexed it as the three tokens
+  `[v0, 7, 1]`. The sanitiser and the indexer disagreed on what counts as
+  a token boundary.
+  Fix: split the input on the *exact* same separator predicate the
+  `unicode61` tokeniser uses (`!is_alphanumeric() && != '_'`), then
+  `*`-suffix each non-empty fragment. `v0.7.1` now becomes `v0* 7* 1*`,
+  `agent-bridge` becomes `agent* bridge*`, `session_handoff` stays a
+  single `session_handoff*`.
+- **`ab-memory-hook` once-per-session lock now actually works.**
+  Claude Code does **not** export `CLAUDE_SESSION_ID` into the hook env
+  (verified empirically — see `lesson_hook_session_id_from_stdin`). The
+  v0.7.0 hook fell back to `$$` (bash PID), which is unique per
+  invocation, so the `/tmp/ab-mem-injected-${SESSION_ID}` lock never
+  collided with itself: the memory index was re-injected on **every**
+  UserPromptSubmit instead of just the first one in a session.
+  Fix: read the JSON payload Claude Code pipes into the hook on stdin
+  and extract `session_id` from there. `CLAUDE_SESSION_ID` env and PID
+  remain as fallbacks for manual / scripted invocations.
+
+### Verification
+
+- `memory_search "v0.7.1"` (release binary, fresh stdio session) → ≥ 3 hits
+  including the v0.7.1 fix lessons we planted earlier today.
+- `memory_search "agent-bridge"` → 3 hits (would have been 0 before).
+- Hook invoked twice with same `session_id="abc-test-1"` → second call
+  exits early with 0-byte output (lock honoured).
+- Hook invoked with a different `session_id="abc-test-2"` → re-injects the
+  index (lock keyed on session, not invocation).
+
+---
+
 ## [0.7.1] — 2026-04-28
 
 **Hotfix.** Two SQL bugs that v0.7.0 (commits `b71e2e2` + later) shipped to

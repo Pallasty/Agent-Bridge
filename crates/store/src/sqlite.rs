@@ -296,14 +296,17 @@ impl SqliteStore {
 ///
 /// FTS5 has its own tiny query language (operators AND/OR/NOT/NEAR, "phrase",
 /// `prefix*`, column filters). We let users pass either:
-/// - **Plain text** (whitespace-separated terms) — we add `*` for prefix
-///   matching on each term so partial words work as expected.
+/// - **Plain text** (whitespace-separated terms) — we split into tokens,
+///   match the indexer's tokenisation rules, and add `*` for prefix matching.
 /// - **Quoted phrases or anything containing FTS5 operators** — passed through
 ///   unchanged so power users can write `"signal exit" OR sigterm`.
 ///
-/// Heuristic: if the input contains FTS5 operator characters
-/// (`"`, `*`, `:`, `(`, `)`, ` AND `, ` OR `, ` NOT `, ` NEAR `) we trust it;
-/// otherwise we tokenise on whitespace and add `*` suffix to each term.
+/// **Token-boundary alignment** (v0.7.2): SQLite FTS5's default `unicode61`
+/// tokeniser treats `_` as a token char and everything else non-alphanumeric
+/// as a separator. We mirror that exactly: split on `!c.is_alphanumeric() && c != '_'`,
+/// then prefix-suffix each non-empty token. Earlier versions stripped `.` from
+/// the input rather than splitting on it, so a query like `v0.7.1` collapsed
+/// to `v071*` and matched nothing (`lesson_fts5_search_dot_strip_bug`).
 fn sanitise_fts_query(q: &str) -> String {
     let trimmed = q.trim();
     let has_operator = trimmed.contains('"')
@@ -318,21 +321,12 @@ fn sanitise_fts_query(q: &str) -> String {
     if has_operator {
         return trimmed.to_string();
     }
-    // Plain-text path: tokenize, strip non-alphanumeric (FTS5 needs bare
-    // tokens; "term"* is not the same as term*), prefix-match each.
+    // Plain-text path: split on the same separators FTS5's unicode61 uses,
+    // so a single tokenised user query maps 1:1 to indexed tokens.
     trimmed
-        .split_whitespace()
-        .filter_map(|t| {
-            let cleaned: String = t
-                .chars()
-                .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
-                .collect();
-            if cleaned.is_empty() {
-                None
-            } else {
-                Some(format!("{cleaned}*"))
-            }
-        })
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("{s}*"))
         .collect::<Vec<_>>()
         .join(" ")
 }
