@@ -79,6 +79,21 @@ enum Cmd {
         #[command(subcommand)]
         cmd: MemoryCmd,
     },
+
+    /// Self-evolution: propose and track improvements to agent-bridge itself.
+    /// Proposals become isolated git worktree branches ready for review/merge.
+    Evolve {
+        /// Override the agent-bridge repo root (default: inferred via `git rev-parse`).
+        #[arg(long, env = "AGENT_BRIDGE_REPO")]
+        repo: Option<PathBuf>,
+
+        /// Override the state.db path.
+        #[arg(long, env = "AGENT_BRIDGE_DB")]
+        db: Option<PathBuf>,
+
+        #[command(subcommand)]
+        cmd: EvolveCmd,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -140,6 +155,35 @@ enum MemoryCmd {
 }
 
 #[derive(Subcommand, Debug)]
+enum EvolveCmd {
+    /// Propose a fix for friction hit during a session.
+    /// Creates an isolated git worktree branch + records the proposal in memory.
+    Propose {
+        /// One-sentence description of the friction / bug / limitation encountered.
+        #[arg(long)]
+        issue: String,
+
+        /// Proposed fix or approach (optional; can be added later).
+        #[arg(long)]
+        fix: Option<String>,
+
+        /// Path to a .diff / .patch file to apply in the worktree (optional).
+        #[arg(long)]
+        patch: Option<PathBuf>,
+
+        /// Dry-run: print what would happen, create nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// List open evolution proposals.
+    List {
+        /// Print raw JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum OscCmd {
     /// Parse a string for OSC notification sequences and dispatch them.
     /// Use `\\x1b` / `\\a` / `\\\\` etc. — backslash escapes are decoded.
@@ -187,6 +231,12 @@ async fn main() -> Result<()> {
         return run_memory(&path, cmd).await;
     }
 
+    // Evolve commands: SQLite + git worktree, no daemon required.
+    if let Cmd::Evolve { repo, db, cmd } = cli.cmd {
+        let db_path = db.unwrap_or_else(default_db_path);
+        return run_evolve(repo, &db_path, cmd).await;
+    }
+
     // History has its own renderer; everything else just dumps JSON-RPC response.
     if let Cmd::History { limit, json: as_json } = cli.cmd {
         let req = RpcRequest::new(1, "notifications.recent", Some(json!({ "limit": limit })));
@@ -227,7 +277,7 @@ async fn main() -> Result<()> {
             "terminal.split",
             Some(json!({ "pane": pane, "dir": dir })),
         ),
-        Cmd::History { .. } | Cmd::Memory { .. } => unreachable!(),
+        Cmd::History { .. } | Cmd::Memory { .. } | Cmd::Evolve { .. } => unreachable!(),
     };
 
     let req = RpcRequest::new(1, method, params);
@@ -365,6 +415,187 @@ fn parse_sort(s: &str) -> Result<MemoryListSort> {
         "newest"   => Ok(MemoryListSort::Newest),
         other      => bail!("unknown sort '{other}' (expected: recent | frequent | newest)"),
     }
+}
+
+fn find_repo_root(hint: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(p) = hint {
+        return Ok(p);
+    }
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .context("git rev-parse --show-toplevel failed (is git installed?)")?;
+    if !out.status.success() {
+        bail!("not inside a git repo; use --repo to specify the agent-bridge root");
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    Ok(PathBuf::from(s))
+}
+
+fn slugify(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+        .chars()
+        .take(40)
+        .collect()
+}
+
+async fn run_evolve(
+    repo_hint: Option<PathBuf>,
+    db_path: &std::path::Path,
+    cmd: EvolveCmd,
+) -> Result<()> {
+    match cmd {
+        EvolveCmd::Propose { issue, fix, patch, dry_run } => {
+            let repo = find_repo_root(repo_hint)?;
+
+            // Generate branch / worktree names.
+            let now = chrono_date();
+            let slug = slugify(&issue);
+            let branch = format!("evolution/{now}-{slug}");
+            let wt_name = format!("agent-bridge-evolve-{now}-{slug}");
+            let wt_path = repo.parent().unwrap_or(&repo).join(&wt_name);
+
+            println!("Evolution proposal");
+            println!("  issue   : {issue}");
+            if let Some(f) = &fix {
+                println!("  fix     : {f}");
+            }
+            println!("  branch  : {branch}");
+            println!("  worktree: {}", wt_path.display());
+            if let Some(p) = &patch {
+                println!("  patch   : {}", p.display());
+            }
+
+            if dry_run {
+                println!("\n(dry-run — nothing created)");
+                return Ok(());
+            }
+
+            // Create the worktree branch.
+            let status = std::process::Command::new("git")
+                .args(["-C", repo.to_str().unwrap_or("."),
+                       "worktree", "add",
+                       wt_path.to_str().unwrap_or("."),
+                       "-b", &branch])
+                .status()
+                .context("git worktree add")?;
+            if !status.success() {
+                bail!("git worktree add failed (see above)");
+            }
+
+            // Apply patch if supplied.
+            if let Some(patch_path) = &patch {
+                let patch_abs = std::fs::canonicalize(patch_path)
+                    .with_context(|| format!("patch file not found: {}", patch_path.display()))?;
+                let apply = std::process::Command::new("git")
+                    .args(["-C", wt_path.to_str().unwrap_or("."),
+                           "apply", "--index",
+                           patch_abs.to_str().unwrap_or(".")])
+                    .status()
+                    .context("git apply")?;
+                if !apply.success() {
+                    eprintln!("warning: git apply failed; worktree created but patch not applied");
+                } else {
+                    println!("patch applied");
+                }
+            }
+
+            // Record proposal in memory store.
+            let store: Arc<dyn StateStore> = Arc::new(
+                SqliteStore::open(db_path)
+                    .await
+                    .with_context(|| format!("open SQLite store at {db_path:?}"))?,
+            );
+            let key = format!("evolve_{now}_{slug}");
+            let content = format!(
+                "**Issue**: {issue}\n\n**Fix**: {}\n\n**Branch**: {branch}\n**Worktree**: {}",
+                fix.as_deref().unwrap_or("(not yet specified)"),
+                wt_path.display(),
+            );
+            let now_s = now_secs();
+            let rec = MemoryRecord {
+                key: key.clone(),
+                kind: "evolution".to_string(),
+                content,
+                tags: vec!["evolution".to_string(), "open".to_string()],
+                related_keys: vec![],
+                scope: None,
+                created_at: now_s,
+                updated_at: now_s,
+                last_accessed_at: now_s,
+                access_count: 0,
+            };
+            store.memory_save(&rec).await?;
+
+            println!("\n✓ proposal recorded as memory key: {key}");
+            println!("\nNext steps:");
+            println!("  cd {}", wt_path.display());
+            println!("  # make changes, then:");
+            println!("  git add -p && git commit -m \"evolve: {slug}\"");
+            println!("  # when ready for review, notify user to merge or push");
+        }
+
+        EvolveCmd::List { json: as_json } => {
+            let store: Arc<dyn StateStore> = Arc::new(
+                SqliteStore::open(db_path)
+                    .await
+                    .with_context(|| format!("open SQLite store at {db_path:?}"))?,
+            );
+            let rows = store.list_memories(Some("evolution"), MemoryListSort::Newest, 50).await?;
+            if as_json {
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else if rows.is_empty() {
+                println!("(no evolution proposals yet)");
+            } else {
+                let now = now_secs();
+                println!("{:>4}  {:<42}  {}", "AGE", "KEY", "ISSUE");
+                println!("{}", "-".repeat(90));
+                for r in &rows {
+                    let age = format_age(now - r.created_at);
+                    let issue = r.content
+                        .lines()
+                        .find(|l| l.starts_with("**Issue**"))
+                        .and_then(|l| l.strip_prefix("**Issue**: "))
+                        .unwrap_or(&r.content);
+                    println!("{:>4}  {:<42}  {}", age, truncate(&r.key, 42), truncate(issue, 40));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn chrono_date() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let secs_per_day = 86400u64;
+    // Days since Unix epoch → Gregorian (Zeller-like, no external dep).
+    let days = now / secs_per_day;
+    let (y, m, d) = days_to_ymd(days);
+    format!("{y:04}{m:02}{d:02}")
+}
+
+fn days_to_ymd(days: u64) -> (u32, u32, u32) {
+    // Algorithm: civil calendar from Julian day number.
+    let jdn = days + 2_440_588; // Unix epoch = JDN 2440588
+    let a = jdn + 32044;
+    let b = (4 * a + 3) / 146097;
+    let c = a - (146097 * b) / 4;
+    let d = (4 * c + 3) / 1461;
+    let e = c - (1461 * d) / 4;
+    let m = (5 * e + 2) / 153;
+    let day   = (e - (153 * m + 2) / 5 + 1) as u32;
+    let month = (m + 3 - 12 * (m / 10)) as u32;
+    let year  = (100 * b + d - 4800 + m / 10) as u32;
+    (year, month, day)
 }
 
 async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
