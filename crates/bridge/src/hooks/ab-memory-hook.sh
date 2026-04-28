@@ -55,6 +55,9 @@ ROWS=$(sqlite3 "$DB" \
      WHEN 'session_handoff'  THEN 3
      WHEN 'todo'             THEN 4
      ELSE 5 END,
+   CASE WHEN scope = 'project:'
+          OR (scope LIKE 'project:%' AND '' LIKE (SUBSTR(scope, 9) || '%'))
+        THEN 0 ELSE 1 END,
    (access_count * 86400 + updated_at) DESC
    LIMIT 80" 2>/dev/null) || exit 0
 
