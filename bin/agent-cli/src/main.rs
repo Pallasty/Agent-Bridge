@@ -181,6 +181,40 @@ enum EvolveCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Apply a targeted file edit inside an evolution worktree and commit it.
+    /// Reads the unified diff from stdin (or --patch). Creates the worktree
+    /// branch if --key names an existing proposal; otherwise treats --issue
+    /// as a one-shot propose+fix.
+    Fix {
+        /// Memory key of an existing evolve proposal (from `evolve list`).
+        /// If omitted, --issue is required to create a new proposal on the fly.
+        #[arg(long)]
+        key: Option<String>,
+
+        /// Issue description (required when --key is not given).
+        #[arg(long)]
+        issue: Option<String>,
+
+        /// Commit message suffix (default: derived from issue/key).
+        #[arg(long)]
+        message: Option<String>,
+
+        /// Path to patch file. If omitted, reads unified diff from stdin.
+        #[arg(long)]
+        patch: Option<PathBuf>,
+
+        /// Dry-run: show what would be applied, create nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Mark a proposal as closed (merged/resolved) in the memory store.
+    Close {
+        /// Memory key of the proposal to close (from `evolve list`).
+        key: String,
+        /// Optional note about how it was resolved.
+        #[arg(long)]
+        note: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -541,21 +575,191 @@ async fn run_evolve(
             println!("  # when ready for review, notify user to merge or push");
         }
 
+        EvolveCmd::Fix { key, issue, message, patch, dry_run } => {
+            let repo = find_repo_root(repo_hint)?;
+            let store: Arc<dyn StateStore> = Arc::new(
+                SqliteStore::open(db_path)
+                    .await
+                    .with_context(|| format!("open SQLite store at {db_path:?}"))?,
+            );
+
+            // Resolve or create the proposal record.
+            let (branch, wt_path, mem_key, issue_text) = if let Some(k) = &key {
+                let rec = store.memory_get(k).await?
+                    .with_context(|| format!("no evolution proposal found for key '{k}'"))?;
+                // Extract branch from content.
+                let branch = rec.content.lines()
+                    .find(|l| l.starts_with("**Branch**:"))
+                    .and_then(|l| l.strip_prefix("**Branch**: "))
+                    .map(str::to_string)
+                    .with_context(|| "proposal record missing **Branch** field")?;
+                let wt_name = branch.strip_prefix("evolution/").unwrap_or(&branch);
+                let wt = repo.parent().unwrap_or(&repo).join(format!("agent-bridge-evolve-{wt_name}"));
+                let issue_text = rec.content.lines()
+                    .find(|l| l.starts_with("**Issue**:"))
+                    .and_then(|l| l.strip_prefix("**Issue**: "))
+                    .unwrap_or(&rec.key)
+                    .to_string();
+                (branch, wt, k.clone(), issue_text)
+            } else {
+                let iss = issue.as_deref()
+                    .context("--issue required when --key not given")?;
+                let now = chrono_date();
+                let slug = slugify(iss);
+                let branch = format!("evolution/{now}-{slug}");
+                let wt_name = format!("agent-bridge-evolve-{now}-{slug}");
+                let wt = repo.parent().unwrap_or(&repo).join(&wt_name);
+                let k = format!("evolve_{now}_{slug}");
+                (branch, wt, k, iss.to_string())
+            };
+
+            // Read patch from file or stdin.
+            let patch_bytes = match &patch {
+                Some(p) => std::fs::read(p)
+                    .with_context(|| format!("read patch file {}", p.display()))?,
+                None => {
+                    use std::io::Read;
+                    let mut buf = Vec::new();
+                    std::io::stdin().read_to_end(&mut buf)?;
+                    buf
+                }
+            };
+            if patch_bytes.trim_ascii().is_empty() {
+                bail!("patch is empty — pipe a unified diff or use --patch <file>");
+            }
+
+            let commit_msg = message.unwrap_or_else(|| {
+                let slug = slugify(&issue_text);
+                format!("evolve: {}", &slug[..slug.len().min(60)])
+            });
+
+            println!("Evolution fix");
+            println!("  key     : {mem_key}");
+            println!("  branch  : {branch}");
+            println!("  worktree: {}", wt_path.display());
+            println!("  commit  : {commit_msg}");
+
+            if dry_run {
+                println!("\npatch preview ({} bytes):", patch_bytes.len());
+                println!("{}", String::from_utf8_lossy(&patch_bytes).chars().take(800).collect::<String>());
+                println!("\n(dry-run — nothing created)");
+                return Ok(());
+            }
+
+            // Create worktree if it doesn't exist yet.
+            if !wt_path.exists() {
+                let status = std::process::Command::new("git")
+                    .args(["-C", repo.to_str().unwrap_or("."),
+                           "worktree", "add",
+                           wt_path.to_str().unwrap_or("."),
+                           "-b", &branch])
+                    .status()
+                    .context("git worktree add")?;
+                if !status.success() {
+                    bail!("git worktree add failed");
+                }
+            }
+
+            // Write patch to a temp file and apply.
+            let tmp = wt_path.join(".evolve_patch.diff");
+            std::fs::write(&tmp, &patch_bytes)?;
+            let apply = std::process::Command::new("git")
+                .args(["-C", wt_path.to_str().unwrap_or("."),
+                       "apply", "--index",
+                       tmp.to_str().unwrap_or(".")])
+                .status()
+                .context("git apply")?;
+            std::fs::remove_file(&tmp).ok();
+            if !apply.success() {
+                bail!("git apply failed — check that the diff is a clean unified diff against the current HEAD");
+            }
+
+            // Commit.
+            let commit = std::process::Command::new("git")
+                .args(["-C", wt_path.to_str().unwrap_or("."),
+                       "commit", "-m", &commit_msg])
+                .status()
+                .context("git commit")?;
+            if !commit.success() {
+                bail!("git commit failed");
+            }
+
+            // Update memory record to reflect fix applied.
+            let now_s = now_secs();
+            if let Some(mut rec) = store.memory_get(&mem_key).await? {
+                rec.content.push_str(&format!("\n\n**Fixed**: patch applied and committed ({})", chrono_date()));
+                rec.updated_at = now_s;
+                store.memory_save(&rec).await?;
+            } else {
+                // New proposal created on-the-fly — write full record.
+                let content = format!(
+                    "**Issue**: {issue_text}\n\n**Branch**: {branch}\n**Worktree**: {}\n\n**Fixed**: patch applied and committed ({})",
+                    wt_path.display(), chrono_date()
+                );
+                let rec = MemoryRecord {
+                    key: mem_key.clone(),
+                    kind: "evolution".to_string(),
+                    content,
+                    tags: vec!["evolution".to_string(), "open".to_string()],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: now_s,
+                    updated_at: now_s,
+                    last_accessed_at: now_s,
+                    access_count: 0,
+                };
+                store.memory_save(&rec).await?;
+            }
+
+            println!("\n✓ patch applied and committed in worktree");
+            println!("  branch: {branch}");
+            println!("\nTo merge:");
+            println!("  cd {}", repo.display());
+            println!("  git merge {branch} --no-ff");
+            println!("  agent-cli evolve close {mem_key}");
+        }
+
+        EvolveCmd::Close { key, note } => {
+            let store: Arc<dyn StateStore> = Arc::new(
+                SqliteStore::open(db_path)
+                    .await
+                    .with_context(|| format!("open SQLite store at {db_path:?}"))?,
+            );
+            let mut rec = store.memory_get(&key).await?
+                .with_context(|| format!("no evolution proposal found for key '{key}'"))?;
+
+            // Replace tag "open" → "closed", append resolution note.
+            rec.tags.retain(|t| t != "open");
+            if !rec.tags.contains(&"closed".to_string()) {
+                rec.tags.push("closed".to_string());
+            }
+            rec.kind = "evolution_closed".to_string();
+            if let Some(n) = &note {
+                rec.content.push_str(&format!("\n\n**Closed**: {n}"));
+            } else {
+                rec.content.push_str("\n\n**Closed**: merged");
+            }
+            rec.updated_at = now_secs();
+            store.memory_save(&rec).await?;
+            println!("✓ closed {key}");
+        }
+
         EvolveCmd::List { json: as_json } => {
             let store: Arc<dyn StateStore> = Arc::new(
                 SqliteStore::open(db_path)
                     .await
                     .with_context(|| format!("open SQLite store at {db_path:?}"))?,
             );
+            // Show open proposals only (kind=evolution); closed ones are kind=evolution_closed.
             let rows = store.list_memories(Some("evolution"), MemoryListSort::Newest, 50).await?;
             if as_json {
                 println!("{}", serde_json::to_string_pretty(&rows)?);
             } else if rows.is_empty() {
-                println!("(no evolution proposals yet)");
+                println!("(no open evolution proposals)");
             } else {
                 let now = now_secs();
-                println!("{:>4}  {:<42}  {}", "AGE", "KEY", "ISSUE");
-                println!("{}", "-".repeat(90));
+                println!("{:>4}  {:<44}  {}", "AGE", "KEY", "ISSUE");
+                println!("{}", "-".repeat(92));
                 for r in &rows {
                     let age = format_age(now - r.created_at);
                     let issue = r.content
@@ -563,7 +767,7 @@ async fn run_evolve(
                         .find(|l| l.starts_with("**Issue**"))
                         .and_then(|l| l.strip_prefix("**Issue**: "))
                         .unwrap_or(&r.content);
-                    println!("{:>4}  {:<42}  {}", age, truncate(&r.key, 42), truncate(issue, 40));
+                    println!("{:>4}  {:<44}  {}", age, truncate(&r.key, 44), truncate(issue, 40));
                 }
             }
         }
