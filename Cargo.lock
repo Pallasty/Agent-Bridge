@@ -124,6 +124,7 @@ version = "0.1.0"
 dependencies = [
  "ab-bridge",
  "ab-core",
+ "ab-store",
  "anyhow",
  "clap",
  "serde_json",

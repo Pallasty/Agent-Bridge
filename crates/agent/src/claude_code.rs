@@ -214,6 +214,10 @@ impl AgentRuntime for ClaudeCodeRuntime {
         Ok(())
     }
 
+    fn pid_for(&self, session: &SessionId) -> Option<u32> {
+        self.children.get(session.as_str()).map(|kv| *kv)
+    }
+
     async fn capabilities(&self) -> AgentCapabilities {
         AgentCapabilities {
             supports_mcp: true,

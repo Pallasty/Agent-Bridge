@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 ab-core.workspace = true
 ab-bridge.workspace = true
+ab-store.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true

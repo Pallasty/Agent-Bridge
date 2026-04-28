@@ -741,6 +741,10 @@ impl McpTool for AgentSessionListTool {
                  `runtime_id` exact match, `cwd_prefix` prefix match, \
                  `state` (\"running\"|\"finished\"), `exit_code` exact match \
                  (use negative for signal kills, e.g. -15 = SIGTERM). \
+                 **v0.8**: each running row carries a `liveness` field — \
+                 `alive` (PID still in /proc), `dead` (PID gone but \
+                 finalise_session never ran → zombie row), or `unknown` \
+                 (bridge restarted since spawn, no in-memory PID). \
                  Use `agent_session_get(id)` to fetch the full stdout/stderr."
                     .into(),
             input_schema: json!({
@@ -773,17 +777,34 @@ impl McpTool for AgentSessionListTool {
         };
         let rows = store.list_sessions(&filter, limit).await?;
         // Strip stdout/stderr to keep the listing compact.
-        let summary: Vec<Value> = rows.into_iter().map(|s| json!({
-            "id":          s.id.as_str(),
-            "runtime_id":  s.runtime_id,
-            "cwd":         s.cwd,
-            "started_at":  s.started_at,
-            "ended_at":    s.ended_at,
-            "exit_code":   s.exit_code,
-            "running":     s.ended_at.is_none(),
-            "stdout_len":  s.stdout.as_ref().map(|x| x.len()).unwrap_or(0),
-            "stderr_len":  s.stderr.as_ref().map(|x| x.len()).unwrap_or(0),
-        })).collect();
+        let summary: Vec<Value> = rows.into_iter().map(|s| {
+            let running = s.ended_at.is_none();
+            let mut row = json!({
+                "id":          s.id.as_str(),
+                "runtime_id":  s.runtime_id,
+                "cwd":         s.cwd,
+                "started_at":  s.started_at,
+                "ended_at":    s.ended_at,
+                "exit_code":   s.exit_code,
+                "running":     running,
+                "stdout_len":  s.stdout.as_ref().map(|x| x.len()).unwrap_or(0),
+                "stderr_len":  s.stderr.as_ref().map(|x| x.len()).unwrap_or(0),
+            });
+            if running {
+                let (pid, liveness) = match self.hub.agent.as_ref().and_then(|a| a.pid_for(&s.id)) {
+                    Some(pid) => {
+                        let alive = std::path::Path::new(&format!("/proc/{pid}")).exists();
+                        (Some(pid), if alive { "alive" } else { "dead" })
+                    }
+                    None => (None, "unknown"),
+                };
+                if let Some(p) = pid {
+                    row["pid"] = json!(p);
+                }
+                row["liveness"] = json!(liveness);
+            }
+            row
+        }).collect();
         Ok(ToolResult::json_text(&Value::Array(summary)))
     }
 }
@@ -1107,12 +1128,16 @@ impl McpTool for MemoryCompactTool {
         ToolSchema {
             name: self.name().into(),
             description:
-                "Prune low-value memories. A row is removed if EITHER threshold \
-                 matches: `min_uses` (access_count strictly less than) OR \
+                "Prune low-value memories. A row is removed only if BOTH thresholds \
+                 match (AND): `min_uses` (access_count strictly less than) AND \
                  `older_than_days` (last_accessed_at older than now - that many \
-                 days). Set `dry_run=true` to preview the keys that would be \
-                 deleted without actually removing them. Both thresholds default \
-                 to none — pass at least one to do anything."
+                 days). A 1-hour grace period on `created_at` further protects \
+                 freshly-saved rows. Set `dry_run=true` to preview the keys that \
+                 would be deleted without actually removing them. **v0.8**: if \
+                 BOTH thresholds are omitted, a balanced default is applied \
+                 (`min_uses=2`, `older_than_days=90`) so callers don't get a \
+                 silent no-op — the response field `applied_defaults` flags \
+                 when this happens."
                     .into(),
             input_schema: json!({
                 "type": "object",
@@ -1133,15 +1158,23 @@ impl McpTool for MemoryCompactTool {
         let older_than_secs = args.get("older_than_days").and_then(|v| v.as_i64()).map(|d| d * 86_400);
         let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
 
-        if min_uses.is_none() && older_than_secs.is_none() {
-            return Ok(ToolResult::error(
-                "at least one of `min_uses` or `older_than_days` must be set",
-            ));
+        let mut policy = CompactPolicy { min_uses, older_than_secs, dry_run };
+        let applied_defaults = policy.is_unset();
+        if applied_defaults {
+            // v0.8: don't punish callers with a silent no-op; apply the balanced
+            // default. dry_run flag is still honoured.
+            let mut def = CompactPolicy::healthy_default();
+            def.dry_run = dry_run;
+            policy = def;
         }
-        let policy = CompactPolicy { min_uses, older_than_secs, dry_run };
         let keys = store.memory_compact(policy).await?;
         Ok(ToolResult::json_text(&json!({
             "dry_run": dry_run,
+            "applied_defaults": applied_defaults,
+            "policy": {
+                "min_uses": policy.min_uses,
+                "older_than_secs": policy.older_than_secs,
+            },
             "removed_count": keys.len(),
             "removed_keys": keys,
         })))

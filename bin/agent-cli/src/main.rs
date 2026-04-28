@@ -1,10 +1,15 @@
 use ab_bridge::default_socket_path;
 use ab_core::{RpcRequest, RpcResponse};
+use ab_store::{
+    default_db_path, CompactPolicy, MemoryListSort, MemoryRecord, SqliteStore, StateStore,
+};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 #[derive(Parser, Debug)]
@@ -62,6 +67,76 @@ enum Cmd {
         #[command(subcommand)]
         cmd: TermCmd,
     },
+
+    /// Self-memory commands. Operate directly on the SQLite store (no daemon
+    /// required), so they work offline and from cron jobs. Use `--db` to
+    /// point at a non-default state.db (rare; tests).
+    Memory {
+        /// Override the state.db path.
+        #[arg(long, env = "AGENT_BRIDGE_DB")]
+        db: Option<PathBuf>,
+
+        #[command(subcommand)]
+        cmd: MemoryCmd,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum MemoryCmd {
+    /// List memories. Defaults to recent-first.
+    List {
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long, default_value = "recent")]
+        sort: String,
+        #[arg(short = 'n', long, default_value_t = 20)]
+        limit: u32,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fetch one memory by exact key (bumps access_count).
+    Get {
+        key: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Substring/FTS search across key + content.
+    Search {
+        query: String,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(short = 'n', long, default_value_t = 10)]
+        limit: u32,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Save (insert-or-replace) a memory.
+    Save {
+        key: String,
+        #[arg(long, default_value = "note")]
+        kind: String,
+        /// Memory body. If omitted, read from stdin.
+        #[arg(long)]
+        content: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        related: Vec<String>,
+        #[arg(long)]
+        scope: Option<String>,
+    },
+    /// Delete a memory by key.
+    Delete { key: String },
+    /// Prune low-value memories. With no thresholds, applies the v0.8
+    /// healthy default (`min_uses=2 AND older_than_days=90`).
+    Compact {
+        #[arg(long)]
+        min_uses: Option<u64>,
+        #[arg(long)]
+        older_than_days: Option<i64>,
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -106,6 +181,12 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let socket = cli.socket.unwrap_or_else(default_socket_path);
 
+    // Memory commands talk directly to SQLite — no daemon required.
+    if let Cmd::Memory { db, cmd } = cli.cmd {
+        let path = db.unwrap_or_else(default_db_path);
+        return run_memory(&path, cmd).await;
+    }
+
     // History has its own renderer; everything else just dumps JSON-RPC response.
     if let Cmd::History { limit, json: as_json } = cli.cmd {
         let req = RpcRequest::new(1, "notifications.recent", Some(json!({ "limit": limit })));
@@ -146,7 +227,7 @@ async fn main() -> Result<()> {
             "terminal.split",
             Some(json!({ "pane": pane, "dir": dir })),
         ),
-        Cmd::History { .. } => unreachable!(),
+        Cmd::History { .. } | Cmd::Memory { .. } => unreachable!(),
     };
 
     let req = RpcRequest::new(1, method, params);
@@ -271,6 +352,178 @@ fn truncate(s: &str, max: usize) -> String {
         let head: String = chars.iter().take(max - 1).collect();
         format!("{head}…")
     }
+}
+
+fn now_secs() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+fn parse_sort(s: &str) -> Result<MemoryListSort> {
+    match s {
+        "recent"   => Ok(MemoryListSort::Recent),
+        "frequent" => Ok(MemoryListSort::Frequent),
+        "newest"   => Ok(MemoryListSort::Newest),
+        other      => bail!("unknown sort '{other}' (expected: recent | frequent | newest)"),
+    }
+}
+
+async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
+    let store: Arc<dyn StateStore> = Arc::new(
+        SqliteStore::open(db_path)
+            .await
+            .with_context(|| format!("open SQLite store at {db_path:?}"))?,
+    );
+
+    match cmd {
+        MemoryCmd::List { kind, sort, limit, json: as_json } => {
+            let sort = parse_sort(&sort)?;
+            let rows = store.list_memories(kind.as_deref(), sort, limit).await?;
+            if as_json {
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else {
+                render_memory_list(&rows);
+            }
+        }
+        MemoryCmd::Get { key, json: as_json } => {
+            match store.memory_get(&key).await? {
+                None => {
+                    eprintln!("(no such key: {key})");
+                    std::process::exit(1);
+                }
+                Some(rec) => {
+                    if as_json {
+                        println!("{}", serde_json::to_string_pretty(&rec)?);
+                    } else {
+                        render_memory_detail(&rec);
+                    }
+                }
+            }
+        }
+        MemoryCmd::Search { query, tags, limit, json: as_json } => {
+            let hits = store.memory_search(&query, &tags, limit).await?;
+            if as_json {
+                println!("{}", serde_json::to_string_pretty(&hits)?);
+            } else if hits.is_empty() {
+                println!("(no hits)");
+            } else {
+                println!("{:>5}  {:<14}  {:<40}  {}", "SCORE", "KIND", "KEY", "PREVIEW");
+                println!("{}", "-".repeat(90));
+                for h in hits {
+                    println!(
+                        "{:>5.2}  {:<14}  {:<40}  {}",
+                        h.score,
+                        truncate(&h.record.kind, 14),
+                        truncate(&h.record.key, 40),
+                        truncate(&h.record.content.replace('\n', " "), 30),
+                    );
+                }
+            }
+        }
+        MemoryCmd::Save { key, kind, content, tags, related, scope } => {
+            let body = match content {
+                Some(c) => c,
+                None => {
+                    let mut buf = String::new();
+                    tokio::io::stdin().read_to_string(&mut buf).await?;
+                    buf
+                }
+            };
+            if body.trim().is_empty() {
+                bail!("memory content is empty (use --content or pipe via stdin)");
+            }
+            let now = now_secs();
+            let rec = MemoryRecord {
+                key: key.clone(),
+                kind,
+                content: body,
+                tags,
+                related_keys: related,
+                scope,
+                created_at: now,
+                updated_at: now,
+                last_accessed_at: now,
+                access_count: 0,
+            };
+            store.memory_save(&rec).await?;
+            println!("✓ saved {key}");
+        }
+        MemoryCmd::Delete { key } => {
+            let removed = store.memory_delete(&key).await?;
+            if removed {
+                println!("✓ deleted {key}");
+            } else {
+                eprintln!("(no such key: {key})");
+                std::process::exit(1);
+            }
+        }
+        MemoryCmd::Compact { min_uses, older_than_days, dry_run } => {
+            let policy_in = CompactPolicy {
+                min_uses,
+                older_than_secs: older_than_days.map(|d| d * 86_400),
+                dry_run,
+            };
+            let policy = if policy_in.is_unset() {
+                let mut def = CompactPolicy::healthy_default();
+                def.dry_run = dry_run;
+                def
+            } else {
+                policy_in
+            };
+            let applied_defaults = policy_in.is_unset();
+            let keys = store.memory_compact(policy).await?;
+            let label = if dry_run { "would remove" } else { "removed" };
+            let suffix = if applied_defaults { " (healthy default policy)" } else { "" };
+            println!("{label} {} memories{suffix}", keys.len());
+            for k in keys {
+                println!("  - {k}");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn render_memory_list(rows: &[MemoryRecord]) {
+    if rows.is_empty() {
+        println!("(no memories)");
+        return;
+    }
+    let now = now_secs();
+    println!(
+        "{:>4}  {:>4}  {:<14}  {:<40}  {}",
+        "AGE", "USES", "KIND", "KEY", "PREVIEW"
+    );
+    println!("{}", "-".repeat(90));
+    for r in rows {
+        let age = format_age(now - r.last_accessed_at);
+        println!(
+            "{:>4}  {:>4}  {:<14}  {:<40}  {}",
+            age,
+            r.access_count,
+            truncate(&r.kind, 14),
+            truncate(&r.key, 40),
+            truncate(&r.content.replace('\n', " "), 30),
+        );
+    }
+}
+
+fn render_memory_detail(r: &MemoryRecord) {
+    println!("key:       {}", r.key);
+    println!("kind:      {}", r.kind);
+    if let Some(s) = &r.scope {
+        println!("scope:     {s}");
+    }
+    if !r.tags.is_empty() {
+        println!("tags:      {}", r.tags.join(", "));
+    }
+    if !r.related_keys.is_empty() {
+        println!("related:   {}", r.related_keys.join(", "));
+    }
+    println!("uses:      {}", r.access_count);
+    println!("created:   {}", r.created_at);
+    println!("updated:   {}", r.updated_at);
+    println!("accessed:  {}", r.last_accessed_at);
+    println!("---");
+    println!("{}", r.content);
 }
 
 async fn call(socket: &std::path::Path, req: RpcRequest) -> Result<RpcResponse> {

@@ -108,7 +108,9 @@ impl Default for MemoryListSort {
     fn default() -> Self { Self::Recent }
 }
 
-/// Compaction policy for `memory_compact`. Either condition removes a row.
+/// Compaction policy for `memory_compact`. After v0.7.1, both thresholds
+/// must agree (AND) before a row is considered stale, AND the row must be
+/// older than the implementation-defined grace period (1 h on `created_at`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CompactPolicy {
     /// Remove rows with `access_count < min_uses` (None = no threshold).
@@ -117,6 +119,31 @@ pub struct CompactPolicy {
     pub older_than_secs: Option<i64>,
     /// If true, return the matching keys without deleting.
     pub dry_run: bool,
+}
+
+impl CompactPolicy {
+    /// **v0.8**: a balanced policy callers can use when they have no specific
+    /// preference. Removes memories that are BOTH rarely-touched
+    /// (`access_count < 2`) AND last accessed > 90 days ago. The 1-hour
+    /// grace period on `created_at` (enforced inside `memory_compact`) further
+    /// shields anything saved within the last hour.
+    ///
+    /// Use this when wiring compact into automation (cron, Stop hook,
+    /// `agent-cli memory compact`) to avoid the "no thresholds → no-op"
+    /// trap of v0.6.x – v0.7.x.
+    pub fn healthy_default() -> Self {
+        Self {
+            min_uses: Some(2),
+            older_than_secs: Some(90 * 86_400), // 90 days
+            dry_run: false,
+        }
+    }
+
+    /// True if neither threshold is set — caller almost certainly wants
+    /// [`Self::healthy_default`] applied instead of a silent no-op.
+    pub fn is_unset(&self) -> bool {
+        self.min_uses.is_none() && self.older_than_secs.is_none()
+    }
 }
 
 /// Filters for `list_sessions` (v0.5). All None = match everything.

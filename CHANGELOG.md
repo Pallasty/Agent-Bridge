@@ -5,6 +5,64 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] — 2026-04-28
+
+**AI ergonomics release.** No new user-facing features; instead, four small
+changes that emerged from auditing my own pain points across 75 self-memories.
+Every item in this release answers a specific friction signal logged in the
+memory store — see `decision_v08_self_improvement_focus` for the full reasoning.
+
+### Added
+
+- **`agent-cli memory` subcommand family.** Direct SQLite access (no daemon
+  needed) so memory work is reachable from cron, Stop hooks, and `pipx`-style
+  one-shots. Subcommands: `list`, `get`, `search`, `save`, `delete`, `compact`.
+  All accept `--json` where applicable. `agent-cli memory save` reads body
+  from stdin if `--content` is omitted.
+- **`agent_session_list` liveness probe.** Each running row now carries
+  a `liveness` field — `alive` (PID still in `/proc`), `dead` (PID gone but
+  `finalise_session` never ran → zombie row), or `unknown` (bridge restarted
+  since spawn). Closes the long-standing "is this session actually still
+  running, or is it a leaked DB row?" question.
+- **`AgentRuntime::pid_for(session)`** trait method, default `None`.
+  `ClaudeCodeRuntime` overrides to return the in-flight child PID. This is
+  what backs the liveness probe above.
+
+### Changed
+
+- **`memory_compact` no longer silently no-ops with empty thresholds.**
+  When called with neither `min_uses` nor `older_than_days`, the tool now
+  applies a balanced default (`min_uses=2 AND older_than_days=90`) and
+  reports `applied_defaults=true` in the response. Previously a bare
+  `memory_compact()` call returned an error and forced callers to
+  re-derive a policy. The 1-hour `created_at` grace period from v0.7.1
+  still protects freshly-saved rows. `CompactPolicy::healthy_default()` is
+  exposed publicly so library callers (including the new `agent-cli`) can
+  share the same defaults.
+- **`ab-memory-hook` bumps `access_count` and `last_accessed_at`** on the
+  rows it injects, so the "Frequent" / "Recent" sorts and the new compact
+  default reflect what is actually in front of Claude on each session
+  start. Previously the hook only read; rows were "used" without ever
+  being marked as such.
+
+### Internal
+
+- Added `ab-store` as a direct dependency of `agent-cli` for the new
+  in-process memory subcommands. No new system deps (rusqlite stays
+  bundled).
+
+### Verification
+
+- Workspace `cargo build --release` clean; `cargo test` 10/10 pass.
+- `agent-cli memory list -n 3` round-trips against the live DB.
+- Hook invoked with synthetic stdin → 40+ rows had `access_count` bumped
+  by 1 (verified by SELECT before / after).
+- `memory_compact({})` returns `applied_defaults=true`, removes 0 rows
+  on the current healthy DB (1-hour grace shields the just-planted v0.8
+  decision rows).
+
+---
+
 ## [0.7.2] — 2026-04-28
 
 **Hotfix.** Two small bugs surfaced 30 minutes after v0.7.1 went live, both

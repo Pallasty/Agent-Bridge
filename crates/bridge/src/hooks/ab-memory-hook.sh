@@ -56,6 +56,28 @@ ROWS=$(sqlite3 "$DB" \
 
 [[ -z "$ROWS" ]] && exit 0
 
+# v0.8: bump access_count + last_accessed_at on the rows we just injected
+# so the "Frequent" / "Recent" sorts (and compaction's healthy default) reflect
+# what is actually in front of Claude. We use the same WHERE clause; a small
+# race window where another writer inserts between SELECT and UPDATE is
+# acceptable — eventual consistency is fine for usage stats.
+sqlite3 "$DB" \
+  "UPDATE memories
+   SET access_count    = access_count + 1,
+       last_accessed_at = CAST(strftime('%s','now') AS INTEGER)
+   WHERE rowid IN (
+     SELECT rowid FROM memories
+     WHERE ${SCOPE_SQL}
+     ORDER BY CASE kind
+       WHEN 'lesson'           THEN 1
+       WHEN 'decision'         THEN 2
+       WHEN 'session_handoff'  THEN 3
+       WHEN 'todo'             THEN 4
+       ELSE 5 END,
+     updated_at DESC
+     LIMIT 80
+   )" 2>/dev/null || true
+
 python3 - "$ROWS" "$CWD" <<'PY'
 import json, sys
 
