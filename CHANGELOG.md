@@ -5,6 +5,31 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] — 2026-04-28
+
+**Memory scope expansion + hook budget split.**
+
+### Added
+
+- **Domain-scoped memories** (`domain:rust`, `domain:amd-gpu`, `domain:mcp`,
+  `domain:ai-architecture`) — cross-project transferable knowledge that injects
+  in every session regardless of CWD.
+- **User cognitive-style memories** (`user_cognitive_style_*`, `user_design_values_core`,
+  `user_collaboration_style`) — captures HOW the user thinks and collaborates,
+  not just what they've built. Enables calibrated explanations and proposals.
+- **Cross-domain synthesis memories** (`synthesis_*`) — explicit connections
+  between recurring patterns across projects (Arrow as unified infra, inference/
+  knowledge decoupling, graduated-autonomy meta-pattern).
+
+### Fixed
+
+- **Hook injection budget split (v0.9.1).** Flat `LIMIT 80` replaced with two
+  budgeted queries: `domain:*` memories get a **reserved 20-slot budget** and are
+  injected first; project/global memories fill the remaining **60 slots**. Prevents
+  a large global store from crowding out domain-scoped cross-project knowledge.
+  SQL fragments extracted into bash vars (`KIND_TIER`, `FREQ_SORT`, `PROJ_MATCH`)
+  to eliminate repetition across SELECT + UPDATE pairs.
+
 ## [0.9.0] — 2026-04-28
 
 **Self-evolution release.** Closes the loop between "I hit a wall" and "I
