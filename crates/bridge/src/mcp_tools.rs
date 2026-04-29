@@ -2192,204 +2192,9 @@ impl SessionCurateTool {
     }
 }
 
-/// Explicit line-prefix markers → memory kind.
-static CURATE_MARKERS: &[(&str, &str)] = &[
-    ("lesson:", "lesson"),
-    ("learned:", "lesson"),
-    ("learning:", "lesson"),
-    ("gotcha:", "lesson"),
-    ("pitfall:", "lesson"),
-    ("bug:", "lesson"),
-    ("fix:", "lesson"),
-    ("warning:", "lesson"),
-    ("pattern:", "lesson"),
-    ("decision:", "decision"),
-    ("decided:", "decision"),
-    ("design:", "decision"),
-    ("architecture:", "decision"),
-    ("we decided:", "decision"),
-    ("we chose:", "decision"),
-    ("todo:", "todo"),
-    ("TODO:", "todo"),
-    ("action item:", "todo"),
-    ("next step:", "todo"),
-    ("note:", "context"),
-    ("context:", "context"),
-    ("status:", "context"),
-    ("state:", "context"),
-    ("remember:", "context"),
-    ("important:", "context"),
-    ("key insight:", "lesson"),
-    ("root cause:", "lesson"),
-    ("handoff:", "session_handoff"),
-    ("session_handoff:", "session_handoff"),
-];
+// CURATE_MARKERS, section helpers, and curate_conversation live in crate::curate.
 
-/// Section-header keywords that make subsequent bullet-list lines inherit a kind.
-/// Format: (keyword substring in lowercase, inherited kind)
-static SECTION_HEADERS: &[(&str, &str)] = &[
-    ("lesson", "lesson"),
-    ("learned", "lesson"),
-    ("learning", "lesson"),
-    ("gotcha", "lesson"),
-    ("pitfall", "lesson"),
-    ("insight", "lesson"),
-    ("decision", "decision"),
-    ("decided", "decision"),
-    ("todo", "todo"),
-    ("action item", "todo"),
-    ("next step", "todo"),
-    ("context", "context"),
-    ("status", "context"),
-    ("handoff", "session_handoff"),
-    ("summary", "context"),
-];
-
-/// Return true if the line looks like a section header (ends with `:` and has no
-/// indentation, or is written in bold markdown like `**Lessons:**`).
-fn is_section_header(line: &str) -> Option<&'static str> {
-    let trimmed = line.trim();
-    // Must end with ':' or ':*'  (markdown bold close)
-    let bare = trimmed
-        .trim_start_matches('*')
-        .trim_end_matches('*')
-        .trim_end_matches(':')
-        .trim();
-    let lower = bare.to_lowercase();
-    for (kw, kind) in SECTION_HEADERS {
-        if lower.contains(kw) && trimmed.ends_with(':') || trimmed.ends_with(":**") {
-            return Some(kind);
-        }
-    }
-    None
-}
-
-/// Strip leading bullet/dash/number from a list item and return the payload.
-fn strip_bullet(line: &str) -> Option<&str> {
-    let t = line.trim();
-    // Markdown list: `- `, `* `, `+ `, `1. `, `•`
-    for prefix in &["- ", "* ", "+ ", "• "] {
-        if let Some(rest) = t.strip_prefix(prefix) {
-            return Some(rest.trim());
-        }
-    }
-    // Numbered list: `1. ` etc.
-    if let Some(pos) = t.find(". ") {
-        let num_part = &t[..pos];
-        if num_part.chars().all(|c| c.is_ascii_digit()) && pos <= 2 {
-            return Some(t[pos + 2..].trim());
-        }
-    }
-    None
-}
-
-fn curate_conversation(text: &str, session_id: Option<&str>, max_items: usize) -> Vec<MemoryRecord> {
-    let mut results: Vec<MemoryRecord> = Vec::new();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-
-    let sid_suffix = session_id
-        .map(|s| format!("_{}", &s[..s.len().min(8)]))
-        .unwrap_or_default();
-
-    // Track the current section context so bullet items inherit the section kind.
-    let mut section_kind: Option<&'static str> = None;
-
-    for (idx, line) in text.lines().enumerate() {
-        if results.len() >= max_items {
-            break;
-        }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            // Blank line resets section context after a gap
-            // (keep for one blank, reset on two — approximate by counting)
-            continue;
-        }
-
-        // ── 1. Check for section header ──────────────────────────────────────
-        if let Some(kind) = is_section_header(trimmed) {
-            section_kind = Some(kind);
-            continue;
-        }
-
-        // ── 2. Explicit line-prefix markers ─────────────────────────────────
-        let mut matched = false;
-        if trimmed.len() >= 10 {
-            let lower = trimmed.to_lowercase();
-            for (marker, kind) in CURATE_MARKERS {
-                let marker_lower = marker.to_lowercase();
-                if lower.starts_with(&marker_lower) {
-                    let content = trimmed[marker.len()..].trim().to_string();
-                    if content.len() >= 5 {
-                        push_curated(
-                            &mut results,
-                            kind,
-                            &content,
-                            &sid_suffix,
-                            idx,
-                            now,
-                        );
-                        matched = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // ── 3. Bullet items under a recognised section ──────────────────────
-        if !matched {
-            if let Some(kind) = section_kind {
-                if let Some(payload) = strip_bullet(trimmed) {
-                    if payload.len() >= 8 {
-                        push_curated(&mut results, kind, payload, &sid_suffix, idx, now);
-                    }
-                } else if !trimmed.starts_with('[') {
-                    // Non-bullet, non-empty line resets the section context
-                    section_kind = None;
-                }
-            }
-        }
-    }
-    results
-}
-
-fn push_curated(
-    results: &mut Vec<MemoryRecord>,
-    kind: &str,
-    content: &str,
-    sid_suffix: &str,
-    idx: usize,
-    now: i64,
-) {
-    let content_slug: String = content
-        .chars()
-        .take(40)
-        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .collect();
-    let key = format!(
-        "curated_{}{}_{}{}",
-        kind,
-        sid_suffix,
-        idx,
-        &content_slug[..content_slug.len().min(20)]
-    );
-    results.push(MemoryRecord {
-        key,
-        kind: kind.to_string(),
-        content: content.to_string(),
-        tags: vec!["auto_curated".to_string()],
-        related_keys: vec![],
-        scope: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-        access_count: 0,
-        importance: 0.5,
-        status: "active".to_string(),
-    });
-}
+// Extraction logic lives in crate::curate — use curate_conversation() below.
 
 #[async_trait]
 impl McpTool for SessionCurateTool {
@@ -2399,12 +2204,13 @@ impl McpTool for SessionCurateTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Extract structured memories from conversation text using rule-based \
-                 marker detection (lesson:, decision:, todo:, handoff:, etc.) and \
-                 persist them to the memory store. This replaces the PreCompact \
-                 shell hook's dependency on claude -p — it works in any frontend \
-                 (Cursor, Claude Code, or standalone). \
-                 Pass dry_run=true to preview without writing."
+            description: "Extract structured memories from conversation text using a two-pass \
+                 pipeline: (1) explicit marker detection (lesson:, decision:, todo:, \
+                 handoff:, etc.) and (2) implicit lexical signal scoring that catches \
+                 unmarked insights via epistemic/normative/causal/decision signals \
+                 in English and Chinese. Persists results to the memory store. \
+                 Replaces the PreCompact hook's claude -p dependency — works in any \
+                 frontend. Pass dry_run=true to preview without writing."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2456,7 +2262,8 @@ impl McpTool for SessionCurateTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let candidates = curate_conversation(&text, session_id.as_deref(), max_items);
+        let candidates =
+            crate::curate::curate_conversation(&text, session_id.as_deref(), max_items);
 
         if dry_run || store_opt.is_none() {
             return Ok(ToolResult::json_text(&json!({

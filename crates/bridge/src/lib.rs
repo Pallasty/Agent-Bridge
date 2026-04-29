@@ -2,6 +2,7 @@
 //!
 //! Routes incoming RPC calls to backend traits (Notifier, AgentRuntime, ...).
 
+pub mod curate;
 pub mod hub;
 pub mod mcp_tools;
 pub mod router;
