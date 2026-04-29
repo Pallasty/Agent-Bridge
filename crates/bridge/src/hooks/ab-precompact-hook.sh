@@ -5,11 +5,24 @@
 # AB_MEMORY_CURATOR=1 prevents the sub-agent's Stop hook from running
 # memory_compact (which would delete newly-saved memories).
 
-SESSION_ID="${CLAUDE_SESSION_ID:-}"
+# Cursor/Claude hooks may pass session id in stdin payload instead of env.
+HOOK_PAYLOAD=$(cat 2>/dev/null || true)
+SESSION_ID=$(printf '%s' "$HOOK_PAYLOAD" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get("session_id", ""))
+except Exception:
+    pass
+' 2>/dev/null)
+SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
 [[ -z "$SESSION_ID" ]] && exit 0
 
-# Locate transcript by session ID across all Claude project dirs
-TRANSCRIPT=$(find "$HOME/.claude/projects" -name "${SESSION_ID}.jsonl" 2>/dev/null | head -1)
+# Locate transcript by session ID — search both Claude Code and Cursor paths.
+# Claude Code: ~/.claude/projects/<slug>/<session-id>.jsonl
+# Cursor:      ~/.cursor/projects/<slug>/agent-transcripts/<session-id>/<session-id>.jsonl
+TRANSCRIPT=$(find "$HOME/.claude/projects" "$HOME/.cursor/projects" \
+    -name "${SESSION_ID}.jsonl" 2>/dev/null | head -1)
 [[ -f "$TRANSCRIPT" ]] || exit 0
 
 AB=$(command -v agent-bridge 2>/dev/null || echo "$HOME/.local/bin/agent-bridge")
@@ -38,10 +51,14 @@ with open(path, 'r', encoding='utf-8') as f:
             continue
         if d.get('isSidechain'):
             continue
-        role = d.get('message', {}).get('role', '')
+        # Support both transcript formats:
+        #   Claude Code: {"message": {"role": ..., "content": ...}, ...}
+        #   Cursor:      {"role": ..., "message": {"content": ...}}
+        msg = d.get('message', {})
+        role = msg.get('role', '') or d.get('role', '')
         if role not in ('user', 'assistant'):
             continue
-        content = d.get('message', {}).get('content', '')
+        content = msg.get('content', '')
         text = ''
         if isinstance(content, str):
             text = content.strip()
