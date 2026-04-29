@@ -5,6 +5,27 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.2] — 2026-04-28
+
+**Memory graph L0 layer + concept-node hook budget.**
+
+### Added
+
+- **L0 concept navigation nodes** (`kind=concept`, tags `["concept","L0"]`).
+  10 top-level concept nodes covering the core knowledge domains: Arrow ecosystem,
+  AMD GPU stack, MCP design, graduated autonomy, user philosophy, inference/knowledge
+  split, project topology, AI identity continuity, self-evolution, and infrastructure
+  stack. Each carries a `related_keys` list pointing to its L1 cluster.
+- **Bidirectional graph edges**: synthesis and key domain memories updated to
+  include back-references to their parent concept nodes (L1→L0 edges).
+- **Hook v0.9.2 — dedicated concept budget** (`≤15 slots`, always injected first).
+  `kind='concept'` rows are excluded from domain/other queries via `AND kind !=
+  'concept'` filters. This prevents concept nodes from competing with lessons/
+  decisions for budget, and from being sorted last by KIND_TIER's ELSE→5 rule.
+  `KIND_TIER` updated to `WHEN 'concept' THEN 0` as defense-in-depth.
+  Merge logic uses pre-declared `NL=$'\n'` to avoid `$'\n'` misexpansion inside
+  double-quoted strings.
+
 ## [0.9.1] — 2026-04-28
 
 **Memory scope expansion + hook budget split.**

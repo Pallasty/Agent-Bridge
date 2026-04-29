@@ -4,6 +4,10 @@
 # Scope-aware: global + project-matching + domain memories are loaded.
 # Runs exactly once per session (lock file keyed on session_id).
 #
+# v0.9.2: concept nodes get a dedicated always-first budget (≤15 slots).
+# kind='concept' rows are excluded from domain/other queries so they never
+# compete for those slots and are never sorted to the back by KIND_TIER.
+#
 # v0.9.1: split injection budget — domain memories get a reserved 20-slot
 # budget injected first; project/global memories fill the remaining 60 slots.
 # This prevents a large global memory store from crowding out domain knowledge.
@@ -49,18 +53,27 @@ CWD="${PWD:-/}"
 FREQ_SORT="(access_count * 86400 + updated_at) DESC"
 
 KIND_TIER="CASE kind
+     WHEN 'concept'          THEN 0
      WHEN 'lesson'           THEN 1
      WHEN 'decision'         THEN 2
      WHEN 'session_handoff'  THEN 3
      WHEN 'todo'             THEN 4
      ELSE 5 END"
 
-# Query 1: domain-scoped memories — reserved 20-slot budget, injected first.
+# Query 0: concept nodes — L0 navigation layer, always injected first.
+# Up to 15 slots; excluded from domain/other budgets below.
+CONCEPT_ROWS=$(sqlite3 "$DB" \
+  "SELECT kind, key, tags, scope, substr(content,1,120) FROM memories
+   WHERE kind = 'concept'
+   ORDER BY ${FREQ_SORT}
+   LIMIT 15" 2>/dev/null) || true
+
+# Query 1: domain-scoped memories — reserved 20-slot budget, injected second.
 # These are cross-project transferable knowledge; they must appear regardless
 # of how large the global store grows.
 DOMAIN_ROWS=$(sqlite3 "$DB" \
   "SELECT kind, key, tags, scope, substr(content,1,120) FROM memories
-   WHERE scope LIKE 'domain:%'
+   WHERE scope LIKE 'domain:%' AND kind != 'concept'
    ORDER BY ${KIND_TIER}, ${FREQ_SORT}
    LIMIT 20" 2>/dev/null) || true
 
@@ -79,28 +92,38 @@ PROJ_MATCH="CASE WHEN scope = 'project:${CWD}'
 
 OTHER_ROWS=$(sqlite3 "$DB" \
   "SELECT kind, key, tags, scope, substr(content,1,120) FROM memories
-   WHERE ${OTHER_SCOPE}
+   WHERE ${OTHER_SCOPE} AND kind != 'concept'
    ORDER BY ${KIND_TIER}, ${PROJ_MATCH}, ${FREQ_SORT}
    LIMIT 60" 2>/dev/null) || true
 
-# Merge: domain first, then project/global.
-if [[ -z "$DOMAIN_ROWS" && -z "$OTHER_ROWS" ]]; then exit 0; fi
-if [[ -n "$DOMAIN_ROWS" && -n "$OTHER_ROWS" ]]; then
-  ROWS="${DOMAIN_ROWS}"$'\n'"${OTHER_ROWS}"
-elif [[ -n "$DOMAIN_ROWS" ]]; then
-  ROWS="$DOMAIN_ROWS"
-else
-  ROWS="$OTHER_ROWS"
-fi
+# Merge: concept nodes first (L0 nav), then domain, then project/global.
+# NL must be declared outside double-quotes for $'\n' to expand correctly.
+NL=$'\n'
+ROWS=""
+[[ -n "$CONCEPT_ROWS" ]] && ROWS="$CONCEPT_ROWS"
+[[ -n "$DOMAIN_ROWS"  ]] && ROWS="${ROWS:+${ROWS}${NL}}${DOMAIN_ROWS}"
+[[ -n "$OTHER_ROWS"   ]] && ROWS="${ROWS:+${ROWS}${NL}}${OTHER_ROWS}"
+[[ -z "$ROWS" ]] && exit 0
 
-# Bump access_count + last_accessed_at for both sets (mirrors the SELECTs above).
+# Bump access_count + last_accessed_at for all three sets (mirrors the SELECTs above).
 sqlite3 "$DB" \
   "UPDATE memories
    SET access_count    = access_count + 1,
        last_accessed_at = CAST(strftime('%s','now') AS INTEGER)
    WHERE rowid IN (
      SELECT rowid FROM memories
-     WHERE scope LIKE 'domain:%'
+     WHERE kind = 'concept'
+     ORDER BY ${FREQ_SORT}
+     LIMIT 15
+   )" 2>/dev/null || true
+
+sqlite3 "$DB" \
+  "UPDATE memories
+   SET access_count    = access_count + 1,
+       last_accessed_at = CAST(strftime('%s','now') AS INTEGER)
+   WHERE rowid IN (
+     SELECT rowid FROM memories
+     WHERE scope LIKE 'domain:%' AND kind != 'concept'
      ORDER BY ${KIND_TIER}, ${FREQ_SORT}
      LIMIT 20
    )" 2>/dev/null || true
@@ -111,7 +134,7 @@ sqlite3 "$DB" \
        last_accessed_at = CAST(strftime('%s','now') AS INTEGER)
    WHERE rowid IN (
      SELECT rowid FROM memories
-     WHERE ${OTHER_SCOPE}
+     WHERE ${OTHER_SCOPE} AND kind != 'concept'
      ORDER BY ${KIND_TIER}, ${PROJ_MATCH}, ${FREQ_SORT}
      LIMIT 60
    )" 2>/dev/null || true
