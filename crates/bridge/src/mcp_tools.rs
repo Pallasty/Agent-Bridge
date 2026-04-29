@@ -2324,26 +2324,32 @@ impl MemoryConsolidateTool {
     }
 }
 
-/// Jaccard similarity over word-bags (lowercase, ≥3 chars).
-fn jaccard_words(a: &str, b: &str) -> f64 {
-    let bag = |s: &str| -> std::collections::HashSet<String> {
-        s.split(|c: char| !c.is_alphanumeric())
-            .map(|w| w.to_lowercase())
-            .filter(|w| w.len() >= 3)
-            .collect()
-    };
-    let wa = bag(a);
-    let wb = bag(b);
+/// Token bag for Jaccard: lowercase alphanumeric tokens with length ≥ 3.
+fn memory_consolidate_word_bag(s: &str) -> std::collections::HashSet<String> {
+    s.split(|c: char| !c.is_alphanumeric())
+        .map(|w| w.to_lowercase())
+        .filter(|w| w.len() >= 3)
+        .collect()
+}
+
+/// Jaccard similarity plus overlap diagnostics for MCP previews.
+fn jaccard_words_with_overlap(a: &str, b: &str) -> (f64, usize, usize, Vec<String>) {
+    let wa = memory_consolidate_word_bag(a);
+    let wb = memory_consolidate_word_bag(b);
     if wa.is_empty() || wb.is_empty() {
-        return 0.0;
+        return (0.0, 0, 0, Vec::new());
     }
-    let inter = wa.intersection(&wb).count();
-    let union = wa.len() + wb.len() - inter;
-    if union == 0 {
+    let inter_n = wa.intersection(&wb).count();
+    let union_n = wa.len() + wb.len() - inter_n;
+    let sim = if union_n == 0 {
         0.0
     } else {
-        inter as f64 / union as f64
-    }
+        inter_n as f64 / union_n as f64
+    };
+    let mut overlap_terms: Vec<String> = wa.intersection(&wb).cloned().collect();
+    overlap_terms.sort();
+    overlap_terms.truncate(14);
+    (sim, inter_n, union_n, overlap_terms)
 }
 
 #[async_trait]
@@ -2359,7 +2365,8 @@ impl McpTool for MemoryConsolidateTool {
                  Pairs above the similarity threshold are merge candidates. \
                  The higher-importance memory wins; the other is archived with a \
                  'supersedes' edge linking winner → loser. \
-                 Default dry_run=true — always preview before committing."
+                 Default dry_run=true — previews include overlap_terms, token_stats, and rank scores. \
+                 Execute merges only after reviewing dry-run output."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2451,7 +2458,7 @@ impl McpTool for MemoryConsolidateTool {
                 for j in (i + 1)..n {
                     let ma = group[i];
                     let mb = group[j];
-                    let sim = jaccard_words(&ma.content, &mb.content);
+                    let (sim, _, _, _) = jaccard_words_with_overlap(&ma.content, &mb.content);
                     if sim < min_sim {
                         continue;
                     }
@@ -2487,15 +2494,39 @@ impl McpTool for MemoryConsolidateTool {
                 .map(|p| {
                     let mem_a = memories.iter().find(|m| m.key == p.key_a);
                     let mem_b = memories.iter().find(|m| m.key == p.key_b);
+                    let ca = mem_a.map(|m| m.content.as_str()).unwrap_or("");
+                    let cb = mem_b.map(|m| m.content.as_str()).unwrap_or("");
+                    let (_sim_check, inter_n, union_n, overlap_terms) =
+                        jaccard_words_with_overlap(ca, cb);
+                    let loser_key = if p.winner == p.key_a {
+                        p.key_b.as_str()
+                    } else {
+                        p.key_a.as_str()
+                    };
+                    let winner_rec = memories.iter().find(|m| m.key == p.winner);
+                    let loser_rec = memories.iter().find(|m| m.key == loser_key);
+                    let rank_winner = winner_rec
+                        .map(|m| m.importance * (1.0 + m.access_count as f64))
+                        .unwrap_or(0.0);
+                    let rank_loser = loser_rec
+                        .map(|m| m.importance * (1.0 + m.access_count as f64))
+                        .unwrap_or(0.0);
                     json!({
                         "key_a": p.key_a,
                         "key_b": p.key_b,
                         "similarity": (p.sim * 100.0).round() / 100.0,
                         "winner": p.winner,
-                        "loser": if p.winner == p.key_a { &p.key_b } else { &p.key_a },
+                        "loser": loser_key,
                         "kind": mem_a.or(mem_b).map(|m| m.kind.as_str()).unwrap_or("?"),
                         "content_a": mem_a.map(|m| &m.content[..m.content.len().min(120)]),
                         "content_b": mem_b.map(|m| &m.content[..m.content.len().min(120)]),
+                        "overlap_terms": overlap_terms,
+                        "token_stats": {
+                            "intersection": inter_n,
+                            "union": union_n,
+                        },
+                        "rank_score_winner": (rank_winner * 1000.0).round() / 1000.0,
+                        "rank_score_loser": (rank_loser * 1000.0).round() / 1000.0,
                     })
                 })
                 .collect();
@@ -2503,6 +2534,10 @@ impl McpTool for MemoryConsolidateTool {
                 "dry_run": true,
                 "pairs_found": preview.len(),
                 "min_similarity": min_sim,
+                "scan": {
+                    "active_memories": memories.len(),
+                    "kind_groups": by_kind.len(),
+                },
                 "pairs": preview,
                 "hint": if preview.is_empty() {
                     "No pairs above threshold. Try lowering min_similarity."
@@ -2558,10 +2593,23 @@ impl McpTool for MemoryConsolidateTool {
                 errors.push(format!("link {}->{loser_key}: {e}", p.winner));
             }
 
+            let win_txt = memories
+                .iter()
+                .find(|m| m.key == p.winner)
+                .map(|m| m.content.as_str())
+                .unwrap_or("");
+            let lose_txt = memories
+                .iter()
+                .find(|m| m.key == *loser_key)
+                .map(|m| m.content.as_str())
+                .unwrap_or("");
+            let (_, _, _, overlap_terms) = jaccard_words_with_overlap(win_txt, lose_txt);
+
             merged.push(json!({
                 "winner": p.winner,
                 "archived": loser_key,
                 "similarity": (p.sim * 100.0).round() / 100.0,
+                "overlap_terms": overlap_terms,
             }));
         }
 
@@ -2570,6 +2618,10 @@ impl McpTool for MemoryConsolidateTool {
             "consolidated": merged.len(),
             "errors": errors,
             "pairs": merged,
+            "scan": {
+                "active_memories": memories.len(),
+                "kind_groups": by_kind.len(),
+            },
         })))
     }
 }
@@ -3197,7 +3249,9 @@ impl McpTool for SessionFinalizeTool {
             name: self.name().into(),
             description: "Manual session-end maintenance for Cursor: run importance decay, \
                  compact stale memories, and optionally export JSONL. \
-                 Equivalent to Claude Code's Stop hook pipeline."
+                 Equivalent to Claude Code's Stop hook pipeline. \
+                 Response includes follow_up with active_total and an optional hint to run memory_consolidate \
+                 when the active graph is large."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -3277,6 +3331,35 @@ impl McpTool for SessionFinalizeTool {
             export_summary = json!({ "path": path, "exported": exported });
         }
 
+        // After compaction/decay, nudge operators toward periodic dedup when the graph grows.
+        const CONSOLIDATE_HINT_ACTIVE_THRESHOLD: u64 = 60;
+        let follow_up = match store.memory_stats().await {
+            Ok(st) => {
+                let active_total = st.counts_by_status.get("active").copied().unwrap_or(0);
+                let suggest = active_total >= CONSOLIDATE_HINT_ACTIVE_THRESHOLD;
+                let hint = if suggest {
+                    json!(format!(
+                        "Active memories {} ≥ {} — preview merges with memory_consolidate(dry_run:true, min_similarity:0.45, max_pairs:10).",
+                        active_total, CONSOLIDATE_HINT_ACTIVE_THRESHOLD
+                    ))
+                } else {
+                    Value::Null
+                };
+                json!({
+                    "active_total": active_total,
+                    "edge_count": st.edge_count,
+                    "suggest_memory_consolidate": suggest,
+                    "hint": hint,
+                })
+            }
+            Err(_) => json!({
+                "active_total": Value::Null,
+                "edge_count": Value::Null,
+                "suggest_memory_consolidate": false,
+                "hint": Value::Null,
+            }),
+        };
+
         Ok(ToolResult::json_text(&json!({
             "dry_run": dry_run,
             "decay": {
@@ -3291,7 +3374,8 @@ impl McpTool for SessionFinalizeTool {
             },
             "removed_count": removed.len(),
             "removed_keys": removed,
-            "export": export_summary
+            "export": export_summary,
+            "follow_up": follow_up,
         })))
     }
 }
