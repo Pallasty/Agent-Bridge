@@ -185,6 +185,27 @@ pub struct SessionFilter {
     pub exit_code: Option<i32>,
 }
 
+/// Aggregate statistics about the memory store (returned by `memory_stats`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MemoryStats {
+    /// Memory count by status: `"active"`, `"archived"`, `"superseded"`.
+    pub counts_by_status: std::collections::HashMap<String, u64>,
+    /// Active memory count per kind, sorted by count descending (top 20).
+    pub counts_by_kind: Vec<(String, u64)>,
+    /// Total directed edges in the memory graph.
+    pub edge_count: u64,
+    /// Oldest memory `created_at` (unix epoch secs). `None` if store is empty.
+    pub oldest_created_at: Option<i64>,
+    /// Newest memory `created_at` (unix epoch secs). `None` if store is empty.
+    pub newest_created_at: Option<i64>,
+    /// Mean `importance` of active memories. `0.0` when no active memories exist.
+    pub avg_importance_active: f64,
+    /// Top tags by frequency across active memories, sorted desc (up to 15).
+    pub top_tags: Vec<(String, u64)>,
+    /// Approximate SQLite file size in bytes. `None` for in-memory stores.
+    pub db_size_bytes: Option<u64>,
+}
+
 /// Filters for `memory_export` (v0.6). All None = export everything.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryExportFilter {
@@ -367,4 +388,8 @@ pub trait StateStore: Send + Sync {
         in_path: &std::path::Path,
         policy: ImportConflictPolicy,
     ) -> Result<ImportReport>;
+
+    /// Return aggregate statistics about the memory store.
+    /// Intended for `memory_stats` MCP tool and session-curate diagnostics.
+    async fn memory_stats(&self) -> Result<MemoryStats>;
 }

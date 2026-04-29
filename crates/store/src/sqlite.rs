@@ -57,8 +57,8 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 
 use crate::{
     CompactPolicy, ImportConflictPolicy, ImportReport, MemoryEdge, MemoryExportFilter,
-    MemoryListSort, MemoryRecord, MemorySearchHit, NotificationRecord, SessionFilter, StateStore,
-    StoredSession, MEMORY_CONTENT_CAP, STDIO_CAP,
+    MemoryListSort, MemoryRecord, MemorySearchHit, MemoryStats, NotificationRecord, SessionFilter,
+    StateStore, StoredSession, MEMORY_CONTENT_CAP, STDIO_CAP,
 };
 
 const SCHEMA_V1: &str = r#"
@@ -1670,6 +1670,116 @@ impl StateStore for SqliteStore {
         // Adjust report.malformed (we updated this field outside the closure).
         report.malformed += 0; // (already counted above; placeholder for clarity)
         Ok(report)
+    }
+
+    async fn memory_stats(&self) -> Result<MemoryStats> {
+
+        let stats = self
+            .conn
+            .call(move |c| -> RusqliteResult<MemoryStats> {
+                // 0. Approximate DB size via SQLite page pragmas.
+                let page_count: i64 = c
+                    .query_row("PRAGMA page_count", [], |r| r.get(0))
+                    .unwrap_or(0);
+                let page_size: i64 = c
+                    .query_row("PRAGMA page_size", [], |r| r.get(0))
+                    .unwrap_or(4096);
+                let db_size_bytes: Option<u64> = if page_count > 0 {
+                    Some((page_count * page_size) as u64)
+                } else {
+                    None
+                };
+
+                // 1. Counts by status.
+                let mut counts_by_status: std::collections::HashMap<String, u64> =
+                    std::collections::HashMap::new();
+                {
+                    let mut stmt =
+                        c.prepare("SELECT status, COUNT(*) FROM memories GROUP BY status")?;
+                    let rows = stmt.query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+                    })?;
+                    for r in rows.flatten() {
+                        counts_by_status.insert(r.0, r.1);
+                    }
+                }
+
+                // 2. Counts by kind (active only), top 20.
+                let mut counts_by_kind: Vec<(String, u64)> = Vec::new();
+                {
+                    let mut stmt = c.prepare(
+                        "SELECT kind, COUNT(*) AS n FROM memories
+                         WHERE status = 'active'
+                         GROUP BY kind
+                         ORDER BY n DESC
+                         LIMIT 20",
+                    )?;
+                    let rows = stmt.query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+                    })?;
+                    for r in rows.flatten() {
+                        counts_by_kind.push(r);
+                    }
+                }
+
+                // 3. Edge count.
+                let edge_count: u64 = c
+                    .query_row("SELECT COUNT(*) FROM memory_edges", [], |r| {
+                        r.get::<_, i64>(0)
+                    })
+                    .unwrap_or(0) as u64;
+
+                // 4. Oldest / newest created_at.
+                let (oldest_created_at, newest_created_at): (Option<i64>, Option<i64>) = c
+                    .query_row(
+                        "SELECT MIN(created_at), MAX(created_at) FROM memories",
+                        [],
+                        |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?)),
+                    )
+                    .unwrap_or((None, None));
+
+                // 5. Average importance (active).
+                let avg_importance_active: f64 = c
+                    .query_row(
+                        "SELECT AVG(importance) FROM memories WHERE status = 'active'",
+                        [],
+                        |r| r.get::<_, Option<f64>>(0),
+                    )
+                    .unwrap_or(None)
+                    .unwrap_or(0.0);
+
+                // 6. Top tags (active memories; tags stored as JSON arrays).
+                let mut tag_counts: std::collections::HashMap<String, u64> =
+                    std::collections::HashMap::new();
+                {
+                    let mut stmt = c
+                        .prepare("SELECT tags FROM memories WHERE status = 'active'")?;
+                    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+                    for tags_s in rows.flatten() {
+                        for tag in parse_str_array(&tags_s) {
+                            *tag_counts.entry(tag).or_default() += 1;
+                        }
+                    }
+                }
+                let mut top_tags: Vec<(String, u64)> = tag_counts.into_iter().collect();
+                top_tags.sort_by(|a, b| b.1.cmp(&a.1));
+                top_tags.truncate(15);
+
+                Ok(MemoryStats {
+                    counts_by_status,
+                    counts_by_kind,
+                    edge_count,
+                    oldest_created_at,
+                    newest_created_at,
+                    avg_importance_active,
+                    top_tags,
+                    db_size_bytes,
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_stats: {e}")))?;
+
+        Ok(stats)
     }
 }
 

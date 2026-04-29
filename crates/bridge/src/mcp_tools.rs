@@ -7,6 +7,7 @@ use ab_mcp::{McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
 use ab_store::{
     CompactPolicy, ImportConflictPolicy, MemoryExportFilter, MemoryListSort, MemoryRecord,
     SessionFilter, StateStore,
+    // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
 };
 use ab_terminal::{OscEvent, OscParser, SplitDir};
 use async_trait::async_trait;
@@ -3035,6 +3036,9 @@ impl McpTool for CapabilitiesTool {
             .unwrap_or_else(|| "none".to_string());
         let agent_bin = match runtime_id.as_str() {
             "warp-oz" => std::env::var("AGENT_BRIDGE_OZ_BIN").unwrap_or_else(|_| "oz".into()),
+            "auggie" => {
+                std::env::var("AGENT_BRIDGE_AUGGIE_BIN").unwrap_or_else(|_| "auggie".into())
+            }
             _ => std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into()),
         };
         let agent_binary_found = which_binary(&agent_bin);
@@ -3124,7 +3128,87 @@ fn detect_frontend() -> &'static str {
     {
         return "warp";
     }
+    // Augment Code: session auth env or ~/.augment config directory.
+    if std::env::var("AUGMENT_SESSION_AUTH").is_ok()
+        || std::env::var("AUGMENT_CLIENT_VERSION").is_ok()
+    {
+        return "auggie";
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        if std::path::Path::new(&home).join(".augment").exists() {
+            return "auggie";
+        }
+    }
     "unknown"
+}
+
+// ===========================================================================
+//                             memory_stats
+// ===========================================================================
+
+pub struct MemoryStatsTool {
+    hub: Hub,
+}
+impl MemoryStatsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryStatsTool {
+    fn name(&self) -> &'static str {
+        "memory_stats"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Return aggregate statistics about the memory store: \
+                 total counts by status (active/archived/superseded), \
+                 counts per kind for active memories, number of graph edges, \
+                 oldest/newest timestamps, average importance, top tags, \
+                 and approximate DB size. \
+                 Call before session_curate or session_finalize to understand \
+                 store health without reading individual records."
+                .into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let stats = store.memory_stats().await.map_err(|e| {
+            ab_core::Error::Backend(format!("memory_stats: {e}"))
+        })?;
+
+        let counts_by_kind_json: Vec<Value> = stats
+            .counts_by_kind
+            .iter()
+            .map(|(k, n)| json!({ "kind": k, "count": n }))
+            .collect();
+
+        let top_tags_json: Vec<Value> = stats
+            .top_tags
+            .iter()
+            .map(|(tag, n)| json!({ "tag": tag, "count": n }))
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "counts_by_status": stats.counts_by_status,
+            "active_total": stats.counts_by_status.get("active").copied().unwrap_or(0),
+            "archived_total": stats.counts_by_status.get("archived").copied().unwrap_or(0),
+            "superseded_total": stats.counts_by_status.get("superseded").copied().unwrap_or(0),
+            "counts_by_kind": counts_by_kind_json,
+            "edge_count": stats.edge_count,
+            "oldest_created_at": stats.oldest_created_at,
+            "newest_created_at": stats.newest_created_at,
+            "avg_importance_active": (stats.avg_importance_active * 1000.0).round() / 1000.0,
+            "top_tags": top_tags_json,
+            "db_size_bytes": stats.db_size_bytes,
+        })))
+    }
 }
 
 // ===========================================================================
@@ -3454,6 +3538,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(SessionCurateTool::new(hub.clone())));
     reg.register(Arc::new(HookStatusTool::new(hub.clone())));
     reg.register(Arc::new(CapabilitiesTool::new(hub.clone())));
+    reg.register(Arc::new(MemoryStatsTool::new(hub.clone())));
     reg.register(Arc::new(MemorySuggestTool::new(hub)));
     reg
 }
