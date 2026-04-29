@@ -1,4 +1,4 @@
-use ab_agent::{AgentRuntime, ClaudeCodeRuntime, GitWorktreeManager};
+use ab_agent::{AgentRuntime, ClaudeCodeRuntime, GitWorktreeManager, OzAgentRuntime};
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
@@ -112,9 +112,13 @@ async fn main() -> Result<()> {
 
 /// Construct the shared backend bundle used by both modes.
 ///
-/// `AGENT_BRIDGE_REPO` selects the git repository the worktree manager binds
-/// to (defaults to `$PWD`). `AGENT_BRIDGE_CLAUDE_BIN` overrides the claude
-/// binary path. `AGENT_BRIDGE_HEADLESS=1` for headless Chromium.
+/// Relevant env vars:
+/// - `AGENT_BRIDGE_REPO`           — git repo for the worktree manager (default: `$PWD`)
+/// - `AGENT_BRIDGE_AGENT_RUNTIME`  — `claude-code` (default) | `warp-oz`
+/// - `AGENT_BRIDGE_CLAUDE_BIN`     — path to the `claude` CLI (default: `claude`)
+/// - `AGENT_BRIDGE_OZ_BIN`         — path to the `oz` CLI (default: `oz`)
+/// - `AGENT_BRIDGE_OZ_ENVIRONMENT_ID` — default cloud env id for `warp-oz`
+/// - `AGENT_BRIDGE_HEADLESS=1`     — headless Chromium
 async fn build_hub() -> Result<Hub> {
     #[cfg(target_os = "linux")]
     let notifier: Arc<dyn ab_notifier::Notifier> = {
@@ -134,9 +138,28 @@ async fn build_hub() -> Result<Hub> {
     tracing::info!(terminal_backend = %terminal.id(), "terminal backend selected");
     let browser: Arc<dyn BrowserBackend> = Arc::new(ChromiumCdpBackend::new());
 
-    let claude_bin = std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
-    let agent: Arc<dyn AgentRuntime> =
-        Arc::new(ClaudeCodeRuntime::with_binary(claude_bin).with_store(store.clone()));
+    // Agent runtime selection.
+    //
+    // `AGENT_BRIDGE_AGENT_RUNTIME` ∈ {`claude-code` (default), `warp-oz`}.
+    // Default preserves backwards compatibility for existing
+    // Claude Code installs; `warp-oz` is the Warp-native cloud-agent
+    // runtime, available when the `oz` CLI is installed and signed in.
+    let agent: Arc<dyn AgentRuntime> = match std::env::var("AGENT_BRIDGE_AGENT_RUNTIME")
+        .ok()
+        .as_deref()
+    {
+        Some("warp-oz") | Some("oz") => {
+            let bin = std::env::var("AGENT_BRIDGE_OZ_BIN").unwrap_or_else(|_| "oz".into());
+            tracing::info!(runtime = "warp-oz", binary = %bin, "agent runtime selected");
+            Arc::new(OzAgentRuntime::with_binary(bin).with_store(store.clone()))
+        }
+        _ => {
+            let bin =
+                std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
+            tracing::info!(runtime = "claude-code", binary = %bin, "agent runtime selected");
+            Arc::new(ClaudeCodeRuntime::with_binary(bin).with_store(store.clone()))
+        }
+    };
 
     let repo = std::env::var("AGENT_BRIDGE_REPO")
         .ok()

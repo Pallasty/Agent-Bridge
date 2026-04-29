@@ -2759,10 +2759,22 @@ impl McpTool for CapabilitiesTool {
             (false, String::new())
         };
 
-        // Agent spawn
+        // Agent spawn. The active runtime is whatever `build_hub()`
+        // selected via `AGENT_BRIDGE_AGENT_RUNTIME`; we read the same
+        // env var here so capabilities reflects the live wiring,
+        // including which CLI binary it resolves to.
         let agent_available = self.hub.agent.is_some();
-        let claude_bin = std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
-        let agent_binary_found = which_binary(&claude_bin);
+        let runtime_id = self
+            .hub
+            .agent
+            .as_ref()
+            .map(|a| a.id().to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let agent_bin = match runtime_id.as_str() {
+            "warp-oz" => std::env::var("AGENT_BRIDGE_OZ_BIN").unwrap_or_else(|_| "oz".into()),
+            _ => std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into()),
+        };
+        let agent_binary_found = which_binary(&agent_bin);
 
         // Hooks: check what's installed
         let home = dirs_home();
@@ -2798,7 +2810,8 @@ impl McpTool for CapabilitiesTool {
             },
             "agent_spawn": {
                 "available": agent_available,
-                "binary": claude_bin,
+                "runtime": runtime_id,
+                "binary": agent_bin,
                 "binary_found": agent_binary_found
             },
             "hooks": {

@@ -3,6 +3,9 @@
 //! - [`AgentRuntime`]: trait wrapping a CLI agent (`claude`, `codex`, `aider`...).
 //! - [`ClaudeCodeRuntime`]: spawns Claude Code in a working directory; one-shot
 //!   `-p` mode for now (PTY/interactive mode is P2).
+//! - [`OzAgentRuntime`]: spawns Warp Oz cloud agents via the `oz` CLI;
+//!   the local subprocess is short-lived (it just POSTs to the Warp
+//!   API and exits), but the cloud run continues asynchronously.
 //! - [`GitWorktreeManager`]: thin wrapper around `git worktree {add,list,remove}`.
 
 use ab_core::{Result, SessionId};
@@ -11,9 +14,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod claude_code;
+pub mod oz;
 pub mod worktree;
 
 pub use claude_code::ClaudeCodeRuntime;
+pub use oz::OzAgentRuntime;
 pub use worktree::{GitWorktreeManager, Worktree};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

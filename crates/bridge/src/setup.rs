@@ -23,7 +23,6 @@ use std::path::{Path, PathBuf};
 const HOOK_MEMORY: &str = include_str!("hooks/ab-memory-hook.sh");
 const HOOK_PRECOMPACT: &str = include_str!("hooks/ab-precompact-hook.sh");
 const HOOK_SESSION_END: &str = include_str!("hooks/ab-session-end-hook.sh");
-const CURATOR_SETTINGS: &str = include_str!("hooks/memory-curator-settings.json");
 
 /// Which frontend the setup is targeting. Drives whether hook scripts
 /// and `~/.claude/settings.json` are written.
@@ -67,15 +66,7 @@ fn install_claude_code(home: &Path, bin_dir: &Path) -> Result<()> {
     write_script(&bin_dir.join("ab-precompact-hook"), HOOK_PRECOMPACT)?;
     write_script(&bin_dir.join("ab-session-end-hook"), HOOK_SESSION_END)?;
 
-    // ── 3. Write curator settings ────────────────────────────────────────
-    let cfg_dir = home.join(".config/agent-bridge");
-    fs::create_dir_all(&cfg_dir).context("create ~/.config/agent-bridge")?;
-    let cfg_path = cfg_dir.join("memory-curator-settings.json");
-    fs::write(&cfg_path, CURATOR_SETTINGS)
-        .with_context(|| format!("write {}", cfg_path.display()))?;
-    println!("  ✓  curator cfg  → {}", cfg_path.display());
-
-    // ── 4. Merge Claude Code settings ────────────────────────────────────
+    // ── 3. Merge Claude Code settings ────────────────────────────────────
     merge_claude_settings(home, bin_dir)?;
 
     println!();
@@ -100,8 +91,7 @@ fn install_claude_code(home: &Path, bin_dir: &Path) -> Result<()> {
 ///   - writing the three `ab-*-hook` shell scripts,
 ///   - rewriting `~/.claude/settings.json` (which Warp users may not
 ///     even have),
-///   - emitting `~/.config/agent-bridge/memory-curator-settings.json`
-///     (only consumed by `ab-precompact-hook.sh`).
+///   - emitting hook scripts (no hook events in Warp).
 fn install_warp(bin_dst: &Path) -> Result<()> {
     println!("  ·  hook scripts skipped (Warp has no equivalent hook events)");
     println!("  ·  ~/.claude/settings.json skipped (claude-code only)");

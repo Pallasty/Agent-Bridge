@@ -220,7 +220,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 |-------|-------------|-------------|
 | `Notifier` | `DbusNotifier` (Linux), `MacOsNotifier` | webhook, Slack, Pushover |
 | `BrowserBackend` | `ChromiumCdpBackend` | webkit, playwright, Firefox |
-| `AgentRuntime` | `ClaudeCodeRuntime` (one-shot) | codex, aider, gemini-cli |
+| `AgentRuntime` | `ClaudeCodeRuntime` (one-shot), `OzAgentRuntime` (Warp cloud) | codex, aider, gemini-cli |
 | `TerminalBackend` | `KittyBackend`, `ZellijBackend`, `WezTermBackend`, `WarpBackend` | ghostty, tmux |
 | `StateStore` | `SqliteStore` (rusqlite-bundled) | in-memory, postgres |
 | `McpTool` | 29 built-in tools | drop in any `Box<dyn McpTool>` |
@@ -234,6 +234,9 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | `AGENT_BRIDGE_HEADLESS` | (unset = headed) | `1` for headless Chromium |
 | `AGENT_BRIDGE_CHROME` | auto-detect | Path to chrome/chromium binary |
 | `AGENT_BRIDGE_CLAUDE_BIN` | `claude` | Override claude CLI path |
+| `AGENT_BRIDGE_AGENT_RUNTIME` | `claude-code` | Pick agent runtime: `claude-code` \| `warp-oz` |
+| `AGENT_BRIDGE_OZ_BIN` | `oz` | Override Warp `oz` CLI path (when runtime = `warp-oz`) |
+| `AGENT_BRIDGE_OZ_ENVIRONMENT_ID` | _(none)_ | Default Oz cloud environment id; can be overridden per `agent_spawn` via `env.OZ_ENVIRONMENT_ID` |
 | `AGENT_BRIDGE_TERMINAL` | auto-detect | Force: `wezterm` \| `kitty` \| `zellij` \| `warp` |
 | `AGENT_BRIDGE_KITTY_SOCKET` | `$KITTY_LISTEN_ON` | kitty IPC socket |
 | `AGENT_BRIDGE_WARP_OPENER` | `xdg-open` (Linux), `open` (macOS) | URL handler used by `WarpBackend` to dispatch `warp://` URIs |
@@ -247,6 +250,18 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 3. `TERM_PROGRAM=WarpTerminal` (or `WARP_IS_LOCAL_SHELL_SESSION=1` /
    `WARP_HONOR_PS1=1`) → `WarpBackend`
 4. otherwise → `WezTermBackend`
+
+### Agent runtime selection
+
+| Runtime | id | Underlying CLI | Notes |
+|---------|----|----------------|-------|
+| `ClaudeCodeRuntime` (default) | `claude-code` | `claude -p <prompt>` | One-shot local invocation; SIGTERM-able. |
+| `OzAgentRuntime` | `warp-oz` | `oz agent run-cloud --prompt <prompt> [--environment <id>]` | Spawns a Warp Oz cloud agent. The local `oz` child exits quickly after POSTing to `https://app.warp.dev/api/v1/agent/run`; the run id is captured in the session's stdout. To cancel the cloud run itself, use `oz run cancel <run-id>` — `agent_kill` only signals the local CLI child. |
+
+Switch with `export AGENT_BRIDGE_AGENT_RUNTIME=warp-oz`. Pin a default
+cloud environment with `AGENT_BRIDGE_OZ_ENVIRONMENT_ID`, or override
+per-spawn by passing `env.OZ_ENVIRONMENT_ID` to the `agent_spawn` MCP
+tool.
 
 ### `WarpBackend` capabilities
 
