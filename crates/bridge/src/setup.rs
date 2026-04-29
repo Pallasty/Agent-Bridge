@@ -37,8 +37,8 @@ pub fn run() -> Result<()> {
     }
 
     // ── 2. Write hook scripts ─────────────────────────────────────────────────
-    write_script(&bin_dir.join("ab-memory-hook"),      HOOK_MEMORY)?;
-    write_script(&bin_dir.join("ab-precompact-hook"),  HOOK_PRECOMPACT)?;
+    write_script(&bin_dir.join("ab-memory-hook"), HOOK_MEMORY)?;
+    write_script(&bin_dir.join("ab-precompact-hook"), HOOK_PRECOMPACT)?;
     write_script(&bin_dir.join("ab-session-end-hook"), HOOK_SESSION_END)?;
 
     // ── 3. Write curator settings ─────────────────────────────────────────────
@@ -73,8 +73,7 @@ fn home_dir() -> Option<PathBuf> {
 }
 
 fn write_script(path: &Path, content: &str) -> Result<()> {
-    fs::write(path, content)
-        .with_context(|| format!("write {}", path.display()))?;
+    fs::write(path, content).with_context(|| format!("write {}", path.display()))?;
     let mut perms = fs::metadata(path)?.permissions();
     perms.set_mode(0o755);
     fs::set_permissions(path, perms)?;
@@ -197,9 +196,11 @@ fn merge_claude_settings(home: &Path, bin_dir: &Path) -> Result<()> {
     if let Some(parent) = settings_path.parent() {
         fs::create_dir_all(parent).context("create ~/.claude")?;
     }
-    fs::write(&settings_path, out)
-        .with_context(|| format!("write {}", settings_path.display()))?;
-    println!("  ✓  settings     → {} (hooks merged)", settings_path.display());
+    fs::write(&settings_path, out).with_context(|| format!("write {}", settings_path.display()))?;
+    println!(
+        "  ✓  settings     → {} (hooks merged)",
+        settings_path.display()
+    );
 
     Ok(())
 }
@@ -207,8 +208,8 @@ fn merge_claude_settings(home: &Path, bin_dir: &Path) -> Result<()> {
 fn script_name_for_event(event: &str) -> &'static str {
     match event {
         "UserPromptSubmit" => "ab-memory-hook",
-        "Stop"             => "ab-session-end-hook",
-        "PreCompact"       => "ab-precompact-hook",
-        _                  => "",
+        "Stop" => "ab-session-end-hook",
+        "PreCompact" => "ab-precompact-hook",
+        _ => "",
     }
 }

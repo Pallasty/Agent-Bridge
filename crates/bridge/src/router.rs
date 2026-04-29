@@ -11,7 +11,9 @@ pub struct Router {
 }
 
 impl Router {
-    pub fn new(hub: Hub) -> Self { Self { hub } }
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
 
     pub async fn dispatch(&self, req: RpcRequest) -> RpcResponse {
         debug!(method = %req.method, id = req.id, "dispatch");
@@ -23,7 +25,10 @@ impl Router {
             "notify.send" => {
                 let evt = build_notify(req.params.unwrap_or(Value::Null));
                 let (delivered, persisted) = self.hub.deliver(&evt).await;
-                RpcResponse::success(req.id, json!({ "delivered": delivered, "persisted": persisted }))
+                RpcResponse::success(
+                    req.id,
+                    json!({ "delivered": delivered, "persisted": persisted }),
+                )
             }
             "notifications.recent" => self.handle_recent(req).await,
             "osc.parse" => self.handle_osc_parse(req).await,
@@ -66,7 +71,13 @@ impl Router {
             Some(s) => s.clone(),
             None => return RpcResponse::fail(req.id, -32004, "no store configured"),
         };
-        let limit = req.params.as_ref().and_then(|p| p.get("limit")).and_then(|v| v.as_u64()).unwrap_or(20).min(1000) as u32;
+        let limit = req
+            .params
+            .as_ref()
+            .and_then(|p| p.get("limit"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .min(1000) as u32;
         match store.recent_notifications(limit).await {
             Ok(rows) => match serde_json::to_value(&rows) {
                 Ok(v) => RpcResponse::success(req.id, json!({ "notifications": v })),
@@ -78,7 +89,12 @@ impl Router {
 
     async fn handle_osc_parse(&self, req: RpcRequest) -> RpcResponse {
         let params = req.params.unwrap_or(Value::Null);
-        let raw = params.get("raw").and_then(|v| v.as_str()).unwrap_or("").as_bytes().to_vec();
+        let raw = params
+            .get("raw")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .as_bytes()
+            .to_vec();
         let mut parser = OscParser::new();
         let events = parser.feed(&raw);
         let mut delivered = 0u32;
@@ -87,18 +103,23 @@ impl Router {
             match e {
                 OscEvent::Notify(evt) => {
                     let (d, _p) = self.hub.deliver(evt).await;
-                    if d > 0 { delivered += 1; }
+                    if d > 0 {
+                        delivered += 1;
+                    }
                 }
                 OscEvent::Malformed { code, reason, .. } => {
                     malformed.push(json!({ "code": code, "reason": reason }));
                 }
             }
         }
-        RpcResponse::success(req.id, json!({
-            "events": events.len(),
-            "delivered": delivered,
-            "malformed": malformed,
-        }))
+        RpcResponse::success(
+            req.id,
+            json!({
+                "events": events.len(),
+                "delivered": delivered,
+                "malformed": malformed,
+            }),
+        )
     }
 
     // -------- terminal --------
@@ -144,7 +165,11 @@ impl Router {
             Some(s) => PaneId::from_raw(s.to_string()),
             None => return RpcResponse::fail(req.id, -32602, "missing 'pane'"),
         };
-        let dir = match params.get("dir").and_then(|v| v.as_str()).unwrap_or("vertical") {
+        let dir = match params
+            .get("dir")
+            .and_then(|v| v.as_str())
+            .unwrap_or("vertical")
+        {
             "horizontal" => SplitDir::Horizontal,
             _ => SplitDir::Vertical,
         };
@@ -161,7 +186,12 @@ impl Router {
             Some(b) => b.clone(),
             None => return RpcResponse::fail(req.id, -32006, "no browser backend configured"),
         };
-        let url = req.params.as_ref().and_then(|p| p.get("url")).and_then(|v| v.as_str()).unwrap_or("");
+        let url = req
+            .params
+            .as_ref()
+            .and_then(|p| p.get("url"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if url.is_empty() {
             return RpcResponse::fail(req.id, -32602, "missing 'url'");
         }
@@ -193,7 +223,12 @@ impl Router {
             Some(b) => b.clone(),
             None => return RpcResponse::fail(req.id, -32006, "no browser backend configured"),
         };
-        let page = match req.params.as_ref().and_then(|p| p.get("page")).and_then(|v| v.as_str()) {
+        let page = match req
+            .params
+            .as_ref()
+            .and_then(|p| p.get("page"))
+            .and_then(|v| v.as_str())
+        {
             Some(s) => PageId::from_raw(s.to_string()),
             None => return RpcResponse::fail(req.id, -32602, "missing 'page'"),
         };
@@ -237,7 +272,10 @@ impl Router {
             Ok(b) => b,
             Err(e) => return RpcResponse::fail(req.id, -32000, format!("browser: {e}")),
         };
-        let path = p.get("path").and_then(|v| v.as_str()).map(|s| s.to_string())
+        let path = p
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
             .unwrap_or_else(|| {
                 std::env::temp_dir()
                     .join(format!("agent-bridge-{page}.png"))
@@ -252,10 +290,29 @@ impl Router {
 }
 
 fn build_notify(params: Value) -> NotifyEvent {
-    let title = params.get("title").and_then(|v| v.as_str()).unwrap_or("agent-bridge").to_string();
-    let body = params.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let severity = params.get("severity").and_then(|v| v.as_str()).and_then(parse_severity).unwrap_or(NotifySeverity::Info);
-    NotifyEvent { source: NotifySource::Manual, severity, title, body, session_id: None, context: Value::Null }
+    let title = params
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("agent-bridge")
+        .to_string();
+    let body = params
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let severity = params
+        .get("severity")
+        .and_then(|v| v.as_str())
+        .and_then(parse_severity)
+        .unwrap_or(NotifySeverity::Info);
+    NotifyEvent {
+        source: NotifySource::Manual,
+        severity,
+        title,
+        body,
+        session_id: None,
+        context: Value::Null,
+    }
 }
 
 fn parse_severity(s: &str) -> Option<NotifySeverity> {

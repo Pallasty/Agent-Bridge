@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub mod sqlite;
-pub use sqlite::{default_db_path, SqliteStore};
+pub use sqlite::{default_db_path, temporal_bonus, weight_for_edge_type, SqliteStore};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredSession {
@@ -67,6 +67,23 @@ pub struct MemoryRecord {
     pub updated_at: i64,
     pub last_accessed_at: i64,
     pub access_count: u64,
+    /// Cognitive importance score (0.0–1.0). Auto-assigned by kind on first
+    /// save (decision:0.8, lesson:0.7, todo:0.6, fact/context:0.5,
+    /// observation:0.3). Decays over time via session_finalize.
+    #[serde(default = "default_importance")]
+    pub importance: f64,
+    /// Lifecycle status: "active" | "archived" | "superseded".
+    /// Archived = decayed below threshold. Superseded = a newer memory
+    /// auto-detected as replacing this one.
+    #[serde(default = "default_status")]
+    pub status: String,
+}
+
+fn default_importance() -> f64 {
+    0.5
+}
+fn default_status() -> String {
+    "active".to_string()
 }
 
 /// A directed edge between two memory records.
@@ -81,7 +98,9 @@ pub struct MemoryEdge {
     pub weight: f64,
 }
 
-fn default_weight() -> f64 { 1.0 }
+fn default_weight() -> f64 {
+    1.0
+}
 
 /// One hit from `memory_search`. Carries a coarse score so callers can
 /// re-rank if needed.
@@ -102,10 +121,15 @@ pub enum MemoryListSort {
     Frequent,
     /// `created_at DESC` — newest first.
     Newest,
+    /// PUCT-inspired cognitive ranking: `importance / (1 + age_days)` DESC.
+    /// High-importance, recently-updated memories surface first.
+    ByImportance,
 }
 
 impl Default for MemoryListSort {
-    fn default() -> Self { Self::Recent }
+    fn default() -> Self {
+        Self::Recent
+    }
 }
 
 /// Compaction policy for `memory_compact`. After v0.7.1, both thresholds
@@ -202,11 +226,8 @@ pub trait StateStore: Send + Sync {
 
     /// List sessions newest-first, capped to `limit` rows. Optional
     /// [`SessionFilter`] narrows the result set.
-    async fn list_sessions(
-        &self,
-        filter: &SessionFilter,
-        limit: u32,
-    ) -> Result<Vec<StoredSession>>;
+    async fn list_sessions(&self, filter: &SessionFilter, limit: u32)
+        -> Result<Vec<StoredSession>>;
 
     /// Update an existing session row with its termination outcome.
     /// Implementations should clamp `stdout`/`stderr` to [`STDIO_CAP`] bytes.
@@ -276,9 +297,54 @@ pub trait StateStore: Send + Sync {
     ) -> Result<()>;
 
     /// Return all edges where `key` is `from_key` or `to_key`.
+    /// Results are ordered by `weight DESC` (highest-weight / most causal first).
     async fn memory_neighbors(&self, key: &str) -> Result<Vec<MemoryEdge>>;
 
+    /// BFS traversal up to `depth` hops from `start_key`.
+    /// Returns `(MemoryEdge, energy)` pairs sorted by descending energy.
+    /// Energy starts at 1.0 and decays with each hop:
+    ///   `energy_next = energy × weight × temporal_bonus(edge_type) × decay_factor`
+    /// where `decay_factor` defaults to 0.7. Edges with energy < `min_energy`
+    /// are pruned. Implements the AiOT GraphMemoryBridge "ignite" pattern.
+    async fn memory_neighbors_bfs(
+        &self,
+        start_key: &str,
+        depth: u8,
+        decay_factor: f64,
+        min_energy: f64,
+    ) -> Result<Vec<(MemoryEdge, f64)>>;
+
     async fn memory_delete(&self, key: &str) -> Result<bool>;
+
+    /// Hybrid search: FTS5 + graph-neighbor expansion fused with Reciprocal Rank Fusion (RRF, k=60).
+    ///
+    /// Algorithm (Hermes issue #346 hybrid search pattern):
+    /// 1. Run FTS5 search → list A (ranked by bm25 + recency + importance).
+    /// 2. For each top-N hit in A, fetch direct graph neighbors.
+    /// 3. Build list B from unique neighbor keys (ranked by edge weight × importance).
+    /// 4. RRF merge: `score(d) = Σ 1/(k + rank_in_list)` across both lists.
+    /// 5. Return top `limit` hits by RRF score, including the `MemoryRecord`.
+    ///
+    /// `k` defaults to 60 (standard RRF constant). `expand_top` controls how many
+    /// FTS5 hits feed into graph expansion (default 10).
+    async fn memory_search_hybrid(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+        k: f64,
+        expand_top: u32,
+    ) -> Result<Vec<MemorySearchHit>>;
+
+    /// Apply importance time-decay: `new_importance = old × 0.5^(days_since_update / half_life)`.
+    /// Memories dropping below `archive_threshold` are marked `status='archived'`
+    /// and excluded from session_bootstrap. Returns the count of archived rows.
+    /// Typical call: `memory_decay_importance(30.0, 0.05)`.
+    async fn memory_decay_importance(
+        &self,
+        half_life_days: f64,
+        archive_threshold: f64,
+    ) -> Result<u64>;
 
     /// Apply [`CompactPolicy`]; returns the keys that were (or would be)
     /// removed. Honours `dry_run`.

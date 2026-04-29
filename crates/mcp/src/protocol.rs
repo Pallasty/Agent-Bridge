@@ -32,14 +32,23 @@ pub struct McpResponse {
 
 impl McpResponse {
     pub fn success(id: Value, result: Value) -> Self {
-        Self { jsonrpc: "2.0", id, result: Some(result), error: None }
+        Self {
+            jsonrpc: "2.0",
+            id,
+            result: Some(result),
+            error: None,
+        }
     }
     pub fn error(id: Value, code: i32, message: impl Into<String>) -> Self {
         Self {
             jsonrpc: "2.0",
             id,
             result: None,
-            error: Some(McpError { code, message: message.into(), data: None }),
+            error: Some(McpError {
+                code,
+                message: message.into(),
+                data: None,
+            }),
         }
     }
 }

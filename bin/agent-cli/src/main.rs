@@ -142,6 +142,30 @@ enum MemoryCmd {
     },
     /// Delete a memory by key.
     Delete { key: String },
+    /// Visualise the memory graph rooted at KEY.
+    ///
+    /// Performs BFS up to DEPTH hops, printing each reachable edge with its
+    /// type, direction (outgoing → / incoming ←), weight, and decayed energy.
+    /// Use this to audit edge quality after `memory_link` calls.
+    ///
+    /// Example:
+    ///   agent-cli memory graph decision_foo --depth 2
+    Graph {
+        /// Root memory key to start traversal from.
+        key: String,
+        /// BFS depth – how many hops to traverse (default 2).
+        #[arg(short, long, default_value_t = 2)]
+        depth: u8,
+        /// Energy decay factor applied at each hop (default 0.7).
+        #[arg(long, default_value_t = 0.7)]
+        decay: f64,
+        /// Minimum energy threshold – prune edges below this (default 0.05).
+        #[arg(long, default_value_t = 0.05)]
+        min_energy: f64,
+        /// Print raw JSON instead of the tree view.
+        #[arg(long)]
+        json: bool,
+    },
     /// Prune low-value memories. With no thresholds, applies the v0.8
     /// healthy default (`min_uses=2 AND older_than_days=90`).
     Compact {
@@ -291,7 +315,11 @@ async fn main() -> Result<()> {
     }
 
     // History has its own renderer; everything else just dumps JSON-RPC response.
-    if let Cmd::History { limit, json: as_json } = cli.cmd {
+    if let Cmd::History {
+        limit,
+        json: as_json,
+    } = cli.cmd
+    {
         let req = RpcRequest::new(1, "notifications.recent", Some(json!({ "limit": limit })));
         let resp = call(&socket, req).await?;
         if !resp.ok {
@@ -309,27 +337,30 @@ async fn main() -> Result<()> {
     let (method, params) = match cli.cmd {
         Cmd::Ping => ("system.ping", None),
         Cmd::Capabilities => ("system.capabilities", None),
-        Cmd::Notify { title, body, severity } => (
+        Cmd::Notify {
+            title,
+            body,
+            severity,
+        } => (
             "notify.send",
             Some(json!({ "title": title, "body": body, "severity": severity })),
         ),
-        Cmd::Osc { cmd: OscCmd::Parse { raw } } => (
-            "osc.parse",
-            Some(json!({ "raw": decode_escapes(&raw) })),
-        ),
-        Cmd::Osc { cmd: OscCmd::Demo { code } } => (
-            "osc.parse",
-            Some(json!({ "raw": demo_payload(&code) })),
-        ),
+        Cmd::Osc {
+            cmd: OscCmd::Parse { raw },
+        } => ("osc.parse", Some(json!({ "raw": decode_escapes(&raw) }))),
+        Cmd::Osc {
+            cmd: OscCmd::Demo { code },
+        } => ("osc.parse", Some(json!({ "raw": demo_payload(&code) }))),
         Cmd::Term { cmd: TermCmd::List } => ("terminal.list", None),
-        Cmd::Term { cmd: TermCmd::SendKeys { pane, keys } } => (
+        Cmd::Term {
+            cmd: TermCmd::SendKeys { pane, keys },
+        } => (
             "terminal.send_keys",
             Some(json!({ "pane": pane, "keys": keys })),
         ),
-        Cmd::Term { cmd: TermCmd::Split { pane, dir } } => (
-            "terminal.split",
-            Some(json!({ "pane": pane, "dir": dir })),
-        ),
+        Cmd::Term {
+            cmd: TermCmd::Split { pane, dir },
+        } => ("terminal.split", Some(json!({ "pane": pane, "dir": dir }))),
         Cmd::History { .. } | Cmd::Memory { .. } | Cmd::Evolve { .. } => unreachable!(),
     };
 
@@ -360,13 +391,19 @@ fn render_history(result: &Value) {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
-    println!("{:>6}  {:<10}  {:<10}  {}", "AGE", "SEVERITY", "SOURCE", "TITLE — BODY");
+    println!(
+        "{:>6}  {:<10}  {:<10}  {}",
+        "AGE", "SEVERITY", "SOURCE", "TITLE — BODY"
+    );
     println!("{}", "-".repeat(78));
     for row in rows {
         let ts = row.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
         let age = format_age(now - ts);
         let event = row.get("event").cloned().unwrap_or(Value::Null);
-        let severity = event.get("severity").and_then(|v| v.as_str()).unwrap_or("?");
+        let severity = event
+            .get("severity")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
         let source = event.get("source").and_then(|v| v.as_str()).unwrap_or("?");
         let title = event.get("title").and_then(|v| v.as_str()).unwrap_or("");
         let body = event.get("body").and_then(|v| v.as_str()).unwrap_or("");
@@ -375,7 +412,13 @@ fn render_history(result: &Value) {
         } else {
             format!("{title} — {body}")
         };
-        println!("{:>6}  {:<10}  {:<10}  {}", age, severity, source, truncate(&line, 50));
+        println!(
+            "{:>6}  {:<10}  {:<10}  {}",
+            age,
+            severity,
+            source,
+            truncate(&line, 50)
+        );
     }
 }
 
@@ -417,8 +460,12 @@ fn decode_escapes(s: &str) -> String {
                 }
                 out.push('\\');
                 out.push('x');
-                if let Some(a) = h1 { out.push(a); }
-                if let Some(b) = h2 { out.push(b); }
+                if let Some(a) = h1 {
+                    out.push(a);
+                }
+                if let Some(b) = h2 {
+                    out.push(b);
+                }
             }
             Some('a') => out.push('\x07'),
             Some('n') => out.push('\n'),
@@ -458,15 +505,18 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 fn now_secs() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 fn parse_sort(s: &str) -> Result<MemoryListSort> {
     match s {
-        "recent"   => Ok(MemoryListSort::Recent),
+        "recent" => Ok(MemoryListSort::Recent),
         "frequent" => Ok(MemoryListSort::Frequent),
-        "newest"   => Ok(MemoryListSort::Newest),
-        other      => bail!("unknown sort '{other}' (expected: recent | frequent | newest)"),
+        "newest" => Ok(MemoryListSort::Newest),
+        other => bail!("unknown sort '{other}' (expected: recent | frequent | newest)"),
     }
 }
 
@@ -487,7 +537,13 @@ fn find_repo_root(hint: Option<PathBuf>) -> Result<PathBuf> {
 
 fn slugify(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .split('-')
         .filter(|p| !p.is_empty())
@@ -504,7 +560,12 @@ async fn run_evolve(
     cmd: EvolveCmd,
 ) -> Result<()> {
     match cmd {
-        EvolveCmd::Propose { issue, fix, patch, dry_run } => {
+        EvolveCmd::Propose {
+            issue,
+            fix,
+            patch,
+            dry_run,
+        } => {
             let repo = find_repo_root(repo_hint)?;
 
             // Generate branch / worktree names.
@@ -532,10 +593,15 @@ async fn run_evolve(
 
             // Create the worktree branch.
             let status = std::process::Command::new("git")
-                .args(["-C", repo.to_str().unwrap_or("."),
-                       "worktree", "add",
-                       wt_path.to_str().unwrap_or("."),
-                       "-b", &branch])
+                .args([
+                    "-C",
+                    repo.to_str().unwrap_or("."),
+                    "worktree",
+                    "add",
+                    wt_path.to_str().unwrap_or("."),
+                    "-b",
+                    &branch,
+                ])
                 .status()
                 .context("git worktree add")?;
             if !status.success() {
@@ -547,9 +613,13 @@ async fn run_evolve(
                 let patch_abs = std::fs::canonicalize(patch_path)
                     .with_context(|| format!("patch file not found: {}", patch_path.display()))?;
                 let apply = std::process::Command::new("git")
-                    .args(["-C", wt_path.to_str().unwrap_or("."),
-                           "apply", "--index",
-                           patch_abs.to_str().unwrap_or(".")])
+                    .args([
+                        "-C",
+                        wt_path.to_str().unwrap_or("."),
+                        "apply",
+                        "--index",
+                        patch_abs.to_str().unwrap_or("."),
+                    ])
                     .status()
                     .context("git apply")?;
                 if !apply.success() {
@@ -583,6 +653,8 @@ async fn run_evolve(
                 updated_at: now_s,
                 last_accessed_at: now_s,
                 access_count: 0,
+                importance: 0.5,
+                status: "active".to_string(),
             };
             store.memory_save(&rec).await?;
 
@@ -594,7 +666,16 @@ async fn run_evolve(
             println!("  # when ready for review, notify user to merge or push");
         }
 
-        EvolveCmd::Fix { key, issue, message, file, old, new, patch, dry_run } => {
+        EvolveCmd::Fix {
+            key,
+            issue,
+            message,
+            file,
+            old,
+            new,
+            patch,
+            dry_run,
+        } => {
             let repo = find_repo_root(repo_hint)?;
             let store: Arc<dyn StateStore> = Arc::new(
                 SqliteStore::open(db_path)
@@ -604,24 +685,34 @@ async fn run_evolve(
 
             // Resolve or create the proposal record.
             let (branch, wt_path, mem_key, issue_text) = if let Some(k) = &key {
-                let rec = store.memory_get(k).await?
+                let rec = store
+                    .memory_get(k)
+                    .await?
                     .with_context(|| format!("no evolution proposal found for key '{k}'"))?;
                 // Extract branch from content.
-                let branch = rec.content.lines()
+                let branch = rec
+                    .content
+                    .lines()
                     .find(|l| l.starts_with("**Branch**:"))
                     .and_then(|l| l.strip_prefix("**Branch**: "))
                     .map(str::to_string)
                     .with_context(|| "proposal record missing **Branch** field")?;
                 let wt_name = branch.strip_prefix("evolution/").unwrap_or(&branch);
-                let wt = repo.parent().unwrap_or(&repo).join(format!("agent-bridge-evolve-{wt_name}"));
-                let issue_text = rec.content.lines()
+                let wt = repo
+                    .parent()
+                    .unwrap_or(&repo)
+                    .join(format!("agent-bridge-evolve-{wt_name}"));
+                let issue_text = rec
+                    .content
+                    .lines()
                     .find(|l| l.starts_with("**Issue**:"))
                     .and_then(|l| l.strip_prefix("**Issue**: "))
                     .unwrap_or(&rec.key)
                     .to_string();
                 (branch, wt, k.clone(), issue_text)
             } else {
-                let iss = issue.as_deref()
+                let iss = issue
+                    .as_deref()
                     .context("--issue required when --key not given")?;
                 let now = chrono_date();
                 let slug = slugify(iss);
@@ -669,7 +760,13 @@ async fn run_evolve(
                         }
                     };
                     println!("\npatch preview ({} bytes):", patch_bytes.len());
-                    println!("{}", String::from_utf8_lossy(&patch_bytes).chars().take(800).collect::<String>());
+                    println!(
+                        "{}",
+                        String::from_utf8_lossy(&patch_bytes)
+                            .chars()
+                            .take(800)
+                            .collect::<String>()
+                    );
                 }
                 println!("\n(dry-run — nothing created)");
                 return Ok(());
@@ -678,10 +775,15 @@ async fn run_evolve(
             // Create worktree if it doesn't exist yet.
             if !wt_path.exists() {
                 let status = std::process::Command::new("git")
-                    .args(["-C", repo.to_str().unwrap_or("."),
-                           "worktree", "add",
-                           wt_path.to_str().unwrap_or("."),
-                           "-b", &branch])
+                    .args([
+                        "-C",
+                        repo.to_str().unwrap_or("."),
+                        "worktree",
+                        "add",
+                        wt_path.to_str().unwrap_or("."),
+                        "-b",
+                        &branch,
+                    ])
                     .status()
                     .context("git worktree add")?;
                 if !status.success() {
@@ -702,16 +804,25 @@ async fn run_evolve(
                     bail!("--old string not found in {}", rel_path.display());
                 }
                 if count > 1 {
-                    bail!("--old string appears {count} times in {} — must be unique", rel_path.display());
+                    bail!(
+                        "--old string appears {count} times in {} — must be unique",
+                        rel_path.display()
+                    );
                 }
                 let result = src.replacen(old_str.as_str(), &new_str, 1);
                 std::fs::write(&abs_path, result)?;
                 let add = std::process::Command::new("git")
-                    .args(["-C", wt_path.to_str().unwrap_or("."),
-                           "add", rel_path.to_str().unwrap_or(".")])
+                    .args([
+                        "-C",
+                        wt_path.to_str().unwrap_or("."),
+                        "add",
+                        rel_path.to_str().unwrap_or("."),
+                    ])
                     .status()
                     .context("git add")?;
-                if !add.success() { bail!("git add failed"); }
+                if !add.success() {
+                    bail!("git add failed");
+                }
                 println!("edit applied: {}", rel_path.display());
             } else {
                 // Patch mode: read diff from file or stdin, apply via git apply.
@@ -731,9 +842,13 @@ async fn run_evolve(
                 let tmp = wt_path.join(".evolve_patch.diff");
                 std::fs::write(&tmp, &patch_bytes)?;
                 let apply = std::process::Command::new("git")
-                    .args(["-C", wt_path.to_str().unwrap_or("."),
-                           "apply", "--index",
-                           tmp.to_str().unwrap_or(".")])
+                    .args([
+                        "-C",
+                        wt_path.to_str().unwrap_or("."),
+                        "apply",
+                        "--index",
+                        tmp.to_str().unwrap_or("."),
+                    ])
                     .status()
                     .context("git apply")?;
                 std::fs::remove_file(&tmp).ok();
@@ -744,8 +859,13 @@ async fn run_evolve(
 
             // Commit.
             let commit = std::process::Command::new("git")
-                .args(["-C", wt_path.to_str().unwrap_or("."),
-                       "commit", "-m", &commit_msg])
+                .args([
+                    "-C",
+                    wt_path.to_str().unwrap_or("."),
+                    "commit",
+                    "-m",
+                    &commit_msg,
+                ])
                 .status()
                 .context("git commit")?;
             if !commit.success() {
@@ -755,7 +875,10 @@ async fn run_evolve(
             // Update memory record to reflect fix applied.
             let now_s = now_secs();
             if let Some(mut rec) = store.memory_get(&mem_key).await? {
-                rec.content.push_str(&format!("\n\n**Fixed**: patch applied and committed ({})", chrono_date()));
+                rec.content.push_str(&format!(
+                    "\n\n**Fixed**: patch applied and committed ({})",
+                    chrono_date()
+                ));
                 rec.updated_at = now_s;
                 store.memory_save(&rec).await?;
             } else {
@@ -775,6 +898,8 @@ async fn run_evolve(
                     updated_at: now_s,
                     last_accessed_at: now_s,
                     access_count: 0,
+                    importance: 0.5,
+                    status: "active".to_string(),
                 };
                 store.memory_save(&rec).await?;
             }
@@ -793,7 +918,9 @@ async fn run_evolve(
                     .await
                     .with_context(|| format!("open SQLite store at {db_path:?}"))?,
             );
-            let mut rec = store.memory_get(&key).await?
+            let mut rec = store
+                .memory_get(&key)
+                .await?
                 .with_context(|| format!("no evolution proposal found for key '{key}'"))?;
 
             // Replace tag "open" → "closed", append resolution note.
@@ -819,7 +946,9 @@ async fn run_evolve(
                     .with_context(|| format!("open SQLite store at {db_path:?}"))?,
             );
             // Show open proposals only (kind=evolution); closed ones are kind=evolution_closed.
-            let rows = store.list_memories(Some("evolution"), MemoryListSort::Newest, 50).await?;
+            let rows = store
+                .list_memories(Some("evolution"), MemoryListSort::Newest, 50)
+                .await?;
             if as_json {
                 println!("{}", serde_json::to_string_pretty(&rows)?);
             } else if rows.is_empty() {
@@ -830,12 +959,18 @@ async fn run_evolve(
                 println!("{}", "-".repeat(92));
                 for r in &rows {
                     let age = format_age(now - r.created_at);
-                    let issue = r.content
+                    let issue = r
+                        .content
                         .lines()
                         .find(|l| l.starts_with("**Issue**"))
                         .and_then(|l| l.strip_prefix("**Issue**: "))
                         .unwrap_or(&r.content);
-                    println!("{:>4}  {:<44}  {}", age, truncate(&r.key, 44), truncate(issue, 40));
+                    println!(
+                        "{:>4}  {:<44}  {}",
+                        age,
+                        truncate(&r.key, 44),
+                        truncate(issue, 40)
+                    );
                 }
             }
         }
@@ -864,9 +999,9 @@ fn days_to_ymd(days: u64) -> (u32, u32, u32) {
     let d = (4 * c + 3) / 1461;
     let e = c - (1461 * d) / 4;
     let m = (5 * e + 2) / 153;
-    let day   = (e - (153 * m + 2) / 5 + 1) as u32;
+    let day = (e - (153 * m + 2) / 5 + 1) as u32;
     let month = (m + 3 - 12 * (m / 10)) as u32;
-    let year  = (100 * b + d - 4800 + m / 10) as u32;
+    let year = (100 * b + d - 4800 + m / 10) as u32;
     (year, month, day)
 }
 
@@ -878,7 +1013,12 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
     );
 
     match cmd {
-        MemoryCmd::List { kind, sort, limit, json: as_json } => {
+        MemoryCmd::List {
+            kind,
+            sort,
+            limit,
+            json: as_json,
+        } => {
             let sort = parse_sort(&sort)?;
             let rows = store.list_memories(kind.as_deref(), sort, limit).await?;
             if as_json {
@@ -887,29 +1027,35 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
                 render_memory_list(&rows);
             }
         }
-        MemoryCmd::Get { key, json: as_json } => {
-            match store.memory_get(&key).await? {
-                None => {
-                    eprintln!("(no such key: {key})");
-                    std::process::exit(1);
-                }
-                Some(rec) => {
-                    if as_json {
-                        println!("{}", serde_json::to_string_pretty(&rec)?);
-                    } else {
-                        render_memory_detail(&rec);
-                    }
+        MemoryCmd::Get { key, json: as_json } => match store.memory_get(&key).await? {
+            None => {
+                eprintln!("(no such key: {key})");
+                std::process::exit(1);
+            }
+            Some(rec) => {
+                if as_json {
+                    println!("{}", serde_json::to_string_pretty(&rec)?);
+                } else {
+                    render_memory_detail(&rec);
                 }
             }
-        }
-        MemoryCmd::Search { query, tags, limit, json: as_json } => {
+        },
+        MemoryCmd::Search {
+            query,
+            tags,
+            limit,
+            json: as_json,
+        } => {
             let hits = store.memory_search(&query, &tags, limit).await?;
             if as_json {
                 println!("{}", serde_json::to_string_pretty(&hits)?);
             } else if hits.is_empty() {
                 println!("(no hits)");
             } else {
-                println!("{:>5}  {:<14}  {:<40}  {}", "SCORE", "KIND", "KEY", "PREVIEW");
+                println!(
+                    "{:>5}  {:<14}  {:<40}  {}",
+                    "SCORE", "KIND", "KEY", "PREVIEW"
+                );
                 println!("{}", "-".repeat(90));
                 for h in hits {
                     println!(
@@ -922,7 +1068,14 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
                 }
             }
         }
-        MemoryCmd::Save { key, kind, content, tags, related, scope } => {
+        MemoryCmd::Save {
+            key,
+            kind,
+            content,
+            tags,
+            related,
+            scope,
+        } => {
             let body = match content {
                 Some(c) => c,
                 None => {
@@ -946,6 +1099,8 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
                 updated_at: now,
                 last_accessed_at: now,
                 access_count: 0,
+                importance: 0.5,
+                status: "active".to_string(),
             };
             store.memory_save(&rec).await?;
             println!("✓ saved {key}");
@@ -959,7 +1114,125 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
                 std::process::exit(1);
             }
         }
-        MemoryCmd::Compact { min_uses, older_than_days, dry_run } => {
+        MemoryCmd::Graph {
+            key,
+            depth,
+            decay,
+            min_energy,
+            json: as_json,
+        } => {
+            let root = match store.memory_get(&key).await? {
+                None => {
+                    eprintln!("(no such key: {key})");
+                    std::process::exit(1);
+                }
+                Some(r) => r,
+            };
+
+            if as_json {
+                // JSON mode: emit root + edges array
+                let edges = store
+                    .memory_neighbors_bfs(&key, depth, decay, min_energy)
+                    .await?;
+                let out = serde_json::json!({
+                    "root": root,
+                    "edges": edges.iter().map(|(e, energy)| serde_json::json!({
+                        "from_key": e.from_key,
+                        "to_key": e.to_key,
+                        "edge_type": e.edge_type,
+                        "weight": e.weight,
+                        "energy": energy,
+                    })).collect::<Vec<_>>(),
+                });
+                println!("{}", serde_json::to_string_pretty(&out)?);
+            } else {
+                // Human-readable tree view
+                let imp = root.importance;
+                let stars = importance_bar(imp);
+                println!(
+                    "● {:<44} [{:<12}] {stars} {:.2}  {}",
+                    root.key, root.kind, imp, root.status
+                );
+
+                if depth == 0 {
+                    return Ok(());
+                }
+
+                let edges = store
+                    .memory_neighbors_bfs(&key, depth, decay, min_energy)
+                    .await?;
+
+                // depth=1 → use memory_neighbors (all direct edges, no energy filter)
+                // depth>1 → use BFS with energy decay
+                struct EdgeRow {
+                    from_key: String,
+                    to_key: String,
+                    edge_type: String,
+                    weight: f64,
+                    energy: f64,
+                }
+                let display_edges: Vec<EdgeRow> = if depth == 1 {
+                    store
+                        .memory_neighbors(&key)
+                        .await?
+                        .into_iter()
+                        .map(|e| {
+                            let w = e.weight;
+                            EdgeRow {
+                                from_key: e.from_key,
+                                to_key: e.to_key,
+                                edge_type: e.edge_type,
+                                weight: w,
+                                energy: w, // direct hop: energy == weight
+                            }
+                        })
+                        .collect()
+                } else {
+                    edges
+                        .into_iter()
+                        .map(|(e, energy)| EdgeRow {
+                            from_key: e.from_key,
+                            to_key: e.to_key,
+                            edge_type: e.edge_type,
+                            weight: e.weight,
+                            energy,
+                        })
+                        .collect()
+                };
+
+                if display_edges.is_empty() {
+                    println!("  (no edges)");
+                } else {
+                    println!(
+                        "  {:<8}  {:<5}  {:<30}  {:<16}  {}",
+                        "ENERGY", "W", "FROM", "EDGE_TYPE", "TO"
+                    );
+                    println!("  {}", "─".repeat(84));
+                    for e in &display_edges {
+                        let from_disp = if e.from_key == key {
+                            format!("●{}", truncate(&e.from_key, 29))
+                        } else {
+                            truncate(&e.from_key, 30)
+                        };
+                        println!(
+                            "  {:<8.3}  {:<5.2}  {:<30}  {:<16}  {}",
+                            e.energy, e.weight, from_disp,
+                            truncate(&e.edge_type, 16),
+                            &e.to_key,
+                        );
+                    }
+                    println!(
+                        "\n  {} edge(s), depth={depth}, decay={decay}",
+                        display_edges.len()
+                    );
+                }
+            }
+        }
+        MemoryCmd::Compact {
+            min_uses,
+            older_than_days,
+            dry_run,
+        } => {
             let policy_in = CompactPolicy {
                 min_uses,
                 older_than_secs: older_than_days.map(|d| d * 86_400),
@@ -975,7 +1248,11 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
             let applied_defaults = policy_in.is_unset();
             let keys = store.memory_compact(policy).await?;
             let label = if dry_run { "would remove" } else { "removed" };
-            let suffix = if applied_defaults { " (healthy default policy)" } else { "" };
+            let suffix = if applied_defaults {
+                " (healthy default policy)"
+            } else {
+                ""
+            };
             println!("{label} {} memories{suffix}", keys.len());
             for k in keys {
                 println!("  - {k}");
@@ -992,16 +1269,18 @@ fn render_memory_list(rows: &[MemoryRecord]) {
     }
     let now = now_secs();
     println!(
-        "{:>4}  {:>4}  {:<14}  {:<40}  {}",
-        "AGE", "USES", "KIND", "KEY", "PREVIEW"
+        "{:>4}  {:>4}  {:<5}  {:<14}  {:<40}  {}",
+        "AGE", "USES", "IMP", "KIND", "KEY", "PREVIEW"
     );
-    println!("{}", "-".repeat(90));
+    println!("{}", "-".repeat(96));
     for r in rows {
         let age = format_age(now - r.last_accessed_at);
+        let imp = format!("{:.2}", r.importance);
         println!(
-            "{:>4}  {:>4}  {:<14}  {:<40}  {}",
+            "{:>4}  {:>4}  {:<5}  {:<14}  {:<40}  {}",
             age,
             r.access_count,
+            imp,
             truncate(&r.kind, 14),
             truncate(&r.key, 40),
             truncate(&r.content.replace('\n', " "), 30),
@@ -1009,22 +1288,32 @@ fn render_memory_list(rows: &[MemoryRecord]) {
     }
 }
 
+/// Returns a 5-char visual bar for importance score, e.g. "████░" for 0.8.
+fn importance_bar(imp: f64) -> String {
+    let filled = (imp * 5.0).round() as usize;
+    let filled = filled.min(5);
+    let empty = 5 - filled;
+    format!("{}{}", "█".repeat(filled), "░".repeat(empty))
+}
+
 fn render_memory_detail(r: &MemoryRecord) {
-    println!("key:       {}", r.key);
-    println!("kind:      {}", r.kind);
+    println!("key:        {}", r.key);
+    println!("kind:       {}", r.kind);
+    println!("importance: {} {:.2}", importance_bar(r.importance), r.importance);
+    println!("status:     {}", r.status);
     if let Some(s) = &r.scope {
-        println!("scope:     {s}");
+        println!("scope:      {s}");
     }
     if !r.tags.is_empty() {
-        println!("tags:      {}", r.tags.join(", "));
+        println!("tags:       {}", r.tags.join(", "));
     }
     if !r.related_keys.is_empty() {
-        println!("related:   {}", r.related_keys.join(", "));
+        println!("related:    {}", r.related_keys.join(", "));
     }
-    println!("uses:      {}", r.access_count);
-    println!("created:   {}", r.created_at);
-    println!("updated:   {}", r.updated_at);
-    println!("accessed:  {}", r.last_accessed_at);
+    println!("uses:       {}", r.access_count);
+    println!("created:    {}", r.created_at);
+    println!("updated:    {}", r.updated_at);
+    println!("accessed:   {}", r.last_accessed_at);
     println!("---");
     println!("{}", r.content);
 }

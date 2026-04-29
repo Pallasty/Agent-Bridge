@@ -108,7 +108,10 @@ impl ChromiumCdpBackend {
                 false
             }
             Err(_) => {
-                debug!(timeout_ms = HEALTH_TIMEOUT.as_millis(), "browser.version() timed out");
+                debug!(
+                    timeout_ms = HEALTH_TIMEOUT.as_millis(),
+                    "browser.version() timed out"
+                );
                 false
             }
         }
@@ -132,8 +135,8 @@ impl ChromiumCdpBackend {
         if let Ok(path) = std::env::var("AGENT_BRIDGE_CHROME") {
             cfg = cfg.chrome_executable(path);
         }
-        let user_data = std::env::temp_dir()
-            .join(format!("agent-bridge-chrome-{}", std::process::id()));
+        let user_data =
+            std::env::temp_dir().join(format!("agent-bridge-chrome-{}", std::process::id()));
         cfg = cfg.user_data_dir(user_data);
 
         let cfg = cfg
@@ -278,8 +281,14 @@ fn convert(
         .as_ref()
         .and_then(|v| ax_value_to_string(&v.value))
         .unwrap_or_else(|| "unknown".into());
-    let name = node.name.as_ref().and_then(|v| ax_value_to_string(&v.value));
-    let value = node.value.as_ref().and_then(|v| ax_value_to_string(&v.value));
+    let name = node
+        .name
+        .as_ref()
+        .and_then(|v| ax_value_to_string(&v.value));
+    let value = node
+        .value
+        .as_ref()
+        .and_then(|v| ax_value_to_string(&v.value));
     let children = node
         .child_ids
         .as_ref()
@@ -290,7 +299,12 @@ fn convert(
         })
         .unwrap_or_default();
 
-    A11yNode { role, name, value, children }
+    A11yNode {
+        role,
+        name,
+        value,
+        children,
+    }
 }
 
 /// `AxValue.value` is `Option<serde_json::Value>` — flatten it down to a

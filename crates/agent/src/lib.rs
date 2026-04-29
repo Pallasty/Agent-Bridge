@@ -60,7 +60,9 @@ pub trait AgentRuntime: Send + Sync {
     /// still tracking it. Used by `agent_session_list` to surface a
     /// process-liveness probe (v0.8). Default impl returns `None` so runtimes
     /// without process tracking are still trait-compatible.
-    fn pid_for(&self, _session: &SessionId) -> Option<u32> { None }
+    fn pid_for(&self, _session: &SessionId) -> Option<u32> {
+        None
+    }
 
     async fn capabilities(&self) -> AgentCapabilities;
 }

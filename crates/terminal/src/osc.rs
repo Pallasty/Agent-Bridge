@@ -32,16 +32,20 @@ pub enum OscEvent {
     Notify(NotifyEvent),
     /// OSC 99 payload that wasn't valid JSON; surfaces the raw body so the
     /// caller can decide whether to drop or log.
-    Malformed { code: u32, raw: String, reason: String },
+    Malformed {
+        code: u32,
+        raw: String,
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
     Ground,
-    Esc,           // saw ESC
-    OscIntro,      // saw ESC ]
-    OscBody,       // accumulating body
-    OscBodyEsc,    // inside body, saw ESC, waiting for '\\'
+    Esc,        // saw ESC
+    OscIntro,   // saw ESC ]
+    OscBody,    // accumulating body
+    OscBodyEsc, // inside body, saw ESC, waiting for '\\'
 }
 
 pub struct OscParser {
@@ -284,8 +288,7 @@ mod tests {
     #[test]
     fn osc99_json_payload_with_severity() {
         let mut p = OscParser::new();
-        let payload =
-            br#"\x1b]99;{"title":"Build","body":"failed","severity":"error"}\x07"#;
+        let payload = br#"\x1b]99;{"title":"Build","body":"failed","severity":"error"}\x07"#;
         // Replace literal escapes for the bytes parser:
         let mut bytes = Vec::new();
         for chunk in payload.split(|&b| b == b'\\') {

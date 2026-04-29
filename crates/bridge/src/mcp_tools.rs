@@ -23,20 +23,27 @@ use crate::hub::Hub;
 //                                   notify
 // ===========================================================================
 
-pub struct NotifyTool { hub: Hub }
-impl NotifyTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct NotifyTool {
+    hub: Hub,
+}
+impl NotifyTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 
 #[async_trait]
 impl McpTool for NotifyTool {
-    fn name(&self) -> &'static str { "notify" }
+    fn name(&self) -> &'static str {
+        "notify"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Send a desktop notification. Persists to the bridge's history \
+            description: "Send a desktop notification. Persists to the bridge's history \
                  store and fans out to every registered Notifier (today: D-Bus). \
                  Use this when the agent needs to ping the human asynchronously."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -55,14 +62,28 @@ impl McpTool for NotifyTool {
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let evt = NotifyEvent {
             source: NotifySource::Mcp,
-            severity: args.get("severity").and_then(|v| v.as_str()).and_then(parse_severity).unwrap_or(NotifySeverity::Info),
-            title: args.get("title").and_then(|v| v.as_str()).unwrap_or("agent-bridge").into(),
-            body: args.get("body").and_then(|v| v.as_str()).unwrap_or("").into(),
+            severity: args
+                .get("severity")
+                .and_then(|v| v.as_str())
+                .and_then(parse_severity)
+                .unwrap_or(NotifySeverity::Info),
+            title: args
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("agent-bridge")
+                .into(),
+            body: args
+                .get("body")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .into(),
             session_id: None,
             context: Value::Null,
         };
         let (delivered, persisted) = self.hub.deliver(&evt).await;
-        Ok(ToolResult::text(format!("delivered to {delivered} notifier(s); persisted={persisted}")))
+        Ok(ToolResult::text(format!(
+            "delivered to {delivered} notifier(s); persisted={persisted}"
+        )))
     }
 }
 
@@ -70,20 +91,27 @@ impl McpTool for NotifyTool {
 //                            notifications_recent
 // ===========================================================================
 
-pub struct NotificationsRecentTool { hub: Hub }
-impl NotificationsRecentTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct NotificationsRecentTool {
+    hub: Hub,
+}
+impl NotificationsRecentTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 
 #[async_trait]
 impl McpTool for NotificationsRecentTool {
-    fn name(&self) -> &'static str { "notifications_recent" }
+    fn name(&self) -> &'static str {
+        "notifications_recent"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Return the most-recent N notifications from the bridge's persistent \
+            description: "Return the most-recent N notifications from the bridge's persistent \
                  history (default 20, max 1000). Useful for the agent to see what it \
                  already told the human and avoid duplicate pings."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -97,9 +125,15 @@ impl McpTool for NotificationsRecentTool {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
         };
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20).min(1000) as u32;
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .min(1000) as u32;
         let rows = store.recent_notifications(limit).await?;
-        Ok(ToolResult::json_text(&serde_json::to_value(rows).unwrap_or(Value::Null)))
+        Ok(ToolResult::json_text(
+            &serde_json::to_value(rows).unwrap_or(Value::Null),
+        ))
     }
 }
 
@@ -107,21 +141,28 @@ impl McpTool for NotificationsRecentTool {
 //                                osc_parse
 // ===========================================================================
 
-pub struct OscParseTool { hub: Hub }
-impl OscParseTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct OscParseTool {
+    hub: Hub,
+}
+impl OscParseTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 
 #[async_trait]
 impl McpTool for OscParseTool {
-    fn name(&self) -> &'static str { "osc_parse" }
+    fn name(&self) -> &'static str {
+        "osc_parse"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Parse a raw byte sequence for OSC 9 / 99 / 777 notification escape \
+            description: "Parse a raw byte sequence for OSC 9 / 99 / 777 notification escape \
                  codes and dispatch every successfully-parsed event through the standard \
                  notification pipeline (persist + fan-out). Pass real ESC characters in \
                  'raw'; clients can use JSON's \\u001b escape if needed."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -132,7 +173,12 @@ impl McpTool for OscParseTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let raw = args.get("raw").and_then(|v| v.as_str()).unwrap_or("").as_bytes().to_vec();
+        let raw = args
+            .get("raw")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .as_bytes()
+            .to_vec();
         let mut parser = OscParser::new();
         let events = parser.feed(&raw);
         let mut delivered = 0u32;
@@ -141,7 +187,9 @@ impl McpTool for OscParseTool {
             match e {
                 OscEvent::Notify(evt) => {
                     let (d, _p) = self.hub.deliver(evt).await;
-                    if d > 0 { delivered += 1; }
+                    if d > 0 {
+                        delivered += 1;
+                    }
                 }
                 OscEvent::Malformed { code, reason, .. } => {
                     malformed.push(json!({ "code": code, "reason": reason }));
@@ -160,19 +208,26 @@ impl McpTool for OscParseTool {
 //                              terminal tools
 // ===========================================================================
 
-pub struct TerminalListTool { hub: Hub }
-impl TerminalListTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct TerminalListTool {
+    hub: Hub,
+}
+impl TerminalListTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for TerminalListTool {
-    fn name(&self) -> &'static str { "terminal_list" }
+    fn name(&self) -> &'static str {
+        "terminal_list"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List terminal panes from the active terminal-multiplexer backend \
+            description: "List terminal panes from the active terminal-multiplexer backend \
                  (today: WezTerm). Returns each pane's id, title, cwd, and command. \
                  Useful for the agent to discover where the human is working."
-                    .into(),
+                .into(),
             input_schema: json!({ "type": "object", "properties": {} }),
         }
     }
@@ -182,25 +237,34 @@ impl McpTool for TerminalListTool {
             None => return Ok(ToolResult::error("no terminal backend configured")),
         };
         match term.list_panes().await {
-            Ok(panes) => Ok(ToolResult::json_text(&serde_json::to_value(panes).unwrap_or(Value::Null))),
+            Ok(panes) => Ok(ToolResult::json_text(
+                &serde_json::to_value(panes).unwrap_or(Value::Null),
+            )),
             Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
         }
     }
 }
 
-pub struct TerminalSendKeysTool { hub: Hub }
-impl TerminalSendKeysTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct TerminalSendKeysTool {
+    hub: Hub,
+}
+impl TerminalSendKeysTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for TerminalSendKeysTool {
-    fn name(&self) -> &'static str { "terminal_send_keys" }
+    fn name(&self) -> &'static str {
+        "terminal_send_keys"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Type the given text into the specified terminal pane (e.g. send a \
+            description: "Type the given text into the specified terminal pane (e.g. send a \
                  command to a sibling agent's session). Does NOT append a newline — \
                  include '\\n' explicitly if you want the command executed."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -222,24 +286,34 @@ impl McpTool for TerminalSendKeysTool {
         };
         let keys = args.get("keys").and_then(|v| v.as_str()).unwrap_or("");
         match term.send_keys(&pane, keys).await {
-            Ok(()) => Ok(ToolResult::text(format!("sent {} bytes to {pane}", keys.len()))),
+            Ok(()) => Ok(ToolResult::text(format!(
+                "sent {} bytes to {pane}",
+                keys.len()
+            ))),
             Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
         }
     }
 }
 
-pub struct TerminalSplitTool { hub: Hub }
-impl TerminalSplitTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct TerminalSplitTool {
+    hub: Hub,
+}
+impl TerminalSplitTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for TerminalSplitTool {
-    fn name(&self) -> &'static str { "terminal_split" }
+    fn name(&self) -> &'static str {
+        "terminal_split"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Split a terminal pane horizontally or vertically and return the new \
+            description: "Split a terminal pane horizontally or vertically and return the new \
                  pane's id."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -259,7 +333,11 @@ impl McpTool for TerminalSplitTool {
             Some(s) => PaneId::from_raw(s.to_string()),
             None => return Ok(ToolResult::error("missing 'pane'")),
         };
-        let dir = match args.get("dir").and_then(|v| v.as_str()).unwrap_or("vertical") {
+        let dir = match args
+            .get("dir")
+            .and_then(|v| v.as_str())
+            .unwrap_or("vertical")
+        {
             "horizontal" => SplitDir::Horizontal,
             _ => SplitDir::Vertical,
         };
@@ -274,19 +352,26 @@ impl McpTool for TerminalSplitTool {
 //                              browser tools
 // ===========================================================================
 
-pub struct BrowserNavigateTool { hub: Hub }
-impl BrowserNavigateTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct BrowserNavigateTool {
+    hub: Hub,
+}
+impl BrowserNavigateTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for BrowserNavigateTool {
-    fn name(&self) -> &'static str { "browser_navigate" }
+    fn name(&self) -> &'static str {
+        "browser_navigate"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Open a URL in the agent-bridge browser and return a page id you can \
+            description: "Open a URL in the agent-bridge browser and return a page id you can \
                  pass to other browser_* tools. The browser is launched lazily on first \
                  call (headed by default; set AGENT_BRIDGE_HEADLESS=1 for headless)."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": { "url": { "type": "string", "description": "Absolute URL." } },
@@ -310,19 +395,26 @@ impl McpTool for BrowserNavigateTool {
     }
 }
 
-pub struct BrowserEvalTool { hub: Hub }
-impl BrowserEvalTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct BrowserEvalTool {
+    hub: Hub,
+}
+impl BrowserEvalTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for BrowserEvalTool {
-    fn name(&self) -> &'static str { "browser_eval" }
+    fn name(&self) -> &'static str {
+        "browser_eval"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Evaluate JavaScript in the given page's main frame and return the \
+            description: "Evaluate JavaScript in the given page's main frame and return the \
                  resulting JSON value. The expression's last value is returned (wrap in \
                  `(() => { ... })()` for multi-statement code)."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -350,19 +442,26 @@ impl McpTool for BrowserEvalTool {
     }
 }
 
-pub struct BrowserSnapshotTool { hub: Hub }
-impl BrowserSnapshotTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct BrowserSnapshotTool {
+    hub: Hub,
+}
+impl BrowserSnapshotTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for BrowserSnapshotTool {
-    fn name(&self) -> &'static str { "browser_snapshot" }
+    fn name(&self) -> &'static str {
+        "browser_snapshot"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Return the page's accessibility tree (role/name/value + children). \
+            description: "Return the page's accessibility tree (role/name/value + children). \
                  Far cheaper than a screenshot for letting the agent reason about page \
                  structure: the same content takes 10–50× fewer tokens than a PNG."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": { "page": { "type": "string" } },
@@ -380,17 +479,27 @@ impl McpTool for BrowserSnapshotTool {
             None => return Ok(ToolResult::error("missing 'page'")),
         };
         match b.snapshot_a11y(&page).await {
-            Ok(tree) => Ok(ToolResult::json_text(&serde_json::to_value(tree).unwrap_or(Value::Null))),
+            Ok(tree) => Ok(ToolResult::json_text(
+                &serde_json::to_value(tree).unwrap_or(Value::Null),
+            )),
             Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
         }
     }
 }
 
-pub struct BrowserClickTool { hub: Hub }
-impl BrowserClickTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct BrowserClickTool {
+    hub: Hub,
+}
+impl BrowserClickTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for BrowserClickTool {
-    fn name(&self) -> &'static str { "browser_click" }
+    fn name(&self) -> &'static str {
+        "browser_click"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
@@ -425,22 +534,29 @@ impl McpTool for BrowserClickTool {
     }
 }
 
-pub struct BrowserScreenshotTool { hub: Hub }
-impl BrowserScreenshotTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct BrowserScreenshotTool {
+    hub: Hub,
+}
+impl BrowserScreenshotTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for BrowserScreenshotTool {
-    fn name(&self) -> &'static str { "browser_screenshot" }
+    fn name(&self) -> &'static str {
+        "browser_screenshot"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Capture a full-page PNG screenshot. Default mode writes the PNG \
+            description: "Capture a full-page PNG screenshot. Default mode writes the PNG \
                  to /tmp and returns the file path (cheap, suitable for storage / \
                  passing to other tools). Set `inline=true` to return the image as \
                  a real MCP image content block — Claude renders it directly into \
                  context (token-heavy, ~1k tokens per 100 KB; only use when you \
                  actually need to *see* the page)."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -469,7 +585,10 @@ impl McpTool for BrowserScreenshotTool {
             Ok(p) => p,
             Err(e) => return Ok(ToolResult::error(format!("browser: {e}"))),
         };
-        let inline = args.get("inline").and_then(|v| v.as_bool()).unwrap_or(false);
+        let inline = args
+            .get("inline")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if inline {
             let b64 = general_purpose::STANDARD.encode(&png);
             let caption = format!("inline screenshot — {} bytes, image/png", png.len());
@@ -488,7 +607,10 @@ impl McpTool for BrowserScreenshotTool {
         if let Err(e) = tokio::fs::write(&path, &png).await {
             return Ok(ToolResult::error(format!("write {path}: {e}")));
         }
-        Ok(ToolResult::text(format!("wrote {} bytes → {path}", png.len())))
+        Ok(ToolResult::text(format!(
+            "wrote {} bytes → {path}",
+            png.len()
+        )))
     }
 }
 
@@ -496,19 +618,26 @@ impl McpTool for BrowserScreenshotTool {
 //                       agent + worktree tools
 // ===========================================================================
 
-pub struct AgentSpawnTool { hub: Hub }
-impl AgentSpawnTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct AgentSpawnTool {
+    hub: Hub,
+}
+impl AgentSpawnTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for AgentSpawnTool {
-    fn name(&self) -> &'static str { "agent_spawn" }
+    fn name(&self) -> &'static str {
+        "agent_spawn"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Spawn a sibling AI agent (today: Claude Code one-shot mode). \
+            description: "Spawn a sibling AI agent (today: Claude Code one-shot mode). \
                  Pass `prompt` and `cwd` (typically a git worktree path); the agent \
                  runs to completion in the background. Returns the new session id."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -529,7 +658,10 @@ impl McpTool for AgentSpawnTool {
             Some(s) => s.to_string(),
             None => return Ok(ToolResult::error("missing 'cwd'")),
         };
-        let prompt = args.get("prompt").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let prompt = args
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let env: HashMap<String, String> = args
             .get("env")
             .and_then(|v| v.as_object())
@@ -540,9 +672,15 @@ impl McpTool for AgentSpawnTool {
             })
             .unwrap_or_default();
 
-        let cfg = SpawnConfig { cwd, env, initial_prompt: prompt };
+        let cfg = SpawnConfig {
+            cwd,
+            env,
+            initial_prompt: prompt,
+        };
         match agent.spawn(cfg).await {
-            Ok(s) => Ok(ToolResult::json_text(&serde_json::to_value(s).unwrap_or(Value::Null))),
+            Ok(s) => Ok(ToolResult::json_text(
+                &serde_json::to_value(s).unwrap_or(Value::Null),
+            )),
             Err(e) => Ok(ToolResult::error(format!("agent: {e}"))),
         }
     }
@@ -553,7 +691,10 @@ impl McpTool for AgentSpawnTool {
 /// this call only; otherwise fall back to the bridge-wide default (set by
 /// AGENT_BRIDGE_REPO at startup). This lets Claude hop between repos within
 /// a single session without restarting the MCP server.
-fn resolve_worktree(hub: &Hub, args: &Value) -> std::result::Result<GitWorktreeManager, ToolResult> {
+fn resolve_worktree(
+    hub: &Hub,
+    args: &Value,
+) -> std::result::Result<GitWorktreeManager, ToolResult> {
     if let Some(repo) = args.get("repo").and_then(|v| v.as_str()) {
         return Ok(GitWorktreeManager::new(PathBuf::from(repo)));
     }
@@ -565,20 +706,27 @@ fn resolve_worktree(hub: &Hub, args: &Value) -> std::result::Result<GitWorktreeM
     }
 }
 
-pub struct WorktreeListTool { hub: Hub }
-impl WorktreeListTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct WorktreeListTool {
+    hub: Hub,
+}
+impl WorktreeListTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for WorktreeListTool {
-    fn name(&self) -> &'static str { "worktree_list" }
+    fn name(&self) -> &'static str {
+        "worktree_list"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List git worktrees of a repository. Pass `repo` to point at any local \
+            description: "List git worktrees of a repository. Pass `repo` to point at any local \
                  git checkout for this call; if omitted, falls back to the bridge-wide \
                  default (AGENT_BRIDGE_REPO env var, else the daemon's launch cwd). \
                  Lets the agent see what parallel branches are already in flight."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -588,29 +736,41 @@ impl McpTool for WorktreeListTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let w = match resolve_worktree(&self.hub, &args) { Ok(w) => w, Err(e) => return Ok(e) };
+        let w = match resolve_worktree(&self.hub, &args) {
+            Ok(w) => w,
+            Err(e) => return Ok(e),
+        };
         match w.list().await {
-            Ok(rows) => Ok(ToolResult::json_text(&serde_json::to_value(rows).unwrap_or(Value::Null))),
+            Ok(rows) => Ok(ToolResult::json_text(
+                &serde_json::to_value(rows).unwrap_or(Value::Null),
+            )),
             Err(e) => Ok(ToolResult::error(format!("worktree: {e}"))),
         }
     }
 }
 
-pub struct WorktreeCreateTool { hub: Hub }
-impl WorktreeCreateTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct WorktreeCreateTool {
+    hub: Hub,
+}
+impl WorktreeCreateTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for WorktreeCreateTool {
-    fn name(&self) -> &'static str { "worktree_create" }
+    fn name(&self) -> &'static str {
+        "worktree_create"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Create a new git worktree on a fresh branch. Pass `repo` to target any \
+            description: "Create a new git worktree on a fresh branch. Pass `repo` to target any \
                  local git checkout; otherwise uses the bridge-wide default. Use this \
                  when the agent wants to try multiple approaches in parallel without \
                  polluting the main checkout. Pair with `agent_spawn` to launch a \
                  sibling Claude in the new worktree."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -624,7 +784,10 @@ impl McpTool for WorktreeCreateTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let w = match resolve_worktree(&self.hub, &args) { Ok(w) => w, Err(e) => return Ok(e) };
+        let w = match resolve_worktree(&self.hub, &args) {
+            Ok(w) => w,
+            Err(e) => return Ok(e),
+        };
         let branch = match args.get("branch").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => return Ok(ToolResult::error("missing 'branch'")),
@@ -635,24 +798,33 @@ impl McpTool for WorktreeCreateTool {
         };
         let base = args.get("base").and_then(|v| v.as_str());
         match w.add(&path, &branch, base).await {
-            Ok(wt) => Ok(ToolResult::json_text(&serde_json::to_value(wt).unwrap_or(Value::Null))),
+            Ok(wt) => Ok(ToolResult::json_text(
+                &serde_json::to_value(wt).unwrap_or(Value::Null),
+            )),
             Err(e) => Ok(ToolResult::error(format!("worktree: {e}"))),
         }
     }
 }
 
-pub struct WorktreeRemoveTool { hub: Hub }
-impl WorktreeRemoveTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct WorktreeRemoveTool {
+    hub: Hub,
+}
+impl WorktreeRemoveTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for WorktreeRemoveTool {
-    fn name(&self) -> &'static str { "worktree_remove" }
+    fn name(&self) -> &'static str {
+        "worktree_remove"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Remove a git worktree. Pass `repo` to target any local git checkout; \
+            description: "Remove a git worktree. Pass `repo` to target any local git checkout; \
                  set `force=true` to clobber dirty working trees."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -665,7 +837,10 @@ impl McpTool for WorktreeRemoveTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let w = match resolve_worktree(&self.hub, &args) { Ok(w) => w, Err(e) => return Ok(e) };
+        let w = match resolve_worktree(&self.hub, &args) {
+            Ok(w) => w,
+            Err(e) => return Ok(e),
+        };
         let path = match args.get("path").and_then(|v| v.as_str()) {
             Some(s) => PathBuf::from(s),
             None => return Ok(ToolResult::error("missing 'path'")),
@@ -682,21 +857,28 @@ impl McpTool for WorktreeRemoveTool {
 //                          agent_kill (v0.3)
 // ===========================================================================
 
-pub struct AgentKillTool { hub: Hub }
-impl AgentKillTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct AgentKillTool {
+    hub: Hub,
+}
+impl AgentKillTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for AgentKillTool {
-    fn name(&self) -> &'static str { "agent_kill" }
+    fn name(&self) -> &'static str {
+        "agent_kill"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Send SIGTERM to a running agent session. Use when a sub-agent has \
+            description: "Send SIGTERM to a running agent session. Use when a sub-agent has \
                  stalled, gone off-task, or you no longer need its result. The \
                  background wait task will subsequently finalise the session row \
                  with the SIGTERM exit code, so `agent_session_get(id)` afterwards \
                  still shows what (partial) output was captured."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -726,16 +908,23 @@ impl McpTool for AgentKillTool {
 //                       agent session inspection (v0.2)
 // ===========================================================================
 
-pub struct AgentSessionListTool { hub: Hub }
-impl AgentSessionListTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct AgentSessionListTool {
+    hub: Hub,
+}
+impl AgentSessionListTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for AgentSessionListTool {
-    fn name(&self) -> &'static str { "agent_session_list" }
+    fn name(&self) -> &'static str {
+        "agent_session_list"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List recent agent sessions (default 20, max 1000). Returns one row \
+            description: "List recent agent sessions (default 20, max 1000). Returns one row \
                  per spawn with id / runtime / cwd / started_at / ended_at / exit_code. \
                  All filters are optional and combine with AND: \
                  `runtime_id` exact match, `cwd_prefix` prefix match, \
@@ -746,7 +935,7 @@ impl McpTool for AgentSessionListTool {
                  finalise_session never ran → zombie row), or `unknown` \
                  (bridge restarted since spawn, no in-memory PID). \
                  Use `agent_session_get(id)` to fetch the full stdout/stderr."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -764,64 +953,91 @@ impl McpTool for AgentSessionListTool {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
         };
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20).min(1000) as u32;
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .min(1000) as u32;
         let filter = SessionFilter {
-            runtime_id: args.get("runtime_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            cwd_prefix: args.get("cwd_prefix").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            exited_only: args.get("state").and_then(|v| v.as_str()).and_then(|s| match s {
-                "finished" => Some(true),
-                "running"  => Some(false),
-                _ => None,
-            }),
-            exit_code: args.get("exit_code").and_then(|v| v.as_i64()).map(|n| n as i32),
+            runtime_id: args
+                .get("runtime_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            cwd_prefix: args
+                .get("cwd_prefix")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            exited_only: args
+                .get("state")
+                .and_then(|v| v.as_str())
+                .and_then(|s| match s {
+                    "finished" => Some(true),
+                    "running" => Some(false),
+                    _ => None,
+                }),
+            exit_code: args
+                .get("exit_code")
+                .and_then(|v| v.as_i64())
+                .map(|n| n as i32),
         };
         let rows = store.list_sessions(&filter, limit).await?;
         // Strip stdout/stderr to keep the listing compact.
-        let summary: Vec<Value> = rows.into_iter().map(|s| {
-            let running = s.ended_at.is_none();
-            let mut row = json!({
-                "id":          s.id.as_str(),
-                "runtime_id":  s.runtime_id,
-                "cwd":         s.cwd,
-                "started_at":  s.started_at,
-                "ended_at":    s.ended_at,
-                "exit_code":   s.exit_code,
-                "running":     running,
-                "stdout_len":  s.stdout.as_ref().map(|x| x.len()).unwrap_or(0),
-                "stderr_len":  s.stderr.as_ref().map(|x| x.len()).unwrap_or(0),
-            });
-            if running {
-                let (pid, liveness) = match self.hub.agent.as_ref().and_then(|a| a.pid_for(&s.id)) {
-                    Some(pid) => {
-                        let alive = std::path::Path::new(&format!("/proc/{pid}")).exists();
-                        (Some(pid), if alive { "alive" } else { "dead" })
+        let summary: Vec<Value> = rows
+            .into_iter()
+            .map(|s| {
+                let running = s.ended_at.is_none();
+                let mut row = json!({
+                    "id":          s.id.as_str(),
+                    "runtime_id":  s.runtime_id,
+                    "cwd":         s.cwd,
+                    "started_at":  s.started_at,
+                    "ended_at":    s.ended_at,
+                    "exit_code":   s.exit_code,
+                    "running":     running,
+                    "stdout_len":  s.stdout.as_ref().map(|x| x.len()).unwrap_or(0),
+                    "stderr_len":  s.stderr.as_ref().map(|x| x.len()).unwrap_or(0),
+                });
+                if running {
+                    let (pid, liveness) =
+                        match self.hub.agent.as_ref().and_then(|a| a.pid_for(&s.id)) {
+                            Some(pid) => {
+                                let alive = std::path::Path::new(&format!("/proc/{pid}")).exists();
+                                (Some(pid), if alive { "alive" } else { "dead" })
+                            }
+                            None => (None, "unknown"),
+                        };
+                    if let Some(p) = pid {
+                        row["pid"] = json!(p);
                     }
-                    None => (None, "unknown"),
-                };
-                if let Some(p) = pid {
-                    row["pid"] = json!(p);
+                    row["liveness"] = json!(liveness);
                 }
-                row["liveness"] = json!(liveness);
-            }
-            row
-        }).collect();
+                row
+            })
+            .collect();
         Ok(ToolResult::json_text(&Value::Array(summary)))
     }
 }
 
-pub struct AgentSessionGetTool { hub: Hub }
-impl AgentSessionGetTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct AgentSessionGetTool {
+    hub: Hub,
+}
+impl AgentSessionGetTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for AgentSessionGetTool {
-    fn name(&self) -> &'static str { "agent_session_get" }
+    fn name(&self) -> &'static str {
+        "agent_session_get"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Fetch one agent session row by id, including the full captured \
+            description: "Fetch one agent session row by id, including the full captured \
                  stdout and stderr (each clamped to 64 KiB). Returns null if the \
                  session id is unknown."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": { "id": { "type": "string" } },
@@ -839,24 +1055,33 @@ impl McpTool for AgentSessionGetTool {
             None => return Ok(ToolResult::error("missing 'id'")),
         };
         let row = store.load_session(&id).await?;
-        Ok(ToolResult::json_text(&serde_json::to_value(row).unwrap_or(Value::Null)))
+        Ok(ToolResult::json_text(
+            &serde_json::to_value(row).unwrap_or(Value::Null),
+        ))
     }
 }
 
-pub struct AgentSessionWaitTool { hub: Hub }
-impl AgentSessionWaitTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct AgentSessionWaitTool {
+    hub: Hub,
+}
+impl AgentSessionWaitTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for AgentSessionWaitTool {
-    fn name(&self) -> &'static str { "agent_session_wait" }
+    fn name(&self) -> &'static str {
+        "agent_session_wait"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Block until the given session has finished (ended_at != null) or \
+            description: "Block until the given session has finished (ended_at != null) or \
                  `timeout_secs` elapses. Polls the store every 500 ms. On success \
                  returns the final row (with stdout/stderr); on timeout returns the \
                  latest in-flight row plus `timed_out=true`."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -877,7 +1102,10 @@ impl McpTool for AgentSessionWaitTool {
             None => return Ok(ToolResult::error("missing 'id'")),
         };
         let timeout = Duration::from_secs(
-            args.get("timeout_secs").and_then(|v| v.as_u64()).unwrap_or(60).min(600),
+            args.get("timeout_secs")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(60)
+                .min(600),
         );
         let deadline = Instant::now() + timeout;
 
@@ -907,22 +1135,29 @@ impl McpTool for AgentSessionWaitTool {
 //                       agent self-memory (v0.4)
 // ===========================================================================
 
-pub struct MemorySaveTool { hub: Hub }
-impl MemorySaveTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct MemorySaveTool {
+    hub: Hub,
+}
+impl MemorySaveTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for MemorySaveTool {
-    fn name(&self) -> &'static str { "memory_save" }
+    fn name(&self) -> &'static str {
+        "memory_save"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Persist one note to agent self-memory (cross-session). Use this to \
+            description: "Persist one note to agent self-memory (cross-session). Use this to \
                  record lessons, decisions, todos, or context the next-session-you \
                  (or other Claude instances) should know. Same `key` overwrites — \
                  `created_at` is preserved, `updated_at` bumps. `related_keys` is a \
                  free-form list of OTHER memory keys you think are causally linked \
                  (no graph algorithms — Claude declares relationships explicitly)."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -931,7 +1166,8 @@ impl McpTool for MemorySaveTool {
                     "content":      { "type": "string", "description": "Markdown / free text. Capped at 256 KiB." },
                     "tags":         { "type": "array", "items": { "type": "string" }, "default": [] },
                     "related_keys": { "type": "array", "items": { "type": "string" }, "default": [] },
-                    "scope":        { "type": "string", "description": "Visibility: omit/global=everywhere, project:/abs/path=cwd-scoped, domain:rust=tech-domain." }
+                    "scope":        { "type": "string", "description": "Visibility: omit/global=everywhere, project:/abs/path=cwd-scoped, domain:rust=tech-domain." },
+                    "importance":   { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Override importance (0.0–1.0). Omit to auto-assign from kind: decision=0.8, lesson=0.7, todo=0.6, fact=0.5, observation=0.3." }
                 },
                 "required": ["key", "kind", "content"]
             }),
@@ -950,20 +1186,54 @@ impl McpTool for MemorySaveTool {
             Some(s) if !s.is_empty() => s.to_string(),
             _ => return Ok(ToolResult::error("missing or empty 'kind'")),
         };
-        let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let tags = args.get("tags").and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        let content = args
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let tags = args
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
-        let related_keys = args.get("related_keys").and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        let related_keys = args
+            .get("related_keys")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
-        let scope = args.get("scope").and_then(|v| v.as_str())
+        let scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty() && *s != "global")
             .map(|s| s.to_string());
+        // Optional importance override; 0.5 = "use kind-based default"
+        let importance = args
+            .get("importance")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5)
+            .clamp(0.0, 1.0);
 
         let mem = MemoryRecord {
-            key: key.clone(), kind, content, tags, related_keys, scope,
-            created_at: 0, updated_at: 0, last_accessed_at: 0, access_count: 0,
+            key: key.clone(),
+            kind,
+            content,
+            tags,
+            related_keys,
+            scope,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance,
+            status: "active".to_string(),
         };
         match store.memory_save(&mem).await {
             Ok(()) => Ok(ToolResult::text(format!("saved memory '{key}'"))),
@@ -972,20 +1242,27 @@ impl McpTool for MemorySaveTool {
     }
 }
 
-pub struct MemoryGetTool { hub: Hub }
-impl MemoryGetTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct MemoryGetTool {
+    hub: Hub,
+}
+impl MemoryGetTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for MemoryGetTool {
-    fn name(&self) -> &'static str { "memory_get" }
+    fn name(&self) -> &'static str {
+        "memory_get"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Fetch one memory by exact key. Side effect: bumps the row's \
+            description: "Fetch one memory by exact key. Side effect: bumps the row's \
                  access_count and last_accessed_at — this is what gives \
                  `memory_search` ranking and `memory_compact` something to score \
                  against. Returns null if the key is unknown."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": { "key": { "type": "string" } },
@@ -1003,30 +1280,55 @@ impl McpTool for MemoryGetTool {
             None => return Ok(ToolResult::error("missing 'key'")),
         };
         let row = store.memory_get(&key).await?;
-        Ok(ToolResult::json_text(&serde_json::to_value(row).unwrap_or(Value::Null)))
+        Ok(ToolResult::json_text(
+            &serde_json::to_value(row).unwrap_or(Value::Null),
+        ))
     }
 }
 
-pub struct MemorySearchTool { hub: Hub }
-impl MemorySearchTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct MemorySearchTool {
+    hub: Hub,
+}
+impl MemorySearchTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for MemorySearchTool {
-    fn name(&self) -> &'static str { "memory_search" }
+    fn name(&self) -> &'static str {
+        "memory_search"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Substring search over memory keys + content. Optional `tags_any` \
-                 narrows to rows tagged with at least one of the listed tags. \
-                 Results ranked by composite score: `recency_weight + 0.3 * \
-                 ln(1 + access_count)` — most-recent + most-touched first."
-                    .into(),
+            description: "Search memories by keyword (FTS5) with optional graph-neighbor expansion. \
+                 Two modes: \
+                 (1) mode='fts' (default): FTS5 full-text search ranked by bm25 + recency + importance. \
+                 (2) mode='hybrid': FTS5 results expanded via graph neighbors, fused with \
+                 Reciprocal Rank Fusion (RRF k=60). Surfaces memories connected to top hits \
+                 even if they don't contain the query keyword. \
+                 Results always exclude archived/superseded memories. \
+                 Use 'hybrid' when you want broader discovery; 'fts' when you need precision."
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "query":    { "type": "string", "description": "Substring (case-sensitive on most SQLite builds)." },
-                    "tags_any": { "type": "array", "items": { "type": "string" }, "default": [] },
-                    "limit":    { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 }
+                    "query":      { "type": "string", "description": "Search query (FTS5 match syntax supported)." },
+                    "tags_any":   { "type": "array", "items": { "type": "string" }, "default": [] },
+                    "limit":      { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 },
+                    "mode":       {
+                        "type": "string", "enum": ["fts", "hybrid"], "default": "fts",
+                        "description": "'fts' = keyword only; 'hybrid' = FTS5 + graph RRF fusion."
+                    },
+                    "expand_top": {
+                        "type": "integer", "minimum": 1, "maximum": 20, "default": 10,
+                        "description": "[hybrid only] Number of top FTS5 hits to expand via graph neighbors."
+                    },
+                    "rrf_k":      {
+                        "type": "number", "minimum": 1.0, "maximum": 200.0, "default": 60.0,
+                        "description": "[hybrid only] RRF constant k. Higher k = less rank compression."
+                    }
                 },
                 "required": ["query"]
             }),
@@ -1037,31 +1339,76 @@ impl McpTool for MemorySearchTool {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
         };
-        let q = args.get("query").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let tags: Vec<String> = args.get("tags_any").and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        let q = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let tags: Vec<String> = args
+            .get("tags_any")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20).min(200) as u32;
-        let hits = store.memory_search(&q, &tags, limit).await?;
-        Ok(ToolResult::json_text(&serde_json::to_value(hits).unwrap_or(Value::Null)))
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .min(200) as u32;
+        let mode = args
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("fts");
+
+        let hits = if mode == "hybrid" {
+            let expand_top = args
+                .get("expand_top")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(10)
+                .min(20) as u32;
+            let rrf_k = args
+                .get("rrf_k")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(60.0)
+                .clamp(1.0, 200.0);
+            store
+                .memory_search_hybrid(&q, &tags, limit, rrf_k, expand_top)
+                .await?
+        } else {
+            store.memory_search(&q, &tags, limit).await?
+        };
+
+        Ok(ToolResult::json_text(
+            &serde_json::to_value(hits).unwrap_or(Value::Null),
+        ))
     }
 }
 
-pub struct MemoryListTool { hub: Hub }
-impl MemoryListTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct MemoryListTool {
+    hub: Hub,
+}
+impl MemoryListTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for MemoryListTool {
-    fn name(&self) -> &'static str { "memory_list" }
+    fn name(&self) -> &'static str {
+        "memory_list"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List memories, optionally filtered by `kind`, sorted by one of \
+            description: "List memories, optionally filtered by `kind`, sorted by one of \
                  'recent' (default — last_accessed_at desc), 'frequent' \
                  (access_count desc), or 'newest' (created_at desc). Use this at \
                  session start with kind='lesson' to surface what previous-you \
                  learned."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -1077,27 +1424,49 @@ impl McpTool for MemoryListTool {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
         };
-        let kind = args.get("kind").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let sort = match args.get("sort").and_then(|v| v.as_str()).unwrap_or("recent") {
+        let kind = args
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let sort = match args
+            .get("sort")
+            .and_then(|v| v.as_str())
+            .unwrap_or("recent")
+        {
             "frequent" => MemoryListSort::Frequent,
-            "newest"   => MemoryListSort::Newest,
-            _          => MemoryListSort::Recent,
+            "newest" => MemoryListSort::Newest,
+            _ => MemoryListSort::Recent,
         };
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20).min(200) as u32;
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .min(200) as u32;
         let rows = store.list_memories(kind.as_deref(), sort, limit).await?;
-        Ok(ToolResult::json_text(&serde_json::to_value(rows).unwrap_or(Value::Null)))
+        Ok(ToolResult::json_text(
+            &serde_json::to_value(rows).unwrap_or(Value::Null),
+        ))
     }
 }
 
-pub struct MemoryDeleteTool { hub: Hub }
-impl MemoryDeleteTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct MemoryDeleteTool {
+    hub: Hub,
+}
+impl MemoryDeleteTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for MemoryDeleteTool {
-    fn name(&self) -> &'static str { "memory_delete" }
+    fn name(&self) -> &'static str {
+        "memory_delete"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Delete a memory by key. Returns `{deleted: true}` if a row was removed.".into(),
+            description: "Delete a memory by key. Returns `{deleted: true}` if a row was removed."
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": { "key": { "type": "string" } },
@@ -1119,16 +1488,23 @@ impl McpTool for MemoryDeleteTool {
     }
 }
 
-pub struct MemoryCompactTool { hub: Hub }
-impl MemoryCompactTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct MemoryCompactTool {
+    hub: Hub,
+}
+impl MemoryCompactTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for MemoryCompactTool {
-    fn name(&self) -> &'static str { "memory_compact" }
+    fn name(&self) -> &'static str {
+        "memory_compact"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Prune low-value memories. A row is removed only if BOTH thresholds \
+            description: "Prune low-value memories. A row is removed only if BOTH thresholds \
                  match (AND): `min_uses` (access_count strictly less than) AND \
                  `older_than_days` (last_accessed_at older than now - that many \
                  days). A 1-hour grace period on `created_at` further protects \
@@ -1138,7 +1514,7 @@ impl McpTool for MemoryCompactTool {
                  (`min_uses=2`, `older_than_days=90`) so callers don't get a \
                  silent no-op — the response field `applied_defaults` flags \
                  when this happens."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -1155,10 +1531,20 @@ impl McpTool for MemoryCompactTool {
             None => return Ok(ToolResult::error("no store configured")),
         };
         let min_uses = args.get("min_uses").and_then(|v| v.as_u64());
-        let older_than_secs = args.get("older_than_days").and_then(|v| v.as_i64()).map(|d| d * 86_400);
-        let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
+        let older_than_secs = args
+            .get("older_than_days")
+            .and_then(|v| v.as_i64())
+            .map(|d| d * 86_400);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
-        let mut policy = CompactPolicy { min_uses, older_than_secs, dry_run };
+        let mut policy = CompactPolicy {
+            min_uses,
+            older_than_secs,
+            dry_run,
+        };
         let applied_defaults = policy.is_unset();
         if applied_defaults {
             // v0.8: don't punish callers with a silent no-op; apply the balanced
@@ -1185,22 +1571,29 @@ impl McpTool for MemoryCompactTool {
 //                       memory portability (v0.6)
 // ===========================================================================
 
-pub struct MemoryExportTool { hub: Hub }
-impl MemoryExportTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct MemoryExportTool {
+    hub: Hub,
+}
+impl MemoryExportTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for MemoryExportTool {
-    fn name(&self) -> &'static str { "memory_export" }
+    fn name(&self) -> &'static str {
+        "memory_export"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Export memories to a newline-delimited JSON file (one record \
+            description: "Export memories to a newline-delimited JSON file (one record \
                  per line — JSONL is grep-friendly and stable across versions). \
                  Optional filters narrow what's exported. The output file can \
                  then be moved across machines via any transport (scp, email \
                  attachment, cloud drive, git repo) and consumed by \
                  `memory_import` on the other side."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -1223,9 +1616,14 @@ impl McpTool for MemoryExportTool {
             None => return Ok(ToolResult::error("missing 'path'")),
         };
         let filter = MemoryExportFilter {
-            kind: args.get("kind").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            kind: args
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             tags_any: args.get("tags_any").and_then(|v| v.as_array()).map(|a| {
-                a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
             }),
             since_ts: args.get("since_ts").and_then(|v| v.as_i64()),
         };
@@ -1239,23 +1637,30 @@ impl McpTool for MemoryExportTool {
     }
 }
 
-pub struct MemoryImportTool { hub: Hub }
-impl MemoryImportTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct MemoryImportTool {
+    hub: Hub,
+}
+impl MemoryImportTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for MemoryImportTool {
-    fn name(&self) -> &'static str { "memory_import" }
+    fn name(&self) -> &'static str {
+        "memory_import"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Import memories from a JSONL file (the format `memory_export` \
+            description: "Import memories from a JSONL file (the format `memory_export` \
                  produces). `conflict_policy` decides what happens when a key \
                  already exists locally:\n\
                    - `skip` (default): keep local row\n\
                    - `overwrite`: always replace with the imported row\n\
                    - `newer_wins`: replace only if imported.updated_at is greater\n\
                  Returns a per-row summary {inserted, updated, skipped, malformed}."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -1279,13 +1684,19 @@ impl McpTool for MemoryImportTool {
             Some(s) => PathBuf::from(s),
             None => return Ok(ToolResult::error("missing 'path'")),
         };
-        let policy = match args.get("conflict_policy").and_then(|v| v.as_str()).unwrap_or("skip") {
-            "overwrite"  => ImportConflictPolicy::Overwrite,
+        let policy = match args
+            .get("conflict_policy")
+            .and_then(|v| v.as_str())
+            .unwrap_or("skip")
+        {
+            "overwrite" => ImportConflictPolicy::Overwrite,
             "newer_wins" => ImportConflictPolicy::NewerWins,
-            _            => ImportConflictPolicy::Skip,
+            _ => ImportConflictPolicy::Skip,
         };
         match store.memory_import(&path, policy).await {
-            Ok(report) => Ok(ToolResult::json_text(&serde_json::to_value(report).unwrap_or(Value::Null))),
+            Ok(report) => Ok(ToolResult::json_text(
+                &serde_json::to_value(report).unwrap_or(Value::Null),
+            )),
             Err(e) => Ok(ToolResult::error(format!("import: {e}"))),
         }
     }
@@ -1295,22 +1706,37 @@ impl McpTool for MemoryImportTool {
 //                       memory graph edges (v0.6)
 // ===========================================================================
 
-pub struct MemoryLinkTool { hub: Hub }
-impl MemoryLinkTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct MemoryLinkTool {
+    hub: Hub,
+}
+impl MemoryLinkTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for MemoryLinkTool {
-    fn name(&self) -> &'static str { "memory_link" }
+    fn name(&self) -> &'static str {
+        "memory_link"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Create or update a directed edge between two memory records. \
-                 Edges are typed (relates | contradicts | supersedes | derived_from | implements) \
-                 and weighted (0.0–1.0, default 1.0). Use this to declare that one \
-                 memory causally implies, extends, or invalidates another — building a \
-                 traversable knowledge graph over time. Pairs with `memory_neighbors` to \
-                 walk the graph."
-                    .into(),
+            description: "Create or update a directed edge between two memory records. \
+                 Edges are typed and weights are auto-assigned by type unless overridden. \
+                 Standard types and base weights: \
+                 updates(1.5) — newest replaces old; \
+                 caused_by(1.3) — causal chain; \
+                 supersedes(1.3) — explicit supersession; \
+                 implements(1.1) — concrete realisation; \
+                 relates(1.0) — generic relation; \
+                 part_of(0.8) — structural containment; \
+                 derived_from(0.8) — loose derivation; \
+                 contradicts(0.5) — known conflict; \
+                 invalidates(0.5) — explicit invalidation. \
+                 Causal edge types get a ×1.2 temporal bonus in BFS traversal. \
+                 Pairs with `memory_neighbors` (BFS) to walk the knowledge graph."
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -1318,10 +1744,14 @@ impl McpTool for MemoryLinkTool {
                     "to_key":    { "type": "string", "description": "Target memory key." },
                     "edge_type": {
                         "type": "string",
-                        "enum": ["relates","contradicts","supersedes","derived_from","implements"],
-                        "default": "relates"
+                        "enum": ["updates","caused_by","supersedes","implements","relates","part_of","derived_from","contradicts","invalidates"],
+                        "default": "relates",
+                        "description": "Relationship type. Weight is auto-assigned from type unless 'weight' is given."
                     },
-                    "weight": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 1.0 }
+                    "weight": {
+                        "type": "number", "minimum": 0.0, "maximum": 2.0, "default": 1.0,
+                        "description": "Override weight. Omit to use canonical weight for the edge type."
+                    }
                 },
                 "required": ["from_key", "to_key"]
             }),
@@ -1340,32 +1770,78 @@ impl McpTool for MemoryLinkTool {
             Some(s) if !s.is_empty() => s.to_string(),
             _ => return Ok(ToolResult::error("missing 'to_key'")),
         };
-        let edge_type = args.get("edge_type").and_then(|v| v.as_str()).unwrap_or("relates").to_string();
-        let weight = args.get("weight").and_then(|v| v.as_f64()).unwrap_or(1.0).clamp(0.0, 1.0);
-        match store.memory_link(&from_key, &to_key, &edge_type, weight).await {
-            Ok(()) => Ok(ToolResult::text(format!("linked '{from_key}' -{edge_type}-> '{to_key}' (weight={weight:.2})"))),
+        let edge_type = args
+            .get("edge_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("relates")
+            .to_string();
+        // 1.0 is the sentinel meaning "auto-assign from type"; any other value is explicit.
+        let weight = args
+            .get("weight")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+        match store
+            .memory_link(&from_key, &to_key, &edge_type, weight)
+            .await
+        {
+            Ok(()) => {
+                // Compute the effective weight that was stored for the response message
+                let effective = if (weight - 1.0).abs() < f64::EPSILON {
+                    ab_store::weight_for_edge_type(&edge_type)
+                } else {
+                    weight
+                };
+                Ok(ToolResult::text(format!(
+                    "linked '{from_key}' -{edge_type}-> '{to_key}' (weight={effective:.2})"
+                )))
+            }
             Err(e) => Ok(ToolResult::error(format!("memory_link: {e}"))),
         }
     }
 }
 
-pub struct MemoryNeighborsTool { hub: Hub }
-impl MemoryNeighborsTool { pub fn new(hub: Hub) -> Self { Self { hub } } }
+pub struct MemoryNeighborsTool {
+    hub: Hub,
+}
+impl MemoryNeighborsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
 #[async_trait]
 impl McpTool for MemoryNeighborsTool {
-    fn name(&self) -> &'static str { "memory_neighbors" }
+    fn name(&self) -> &'static str {
+        "memory_neighbors"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Return all graph edges where the given key appears as source OR target. \
-                 Each edge has {from_key, to_key, edge_type, weight}. Use this to \
-                 traverse the memory graph: fetch a memory, then walk its neighbors \
-                 to find related/superseding/derived records without a keyword search."
-                    .into(),
+            description: "Return graph edges (and optionally BFS-traverse multi-hop) from a memory key. \
+                 With depth=1 (default) returns direct neighbors ordered by weight DESC. \
+                 With depth>1 performs BFS traversal, propagating energy as \
+                 energy × edge_weight × temporal_bonus × decay_factor. \
+                 Returns [{from_key, to_key, edge_type, weight, energy}] sorted by energy DESC. \
+                 Causal edge types (updates, caused_by, supersedes, implements) get ×1.2 temporal bonus. \
+                 Conflict edges (contradicts, invalidates) get ×0.85. \
+                 Use this to discover chains of related decisions, bug-fix histories, and design evolutions."
+                .into(),
             input_schema: json!({
                 "type": "object",
-                "properties": { "key": { "type": "string" } },
+                "properties": {
+                    "key": { "type": "string", "description": "Starting memory key." },
+                    "depth": {
+                        "type": "integer", "minimum": 1, "maximum": 6, "default": 1,
+                        "description": "BFS depth. 1=direct neighbors only, 2–6=multi-hop traversal."
+                    },
+                    "decay_factor": {
+                        "type": "number", "minimum": 0.1, "maximum": 1.0, "default": 0.7,
+                        "description": "Energy decay per hop. 0.7 means 30% energy loss per hop."
+                    },
+                    "min_energy": {
+                        "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.05,
+                        "description": "Prune edges with propagated energy below this threshold."
+                    }
+                },
                 "required": ["key"]
             }),
         }
@@ -1379,8 +1855,1016 @@ impl McpTool for MemoryNeighborsTool {
             Some(s) => s.to_string(),
             None => return Ok(ToolResult::error("missing 'key'")),
         };
-        let edges = store.memory_neighbors(&key).await?;
-        Ok(ToolResult::json_text(&serde_json::to_value(edges).unwrap_or(Value::Null)))
+        let depth = args
+            .get("depth")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1)
+            .clamp(1, 6) as u8;
+        let decay_factor = args
+            .get("decay_factor")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.7)
+            .clamp(0.1, 1.0);
+        let min_energy = args
+            .get("min_energy")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.05)
+            .clamp(0.0, 1.0);
+
+        if depth == 1 {
+            // Fast path: simple direct neighbors (no BFS overhead)
+            let edges = store.memory_neighbors(&key).await?;
+            let out: Vec<serde_json::Value> = edges
+                .into_iter()
+                .map(|e| {
+                    let energy = 1.0 * e.weight; // at depth=1, energy = starting_energy × weight
+                    serde_json::json!({
+                        "from_key": e.from_key,
+                        "to_key": e.to_key,
+                        "edge_type": e.edge_type,
+                        "weight": e.weight,
+                        "energy": energy
+                    })
+                })
+                .collect();
+            Ok(ToolResult::json_text(
+                &serde_json::to_value(out).unwrap_or(Value::Null),
+            ))
+        } else {
+            // BFS multi-hop path
+            let pairs = store
+                .memory_neighbors_bfs(&key, depth, decay_factor, min_energy)
+                .await?;
+            let out: Vec<serde_json::Value> = pairs
+                .into_iter()
+                .map(|(e, energy)| {
+                    serde_json::json!({
+                        "from_key": e.from_key,
+                        "to_key": e.to_key,
+                        "edge_type": e.edge_type,
+                        "weight": e.weight,
+                        "energy": (energy * 1000.0).round() / 1000.0
+                    })
+                })
+                .collect();
+            Ok(ToolResult::json_text(
+                &serde_json::to_value(out).unwrap_or(Value::Null),
+            ))
+        }
+    }
+}
+
+pub struct SessionBootstrapTool {
+    hub: Hub,
+}
+impl SessionBootstrapTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for SessionBootstrapTool {
+    fn name(&self) -> &'static str {
+        "session_bootstrap"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Build a compact memory bootstrap block for the current session. \
+                 Returns top scoped memories (global + project). \
+                 Pass frontend='cursor' for a compact token-efficient format, \
+                 or frontend='claude-code' (default) for the full format."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": { "type": "string", "description": "Optional project path for scope filtering. Defaults to process cwd." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 60 },
+                    "frontend": { "type": "string", "enum": ["claude-code", "cursor", "auto"], "default": "auto", "description": "Output format: 'cursor' for compact, 'claude-code' for full, 'auto' detects from env." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let cwd = args
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.display().to_string())
+            })
+            .unwrap_or_else(|| "/".to_string());
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(60)
+            .min(200) as u32;
+
+        // Detect frontend: explicit arg > env var > default (claude-code)
+        let frontend = args
+            .get("frontend")
+            .and_then(|v| v.as_str())
+            .unwrap_or("auto");
+        let is_cursor = match frontend {
+            "cursor" => true,
+            "claude-code" => false,
+            _ => std::env::var("AGENT_BRIDGE_TERMINAL").is_ok()
+                && std::env::var("CURSOR_TRACE_ID").is_ok()
+                || std::env::var("VSCODE_GIT_IPC_HANDLE").is_ok(),
+        };
+
+        let rows = store
+            .list_memories_in_scope(&cwd, None, MemoryListSort::ByImportance, limit)
+            .await?;
+
+        // Filter to active memories only — archived and superseded are hidden
+        // from bootstrap to keep context clean.
+        let rows: Vec<_> = rows
+            .into_iter()
+            .filter(|r| r.status == "active")
+            .collect();
+
+        if rows.is_empty() {
+            let lifecycle_hint = session_lifecycle_hint();
+            return Ok(ToolResult::text(format!(
+                "(no scoped memories yet)\n\n{lifecycle_hint}"
+            )));
+        }
+
+        let mut lines = if is_cursor {
+            // Compact format for Cursor: minimal headers, 80-char snippets
+            vec![
+                format!("=== Bootstrap (scope: {}) ===", cwd),
+                String::new(),
+            ]
+        } else {
+            vec![
+                format!("=== Agent-Bridge Session Bootstrap (scope: {cwd}) ==="),
+                "Use memory_get <key> for full content, memory_search for lookup.".to_string(),
+                String::new(),
+            ]
+        };
+
+        let snippet_len = if is_cursor { 80 } else { 120 };
+        for r in &rows {
+            let tags = if r.tags.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", r.tags.join(", "))
+            };
+            let snippet: String = r.content.chars().take(snippet_len).collect();
+            let ellipsis = if r.content.chars().count() > snippet_len {
+                "…"
+            } else {
+                ""
+            };
+            let imp_marker = if r.importance >= 0.7 { "★" } else { "" };
+            lines.push(format!(
+                "[{}] {}{}{}: {}{}",
+                r.kind, r.key, imp_marker, tags, snippet, ellipsis
+            ));
+        }
+        lines.push("=== End Bootstrap ===".to_string());
+        lines.push(String::new());
+        lines.push(session_lifecycle_hint());
+        Ok(ToolResult::text(lines.join("\n")))
+    }
+}
+
+/// Lifecycle reminder appended to session_bootstrap output.
+fn session_lifecycle_hint() -> String {
+    "=== Session Lifecycle Reminder ===\n\
+     Before this session ends, call:\n\
+     1. session_curate(conversation_text=<recent context summary>) — extract and save lessons\n\
+     2. session_finalize() — compact stale memories + optional export\n\
+     =================================="
+        .to_string()
+}
+
+// ===========================================================================
+//                              session_curate
+// ===========================================================================
+
+pub struct SessionCurateTool {
+    hub: Hub,
+}
+impl SessionCurateTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+/// Marker prefixes that indicate a memorable item in conversation text.
+static CURATE_MARKERS: &[(&str, &str)] = &[
+    ("lesson:", "lesson"),
+    ("learned:", "lesson"),
+    ("decision:", "decision"),
+    ("decided:", "decision"),
+    ("todo:", "todo"),
+    ("TODO:", "todo"),
+    ("action item:", "todo"),
+    ("bug:", "lesson"),
+    ("fix:", "lesson"),
+    ("pitfall:", "lesson"),
+    ("warning:", "lesson"),
+    ("note:", "context"),
+    ("context:", "context"),
+    ("handoff:", "session_handoff"),
+    ("session_handoff:", "session_handoff"),
+    ("remember:", "context"),
+    ("important:", "context"),
+    ("design:", "decision"),
+    ("architecture:", "decision"),
+    ("pattern:", "lesson"),
+];
+
+fn curate_conversation(text: &str, session_id: Option<&str>, max_items: usize) -> Vec<MemoryRecord> {
+    let mut results: Vec<MemoryRecord> = Vec::new();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let sid_suffix = session_id
+        .map(|s| format!("_{}", &s[..s.len().min(8)]))
+        .unwrap_or_default();
+
+    for (idx, line) in text.lines().enumerate() {
+        if results.len() >= max_items {
+            break;
+        }
+        let trimmed = line.trim();
+        if trimmed.len() < 10 {
+            continue;
+        }
+        for (marker, kind) in CURATE_MARKERS {
+            let lower = trimmed.to_lowercase();
+            let marker_lower = marker.to_lowercase();
+            if lower.starts_with(&marker_lower) {
+                let content = trimmed[marker.len()..].trim().to_string();
+                if content.len() < 5 {
+                    continue;
+                }
+                // Build a stable key from kind + content hash
+                let content_slug: String = content
+                    .chars()
+                    .take(40)
+                    .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                    .collect();
+                let key = format!(
+                    "curated_{}{}_{}{}",
+                    kind,
+                    sid_suffix,
+                    idx,
+                    &content_slug[..content_slug.len().min(20)]
+                );
+                results.push(MemoryRecord {
+                    key,
+                    kind: kind.to_string(),
+                    content,
+                    tags: vec!["auto_curated".to_string()],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: now,
+                    updated_at: now,
+                    last_accessed_at: now,
+                    access_count: 0,
+                    importance: 0.5, // auto-assigned from kind in memory_save
+                    status: "active".to_string(),
+                });
+                break;
+            }
+        }
+    }
+    results
+}
+
+#[async_trait]
+impl McpTool for SessionCurateTool {
+    fn name(&self) -> &'static str {
+        "session_curate"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Extract structured memories from conversation text using rule-based \
+                 marker detection (lesson:, decision:, todo:, handoff:, etc.) and \
+                 persist them to the memory store. This replaces the PreCompact \
+                 shell hook's dependency on claude -p — it works in any frontend \
+                 (Cursor, Claude Code, or standalone). \
+                 Pass dry_run=true to preview without writing."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "conversation_text": {
+                        "type": "string",
+                        "description": "Recent conversation or summary text. Lines prefixed with lesson:, decision:, todo:, handoff:, etc. are extracted as memories."
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Optional session ID for key namespacing and deduplication."
+                    },
+                    "max_items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 8,
+                        "description": "Max number of memories to write."
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "If true, return what would be saved without writing."
+                    }
+                },
+                "required": ["conversation_text"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store_opt = self.hub.store.clone();
+
+        let text = match args.get("conversation_text").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => return Ok(ToolResult::error("missing 'conversation_text'")),
+        };
+        let session_id = args
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let max_items = args
+            .get("max_items")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(8)
+            .min(50) as usize;
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let candidates = curate_conversation(&text, session_id.as_deref(), max_items);
+
+        if dry_run || store_opt.is_none() {
+            return Ok(ToolResult::json_text(&json!({
+                "dry_run": true,
+                "candidates": candidates.iter().map(|m| json!({
+                    "key": m.key,
+                    "kind": m.kind,
+                    "content": m.content,
+                    "tags": m.tags,
+                })).collect::<Vec<_>>()
+            })));
+        }
+
+        let store = store_opt.unwrap();
+        let mut saved: Vec<Value> = Vec::new();
+        let mut errors: Vec<String> = Vec::new();
+
+        for mem in &candidates {
+            // Skip if key already exists (dedup)
+            match store.memory_get(&mem.key).await {
+                Ok(Some(_)) => {
+                    // Already exists — skip
+                }
+                Ok(None) => match store.memory_save(mem).await {
+                    Ok(()) => saved.push(json!({ "key": mem.key, "kind": mem.kind })),
+                    Err(e) => errors.push(format!("{}: {e}", mem.key)),
+                },
+                Err(e) => errors.push(format!("{}: {e}", mem.key)),
+            }
+        }
+
+        let session_handoff_key = candidates
+            .iter()
+            .find(|m| m.kind == "session_handoff")
+            .map(|m| m.key.clone());
+
+        Ok(ToolResult::json_text(&json!({
+            "dry_run": false,
+            "saved_count": saved.len(),
+            "new_memories": saved,
+            "skipped_duplicates": candidates.len() - saved.len() - errors.len(),
+            "errors": errors,
+            "session_handoff_key": session_handoff_key
+        })))
+    }
+}
+
+// ===========================================================================
+//                              hook_status
+// ===========================================================================
+
+pub struct HookStatusTool;
+impl HookStatusTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+
+/// Path of the hook run log file.
+fn hook_run_log_path() -> PathBuf {
+    dirs_home()
+        .join(".local")
+        .join("share")
+        .join("agent-bridge")
+        .join("hook-runs.jsonl")
+}
+
+fn dirs_home() -> PathBuf {
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp"))
+}
+
+/// Parse the most recent hook run entry from the JSONL log for a given event name.
+fn last_hook_run(event: &str, log_path: &std::path::Path) -> Option<Value> {
+    let content = std::fs::read_to_string(log_path).ok()?;
+    content
+        .lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|v| v.get("event").and_then(|e| e.as_str()) == Some(event))
+}
+
+/// Well-known hook configurations: (event_name, default_script_path)
+fn known_hooks() -> Vec<(&'static str, &'static str)> {
+    let home = dirs_home();
+    // We build static paths at this point; ownership of the string is managed below
+    // by converting to owned — but since we need &'static str we embed them literally.
+    // Instead, use a Vec<(String, String)> and convert.
+    let _ = home; // suppress warning
+    vec![
+        ("beforeSubmitPrompt", "ab-memory-hook"),
+        ("preCompact", "ab-precompact-hook"),
+        ("stop", "ab-session-end-hook"),
+    ]
+}
+
+/// Source script paths inside the agent-bridge repo hooks dir.
+fn hook_source_paths() -> HashMap<&'static str, &'static str> {
+    let mut m = HashMap::new();
+    m.insert("beforeSubmitPrompt", "ab-memory-hook.sh");
+    m.insert("preCompact", "ab-precompact-hook.sh");
+    m.insert("stop", "ab-session-end-hook.sh");
+    m
+}
+
+fn sha256_file(path: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).ok()?;
+    // Simple FNV-1a 64-bit hash as a lightweight alternative to sha256
+    // (avoids pulling in sha2 crate; sufficient for change detection)
+    let mut hash: u64 = 14695981039346656037;
+    for byte in &buf {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    Some(format!("{hash:016x}"))
+}
+
+#[async_trait]
+impl McpTool for HookStatusTool {
+    fn name(&self) -> &'static str {
+        "hook_status"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Return the status of each agent-bridge hook script: existence, \
+                 executability, last run time, exit code, output bytes, and whether \
+                 the installed script is in sync with the repo source. \
+                 Use this to diagnose hook configuration problems."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "repo_hooks_dir": {
+                        "type": "string",
+                        "description": "Optional path to the agent-bridge repo hooks dir for sync check. Defaults to auto-detect."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let home = dirs_home();
+        let bin_dir = home.join(".local").join("bin");
+        let log_path = hook_run_log_path();
+        let source_names = hook_source_paths();
+
+        // Find repo hooks dir: explicit arg > detect from binary symlink > CARGO_MANIFEST_DIR
+        let repo_hooks_dir: Option<PathBuf> = args
+            .get("repo_hooks_dir")
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+            .or_else(|| {
+                // Try to resolve symlink of the agent-bridge binary
+                let bin = bin_dir.join("agent-bridge");
+                std::fs::read_link(&bin)
+                    .ok()
+                    .and_then(|target| target.parent().map(|p| p.to_path_buf()))
+                    .and_then(|dir| {
+                        // Walk up to find crates/bridge/src/hooks
+                        let mut d = dir.clone();
+                        for _ in 0..6 {
+                            let candidate = d.join("crates").join("bridge").join("src").join("hooks");
+                            if candidate.is_dir() {
+                                return Some(candidate);
+                            }
+                            if !d.pop() {
+                                break;
+                            }
+                        }
+                        None
+                    })
+            });
+
+        let hooks = known_hooks();
+        let mut hook_statuses: Vec<Value> = Vec::new();
+
+        for (event, script_basename) in &hooks {
+            let installed_path = bin_dir.join(script_basename);
+            let exists = installed_path.exists();
+            let executable = exists && {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::metadata(&installed_path)
+                    .map(|m| m.permissions().mode() & 0o111 != 0)
+                    .unwrap_or(false)
+            };
+
+            let last_run = last_hook_run(event, &log_path);
+            let last_run_ts = last_run
+                .as_ref()
+                .and_then(|v| v.get("ts"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let last_exit_code = last_run
+                .as_ref()
+                .and_then(|v| v.get("exit_code"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let last_output_bytes = last_run
+                .as_ref()
+                .and_then(|v| v.get("output_bytes"))
+                .cloned()
+                .unwrap_or(Value::Null);
+
+            // Sync check
+            let sync_info = if let Some(ref hooks_dir) = repo_hooks_dir {
+                let source_name = source_names.get(*event).copied().unwrap_or("");
+                let source_path = hooks_dir.join(source_name);
+                let installed_hash = sha256_file(&installed_path);
+                let source_hash = sha256_file(&source_path);
+                let in_sync = installed_hash.is_some()
+                    && source_hash.is_some()
+                    && installed_hash == source_hash;
+                json!({
+                    "installed_hash": installed_hash,
+                    "source_hash": source_hash,
+                    "source_path": source_path.display().to_string(),
+                    "in_sync": in_sync
+                })
+            } else {
+                json!({ "in_sync": null, "note": "provide repo_hooks_dir for sync check" })
+            };
+
+            hook_statuses.push(json!({
+                "event": event,
+                "script": installed_path.display().to_string(),
+                "exists": exists,
+                "executable": executable,
+                "last_run_ts": last_run_ts,
+                "last_exit_code": last_exit_code,
+                "last_output_bytes": last_output_bytes,
+                "sync": sync_info
+            }));
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "hooks": hook_statuses,
+            "log_path": log_path.display().to_string(),
+            "log_exists": log_path.exists()
+        })))
+    }
+}
+
+// ===========================================================================
+//                              capabilities
+// ===========================================================================
+
+pub struct CapabilitiesTool {
+    hub: Hub,
+}
+impl CapabilitiesTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for CapabilitiesTool {
+    fn name(&self) -> &'static str {
+        "capabilities"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Return what the agent-bridge backend can do in this environment: \
+                 terminal backend, browser availability, memory store status, \
+                 configured hooks, detected frontend, and binary version. \
+                 Call once at session start to avoid wasting tokens on unavailable features."
+                .into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        // Terminal
+        let terminal_id = self
+            .hub
+            .terminal
+            .as_ref()
+            .map(|t| t.id().to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let terminal_available = self.hub.terminal.is_some();
+
+        // Browser: try a quick availability probe (just check if the field is set)
+        let browser_id = self
+            .hub
+            .browser
+            .as_ref()
+            .map(|b| b.id().to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let browser_available = self.hub.browser.is_some();
+
+        // Memory
+        let (memory_available, db_path) = if self.hub.store.is_some() {
+            let path = ab_store::default_db_path().display().to_string();
+            (true, path)
+        } else {
+            (false, String::new())
+        };
+
+        // Agent spawn
+        let agent_available = self.hub.agent.is_some();
+        let claude_bin = std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
+        let agent_binary_found = which_binary(&claude_bin);
+
+        // Hooks: check what's installed
+        let home = dirs_home();
+        let bin_dir = home.join(".local").join("bin");
+        let hooks = known_hooks();
+        let configured_hooks: Vec<&str> = hooks
+            .iter()
+            .filter(|(_, script)| bin_dir.join(script).exists())
+            .map(|(event, _)| *event)
+            .collect();
+
+        // Detect frontend
+        let frontend = detect_frontend();
+
+        // Version from binary
+        let version = env!("CARGO_PKG_VERSION");
+
+        Ok(ToolResult::json_text(&json!({
+            "terminal": {
+                "backend": terminal_id,
+                "available": terminal_available,
+                "env": std::env::var("AGENT_BRIDGE_TERMINAL").ok()
+            },
+            "browser": {
+                "backend": browser_id,
+                "available": browser_available,
+                "headless": std::env::var("AGENT_BRIDGE_HEADLESS").map(|v| v == "1").unwrap_or(false)
+            },
+            "memory": {
+                "available": memory_available,
+                "db_path": db_path,
+                "fts5": true
+            },
+            "agent_spawn": {
+                "available": agent_available,
+                "binary": claude_bin,
+                "binary_found": agent_binary_found
+            },
+            "hooks": {
+                "configured": configured_hooks,
+                "frontend": frontend
+            },
+            "version": version
+        })))
+    }
+}
+
+fn which_binary(name: &str) -> bool {
+    std::process::Command::new("which")
+        .arg(name)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn detect_frontend() -> &'static str {
+    // Cursor sets VSCODE_GIT_IPC_HANDLE or similar VS Code env vars
+    if std::env::var("VSCODE_GIT_IPC_HANDLE").is_ok()
+        || std::env::var("VSCODE_IPC_HOOK_CLI").is_ok()
+        || std::env::var("CURSOR_TRACE_ID").is_ok()
+    {
+        return "cursor";
+    }
+    // Claude Code sets CLAUDE_SESSION_ID or ANTHROPIC_CLAUDE_*
+    if std::env::var("CLAUDE_SESSION_ID").is_ok()
+        || std::env::var("CLAUDE_CODE_ENTRYPOINT").is_ok()
+    {
+        return "claude-code";
+    }
+    "unknown"
+}
+
+// ===========================================================================
+//                             memory_suggest
+// ===========================================================================
+
+pub struct MemorySuggestTool {
+    hub: Hub,
+}
+impl MemorySuggestTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemorySuggestTool {
+    fn name(&self) -> &'static str {
+        "memory_suggest"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Suggest related memory keys for a given key, based on tag overlap, \
+                 key-prefix similarity, and content token overlap. \
+                 Returns ranked candidates with reason + confidence. \
+                 Use the suggestions to decide which memory_link calls to make."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string", "description": "The memory key to find suggestions for." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 20, "default": 8 }
+                },
+                "required": ["key"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => return Ok(ToolResult::error("missing 'key'")),
+        };
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(8)
+            .min(20) as u32;
+
+        // Fetch the source memory
+        let source = match store.memory_get(&key).await? {
+            Some(m) => m,
+            None => return Ok(ToolResult::error(format!("key not found: '{key}'"))),
+        };
+
+        // Already-linked neighbors (to exclude from suggestions)
+        let existing_edges = store.memory_neighbors(&key).await.unwrap_or_default();
+        let already_linked: std::collections::HashSet<String> = existing_edges
+            .iter()
+            .map(|e| {
+                if e.from_key == key {
+                    e.to_key.clone()
+                } else {
+                    e.from_key.clone()
+                }
+            })
+            .collect();
+
+        // List all memories (up to 500 for scoring)
+        let all = store
+            .list_memories(None, MemoryListSort::Recent, 500)
+            .await
+            .unwrap_or_default();
+
+        let source_prefix = key_prefix(&key);
+        let source_tokens = content_tokens(&source.content);
+
+        let mut candidates: Vec<Value> = all
+            .iter()
+            .filter(|m| m.key != key && !already_linked.contains(&m.key))
+            .filter_map(|m| {
+                let mut score = 0.0f64;
+                let mut reasons: Vec<&str> = Vec::new();
+
+                // Tag overlap
+                let tag_overlap = source
+                    .tags
+                    .iter()
+                    .filter(|t| m.tags.contains(t))
+                    .count();
+                if tag_overlap > 0 {
+                    score += 0.4 * tag_overlap as f64;
+                    reasons.push("tag_overlap");
+                }
+
+                // Key prefix similarity
+                let m_prefix = key_prefix(&m.key);
+                if !source_prefix.is_empty() && source_prefix == m_prefix {
+                    score += 0.3;
+                    reasons.push("same_prefix");
+                }
+
+                // Content token overlap (Jaccard-like)
+                let m_tokens = content_tokens(&m.content);
+                let intersection = source_tokens
+                    .iter()
+                    .filter(|t| m_tokens.contains(*t))
+                    .count();
+                let union = source_tokens.len() + m_tokens.len() - intersection;
+                if union > 0 && intersection > 2 {
+                    let jaccard = intersection as f64 / union as f64;
+                    score += jaccard;
+                    reasons.push("content_overlap");
+                }
+
+                if score < 0.1 {
+                    return None;
+                }
+
+                Some(json!({
+                    "key": m.key,
+                    "kind": m.kind,
+                    "confidence": (score * 100.0).min(100.0).round() / 100.0,
+                    "reason": reasons.join("+"),
+                    "snippet": m.content.chars().take(80).collect::<String>()
+                }))
+            })
+            .collect();
+
+        // Sort by confidence descending
+        candidates.sort_by(|a, b| {
+            let ca = a.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let cb = b.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            cb.partial_cmp(&ca).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        candidates.truncate(limit as usize);
+
+        Ok(ToolResult::json_text(&json!({
+            "source_key": key,
+            "suggestions": candidates,
+            "already_linked": already_linked.into_iter().collect::<Vec<_>>()
+        })))
+    }
+}
+
+fn key_prefix(key: &str) -> &str {
+    key.split(&['_', '-', '/', '.'][..])
+        .next()
+        .unwrap_or("")
+}
+
+fn content_tokens(content: &str) -> std::collections::HashSet<String> {
+    content
+        .split_whitespace()
+        .filter(|t| t.len() >= 4)
+        .map(|t| t.to_lowercase())
+        .collect()
+}
+
+pub struct SessionFinalizeTool {
+    hub: Hub,
+}
+impl SessionFinalizeTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for SessionFinalizeTool {
+    fn name(&self) -> &'static str {
+        "session_finalize"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Manual session-end maintenance for Cursor: run importance decay, \
+                 compact stale memories, and optionally export JSONL. \
+                 Equivalent to Claude Code's Stop hook pipeline."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "older_than_days": { "type": "integer", "minimum": 1, "default": 90 },
+                    "min_uses": { "type": "integer", "minimum": 0 },
+                    "dry_run": { "type": "boolean", "default": false },
+                    "decay_half_life_days": {
+                        "type": "number", "minimum": 1.0, "default": 30.0,
+                        "description": "Importance half-life in days. Default 30 = importance halves every month."
+                    },
+                    "decay_archive_threshold": {
+                        "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.05,
+                        "description": "Memories with decayed importance below this are marked archived."
+                    },
+                    "skip_decay": {
+                        "type": "boolean", "default": false,
+                        "description": "If true, skip the importance decay pass (compact still runs)."
+                    },
+                    "export_path": { "type": "string", "description": "Optional JSONL export output path." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let older_than_days = args
+            .get("older_than_days")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(90);
+        let min_uses = args.get("min_uses").and_then(|v| v.as_u64());
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let half_life = args
+            .get("decay_half_life_days")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(30.0)
+            .max(1.0);
+        let archive_threshold = args
+            .get("decay_archive_threshold")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.05)
+            .clamp(0.0, 1.0);
+        let skip_decay = args
+            .get("skip_decay")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // 1. Importance decay pass (unless skipped or dry_run)
+        let decay_archived = if skip_decay || dry_run {
+            0u64
+        } else {
+            store
+                .memory_decay_importance(half_life, archive_threshold)
+                .await
+                .unwrap_or(0)
+        };
+
+        // 2. Compact stale memories
+        let policy = CompactPolicy {
+            min_uses,
+            older_than_secs: Some(older_than_days * 86_400),
+            dry_run,
+        };
+        let removed = store.memory_compact(policy).await?;
+
+        // 3. Optional export
+        let mut export_summary = Value::Null;
+        if let Some(path) = args.get("export_path").and_then(|v| v.as_str()) {
+            let filter = MemoryExportFilter::default();
+            let exported = store.memory_export(&filter, &PathBuf::from(path)).await?;
+            export_summary = json!({ "path": path, "exported": exported });
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "dry_run": dry_run,
+            "decay": {
+                "half_life_days": half_life,
+                "archive_threshold": archive_threshold,
+                "archived_count": decay_archived,
+                "skipped": skip_decay || dry_run
+            },
+            "policy": {
+                "older_than_days": older_than_days,
+                "min_uses": min_uses
+            },
+            "removed_count": removed.len(),
+            "removed_keys": removed,
+            "export": export_summary
+        })))
     }
 }
 
@@ -1424,7 +2908,15 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(MemoryImportTool::new(hub.clone())));
     // v0.6: graph edges
     reg.register(Arc::new(MemoryLinkTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryNeighborsTool::new(hub)));
+    reg.register(Arc::new(MemoryNeighborsTool::new(hub.clone())));
+    // Cursor-friendly manual equivalents for Claude hook lifecycle.
+    reg.register(Arc::new(SessionBootstrapTool::new(hub.clone())));
+    reg.register(Arc::new(SessionFinalizeTool::new(hub.clone())));
+    // v0.9: Cursor capability alignment
+    reg.register(Arc::new(SessionCurateTool::new(hub.clone())));
+    reg.register(Arc::new(HookStatusTool::new(hub.clone())));
+    reg.register(Arc::new(CapabilitiesTool::new(hub.clone())));
+    reg.register(Arc::new(MemorySuggestTool::new(hub)));
     reg
 }
 

@@ -20,7 +20,9 @@ pub struct Hub {
 }
 
 impl Hub {
-    pub fn builder() -> HubBuilder { HubBuilder::default() }
+    pub fn builder() -> HubBuilder {
+        HubBuilder::default()
+    }
 
     /// Persist (best-effort) and fan-out one notification.
     pub async fn deliver(&self, evt: &NotifyEvent) -> (u32, bool) {
@@ -53,12 +55,30 @@ pub struct HubBuilder {
 }
 
 impl HubBuilder {
-    pub fn notifier(mut self, n: Arc<dyn Notifier>) -> Self { self.notifiers.push(n); self }
-    pub fn store(mut self, s: Arc<dyn StateStore>) -> Self { self.store = Some(s); self }
-    pub fn terminal(mut self, t: Arc<dyn TerminalBackend>) -> Self { self.terminal = Some(t); self }
-    pub fn browser(mut self, b: Arc<dyn BrowserBackend>) -> Self { self.browser = Some(b); self }
-    pub fn agent(mut self, a: Arc<dyn AgentRuntime>) -> Self { self.agent = Some(a); self }
-    pub fn worktree(mut self, w: Arc<GitWorktreeManager>) -> Self { self.worktree = Some(w); self }
+    pub fn notifier(mut self, n: Arc<dyn Notifier>) -> Self {
+        self.notifiers.push(n);
+        self
+    }
+    pub fn store(mut self, s: Arc<dyn StateStore>) -> Self {
+        self.store = Some(s);
+        self
+    }
+    pub fn terminal(mut self, t: Arc<dyn TerminalBackend>) -> Self {
+        self.terminal = Some(t);
+        self
+    }
+    pub fn browser(mut self, b: Arc<dyn BrowserBackend>) -> Self {
+        self.browser = Some(b);
+        self
+    }
+    pub fn agent(mut self, a: Arc<dyn AgentRuntime>) -> Self {
+        self.agent = Some(a);
+        self
+    }
+    pub fn worktree(mut self, w: Arc<GitWorktreeManager>) -> Self {
+        self.worktree = Some(w);
+        self
+    }
     pub fn build(self) -> Hub {
         Hub {
             notifiers: self.notifiers,

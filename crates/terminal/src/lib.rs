@@ -43,10 +43,7 @@ pub enum SplitDir {
 pub enum TermEvent {
     PaneOpened(PaneId),
     PaneClosed(PaneId),
-    OscNotification {
-        pane: PaneId,
-        body: String,
-    },
+    OscNotification { pane: PaneId, body: String },
 }
 
 #[async_trait]

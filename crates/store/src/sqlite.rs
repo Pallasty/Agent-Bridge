@@ -10,6 +10,51 @@ use tokio_rusqlite::{params, Connection};
 type RusqliteResult<T> = std::result::Result<T, tokio_rusqlite::rusqlite::Error>;
 use tracing::info;
 
+// ── Edge type canonical weights (P1: typed-edges) ──────────────────────────
+// Inspired by AiOT GraphMemoryBridge edge semantics + temporal bonus idea.
+//
+// Causal edges (updates, caused_by, supersedes) get a temporal bonus ×1.2
+// in energy propagation (applied in memory_neighbors BFS traversal).
+// Recall edges (invalidates, contradicts) get a penalty ×0.85.
+//
+// Base weights — used when caller passes edge_type but no explicit weight:
+const EDGE_WEIGHT_UPDATES: f64 = 1.5; // newest info replaces old
+const EDGE_WEIGHT_CAUSED_BY: f64 = 1.3; // causal chain
+const EDGE_WEIGHT_SUPERSEDES: f64 = 1.3; // explicit supersession
+const EDGE_WEIGHT_IMPLEMENTS: f64 = 1.1; // concrete realisation of design
+const EDGE_WEIGHT_RELATED: f64 = 1.0; // generic relation
+const EDGE_WEIGHT_PART_OF: f64 = 0.8; // structural containment
+const EDGE_WEIGHT_DERIVED_FROM: f64 = 0.8; // loose derivation
+const EDGE_WEIGHT_CONTRADICTS: f64 = 0.5; // known conflict
+const EDGE_WEIGHT_INVALIDATES: f64 = 0.5; // explicit invalidation
+
+/// Return the canonical base weight for a known edge type.
+/// Unknown types default to 1.0 (generic relation).
+pub fn weight_for_edge_type(edge_type: &str) -> f64 {
+    match edge_type {
+        "updates" => EDGE_WEIGHT_UPDATES,
+        "caused_by" => EDGE_WEIGHT_CAUSED_BY,
+        "supersedes" => EDGE_WEIGHT_SUPERSEDES,
+        "implements" => EDGE_WEIGHT_IMPLEMENTS,
+        "relates" | "related" => EDGE_WEIGHT_RELATED,
+        "part_of" => EDGE_WEIGHT_PART_OF,
+        "derived_from" => EDGE_WEIGHT_DERIVED_FROM,
+        "contradicts" => EDGE_WEIGHT_CONTRADICTS,
+        "invalidates" => EDGE_WEIGHT_INVALIDATES,
+        _ => 1.0,
+    }
+}
+
+/// AiOT temporal bonus multiplier for an edge type:
+/// causal edges get ×1.2, recall-penalty edges get ×0.85, others ×1.0.
+pub fn temporal_bonus(edge_type: &str) -> f64 {
+    match edge_type {
+        "updates" | "caused_by" | "supersedes" | "implements" => 1.2,
+        "contradicts" | "invalidates" => 0.85,
+        _ => 1.0,
+    }
+}
+
 use crate::{
     CompactPolicy, ImportConflictPolicy, ImportReport, MemoryEdge, MemoryExportFilter,
     MemoryListSort, MemoryRecord, MemorySearchHit, NotificationRecord, SessionFilter, StateStore,
@@ -122,6 +167,34 @@ CREATE INDEX IF NOT EXISTS idx_memory_edges_from ON memory_edges(from_key);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_to   ON memory_edges(to_key);
 "#;
 
+// v1.0: importance score + status column for cognitive memory
+const SCHEMA_V7: &str = r#"
+ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5;
+ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+
+-- Back-fill kind-based importance for existing rows
+UPDATE memories SET importance = CASE kind
+    WHEN 'decision'    THEN 0.8
+    WHEN 'architecture' THEN 0.8
+    WHEN 'design'      THEN 0.8
+    WHEN 'lesson'      THEN 0.7
+    WHEN 'bug'         THEN 0.7
+    WHEN 'fix'         THEN 0.7
+    WHEN 'pitfall'     THEN 0.7
+    WHEN 'todo'        THEN 0.6
+    WHEN 'action'      THEN 0.6
+    WHEN 'fact'        THEN 0.5
+    WHEN 'context'     THEN 0.5
+    WHEN 'preference'  THEN 0.5
+    WHEN 'observation' THEN 0.3
+    WHEN 'note'        THEN 0.3
+    ELSE 0.5
+END;
+
+CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance DESC);
+CREATE INDEX IF NOT EXISTS idx_memories_status     ON memories(status);
+"#;
+
 // v0.5.1 hotfix: replace the broken triggers v0.5.0 may have installed.
 const SCHEMA_V5: &str = r#"
 DROP TRIGGER IF EXISTS memories_ai;
@@ -186,6 +259,8 @@ impl SqliteStore {
             .map_err(|e| Error::Backend(format!("sqlite open {path:?}: {e}")))?;
 
         conn.call(|c| -> RusqliteResult<()> {
+            // Allow up to 5 s of retries when another writer holds the DB.
+            c.busy_timeout(std::time::Duration::from_secs(5))?;
             c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
             c.execute_batch(SCHEMA_V1)?;
             c.execute(
@@ -203,12 +278,9 @@ impl SqliteStore {
                 .unwrap_or_else(|_| "1".to_string());
             if cur.as_str() == "1" {
                 let _ = c.execute("ALTER TABLE sessions ADD COLUMN exit_code INTEGER", []);
-                let _ = c.execute("ALTER TABLE sessions ADD COLUMN stdout    TEXT",   []);
-                let _ = c.execute("ALTER TABLE sessions ADD COLUMN stderr    TEXT",   []);
-                c.execute(
-                    "UPDATE schema_meta SET value='2' WHERE key='version'",
-                    [],
-                )?;
+                let _ = c.execute("ALTER TABLE sessions ADD COLUMN stdout    TEXT", []);
+                let _ = c.execute("ALTER TABLE sessions ADD COLUMN stderr    TEXT", []);
+                c.execute("UPDATE schema_meta SET value='2' WHERE key='version'", [])?;
             }
 
             // ── v3 migration: memories table for agent self-memory ──
@@ -221,10 +293,7 @@ impl SqliteStore {
                 .unwrap_or_else(|_| "2".to_string());
             if cur.as_str() == "2" {
                 c.execute_batch(SCHEMA_V3)?;
-                c.execute(
-                    "UPDATE schema_meta SET value='3' WHERE key='version'",
-                    [],
-                )?;
+                c.execute("UPDATE schema_meta SET value='3' WHERE key='version'", [])?;
             }
 
             // ── v4 migration: FTS5 index on memories ──
@@ -243,10 +312,7 @@ impl SqliteStore {
                      SELECT rowid, key, content FROM memories",
                     [],
                 )?;
-                c.execute(
-                    "UPDATE schema_meta SET value='4' WHERE key='version'",
-                    [],
-                )?;
+                c.execute("UPDATE schema_meta SET value='4' WHERE key='version'", [])?;
             }
 
             // ── v5 hotfix: replace v0.5.0's broken FTS5 sync triggers ──
@@ -259,10 +325,7 @@ impl SqliteStore {
                 .unwrap_or_else(|_| "4".to_string());
             if cur.as_str() == "4" {
                 c.execute_batch(SCHEMA_V5)?;
-                c.execute(
-                    "UPDATE schema_meta SET value='5' WHERE key='version'",
-                    [],
-                )?;
+                c.execute("UPDATE schema_meta SET value='5' WHERE key='version'", [])?;
             }
 
             // ── v6: scope column + memory_edges graph table ──
@@ -275,10 +338,37 @@ impl SqliteStore {
                 .unwrap_or_else(|_| "5".to_string());
             if cur.as_str() == "5" {
                 c.execute_batch(SCHEMA_V6)?;
-                c.execute(
-                    "UPDATE schema_meta SET value='6' WHERE key='version'",
+                c.execute("UPDATE schema_meta SET value='6' WHERE key='version'", [])?;
+            }
+
+            // ── v7: importance score + status for cognitive memory ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
                     [],
-                )?;
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "6".to_string());
+            if cur.as_str() == "6" {
+                // Guard: skip ALTER TABLE if columns already exist (idempotent).
+                let has_importance: bool = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name='importance'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .unwrap_or(0)
+                    > 0;
+                if !has_importance {
+                    c.execute_batch(SCHEMA_V7)?;
+                } else {
+                    // Columns exist but version stamp was lost — recreate indices only.
+                    c.execute_batch(
+                        "CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance DESC);\
+                         CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);",
+                    )?;
+                }
+                c.execute("UPDATE schema_meta SET value='7' WHERE key='version'", [])?;
             }
             Ok(())
         })
@@ -349,15 +439,50 @@ fn memory_score(last_accessed_at: i64, access_count: u64, now: i64) -> f64 {
     recency + 0.3 * frequency
 }
 
+/// Map a memory kind string to its default importance score.
+fn importance_for_kind(kind: &str) -> f64 {
+    match kind {
+        "decision" | "architecture" | "design" => 0.8,
+        "lesson" | "bug" | "fix" | "pitfall" => 0.7,
+        "todo" | "action" => 0.6,
+        "fact" | "context" | "preference" | "session_handoff" => 0.5,
+        "observation" | "note" => 0.3,
+        _ => 0.5,
+    }
+}
+
+/// Tokenise content for contradiction-overlap detection.
+/// Returns lowercase alpha-numeric tokens of length >= 4.
+fn overlap_tokens(text: &str) -> std::collections::HashSet<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() >= 4)
+        .map(|t| t.to_lowercase())
+        .collect()
+}
+
+/// Jaccard-style overlap ratio between two token sets.
+fn token_overlap_ratio(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let intersection = a.intersection(b).count();
+    let union = a.union(b).count();
+    if union == 0 { 0.0 } else { intersection as f64 / union as f64 }
+}
+
 fn parse_str_array(s: &str) -> Vec<String> {
     serde_json::from_str(s).unwrap_or_default()
 }
 
 /// Clamp `s` to at most `max` bytes, preserving UTF-8 boundaries.
 fn clamp(s: &str, max: usize) -> String {
-    if s.len() <= max { return s.to_string(); }
+    if s.len() <= max {
+        return s.to_string();
+    }
     let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) { end -= 1; }
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
     let mut out = s[..end].to_string();
     out.push_str("\n…[truncated]…");
     out
@@ -413,8 +538,14 @@ impl StateStore for SqliteStore {
                        (id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![
-                        s.id.as_str(), s.runtime_id, s.cwd, s.started_at, s.ended_at,
-                        s.exit_code, s.stdout, s.stderr
+                        s.id.as_str(),
+                        s.runtime_id,
+                        s.cwd,
+                        s.started_at,
+                        s.ended_at,
+                        s.exit_code,
+                        s.stdout,
+                        s.stderr
                     ],
                 )?;
                 Ok(())
@@ -460,10 +591,10 @@ impl StateStore for SqliteStore {
         limit: u32,
     ) -> Result<Vec<StoredSession>> {
         let limit_i = limit as i64;
-        let f_runtime    = filter.runtime_id.clone();
+        let f_runtime = filter.runtime_id.clone();
         let f_cwd_prefix = filter.cwd_prefix.clone();
-        let f_exited     = filter.exited_only;
-        let f_exit_code  = filter.exit_code;
+        let f_exited = filter.exited_only;
+        let f_exit_code = filter.exit_code;
 
         let rows = self
             .conn
@@ -578,8 +709,8 @@ impl StateStore for SqliteStore {
                 let rows = stmt
                     .query_map(params![limit], |row| {
                         let context_str: String = row.get(6)?;
-                        let context = serde_json::from_str(&context_str)
-                            .unwrap_or(serde_json::Value::Null);
+                        let context =
+                            serde_json::from_str(&context_str).unwrap_or(serde_json::Value::Null);
                         let session_id: Option<String> = row.get(5)?;
                         Ok(NotificationRecord {
                             ts: row.get(0)?,
@@ -610,24 +741,85 @@ impl StateStore for SqliteStore {
         let tags = serde_json::to_string(&mem.tags)?;
         let related = serde_json::to_string(&mem.related_keys)?;
         let scope = mem.scope.clone();
+        // Use caller-supplied importance if non-default, otherwise auto-assign from kind.
+        let importance = if (mem.importance - 0.5).abs() > 1e-9 {
+            mem.importance.clamp(0.0, 1.0)
+        } else {
+            importance_for_kind(&kind)
+        };
+        let status = if mem.status.is_empty() {
+            "active".to_string()
+        } else {
+            mem.status.clone()
+        };
         let now = now_secs();
+
+        // Pre-compute overlap tokens for contradiction detection (outside closure).
+        let new_tokens = overlap_tokens(&content);
+        let kind_clone = kind.clone();
 
         self.conn
             .call(move |c| -> RusqliteResult<()> {
                 c.execute(
                     "INSERT INTO memories
                        (key, kind, content, tags, related_keys, scope,
-                        created_at, updated_at, last_accessed_at, access_count)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0)
+                        created_at, updated_at, last_accessed_at, access_count,
+                        importance, status)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9)
                      ON CONFLICT(key) DO UPDATE SET
                         kind          = excluded.kind,
                         content       = excluded.content,
                         tags          = excluded.tags,
                         related_keys  = excluded.related_keys,
                         scope         = excluded.scope,
-                        updated_at    = excluded.updated_at",
-                    params![key, kind, content, tags, related, scope, now],
+                        updated_at    = excluded.updated_at,
+                        importance    = excluded.importance,
+                        status        = CASE
+                            WHEN memories.status = 'superseded' THEN 'active'
+                            ELSE excluded.status
+                        END",
+                    params![key, kind_clone, content, tags, related, scope, now, importance, status],
                 )?;
+
+                // ── Contradiction detection ──────────────────────────────────
+                // Only run if we have enough tokens to compare meaningfully.
+                if new_tokens.len() >= 3 {
+                    let mut cand_stmt = c.prepare(
+                        "SELECT key, content FROM memories
+                         WHERE kind = ?1
+                           AND (scope IS ?2)
+                           AND key != ?3
+                           AND status = 'active'
+                         LIMIT 30",
+                    )?;
+                    let candidates: Vec<(String, String)> = cand_stmt
+                        .query_map(params![kind_clone, scope, key], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        })?
+                        .filter_map(|r| r.ok())
+                        .collect();
+
+                    for (cand_key, cand_content) in candidates {
+                        let cand_tokens = overlap_tokens(&cand_content);
+                        if token_overlap_ratio(&new_tokens, &cand_tokens) > 0.5 {
+                            // New memory supersedes the old one.
+                            c.execute(
+                                "INSERT INTO memory_edges
+                                   (from_key, to_key, edge_type, weight, created_at)
+                                 VALUES (?1, ?2, 'supersedes', 1.3, ?3)
+                                 ON CONFLICT(from_key, to_key, edge_type)
+                                 DO UPDATE SET weight = excluded.weight",
+                                params![key, cand_key, now],
+                            )?;
+                            c.execute(
+                                "UPDATE memories SET status = 'superseded'
+                                 WHERE key = ?1 AND status = 'active'",
+                                params![cand_key],
+                            )?;
+                        }
+                    }
+                }
+
                 Ok(())
             })
             .await
@@ -639,11 +831,13 @@ impl StateStore for SqliteStore {
         let key = key.to_string();
         let now = now_secs();
 
-        let row = self.conn
+        let row = self
+            .conn
             .call(move |c| -> RusqliteResult<Option<MemoryRecord>> {
                 let mut stmt = c.prepare(
                     "SELECT key, kind, content, tags, related_keys, scope,
-                            created_at, updated_at, last_accessed_at, access_count
+                            created_at, updated_at, last_accessed_at, access_count,
+                            importance, status
                      FROM memories WHERE key = ?1",
                 )?;
                 let r = stmt
@@ -651,16 +845,18 @@ impl StateStore for SqliteStore {
                         let tags_s: String = row.get(3)?;
                         let related_s: String = row.get(4)?;
                         Ok(MemoryRecord {
-                            key:              row.get(0)?,
-                            kind:             row.get(1)?,
-                            content:          row.get(2)?,
-                            tags:             parse_str_array(&tags_s),
-                            related_keys:     parse_str_array(&related_s),
-                            scope:            row.get(5)?,
-                            created_at:       row.get(6)?,
-                            updated_at:       row.get(7)?,
+                            key: row.get(0)?,
+                            kind: row.get(1)?,
+                            content: row.get(2)?,
+                            tags: parse_str_array(&tags_s),
+                            related_keys: parse_str_array(&related_s),
+                            scope: row.get(5)?,
+                            created_at: row.get(6)?,
+                            updated_at: row.get(7)?,
                             last_accessed_at: row.get(8)?,
-                            access_count:     row.get::<_, i64>(9)? as u64,
+                            access_count: row.get::<_, i64>(9)? as u64,
+                            importance: row.get::<_, f64>(10).unwrap_or(0.5),
+                            status: row.get::<_, String>(11).unwrap_or_else(|_| "active".to_string()),
                         })
                     })
                     .ok();
@@ -703,7 +899,8 @@ impl StateStore for SqliteStore {
         let limit_i = limit as i64;
         let now = now_secs();
 
-        let hits = self.conn
+        let hits = self
+            .conn
             .call(move |c| -> RusqliteResult<Vec<MemorySearchHit>> {
                 // FTS5 first: get candidate rowids ranked by bm25.
                 // Then JOIN back to memories for the full record.
@@ -712,7 +909,8 @@ impl StateStore for SqliteStore {
                 let mut stmt = c.prepare(
                     "SELECT m.key, m.kind, m.content, m.tags, m.related_keys, m.scope,
                             m.created_at, m.updated_at, m.last_accessed_at, m.access_count,
-                            bm25(memories_fts) AS bm25_score
+                            bm25(memories_fts) AS bm25_score,
+                            m.importance, m.status
                      FROM memories_fts
                      JOIN memories m ON m.rowid = memories_fts.rowid
                      WHERE memories_fts MATCH ?1
@@ -724,16 +922,18 @@ impl StateStore for SqliteStore {
                         let tags_s: String = row.get(3)?;
                         let related_s: String = row.get(4)?;
                         let rec = MemoryRecord {
-                            key:              row.get(0)?,
-                            kind:             row.get(1)?,
-                            content:          row.get(2)?,
-                            tags:             parse_str_array(&tags_s),
-                            related_keys:     parse_str_array(&related_s),
-                            scope:            row.get(5)?,
-                            created_at:       row.get(6)?,
-                            updated_at:       row.get(7)?,
+                            key: row.get(0)?,
+                            kind: row.get(1)?,
+                            content: row.get(2)?,
+                            tags: parse_str_array(&tags_s),
+                            related_keys: parse_str_array(&related_s),
+                            scope: row.get(5)?,
+                            created_at: row.get(6)?,
+                            updated_at: row.get(7)?,
                             last_accessed_at: row.get(8)?,
-                            access_count:     row.get::<_, i64>(9)? as u64,
+                            access_count: row.get::<_, i64>(9)? as u64,
+                            importance: row.get::<_, f64>(11).unwrap_or(0.5),
+                            status: row.get::<_, String>(12).unwrap_or_else(|_| "active".to_string()),
                         };
                         let bm25: f64 = row.get(10)?;
                         Ok((rec, bm25))
@@ -742,9 +942,7 @@ impl StateStore for SqliteStore {
 
                 let mut hits: Vec<MemorySearchHit> = rows
                     .into_iter()
-                    .filter(|(r, _)| {
-                        tags.is_empty() || tags.iter().any(|t| r.tags.contains(t))
-                    })
+                    .filter(|(r, _)| tags.is_empty() || tags.iter().any(|t| r.tags.contains(t)))
                     .map(|(r, bm25)| {
                         // bm25 is negative (more negative = better match in SQLite).
                         // Convert to positive "match strength", then mix with our
@@ -755,13 +953,172 @@ impl StateStore for SqliteStore {
                         MemorySearchHit { record: r, score }
                     })
                     .collect();
-                hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+                // Intuition guardrail: FTS5 tokenisation can miss obvious "exact key"
+                // queries (e.g. keys with separators like `_` / `.`). Always add an
+                // exact-key fallback candidate so searching by key behaves predictably.
+                let exact_key_row = {
+                    let mut exact_stmt = c.prepare(
+                        "SELECT key, kind, content, tags, related_keys, scope,
+                                created_at, updated_at, last_accessed_at, access_count,
+                                importance, status
+                         FROM memories
+                         WHERE key = ?1 COLLATE NOCASE
+                         LIMIT 1",
+                    )?;
+                    exact_stmt
+                        .query_row(params![q], |row| {
+                            let tags_s: String = row.get(3)?;
+                            let related_s: String = row.get(4)?;
+                            Ok(MemoryRecord {
+                                key: row.get(0)?,
+                                kind: row.get(1)?,
+                                content: row.get(2)?,
+                                tags: parse_str_array(&tags_s),
+                                related_keys: parse_str_array(&related_s),
+                                scope: row.get(5)?,
+                                created_at: row.get(6)?,
+                                updated_at: row.get(7)?,
+                                last_accessed_at: row.get(8)?,
+                                access_count: row.get::<_, i64>(9)? as u64,
+                                importance: row.get::<_, f64>(10).unwrap_or(0.5),
+                                status: row.get::<_, String>(11).unwrap_or_else(|_| "active".to_string()),
+                            })
+                        })
+                        .ok()
+                };
+                if let Some(rec) = exact_key_row {
+                    let tags_match = tags.is_empty() || tags.iter().any(|t| rec.tags.contains(t));
+                    let exists = hits.iter().any(|h| h.record.key == rec.key);
+                    if tags_match && !exists {
+                        // Keep exact-key hits above fuzzy matches.
+                        let score =
+                            1_000_000.0 + memory_score(rec.last_accessed_at, rec.access_count, now);
+                        hits.push(MemorySearchHit { record: rec, score });
+                    }
+                }
+
+                hits.sort_by(|a, b| {
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
                 hits.truncate(limit_i as usize);
                 Ok(hits)
             })
             .await
             .map_err(|e| Error::Backend(format!("memory_search: {e}")))?;
         Ok(hits)
+    }
+
+    async fn memory_search_hybrid(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+        k: f64,
+        expand_top: u32,
+    ) -> Result<Vec<MemorySearchHit>> {
+        use std::collections::HashMap;
+
+        // ── Step 1: FTS5 search (list A) ──────────────────────────────────────
+        // Fetch 4× limit so graph expansion has candidates to work with.
+        let fts_hits = self
+            .memory_search(query, tags_any, limit.saturating_mul(4).max(40))
+            .await?;
+
+        if fts_hits.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // ── Step 2: Graph expansion (list B) ──────────────────────────────────
+        // For each of the top `expand_top` FTS5 hits, fetch direct neighbors.
+        // Weight each neighbor by edge.weight × neighbour.importance.
+        let expand_n = expand_top.min(fts_hits.len() as u32) as usize;
+        let mut graph_scores: HashMap<String, f64> = HashMap::new();
+
+        for hit in fts_hits.iter().take(expand_n) {
+            let edges = self.memory_neighbors(&hit.record.key).await.unwrap_or_default();
+            for edge in edges {
+                // Neighbour key is the other end of the edge
+                let neighbour_key = if edge.from_key == hit.record.key {
+                    edge.to_key.clone()
+                } else {
+                    edge.from_key.clone()
+                };
+                // Skip if this key is already in FTS5 results (we'll pick it up via RRF)
+                let already_in_fts = fts_hits.iter().any(|h| h.record.key == neighbour_key);
+                // Score = edge weight × fts hit importance (the seed's importance)
+                let edge_score = edge.weight * hit.record.importance;
+                let e = graph_scores.entry(neighbour_key).or_insert(0.0);
+                *e += edge_score; // accumulate across multiple seed paths
+                let _ = already_in_fts; // keep both — RRF handles dedup via rank
+            }
+        }
+
+        // Fetch full records for graph candidates not already in FTS list
+        let mut graph_records: Vec<(String, f64)> = graph_scores.into_iter().collect();
+        // Sort graph candidates by accumulated score (higher = more relevant neighbor)
+        graph_records.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Collect full MemoryRecords for graph list
+        let mut graph_hits: Vec<MemorySearchHit> = Vec::new();
+        for (key, gscore) in &graph_records {
+            if let Ok(Some(rec)) = self.memory_get(key).await {
+                // Only include active memories
+                if rec.status == "active" {
+                    graph_hits.push(MemorySearchHit {
+                        record: rec,
+                        score: *gscore,
+                    });
+                }
+            }
+        }
+
+        // ── Step 3: RRF fusion ─────────────────────────────────────────────────
+        // RRF score(d) = Σ_list 1/(k + rank_in_list)
+        // k=60 is the standard constant (Robertson et al.)
+        let rrf_k = k.max(1.0);
+        let mut rrf_scores: HashMap<String, f64> = HashMap::new();
+
+        // List A: FTS5 results
+        for (rank, hit) in fts_hits.iter().enumerate() {
+            let key = hit.record.key.clone();
+            *rrf_scores.entry(key).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
+        }
+        // List B: Graph neighbor results
+        for (rank, hit) in graph_hits.iter().enumerate() {
+            let key = hit.record.key.clone();
+            *rrf_scores.entry(key).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
+        }
+
+        // ── Step 4: Build final result set ────────────────────────────────────
+        // Collect all unique MemoryRecords (prefer FTS5 record since it was freshly bumped)
+        let mut all_records: HashMap<String, MemoryRecord> = HashMap::new();
+        for hit in fts_hits {
+            all_records.entry(hit.record.key.clone()).or_insert(hit.record);
+        }
+        for hit in graph_hits {
+            all_records.entry(hit.record.key.clone()).or_insert(hit.record);
+        }
+
+        let mut merged: Vec<MemorySearchHit> = rrf_scores
+            .into_iter()
+            .filter_map(|(key, rrf_score)| {
+                all_records.remove(&key).map(|record| MemorySearchHit {
+                    score: rrf_score,
+                    record,
+                })
+            })
+            .collect();
+
+        merged.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        merged.truncate(limit as usize);
+        Ok(merged)
     }
 
     async fn list_memories(
@@ -784,12 +1141,18 @@ impl StateStore for SqliteStore {
         let ctx = ctx.to_string();
         let limit_i = limit as i64;
         let order = match sort {
-            MemoryListSort::Recent   => "last_accessed_at DESC",
-            MemoryListSort::Frequent => "access_count DESC, last_accessed_at DESC",
-            MemoryListSort::Newest   => "created_at DESC",
+            MemoryListSort::Recent => "last_accessed_at DESC".to_string(),
+            MemoryListSort::Frequent => "access_count DESC, last_accessed_at DESC".to_string(),
+            MemoryListSort::Newest => "created_at DESC".to_string(),
+            // PUCT-inspired: importance / (1 + age_days_since_update) DESC
+            // This surfaces high-importance, recently-updated memories first.
+            MemoryListSort::ByImportance => {
+                "(importance / (1.0 + (CAST(strftime('%s','now') AS REAL) - updated_at) / 86400.0)) DESC, importance DESC".to_string()
+            }
         };
 
-        let rows = self.conn
+        let rows = self
+            .conn
             .call(move |c| -> RusqliteResult<Vec<MemoryRecord>> {
                 // Bind exactly 3 params unconditionally — `?3` (the scope ctx)
                 // is NULL when the caller didn't supply one, and the WHERE
@@ -806,7 +1169,8 @@ impl StateStore for SqliteStore {
                 //     `?3` is a path under that project.
                 let sql = format!(
                     "SELECT key, kind, content, tags, related_keys, scope,
-                            created_at, updated_at, last_accessed_at, access_count
+                            created_at, updated_at, last_accessed_at, access_count,
+                            importance, status
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
                        AND (?3 IS NULL
@@ -824,16 +1188,18 @@ impl StateStore for SqliteStore {
                         let tags_s: String = row.get(3)?;
                         let related_s: String = row.get(4)?;
                         Ok(MemoryRecord {
-                            key:              row.get(0)?,
-                            kind:             row.get(1)?,
-                            content:          row.get(2)?,
-                            tags:             parse_str_array(&tags_s),
-                            related_keys:     parse_str_array(&related_s),
-                            scope:            row.get(5)?,
-                            created_at:       row.get(6)?,
-                            updated_at:       row.get(7)?,
+                            key: row.get(0)?,
+                            kind: row.get(1)?,
+                            content: row.get(2)?,
+                            tags: parse_str_array(&tags_s),
+                            related_keys: parse_str_array(&related_s),
+                            scope: row.get(5)?,
+                            created_at: row.get(6)?,
+                            updated_at: row.get(7)?,
                             last_accessed_at: row.get(8)?,
-                            access_count:     row.get::<_, i64>(9)? as u64,
+                            access_count: row.get::<_, i64>(9)? as u64,
+                            importance: row.get::<_, f64>(10).unwrap_or(0.5),
+                            status: row.get::<_, String>(11).unwrap_or_else(|_| "active".to_string()),
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -854,6 +1220,14 @@ impl StateStore for SqliteStore {
         let from = from_key.to_string();
         let to = to_key.to_string();
         let etype = edge_type.to_string();
+        // If the caller passed the sentinel default (1.0), auto-upgrade to
+        // the canonical weight for this edge type so callers don't have to
+        // remember the weight table.
+        let effective_weight = if (weight - 1.0).abs() < f64::EPSILON {
+            weight_for_edge_type(&etype)
+        } else {
+            weight.clamp(0.0, 2.0) // allow >1.0 for temporal-bonus pre-applied weights
+        };
         let now = now_secs();
         self.conn
             .call(move |c| -> RusqliteResult<()> {
@@ -862,7 +1236,7 @@ impl StateStore for SqliteStore {
                      VALUES (?1, ?2, ?3, ?4, ?5)
                      ON CONFLICT(from_key, to_key, edge_type) DO UPDATE SET
                         weight = excluded.weight",
-                    params![from, to, etype, weight, now],
+                    params![from, to, etype, effective_weight, now],
                 )?;
                 Ok(())
             })
@@ -873,7 +1247,8 @@ impl StateStore for SqliteStore {
 
     async fn memory_neighbors(&self, key: &str) -> Result<Vec<MemoryEdge>> {
         let key = key.to_string();
-        let edges = self.conn
+        let edges = self
+            .conn
             .call(move |c| -> RusqliteResult<Vec<MemoryEdge>> {
                 let mut stmt = c.prepare(
                     "SELECT from_key, to_key, edge_type, weight FROM memory_edges
@@ -883,10 +1258,10 @@ impl StateStore for SqliteStore {
                 let rows = stmt
                     .query_map(params![key], |row| {
                         Ok(MemoryEdge {
-                            from_key:  row.get(0)?,
-                            to_key:    row.get(1)?,
+                            from_key: row.get(0)?,
+                            to_key: row.get(1)?,
                             edge_type: row.get(2)?,
-                            weight:    row.get(3)?,
+                            weight: row.get(3)?,
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -897,9 +1272,103 @@ impl StateStore for SqliteStore {
         Ok(edges)
     }
 
+    async fn memory_neighbors_bfs(
+        &self,
+        start_key: &str,
+        depth: u8,
+        decay_factor: f64,
+        min_energy: f64,
+    ) -> Result<Vec<(MemoryEdge, f64)>> {
+        use std::collections::{HashMap, VecDeque};
+
+        let start = start_key.to_string();
+        let max_depth = depth.min(6); // hard cap to avoid O(n^d) blowup
+        let decay = decay_factor.clamp(0.1, 1.0);
+        let threshold = min_energy.max(0.001);
+
+        // Fetch all edges once and work in-memory — DB is local SQLite, fits RAM.
+        let all_edges = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<MemoryEdge>> {
+                let mut stmt = c.prepare(
+                    "SELECT from_key, to_key, edge_type, weight FROM memory_edges",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok(MemoryEdge {
+                        from_key: row.get(0)?,
+                        to_key: row.get(1)?,
+                        edge_type: row.get(2)?,
+                        weight: row.get(3)?,
+                    })
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_neighbors_bfs fetch: {e}")))?;
+
+        // BFS with energy tracking (AiOT GraphMemoryBridge "ignite" pattern).
+        // visited: key → best energy seen so far (we propagate max).
+        let mut visited: HashMap<String, f64> = HashMap::new();
+        visited.insert(start.clone(), 1.0);
+
+        // queue: (current_key, remaining_depth, energy_at_this_node)
+        let mut queue: VecDeque<(String, u8, f64)> = VecDeque::new();
+        queue.push_back((start.clone(), max_depth, 1.0));
+
+        // result: (edge, propagated_energy) — collect edges we traverse
+        let mut result: Vec<(MemoryEdge, f64)> = Vec::new();
+
+        while let Some((current, hops_left, energy)) = queue.pop_front() {
+            if hops_left == 0 {
+                continue;
+            }
+            // Find edges incident to `current`
+            for edge in &all_edges {
+                let (neighbour, is_outbound) = if edge.from_key == current {
+                    (edge.to_key.clone(), true)
+                } else if edge.to_key == current {
+                    (edge.from_key.clone(), false)
+                } else {
+                    continue;
+                };
+                // Strict cycle guard: never revisit a node already in the queue.
+                // This prevents loops (e.g. A→B→A) from appearing in results.
+                if visited.contains_key(&neighbour) {
+                    continue;
+                }
+                // Energy propagation:
+                //   causal outbound edges get temporal bonus ×1.2
+                //   inbound causal edges don't get the bonus (information flows forward)
+                let bonus = if is_outbound {
+                    temporal_bonus(&edge.edge_type)
+                } else {
+                    1.0
+                };
+                let next_energy = energy * edge.weight * bonus * decay;
+                if next_energy < threshold {
+                    continue;
+                }
+                visited.insert(neighbour.clone(), next_energy);
+                result.push((edge.clone(), next_energy));
+                queue.push_back((neighbour, hops_left - 1, next_energy));
+            }
+        }
+
+        // Sort by descending energy (highest-energy = most relevant first)
+        result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // Deduplicate: keep highest-energy occurrence of each (from, to, type) triple
+        let mut seen = std::collections::HashSet::new();
+        result.retain(|(e, _)| {
+            seen.insert((e.from_key.clone(), e.to_key.clone(), e.edge_type.clone()))
+        });
+        Ok(result)
+    }
+
     async fn memory_delete(&self, key: &str) -> Result<bool> {
         let key = key.to_string();
-        let n = self.conn
+        let n = self
+            .conn
             .call(move |c| -> RusqliteResult<usize> {
                 Ok(c.execute("DELETE FROM memories WHERE key = ?1", params![key])?)
             })
@@ -908,8 +1377,65 @@ impl StateStore for SqliteStore {
         Ok(n > 0)
     }
 
+    async fn memory_decay_importance(
+        &self,
+        half_life_days: f64,
+        archive_threshold: f64,
+    ) -> Result<u64> {
+        let now = now_secs();
+        let archived = self
+            .conn
+            .call(move |c| -> RusqliteResult<u64> {
+                // Fetch all active memories with their updated_at + current importance.
+                let mut stmt = c.prepare(
+                    "SELECT key, importance, updated_at FROM memories
+                     WHERE status = 'active'",
+                )?;
+                let candidates: Vec<(String, f64, i64)> = stmt
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, f64>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+
+                let tx = c.unchecked_transaction()?;
+                let mut archived_count = 0u64;
+                for (key, importance, updated_at) in candidates {
+                    let age_days = ((now - updated_at).max(0) as f64) / 86_400.0;
+                    // importance × 0.5^(age_days / half_life_days)
+                    let new_importance = importance * (0.5f64).powf(age_days / half_life_days);
+                    if new_importance < archive_threshold {
+                        tx.execute(
+                            "UPDATE memories SET importance = ?2, status = 'archived'
+                             WHERE key = ?1",
+                            params![key, new_importance],
+                        )?;
+                        archived_count += 1;
+                    } else {
+                        tx.execute(
+                            "UPDATE memories SET importance = ?2 WHERE key = ?1",
+                            params![key, new_importance],
+                        )?;
+                    }
+                }
+                tx.commit()?;
+                Ok(archived_count)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_decay_importance: {e}")))?;
+        Ok(archived)
+    }
+
     async fn memory_compact(&self, policy: CompactPolicy) -> Result<Vec<String>> {
-        let CompactPolicy { min_uses, older_than_secs, dry_run } = policy;
+        let CompactPolicy {
+            min_uses,
+            older_than_secs,
+            dry_run,
+        } = policy;
         let cutoff_lat = older_than_secs.map(|s| now_secs() - s);
         let min_uses_i = min_uses.map(|n| n as i64);
         // v0.7.1 fix (lesson_compact_or_logic_kills_new_memories): newly saved
@@ -928,7 +1454,8 @@ impl StateStore for SqliteStore {
         const GRACE_SECS: i64 = 3600;
         let grace_cutoff = now_secs() - GRACE_SECS;
 
-        let keys = self.conn
+        let keys = self
+            .conn
             .call(move |c| -> RusqliteResult<Vec<String>> {
                 let mut stmt = c.prepare(
                     "SELECT key FROM memories
@@ -938,10 +1465,9 @@ impl StateStore for SqliteStore {
                        AND (?2 IS NULL OR last_accessed_at < ?2)",
                 )?;
                 let keys: Vec<String> = stmt
-                    .query_map(
-                        params![min_uses_i, cutoff_lat, grace_cutoff],
-                        |r| r.get::<_, String>(0),
-                    )?
+                    .query_map(params![min_uses_i, cutoff_lat, grace_cutoff], |r| {
+                        r.get::<_, String>(0)
+                    })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
 
                 if !dry_run && !keys.is_empty() {
@@ -967,11 +1493,13 @@ impl StateStore for SqliteStore {
         let tags = filter.tags_any.clone();
         let since = filter.since_ts;
 
-        let rows: Vec<MemoryRecord> = self.conn
+        let rows: Vec<MemoryRecord> = self
+            .conn
             .call(move |c| -> RusqliteResult<Vec<MemoryRecord>> {
                 let mut stmt = c.prepare(
                     "SELECT key, kind, content, tags, related_keys, scope,
-                            created_at, updated_at, last_accessed_at, access_count
+                            created_at, updated_at, last_accessed_at, access_count,
+                            importance, status
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
                        AND (?2 IS NULL OR updated_at >= ?2)
@@ -982,16 +1510,18 @@ impl StateStore for SqliteStore {
                         let tags_s: String = row.get(3)?;
                         let related_s: String = row.get(4)?;
                         Ok(MemoryRecord {
-                            key:              row.get(0)?,
-                            kind:             row.get(1)?,
-                            content:          row.get(2)?,
-                            tags:             parse_str_array(&tags_s),
-                            related_keys:     parse_str_array(&related_s),
-                            scope:            row.get(5)?,
-                            created_at:       row.get(6)?,
-                            updated_at:       row.get(7)?,
+                            key: row.get(0)?,
+                            kind: row.get(1)?,
+                            content: row.get(2)?,
+                            tags: parse_str_array(&tags_s),
+                            related_keys: parse_str_array(&related_s),
+                            scope: row.get(5)?,
+                            created_at: row.get(6)?,
+                            updated_at: row.get(7)?,
                             last_accessed_at: row.get(8)?,
-                            access_count:     row.get::<_, i64>(9)? as u64,
+                            access_count: row.get::<_, i64>(9)? as u64,
+                            importance: row.get::<_, f64>(10).unwrap_or(0.5),
+                            status: row.get::<_, String>(11).unwrap_or_else(|_| "active".to_string()),
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1040,14 +1570,17 @@ impl StateStore for SqliteStore {
         // for atomicity (a malformed line shouldn't half-import).
         let mut parsed: Vec<MemoryRecord> = Vec::new();
         for line in text.lines() {
-            if line.trim().is_empty() { continue; }
+            if line.trim().is_empty() {
+                continue;
+            }
             match serde_json::from_str::<MemoryRecord>(line) {
                 Ok(r) => parsed.push(r),
                 Err(_) => report.malformed += 1,
             }
         }
 
-        let mut report = self.conn
+        let mut report = self
+            .conn
             .call(move |c| -> RusqliteResult<ImportReport> {
                 let tx = c.unchecked_transaction()?;
                 for r in &parsed {
@@ -1059,20 +1592,37 @@ impl StateStore for SqliteStore {
                         )
                         .ok();
                     let tags_s = serde_json::to_string(&r.tags).unwrap_or_else(|_| "[]".into());
-                    let related_s = serde_json::to_string(&r.related_keys).unwrap_or_else(|_| "[]".into());
+                    let related_s =
+                        serde_json::to_string(&r.related_keys).unwrap_or_else(|_| "[]".into());
                     let content = clamp(&r.content, MEMORY_CONTENT_CAP);
+                    let imp = if (r.importance - 0.5).abs() > 1e-9 {
+                        r.importance
+                    } else {
+                        importance_for_kind(&r.kind)
+                    };
+                    let stat = if r.status.is_empty() { "active" } else { r.status.as_str() };
                     match existing {
                         None => {
                             // Brand-new row — insert with the imported timestamps verbatim.
                             tx.execute(
                                 "INSERT INTO memories
                                    (key, kind, content, tags, related_keys, scope,
-                                    created_at, updated_at, last_accessed_at, access_count)
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                    created_at, updated_at, last_accessed_at, access_count,
+                                    importance, status)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                                 params![
-                                    r.key, r.kind, content, tags_s, related_s, r.scope,
-                                    r.created_at, r.updated_at, r.last_accessed_at,
+                                    r.key,
+                                    r.kind,
+                                    content,
+                                    tags_s,
+                                    related_s,
+                                    r.scope,
+                                    r.created_at,
+                                    r.updated_at,
+                                    r.last_accessed_at,
                                     r.access_count as i64,
+                                    imp,
+                                    stat,
                                 ],
                             )?;
                             report.inserted += 1;
@@ -1088,11 +1638,20 @@ impl StateStore for SqliteStore {
                                     "UPDATE memories SET
                                         kind = ?2, content = ?3, tags = ?4, related_keys = ?5,
                                         scope = ?6, updated_at = ?7, last_accessed_at = ?8,
-                                        access_count = ?9
+                                        access_count = ?9, importance = ?10, status = ?11
                                      WHERE key = ?1",
                                     params![
-                                        r.key, r.kind, content, tags_s, related_s, r.scope,
-                                        r.updated_at, r.last_accessed_at, r.access_count as i64,
+                                        r.key,
+                                        r.kind,
+                                        content,
+                                        tags_s,
+                                        related_s,
+                                        r.scope,
+                                        r.updated_at,
+                                        r.last_accessed_at,
+                                        r.access_count as i64,
+                                        imp,
+                                        stat,
                                     ],
                                 )?;
                                 report.updated += 1;
@@ -1111,5 +1670,56 @@ impl StateStore for SqliteStore {
         // Adjust report.malformed (we updated this field outside the closure).
         report.malformed += 0; // (already counted above; placeholder for clarity)
         Ok(report)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{MemoryListSort, StateStore};
+
+    #[tokio::test]
+    async fn memory_search_falls_back_to_exact_key_match() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-store-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path)
+            .await
+            .expect("open sqlite store");
+
+        let rec = MemoryRecord {
+            key: "probe_exact_key_fix_20260429".to_string(),
+            kind: "context".to_string(),
+            content: "regression test for exact key fallback".to_string(),
+            tags: vec!["probe".to_string()],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+        };
+        store.memory_save(&rec).await.expect("memory_save");
+
+        let hits = store
+            .memory_search("probe_exact_key_fix_20260429", &[], 5)
+            .await
+            .expect("memory_search");
+        assert!(
+            hits.iter()
+                .any(|h| h.record.key == "probe_exact_key_fix_20260429"),
+            "exact key should be found even when FTS tokenization misses it"
+        );
+
+        let list = store
+            .list_memories(Some("context"), MemoryListSort::Recent, 10)
+            .await
+            .expect("list_memories");
+        assert!(!list.is_empty());
     }
 }

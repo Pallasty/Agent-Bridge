@@ -43,7 +43,9 @@ async fn main() -> Result<()> {
     }
 
     let log_layer = match cmd {
-        Cmd::Mcp => tracing_subscriber::fmt::layer().with_writer(std::io::stderr).boxed(),
+        Cmd::Mcp => tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .boxed(),
         _ => tracing_subscriber::fmt::layer().boxed(),
     };
     tracing_subscriber::registry()
@@ -94,11 +96,9 @@ async fn build_hub() -> Result<Hub> {
     tracing::info!(terminal_backend = %terminal.id(), "terminal backend selected");
     let browser: Arc<dyn BrowserBackend> = Arc::new(ChromiumCdpBackend::new());
 
-    let claude_bin =
-        std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
-    let agent: Arc<dyn AgentRuntime> = Arc::new(
-        ClaudeCodeRuntime::with_binary(claude_bin).with_store(store.clone()),
-    );
+    let claude_bin = std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
+    let agent: Arc<dyn AgentRuntime> =
+        Arc::new(ClaudeCodeRuntime::with_binary(claude_bin).with_store(store.clone()));
 
     let repo = std::env::var("AGENT_BRIDGE_REPO")
         .ok()

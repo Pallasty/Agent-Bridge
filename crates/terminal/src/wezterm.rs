@@ -33,7 +33,9 @@ impl WezTermBackend {
         Self::default()
     }
     pub fn with_binary(binary: impl Into<String>) -> Self {
-        Self { binary: binary.into() }
+        Self {
+            binary: binary.into(),
+        }
     }
 }
 
@@ -126,7 +128,9 @@ impl TerminalBackend for WezTermBackend {
         .await?;
         let new_id = stdout.trim();
         if new_id.is_empty() {
-            return Err(Error::Backend("wezterm cli split-pane returned empty id".into()));
+            return Err(Error::Backend(
+                "wezterm cli split-pane returned empty id".into(),
+            ));
         }
         Ok(PaneId::from_raw(new_id.to_string()))
     }

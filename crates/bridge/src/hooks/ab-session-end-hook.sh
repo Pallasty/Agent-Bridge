@@ -5,6 +5,16 @@
 # (AB_MEMORY_CURATOR=1 is set by ab-precompact-hook).
 [[ -n "$AB_MEMORY_CURATOR" ]] && exit 0
 
+# Log this hook run to the shared hook-runs.jsonl file (read by hook_status MCP tool).
+_AB_HOOK_LOG="$HOME/.local/share/agent-bridge/hook-runs.jsonl"
+_AB_HOOK_START=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+_ab_log_hook_run() {
+    mkdir -p "$(dirname "$_AB_HOOK_LOG")"
+    printf '{"event":"stop","ts":"%s","exit_code":%d,"output_bytes":0}\n' \
+        "$_AB_HOOK_START" "$1" >> "$_AB_HOOK_LOG" 2>/dev/null || true
+}
+trap '_ab_log_hook_run $?' EXIT
+
 DB="$HOME/.local/share/agent-bridge/state.db"
 [[ -f "$DB" ]] || exit 0
 

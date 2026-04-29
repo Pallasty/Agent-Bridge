@@ -57,7 +57,10 @@ impl ContentBlock {
         Self::Text { text: s.into() }
     }
     pub fn image(base64: impl Into<String>, mime: impl Into<String>) -> Self {
-        Self::Image { data: base64.into(), mime_type: mime.into() }
+        Self::Image {
+            data: base64.into(),
+            mime_type: mime.into(),
+        }
     }
 }
 
@@ -71,17 +74,26 @@ pub struct ToolResult {
 
 impl ToolResult {
     pub fn text(s: impl Into<String>) -> Self {
-        Self { content: vec![ContentBlock::text(s)], is_error: false }
+        Self {
+            content: vec![ContentBlock::text(s)],
+            is_error: false,
+        }
     }
     pub fn error(s: impl Into<String>) -> Self {
-        Self { content: vec![ContentBlock::text(s)], is_error: true }
+        Self {
+            content: vec![ContentBlock::text(s)],
+            is_error: true,
+        }
     }
     pub fn json_text(v: &Value) -> Self {
         Self::text(serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
     }
     /// Build a result whose single block is an inline image.
     pub fn image(base64: impl Into<String>, mime: impl Into<String>) -> Self {
-        Self { content: vec![ContentBlock::image(base64, mime)], is_error: false }
+        Self {
+            content: vec![ContentBlock::image(base64, mime)],
+            is_error: false,
+        }
     }
     /// Image + a one-line text caption (some clients prefer the caption for
     /// alt-text; both blocks are returned in `content`).
@@ -91,7 +103,10 @@ impl ToolResult {
         caption: impl Into<String>,
     ) -> Self {
         Self {
-            content: vec![ContentBlock::image(base64, mime), ContentBlock::text(caption)],
+            content: vec![
+                ContentBlock::image(base64, mime),
+                ContentBlock::text(caption),
+            ],
             is_error: false,
         }
     }

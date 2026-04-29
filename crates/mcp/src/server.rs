@@ -5,9 +5,9 @@
 //! Logs go to stderr (so they never collide with the protocol stream).
 
 use crate::protocol::{
-    InitializeResult, McpRequest, McpResponse, ResourcesCapability, ServerCapabilities,
-    ServerInfo, ToolsCapability, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST,
-    METHOD_NOT_FOUND, PARSE_ERROR, PROTOCOL_VERSION,
+    InitializeResult, McpRequest, McpResponse, ResourcesCapability, ServerCapabilities, ServerInfo,
+    ToolsCapability, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
+    PARSE_ERROR, PROTOCOL_VERSION,
 };
 use crate::{ToolContext, ToolRegistry};
 use ab_store::{MemoryListSort, StateStore};
@@ -38,11 +38,8 @@ pub async fn serve_stdio(
         let req = match serde_json::from_str::<McpRequest>(&line) {
             Ok(r) => r,
             Err(e) => {
-                let resp = McpResponse::error(
-                    Value::Null,
-                    PARSE_ERROR,
-                    format!("invalid json-rpc: {e}"),
-                );
+                let resp =
+                    McpResponse::error(Value::Null, PARSE_ERROR, format!("invalid json-rpc: {e}"));
                 write_response(&mut stdout, &resp).await;
                 continue;
             }
@@ -191,6 +188,12 @@ async fn handle(
                         "name": "All Memories (JSONL)",
                         "description": "Complete memory export, one JSON object per line.",
                         "mimeType": "application/x-ndjson"
+                    },
+                    {
+                        "uri": "agent-bridge://session/bootstrap",
+                        "name": "Session Bootstrap",
+                        "description": "Compact session bootstrap block: top scoped memories for the current working directory. Equivalent to calling session_bootstrap() tool. Pull this resource at session start when hooks are unavailable.",
+                        "mimeType": "text/plain"
                     }
                 ]
             }))
@@ -225,16 +228,17 @@ async fn handle_resource_read(id: Value, store: &dyn StateStore, uri: &str) -> M
             };
             let mut lines = vec![
                 "Agent-Bridge Self-Memory Index".to_string(),
-                "Use memory_get <key> for full content, memory_search for keyword lookup.".to_string(),
+                "Use memory_get <key> for full content, memory_search for keyword lookup."
+                    .to_string(),
                 String::new(),
             ];
             // Sort: lessons → decisions → todos → context
             let mut sorted = rows;
             sorted.sort_by_key(|r| match r.kind.as_str() {
-                "lesson"   => 0u8,
+                "lesson" => 0u8,
                 "decision" => 1,
-                "todo"     => 2,
-                _          => 3,
+                "todo" => 2,
+                _ => 3,
             });
             for r in &sorted {
                 let tags = if r.tags.is_empty() {
@@ -243,14 +247,24 @@ async fn handle_resource_read(id: Value, store: &dyn StateStore, uri: &str) -> M
                     format!(" [{}]", r.tags.join(", "))
                 };
                 let snippet: String = r.content.chars().take(120).collect();
-                let ellipsis = if r.content.chars().count() > 120 { "…" } else { "" };
-                lines.push(format!("[{}] {}{}: {}{}", r.kind, r.key, tags, snippet, ellipsis));
+                let ellipsis = if r.content.chars().count() > 120 {
+                    "…"
+                } else {
+                    ""
+                };
+                lines.push(format!(
+                    "[{}] {}{}: {}{}",
+                    r.kind, r.key, tags, snippet, ellipsis
+                ));
             }
             resource_text_response(id, uri, lines.join("\n"))
         }
 
         "memory://all" => {
-            let rows = match store.list_memories(None, MemoryListSort::Recent, 10_000).await {
+            let rows = match store
+                .list_memories(None, MemoryListSort::Recent, 10_000)
+                .await
+            {
                 Ok(r) => r,
                 Err(e) => return McpResponse::error(id, INTERNAL_ERROR, format!("store: {e}")),
             };
@@ -263,7 +277,10 @@ async fn handle_resource_read(id: Value, store: &dyn StateStore, uri: &str) -> M
 
         kind_uri if kind_uri.starts_with("memory://") => {
             let kind = &kind_uri["memory://".len()..];
-            let rows = match store.list_memories(Some(kind), MemoryListSort::Recent, 500).await {
+            let rows = match store
+                .list_memories(Some(kind), MemoryListSort::Recent, 500)
+                .await
+            {
                 Ok(r) => r,
                 Err(e) => return McpResponse::error(id, INTERNAL_ERROR, format!("store: {e}")),
             };
@@ -272,9 +289,52 @@ async fn handle_resource_read(id: Value, store: &dyn StateStore, uri: &str) -> M
             }
             let mut parts = Vec::new();
             for r in &rows {
-                parts.push(format!("# {} [{}]\n{}", r.key, r.tags.join(", "), r.content));
+                parts.push(format!(
+                    "# {} [{}]\n{}",
+                    r.key,
+                    r.tags.join(", "),
+                    r.content
+                ));
             }
             resource_text_response(id, uri, parts.join("\n\n---\n\n"))
+        }
+
+        "agent-bridge://session/bootstrap" => {
+            let cwd = std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "/".to_string());
+            let rows = match store
+                .list_memories_in_scope(&cwd, None, MemoryListSort::Recent, 60)
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => return McpResponse::error(id, INTERNAL_ERROR, format!("store: {e}")),
+            };
+            let mut lines = vec![
+                format!("=== Agent-Bridge Session Bootstrap (scope: {cwd}) ==="),
+                "Use memory_get <key> for full content, memory_search for lookup.".to_string(),
+                String::new(),
+            ];
+            for r in &rows {
+                let tags = if r.tags.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", r.tags.join(", "))
+                };
+                let snippet: String = r.content.chars().take(120).collect();
+                let ellipsis = if r.content.chars().count() > 120 { "…" } else { "" };
+                lines.push(format!("[{}] {}{}: {}{}", r.kind, r.key, tags, snippet, ellipsis));
+            }
+            lines.push("=== End Bootstrap ===".to_string());
+            lines.push(String::new());
+            lines.push(
+                "=== Session Lifecycle Reminder ===\n\
+                 Before this session ends, call:\n\
+                 1. session_curate(conversation_text=<summary>) — save lessons\n\
+                 2. session_finalize() — compact + optional export\n\
+                 ==================================".to_string()
+            );
+            resource_text_response(id, uri, lines.join("\n"))
         }
 
         _ => McpResponse::error(id, INVALID_PARAMS, format!("unknown resource uri: {uri}")),
@@ -282,9 +342,12 @@ async fn handle_resource_read(id: Value, store: &dyn StateStore, uri: &str) -> M
 }
 
 fn resource_text_response(id: Value, uri: &str, text: String) -> McpResponse {
-    McpResponse::success(id, json!({
-        "contents": [{ "uri": uri, "text": text }]
-    }))
+    McpResponse::success(
+        id,
+        json!({
+            "contents": [{ "uri": uri, "text": text }]
+        }),
+    )
 }
 
 trait LogResponse {

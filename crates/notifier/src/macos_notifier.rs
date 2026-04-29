@@ -28,9 +28,8 @@ impl Notifier for MacOsNotifier {
         let title = evt.title.replace('\\', "\\\\").replace('"', "\\\"");
         let body = evt.body.replace('\\', "\\\\").replace('"', "\\\"");
 
-        let script = format!(
-            r#"display notification "{body}" with title "{title}" subtitle "{subtitle}""#
-        );
+        let script =
+            format!(r#"display notification "{body}" with title "{title}" subtitle "{subtitle}""#);
 
         let status = tokio::process::Command::new("osascript")
             .arg("-e")

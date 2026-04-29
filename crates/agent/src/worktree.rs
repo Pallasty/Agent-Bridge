@@ -35,15 +35,12 @@ impl GitWorktreeManager {
 
     /// `git worktree add -b <branch> <path> [base]`. If `base` is None, falls
     /// back to the repository's HEAD.
-    pub async fn add(
-        &self,
-        path: &Path,
-        branch: &str,
-        base: Option<&str>,
-    ) -> Result<Worktree> {
+    pub async fn add(&self, path: &Path, branch: &str, base: Option<&str>) -> Result<Worktree> {
         let mut args: Vec<String> = vec![
-            "worktree".into(), "add".into(),
-            "-b".into(), branch.into(),
+            "worktree".into(),
+            "add".into(),
+            "-b".into(),
+            branch.into(),
             path.display().to_string(),
         ];
         if let Some(b) = base {
@@ -74,7 +71,9 @@ impl GitWorktreeManager {
     /// `git worktree remove [-f] <path>`. Forces removal if `force` is true.
     pub async fn remove(&self, path: &Path, force: bool) -> Result<()> {
         let mut args: Vec<&str> = vec!["worktree", "remove"];
-        if force { args.push("-f"); }
+        if force {
+            args.push("-f");
+        }
         let path_s = path.display().to_string();
         args.push(&path_s);
         self.git(&args).await?;
@@ -130,16 +129,24 @@ fn parse_porcelain(text: &str) -> Vec<Worktree> {
                 });
             }
             "HEAD" => {
-                if let Some(w) = cur.as_mut() { w.head = Some(rest.to_string()); }
+                if let Some(w) = cur.as_mut() {
+                    w.head = Some(rest.to_string());
+                }
             }
             "branch" => {
-                if let Some(w) = cur.as_mut() { w.branch = Some(rest.to_string()); }
+                if let Some(w) = cur.as_mut() {
+                    w.branch = Some(rest.to_string());
+                }
             }
             "bare" => {
-                if let Some(w) = cur.as_mut() { w.bare = true; }
+                if let Some(w) = cur.as_mut() {
+                    w.bare = true;
+                }
             }
             "locked" => {
-                if let Some(w) = cur.as_mut() { w.locked = true; }
+                if let Some(w) = cur.as_mut() {
+                    w.locked = true;
+                }
             }
             _ => {}
         }

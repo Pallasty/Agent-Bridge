@@ -22,6 +22,18 @@
 # causing memory index to re-inject on every UserPromptSubmit.
 
 DB="$HOME/.local/share/agent-bridge/state.db"
+
+# Log this hook run to the shared hook-runs.jsonl file (read by hook_status MCP tool).
+_AB_HOOK_LOG="$HOME/.local/share/agent-bridge/hook-runs.jsonl"
+_AB_HOOK_START=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+_ab_log_hook_run() {
+    local exit_code="$1" output_bytes="$2"
+    mkdir -p "$(dirname "$_AB_HOOK_LOG")"
+    printf '{"event":"beforeSubmitPrompt","ts":"%s","exit_code":%d,"output_bytes":%d}\n' \
+        "$_AB_HOOK_START" "$exit_code" "$output_bytes" >> "$_AB_HOOK_LOG" 2>/dev/null || true
+}
+trap '_ab_log_hook_run $? 0' EXIT
+
 [[ -f "$DB" ]] || exit 0
 
 # Skip memory injection inside curator sub-agents (PreCompact hook sets this)
@@ -139,7 +151,7 @@ sqlite3 "$DB" \
      LIMIT 60
    )" 2>/dev/null || true
 
-python3 - "$ROWS" "$CWD" <<'PY'
+OUTPUT=$(python3 - "$ROWS" "$CWD" <<'PY'
 import json, sys
 
 rows_raw = sys.argv[1]
@@ -173,3 +185,7 @@ block = (
 )
 print(json.dumps({"additionalContext": block}))
 PY
+)
+_OUT_BYTES=${#OUTPUT}
+trap "_ab_log_hook_run \$? $_OUT_BYTES" EXIT
+printf '%s' "$OUTPUT"

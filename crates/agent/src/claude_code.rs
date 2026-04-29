@@ -48,9 +48,15 @@ impl Default for ClaudeCodeRuntime {
 }
 
 impl ClaudeCodeRuntime {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
     pub fn with_binary(binary: impl Into<String>) -> Self {
-        Self { binary: binary.into(), store: None, children: Arc::new(DashMap::new()) }
+        Self {
+            binary: binary.into(),
+            store: None,
+            children: Arc::new(DashMap::new()),
+        }
     }
     pub fn with_store(mut self, store: Arc<dyn StateStore>) -> Self {
         self.store = Some(store);
@@ -58,16 +64,23 @@ impl ClaudeCodeRuntime {
     }
 
     /// Number of in-flight sessions (testing / observability).
-    pub fn live_count(&self) -> usize { self.children.len() }
+    pub fn live_count(&self) -> usize {
+        self.children.len()
+    }
 }
 
 fn now_secs() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 #[async_trait]
 impl AgentRuntime for ClaudeCodeRuntime {
-    fn id(&self) -> &str { "claude-code" }
+    fn id(&self) -> &str {
+        "claude-code"
+    }
 
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
         let prompt = cfg.initial_prompt.clone().unwrap_or_default();
@@ -143,7 +156,9 @@ impl AgentRuntime for ClaudeCodeRuntime {
                             o.status.signal().map(|s| -(s as i32))
                         }
                         #[cfg(not(unix))]
-                        { None }
+                        {
+                            None
+                        }
                     });
                     if let Some(store) = store_bg {
                         let _ = store
@@ -235,8 +250,14 @@ fn apply_env(cmd: &mut Command, env: &HashMap<String, String>) {
 
 fn truncate(s: &str, max: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= max { s.replace('\n', " ⏎ ") } else {
-        let head: String = chars.iter().take(max - 1).collect::<String>().replace('\n', " ⏎ ");
+    if chars.len() <= max {
+        s.replace('\n', " ⏎ ")
+    } else {
+        let head: String = chars
+            .iter()
+            .take(max - 1)
+            .collect::<String>()
+            .replace('\n', " ⏎ ");
         format!("{head}…")
     }
 }

@@ -35,14 +35,22 @@ pub struct RpcResponse {
 
 impl RpcResponse {
     pub fn success(id: u64, result: serde_json::Value) -> Self {
-        Self { id, ok: true, result: Some(result), error: None }
+        Self {
+            id,
+            ok: true,
+            result: Some(result),
+            error: None,
+        }
     }
     pub fn fail(id: u64, code: i32, message: impl Into<String>) -> Self {
         Self {
             id,
             ok: false,
             result: None,
-            error: Some(RpcError { code, message: message.into() }),
+            error: Some(RpcError {
+                code,
+                message: message.into(),
+            }),
         }
     }
 }

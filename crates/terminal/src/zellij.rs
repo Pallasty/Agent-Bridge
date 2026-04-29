@@ -36,7 +36,9 @@ impl ZellijBackend {
         Self::default()
     }
     pub fn with_binary(binary: impl Into<String>) -> Self {
-        Self { binary: binary.into() }
+        Self {
+            binary: binary.into(),
+        }
     }
 }
 
