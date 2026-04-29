@@ -2234,6 +2234,14 @@ impl McpTool for SessionCurateTool {
                         "type": "boolean",
                         "default": false,
                         "description": "If true, return what would be saved without writing."
+                    },
+                    "implicit_score_threshold": {
+                        "type": "number",
+                        "description": "Optional Pass-2 minimum aggregate signal score (default from env AGENT_BRIDGE_CURATE_SCORE_THRESHOLD or built-in default). Clamped to [0.15, 0.95]."
+                    },
+                    "implicit_dedup_jaccard": {
+                        "type": "number",
+                        "description": "Optional Pass-2 Jaccard dedup threshold (default from env AGENT_BRIDGE_CURATE_DEDUP_JACCARD or built-in default). Clamped to [0.1, 0.95]."
                     }
                 },
                 "required": ["conversation_text"]
@@ -2262,12 +2270,30 @@ impl McpTool for SessionCurateTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let candidates =
-            crate::curate::curate_conversation(&text, session_id.as_deref(), max_items);
+        let score_ov = args
+            .get("implicit_score_threshold")
+            .and_then(|v| v.as_f64())
+            .map(|x| x as f32);
+        let dedup_ov = args
+            .get("implicit_dedup_jaccard")
+            .and_then(|v| v.as_f64());
+        let curate_opts = crate::curate::CurateOptions::from_env_or_defaults()
+            .with_overrides(score_ov, dedup_ov);
+
+        let candidates = crate::curate::curate_conversation_with_options(
+            &text,
+            session_id.as_deref(),
+            max_items,
+            curate_opts.clone(),
+        );
 
         if dry_run || store_opt.is_none() {
             return Ok(ToolResult::json_text(&json!({
                 "dry_run": true,
+                "options": {
+                    "implicit_score_threshold": curate_opts.implicit_score_threshold,
+                    "implicit_dedup_jaccard": curate_opts.implicit_dedup_jaccard,
+                },
                 "candidates": candidates.iter().map(|m| json!({
                     "key": m.key,
                     "kind": m.kind,

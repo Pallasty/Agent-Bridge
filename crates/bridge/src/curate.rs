@@ -8,24 +8,80 @@
 //! ## Pass 2 — implicit lexical scoring  (NEW)
 //! Scores every unmarked line against five signal tables
 //! (epistemic / normative / causal / decision / todo) using simple
-//! substring matching. Lines that exceed [`SCORE_THRESHOLD`] are
+//! substring matching. Lines that exceed the configured score threshold are
 //! extracted as memories, classified by the dominant signal kind.
 //! Jaccard word-bag deduplication suppresses near-duplicates.
 //!
-//! Public entry point: [`curate_conversation`].
+//! ## Tuning
+//! - Defaults: [`DEFAULT_IMPLICIT_SCORE_THRESHOLD`], [`DEFAULT_IMPLICIT_DEDUP_JACCARD`].
+//! - Environment (optional): `AGENT_BRIDGE_CURATE_SCORE_THRESHOLD` (f32),
+//!   `AGENT_BRIDGE_CURATE_DEDUP_JACCARD` (f64). MCP tool args override env for that call.
+//!
+//! Public entry points: [`curate_conversation`], [`curate_conversation_with_options`].
 
 use ab_store::MemoryRecord;
 
 // ── Thresholds & limits ────────────────────────────────────────────────────
 
-/// Minimum aggregate signal score for a line to be implicitly extracted.
-const SCORE_THRESHOLD: f32 = 0.45;
+/// Default minimum aggregate signal score for implicit extraction (Pass 2).
+pub const DEFAULT_IMPLICIT_SCORE_THRESHOLD: f32 = 0.45;
+/// Default Jaccard similarity above which Pass 2 treats a line as duplicate of an earlier bag.
+pub const DEFAULT_IMPLICIT_DEDUP_JACCARD: f64 = 0.55;
+
+/// Tunable Pass-2 parameters (thresholds + dedup). Use [`CurateOptions::from_env_or_defaults`]
+/// in production; use [`CurateOptions::default`] in tests for deterministic behavior.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CurateOptions {
+    pub implicit_score_threshold: f32,
+    pub implicit_dedup_jaccard: f64,
+}
+
+impl Default for CurateOptions {
+    fn default() -> Self {
+        Self {
+            implicit_score_threshold: DEFAULT_IMPLICIT_SCORE_THRESHOLD,
+            implicit_dedup_jaccard: DEFAULT_IMPLICIT_DEDUP_JACCARD,
+        }
+    }
+}
+
+impl CurateOptions {
+    /// Defaults, then optional env overrides (`AGENT_BRIDGE_CURATE_*`).
+    pub fn from_env_or_defaults() -> Self {
+        let mut o = Self::default();
+        if let Ok(s) = std::env::var("AGENT_BRIDGE_CURATE_SCORE_THRESHOLD") {
+            if let Ok(v) = s.trim().parse::<f32>() {
+                o.implicit_score_threshold = v.clamp(0.15, 0.95);
+            }
+        }
+        if let Ok(s) = std::env::var("AGENT_BRIDGE_CURATE_DEDUP_JACCARD") {
+            if let Ok(v) = s.trim().parse::<f64>() {
+                o.implicit_dedup_jaccard = v.clamp(0.1, 0.95);
+            }
+        }
+        o
+    }
+
+    /// Merge MCP / CLI overrides onto this instance (already env-merged if applicable).
+    pub fn with_overrides(
+        mut self,
+        implicit_score_threshold: Option<f32>,
+        implicit_dedup_jaccard: Option<f64>,
+    ) -> Self {
+        if let Some(v) = implicit_score_threshold {
+            self.implicit_score_threshold = v.clamp(0.15, 0.95);
+        }
+        if let Some(v) = implicit_dedup_jaccard {
+            self.implicit_dedup_jaccard = v.clamp(0.1, 0.95);
+        }
+        self
+    }
+}
+
 /// Minimum character count for implicit extraction.
 const MIN_CHARS: usize = 20;
 /// Maximum stored content length (chars); longer content is clipped with `…`.
 const MAX_CHARS: usize = 400;
-/// Jaccard word-bag similarity above which a candidate is considered duplicate.
-const DEDUP_THRESHOLD: f64 = 0.55;
 
 // ── Signal tables ──────────────────────────────────────────────────────────
 // Format: (keyword, score_weight, kind_vote)
@@ -396,8 +452,8 @@ fn curate_explicit(
 // ── Phase 2: implicit lexical scoring ─────────────────────────────────────
 
 /// Score a lowercase line against all signal tables.
-/// Returns `Some((score, kind))` if score ≥ SCORE_THRESHOLD, else `None`.
-fn score_sentence(lower: &str) -> Option<(f32, &'static str)> {
+/// Returns `Some((score, kind))` if score ≥ `score_threshold`, else `None`.
+fn score_sentence(lower: &str, score_threshold: f32) -> Option<(f32, &'static str)> {
     let mut score = 0.0f32;
     // kind → accumulated vote weight
     let mut lesson_v  = 0.0f32;
@@ -420,7 +476,9 @@ fn score_sentence(lower: &str) -> Option<(f32, &'static str)> {
         }
     }
 
-    if score < SCORE_THRESHOLD { return None; }
+    if score < score_threshold {
+        return None;
+    }
 
     let kind = if decision_v >= lesson_v && decision_v >= todo_v {
         "decision"
@@ -438,6 +496,7 @@ fn curate_implicit(
     seen_bags: &[std::collections::HashSet<String>],
     max_items: usize,
     now: i64,
+    opts: &CurateOptions,
 ) -> Vec<MemoryRecord> {
     let mut results: Vec<MemoryRecord> = Vec::new();
     let mut local_bags: Vec<std::collections::HashSet<String>> = seen_bags.to_vec();
@@ -450,17 +509,22 @@ fn curate_implicit(
         if has_explicit_marker(trimmed) { continue; }
 
         let lower = trimmed.to_lowercase();
-        let Some((score, kind)) = score_sentence(&lower) else { continue };
+        let Some((score, kind)) = score_sentence(&lower, opts.implicit_score_threshold) else {
+            continue;
+        };
 
         let content = clip(trimmed, MAX_CHARS);
         let bag = word_bag(&content);
-        if local_bags.iter().any(|s| jaccard(s, &bag) > DEDUP_THRESHOLD) {
+        let dedup = opts.implicit_dedup_jaccard;
+        if local_bags.iter().any(|s| jaccard(s, &bag) > dedup) {
             continue;
         }
         local_bags.push(bag);
 
         // Boost importance proportional to signal strength (f64 as required by MemoryRecord)
-        let importance = f64::from((0.5 + (score - SCORE_THRESHOLD) * 0.25).min(0.85));
+        let importance = f64::from(
+            (0.5 + (score - opts.implicit_score_threshold) * 0.25).min(0.85),
+        );
         let key = format!("curated_implicit_{}{}", kind, simple_hash(&content));
 
         results.push(MemoryRecord {
@@ -490,10 +554,28 @@ fn curate_implicit(
 /// 2. **Implicit** — lexical signal scoring on every unmarked line.
 ///
 /// Results from both passes are deduplicated by Jaccard word-bag similarity.
+///
+/// Uses [`CurateOptions::from_env_or_defaults`] (env + defaults). For deterministic tests,
+/// call [`curate_conversation_with_options`] with [`CurateOptions::default`].
 pub fn curate_conversation(
     text: &str,
     session_id: Option<&str>,
     max_items: usize,
+) -> Vec<MemoryRecord> {
+    curate_conversation_with_options(
+        text,
+        session_id,
+        max_items,
+        CurateOptions::from_env_or_defaults(),
+    )
+}
+
+/// Same as [`curate_conversation`] but with explicit Pass-2 options (no implicit env read).
+pub fn curate_conversation_with_options(
+    text: &str,
+    session_id: Option<&str>,
+    max_items: usize,
+    opts: CurateOptions,
 ) -> Vec<MemoryRecord> {
     let now = now_secs();
     let sid = mk_sid_suffix(session_id);
@@ -505,7 +587,9 @@ pub fn curate_conversation(
     let budget = max_items.saturating_sub(results.len());
     if budget > 0 {
         let seen: Vec<_> = results.iter().map(|r| word_bag(&r.content)).collect();
-        results.extend(curate_implicit(text, &sid, &seen, budget, now));
+        results.extend(curate_implicit(
+            text, &sid, &seen, budget, now, &opts,
+        ));
     }
 
     results
@@ -518,29 +602,42 @@ mod tests {
 
     // ── score_sentence ────────────────────────────────────────────────────
 
+    fn thresh() -> f32 {
+        DEFAULT_IMPLICIT_SCORE_THRESHOLD
+    }
+
     #[test]
     fn score_epistemic_en() {
-        let (s, k) = score_sentence("we found that cargo check is 10x faster than build").unwrap();
-        assert!(s >= SCORE_THRESHOLD, "score={s}");
+        let (s, k) =
+            score_sentence("we found that cargo check is 10x faster than build", thresh()).unwrap();
+        assert!(s >= thresh(), "score={s}");
         assert_eq!(k, "lesson");
     }
 
     #[test]
     fn score_causal_en() {
-        let (s, k) = score_sentence("the oom was caused by the arena allocator holding live refs").unwrap();
-        assert!(s >= SCORE_THRESHOLD, "score={s}");
+        let (s, k) = score_sentence(
+            "the oom was caused by the arena allocator holding live refs",
+            thresh(),
+        )
+        .unwrap();
+        assert!(s >= thresh(), "score={s}");
         assert_eq!(k, "lesson");
     }
 
     #[test]
     fn score_decision_en() {
-        let (_, k) = score_sentence("we decided to go with auggie instead of claude for ci").unwrap();
+        let (_, k) = score_sentence(
+            "we decided to go with auggie instead of claude for ci",
+            thresh(),
+        )
+        .unwrap();
         assert_eq!(k, "decision");
     }
 
     #[test]
     fn score_todo_en() {
-        let r = score_sentence("next step is to implement the memory_stats endpoint");
+        let r = score_sentence("next step is to implement the memory_stats endpoint", thresh());
         assert!(r.is_some());
         let (_, k) = r.unwrap();
         assert_eq!(k, "todo");
@@ -548,20 +645,29 @@ mod tests {
 
     #[test]
     fn score_chinese_epistemic() {
-        let (s, k) = score_sentence("发现问题在于 sqlite 没有正确处理并发写入").unwrap();
-        assert!(s >= SCORE_THRESHOLD, "score={s}");
+        let (s, k) =
+            score_sentence("发现问题在于 sqlite 没有正确处理并发写入", thresh()).unwrap();
+        assert!(s >= thresh(), "score={s}");
         assert_eq!(k, "lesson");
     }
 
     #[test]
+    fn score_chinese_normative_and_decision() {
+        let (_, k) = score_sentence("因此我们应当避免在热路径上持有全局锁", thresh()).unwrap();
+        assert_eq!(k, "lesson");
+        let (_, k2) = score_sentence("团队最终决定采用方案 B 并推迟缓存重构", thresh()).unwrap();
+        assert_eq!(k2, "decision");
+    }
+
+    #[test]
     fn noise_question_is_rejected() {
-        assert!(score_sentence("did you see the error message?").is_none());
+        assert!(score_sentence("did you see the error message?", thresh()).is_none());
     }
 
     #[test]
     fn short_line_below_threshold() {
         // "ok" — trivially below threshold
-        assert!(score_sentence("ok").is_none());
+        assert!(score_sentence("ok", thresh()).is_none());
     }
 
     // ── is_noise ─────────────────────────────────────────────────────────
@@ -594,7 +700,7 @@ mod tests {
     #[test]
     fn explicit_marker_still_works() {
         let text = "lesson: always run cargo check before cargo build\n";
-        let recs = curate_conversation(text, None, 10);
+        let recs = curate_conversation_with_options(text, None, 10, CurateOptions::default());
         assert!(!recs.is_empty(), "explicit marker must produce a record");
         assert_eq!(recs[0].kind, "lesson");
         assert!(recs[0].content.contains("cargo check"));
@@ -605,7 +711,7 @@ mod tests {
         let text =
             "We found that the root cause of the latency spike was the naive retry loop \
              holding the connection pool exhausted under load.";
-        let recs = curate_conversation(text, None, 10);
+        let recs = curate_conversation_with_options(text, None, 10, CurateOptions::default());
         assert!(
             !recs.is_empty(),
             "implicit pass must extract unmarked insight; got 0 records"
@@ -617,7 +723,7 @@ mod tests {
     #[test]
     fn implicit_tag_present() {
         let text = "It turns out avoiding the retry loop cuts p99 latency by 80%.";
-        let recs = curate_conversation(text, None, 10);
+        let recs = curate_conversation_with_options(text, None, 10, CurateOptions::default());
         assert!(!recs.is_empty());
         // At least one implicit record carries the "implicit" tag
         let has_implicit_tag = recs.iter().any(|r| r.tags.contains(&"implicit".to_string()));
@@ -632,7 +738,8 @@ mod tests {
             "We found that holding the lock while awaiting async calls causes deadlock.",
         ]
         .join("\n");
-        let recs = curate_conversation(&text, None, 10);
+        let recs =
+            curate_conversation_with_options(&text, None, 10, CurateOptions::default());
         assert!(recs.len() <= 2, "dedup should suppress near-duplicate; got {}", recs.len());
     }
 
@@ -642,7 +749,22 @@ mod tests {
             .map(|i| format!("We found that insight number {i} is caused by the entropy system."))
             .collect::<Vec<_>>()
             .join("\n");
-        let recs = curate_conversation(&text, None, 5);
+        let recs =
+            curate_conversation_with_options(&text, None, 5, CurateOptions::default());
         assert!(recs.len() <= 5, "must not exceed max_items=5; got {}", recs.len());
+    }
+
+    #[test]
+    fn implicit_chinese_unmarked_insight() {
+        let text = "我们发现延迟飙升的根源在于连接池在高压下被占满，简单的重试循环会雪上加霜。";
+        let recs = curate_conversation_with_options(text, None, 10, CurateOptions::default());
+        assert!(
+            !recs.is_empty(),
+            "implicit pass should capture Chinese causal/epistemic line"
+        );
+        assert!(
+            recs.iter().any(|r| r.tags.contains(&"implicit".to_string())),
+            "expected implicit tag"
+        );
     }
 }
