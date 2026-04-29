@@ -6,7 +6,7 @@ use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result,
 use ab_mcp::{McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
 use ab_store::{
     CompactPolicy, ImportConflictPolicy, MemoryExportFilter, MemoryListSort, MemoryRecord,
-    SessionFilter,
+    SessionFilter, StateStore,
 };
 use ab_terminal::{OscEvent, OscParser, SplitDir};
 use async_trait::async_trait;
@@ -1135,6 +1135,109 @@ impl McpTool for AgentSessionWaitTool {
 //                       agent self-memory (v0.4)
 // ===========================================================================
 
+/// Build a proactive hint for an agent memory key.
+///
+/// Heuristic:
+/// 1. Count existing edges (via `memory_neighbors`).
+/// 2. Build a topical query from the key slug + tags + first content words.
+///    Key slugs (e.g. "lesson_bfs_cycle") carry semantic signal; raw content
+///    often matches only itself.
+/// 3. Run FTS search (hybrid mode for richer recall).
+/// 4. Keep top-3 results that aren't the key itself or already linked.
+/// 5. Return a compact one-line suggestion, or `None` when nothing useful.
+///
+/// Errors are swallowed — hints are best-effort and must never break callers.
+async fn build_proactive_hint(
+    store: &Arc<dyn StateStore>,
+    key: &str,
+    content: &str,
+    tags: &[String],
+) -> Option<String> {
+    // Existing direct edges
+    let neighbors = store.memory_neighbors(key).await.unwrap_or_default();
+    let edge_count = neighbors.len();
+    let linked: std::collections::HashSet<String> = neighbors
+        .into_iter()
+        .flat_map(|e| [e.from_key, e.to_key])
+        .filter(|k| k != key)
+        .collect();
+
+    // Build a topical query using FTS5 OR syntax so any relevant keyword matches.
+    //
+    // FTS5 uses AND by default; multi-word queries with uncommon words produce zero
+    // results.  "tag1 OR tag2 OR word1 OR word2" avoids this while still ranking by
+    // how many terms appear.
+    //
+    // Strategy: tags first (always topical), then first content words.
+    // The FTS5 index stores the key as a single token ("lesson_bfs_guard"),
+    // so key-slug splits are useless here — skip them.
+    // Collect candidate tokens:
+    //   tags that are clean identifiers (no hyphens/dots that confuse FTS5)
+    //   + first content words that are purely alphabetic, len ≥ 3
+    let is_clean = |s: &str| {
+        s.len() >= 3 && s.chars().all(|c| c.is_ascii_alphanumeric())
+    };
+    let tag_terms: Vec<String> = tags
+        .iter()
+        .filter(|t| is_clean(t))
+        .cloned()
+        .collect();
+    let content_terms: Vec<String> = content
+        .split_whitespace()
+        .map(|w| {
+            // Strip leading/trailing punctuation
+            w.trim_matches(|c: char| !c.is_alphanumeric()).to_string()
+        })
+        .filter(|w| is_clean(w) && w.chars().all(|c| c.is_ascii_alphabetic()))
+        .take(10)
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    let terms: Vec<String> = tag_terms
+        .into_iter()
+        .chain(content_terms)
+        .filter(|w| seen.insert(w.to_lowercase()))
+        .take(10)
+        .collect();
+    let query = terms.join(" OR ");  // FTS5 OR: any term matches
+
+    if query.trim().is_empty() {
+        return None;
+    }
+
+    // Hybrid search — broader recall than pure FTS
+    // signature: (query, tags, limit, rrf_k, expand_top)
+    let tags_empty: Vec<String> = Vec::new();
+    let hits = store
+        .memory_search_hybrid(&query, &tags_empty, 6, 60.0, 3)
+        .await
+        .unwrap_or_default();
+
+    // Filter: skip self and already-linked; no score threshold (BM25 isn't normalised)
+    let candidates: Vec<_> = hits
+        .into_iter()
+        .filter(|h| h.record.key != key && !linked.contains(&h.record.key))
+        .take(3)
+        .collect();
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let suggestions = candidates
+        .iter()
+        .map(|h| h.record.key.clone())
+        .collect::<Vec<_>>()
+        .join(" · ");
+
+    let edge_note = if edge_count == 0 {
+        "no edges yet".to_string()
+    } else {
+        format!("{edge_count} edge(s)")
+    };
+
+    Some(format!("{edge_note} | consider memory_link: {suggestions}"))
+}
+
 pub struct MemorySaveTool {
     hub: Hub,
 }
@@ -1236,7 +1339,16 @@ impl McpTool for MemorySaveTool {
             status: "active".to_string(),
         };
         match store.memory_save(&mem).await {
-            Ok(()) => Ok(ToolResult::text(format!("saved memory '{key}'"))),
+            Ok(()) => {
+                let hint =
+                    build_proactive_hint(&store, &key, &mem.content, &mem.tags).await;
+                let resp = json!({
+                    "status": "saved",
+                    "key": key,
+                    "proactive_hint": hint,
+                });
+                Ok(ToolResult::json_text(&resp))
+            }
             Err(e) => Ok(ToolResult::error(format!("memory: {e}"))),
         }
     }
@@ -1280,9 +1392,21 @@ impl McpTool for MemoryGetTool {
             None => return Ok(ToolResult::error("missing 'key'")),
         };
         let row = store.memory_get(&key).await?;
-        Ok(ToolResult::json_text(
-            &serde_json::to_value(row).unwrap_or(Value::Null),
-        ))
+        match row {
+            None => Ok(ToolResult::json_text(&Value::Null)),
+            Some(rec) => {
+                let hint =
+                    build_proactive_hint(&store, &key, &rec.content, &rec.tags).await;
+                let mut resp = serde_json::to_value(&rec).unwrap_or(Value::Null);
+                if let Some(obj) = resp.as_object_mut() {
+                    obj.insert(
+                        "proactive_hint".to_string(),
+                        hint.map(Value::String).unwrap_or(Value::Null),
+                    );
+                }
+                Ok(ToolResult::json_text(&resp))
+            }
+        }
     }
 }
 
