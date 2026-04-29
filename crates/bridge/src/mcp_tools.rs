@@ -2056,15 +2056,21 @@ impl McpTool for SessionBootstrapTool {
             name: self.name().into(),
             description: "Build a compact memory bootstrap block for the current session. \
                  Returns top scoped memories (global + project). \
-                 Pass frontend='cursor' for a compact token-efficient format, \
-                 or frontend='claude-code' (default) for the full format."
+                 Pass frontend='cursor' or 'warp' for the compact \
+                 token-efficient format, or frontend='claude-code' \
+                 (default) for the full format."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "cwd": { "type": "string", "description": "Optional project path for scope filtering. Defaults to process cwd." },
                     "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 60 },
-                    "frontend": { "type": "string", "enum": ["claude-code", "cursor", "auto"], "default": "auto", "description": "Output format: 'cursor' for compact, 'claude-code' for full, 'auto' detects from env." }
+                    "frontend": {
+                        "type": "string",
+                        "enum": ["claude-code", "cursor", "warp", "auto"],
+                        "default": "auto",
+                        "description": "Output format: 'cursor'/'warp' for compact, 'claude-code' for full, 'auto' detects from env."
+                    }
                 }
             }),
         }
@@ -2090,17 +2096,18 @@ impl McpTool for SessionBootstrapTool {
             .unwrap_or(60)
             .min(200) as u32;
 
-        // Detect frontend: explicit arg > env var > default (claude-code)
+        // Detect frontend: explicit arg > env var > default (claude-code).
+        // Both `cursor` and `warp` use the compact output format (Warp
+        // surfaces tool output in the Block UI where vertical space is
+        // at a premium, just like Cursor's inline panel).
         let frontend = args
             .get("frontend")
             .and_then(|v| v.as_str())
             .unwrap_or("auto");
-        let is_cursor = match frontend {
-            "cursor" => true,
+        let is_compact = match frontend {
+            "cursor" | "warp" => true,
             "claude-code" => false,
-            _ => std::env::var("AGENT_BRIDGE_TERMINAL").is_ok()
-                && std::env::var("CURSOR_TRACE_ID").is_ok()
-                || std::env::var("VSCODE_GIT_IPC_HANDLE").is_ok(),
+            _ => detect_frontend() != "claude-code" && detect_frontend() != "unknown",
         };
 
         let rows = store
@@ -2121,8 +2128,8 @@ impl McpTool for SessionBootstrapTool {
             )));
         }
 
-        let mut lines = if is_cursor {
-            // Compact format for Cursor: minimal headers, 80-char snippets
+        let mut lines = if is_compact {
+            // Compact format (Cursor / Warp): minimal headers, 80-char snippets
             vec![
                 format!("=== Bootstrap (scope: {}) ===", cwd),
                 String::new(),
@@ -2135,7 +2142,7 @@ impl McpTool for SessionBootstrapTool {
             ]
         };
 
-        let snippet_len = if is_cursor { 80 } else { 120 };
+        let snippet_len = if is_compact { 80 } else { 120 };
         for r in &rows {
             let tags = if r.tags.is_empty() {
                 String::new()
@@ -2184,29 +2191,96 @@ impl SessionCurateTool {
     }
 }
 
-/// Marker prefixes that indicate a memorable item in conversation text.
+/// Explicit line-prefix markers → memory kind.
 static CURATE_MARKERS: &[(&str, &str)] = &[
     ("lesson:", "lesson"),
     ("learned:", "lesson"),
+    ("learning:", "lesson"),
+    ("gotcha:", "lesson"),
+    ("pitfall:", "lesson"),
+    ("bug:", "lesson"),
+    ("fix:", "lesson"),
+    ("warning:", "lesson"),
+    ("pattern:", "lesson"),
     ("decision:", "decision"),
     ("decided:", "decision"),
+    ("design:", "decision"),
+    ("architecture:", "decision"),
+    ("we decided:", "decision"),
+    ("we chose:", "decision"),
     ("todo:", "todo"),
     ("TODO:", "todo"),
     ("action item:", "todo"),
-    ("bug:", "lesson"),
-    ("fix:", "lesson"),
-    ("pitfall:", "lesson"),
-    ("warning:", "lesson"),
+    ("next step:", "todo"),
     ("note:", "context"),
     ("context:", "context"),
-    ("handoff:", "session_handoff"),
-    ("session_handoff:", "session_handoff"),
+    ("status:", "context"),
+    ("state:", "context"),
     ("remember:", "context"),
     ("important:", "context"),
-    ("design:", "decision"),
-    ("architecture:", "decision"),
-    ("pattern:", "lesson"),
+    ("key insight:", "lesson"),
+    ("root cause:", "lesson"),
+    ("handoff:", "session_handoff"),
+    ("session_handoff:", "session_handoff"),
 ];
+
+/// Section-header keywords that make subsequent bullet-list lines inherit a kind.
+/// Format: (keyword substring in lowercase, inherited kind)
+static SECTION_HEADERS: &[(&str, &str)] = &[
+    ("lesson", "lesson"),
+    ("learned", "lesson"),
+    ("learning", "lesson"),
+    ("gotcha", "lesson"),
+    ("pitfall", "lesson"),
+    ("insight", "lesson"),
+    ("decision", "decision"),
+    ("decided", "decision"),
+    ("todo", "todo"),
+    ("action item", "todo"),
+    ("next step", "todo"),
+    ("context", "context"),
+    ("status", "context"),
+    ("handoff", "session_handoff"),
+    ("summary", "context"),
+];
+
+/// Return true if the line looks like a section header (ends with `:` and has no
+/// indentation, or is written in bold markdown like `**Lessons:**`).
+fn is_section_header(line: &str) -> Option<&'static str> {
+    let trimmed = line.trim();
+    // Must end with ':' or ':*'  (markdown bold close)
+    let bare = trimmed
+        .trim_start_matches('*')
+        .trim_end_matches('*')
+        .trim_end_matches(':')
+        .trim();
+    let lower = bare.to_lowercase();
+    for (kw, kind) in SECTION_HEADERS {
+        if lower.contains(kw) && trimmed.ends_with(':') || trimmed.ends_with(":**") {
+            return Some(kind);
+        }
+    }
+    None
+}
+
+/// Strip leading bullet/dash/number from a list item and return the payload.
+fn strip_bullet(line: &str) -> Option<&str> {
+    let t = line.trim();
+    // Markdown list: `- `, `* `, `+ `, `1. `, `•`
+    for prefix in &["- ", "* ", "+ ", "• "] {
+        if let Some(rest) = t.strip_prefix(prefix) {
+            return Some(rest.trim());
+        }
+    }
+    // Numbered list: `1. ` etc.
+    if let Some(pos) = t.find(". ") {
+        let num_part = &t[..pos];
+        if num_part.chars().all(|c| c.is_ascii_digit()) && pos <= 2 {
+            return Some(t[pos + 2..].trim());
+        }
+    }
+    None
+}
 
 fn curate_conversation(text: &str, session_id: Option<&str>, max_items: usize) -> Vec<MemoryRecord> {
     let mut results: Vec<MemoryRecord> = Vec::new();
@@ -2219,54 +2293,101 @@ fn curate_conversation(text: &str, session_id: Option<&str>, max_items: usize) -
         .map(|s| format!("_{}", &s[..s.len().min(8)]))
         .unwrap_or_default();
 
+    // Track the current section context so bullet items inherit the section kind.
+    let mut section_kind: Option<&'static str> = None;
+
     for (idx, line) in text.lines().enumerate() {
         if results.len() >= max_items {
             break;
         }
         let trimmed = line.trim();
-        if trimmed.len() < 10 {
+        if trimmed.is_empty() {
+            // Blank line resets section context after a gap
+            // (keep for one blank, reset on two — approximate by counting)
             continue;
         }
-        for (marker, kind) in CURATE_MARKERS {
+
+        // ── 1. Check for section header ──────────────────────────────────────
+        if let Some(kind) = is_section_header(trimmed) {
+            section_kind = Some(kind);
+            continue;
+        }
+
+        // ── 2. Explicit line-prefix markers ─────────────────────────────────
+        let mut matched = false;
+        if trimmed.len() >= 10 {
             let lower = trimmed.to_lowercase();
-            let marker_lower = marker.to_lowercase();
-            if lower.starts_with(&marker_lower) {
-                let content = trimmed[marker.len()..].trim().to_string();
-                if content.len() < 5 {
-                    continue;
+            for (marker, kind) in CURATE_MARKERS {
+                let marker_lower = marker.to_lowercase();
+                if lower.starts_with(&marker_lower) {
+                    let content = trimmed[marker.len()..].trim().to_string();
+                    if content.len() >= 5 {
+                        push_curated(
+                            &mut results,
+                            kind,
+                            &content,
+                            &sid_suffix,
+                            idx,
+                            now,
+                        );
+                        matched = true;
+                        break;
+                    }
                 }
-                // Build a stable key from kind + content hash
-                let content_slug: String = content
-                    .chars()
-                    .take(40)
-                    .map(|c| if c.is_alphanumeric() { c } else { '_' })
-                    .collect();
-                let key = format!(
-                    "curated_{}{}_{}{}",
-                    kind,
-                    sid_suffix,
-                    idx,
-                    &content_slug[..content_slug.len().min(20)]
-                );
-                results.push(MemoryRecord {
-                    key,
-                    kind: kind.to_string(),
-                    content,
-                    tags: vec!["auto_curated".to_string()],
-                    related_keys: vec![],
-                    scope: None,
-                    created_at: now,
-                    updated_at: now,
-                    last_accessed_at: now,
-                    access_count: 0,
-                    importance: 0.5, // auto-assigned from kind in memory_save
-                    status: "active".to_string(),
-                });
-                break;
+            }
+        }
+
+        // ── 3. Bullet items under a recognised section ──────────────────────
+        if !matched {
+            if let Some(kind) = section_kind {
+                if let Some(payload) = strip_bullet(trimmed) {
+                    if payload.len() >= 8 {
+                        push_curated(&mut results, kind, payload, &sid_suffix, idx, now);
+                    }
+                } else if !trimmed.starts_with('[') {
+                    // Non-bullet, non-empty line resets the section context
+                    section_kind = None;
+                }
             }
         }
     }
     results
+}
+
+fn push_curated(
+    results: &mut Vec<MemoryRecord>,
+    kind: &str,
+    content: &str,
+    sid_suffix: &str,
+    idx: usize,
+    now: i64,
+) {
+    let content_slug: String = content
+        .chars()
+        .take(40)
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
+    let key = format!(
+        "curated_{}{}_{}{}",
+        kind,
+        sid_suffix,
+        idx,
+        &content_slug[..content_slug.len().min(20)]
+    );
+    results.push(MemoryRecord {
+        key,
+        kind: kind.to_string(),
+        content: content.to_string(),
+        tags: vec!["auto_curated".to_string()],
+        related_keys: vec![],
+        scope: None,
+        created_at: now,
+        updated_at: now,
+        last_accessed_at: now,
+        access_count: 0,
+        importance: 0.5,
+        status: "active".to_string(),
+    });
 }
 
 #[async_trait]
@@ -2710,6 +2831,22 @@ fn detect_frontend() -> &'static str {
         || std::env::var("CLAUDE_CODE_ENTRYPOINT").is_ok()
     {
         return "claude-code";
+    }
+    // Warp injects TERM_PROGRAM=WarpTerminal + WARP_IS_LOCAL_SHELL_SESSION=1
+    // on every shell it spawns (see app/src/terminal/local_tty/unix.rs in
+    // warpdotdev/warp). WARP_HONOR_PS1 takes literal "0"|"1", so we test
+    // value rather than presence to avoid false positives.
+    if std::env::var("TERM_PROGRAM")
+        .map(|v| v == "WarpTerminal")
+        .unwrap_or(false)
+        || std::env::var("WARP_IS_LOCAL_SHELL_SESSION")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+        || std::env::var("WARP_HONOR_PS1")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    {
+        return "warp";
     }
     "unknown"
 }

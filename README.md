@@ -35,9 +35,58 @@ and git-backed sync to any other machine running agent-bridge.
 
 ---
 
+## Quick start (Warp)
+
+[Warp](https://www.warp.dev) is supported as a first-class frontend. The
+flow differs from Claude Code in two ways: there is no shell-out hook
+model, and Warp registers MCP servers via its settings UI rather than a
+`claude mcp add` CLI.
+
+```bash
+# 1. Build (same as above)
+git clone git@github.com:pallasting/Agent-Bridge.git ~/agent-bridge
+cd ~/agent-bridge && cargo build --release
+
+# 2. Install — Warp profile copies the binary only and prints UI guidance.
+./target/release/agent-bridge setup --frontend warp
+# (Or rely on auto-detect when running this from inside a Warp shell:
+#   ./target/release/agent-bridge setup)
+
+# 3. Add to PATH
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Then in Warp itself:
+
+1. Open **Settings → MCP servers → Add server**.
+2. Set **Command** = `~/.local/bin/agent-bridge`, **Args** = `["mcp"]`.
+3. Save and reload.
+
+That's the whole adaptation surface. Warp does not have analogues for
+the Claude Code `UserPromptSubmit / Stop / PreCompact` hook events, so
+the `setup --frontend warp` profile deliberately skips writing the
+three `ab-*-hook` scripts and the `~/.claude/settings.json` rewrite.
+Instead, the agent should call the equivalent MCP tools directly:
+
+| Lifecycle moment | What to call instead of a hook |
+|------------------|--------------------------------|
+| Session start    | Read `agent-bridge://session/bootstrap` resource, or call `session_bootstrap` |
+| Before summarising / compacting context | `session_curate(conversation_text=...)` |
+| Session end      | `session_finalize()` |
+
+The `session_bootstrap` and `capabilities` tools auto-detect Warp via
+`TERM_PROGRAM=WarpTerminal` / `WARP_IS_LOCAL_SHELL_SESSION=1` and emit
+a compact, Block-UI-friendly format.
+
+---
+
 ## What `setup` does
 
-`agent-bridge setup` is idempotent and safe to re-run after upgrades:
+`agent-bridge setup` is idempotent and safe to re-run after upgrades.
+The `--frontend` flag selects the install profile (default: `auto`,
+which detects Warp via env vars and falls back to claude-code).
+
+Claude Code profile (`--frontend claude-code`):
 
 | Step | What happens |
 |------|-------------|
@@ -45,6 +94,15 @@ and git-backed sync to any other machine running agent-bridge.
 | Hook scripts | Writes three scripts to `~/.local/bin/` (see below) |
 | Curator settings | Writes `~/.config/agent-bridge/memory-curator-settings.json` |
 | Claude Code hooks | Merges three hook entries into `~/.claude/settings.json` (never overwrites existing entries) |
+
+Warp profile (`--frontend warp`):
+
+| Step | What happens |
+|------|-------------|
+| Binary | Copies itself to `~/.local/bin/agent-bridge` |
+| Hook scripts | **Skipped** — Warp has no equivalent hook events |
+| Curator settings | **Skipped** — only consumed by `ab-precompact-hook.sh` |
+| Settings file | **Skipped** — prints registration guidance for `Settings → MCP servers` instead |
 
 ### Hook scripts
 
@@ -163,7 +221,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | `Notifier` | `DbusNotifier` (Linux), `MacOsNotifier` | webhook, Slack, Pushover |
 | `BrowserBackend` | `ChromiumCdpBackend` | webkit, playwright, Firefox |
 | `AgentRuntime` | `ClaudeCodeRuntime` (one-shot) | codex, aider, gemini-cli |
-| `TerminalBackend` | `KittyBackend`, `ZellijBackend`, `WezTermBackend` | ghostty, tmux |
+| `TerminalBackend` | `KittyBackend`, `ZellijBackend`, `WezTermBackend`, `WarpBackend` | ghostty, tmux |
 | `StateStore` | `SqliteStore` (rusqlite-bundled) | in-memory, postgres |
 | `McpTool` | 29 built-in tools | drop in any `Box<dyn McpTool>` |
 
@@ -176,8 +234,9 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | `AGENT_BRIDGE_HEADLESS` | (unset = headed) | `1` for headless Chromium |
 | `AGENT_BRIDGE_CHROME` | auto-detect | Path to chrome/chromium binary |
 | `AGENT_BRIDGE_CLAUDE_BIN` | `claude` | Override claude CLI path |
-| `AGENT_BRIDGE_TERMINAL` | auto-detect | Force: `wezterm` \| `kitty` \| `zellij` |
+| `AGENT_BRIDGE_TERMINAL` | auto-detect | Force: `wezterm` \| `kitty` \| `zellij` \| `warp` |
 | `AGENT_BRIDGE_KITTY_SOCKET` | `$KITTY_LISTEN_ON` | kitty IPC socket |
+| `AGENT_BRIDGE_WARP_OPENER` | `xdg-open` (Linux), `open` (macOS) | URL handler used by `WarpBackend` to dispatch `warp://` URIs |
 | `AGENT_BRIDGE_MEMORY_REPO` | `~/agent-bridge-memory` | Path to memory sync repo |
 | `RUST_LOG` | `info` | tracing-subscriber filter |
 
@@ -185,7 +244,22 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 
 1. `ZELLIJ` is set → `ZellijBackend`
 2. `KITTY_WINDOW_ID` is set → `KittyBackend`
-3. otherwise → `WezTermBackend`
+3. `TERM_PROGRAM=WarpTerminal` (or `WARP_IS_LOCAL_SHELL_SESSION=1` /
+   `WARP_HONOR_PS1=1`) → `WarpBackend`
+4. otherwise → `WezTermBackend`
+
+### `WarpBackend` capabilities
+
+Warp does not expose a public CLI for terminal mux control, only the
+`warp://` URL scheme. The backend therefore supports a reduced
+feature set:
+
+| Op | Behaviour |
+|----|-----------|
+| `list_panes` | Returns one synthetic row for the current shell session (id from `WARP_SESSION_ID` if exported, else `warp:current`). |
+| `send_keys`  | Returns `Error::Backend` — no public IPC for typing into another pane. |
+| `split`      | Vertical → `warp://action/new_tab?path=<cwd>`; Horizontal → `warp://action/new_window?path=<cwd>`. New pane id is synthetic. |
+| `subscribe`  | Empty stream (OSC notifications still flow through `osc.parse`). |
 
 ## Status
 

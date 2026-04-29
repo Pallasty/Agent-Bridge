@@ -3,9 +3,9 @@ use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
 use ab_store::{default_db_path, SqliteStore, StateStore};
-use ab_terminal::{auto_backend, TerminalBackend};
+use ab_terminal::{auto_backend, TerminalBackend, WarpBackend};
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
@@ -24,12 +24,50 @@ enum Cmd {
     Daemon,
     /// Run as an MCP stdio server (for `claude mcp add agent-bridge ...`).
     Mcp,
-    /// Install Claude Code hooks and settings for the memory system.
+    /// Install agent-bridge for the chosen frontend.
     ///
-    /// Copies the binary to ~/.local/bin/agent-bridge, writes three hook
-    /// scripts (UserPromptSubmit / PreCompact / Stop), and merges the hook
-    /// configuration into ~/.claude/settings.json.
-    Setup,
+    /// `--frontend claude-code` (default): copies the binary to
+    /// `~/.local/bin/agent-bridge`, writes the three Claude Code hook
+    /// scripts, and merges hook entries into `~/.claude/settings.json`.
+    ///
+    /// `--frontend warp`: copies the binary only and prints guidance for
+    /// registering the MCP server in Warp's settings UI. Skips all
+    /// Claude-specific hook installation since Warp does not have
+    /// equivalent hook-event slots.
+    ///
+    /// `--frontend auto`: detect from `WarpBackend::detect()` /
+    /// CLAUDE_* env vars. Defaults to claude-code if neither is found.
+    Setup {
+        #[arg(long, value_enum, default_value_t = SetupFrontend::Auto)]
+        frontend: SetupFrontend,
+    },
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum SetupFrontend {
+    /// Install hooks for Claude Code (legacy behaviour).
+    ClaudeCode,
+    /// Install for Warp (binary only; no hook scripts).
+    Warp,
+    /// Auto-detect from the running shell's environment.
+    Auto,
+}
+
+impl SetupFrontend {
+    /// Resolve `Auto` to a concrete frontend by inspecting the env.
+    fn resolve(self) -> setup::Frontend {
+        match self {
+            Self::ClaudeCode => setup::Frontend::ClaudeCode,
+            Self::Warp => setup::Frontend::Warp,
+            Self::Auto => {
+                if WarpBackend::detect() {
+                    setup::Frontend::Warp
+                } else {
+                    setup::Frontend::ClaudeCode
+                }
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -38,8 +76,8 @@ async fn main() -> Result<()> {
     let cmd = cli.cmd.unwrap_or(Cmd::Daemon);
 
     // Setup runs synchronously, no async runtime needed beyond tokio's shell.
-    if matches!(cmd, Cmd::Setup) {
-        return setup::run();
+    if let Cmd::Setup { frontend } = &cmd {
+        return setup::run(frontend.resolve());
     }
 
     let log_layer = match cmd {
@@ -68,7 +106,7 @@ async fn main() -> Result<()> {
             serve_stdio(registry, store, "agent-bridge", env!("CARGO_PKG_VERSION")).await;
             Ok(())
         }
-        Cmd::Setup => unreachable!(),
+        Cmd::Setup { .. } => unreachable!(),
     }
 }
 

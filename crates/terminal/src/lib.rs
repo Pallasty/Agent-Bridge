@@ -4,6 +4,7 @@
 //! - [`WezTermBackend`] — wraps `wezterm cli`.
 //! - [`KittyBackend`]  — wraps `kitten @` (kitty remote control).
 //! - [`ZellijBackend`] — wraps `zellij action` (session-granularity only).
+//! - [`WarpBackend`]   — wraps Warp's `warp://` URL scheme (limited IPC).
 //! - [`auto_backend`]  — pick a backend from `AGENT_BRIDGE_TERMINAL` or env detection.
 //! - [`osc`] — pure-Rust streaming parser for OSC 9 / 99 / 777 notification
 //!   sequences, used by both the bridge daemon and integration glue.
@@ -16,11 +17,13 @@ use std::sync::Arc;
 
 pub mod kitty;
 pub mod osc;
+pub mod warp;
 pub mod wezterm;
 pub mod zellij;
 
 pub use kitty::KittyBackend;
 pub use osc::{OscEvent, OscParser};
+pub use warp::WarpBackend;
 pub use wezterm::WezTermBackend;
 pub use zellij::ZellijBackend;
 
@@ -64,8 +67,12 @@ pub trait TerminalBackend: Send + Sync {
 /// Pick a [`TerminalBackend`] from the environment.
 ///
 /// Resolution order:
-/// 1. Explicit override: `AGENT_BRIDGE_TERMINAL` ∈ {`kitty`, `zellij`, `wezterm`}.
-/// 2. Auto-detect: `ZELLIJ` set → zellij; `KITTY_WINDOW_ID` set → kitty.
+/// 1. Explicit override: `AGENT_BRIDGE_TERMINAL` ∈ {`kitty`, `zellij`, `wezterm`, `warp`}.
+/// 2. Auto-detect:
+///    - `ZELLIJ` set → zellij
+///    - `KITTY_WINDOW_ID` set → kitty
+///    - [`WarpBackend::detect`] (i.e. `TERM_PROGRAM=WarpTerminal` or any
+///      `WARP_*` shell-session marker) → warp
 /// 3. Fallback: wezterm (preserves pre-multi-backend behaviour).
 ///
 /// Unknown override values silently fall through to the auto-detect step
@@ -79,11 +86,14 @@ pub fn auto_backend() -> Arc<dyn TerminalBackend> {
         Some("kitty") => "kitty",
         Some("zellij") => "zellij",
         Some("wezterm") => "wezterm",
+        Some("warp") => "warp",
         _ => {
             if std::env::var_os("ZELLIJ").is_some() {
                 "zellij"
             } else if std::env::var_os("KITTY_WINDOW_ID").is_some() {
                 "kitty"
+            } else if WarpBackend::detect() {
+                "warp"
             } else {
                 "wezterm"
             }
@@ -93,6 +103,7 @@ pub fn auto_backend() -> Arc<dyn TerminalBackend> {
     match chosen {
         "kitty" => Arc::new(KittyBackend::new()),
         "zellij" => Arc::new(ZellijBackend::new()),
+        "warp" => Arc::new(WarpBackend::new()),
         _ => Arc::new(WezTermBackend::new()),
     }
 }

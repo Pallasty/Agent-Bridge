@@ -1,7 +1,17 @@
 //! `agent-bridge setup` — one-shot installer.
 //!
-//! Copies the binary to `~/.local/bin/agent-bridge`, writes three Claude Code
-//! hook scripts, and merges the hook configuration into `~/.claude/settings.json`.
+//! Two installation profiles:
+//!
+//! - `Frontend::ClaudeCode` (legacy default): copies the binary,
+//!   writes the three hook scripts, and merges `UserPromptSubmit /
+//!   Stop / PreCompact` entries into `~/.claude/settings.json`.
+//! - `Frontend::Warp`: copies the binary only. Warp does not expose
+//!   shell-out hooks for those events, so the hook scripts and the
+//!   `~/.claude/settings.json` rewrite are deliberately skipped.
+//!   Instead, prints UI guidance for registering the MCP server
+//!   through `Settings → MCP servers` and recommends letting agents
+//!   call `session_bootstrap` / `session_curate` / `session_finalize`
+//!   manually at session boundaries.
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -15,10 +25,18 @@ const HOOK_PRECOMPACT: &str = include_str!("hooks/ab-precompact-hook.sh");
 const HOOK_SESSION_END: &str = include_str!("hooks/ab-session-end-hook.sh");
 const CURATOR_SETTINGS: &str = include_str!("hooks/memory-curator-settings.json");
 
-pub fn run() -> Result<()> {
+/// Which frontend the setup is targeting. Drives whether hook scripts
+/// and `~/.claude/settings.json` are written.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Frontend {
+    ClaudeCode,
+    Warp,
+}
+
+pub fn run(frontend: Frontend) -> Result<()> {
     let home = home_dir().context("cannot determine $HOME")?;
 
-    // ── 1. Install binary ─────────────────────────────────────────────────────
+    // ── 1. Install binary (always) ───────────────────────────────────────
     let bin_dir = home.join(".local/bin");
     fs::create_dir_all(&bin_dir).context("create ~/.local/bin")?;
 
@@ -36,12 +54,20 @@ pub fn run() -> Result<()> {
         println!("  ·  binary      already at {}", bin_dst.display());
     }
 
-    // ── 2. Write hook scripts ─────────────────────────────────────────────────
+    match frontend {
+        Frontend::ClaudeCode => install_claude_code(&home, &bin_dir),
+        Frontend::Warp => install_warp(&bin_dst),
+    }
+}
+
+/// Claude Code profile: full hook installation.
+fn install_claude_code(home: &Path, bin_dir: &Path) -> Result<()> {
+    // ── 2. Write hook scripts ────────────────────────────────────────────
     write_script(&bin_dir.join("ab-memory-hook"), HOOK_MEMORY)?;
     write_script(&bin_dir.join("ab-precompact-hook"), HOOK_PRECOMPACT)?;
     write_script(&bin_dir.join("ab-session-end-hook"), HOOK_SESSION_END)?;
 
-    // ── 3. Write curator settings ─────────────────────────────────────────────
+    // ── 3. Write curator settings ────────────────────────────────────────
     let cfg_dir = home.join(".config/agent-bridge");
     fs::create_dir_all(&cfg_dir).context("create ~/.config/agent-bridge")?;
     let cfg_path = cfg_dir.join("memory-curator-settings.json");
@@ -49,11 +75,11 @@ pub fn run() -> Result<()> {
         .with_context(|| format!("write {}", cfg_path.display()))?;
     println!("  ✓  curator cfg  → {}", cfg_path.display());
 
-    // ── 4. Merge Claude Code settings ─────────────────────────────────────────
-    merge_claude_settings(&home, &bin_dir)?;
+    // ── 4. Merge Claude Code settings ────────────────────────────────────
+    merge_claude_settings(home, bin_dir)?;
 
     println!();
-    println!("Setup complete.");
+    println!("Setup complete (claude-code profile).");
     println!();
     println!("Next steps:");
     println!("  1. Add ~/.local/bin to your PATH if it isn't already.");
@@ -62,6 +88,43 @@ pub fn run() -> Result<()> {
     println!("  4. (Optional) Clone the memory-sync repo:");
     println!("       git clone <your-memory-repo> ~/agent-bridge-memory");
     println!("  5. Restart Claude Code — the hooks take effect on the next session.");
+
+    Ok(())
+}
+
+/// Warp profile: binary only, plus printed registration guidance.
+///
+/// Warp does not have analogues for the Claude Code hook events
+/// (`UserPromptSubmit` / `Stop` / `PreCompact`), so we deliberately
+/// skip:
+///   - writing the three `ab-*-hook` shell scripts,
+///   - rewriting `~/.claude/settings.json` (which Warp users may not
+///     even have),
+///   - emitting `~/.config/agent-bridge/memory-curator-settings.json`
+///     (only consumed by `ab-precompact-hook.sh`).
+fn install_warp(bin_dst: &Path) -> Result<()> {
+    println!("  ·  hook scripts skipped (Warp has no equivalent hook events)");
+    println!("  ·  ~/.claude/settings.json skipped (claude-code only)");
+    println!();
+    println!("Setup complete (warp profile).");
+    println!();
+    println!("Next steps in Warp:");
+    println!("  1. Open  Settings  →  MCP servers  →  Add server.");
+    println!("  2. Configure:");
+    println!("       Name:    agent-bridge");
+    println!("       Command: {}", bin_dst.display());
+    println!("       Args:    [\"mcp\"]");
+    println!("  3. Save and reload Warp.");
+    println!();
+    println!("For session lifecycle (Warp has no PreCompact/Stop hooks),");
+    println!("have the agent call these MCP tools manually:");
+    println!("  • At session start  →  read agent-bridge://session/bootstrap");
+    println!("                        (or call the session_bootstrap tool)");
+    println!("  • Before summarising →  call session_curate(conversation_text=...)");
+    println!("  • At session end    →  call session_finalize()");
+    println!();
+    println!("Optional: start the long-lived daemon for Unix-socket access:");
+    println!("  agent-bridge daemon &");
 
     Ok(())
 }
