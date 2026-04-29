@@ -54,6 +54,15 @@ use crate::{AgentCapabilities, AgentRuntime, AgentSession, SpawnConfig};
 /// Default Oz CLI binary name on `$PATH`.
 pub const DEFAULT_OZ_BIN: &str = "oz";
 
+/// Terminal cloud-run states that the poller should stop at.
+pub const TERMINAL_STATES: &[&str] = &["SUCCEEDED", "FAILED", "CANCELLED"];
+
+/// Max time the background poller will wait for a terminal state.
+const POLL_MAX_SECS: u64 = 30 * 60; // 30 min
+
+/// Interval between `oz run get` calls.
+const POLL_INTERVAL_SECS: u64 = 5;
+
 /// Default environment-id env var name read from `SpawnConfig.env`.
 ///
 /// Lets MCP callers pin the cloud environment per-spawn without
@@ -173,6 +182,9 @@ impl AgentRuntime for OzAgentRuntime {
                 exit_code: None,
                 stdout: None,
                 stderr: None,
+                cloud_run_id: None,
+                cloud_run_state: None,
+                cloud_session_link: None,
             };
             if let Err(e) = store.save_session(&initial).await {
                 warn!(session = %session_id, error = %e, "store: save_session failed");
@@ -215,6 +227,7 @@ impl AgentRuntime for OzAgentRuntime {
         let sid_bg = session_id.clone();
         let store_bg = self.store.clone();
         let children_bg = self.children.clone();
+        let binary_bg = self.binary.clone();
         tokio::spawn(async move {
             let out = child.wait_with_output().await;
             children_bg.remove(sid_bg.as_str());
@@ -241,7 +254,12 @@ impl AgentRuntime for OzAgentRuntime {
                             None
                         }
                     });
-                    if let Some(store) = store_bg {
+
+                    // Parse run_id from JSON output.
+                    let parsed = parse_run_output(&stdout);
+                    let run_id = parsed.run_id.clone();
+
+                    if let Some(store) = &store_bg {
                         let _ = store
                             .finalise_session(
                                 &sid_bg,
@@ -251,6 +269,64 @@ impl AgentRuntime for OzAgentRuntime {
                                 Some(stderr),
                             )
                             .await;
+
+                        // Persist run_id + initial state from spawn output.
+                        if let Some(rid) = &run_id {
+                            let _ = store.set_cloud_run_id(&sid_bg, rid).await;
+                            if let Some(st) = &parsed.state {
+                                let _ = store
+                                    .set_cloud_run_state(
+                                        &sid_bg,
+                                        st,
+                                        parsed.session_link.as_deref(),
+                                    )
+                                    .await;
+                            }
+                        }
+                    }
+
+                    // Start background poll for cloud-run terminal state.
+                    if let Some(rid) = run_id {
+                        if let Some(store) = store_bg {
+                            let bin = binary_bg;
+                            let sid = sid_bg.clone();
+                            tokio::spawn(async move {
+                                let deadline = std::time::Instant::now()
+                                    + std::time::Duration::from_secs(POLL_MAX_SECS);
+                                loop {
+                                    tokio::time::sleep(std::time::Duration::from_secs(
+                                        POLL_INTERVAL_SECS,
+                                    ))
+                                    .await;
+                                    if std::time::Instant::now() >= deadline {
+                                        info!(session = %sid, run_id = %rid, "cloud-run poll timed out");
+                                        break;
+                                    }
+                                    if let Some(status) = fetch_run_status(&bin, &rid).await {
+                                        let state_str = status
+                                            .state
+                                            .as_deref()
+                                            .unwrap_or("UNKNOWN");
+                                        let _ = store
+                                            .set_cloud_run_state(
+                                                &sid,
+                                                state_str,
+                                                status.session_link.as_deref(),
+                                            )
+                                            .await;
+                                        if TERMINAL_STATES.contains(&state_str) {
+                                            info!(
+                                                session = %sid,
+                                                run_id = %rid,
+                                                state = state_str,
+                                                "cloud-run reached terminal state"
+                                            );
+                                            break;
+                                        }
+                                    }
+                                }
+                            });
+                        }
                     }
                 }
                 Err(e) => {
@@ -338,6 +414,63 @@ impl AgentRuntime for OzAgentRuntime {
     }
 }
 
+// ─── cloud-run JSON helpers ──────────────────────────────────────────────
+
+/// Parsed fields from `oz agent run-cloud --output-format json` stdout.
+#[derive(Debug, Clone, Default)]
+pub struct OzRunOutput {
+    pub run_id: Option<String>,
+    pub state: Option<String>,
+    pub session_link: Option<String>,
+    pub title: Option<String>,
+}
+
+/// Parse the JSON-ish output of `oz agent run-cloud --output-format json`.
+/// Falls back to regex-extracting `run_id` from plain text if JSON parsing fails.
+pub fn parse_run_output(stdout: &str) -> OzRunOutput {
+    // Try full JSON parse first.
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(stdout) {
+        return OzRunOutput {
+            run_id: v.get("run_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            state: v.get("state").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            session_link: v.get("session_link").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            title: v.get("title").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        };
+    }
+    // Fallback: look for UUID-like run_id in plain text.
+    // `oz` often prints: "Spawned agent with run ID: <uuid>"
+    let run_id = stdout
+        .split_whitespace()
+        .find(|w| w.len() >= 32 && w.chars().all(|c| c.is_ascii_hexdigit() || c == '-'))
+        .map(|s| s.to_string());
+    OzRunOutput {
+        run_id,
+        ..Default::default()
+    }
+}
+
+/// Parse the JSON output of `oz run get <id> --output-format json`.
+pub fn parse_run_status(stdout: &str) -> OzRunOutput {
+    parse_run_output(stdout)
+}
+
+/// Shell out to `oz run get <run_id> --output-format json` and parse result.
+pub async fn fetch_run_status(binary: &str, run_id: &str) -> Option<OzRunOutput> {
+    let output = Command::new(binary)
+        .args(["run", "get", run_id, "--output-format", "json"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Some(parse_run_status(&stdout))
+}
+
 fn truncate(s: &str, max: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max {
@@ -361,6 +494,35 @@ mod tests {
     #[test]
     fn id_is_stable() {
         assert_eq!(OzAgentRuntime::new().id(), "warp-oz");
+    }
+
+    #[test]
+    fn parse_run_output_from_json() {
+        let json = r#"{"run_id":"abc-123","state":"QUEUED","session_link":"https://oz.warp.dev/runs/abc-123","title":"test"}"#;
+        let parsed = super::parse_run_output(json);
+        assert_eq!(parsed.run_id.as_deref(), Some("abc-123"));
+        assert_eq!(parsed.state.as_deref(), Some("QUEUED"));
+        assert_eq!(
+            parsed.session_link.as_deref(),
+            Some("https://oz.warp.dev/runs/abc-123")
+        );
+    }
+
+    #[test]
+    fn parse_run_output_plain_text_fallback() {
+        let text = "Spawned agent with run ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890\n";
+        let parsed = super::parse_run_output(text);
+        assert_eq!(
+            parsed.run_id.as_deref(),
+            Some("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+        );
+        assert!(parsed.state.is_none());
+    }
+
+    #[test]
+    fn parse_run_output_empty() {
+        let parsed = super::parse_run_output("");
+        assert!(parsed.run_id.is_none());
     }
 
     #[test]

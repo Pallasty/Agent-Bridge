@@ -167,6 +167,13 @@ CREATE INDEX IF NOT EXISTS idx_memory_edges_from ON memory_edges(from_key);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_to   ON memory_edges(to_key);
 "#;
 
+// v8: cloud-run lifecycle columns on sessions (warp-oz)
+const SCHEMA_V8: &str = r#"
+ALTER TABLE sessions ADD COLUMN cloud_run_id TEXT;
+ALTER TABLE sessions ADD COLUMN cloud_run_state TEXT;
+ALTER TABLE sessions ADD COLUMN cloud_session_link TEXT;
+"#;
+
 // v1.0: importance score + status column for cognitive memory
 const SCHEMA_V7: &str = r#"
 ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5;
@@ -368,7 +375,30 @@ impl SqliteStore {
                          CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);",
                     )?;
                 }
-                c.execute("UPDATE schema_meta SET value='7' WHERE key='version'", [])?;
+                c.execute("UPDATE schema_meta SET value='7' WHERE key='version'", []);
+            }
+
+            // ── v8 migration: cloud-run lifecycle columns on sessions ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "7".to_string());
+            if cur.as_str() == "7" {
+                let has_col: bool = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='cloud_run_id'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .unwrap_or(0)
+                    > 0;
+                if !has_col {
+                    c.execute_batch(SCHEMA_V8)?;
+                }
+                c.execute("UPDATE schema_meta SET value='8' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -535,8 +565,9 @@ impl StateStore for SqliteStore {
             .call(move |c| -> RusqliteResult<()> {
                 c.execute(
                     "INSERT OR REPLACE INTO sessions
-                       (id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                       (id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr,
+                        cloud_run_id, cloud_run_state, cloud_session_link)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
                         s.id.as_str(),
                         s.runtime_id,
@@ -545,7 +576,10 @@ impl StateStore for SqliteStore {
                         s.ended_at,
                         s.exit_code,
                         s.stdout,
-                        s.stderr
+                        s.stderr,
+                        s.cloud_run_id,
+                        s.cloud_run_state,
+                        s.cloud_session_link
                     ],
                 )?;
                 Ok(())
@@ -561,7 +595,8 @@ impl StateStore for SqliteStore {
             .conn
             .call(move |c| -> RusqliteResult<Option<StoredSession>> {
                 let mut stmt = c.prepare(
-                    "SELECT id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr
+                    "SELECT id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr,
+                            cloud_run_id, cloud_run_state, cloud_session_link
                      FROM sessions WHERE id=?1",
                 )?;
                 let r = stmt
@@ -575,6 +610,9 @@ impl StateStore for SqliteStore {
                             exit_code: row.get(5)?,
                             stdout: row.get(6)?,
                             stderr: row.get(7)?,
+                            cloud_run_id: row.get(8)?,
+                            cloud_run_state: row.get(9)?,
+                            cloud_session_link: row.get(10)?,
                         })
                     })
                     .ok();
@@ -613,7 +651,8 @@ impl StateStore for SqliteStore {
                 });
 
                 let mut stmt = c.prepare(
-                    "SELECT id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr
+                    "SELECT id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr,
+                            cloud_run_id, cloud_run_state, cloud_session_link
                      FROM sessions
                      WHERE (?1 IS NULL OR runtime_id = ?1)
                        AND (?2 IS NULL OR cwd LIKE ?2 ESCAPE '\\')
@@ -638,6 +677,9 @@ impl StateStore for SqliteStore {
                                 exit_code: row.get(5)?,
                                 stdout: row.get(6)?,
                                 stderr: row.get(7)?,
+                                cloud_run_id: row.get(8)?,
+                                cloud_run_state: row.get(9)?,
+                                cloud_session_link: row.get(10)?,
                             })
                         },
                     )?
@@ -1780,6 +1822,46 @@ impl StateStore for SqliteStore {
             .map_err(|e| Error::Backend(format!("memory_stats: {e}")))?;
 
         Ok(stats)
+    }
+
+    // ─── v8: cloud-run lifecycle (warp-oz) ──────────────────────────────
+
+    async fn set_cloud_run_id(&self, session_id: &SessionId, run_id: &str) -> Result<()> {
+        let key = session_id.as_str().to_string();
+        let rid = run_id.to_string();
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE sessions SET cloud_run_id = ?2 WHERE id = ?1",
+                    params![key, rid],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("set_cloud_run_id: {e}")))?;
+        Ok(())
+    }
+
+    async fn set_cloud_run_state(
+        &self,
+        session_id: &SessionId,
+        state: &str,
+        session_link: Option<&str>,
+    ) -> Result<()> {
+        let key = session_id.as_str().to_string();
+        let st = state.to_string();
+        let link = session_link.map(|s| s.to_string());
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE sessions SET cloud_run_state = ?2, cloud_session_link = COALESCE(?3, cloud_session_link) WHERE id = ?1",
+                    params![key, st, link],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("set_cloud_run_state: {e}")))?;
+        Ok(())
     }
 }
 

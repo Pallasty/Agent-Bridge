@@ -27,6 +27,16 @@ pub struct StoredSession {
     /// Captured stderr (truncated to STDIO_CAP bytes).
     #[serde(default)]
     pub stderr: Option<String>,
+    // ── v8: cloud-run lifecycle fields (warp-oz) ────────────────────
+    /// Warp cloud run UUID, parsed from `oz agent run-cloud` JSON output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_run_id: Option<String>,
+    /// Last known cloud run state: QUEUED | INPROGRESS | SUCCEEDED | FAILED.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_run_state: Option<String>,
+    /// URL to the full cloud run transcript on Warp.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_session_link: Option<String>,
 }
 
 /// One persisted notification, with its server-assigned timestamp.
@@ -392,4 +402,17 @@ pub trait StateStore: Send + Sync {
     /// Return aggregate statistics about the memory store.
     /// Intended for `memory_stats` MCP tool and session-curate diagnostics.
     async fn memory_stats(&self) -> Result<MemoryStats>;
+
+    // ─── v8: cloud-run lifecycle helpers (warp-oz) ──────────────────
+
+    /// Persist the Warp cloud run id for a session after spawn.
+    async fn set_cloud_run_id(&self, session_id: &SessionId, run_id: &str) -> Result<()>;
+
+    /// Update the cloud run state + optional session link.
+    async fn set_cloud_run_state(
+        &self,
+        session_id: &SessionId,
+        state: &str,
+        session_link: Option<&str>,
+    ) -> Result<()>;
 }

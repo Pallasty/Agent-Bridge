@@ -126,6 +126,9 @@ impl AgentRuntime for AuggieRuntime {
                 exit_code: None,
                 stdout: None,
                 stderr: None,
+                cloud_run_id: None,
+                cloud_run_state: None,
+                cloud_session_link: None,
             };
             if let Err(e) = store.save_session(&initial).await {
                 warn!(session = %session_id, error = %e, "store: save_session failed");

@@ -263,6 +263,32 @@ cloud environment with `AGENT_BRIDGE_OZ_ENVIRONMENT_ID`, or override
 per-spawn by passing `env.OZ_ENVIRONMENT_ID` to the `agent_spawn` MCP
 tool.
 
+### Cloud Agent Lifecycle (warp-oz)
+
+After `agent_spawn` returns a session id, agent-bridge automatically:
+
+1. Parses `run_id` from the `oz` CLI JSON output.
+2. Persists `run_id` in the session row (`cloud_run_id` column).
+3. Starts a background poller (`oz run get <run_id>`) every 5 s for
+   up to 30 min, writing the live `state` and `session_link` back into
+   the store (`cloud_run_state` / `cloud_session_link`).
+
+`agent_session_wait` is cloud-aware: for `warp-oz` sessions it continues
+polling after the local CLI exits until the cloud run reaches a terminal
+state (`SUCCEEDED` / `FAILED` / `CANCELLED`) or the timeout elapses.
+
+#### New MCP tools (v0.10)
+
+| Tool | Description |
+|------|-------------|
+| `oz_run_get` | Fetch current state of a cloud run by `run_id` or bridge `session_id`. Returns `state`, `title`, `session_link`. |
+| `oz_run_list` | List recent cloud runs (optional `state` filter, `limit`). |
+| `oz_run_cancel` | Cancel an in-progress cloud run by `run_id` or `session_id`. |
+
+All three tools require the `oz` CLI on `$PATH` and an active session
+(`oz login` or `WARP_API_KEY` set). `capabilities()` reports
+`oz_run_tools: true` when the runtime is `warp-oz`.
+
 ### `WarpBackend` capabilities
 
 Warp does not expose a public CLI for terminal mux control, only the

@@ -1,7 +1,7 @@
 //! Built-in MCP tools — wrap the bridge's backend bundle and expose it to
 //! Claude Code (or any MCP client) over the `tools/call` channel.
 
-use ab_agent::{GitWorktreeManager, SpawnConfig};
+use ab_agent::{oz::fetch_run_status, GitWorktreeManager, SpawnConfig};
 use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
 use ab_mcp::{McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
 use ab_store::{
@@ -1110,16 +1110,13 @@ impl McpTool for AgentSessionWaitTool {
         );
         let deadline = Instant::now() + timeout;
 
-        loop {
+        // Phase 1: wait for local CLI process to finish (ended_at set).
+        let local_row = loop {
             let row = store.load_session(&id).await?;
-            match row.as_ref() {
-                Some(s) if s.ended_at.is_some() => {
-                    return Ok(ToolResult::json_text(&json!({
-                        "timed_out": false,
-                        "session": s,
-                    })));
+            if let Some(ref s) = row {
+                if s.ended_at.is_some() {
+                    break row;
                 }
-                _ => {}
             }
             if Instant::now() >= deadline {
                 return Ok(ToolResult::json_text(&json!({
@@ -1128,7 +1125,59 @@ impl McpTool for AgentSessionWaitTool {
                 })));
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
+        };
+
+        // Phase 2 (warp-oz only): if cloud_run_id is set and state is not yet
+        // terminal, continue polling via `oz run get` until terminal or timeout.
+        let is_warp_oz = local_row
+            .as_ref()
+            .map(|s| s.runtime_id == "warp-oz")
+            .unwrap_or(false);
+        let cloud_run_id = local_row
+            .as_ref()
+            .and_then(|s| s.cloud_run_id.clone());
+
+        if is_warp_oz {
+            if let Some(run_id) = cloud_run_id {
+                let bin = oz_binary(&self.hub);
+                // Check initial cloud state from store first.
+                let already_terminal = local_row
+                    .as_ref()
+                    .and_then(|s| s.cloud_run_state.as_deref())
+                    .map(|st| ab_agent::oz::TERMINAL_STATES.contains(&st))
+                    .unwrap_or(false);
+                if !already_terminal {
+                    // Poll until terminal or deadline.
+                    loop {
+                        if Instant::now() >= deadline {
+                            let row = store.load_session(&id).await?;
+                            return Ok(ToolResult::json_text(&json!({
+                                "timed_out": true,
+                                "session": row,
+                            })));
+                        }
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                        // Call oz run get to get latest state
+                        if let Some(status) = fetch_run_status(&bin, &run_id).await {
+                            let state_str = status.state.as_deref().unwrap_or("UNKNOWN");
+                            let _ = store
+                                .set_cloud_run_state(&id, state_str, status.session_link.as_deref())
+                                .await;
+                            if ab_agent::oz::TERMINAL_STATES.contains(&state_str) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
+
+        // Return final row.
+        let final_row = store.load_session(&id).await?;
+        Ok(ToolResult::json_text(&json!({
+            "timed_out": false,
+            "session": final_row,
+        })))
     }
 }
 
@@ -2970,6 +3019,7 @@ impl McpTool for CapabilitiesTool {
                 "configured": configured_hooks,
                 "frontend": frontend
             },
+            "oz_run_tools": runtime_id == "warp-oz",
             "version": version
         })))
     }
@@ -3407,6 +3457,224 @@ impl McpTool for SessionFinalizeTool {
 }
 
 // ===========================================================================
+//                    oz_run_get / oz_run_list / oz_run_cancel
+// ===========================================================================
+
+/// Resolve the oz binary path (same logic as main.rs build_hub).
+fn oz_binary(_hub: &Hub) -> String {
+    std::env::var("AGENT_BRIDGE_OZ_BIN").unwrap_or_else(|_| "oz".into())
+}
+
+pub struct OzRunGetTool {
+    hub: Hub,
+}
+impl OzRunGetTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for OzRunGetTool {
+    fn name(&self) -> &'static str {
+        "oz_run_get"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Fetch the current status of a Warp cloud agent run by `run_id` or \
+                 bridge `session_id` (for warp-oz sessions). Returns state, title, and \
+                 session_link when the run has completed. \
+                 Requires `oz` CLI on PATH and authenticated (`oz login` or WARP_API_KEY)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "run_id":     { "type": "string", "description": "Warp cloud run UUID." },
+                    "session_id": { "type": "string", "description": "Bridge session id from agent_spawn (warp-oz only). Used to look up run_id automatically." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let bin = oz_binary(&self.hub);
+
+        // Resolve run_id: explicit or via session_id lookup.
+        let run_id = if let Some(rid) = args.get("run_id").and_then(|v| v.as_str()) {
+            rid.to_string()
+        } else if let Some(sid) = args.get("session_id").and_then(|v| v.as_str()) {
+            let store = match &self.hub.store {
+                Some(s) => s.clone(),
+                None => return Ok(ToolResult::error("no store configured")),
+            };
+            let session = store
+                .load_session(&SessionId::from_raw(sid.to_string()))
+                .await?;
+            match session.and_then(|s| s.cloud_run_id) {
+                Some(rid) => rid,
+                None => return Ok(ToolResult::error("session has no cloud_run_id (not a warp-oz session, or run_id not yet persisted)")),
+            }
+        } else {
+            return Ok(ToolResult::error("one of 'run_id' or 'session_id' is required"));
+        };
+
+        match fetch_run_status(&bin, &run_id).await {
+            Some(status) => Ok(ToolResult::json_text(&json!({
+                "run_id":       run_id,
+                "state":        status.state,
+                "title":        status.title,
+                "session_link": status.session_link,
+            }))),
+            None => Ok(ToolResult::error(format!(
+                "oz run get {run_id} failed (oz not on PATH, not logged in, or run_id invalid)"
+            ))),
+        }
+    }
+}
+
+pub struct OzRunListTool {
+    hub: Hub,
+}
+impl OzRunListTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for OzRunListTool {
+    fn name(&self) -> &'static str {
+        "oz_run_list"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "List recent Warp cloud agent runs via the oz CLI. \
+                 Returns run IDs, states, titles, and session links. \
+                 Optional filters: state (QUEUED/INPROGRESS/SUCCEEDED/FAILED), limit."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "state": { "type": "string", "description": "Filter by state (QUEUED, INPROGRESS, SUCCEEDED, FAILED)." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let bin = oz_binary(&self.hub);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10)
+            .min(50);
+        let mut cmd_args = vec![
+            "run".to_string(),
+            "list".to_string(),
+            "--output-format".to_string(),
+            "json".to_string(),
+            "--limit".to_string(),
+            limit.to_string(),
+        ];
+        if let Some(st) = args.get("state").and_then(|v| v.as_str()) {
+            cmd_args.push("--state".to_string());
+            cmd_args.push(st.to_string());
+        }
+        let out = tokio::process::Command::new(&bin)
+            .args(&cmd_args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .await;
+        match out {
+            Ok(o) if o.status.success() => {
+                let text = String::from_utf8_lossy(&o.stdout).into_owned();
+                let parsed: Value =
+                    serde_json::from_str(&text).unwrap_or(json!({ "raw": text }));
+                Ok(ToolResult::json_text(&parsed))
+            }
+            Ok(o) => Ok(ToolResult::error(format!(
+                "oz run list failed (exit {:?})",
+                o.status.code()
+            ))),
+            Err(e) => Ok(ToolResult::error(format!("oz not found or not executable: {e}"))),
+        }
+    }
+}
+
+pub struct OzRunCancelTool {
+    hub: Hub,
+}
+impl OzRunCancelTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for OzRunCancelTool {
+    fn name(&self) -> &'static str {
+        "oz_run_cancel"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Cancel an in-progress Warp cloud agent run. \
+                 Accepts `run_id` or `session_id`. \
+                 This stops the cloud-side execution, not just the local CLI process."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "run_id":     { "type": "string" },
+                    "session_id": { "type": "string", "description": "Bridge session id (warp-oz only)." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let bin = oz_binary(&self.hub);
+
+        let run_id = if let Some(rid) = args.get("run_id").and_then(|v| v.as_str()) {
+            rid.to_string()
+        } else if let Some(sid) = args.get("session_id").and_then(|v| v.as_str()) {
+            let store = match &self.hub.store {
+                Some(s) => s.clone(),
+                None => return Ok(ToolResult::error("no store configured")),
+            };
+            let session = store
+                .load_session(&SessionId::from_raw(sid.to_string()))
+                .await?;
+            match session.and_then(|s| s.cloud_run_id) {
+                Some(rid) => rid,
+                None => return Ok(ToolResult::error("session has no cloud_run_id")),
+            }
+        } else {
+            return Ok(ToolResult::error("one of 'run_id' or 'session_id' is required"));
+        };
+
+        let out = tokio::process::Command::new(&bin)
+            .args(["run", "cancel", &run_id])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await;
+        match out {
+            Ok(o) if o.status.success() => Ok(ToolResult::json_text(&json!({
+                "cancelled": true,
+                "run_id": run_id,
+            }))),
+            Ok(o) => Ok(ToolResult::error(format!(
+                "oz run cancel failed (exit {:?}): {}",
+                o.status.code(),
+                String::from_utf8_lossy(&o.stderr)
+            ))),
+            Err(e) => Ok(ToolResult::error(format!("oz not found: {e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -3456,7 +3724,11 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(HookStatusTool::new(hub.clone())));
     reg.register(Arc::new(CapabilitiesTool::new(hub.clone())));
     reg.register(Arc::new(MemoryStatsTool::new(hub.clone())));
-    reg.register(Arc::new(MemorySuggestTool::new(hub)));
+    reg.register(Arc::new(MemorySuggestTool::new(hub.clone())));
+    // v0.10: warp-oz cloud-run lifecycle tools
+    reg.register(Arc::new(OzRunGetTool::new(hub.clone())));
+    reg.register(Arc::new(OzRunListTool::new(hub.clone())));
+    reg.register(Arc::new(OzRunCancelTool::new(hub)));
     reg
 }
 
