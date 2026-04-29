@@ -1703,6 +1703,8 @@ mod tests {
             updated_at: 0,
             last_accessed_at: 0,
             access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
         };
         store.memory_save(&rec).await.expect("memory_save");
 
