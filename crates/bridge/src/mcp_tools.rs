@@ -2504,6 +2504,269 @@ impl McpTool for SessionCurateTool {
 }
 
 // ===========================================================================
+//                          memory_consolidate
+// ===========================================================================
+
+pub struct MemoryConsolidateTool {
+    hub: Hub,
+}
+impl MemoryConsolidateTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+/// Jaccard similarity over word-bags (lowercase, ≥3 chars).
+fn jaccard_words(a: &str, b: &str) -> f64 {
+    let bag = |s: &str| -> std::collections::HashSet<String> {
+        s.split(|c: char| !c.is_alphanumeric())
+            .map(|w| w.to_lowercase())
+            .filter(|w| w.len() >= 3)
+            .collect()
+    };
+    let wa = bag(a);
+    let wb = bag(b);
+    if wa.is_empty() || wb.is_empty() {
+        return 0.0;
+    }
+    let inter = wa.intersection(&wb).count();
+    let union = wa.len() + wb.len() - inter;
+    if union == 0 {
+        0.0
+    } else {
+        inter as f64 / union as f64
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryConsolidateTool {
+    fn name(&self) -> &'static str {
+        "memory_consolidate"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Find and merge redundant or duplicate memories using Jaccard word-overlap \
+                 similarity. Groups memories by kind and compares within each group. \
+                 Pairs above the similarity threshold are merge candidates. \
+                 The higher-importance memory wins; the other is archived with a \
+                 'supersedes' edge linking winner → loser. \
+                 Default dry_run=true — always preview before committing."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "description": "Restrict to one memory kind (lesson, decision, context, etc.). Omit to scan all kinds."
+                    },
+                    "min_similarity": {
+                        "type": "number",
+                        "minimum": 0.1,
+                        "maximum": 0.95,
+                        "default": 0.45,
+                        "description": "Jaccard word-overlap threshold [0.1–0.95]. 0.45 = roughly 45% word overlap. Lower = more aggressive merging."
+                    },
+                    "max_pairs": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 10,
+                        "description": "Maximum number of pairs to consolidate per call."
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "true = preview candidates without writing. false = execute merges."
+                    }
+                },
+                "required": []
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store_opt = self.hub.store.clone();
+        let store = match store_opt {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("no memory store")),
+        };
+
+        let kind_filter = args
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let min_sim = args
+            .get("min_similarity")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.45)
+            .clamp(0.1, 0.95);
+        let max_pairs = args
+            .get("max_pairs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10)
+            .min(50) as usize;
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        // ── Load memories ─────────────────────────────────────────────────
+        let all = store
+            .list_memories(kind_filter.as_deref(), MemoryListSort::ByImportance, 300)
+            .await?;
+        // Only active memories
+        let memories: Vec<_> = all.into_iter().filter(|m| m.status == "active").collect();
+
+        // ── Find candidate pairs by Jaccard ───────────────────────────────
+        // Group by kind, then compare within each group.
+        let mut by_kind: std::collections::HashMap<String, Vec<&MemoryRecord>> =
+            std::collections::HashMap::new();
+        for m in &memories {
+            by_kind.entry(m.kind.clone()).or_default().push(m);
+        }
+
+        #[derive(Debug)]
+        struct Pair {
+            key_a: String,
+            key_b: String,
+            sim: f64,
+            winner: String, // key of the memory to keep
+        }
+
+        let mut pairs: Vec<Pair> = Vec::new();
+        let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+
+        for group in by_kind.values() {
+            let n = group.len();
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let ma = group[i];
+                    let mb = group[j];
+                    let sim = jaccard_words(&ma.content, &mb.content);
+                    if sim < min_sim {
+                        continue;
+                    }
+                    // Canonical pair order
+                    let (ka, kb) = if ma.key < mb.key {
+                        (ma.key.clone(), mb.key.clone())
+                    } else {
+                        (mb.key.clone(), ma.key.clone())
+                    };
+                    if !seen.insert((ka.clone(), kb.clone())) {
+                        continue;
+                    }
+                    // Winner = higher importance × (1 + access_count)
+                    let score_a = ma.importance * (1.0 + ma.access_count as f64);
+                    let score_b = mb.importance * (1.0 + mb.access_count as f64);
+                    let winner = if score_a >= score_b {
+                        ma.key.clone()
+                    } else {
+                        mb.key.clone()
+                    };
+                    pairs.push(Pair { key_a: ka, key_b: kb, sim, winner });
+                }
+            }
+        }
+
+        // Sort by similarity descending, keep top max_pairs
+        pairs.sort_by(|a, b| b.sim.partial_cmp(&a.sim).unwrap_or(std::cmp::Ordering::Equal));
+        pairs.truncate(max_pairs);
+
+        if dry_run || pairs.is_empty() {
+            let preview: Vec<Value> = pairs
+                .iter()
+                .map(|p| {
+                    let mem_a = memories.iter().find(|m| m.key == p.key_a);
+                    let mem_b = memories.iter().find(|m| m.key == p.key_b);
+                    json!({
+                        "key_a": p.key_a,
+                        "key_b": p.key_b,
+                        "similarity": (p.sim * 100.0).round() / 100.0,
+                        "winner": p.winner,
+                        "loser": if p.winner == p.key_a { &p.key_b } else { &p.key_a },
+                        "kind": mem_a.or(mem_b).map(|m| m.kind.as_str()).unwrap_or("?"),
+                        "content_a": mem_a.map(|m| &m.content[..m.content.len().min(120)]),
+                        "content_b": mem_b.map(|m| &m.content[..m.content.len().min(120)]),
+                    })
+                })
+                .collect();
+            return Ok(ToolResult::json_text(&json!({
+                "dry_run": true,
+                "pairs_found": preview.len(),
+                "min_similarity": min_sim,
+                "pairs": preview,
+                "hint": if preview.is_empty() {
+                    "No pairs above threshold. Try lowering min_similarity."
+                } else {
+                    "Review pairs above, then call with dry_run=false to execute."
+                }
+            })));
+        }
+
+        // ── Execute merges ────────────────────────────────────────────────
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let mut merged: Vec<Value> = Vec::new();
+        let mut errors: Vec<String> = Vec::new();
+
+        for p in &pairs {
+            let loser_key = if p.winner == p.key_a {
+                &p.key_b
+            } else {
+                &p.key_a
+            };
+
+            // Get current loser record
+            let loser_rec = match store.memory_get(loser_key).await {
+                Ok(Some(r)) => r,
+                Ok(None) => {
+                    errors.push(format!("{loser_key}: not found"));
+                    continue;
+                }
+                Err(e) => {
+                    errors.push(format!("{loser_key}: {e}"));
+                    continue;
+                }
+            };
+
+            // Archive the loser
+            let mut archived = loser_rec.clone();
+            archived.status = "archived".to_string();
+            archived.updated_at = now;
+
+            if let Err(e) = store.memory_save(&archived).await {
+                errors.push(format!("archive {loser_key}: {e}"));
+                continue;
+            }
+
+            // Create supersedes edge: winner → loser
+            if let Err(e) = store
+                .memory_link(&p.winner, loser_key, "supersedes", 1.0)
+                .await
+            {
+                errors.push(format!("link {}->{loser_key}: {e}", p.winner));
+            }
+
+            merged.push(json!({
+                "winner": p.winner,
+                "archived": loser_key,
+                "similarity": (p.sim * 100.0).round() / 100.0,
+            }));
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "dry_run": false,
+            "consolidated": merged.len(),
+            "errors": errors,
+            "pairs": merged,
+        })))
+    }
+}
+
+// ===========================================================================
 //                              hook_status
 // ===========================================================================
 
@@ -3180,6 +3443,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(MemoryCompactTool::new(hub.clone())));
     reg.register(Arc::new(MemoryExportTool::new(hub.clone())));
     reg.register(Arc::new(MemoryImportTool::new(hub.clone())));
+    reg.register(Arc::new(MemoryConsolidateTool::new(hub.clone())));
     // v0.6: graph edges
     reg.register(Arc::new(MemoryLinkTool::new(hub.clone())));
     reg.register(Arc::new(MemoryNeighborsTool::new(hub.clone())));
