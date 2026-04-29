@@ -12,6 +12,11 @@
 //!   through `Settings → MCP servers` and recommends letting agents
 //!   call `session_bootstrap` / `session_curate` / `session_finalize`
 //!   manually at session boundaries.
+//! - `Frontend::Auggie`: copies the binary and tries to register the
+//!   MCP server with `auggie mcp add` so the user does not have to
+//!   hand-edit `~/.augment/settings.json`. Like Warp, Auggie has no
+//!   `UserPromptSubmit / Stop / PreCompact` hooks, so we skip the
+//!   hook scripts and Claude settings rewrite.
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -30,6 +35,7 @@ const HOOK_SESSION_END: &str = include_str!("hooks/ab-session-end-hook.sh");
 pub enum Frontend {
     ClaudeCode,
     Warp,
+    Auggie,
 }
 
 pub fn run(frontend: Frontend) -> Result<()> {
@@ -56,6 +62,7 @@ pub fn run(frontend: Frontend) -> Result<()> {
     match frontend {
         Frontend::ClaudeCode => install_claude_code(&home, &bin_dir),
         Frontend::Warp => install_warp(&bin_dst),
+        Frontend::Auggie => install_auggie(&bin_dst),
     }
 }
 
@@ -118,6 +125,80 @@ fn install_warp(bin_dst: &Path) -> Result<()> {
 
     Ok(())
 }
+
+/// Auggie profile: binary only, plus best-effort `auggie mcp add`
+/// registration.
+///
+/// Auggie has no `UserPromptSubmit / Stop / PreCompact` hook events,
+/// so we deliberately skip:
+///   - writing the three `ab-*-hook` shell scripts,
+///   - rewriting `~/.claude/settings.json` (Auggie users may not have it).
+///
+/// MCP registration uses the Auggie CLI's own `mcp add` subcommand
+/// (which writes `~/.augment/settings.json`). If `auggie` is not on
+/// `$PATH`, we fall back to printing the equivalent command for the
+/// user to run manually.
+fn install_auggie(bin_dst: &Path) -> Result<()> {
+    println!("  ·  hook scripts skipped (Auggie has no equivalent hook events)");
+    println!("  ·  ~/.claude/settings.json skipped (claude-code only)");
+
+    let registered = try_register_auggie_mcp(bin_dst);
+
+    println!();
+    println!("Setup complete (auggie profile).");
+    println!();
+    if registered {
+        println!("MCP server 'agent-bridge' registered with Auggie via `auggie mcp add`.");
+        println!("Restart any open Auggie sessions to pick it up.");
+    } else {
+        println!("Could not run `auggie mcp add` automatically. Register manually:");
+        println!(
+            "  auggie mcp add agent-bridge --command {} --args mcp",
+            bin_dst.display()
+        );
+        println!("(or edit ~/.augment/settings.json by hand).");
+    }
+    println!();
+    println!("For session lifecycle (Auggie has no PreCompact/Stop hooks),");
+    println!("have the agent call these MCP tools manually:");
+    println!("  • At session start  →  read agent-bridge://session/bootstrap");
+    println!("                        (or call the session_bootstrap tool)");
+    println!("  • Before summarising →  call session_curate(conversation_text=...)");
+    println!("  • At session end    →  call session_finalize()");
+    println!();
+    println!("Optional: start the long-lived daemon for Unix-socket access:");
+    println!("  agent-bridge daemon &");
+
+    Ok(())
+}
+
+/// Best-effort: invoke `auggie mcp add agent-bridge --command <bin>
+/// --args mcp`. Returns true on success, false on any failure
+/// (auggie not installed, non-zero exit, etc.) so the caller can
+/// print a manual fallback.
+fn try_register_auggie_mcp(bin_dst: &Path) -> bool {
+    let status = std::process::Command::new("auggie")
+        .arg("mcp")
+        .arg("add")
+        .arg("agent-bridge")
+        .arg("--command")
+        .arg(bin_dst)
+        .arg("--args")
+        .arg("mcp")
+        .status();
+    match status {
+        Ok(s) if s.success() => true,
+        Ok(s) => {
+            println!("  ·  `auggie mcp add` exited with {s}; falling back to manual instructions");
+            false
+        }
+        Err(e) => {
+            println!("  ·  could not invoke `auggie` ({e}); falling back to manual instructions");
+            false
+        }
+    }
+}
+
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 

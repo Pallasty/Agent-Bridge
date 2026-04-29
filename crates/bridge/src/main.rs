@@ -1,4 +1,4 @@
-use ab_agent::{AgentRuntime, ClaudeCodeRuntime, GitWorktreeManager, OzAgentRuntime};
+use ab_agent::{AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, GitWorktreeManager, OzAgentRuntime};
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
@@ -49,25 +49,52 @@ pub enum SetupFrontend {
     ClaudeCode,
     /// Install for Warp (binary only; no hook scripts).
     Warp,
+    /// Install for Augment Code (auggie) — registers MCP via
+    /// `auggie mcp add`; no hook scripts.
+    Auggie,
     /// Auto-detect from the running shell's environment.
     Auto,
 }
 
 impl SetupFrontend {
     /// Resolve `Auto` to a concrete frontend by inspecting the env.
+    ///
+    /// Detection order: Warp → Auggie (`~/.augment` exists or `auggie`
+    /// on PATH) → Claude Code (default fallback).
     fn resolve(self) -> setup::Frontend {
         match self {
             Self::ClaudeCode => setup::Frontend::ClaudeCode,
             Self::Warp => setup::Frontend::Warp,
+            Self::Auggie => setup::Frontend::Auggie,
             Self::Auto => {
                 if WarpBackend::detect() {
                     setup::Frontend::Warp
+                } else if detect_auggie() {
+                    setup::Frontend::Auggie
                 } else {
                     setup::Frontend::ClaudeCode
                 }
             }
         }
     }
+}
+
+/// Heuristic: an `~/.augment` directory or an `auggie` binary on
+/// `$PATH` is sufficient evidence the user is on Auggie.
+fn detect_auggie() -> bool {
+    if let Some(home) = std::env::var_os("HOME") {
+        if std::path::Path::new(&home).join(".augment").exists() {
+            return true;
+        }
+    }
+    which_in_path("auggie")
+}
+
+fn which_in_path(bin: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|p| p.join(bin).is_file())
 }
 
 #[tokio::main]
@@ -114,10 +141,11 @@ async fn main() -> Result<()> {
 ///
 /// Relevant env vars:
 /// - `AGENT_BRIDGE_REPO`           — git repo for the worktree manager (default: `$PWD`)
-/// - `AGENT_BRIDGE_AGENT_RUNTIME`  — `claude-code` (default) | `warp-oz`
+/// - `AGENT_BRIDGE_AGENT_RUNTIME`  — `claude-code` (default) | `warp-oz` | `auggie`
 /// - `AGENT_BRIDGE_CLAUDE_BIN`     — path to the `claude` CLI (default: `claude`)
 /// - `AGENT_BRIDGE_OZ_BIN`         — path to the `oz` CLI (default: `oz`)
 /// - `AGENT_BRIDGE_OZ_ENVIRONMENT_ID` — default cloud env id for `warp-oz`
+/// - `AGENT_BRIDGE_AUGGIE_BIN`     — path to the `auggie` CLI (default: `auggie`)
 /// - `AGENT_BRIDGE_HEADLESS=1`     — headless Chromium
 async fn build_hub() -> Result<Hub> {
     #[cfg(target_os = "linux")]
@@ -152,6 +180,12 @@ async fn build_hub() -> Result<Hub> {
             let bin = std::env::var("AGENT_BRIDGE_OZ_BIN").unwrap_or_else(|_| "oz".into());
             tracing::info!(runtime = "warp-oz", binary = %bin, "agent runtime selected");
             Arc::new(OzAgentRuntime::with_binary(bin).with_store(store.clone()))
+        }
+        Some("auggie") | Some("augment") => {
+            let bin =
+                std::env::var("AGENT_BRIDGE_AUGGIE_BIN").unwrap_or_else(|_| "auggie".into());
+            tracing::info!(runtime = "auggie", binary = %bin, "agent runtime selected");
+            Arc::new(AuggieRuntime::with_binary(bin).with_store(store.clone()))
         }
         _ => {
             let bin =

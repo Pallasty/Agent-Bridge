@@ -6,6 +6,8 @@
 //! - [`OzAgentRuntime`]: spawns Warp Oz cloud agents via the `oz` CLI;
 //!   the local subprocess is short-lived (it just POSTs to the Warp
 //!   API and exits), but the cloud run continues asynchronously.
+//! - [`AuggieRuntime`]: spawns Augment Code's `auggie --print` CLI in
+//!   a working directory; same one-shot model as `ClaudeCodeRuntime`.
 //! - [`GitWorktreeManager`]: thin wrapper around `git worktree {add,list,remove}`.
 
 use ab_core::{Result, SessionId};
@@ -13,10 +15,12 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod auggie;
 pub mod claude_code;
 pub mod oz;
 pub mod worktree;
 
+pub use auggie::AuggieRuntime;
 pub use claude_code::ClaudeCodeRuntime;
 pub use oz::OzAgentRuntime;
 pub use worktree::{GitWorktreeManager, Worktree};
