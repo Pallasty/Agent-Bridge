@@ -176,6 +176,57 @@ enum MemoryCmd {
         #[arg(long)]
         dry_run: bool,
     },
+
+    /// Automatically curate memories from session_handoff records (or any
+    /// source kind). Aggregates the N most important source memories, runs
+    /// the two-pass curate pipeline (marker + implicit lexical scoring), and
+    /// persists extracted lessons / decisions / facts. Duplicate keys are
+    /// always skipped, so this is safe to call repeatedly from cron or an
+    /// Oz cloud schedule.
+    ///
+    /// Multi-device pipeline:
+    ///   1. Import merged JSONL into a temp DB:
+    ///        agent-bridge memory --db /tmp/curate.db \
+    ///          import /path/to/memories.jsonl
+    ///   2. Run auto-curation on the temp DB:
+    ///        agent-bridge memory --db /tmp/curate.db auto-curate
+    ///   3. Export curated results back to JSONL:
+    ///        agent-bridge memory --db /tmp/curate.db \
+    ///          export --path /path/to/curated.jsonl
+    AutoCurate {
+        /// Memory kind used as source material (default: session_handoff).
+        #[arg(long, default_value = "session_handoff")]
+        source_kind: String,
+
+        /// Number of source memories to aggregate, sorted by importance (1–20).
+        #[arg(long, default_value_t = 5)]
+        max_sources: u32,
+
+        /// Max structured memories to extract from the aggregated text (1–50).
+        #[arg(long, default_value_t = 12)]
+        max_items: usize,
+
+        /// Comma-separated kinds to suppress from extracted output.
+        /// Default: session_handoff (avoids re-generating handoff records).
+        #[arg(long, value_delimiter = ',', default_value = "session_handoff")]
+        exclude_kinds: Vec<String>,
+
+        /// Preview extracted candidates without writing to the store.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Override Pass-2 minimum signal score (0.15–0.95).
+        #[arg(long)]
+        score_threshold: Option<f64>,
+
+        /// Override Pass-2 Jaccard dedup threshold (0.1–0.95).
+        #[arg(long)]
+        dedup_jaccard: Option<f64>,
+
+        /// Print machine-readable JSON summary.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1256,6 +1307,136 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
             println!("{label} {} memories{suffix}", keys.len());
             for k in keys {
                 println!("  - {k}");
+            }
+        }
+
+        MemoryCmd::AutoCurate {
+            source_kind,
+            max_sources,
+            max_items,
+            exclude_kinds,
+            dry_run,
+            score_threshold,
+            dedup_jaccard,
+            json: as_json,
+        } => {
+            // ── 1. Gather source memories ────────────────────────────────
+            let sources = store
+                .list_memories(Some(&source_kind), MemoryListSort::ByImportance, max_sources)
+                .await?;
+
+            if sources.is_empty() {
+                if as_json {
+                    println!("{}", serde_json::to_string_pretty(&json!({
+                        "status": "no_sources",
+                        "source_kind": source_kind,
+                        "sources_found": 0,
+                        "saved_count": 0,
+                    }))?);
+                } else {
+                    println!("(no memories of kind '{}' — nothing to curate)", source_kind);
+                }
+                return Ok(());
+            }
+
+            // ── 2. Aggregate into sections ────────────────────────────────
+            let mut aggregated = String::new();
+            let source_keys: Vec<String> = sources.iter().map(|m| m.key.clone()).collect();
+            for (i, m) in sources.iter().enumerate() {
+                aggregated.push_str(&format!(
+                    "\n=== Source {} ({}) ===\n{}",
+                    i + 1, m.key, m.content
+                ));
+            }
+
+            // ── 3. Run two-pass curate pipeline ──────────────────────────
+            let opts = ab_bridge::curate::CurateOptions::from_env_or_defaults()
+                .with_overrides(
+                    score_threshold.map(|x| x as f32),
+                    dedup_jaccard,
+                );
+            let mut candidates = ab_bridge::curate::curate_conversation_with_options(
+                &aggregated,
+                None, // global distillation — no session_id namespace
+                max_items.min(50),
+                opts.clone(),
+            );
+            // Filter excluded kinds (default: session_handoff)
+            candidates.retain(|c| !exclude_kinds.iter().any(|k| k == &c.kind));
+
+            // ── 4. Dry-run: print preview and exit ────────────────────────
+            if dry_run {
+                if as_json {
+                    println!("{}", serde_json::to_string_pretty(&json!({
+                        "dry_run": true,
+                        "source_kind": source_kind,
+                        "sources_used": source_keys,
+                        "aggregated_chars": aggregated.len(),
+                        "options": {
+                            "implicit_score_threshold": opts.implicit_score_threshold,
+                            "implicit_dedup_jaccard":   opts.implicit_dedup_jaccard,
+                        },
+                        "candidates": candidates.iter().map(|m| json!({
+                            "key":     m.key,
+                            "kind":    m.kind,
+                            "content": m.content,
+                            "tags":    m.tags,
+                        })).collect::<Vec<_>>()
+                    }))?);
+                } else {
+                    println!(
+                        "dry-run — {} candidate(s) from {} source(s) ({} chars aggregated):",
+                        candidates.len(), source_keys.len(), aggregated.len()
+                    );
+                    for c in &candidates {
+                        println!("  [{}] {}  —  {}", c.kind, c.key, truncate(&c.content, 60));
+                    }
+                    if candidates.is_empty() {
+                        println!("  (no signal found in aggregated content)");
+                    }
+                }
+                return Ok(());
+            }
+
+            // ── 5. Persist (skip duplicates) ──────────────────────────────
+            let mut saved: Vec<String> = Vec::new();
+            let mut skipped = 0usize;
+            let mut errors: Vec<String> = Vec::new();
+
+            for mem in &candidates {
+                match store.memory_get(&mem.key).await {
+                    Ok(Some(_)) => skipped += 1,
+                    Ok(None) => match store.memory_save(mem).await {
+                        Ok(()) => saved.push(mem.key.clone()),
+                        Err(e) => errors.push(format!("{}: {e}", mem.key)),
+                    },
+                    Err(e) => errors.push(format!("{}: {e}", mem.key)),
+                }
+            }
+
+            if as_json {
+                println!("{}", serde_json::to_string_pretty(&json!({
+                    "status": "ok",
+                    "source_kind": source_kind,
+                    "sources_used": source_keys,
+                    "aggregated_chars": aggregated.len(),
+                    "candidates_found": candidates.len(),
+                    "saved_count": saved.len(),
+                    "new_keys": saved,
+                    "skipped_duplicates": skipped,
+                    "errors": errors,
+                }))?);
+            } else {
+                println!(
+                    "✓ auto-curate: {} saved, {} skipped (duplicates), {} error(s) — from {} source(s)",
+                    saved.len(), skipped, errors.len(), source_keys.len()
+                );
+                for k in &saved {
+                    println!("  + {k}");
+                }
+                for e in &errors {
+                    eprintln!("  ! {e}");
+                }
             }
         }
     }
