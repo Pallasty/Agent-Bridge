@@ -173,7 +173,7 @@ export AGENT_BRIDGE_MEMORY_REPO=~/my-memory-repo
 
 ---
 
-## MCP tools (29 total)
+## MCP tools (42 total)
 
 Claude Code sees these tools when agent-bridge is registered as an MCP server:
 
@@ -207,7 +207,20 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `memory_export` | Export to JSONL file |
 | | `memory_import` | Import from JSONL (skip / overwrite / newer-wins) |
 | | `memory_link` | Create a typed edge between two notes |
-| | `memory_neighbors` | Walk the memory graph from a key |
+| | `memory_neighbors` | Walk the memory graph from a key (BFS with energy decay) |
+| | `memory_consolidate` | Find and merge duplicate/redundant memories by Jaccard similarity |
+| | `memory_stats` | Aggregate statistics: counts by status/kind, edge count, top tags |
+| | `memory_suggest` | Suggest related memory keys via tag/prefix/content overlap |
+| | `memory_graph_export` | Export memory graph as Graphviz DOT or JSON (v0.11) |
+| | `memory_auto_curate` | Automated batch curation from `session_handoff` memories (v0.12) |
+| session | `session_bootstrap` | Build a compact memory bootstrap block for the current session |
+| | `session_curate` | Extract structured memories from conversation text (two-pass pipeline) |
+| | `session_finalize` | Session-end: importance decay + compact stale memories + optional export |
+| meta | `capabilities` | Report what agent-bridge can do in this environment |
+| | `hook_status` | Check installed hook scripts and their last run status |
+| warp-oz | `oz_run_get` | Fetch status of a Warp cloud agent run by `run_id` or `session_id` |
+| | `oz_run_list` | List recent Warp cloud agent runs (optional state filter) |
+| | `oz_run_cancel` | Cancel an in-progress Warp cloud agent run |
 
 ### Memory scopes
 
@@ -252,7 +265,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | `AgentRuntime` | `ClaudeCodeRuntime` (one-shot), `OzAgentRuntime` (Warp cloud) | codex, aider, gemini-cli |
 | `TerminalBackend` | `KittyBackend`, `ZellijBackend`, `WezTermBackend`, `WarpBackend` | ghostty, tmux |
 | `StateStore` | `SqliteStore` (rusqlite-bundled) | in-memory, postgres |
-| `McpTool` | 29 built-in tools | drop in any `Box<dyn McpTool>` |
+| `McpTool` | 42 built-in tools | drop in any `Box<dyn McpTool>` |
 
 ## Configuration (env vars)
 
@@ -318,6 +331,11 @@ All three tools require the `oz` CLI on `$PATH` and an active session
 (`oz login` or `WARP_API_KEY` set). `capabilities()` reports
 `oz_run_tools: true` when the runtime is `warp-oz`.
 
+**v0.12**: `memory_auto_curate` can be scheduled as a recurring Warp Oz
+cloud agent task (daily cron via `oz schedule`) to automatically distil
+accumulated `session_handoff` memories into structured lessons, decisions,
+and facts — no human prompt required.
+
 ### `WarpBackend` capabilities
 
 Warp does not expose a public CLI for terminal mux control, only the
@@ -340,7 +358,7 @@ feature set:
 | P1-B | OSC 9/99/777 parser + terminal backends | ✅ |
 | P1-C | GitWorktreeManager + ClaudeCodeRuntime | ✅ |
 | P1-D | ChromiumCdpBackend (CDP) | ✅ |
-| P1-E | MCP stdio server (29 tools) | ✅ |
+| P1-E | MCP stdio server (42 tools) | ✅ |
 | P1-F | Cross-session memory (FTS5 + graph edges + scopes) | ✅ |
 | P1-G | PreCompact curator hook + `agent-bridge setup` | ✅ |
 
