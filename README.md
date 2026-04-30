@@ -109,7 +109,7 @@ Warp profile (`--frontend warp`):
 | Script | Claude Code event | Purpose |
 |--------|------------------|---------|
 | `ab-memory-hook` | `UserPromptSubmit` | Inject scope-aware memory index at session start (once per session) |
-| `ab-precompact-hook` | `PreCompact` (manual + auto) | Spawn a curator sub-agent that reads the conversation and saves lessons/decisions to memory before context is lost |
+| `ab-precompact-hook` | `PreCompact` (manual + auto) | Reads the transcript, calls `session_curate` + `session_finalize` over MCP (no sub-agent) |
 | `ab-session-end-hook` | `Stop` | Compact memories older than 90 days; sync to git remote |
 
 ### Memory lifecycle
@@ -121,12 +121,30 @@ Session start  ──► ab-memory-hook injects relevant memories into context
   conversation  ──► Claude calls memory_save / memory_link at will
      │
      ▼
-/compact or     ──► ab-precompact-hook spawns curator sub-agent
-context full         └─► reads transcript → calls memory_save (3–8 items)
+/compact or     ──► ab-precompact-hook runs transcript → MCP
+context full         └─► session_curate + session_finalize (lessons/decisions)
      │
      ▼
 Session end     ──► ab-session-end-hook compacts stale + syncs to git
 ```
+
+### Tuning `session_curate` (Pass-2 implicit extraction)
+
+Pass-2 uses a score threshold and Jaccard deduplication. You can tune them in three ways (last wins per call: **MCP tool arguments** override **environment** for that request; the bridge still applies built-in clamps).
+
+| Mechanism | Variables / fields |
+|-----------|-------------------|
+| Environment (stdio MCP process or shell that launches `agent-bridge`) | `AGENT_BRIDGE_CURATE_SCORE_THRESHOLD` (float, clamped 0.15–0.95), `AGENT_BRIDGE_CURATE_DEDUP_JACCARD` (float, clamped 0.1–0.95) |
+| MCP `session_curate` arguments (optional) | `implicit_score_threshold`, `implicit_dedup_jaccard` — same semantics; override env for that call |
+| Preview | `dry_run: true` — response JSON includes `candidates` and **`options`** (resolved thresholds used) |
+
+After upgrading or changing Cursor/Warp MCP settings, smoke-test the stdio server:
+
+```bash
+./scripts/verify_session_curate.sh
+```
+
+Requires `agent-bridge` on `PATH` or `~/.local/bin/agent-bridge`.
 
 ### Cross-machine memory sync
 

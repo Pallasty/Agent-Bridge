@@ -7,7 +7,10 @@
 #   3. Extract last ~60 turns and pre-process the text so bullet items under
 #      "Lessons / Decisions / Summary" sections get `lesson:` / `decision:`
 #      prefix markers — making session_curate's rule engine effective.
-#   4. Call agent-bridge MCP: session_curate  (extract + persist memories)
+#   4. Call agent-bridge MCP: session_curate  (extract + persist memories).
+#      Pass-2 tuning: set AGENT_BRIDGE_CURATE_SCORE_THRESHOLD /
+#      AGENT_BRIDGE_CURATE_DEDUP_JACCARD in the environment of this hook
+#      (or add implicit_* args to the JSON below if you fork this script).
 #   5. Call agent-bridge MCP: session_finalize (importance decay + cleanup)
 #   6. Return systemMessage summary for the IDE.
 
