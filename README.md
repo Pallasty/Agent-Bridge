@@ -148,6 +148,15 @@ After upgrading or changing Cursor/Warp MCP settings, smoke-test the stdio serve
 
 Requires `agent-bridge` on `PATH` or `~/.local/bin/agent-bridge`.
 
+For profile tuning/regression on a real session transcript, run:
+
+```bash
+./scripts/compare_session_curate_profiles.sh --transcript /path/to/session.jsonl
+```
+
+This compares `baseline / balanced / strict / aggressive` profiles on the same
+input, printing candidate counts, kind distributions, and sample diffs vs baseline.
+
 ### Cross-machine memory sync
 
 Memory is stored in SQLite at `~/.local/share/agent-bridge/state.db`.
