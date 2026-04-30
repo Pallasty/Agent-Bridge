@@ -3875,6 +3875,233 @@ impl McpTool for MemoryGraphExportTool {
 }
 
 // ===========================================================================
+//                          memory_auto_curate (v0.12)
+// ===========================================================================
+
+/// Automated memory curation: gathers recent `session_handoff` (or any
+/// configurable kind) memories, aggregates their content, runs the
+/// curate_conversation two-pass pipeline over the combined text, and
+/// persists the resulting structured memories.
+///
+/// Designed to be called periodically (e.g. by an Oz cloud-agent schedule)
+/// to proactively accumulate lessons/decisions/facts from session summaries
+/// without requiring a human to explicitly invoke session_curate.
+pub struct MemoryAutoCurateTool {
+    hub: Hub,
+}
+impl MemoryAutoCurateTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryAutoCurateTool {
+    fn name(&self) -> &'static str {
+        "memory_auto_curate"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Automated memory curation: load recent memories of a given kind \
+                 (default: session_handoff), aggregate their content, run the \
+                 two-pass curate pipeline, and persist the extracted lessons / \
+                 decisions / facts. Safe to call repeatedly — duplicate keys are \
+                 skipped. Designed for scheduled or post-session automation; no \
+                 LLM call required."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "source_kind": {
+                        "type": "string",
+                        "description": "Memory kind to gather as source material. Default: 'session_handoff'.",
+                        "default": "session_handoff"
+                    },
+                    "max_sources": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20,
+                        "default": 5,
+                        "description": "How many source memories to aggregate (sorted by importance). Default: 5."
+                    },
+                    "max_items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 12,
+                        "description": "Max structured memories to extract from the aggregated text. Default: 12."
+                    },
+                    "exclude_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Candidate kinds to suppress from output (e.g. re-generated 'session_handoff'). Default: ['session_handoff']."
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Preview extracted candidates without writing to the store."
+                    },
+                    "implicit_score_threshold": {
+                        "type": "number",
+                        "description": "Override Pass-2 minimum signal score. Same semantics as session_curate."
+                    },
+                    "implicit_dedup_jaccard": {
+                        "type": "number",
+                        "description": "Override Pass-2 Jaccard dedup threshold. Same semantics as session_curate."
+                    }
+                },
+                "required": []
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match self.hub.store.clone() {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+
+        // ── Parameters ──────────────────────────────────────────────────
+        let source_kind = args
+            .get("source_kind")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("session_handoff")
+            .to_string();
+
+        let max_sources = args
+            .get("max_sources")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5)
+            .min(20) as u32;
+
+        let max_items = args
+            .get("max_items")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(12)
+            .min(50) as usize;
+
+        let exclude_kinds: Vec<String> = args
+            .get("exclude_kinds")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec!["session_handoff".to_string()]);
+
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let score_ov = args
+            .get("implicit_score_threshold")
+            .and_then(|v| v.as_f64())
+            .map(|x| x as f32);
+        let dedup_ov = args
+            .get("implicit_dedup_jaccard")
+            .and_then(|v| v.as_f64());
+
+        // ── Gather source memories ───────────────────────────────────────
+        let sources = store
+            .list_memories(
+                Some(&source_kind),
+                MemoryListSort::ByImportance,
+                max_sources,
+            )
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("memory_auto_curate list: {e}")))?;
+
+        if sources.is_empty() {
+            return Ok(ToolResult::json_text(&json!({
+                "status": "no_sources",
+                "message": format!("No memories of kind '{}' found. Nothing to curate.", source_kind),
+                "source_kind": source_kind,
+                "sources_found": 0,
+                "saved_count": 0,
+            })));
+        }
+
+        // ── Aggregate content ────────────────────────────────────────────
+        let mut aggregated = String::new();
+        let source_keys: Vec<String> = sources.iter().map(|m| m.key.clone()).collect();
+        for (i, m) in sources.iter().enumerate() {
+            aggregated.push_str(&format!("\n=== Source {} ({}) ===\n{}", i + 1, m.key, m.content));
+        }
+
+        // ── Run curate pipeline ──────────────────────────────────────────
+        let curate_opts = crate::curate::CurateOptions::from_env_or_defaults()
+            .with_overrides(score_ov, dedup_ov);
+
+        let mut candidates = crate::curate::curate_conversation_with_options(
+            &aggregated,
+            None, // no session_id namespace; these are global distillations
+            max_items,
+            curate_opts.clone(),
+        );
+
+        // Filter out excluded kinds
+        candidates.retain(|c| !exclude_kinds.iter().any(|k| k == &c.kind));
+
+        // ── Dry run: return preview ─────────────────────────────────────
+        if dry_run {
+            return Ok(ToolResult::json_text(&json!({
+                "dry_run": true,
+                "source_kind": source_kind,
+                "sources_used": source_keys,
+                "aggregated_chars": aggregated.len(),
+                "options": {
+                    "implicit_score_threshold": curate_opts.implicit_score_threshold,
+                    "implicit_dedup_jaccard":   curate_opts.implicit_dedup_jaccard,
+                },
+                "candidates": candidates.iter().map(|m| json!({
+                    "key":     m.key,
+                    "kind":    m.kind,
+                    "content": m.content,
+                    "tags":    m.tags,
+                })).collect::<Vec<_>>()
+            })));
+        }
+
+        // ── Persist new memories (skip duplicates) ───────────────────────
+        let mut saved: Vec<Value> = Vec::new();
+        let mut skipped = 0usize;
+        let mut errors: Vec<String> = Vec::new();
+
+        for mem in &candidates {
+            match store.memory_get(&mem.key).await {
+                Ok(Some(_)) => skipped += 1,
+                Ok(None) => match store.memory_save(mem).await {
+                    Ok(()) => saved.push(json!({ "key": mem.key, "kind": mem.kind })),
+                    Err(e) => errors.push(format!("{}: {e}", mem.key)),
+                },
+                Err(e) => errors.push(format!("{}: {e}", mem.key)),
+            }
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "source_kind": source_kind,
+            "sources_used": source_keys,
+            "aggregated_chars": aggregated.len(),
+            "candidates_found": candidates.len(),
+            "saved_count": saved.len(),
+            "new_memories": saved,
+            "skipped_duplicates": skipped,
+            "errors": errors,
+            "follow_up": if saved.is_empty() {
+                "No new memories saved (all duplicates or no signal). Consider widening source scope or adjusting thresholds."
+            } else {
+                "New memories saved. Run memory_consolidate(dry_run:true) to check for near-duplicates."
+            }
+        })))
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -3930,7 +4157,9 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(OzRunListTool::new(hub.clone())));
     reg.register(Arc::new(OzRunCancelTool::new(hub.clone())));
     // v0.11: memory graph visualisation
-    reg.register(Arc::new(MemoryGraphExportTool::new(hub)));
+    reg.register(Arc::new(MemoryGraphExportTool::new(hub.clone())));
+    // v0.12: automated memory curation
+    reg.register(Arc::new(MemoryAutoCurateTool::new(hub)));
     reg
 }
 
