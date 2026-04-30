@@ -198,12 +198,15 @@ messages = [
     # 2. Initialized notification (required by MCP spec)
     {"jsonrpc": "2.0", "method": "notifications/initialized"},
     # 3. session_curate: extract + save memories from the conversation
+    #    Use a balanced Pass-2 profile validated on mixed CN/EN transcripts.
     {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
         "name": "session_curate",
         "arguments": {
             "conversation_text": text,
             "session_id": session_id,
-            "max_items": 10
+            "max_items": 10,
+            "implicit_score_threshold": 0.50,
+            "implicit_dedup_jaccard": 0.58
         }
     }},
     # 4. session_finalize: importance decay + stale memory cleanup

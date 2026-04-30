@@ -138,6 +138,8 @@ Pass-2 uses a score threshold and Jaccard deduplication. You can tune them in th
 | MCP `session_curate` arguments (optional) | `implicit_score_threshold`, `implicit_dedup_jaccard` — same semantics; override env for that call |
 | Preview | `dry_run: true` — response JSON includes `candidates` and **`options`** (resolved thresholds used) |
 
+Current `ab-precompact-hook` default profile (applied via MCP args): `implicit_score_threshold=0.50`, `implicit_dedup_jaccard=0.58`.
+
 After upgrading or changing Cursor/Warp MCP settings, smoke-test the stdio server:
 
 ```bash
