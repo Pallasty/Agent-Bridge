@@ -767,4 +767,63 @@ mod tests {
             "expected implicit tag"
         );
     }
+
+    // ── memory_auto_curate pipeline scenarios ─────────────────────────────
+
+    /// memory_auto_curate aggregates session_handoff memories into sections
+    /// like `=== Source N (key) ===\n<content>` then runs the curate pipeline.
+    /// Verify the pipeline can still extract markers from that aggregated format.
+    #[test]
+    fn auto_curate_aggregated_markers() {
+        let text = [
+            "=== Source 1 (session_handoff_2026_01) ===",
+            "lesson: always run cargo test before deploying a new binary",
+            "decision: adopt two-pass curate pipeline for automated curation",
+            "",
+            "=== Source 2 (session_handoff_2025_12) ===",
+            "lesson: session_handoff memories are the right source for auto-curation",
+        ]
+        .join("\n");
+        let recs = curate_conversation_with_options(&text, None, 10, CurateOptions::default());
+        assert!(!recs.is_empty(), "pipeline must extract from aggregated sections; got 0");
+        let has_lesson_or_decision = recs
+            .iter()
+            .any(|r| r.kind == "lesson" || r.kind == "decision");
+        assert!(has_lesson_or_decision, "expected lesson or decision kind; got {:?}",
+            recs.iter().map(|r| r.kind.as_str()).collect::<Vec<_>>());
+    }
+
+    /// `handoff:` prefix should produce a record with kind == "session_handoff".
+    #[test]
+    fn auto_curate_handoff_marker_extracted() {
+        let text = "handoff: migrated agent-bridge to async SQLite pool\n";
+        let recs = curate_conversation_with_options(text, None, 10, CurateOptions::default());
+        assert!(!recs.is_empty(), "handoff: marker must produce a record");
+        assert!(
+            recs.iter().any(|r| r.kind == "session_handoff"),
+            "expected session_handoff kind; got {:?}",
+            recs.iter().map(|r| r.kind.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    /// Simulates the exclude_kinds filter that memory_auto_curate applies:
+    /// extract from handoff-only text, then filter out session_handoff →
+    /// should leave an empty vec.
+    #[test]
+    fn auto_curate_exclude_by_kind() {
+        let text = [
+            "handoff: shipped v0.11 memory_graph_export with DOT and JSON output",
+            "handoff: shipped v0.12 memory_auto_curate for scheduled curation",
+        ]
+        .join("\n");
+        let mut recs = curate_conversation_with_options(&text, None, 10, CurateOptions::default());
+        // All records extracted from `handoff:` lines should be session_handoff.
+        assert!(
+            recs.iter().all(|r| r.kind == "session_handoff"),
+            "only handoff markers present; all records should be session_handoff"
+        );
+        // Simulating memory_auto_curate's exclude_kinds=["session_handoff"] filter:
+        recs.retain(|r| r.kind != "session_handoff");
+        assert!(recs.is_empty(), "after filtering session_handoff, vec must be empty");
+    }
 }
