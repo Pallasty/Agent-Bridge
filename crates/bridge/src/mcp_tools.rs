@@ -3675,6 +3675,206 @@ impl McpTool for OzRunCancelTool {
 }
 
 // ===========================================================================
+//                          memory_graph_export (v0.11)
+// ===========================================================================
+
+pub struct MemoryGraphExportTool {
+    hub: Hub,
+}
+impl MemoryGraphExportTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryGraphExportTool {
+    fn name(&self) -> &'static str {
+        "memory_graph_export"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Export the memory knowledge graph in Graphviz DOT or JSON format. \
+                 Nodes are active memory records (labelled by key and kind). \
+                 Edges carry type and weight. \
+                 Pass format='dot' (default) to get a DOT string you can pipe into \
+                 `dot -Tsvg` or paste into https://dreampuf.github.io/GraphvizOnline/. \
+                 Pass format='json' for {nodes:[…], edges:[…]} suitable for \
+                 D3 / Cytoscape / vis-network. \
+                 Optional `tags_any` and `kind` filters narrow which nodes are included \
+                 (unmatched nodes are omitted but their incident edges are also dropped)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "format": {
+                        "type": "string",
+                        "enum": ["dot", "json"],
+                        "default": "dot",
+                        "description": "Output format."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Only include memories of this kind."
+                    },
+                    "tags_any": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Include only memories that have at least one of these tags."
+                    },
+                    "max_nodes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 200,
+                        "description": "Cap on how many nodes to include (highest-importance first)."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+
+        let fmt = args.get("format").and_then(|v| v.as_str()).unwrap_or("dot");
+        let kind_filter = args.get("kind").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let tags_any: Vec<String> = args.get("tags_any")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+        let max_nodes = args.get("max_nodes").and_then(|v| v.as_u64()).unwrap_or(200).min(500) as u32;
+
+        // Fetch active nodes (highest-importance first).
+        let all_nodes = store
+            .list_memories(kind_filter.as_deref(), MemoryListSort::ByImportance, max_nodes)
+            .await?;
+        let nodes: Vec<_> = all_nodes
+            .into_iter()
+            .filter(|m| m.status == "active")
+            .filter(|m| tags_any.is_empty() || tags_any.iter().any(|t| m.tags.contains(t)))
+            .collect();
+
+        let node_keys: std::collections::HashSet<String> =
+            nodes.iter().map(|m| m.key.clone()).collect();
+
+        // Fetch all edges; keep only those where BOTH endpoints are in the node set.
+        let all_edges = {
+            // Pull edges for every included node (dedup via set).
+            let mut seen = std::collections::HashSet::new();
+            let mut edges = Vec::new();
+            for m in &nodes {
+                let nbrs = store.memory_neighbors(&m.key).await.unwrap_or_default();
+                for e in nbrs {
+                    let key = if e.from_key < e.to_key {
+                        (e.from_key.clone(), e.to_key.clone(), e.edge_type.clone())
+                    } else {
+                        (e.to_key.clone(), e.from_key.clone(), e.edge_type.clone())
+                    };
+                    if seen.insert(key)
+                        && node_keys.contains(&e.from_key)
+                        && node_keys.contains(&e.to_key)
+                    {
+                        edges.push(e);
+                    }
+                }
+            }
+            edges
+        };
+
+        match fmt {
+            "json" => {
+                let nodes_json: Vec<Value> = nodes.iter().map(|m| json!({
+                    "id":         m.key,
+                    "kind":       m.kind,
+                    "importance": (m.importance * 1000.0).round() / 1000.0,
+                    "tags":       m.tags,
+                    "label":      format!("[{}] {}", m.kind, m.key),
+                })).collect();
+                let edges_json: Vec<Value> = all_edges.iter().map(|e| json!({
+                    "source":    e.from_key,
+                    "target":    e.to_key,
+                    "type":      e.edge_type,
+                    "weight":    (e.weight * 1000.0).round() / 1000.0,
+                })).collect();
+                Ok(ToolResult::json_text(&json!({
+                    "format":    "json",
+                    "node_count": nodes_json.len(),
+                    "edge_count": edges_json.len(),
+                    "nodes":     nodes_json,
+                    "edges":     edges_json,
+                })))
+            }
+            _ => {
+                // DOT format
+                let mut dot = String::from("digraph memories {\n");
+                dot.push_str("  graph [rankdir=LR fontname=\"Helvetica\"];\n");
+                dot.push_str("  node  [shape=box style=rounded fontname=\"Helvetica\" fontsize=10];\n");
+                dot.push_str("  edge  [fontname=\"Helvetica\" fontsize=8];\n\n");
+
+                // Color scheme per kind
+                fn kind_color(kind: &str) -> &str {
+                    match kind {
+                        "decision"     => "#ffd700",
+                        "lesson"       => "#90ee90",
+                        "todo"         => "#ff9999",
+                        "session_handoff" => "#add8e6",
+                        "context"      => "#e0e0e0",
+                        "concept"      => "#d8b4fe",
+                        "reference"    => "#fed7aa",
+                        _              => "#f0f0f0",
+                    }
+                }
+
+                for m in &nodes {
+                    // Escape key for DOT id (replace hyphens/spaces with underscores)
+                    let id = m.key.replace(['-', ' ', '.', '/'], "_");
+                    let label = if m.key.len() > 30 {
+                        format!("{}\\n[{}]", &m.key[..28], m.kind)
+                    } else {
+                        format!("{} [{}]", m.key, m.kind)
+                    };
+                    let color = kind_color(&m.kind);
+                    let width = 1.0 + m.importance * 2.0; // border width encodes importance
+                    dot.push_str(&format!(
+                        "  {} [label=\"{}\" fillcolor=\"{}\" style=\"filled,rounded\" penwidth={:.1}];\n",
+                        id, label, color, width
+                    ));
+                }
+
+                dot.push_str("\n");
+
+                for e in &all_edges {
+                    let src = e.from_key.replace(['-', ' ', '.', '/'], "_");
+                    let dst = e.to_key.replace(['-', ' ', '.', '/'], "_");
+                    let style = match e.edge_type.as_str() {
+                        "supersedes" | "updates"   => "bold",
+                        "contradicts" | "invalidates" => "dashed",
+                        _ => "solid",
+                    };
+                    dot.push_str(&format!(
+                        "  {} -> {} [label=\"{}\" style={} weight={:.1}];\n",
+                        src, dst, e.edge_type, style, e.weight
+                    ));
+                }
+
+                dot.push_str("}\n");
+
+                Ok(ToolResult::json_text(&json!({
+                    "format":     "dot",
+                    "node_count": nodes.len(),
+                    "edge_count": all_edges.len(),
+                    "dot":        dot,
+                    "hint":       "Render with: echo '<dot>' | dot -Tsvg -o graph.svg"
+                })))
+            }
+        }
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -3728,7 +3928,9 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     // v0.10: warp-oz cloud-run lifecycle tools
     reg.register(Arc::new(OzRunGetTool::new(hub.clone())));
     reg.register(Arc::new(OzRunListTool::new(hub.clone())));
-    reg.register(Arc::new(OzRunCancelTool::new(hub)));
+    reg.register(Arc::new(OzRunCancelTool::new(hub.clone())));
+    // v0.11: memory graph visualisation
+    reg.register(Arc::new(MemoryGraphExportTool::new(hub)));
     reg
 }
 
