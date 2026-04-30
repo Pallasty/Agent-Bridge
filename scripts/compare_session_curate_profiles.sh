@@ -27,6 +27,7 @@ CONVERSATION_FILE=""
 MAX_ITEMS=20
 TURN_LIMIT=80
 CHAR_LIMIT=16000
+JSON_OUT=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -48,6 +49,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --char-limit)
             CHAR_LIMIT="${2:-16000}"
+            shift 2
+            ;;
+        --json-out)
+            JSON_OUT="${2:-}"
             shift 2
             ;;
         *)
@@ -197,14 +202,14 @@ with open(out_path, "w", encoding="utf-8") as f:
 PY
 fi
 
-python3 - "$TEXT_FILE" "$MAX_ITEMS" "$AB" <<'PY'
+python3 - "$TEXT_FILE" "$MAX_ITEMS" "$AB" "$JSON_OUT" <<'PY'
 import collections
 import json
 import subprocess
 import sys
 from typing import Any, Dict, List
 
-text_path, max_items_s, ab = sys.argv[1], sys.argv[2], sys.argv[3]
+text_path, max_items_s, ab, json_out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 max_items = int(max_items_s)
 text = open(text_path, "r", encoding="utf-8").read()
 
@@ -285,6 +290,7 @@ for name, payload in runs.items():
     )
 
 baseline_payload = runs.get("baseline", {})
+diffs: Dict[str, Dict[str, Any]] = {}
 if "error" not in baseline_payload:
     base_set = {
         (c.get("kind", "?"), c.get("content", ""))
@@ -297,6 +303,16 @@ if "error" not in baseline_payload:
         cur_set = {(c.get("kind", "?"), c.get("content", "")) for c in payload.get("candidates", [])}
         only_cur = list(cur_set - base_set)
         only_base = list(base_set - cur_set)
+        diffs[name] = {
+            f"only_{name}_count": len(only_cur),
+            "only_baseline_count": len(only_base),
+            f"only_{name}_samples": [
+                {"kind": k, "content": c} for (k, c) in only_cur[:10]
+            ],
+            "only_baseline_samples": [
+                {"kind": k, "content": c} for (k, c) in only_base[:10]
+            ],
+        }
         print(f"\n[{name} vs baseline]")
         print(f"  only_{name}={len(only_cur)} only_baseline={len(only_base)}")
         for label, rows in ((f"only_{name}", only_cur[:3]), ("only_baseline", only_base[:3])):
@@ -306,5 +322,30 @@ if "error" not in baseline_payload:
             for k, c in rows:
                 snippet = c.replace("\n", " ")[:140]
                 print(f"    - ({k}) {snippet}")
+
+if json_out:
+    summary: Dict[str, Any] = {
+        "input_chars": len(text),
+        "max_items": max_items,
+        "profiles": {},
+        "diffs_vs_baseline": diffs,
+    }
+    for name, payload in runs.items():
+        if "error" in payload:
+            summary["profiles"][name] = {"error": payload["error"]}
+            continue
+        cands = payload.get("candidates", [])
+        kinds = collections.Counter(c.get("kind", "?") for c in cands)
+        implicit = sum(1 for c in cands if "implicit" in c.get("tags", []))
+        summary["profiles"][name] = {
+            "total": len(cands),
+            "implicit": implicit,
+            "kinds": dict(kinds),
+            "options": payload.get("options", {}),
+            "candidates": cands,
+        }
+    with open(json_out, "w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+    print(f"\nJSON report written: {json_out}")
 PY
 

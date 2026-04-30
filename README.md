@@ -157,6 +157,14 @@ For profile tuning/regression on a real session transcript, run:
 This compares `baseline / balanced / strict / aggressive` profiles on the same
 input, printing candidate counts, kind distributions, and sample diffs vs baseline.
 
+Optional JSON report:
+
+```bash
+./scripts/compare_session_curate_profiles.sh \
+  --transcript /path/to/session.jsonl \
+  --json-out ./curate-profile-report.json
+```
+
 ### Cross-machine memory sync
 
 Memory is stored in SQLite at `~/.local/share/agent-bridge/state.db`.
