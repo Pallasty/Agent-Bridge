@@ -4401,20 +4401,20 @@ impl McpTool for OzRunCancelTool {
             name: self.name().into(),
             description: "Cancel an in-progress Warp cloud agent run. \
                  Accepts `run_id` or `session_id`. \
-                 This stops the cloud-side execution, not just the local CLI process."
+                 Calls POST https://app.warp.dev/api/v1/agent/runs/{id}/cancel via curl. \
+                 Requires WARP_API_KEY env var (generate at Warp Settings → Platform)."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "run_id":     { "type": "string" },
+                    "run_id":     { "type": "string", "description": "Warp cloud run UUID." },
                     "session_id": { "type": "string", "description": "Bridge session id (warp-oz only)." }
                 }
             }),
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let bin = oz_binary(&self.hub);
-
+        // ── Resolve run_id ────────────────────────────────────────────────
         let run_id = if let Some(rid) = args.get("run_id").and_then(|v| v.as_str()) {
             rid.to_string()
         } else if let Some(sid) = args.get("session_id").and_then(|v| v.as_str()) {
@@ -4435,24 +4435,65 @@ impl McpTool for OzRunCancelTool {
             ));
         };
 
-        let out = tokio::process::Command::new(&bin)
-            .args(["run", "cancel", &run_id])
+        // ── Get WARP_API_KEY ──────────────────────────────────────────────
+        // The oz CLI reads the same env var (WARP_API_KEY) for its --api-key flag.
+        // Generate one at: Warp Settings → Platform.
+        let api_key = match std::env::var("WARP_API_KEY") {
+            Ok(k) if !k.is_empty() => k,
+            _ => return Ok(ToolResult::error(
+                "WARP_API_KEY env var not set. \
+                 Generate an API key at Warp Settings → Platform \
+                 (warp://settings/platform), then export WARP_API_KEY=<key>."
+            )),
+        };
+
+        // ── POST .../cancel via curl ──────────────────────────────────────
+        // The oz CLI has no 'oz run cancel' subcommand; we call the REST API directly.
+        // Endpoint: POST https://app.warp.dev/api/v1/agent/runs/{runId}/cancel
+        let url = format!(
+            "https://app.warp.dev/api/v1/agent/runs/{}/cancel",
+            run_id
+        );
+        let out = tokio::process::Command::new("curl")
+            .args([
+                "-s",                           // silent
+                "-X", "POST",
+                "-H", &format!("Authorization: Bearer {api_key}"),
+                "-H", "Content-Type: application/json",
+                "-w", "\n__HTTP_STATUS__%{http_code}",
+                &url,
+            ])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .output()
             .await;
+
         match out {
-            Ok(o) if o.status.success() => Ok(ToolResult::json_text(&json!({
-                "cancelled": true,
-                "run_id": run_id,
-            }))),
-            Ok(o) => Ok(ToolResult::error(format!(
-                "oz run cancel failed (exit {:?}): {}",
-                o.status.code(),
-                String::from_utf8_lossy(&o.stderr)
-            ))),
-            Err(e) => Ok(ToolResult::error(format!("oz not found: {e}"))),
+            Err(e) => Ok(ToolResult::error(format!("curl not found: {e}"))),
+            Ok(o) => {
+                let raw = String::from_utf8_lossy(&o.stdout).into_owned();
+                // Split body and HTTP status (appended via -w)
+                let (body, status_code) = if let Some(idx) = raw.rfind("\n__HTTP_STATUS__") {
+                    let code: u16 = raw[idx + 16..].trim().parse().unwrap_or(0);
+                    (&raw[..idx], code)
+                } else {
+                    (raw.as_str(), 0u16)
+                };
+
+                if status_code == 200 || status_code == 204 {
+                    Ok(ToolResult::json_text(&json!({
+                        "cancelled": true,
+                        "run_id": run_id,
+                        "http_status": status_code,
+                    })))
+                } else {
+                    Ok(ToolResult::error(format!(
+                        "cancel failed (HTTP {status_code}): {}",
+                        body.trim()
+                    )))
+                }
+            }
         }
     }
 }
