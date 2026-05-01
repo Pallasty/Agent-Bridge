@@ -54,6 +54,12 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   validates lifecycle bootstrap, perception tools, structured handoff, plan
   save/load/update, Warp status, agent messaging, and per-response `backend_id`.
 
+### Changed
+
+- **`verify-warp-integration` CI** — `push` to `master` uses `paths-ignore` so
+  markdown-only / docs / snapshot commits skip the job; **`workflow_dispatch`**
+  remains unfiltered for full manual runs.
+
 ## [0.9.2] — 2026-04-28
 
 **Memory graph L0 layer + concept-node hook budget.**

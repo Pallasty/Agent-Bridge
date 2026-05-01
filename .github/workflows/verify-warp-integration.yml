@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - master
+    paths-ignore:
+      # Documentation-only or artefact-only changes do not affect binaries/tests.
+      - "**/*.md"
+      - "docs/**"
+      - "memory_snapshots/**"
+      - ".gitignore"
+      - "LICENSE"
   workflow_dispatch:
 
 jobs:
