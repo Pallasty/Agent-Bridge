@@ -111,6 +111,11 @@ msgs = [
         "name": "agent_inbox",
         "arguments": {"to_session": "verify-to", "limit": 20},
     }},
+    # terminal IPC checks (work whether or not Warp is currently running)
+    {"jsonrpc": "2.0", "id": 21, "method": "tools/call", "params": {
+        "name": "terminal_list",
+        "arguments": {},
+    }},
 ]
 
 out_dir = os.environ["TMPDIR_RUN"]
@@ -185,7 +190,7 @@ if not by_id:
         print(err[:4000], file=sys.stderr)
     sys.exit(1)
 
-for tid in (10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20):
+for tid in (10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21):
     d = by_id.get(tid)
     if not d:
         print(f"FAIL: missing response id={tid}", file=sys.stderr)
@@ -268,6 +273,25 @@ if not isinstance(rows, list) or len(rows) < 1:
     print(f"FAIL: agent_inbox: {ib!r}", file=sys.stderr)
     sys.exit(1)
 print(f"OK: agent_message + agent_inbox ({len(rows)} row(s))")
+
+# terminal_list — always runs; result depends on whether Warp IPC socket is live
+tl = parse_inner_json(by_id[21]["result"], "terminal_list")
+# capabilities already fetched above; re-parse for warp_ipc_socket_ready
+warp_ipc_ready = caps.get("terminal", {}).get("warp_ipc_socket_ready", False)
+if warp_ipc_ready:
+    sessions = tl.get("sessions")
+    if not isinstance(sessions, list):
+        print(f"FAIL: terminal_list with live IPC should return sessions list: {tl!r}", file=sys.stderr)
+        sys.exit(1)
+    print(f"OK: terminal_list via Warp IPC — {len(sessions)} session(s) active")
+else:
+    import os
+    sock_path = os.path.join(
+        os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+        "warp-agent-bridge.sock",
+    )
+    print(f"NOTE: Warp IPC socket not ready ({sock_path}); terminal_list returned: {tl!r}")
+    print("      Build Warp fork and launch it to verify full end-to-end path.")
 
 print("")
 print("verify_warp_integration.sh: all checks passed")
