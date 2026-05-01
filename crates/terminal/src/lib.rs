@@ -1,6 +1,6 @@
 //! Terminal multiplexer abstraction + OSC parsing.
 //!
-//! - [`TerminalBackend`] trait — generic mux operations.
+//! - [`TerminalBackend`] trait — generic mux operations plus sync [`TerminalCapabilities`].
 //! - [`WezTermBackend`] — wraps `wezterm cli`.
 //! - [`KittyBackend`]  — wraps `kitten @` (kitty remote control).
 //! - [`ZellijBackend`] — wraps `zellij action` (session-granularity only).
@@ -23,7 +23,10 @@ pub mod zellij;
 
 pub use kitty::KittyBackend;
 pub use osc::{OscEvent, OscParser};
-pub use warp::WarpBackend;
+pub use warp::{
+    dispatch_warp_scheme_uri, warp_scheme_launch_configuration, warp_scheme_new_tab,
+    warp_scheme_new_window, warp_scheme_open_settings_page, WarpBackend,
+};
 pub use wezterm::WezTermBackend;
 pub use zellij::ZellijBackend;
 
@@ -42,6 +45,18 @@ pub enum SplitDir {
     Vertical,
 }
 
+/// Static capability flags for a [`TerminalBackend`] (sync; used by MCP `capabilities` and clients).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TerminalCapabilities {
+    pub backend_id: String,
+    pub can_read_output: bool,
+    pub can_send_keys: bool,
+    pub can_split: bool,
+    /// Warp-only: whether the in-process bridge Unix socket path exists and is a socket.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warp_ipc_socket_ready: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TermEvent {
     PaneOpened(PaneId),
@@ -53,9 +68,18 @@ pub enum TermEvent {
 pub trait TerminalBackend: Send + Sync {
     fn id(&self) -> &str;
 
+    /// Sync introspection for tooling (filesystem probe only where needed, e.g. Warp IPC).
+    fn capabilities(&self) -> TerminalCapabilities;
+
     async fn list_panes(&self) -> Result<Vec<Pane>>;
 
     async fn send_keys(&self, pane: &PaneId, keys: &str) -> Result<()>;
+
+    /// Read recent output lines from a pane/session.
+    ///
+    /// Backends that cannot expose scrollback should return an
+    /// `Error::Backend` explaining the limitation.
+    async fn read_output(&self, pane: &PaneId, lines: usize) -> Result<Vec<String>>;
 
     async fn split(&self, pane: &PaneId, dir: SplitDir) -> Result<PaneId>;
 

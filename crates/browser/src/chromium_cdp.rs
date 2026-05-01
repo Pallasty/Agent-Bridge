@@ -238,6 +238,51 @@ impl BrowserBackend for ChromiumCdpBackend {
         Ok(Bytes::from(png))
     }
 
+    async fn extract_text(&self, page: &PageId) -> Result<String> {
+        let p = self.page_handle(page)?;
+        const JS: &str = r#"(() => {
+            try {
+                const r = document.documentElement;
+                return r && r.innerText != null ? String(r.innerText) : '';
+            } catch (_) {
+                return '';
+            }
+        })()"#;
+        let val = p
+            .evaluate(JS)
+            .await
+            .map_err(|e| Error::Backend(format!("extract_text evaluate: {e}")))?;
+        let v: serde_json::Value = val
+            .into_value()
+            .map_err(|e| Error::Backend(format!("extract_text into_value: {e}")))?;
+        Ok(json_eval_result_as_plain_text(&v))
+    }
+
+    async fn fill_form(&self, page: &PageId, selector: &str, value: &str) -> Result<()> {
+        let p = self.page_handle(page)?;
+        let sel_lit = serde_json::to_string(selector).map_err(|e| Error::Serde(e))?;
+        let val_lit = serde_json::to_string(value).map_err(|e| Error::Serde(e))?;
+        let js = format!(
+            "(() => {{ const sel = {sel_lit}; const val = {val_lit}; \
+             const el = document.querySelector(sel); \
+             if (!el) {{ throw new Error('fill_form: no element for selector'); }} \
+             el.focus(); \
+             if ('value' in el && el.value !== undefined) {{ el.value = val; }} \
+             else {{ el.textContent = val; }} \
+             el.dispatchEvent(new Event('input', {{ bubbles: true }})); \
+             el.dispatchEvent(new Event('change', {{ bubbles: true }})); \
+             return true; }})()"
+        );
+        let val = p
+            .evaluate(js.as_str())
+            .await
+            .map_err(|e| Error::Backend(format!("fill_form evaluate: {e}")))?;
+        let _: serde_json::Value = val
+            .into_value()
+            .map_err(|e| Error::Backend(format!("fill_form into_value: {e}")))?;
+        Ok(())
+    }
+
     async fn close(&self, page: &PageId) -> Result<()> {
         if let Some((_, p)) = self.pages.remove(page.as_str()) {
             // `Arc<Page>` may have outstanding references; if we're the last
@@ -247,6 +292,16 @@ impl BrowserBackend for ChromiumCdpBackend {
             }
         }
         Ok(())
+    }
+}
+
+fn json_eval_result_as_plain_text(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        _ => v.to_string(),
     }
 }
 

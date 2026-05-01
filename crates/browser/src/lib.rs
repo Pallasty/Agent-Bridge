@@ -38,5 +38,12 @@ pub trait BrowserBackend: Send + Sync {
 
     async fn screenshot(&self, page: &PageId) -> Result<Bytes>;
 
+    /// Visible text of the page (`document.documentElement.innerText`), best-effort.
+    async fn extract_text(&self, page: &PageId) -> Result<String>;
+
+    /// Set the value of the first element matching `selector` (input/textarea or
+    /// `textContent` fallback) and dispatch `input` + `change` events.
+    async fn fill_form(&self, page: &PageId, selector: &str, value: &str) -> Result<()>;
+
     async fn close(&self, page: &PageId) -> Result<()>;
 }

@@ -92,7 +92,7 @@ Layer 1 — OS / Kernel       Linux (PTY · D-Bus · CDP · filesystem)
 | ----------------------- | ------------- | --------------------------------------------------------------- |
 | MCP stdio               | Warp → bridge | JSON-RPC 2.0 (`tools/call`, `resources/read`)                   |
 | Session events          | Warp → bridge | `PluggableNotification` OSC 777 → `session_lifecycle_step`      |
-| URL dispatch            | bridge → Warp | `warp://action/*` URL scheme                                    |
+| URL dispatch            | bridge → Warp | `warp://action/`* URL scheme                                    |
 | Local IPC (Unix socket) | bridge ↔ Warp | JSON line protocol (`BridgeRequest` / `BridgeResponse`; see §9) |
 | Filesystem              | both          | `~/.local/share/agent-bridge/state.db` (SQLite)                 |
 
@@ -471,7 +471,7 @@ error patterns in the bootstrap block.
 
 ### Phase B gate (end of W5)
 
-- `warp_*` tools work from inside Warp terminal
+- `warp`_* tools work from inside Warp terminal
 - `plan_save/load/update` persists across sessions
 - `context_budget` returns estimates within 15% of actual token count
 

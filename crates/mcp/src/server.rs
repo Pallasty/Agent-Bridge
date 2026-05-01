@@ -10,7 +10,7 @@ use crate::protocol::{
     PARSE_ERROR, PROTOCOL_VERSION,
 };
 use crate::{ToolContext, ToolRegistry};
-use ab_store::{MemoryListSort, StateStore};
+use ab_store::{prioritize_session_handoff, MemoryListSort, StateStore};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -192,7 +192,7 @@ async fn handle(
                     {
                         "uri": "agent-bridge://session/bootstrap",
                         "name": "Session Bootstrap",
-                        "description": "Compact session bootstrap block: top scoped memories for the current working directory. Equivalent to calling session_bootstrap() tool. Pull this resource at session start when hooks are unavailable.",
+                        "description": "Compact session bootstrap block: top scoped memories for the current working directory (importance-ranked; session_handoff first). Equivalent to calling session_bootstrap() tool. Pull this resource at session start when hooks are unavailable.",
                         "mimeType": "text/plain"
                     }
                 ]
@@ -232,13 +232,14 @@ async fn handle_resource_read(id: Value, store: &dyn StateStore, uri: &str) -> M
                     .to_string(),
                 String::new(),
             ];
-            // Sort: lessons → decisions → todos → context
+            // Sort: session handoff → lessons → decisions → todos → other
             let mut sorted = rows;
             sorted.sort_by_key(|r| match r.kind.as_str() {
-                "lesson" => 0u8,
-                "decision" => 1,
-                "todo" => 2,
-                _ => 3,
+                "session_handoff" => 0u8,
+                "lesson" => 1,
+                "decision" => 2,
+                "todo" => 3,
+                _ => 4,
             });
             for r in &sorted {
                 let tags = if r.tags.is_empty() {
@@ -304,12 +305,14 @@ async fn handle_resource_read(id: Value, store: &dyn StateStore, uri: &str) -> M
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|_| "/".to_string());
             let rows = match store
-                .list_memories_in_scope(&cwd, None, MemoryListSort::Recent, 60)
+                .list_memories_in_scope(&cwd, None, MemoryListSort::ByImportance, 60)
                 .await
             {
                 Ok(r) => r,
                 Err(e) => return McpResponse::error(id, INTERNAL_ERROR, format!("store: {e}")),
             };
+            let rows: Vec<_> = rows.into_iter().filter(|r| r.status == "active").collect();
+            let rows = prioritize_session_handoff(rows);
             let mut lines = vec![
                 format!("=== Agent-Bridge Session Bootstrap (scope: {cwd}) ==="),
                 "Use memory_get <key> for full content, memory_search for lookup.".to_string(),
@@ -322,17 +325,26 @@ async fn handle_resource_read(id: Value, store: &dyn StateStore, uri: &str) -> M
                     format!(" [{}]", r.tags.join(", "))
                 };
                 let snippet: String = r.content.chars().take(120).collect();
-                let ellipsis = if r.content.chars().count() > 120 { "…" } else { "" };
-                lines.push(format!("[{}] {}{}: {}{}", r.kind, r.key, tags, snippet, ellipsis));
+                let ellipsis = if r.content.chars().count() > 120 {
+                    "…"
+                } else {
+                    ""
+                };
+                lines.push(format!(
+                    "[{}] {}{}: {}{}",
+                    r.kind, r.key, tags, snippet, ellipsis
+                ));
             }
             lines.push("=== End Bootstrap ===".to_string());
             lines.push(String::new());
             lines.push(
                 "=== Session Lifecycle Reminder ===\n\
                  Before this session ends, call:\n\
-                 1. session_curate(conversation_text=<summary>) — save lessons\n\
+                 1. session_curate(conversation_text=<summary>) — save lessons; \
+                    use handoff: lines for next-session continuity\n\
                  2. session_finalize() — compact + optional export\n\
-                 ==================================".to_string()
+                 =================================="
+                    .to_string(),
             );
             resource_text_response(id, uri, lines.join("\n"))
         }

@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::process::Command;
 
-use crate::{Pane, SplitDir, TermEvent, TerminalBackend};
+use crate::{Pane, SplitDir, TermEvent, TerminalBackend, TerminalCapabilities};
 
 #[derive(Clone)]
 pub struct ZellijBackend {
@@ -65,6 +65,16 @@ impl TerminalBackend for ZellijBackend {
         "zellij"
     }
 
+    fn capabilities(&self) -> TerminalCapabilities {
+        TerminalCapabilities {
+            backend_id: self.id().to_string(),
+            can_read_output: true,
+            can_send_keys: true,
+            can_split: true,
+            warp_ipc_socket_ready: None,
+        }
+    }
+
     async fn list_panes(&self) -> Result<Vec<Pane>> {
         // `--short` outputs one session name per line, no ANSI colors.
         let stdout = match run(&self.binary, &["list-sessions", "--short"]).await {
@@ -96,6 +106,20 @@ impl TerminalBackend for ZellijBackend {
         )
         .await
         .map(|_| ())
+    }
+
+    async fn read_output(&self, pane: &PaneId, lines: usize) -> Result<Vec<String>> {
+        // pane id == session name. zellij CLI currently dumps the focused
+        // pane for the target session.
+        let stdout = run(
+            &self.binary,
+            &["--session", pane.as_str(), "action", "dump-screen"],
+        )
+        .await?;
+        let all: Vec<String> = stdout.lines().map(ToString::to_string).collect();
+        let total = all.len();
+        let keep = lines.max(1).min(total);
+        Ok(all.into_iter().skip(total.saturating_sub(keep)).collect())
     }
 
     async fn split(&self, pane: &PaneId, dir: SplitDir) -> Result<PaneId> {

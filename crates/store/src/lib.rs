@@ -142,6 +142,55 @@ impl Default for MemoryListSort {
     }
 }
 
+/// One step in a persisted agent task plan (W5 — DESIGN-warp-first-agent-shell).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanStep {
+    pub id: String,
+    pub desc: String,
+    /// Typical values: `pending` | `in_progress` | `done` | `cancelled` (free-form allowed).
+    #[serde(default = "default_plan_status")]
+    pub status: String,
+    #[serde(default)]
+    pub deps: Vec<String>,
+}
+
+fn default_plan_status() -> String {
+    "pending".to_string()
+}
+
+/// Full plan row loaded from SQLite.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanRecord {
+    pub plan_id: String,
+    pub title: String,
+    pub steps: Vec<PlanStep>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// One persisted agent-to-agent message row (W6 — multi-session inbox).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentMessageRecord {
+    pub id: i64,
+    pub from_session: String,
+    pub to_session: String,
+    pub payload: serde_json::Value,
+    pub created_at: i64,
+    pub read: bool,
+}
+
+/// Reorder memories so `kind == "session_handoff"` rows appear first.
+///
+/// Session bootstrap and similar call sites use importance-based SQL ordering;
+/// this stable partition ensures cross-session handoff notes surface before
+/// lessons/decisions so a new agent sees continuity immediately.
+pub fn prioritize_session_handoff(rows: Vec<MemoryRecord>) -> Vec<MemoryRecord> {
+    let (mut head, tail): (Vec<_>, Vec<_>) =
+        rows.into_iter().partition(|r| r.kind == "session_handoff");
+    head.extend(tail);
+    head
+}
+
 /// Compaction policy for `memory_compact`. After v0.7.1, both thresholds
 /// must agree (AND) before a row is considered stale, AND the row must be
 /// older than the implementation-defined grace period (1 h on `created_at`).
@@ -415,4 +464,86 @@ pub trait StateStore: Send + Sync {
         state: &str,
         session_link: Option<&str>,
     ) -> Result<()>;
+
+    // ─── W5: structured plans (SQLite `plans` table) ─────────────────────
+
+    /// Insert or replace a plan (`plan_id` primary key). Updates `updated_at`;
+    /// preserves `created_at` on existing rows.
+    async fn plan_save(&self, plan_id: &str, title: &str, steps: &[PlanStep]) -> Result<()>;
+
+    /// Load a plan by id.
+    async fn plan_load(&self, plan_id: &str) -> Result<Option<PlanRecord>>;
+
+    /// Set `steps[id].status`. Returns `Ok(false)` if plan or step id is missing.
+    async fn plan_update_step(&self, plan_id: &str, step_id: &str, status: &str) -> Result<bool>;
+
+    // ─── W6: agent_messages (multi-session) ────────────────────────────────
+
+    /// Append a JSON payload addressed to `to_session`. Returns new row `id`.
+    async fn agent_message_send(
+        &self,
+        from_session: &str,
+        to_session: &str,
+        payload: &serde_json::Value,
+    ) -> Result<i64>;
+
+    /// Poller-friendly inbox: rows for `to_session`, optionally after `since_id`,
+    /// optionally unread-only, ordered by id ascending.
+    async fn agent_inbox_fetch(
+        &self,
+        to_session: &str,
+        since_id: Option<i64>,
+        unread_only: bool,
+        limit: u32,
+    ) -> Result<Vec<AgentMessageRecord>>;
+}
+
+#[cfg(test)]
+mod session_handoff_order_tests {
+    use super::*;
+
+    fn rec(key: &str, kind: &str) -> MemoryRecord {
+        MemoryRecord {
+            key: key.into(),
+            kind: kind.into(),
+            content: String::new(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+        }
+    }
+
+    #[test]
+    fn prioritize_session_handoff_floats_continuity_first() {
+        let rows = vec![
+            rec("l1", "lesson"),
+            rec("h1", "session_handoff"),
+            rec("d1", "decision"),
+        ];
+        let out = prioritize_session_handoff(rows);
+        assert_eq!(
+            out.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
+            vec!["h1", "l1", "d1"]
+        );
+    }
+
+    #[test]
+    fn prioritize_session_handoff_preserves_order_within_tiers() {
+        let rows = vec![
+            rec("h2", "session_handoff"),
+            rec("h1", "session_handoff"),
+            rec("a", "lesson"),
+        ];
+        let out = prioritize_session_handoff(rows);
+        assert_eq!(
+            out.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
+            vec!["h2", "h1", "a"]
+        );
+    }
 }

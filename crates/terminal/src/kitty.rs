@@ -21,7 +21,7 @@ use futures::stream::{self, BoxStream};
 use serde::Deserialize;
 use tokio::process::Command;
 
-use crate::{Pane, SplitDir, TermEvent, TerminalBackend};
+use crate::{Pane, SplitDir, TermEvent, TerminalBackend, TerminalCapabilities};
 
 #[derive(Clone)]
 pub struct KittyBackend {
@@ -120,6 +120,16 @@ impl TerminalBackend for KittyBackend {
         "kitty"
     }
 
+    fn capabilities(&self) -> TerminalCapabilities {
+        TerminalCapabilities {
+            backend_id: self.id().to_string(),
+            can_read_output: true,
+            can_send_keys: true,
+            can_split: true,
+            warp_ipc_socket_ready: None,
+        }
+    }
+
     async fn list_panes(&self) -> Result<Vec<Pane>> {
         let mut args = self.at_prefix();
         args.push("ls".into());
@@ -177,6 +187,18 @@ impl TerminalBackend for KittyBackend {
             )));
         }
         Ok(())
+    }
+
+    async fn read_output(&self, pane: &PaneId, lines: usize) -> Result<Vec<String>> {
+        let mut args = self.at_prefix();
+        args.push("get-text".into());
+        args.push("--match".into());
+        args.push(format!("id:{}", pane.as_str()));
+        let stdout = run(&self.binary, &args).await?;
+        let all: Vec<String> = stdout.lines().map(ToString::to_string).collect();
+        let total = all.len();
+        let keep = lines.max(1).min(total);
+        Ok(all.into_iter().skip(total.saturating_sub(keep)).collect())
     }
 
     async fn split(&self, pane: &PaneId, dir: SplitDir) -> Result<PaneId> {

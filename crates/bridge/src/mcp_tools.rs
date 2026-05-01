@@ -3,13 +3,24 @@
 
 use ab_agent::{oz::fetch_run_status, GitWorktreeManager, SpawnConfig};
 use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
-use ab_mcp::{McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
+use ab_mcp::{ContentBlock, McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
 use ab_store::{
-    CompactPolicy, ImportConflictPolicy, MemoryExportFilter, MemoryListSort, MemoryRecord,
-    SessionFilter, StateStore,
+    prioritize_session_handoff,
     // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
+    CompactPolicy,
+    ImportConflictPolicy,
+    MemoryExportFilter,
+    MemoryListSort,
+    MemoryRecord,
+    PlanRecord,
+    PlanStep,
+    SessionFilter,
+    StateStore,
 };
-use ab_terminal::{OscEvent, OscParser, SplitDir};
+use ab_terminal::{
+    dispatch_warp_scheme_uri, warp_scheme_launch_configuration, warp_scheme_new_tab,
+    warp_scheme_new_window, warp_scheme_open_settings_page, OscEvent, OscParser, SplitDir,
+};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::{json, Value};
@@ -18,7 +29,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::context_budget::{budget_recommendation, estimated_usage_tokens, model_context_limit};
 use crate::hub::Hub;
+use crate::project::{changes_digest, detect_project, resolve_cwd};
+use crate::session_handoff::build_handoff_brief;
+use crate::warp_actions::warp_status_snapshot;
 
 // ===========================================================================
 //                                   notify
@@ -349,6 +364,78 @@ impl McpTool for TerminalSplitTool {
     }
 }
 
+pub struct TerminalReadOutputTool {
+    hub: Hub,
+}
+impl TerminalReadOutputTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for TerminalReadOutputTool {
+    fn name(&self) -> &'static str {
+        "terminal_read_output"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read recent output from a terminal pane/session. Useful after \
+                 terminal_send_keys to inspect command results without switching UI focus."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pane": { "type": "string", "description": "Pane id from terminal_list." },
+                    "last_n_lines": { "type": "integer", "minimum": 1, "maximum": 2000, "default": 80 }
+                },
+                "required": ["pane"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let term = match &self.hub.terminal {
+            Some(t) => t.clone(),
+            None => return Ok(ToolResult::error("no terminal backend configured")),
+        };
+        let pane = match args.get("pane").and_then(|v| v.as_str()) {
+            Some(s) => PaneId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'pane'")),
+        };
+        let lines = args
+            .get("last_n_lines")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(80)
+            .clamp(1, 2000) as usize;
+        let caps = term.capabilities();
+        if !caps.can_read_output {
+            let payload = json!({
+                "error": "terminal_read_output_unsupported",
+                "backend": term.id(),
+                "capabilities": caps,
+                "message": "This terminal backend cannot read scrollback in the current environment.",
+                "alternatives": [
+                    "Use kitty, wezterm, or zellij for CLI scrollback via agent-bridge.",
+                    "For Warp: enable the in-process bridge IPC socket (see AGENT_BRIDGE_WARP_IPC_SOCKET)."
+                ]
+            });
+            return Ok(ToolResult::error(
+                serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()),
+            ));
+        }
+        match term.read_output(&pane, lines).await {
+            Ok(output_lines) => Ok(ToolResult::json_text(&json!({
+                "pane": pane.as_str(),
+                "backend": term.id(),
+                "requested_lines": lines,
+                "returned_lines": output_lines.len(),
+                "lines": output_lines
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
+        }
+    }
+}
+
 // ===========================================================================
 //                              browser tools
 // ===========================================================================
@@ -612,6 +699,257 @@ impl McpTool for BrowserScreenshotTool {
             "wrote {} bytes → {path}",
             png.len()
         )))
+    }
+}
+
+pub struct BrowserExtractTextTool {
+    hub: Hub,
+}
+impl BrowserExtractTextTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserExtractTextTool {
+    fn name(&self) -> &'static str {
+        "browser_extract_text"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Return visible page text (`innerText` of the document root). \
+                 Cheaper than screenshots for reading main content when layout does not matter."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "page": { "type": "string", "description": "Page id from browser_navigate." } },
+                "required": ["page"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        match b.extract_text(&page).await {
+            Ok(text) => Ok(ToolResult::json_text(&json!({
+                "page": page.as_str(),
+                "chars": text.len(),
+                "text": text
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
+pub struct BrowserFillFormTool {
+    hub: Hub,
+}
+impl BrowserFillFormTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserFillFormTool {
+    fn name(&self) -> &'static str {
+        "browser_fill_form"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Fill the first element matching a CSS selector (sets `.value` or \
+                 `textContent`) and dispatch `input`/`change` events."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":     { "type": "string" },
+                    "selector": { "type": "string", "description": "CSS selector." },
+                    "value":    { "type": "string", "description": "Text to apply." }
+                },
+                "required": ["page", "selector", "value"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let sel = args.get("selector").and_then(|v| v.as_str()).unwrap_or("");
+        if sel.is_empty() {
+            return Ok(ToolResult::error("missing 'selector'"));
+        }
+        let val = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
+        match b.fill_form(&page, sel, val).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({
+                "page": page.as_str(),
+                "selector": sel,
+                "status": "ok"
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
+pub struct AgentMessageTool {
+    hub: Hub,
+}
+impl AgentMessageTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentMessageTool {
+    fn name(&self) -> &'static str {
+        "agent_message"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Append a JSON payload to another session's inbox (SQLite \
+                 `agent_messages`). Use opaque session ids (e.g. client-supplied handles)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "from_session": { "type": "string", "description": "Sender session id." },
+                    "to_session":   { "type": "string", "description": "Recipient session id." },
+                    "payload":      { "type": "object", "description": "Arbitrary JSON object." }
+                },
+                "required": ["from_session", "to_session", "payload"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let from_session = match args
+            .get("from_session")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing or empty 'from_session'")),
+        };
+        let to_session = match args
+            .get("to_session")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing or empty 'to_session'")),
+        };
+        let payload = match args.get("payload").filter(|v| v.is_object()) {
+            Some(v) => v.clone(),
+            None => return Ok(ToolResult::error("missing 'payload' object")),
+        };
+        let id = store
+            .agent_message_send(&from_session, &to_session, &payload)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("agent_message_send: {e}")))?;
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "id": id,
+            "from_session": from_session,
+            "to_session": to_session
+        })))
+    }
+}
+
+pub struct AgentInboxTool {
+    hub: Hub,
+}
+impl AgentInboxTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentInboxTool {
+    fn name(&self) -> &'static str {
+        "agent_inbox"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Fetch inbox rows for `to_session`, optionally after `since_id` \
+                 (message id cursor), optionally unread-only. Ordered by id ascending; limit 1–500."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "to_session": {
+                        "type": "string",
+                        "description": "Recipient session id (same namespace as agent_message)."
+                    },
+                    "since_id": {
+                        "type": "integer",
+                        "description": "Only rows with id greater than this (exclusive cursor)."
+                    },
+                    "unread_only": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "If true, only rows with read=0 (column reserved for future use)."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Max rows (clamped 1–500)."
+                    }
+                },
+                "required": ["to_session"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let to_session = match args
+            .get("to_session")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing or empty 'to_session'")),
+        };
+        let since_id = args.get("since_id").and_then(|v| v.as_i64());
+        let unread_only = args
+            .get("unread_only")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .clamp(1, 500) as u32;
+        let rows = store
+            .agent_inbox_fetch(&to_session, since_id, unread_only, limit)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("agent_inbox_fetch: {e}")))?;
+        Ok(ToolResult::json_text(&json!({
+            "to_session": to_session,
+            "since_id": since_id,
+            "count": rows.len(),
+            "messages": rows
+        })))
     }
 }
 
@@ -1133,9 +1471,7 @@ impl McpTool for AgentSessionWaitTool {
             .as_ref()
             .map(|s| s.runtime_id == "warp-oz")
             .unwrap_or(false);
-        let cloud_run_id = local_row
-            .as_ref()
-            .and_then(|s| s.cloud_run_id.clone());
+        let cloud_run_id = local_row.as_ref().and_then(|s| s.cloud_run_id.clone());
 
         if is_warp_oz {
             if let Some(run_id) = cloud_run_id {
@@ -1224,14 +1560,8 @@ async fn build_proactive_hint(
     // Collect candidate tokens:
     //   tags that are clean identifiers (no hyphens/dots that confuse FTS5)
     //   + first content words that are purely alphabetic, len ≥ 3
-    let is_clean = |s: &str| {
-        s.len() >= 3 && s.chars().all(|c| c.is_ascii_alphanumeric())
-    };
-    let tag_terms: Vec<String> = tags
-        .iter()
-        .filter(|t| is_clean(t))
-        .cloned()
-        .collect();
+    let is_clean = |s: &str| s.len() >= 3 && s.chars().all(|c| c.is_ascii_alphanumeric());
+    let tag_terms: Vec<String> = tags.iter().filter(|t| is_clean(t)).cloned().collect();
     let content_terms: Vec<String> = content
         .split_whitespace()
         .map(|w| {
@@ -1248,7 +1578,7 @@ async fn build_proactive_hint(
         .filter(|w| seen.insert(w.to_lowercase()))
         .take(10)
         .collect();
-    let query = terms.join(" OR ");  // FTS5 OR: any term matches
+    let query = terms.join(" OR "); // FTS5 OR: any term matches
 
     if query.trim().is_empty() {
         return None;
@@ -1390,8 +1720,7 @@ impl McpTool for MemorySaveTool {
         };
         match store.memory_save(&mem).await {
             Ok(()) => {
-                let hint =
-                    build_proactive_hint(&store, &key, &mem.content, &mem.tags).await;
+                let hint = build_proactive_hint(&store, &key, &mem.content, &mem.tags).await;
                 let resp = json!({
                     "status": "saved",
                     "key": key,
@@ -1445,8 +1774,7 @@ impl McpTool for MemoryGetTool {
         match row {
             None => Ok(ToolResult::json_text(&Value::Null)),
             Some(rec) => {
-                let hint =
-                    build_proactive_hint(&store, &key, &rec.content, &rec.tags).await;
+                let hint = build_proactive_hint(&store, &key, &rec.content, &rec.tags).await;
                 let mut resp = serde_json::to_value(&rec).unwrap_or(Value::Null);
                 if let Some(obj) = resp.as_object_mut() {
                     obj.insert(
@@ -1532,10 +1860,7 @@ impl McpTool for MemorySearchTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(20)
             .min(200) as u32;
-        let mode = args
-            .get("mode")
-            .and_then(|v| v.as_str())
-            .unwrap_or("fts");
+        let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("fts");
 
         let hits = if mode == "hybrid" {
             let expand_top = args
@@ -1950,10 +2275,7 @@ impl McpTool for MemoryLinkTool {
             .unwrap_or("relates")
             .to_string();
         // 1.0 is the sentinel meaning "auto-assign from type"; any other value is explicit.
-        let weight = args
-            .get("weight")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(1.0);
+        let weight = args.get("weight").and_then(|v| v.as_f64()).unwrap_or(1.0);
         match store
             .memory_link(&from_key, &to_key, &edge_type, weight)
             .await
@@ -2105,7 +2427,8 @@ impl McpTool for SessionBootstrapTool {
         ToolSchema {
             name: self.name().into(),
             description: "Build a compact memory bootstrap block for the current session. \
-                 Returns top scoped memories (global + project). \
+                 Returns top scoped memories (global + project), with session_handoff \
+                 rows first for continuity. \
                  Pass frontend='cursor' or 'warp' for the compact \
                  token-efficient format, or frontend='claude-code' \
                  (default) for the full format."
@@ -2166,10 +2489,8 @@ impl McpTool for SessionBootstrapTool {
 
         // Filter to active memories only — archived and superseded are hidden
         // from bootstrap to keep context clean.
-        let rows: Vec<_> = rows
-            .into_iter()
-            .filter(|r| r.status == "active")
-            .collect();
+        let rows: Vec<_> = rows.into_iter().filter(|r| r.status == "active").collect();
+        let rows = prioritize_session_handoff(rows);
 
         if rows.is_empty() {
             let lifecycle_hint = session_lifecycle_hint();
@@ -2180,10 +2501,7 @@ impl McpTool for SessionBootstrapTool {
 
         let mut lines = if is_compact {
             // Compact format (Cursor / Warp): minimal headers, 80-char snippets
-            vec![
-                format!("=== Bootstrap (scope: {}) ===", cwd),
-                String::new(),
-            ]
+            vec![format!("=== Bootstrap (scope: {}) ===", cwd), String::new()]
         } else {
             vec![
                 format!("=== Agent-Bridge Session Bootstrap (scope: {cwd}) ==="),
@@ -2222,7 +2540,8 @@ impl McpTool for SessionBootstrapTool {
 fn session_lifecycle_hint() -> String {
     "=== Session Lifecycle Reminder ===\n\
      Before this session ends, call:\n\
-     1. session_curate(conversation_text=<recent context summary>) — extract and save lessons\n\
+     1. session_curate(conversation_text=<recent context summary>) — extract and save lessons; \
+        prefix lines with handoff: for next-session continuity\n\
      2. session_finalize() — compact stale memories + optional export\n\
      =================================="
         .to_string()
@@ -2323,11 +2642,9 @@ impl McpTool for SessionCurateTool {
             .get("implicit_score_threshold")
             .and_then(|v| v.as_f64())
             .map(|x| x as f32);
-        let dedup_ov = args
-            .get("implicit_dedup_jaccard")
-            .and_then(|v| v.as_f64());
-        let curate_opts = crate::curate::CurateOptions::from_env_or_defaults()
-            .with_overrides(score_ov, dedup_ov);
+        let dedup_ov = args.get("implicit_dedup_jaccard").and_then(|v| v.as_f64());
+        let curate_opts =
+            crate::curate::CurateOptions::from_env_or_defaults().with_overrides(score_ov, dedup_ov);
 
         let candidates = crate::curate::curate_conversation_with_options(
             &text,
@@ -2525,7 +2842,8 @@ impl McpTool for MemoryConsolidateTool {
         }
 
         let mut pairs: Vec<Pair> = Vec::new();
-        let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+        let mut seen: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
 
         for group in by_kind.values() {
             let n = group.len();
@@ -2554,13 +2872,22 @@ impl McpTool for MemoryConsolidateTool {
                     } else {
                         mb.key.clone()
                     };
-                    pairs.push(Pair { key_a: ka, key_b: kb, sim, winner });
+                    pairs.push(Pair {
+                        key_a: ka,
+                        key_b: kb,
+                        sim,
+                        winner,
+                    });
                 }
             }
         }
 
         // Sort by similarity descending, keep top max_pairs
-        pairs.sort_by(|a, b| b.sim.partial_cmp(&a.sim).unwrap_or(std::cmp::Ordering::Equal));
+        pairs.sort_by(|a, b| {
+            b.sim
+                .partial_cmp(&a.sim)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         pairs.truncate(max_pairs);
 
         if dry_run || pairs.is_empty() {
@@ -2820,7 +3147,8 @@ impl McpTool for HookStatusTool {
                         // Walk up to find crates/bridge/src/hooks
                         let mut d = dir.clone();
                         for _ in 0..6 {
-                            let candidate = d.join("crates").join("bridge").join("src").join("hooks");
+                            let candidate =
+                                d.join("crates").join("bridge").join("src").join("hooks");
                             if candidate.is_dir() {
                                 return Some(candidate);
                             }
@@ -2931,14 +3259,28 @@ impl McpTool for CapabilitiesTool {
         }
     }
     async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        // Terminal
-        let terminal_id = self
-            .hub
-            .terminal
-            .as_ref()
-            .map(|t| t.id().to_string())
-            .unwrap_or_else(|| "none".to_string());
-        let terminal_available = self.hub.terminal.is_some();
+        // Terminal — capability flags come from each backend (Warp IPC is probed sync).
+        let (
+            terminal_id,
+            terminal_available,
+            terminal_can_read_output,
+            terminal_can_send_keys,
+            terminal_can_split,
+            terminal_capabilities_json,
+        ) = match &self.hub.terminal {
+            Some(t) => {
+                let c = t.capabilities();
+                (
+                    c.backend_id.clone(),
+                    true,
+                    c.can_read_output,
+                    c.can_send_keys,
+                    c.can_split,
+                    serde_json::to_value(&c).unwrap_or_else(|_| Value::Null),
+                )
+            }
+            None => ("none".to_string(), false, false, false, false, Value::Null),
+        };
 
         // Browser: try a quick availability probe (just check if the field is set)
         let browser_id = self
@@ -2997,6 +3339,10 @@ impl McpTool for CapabilitiesTool {
             "terminal": {
                 "backend": terminal_id,
                 "available": terminal_available,
+                "can_read_output": terminal_can_read_output,
+                "can_send_keys": terminal_can_send_keys,
+                "can_split": terminal_can_split,
+                "capabilities": terminal_capabilities_json,
                 "env": std::env::var("AGENT_BRIDGE_TERMINAL").ok()
             },
             "browser": {
@@ -3042,8 +3388,7 @@ fn detect_frontend() -> &'static str {
         return "cursor";
     }
     // Claude Code sets CLAUDE_SESSION_ID or ANTHROPIC_CLAUDE_*
-    if std::env::var("CLAUDE_SESSION_ID").is_ok()
-        || std::env::var("CLAUDE_CODE_ENTRYPOINT").is_ok()
+    if std::env::var("CLAUDE_SESSION_ID").is_ok() || std::env::var("CLAUDE_CODE_ENTRYPOINT").is_ok()
     {
         return "claude-code";
     }
@@ -3114,9 +3459,10 @@ impl McpTool for MemoryStatsTool {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no memory store configured")),
         };
-        let stats = store.memory_stats().await.map_err(|e| {
-            ab_core::Error::Backend(format!("memory_stats: {e}"))
-        })?;
+        let stats = store
+            .memory_stats()
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("memory_stats: {e}")))?;
 
         let counts_by_kind_json: Vec<Value> = stats
             .counts_by_kind
@@ -3233,11 +3579,7 @@ impl McpTool for MemorySuggestTool {
                 let mut reasons: Vec<&str> = Vec::new();
 
                 // Tag overlap
-                let tag_overlap = source
-                    .tags
-                    .iter()
-                    .filter(|t| m.tags.contains(t))
-                    .count();
+                let tag_overlap = source.tags.iter().filter(|t| m.tags.contains(t)).count();
                 if tag_overlap > 0 {
                     score += 0.4 * tag_overlap as f64;
                     reasons.push("tag_overlap");
@@ -3294,9 +3636,7 @@ impl McpTool for MemorySuggestTool {
 }
 
 fn key_prefix(key: &str) -> &str {
-    key.split(&['_', '-', '/', '.'][..])
-        .next()
-        .unwrap_or("")
+    key.split(&['_', '-', '/', '.'][..]).next().unwrap_or("")
 }
 
 fn content_tokens(content: &str) -> std::collections::HashSet<String> {
@@ -3456,6 +3796,385 @@ impl McpTool for SessionFinalizeTool {
     }
 }
 
+fn tool_result_first_json(tr: &ToolResult) -> Option<Value> {
+    tr.content.iter().find_map(|b| {
+        if let ContentBlock::Text { text } = b {
+            serde_json::from_str::<Value>(text).ok()
+        } else {
+            None
+        }
+    })
+}
+
+// ===========================================================================
+//              project_detect + changes_digest (W2 perception)
+// ===========================================================================
+
+pub struct ProjectDetectTool {
+    #[allow(dead_code)]
+    hub: Hub,
+}
+
+impl ProjectDetectTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for ProjectDetectTool {
+    fn name(&self) -> &'static str {
+        "project_detect"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Scan a directory for common project manifests (Cargo.toml, package.json, \
+                 pyproject.toml, go.mod, Makefile), infer languages and suggested test/lint/format \
+                 commands, list Rust workspace members via cargo metadata, and snapshot git \
+                 branch/clean/recent commit. Optional cwd defaults to process working directory."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": { "type": "string", "description": "Directory to scan (default: process cwd)." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let cwd = match resolve_cwd(args.get("cwd").and_then(|v| v.as_str())) {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolResult::error(e.to_string())),
+        };
+        let res = tokio::task::spawn_blocking(move || detect_project(&cwd))
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("project_detect task: {e}")))?;
+        match res {
+            Ok(v) => Ok(ToolResult::json_text(&v)),
+            Err(e) => Ok(ToolResult::error(e.to_string())),
+        }
+    }
+}
+
+pub struct ChangesDigestTool {
+    #[allow(dead_code)]
+    hub: Hub,
+}
+
+impl ChangesDigestTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for ChangesDigestTool {
+    fn name(&self) -> &'static str {
+        "changes_digest"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Structured git diff summary: file counts, total insertions/deletions, \
+                 per-file numstat summary, and name-status rows. scope=working_tree (default), \
+                 staged, last_commit, or branch_vs_main (diff against merge-base with main/master)."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": { "type": "string", "description": "Git repo directory (default: process cwd)." },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["working_tree", "staged", "last_commit", "branch_vs_main"],
+                        "default": "working_tree",
+                        "description": "Which tree to summarize."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let cwd = match resolve_cwd(args.get("cwd").and_then(|v| v.as_str())) {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolResult::error(e.to_string())),
+        };
+        let scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .unwrap_or("working_tree")
+            .to_string();
+        let res = tokio::task::spawn_blocking(move || changes_digest(&cwd, &scope))
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("changes_digest task: {e}")))?;
+        match res {
+            Ok(v) => Ok(ToolResult::json_text(&v)),
+            Err(e) => Ok(ToolResult::error(e.to_string())),
+        }
+    }
+}
+
+// ===========================================================================
+//                    session_handoff (W3 structured brief)
+// ===========================================================================
+
+pub struct SessionHandoffBriefTool {
+    hub: Hub,
+}
+impl SessionHandoffBriefTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SessionHandoffBriefTool {
+    fn name(&self) -> &'static str {
+        "session_handoff"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Build a machine-readable session handoff brief for the next agent: \
+                 aggregates active todos, recent session_handoff memories, git branch / \
+                 last commit / working-tree files, plus optional narrative fields. \
+                 No new tables — combines memory store + git only (DESIGN D9)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": { "type": "string", "description": "Project directory (defaults to process cwd)." },
+                    "max_todos": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
+                    "max_handoff_memories": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
+                    "last_task": { "type": "string", "description": "Optional one-line summary of what was in progress." },
+                    "status": { "type": "string", "description": "Optional status string for the last task." },
+                    "open_questions": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional list of unresolved questions."
+                    },
+                    "conversation_text": {
+                        "type": "string",
+                        "description": "Optional recent transcript snippet (truncated in output) for extra context."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let cwd = args
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("/"));
+        let max_todos = args
+            .get("max_todos")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 100) as u32;
+        let max_handoff_memories = args
+            .get("max_handoff_memories")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10)
+            .clamp(1, 50) as u32;
+        let last_task = args
+            .get("last_task")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let status = args
+            .get("status")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let open_questions: Vec<String> = args
+            .get("open_questions")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let conversation_text = args
+            .get("conversation_text")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let brief = build_handoff_brief(
+            store,
+            cwd,
+            max_todos,
+            max_handoff_memories,
+            last_task,
+            status,
+            open_questions,
+            conversation_text,
+        )
+        .await?;
+        Ok(ToolResult::json_text(&brief))
+    }
+}
+
+// ===========================================================================
+//                    session_lifecycle_step (W3 dispatcher)
+// ===========================================================================
+
+pub struct SessionLifecycleStepTool {
+    hub: Hub,
+}
+impl SessionLifecycleStepTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SessionLifecycleStepTool {
+    fn name(&self) -> &'static str {
+        "session_lifecycle_step"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Dispatch a single session lifecycle phase: bootstrap (memory primer), \
+                 precompact (session_curate then session_finalize), or finalize alone. \
+                 Pass-through arguments are forwarded to the underlying tools."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "step": {
+                        "type": "string",
+                        "enum": ["bootstrap", "start", "precompact", "finalize", "end"],
+                        "description": "bootstrap|start → session_bootstrap; precompact → curate+finalize; finalize|end → session_finalize only."
+                    },
+                    "cwd": { "type": "string" },
+                    "limit": { "type": "integer" },
+                    "frontend": { "type": "string" },
+                    "conversation_text": { "type": "string" },
+                    "session_id": { "type": "string" },
+                    "max_items": { "type": "integer" },
+                    "dry_run": { "type": "boolean" },
+                    "implicit_score_threshold": { "type": "number" },
+                    "implicit_dedup_jaccard": { "type": "number" },
+                    "older_than_days": { "type": "integer" },
+                    "min_uses": { "type": "integer" },
+                    "decay_half_life_days": { "type": "number" },
+                    "decay_archive_threshold": { "type": "number" },
+                    "skip_decay": { "type": "boolean" },
+                    "export_path": { "type": "string" }
+                },
+                "required": ["step"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let step = args
+            .get("step")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_lowercase())
+            .unwrap_or_default();
+
+        match step.as_str() {
+            "bootstrap" | "start" => {
+                let mut sub = json!({});
+                for k in ["cwd", "limit", "frontend"] {
+                    if let Some(v) = args.get(k) {
+                        sub[k] = v.clone();
+                    }
+                }
+                SessionBootstrapTool::new(self.hub.clone())
+                    .execute(sub, ctx)
+                    .await
+            }
+            "finalize" | "end" => {
+                let mut sub = json!({});
+                for k in [
+                    "older_than_days",
+                    "min_uses",
+                    "dry_run",
+                    "decay_half_life_days",
+                    "decay_archive_threshold",
+                    "skip_decay",
+                    "export_path",
+                ] {
+                    if let Some(v) = args.get(k) {
+                        sub[k] = v.clone();
+                    }
+                }
+                SessionFinalizeTool::new(self.hub.clone())
+                    .execute(sub, ctx)
+                    .await
+            }
+            "precompact" => {
+                let conv = args
+                    .get("conversation_text")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let conv = match conv {
+                    Some(t) if !t.trim().is_empty() => t,
+                    _ => {
+                        return Ok(ToolResult::error(
+                            "precompact requires non-empty conversation_text",
+                        ));
+                    }
+                };
+                let mut curate_args = json!({ "conversation_text": conv });
+                for k in [
+                    "session_id",
+                    "max_items",
+                    "dry_run",
+                    "implicit_score_threshold",
+                    "implicit_dedup_jaccard",
+                ] {
+                    if let Some(v) = args.get(k) {
+                        curate_args[k] = v.clone();
+                    }
+                }
+                let curate = SessionCurateTool::new(self.hub.clone())
+                    .execute(curate_args, ctx)
+                    .await?;
+
+                let mut fin_args = json!({});
+                for k in [
+                    "older_than_days",
+                    "min_uses",
+                    "dry_run",
+                    "decay_half_life_days",
+                    "decay_archive_threshold",
+                    "skip_decay",
+                    "export_path",
+                ] {
+                    if let Some(v) = args.get(k) {
+                        fin_args[k] = v.clone();
+                    }
+                }
+                let finalize = SessionFinalizeTool::new(self.hub.clone())
+                    .execute(fin_args, ctx)
+                    .await?;
+
+                let merged = json!({
+                    "step": "precompact",
+                    "session_curate": tool_result_first_json(&curate),
+                    "session_finalize": tool_result_first_json(&finalize),
+                });
+                let mut out = ToolResult::json_text(&merged);
+                out.is_error = curate.is_error || finalize.is_error;
+                Ok(out)
+            }
+            other => Ok(ToolResult::error(format!(
+                "unknown lifecycle step: {other} (expected bootstrap|start|precompact|finalize|end)"
+            ))),
+        }
+    }
+}
+
 // ===========================================================================
 //                    oz_run_get / oz_run_list / oz_run_cancel
 // ===========================================================================
@@ -3514,7 +4233,9 @@ impl McpTool for OzRunGetTool {
                 None => return Ok(ToolResult::error("session has no cloud_run_id (not a warp-oz session, or run_id not yet persisted)")),
             }
         } else {
-            return Ok(ToolResult::error("one of 'run_id' or 'session_id' is required"));
+            return Ok(ToolResult::error(
+                "one of 'run_id' or 'session_id' is required",
+            ));
         };
 
         match fetch_run_status(&bin, &run_id).await {
@@ -3589,15 +4310,16 @@ impl McpTool for OzRunListTool {
         match out {
             Ok(o) if o.status.success() => {
                 let text = String::from_utf8_lossy(&o.stdout).into_owned();
-                let parsed: Value =
-                    serde_json::from_str(&text).unwrap_or(json!({ "raw": text }));
+                let parsed: Value = serde_json::from_str(&text).unwrap_or(json!({ "raw": text }));
                 Ok(ToolResult::json_text(&parsed))
             }
             Ok(o) => Ok(ToolResult::error(format!(
                 "oz run list failed (exit {:?})",
                 o.status.code()
             ))),
-            Err(e) => Ok(ToolResult::error(format!("oz not found or not executable: {e}"))),
+            Err(e) => Ok(ToolResult::error(format!(
+                "oz not found or not executable: {e}"
+            ))),
         }
     }
 }
@@ -3649,7 +4371,9 @@ impl McpTool for OzRunCancelTool {
                 None => return Ok(ToolResult::error("session has no cloud_run_id")),
             }
         } else {
-            return Ok(ToolResult::error("one of 'run_id' or 'session_id' is required"));
+            return Ok(ToolResult::error(
+                "one of 'run_id' or 'session_id' is required",
+            ));
         };
 
         let out = tokio::process::Command::new(&bin)
@@ -3740,16 +4464,32 @@ impl McpTool for MemoryGraphExportTool {
         };
 
         let fmt = args.get("format").and_then(|v| v.as_str()).unwrap_or("dot");
-        let kind_filter = args.get("kind").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let tags_any: Vec<String> = args.get("tags_any")
+        let kind_filter = args
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let tags_any: Vec<String> = args
+            .get("tags_any")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
-        let max_nodes = args.get("max_nodes").and_then(|v| v.as_u64()).unwrap_or(200).min(500) as u32;
+        let max_nodes = args
+            .get("max_nodes")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .min(500) as u32;
 
         // Fetch active nodes (highest-importance first).
         let all_nodes = store
-            .list_memories(kind_filter.as_deref(), MemoryListSort::ByImportance, max_nodes)
+            .list_memories(
+                kind_filter.as_deref(),
+                MemoryListSort::ByImportance,
+                max_nodes,
+            )
             .await?;
         let nodes: Vec<_> = all_nodes
             .into_iter()
@@ -3786,19 +4526,29 @@ impl McpTool for MemoryGraphExportTool {
 
         match fmt {
             "json" => {
-                let nodes_json: Vec<Value> = nodes.iter().map(|m| json!({
-                    "id":         m.key,
-                    "kind":       m.kind,
-                    "importance": (m.importance * 1000.0).round() / 1000.0,
-                    "tags":       m.tags,
-                    "label":      format!("[{}] {}", m.kind, m.key),
-                })).collect();
-                let edges_json: Vec<Value> = all_edges.iter().map(|e| json!({
-                    "source":    e.from_key,
-                    "target":    e.to_key,
-                    "type":      e.edge_type,
-                    "weight":    (e.weight * 1000.0).round() / 1000.0,
-                })).collect();
+                let nodes_json: Vec<Value> = nodes
+                    .iter()
+                    .map(|m| {
+                        json!({
+                            "id":         m.key,
+                            "kind":       m.kind,
+                            "importance": (m.importance * 1000.0).round() / 1000.0,
+                            "tags":       m.tags,
+                            "label":      format!("[{}] {}", m.kind, m.key),
+                        })
+                    })
+                    .collect();
+                let edges_json: Vec<Value> = all_edges
+                    .iter()
+                    .map(|e| {
+                        json!({
+                            "source":    e.from_key,
+                            "target":    e.to_key,
+                            "type":      e.edge_type,
+                            "weight":    (e.weight * 1000.0).round() / 1000.0,
+                        })
+                    })
+                    .collect();
                 Ok(ToolResult::json_text(&json!({
                     "format":    "json",
                     "node_count": nodes_json.len(),
@@ -3811,20 +4561,22 @@ impl McpTool for MemoryGraphExportTool {
                 // DOT format
                 let mut dot = String::from("digraph memories {\n");
                 dot.push_str("  graph [rankdir=LR fontname=\"Helvetica\"];\n");
-                dot.push_str("  node  [shape=box style=rounded fontname=\"Helvetica\" fontsize=10];\n");
+                dot.push_str(
+                    "  node  [shape=box style=rounded fontname=\"Helvetica\" fontsize=10];\n",
+                );
                 dot.push_str("  edge  [fontname=\"Helvetica\" fontsize=8];\n\n");
 
                 // Color scheme per kind
                 fn kind_color(kind: &str) -> &str {
                     match kind {
-                        "decision"     => "#ffd700",
-                        "lesson"       => "#90ee90",
-                        "todo"         => "#ff9999",
+                        "decision" => "#ffd700",
+                        "lesson" => "#90ee90",
+                        "todo" => "#ff9999",
                         "session_handoff" => "#add8e6",
-                        "context"      => "#e0e0e0",
-                        "concept"      => "#d8b4fe",
-                        "reference"    => "#fed7aa",
-                        _              => "#f0f0f0",
+                        "context" => "#e0e0e0",
+                        "concept" => "#d8b4fe",
+                        "reference" => "#fed7aa",
+                        _ => "#f0f0f0",
                     }
                 }
 
@@ -3850,7 +4602,7 @@ impl McpTool for MemoryGraphExportTool {
                     let src = e.from_key.replace(['-', ' ', '.', '/'], "_");
                     let dst = e.to_key.replace(['-', ' ', '.', '/'], "_");
                     let style = match e.edge_type.as_str() {
-                        "supersedes" | "updates"   => "bold",
+                        "supersedes" | "updates" => "bold",
                         "contradicts" | "invalidates" => "dashed",
                         _ => "solid",
                     };
@@ -4001,9 +4753,7 @@ impl McpTool for MemoryAutoCurateTool {
             .get("implicit_score_threshold")
             .and_then(|v| v.as_f64())
             .map(|x| x as f32);
-        let dedup_ov = args
-            .get("implicit_dedup_jaccard")
-            .and_then(|v| v.as_f64());
+        let dedup_ov = args.get("implicit_dedup_jaccard").and_then(|v| v.as_f64());
 
         // ── Gather source memories ───────────────────────────────────────
         let sources = store
@@ -4029,12 +4779,17 @@ impl McpTool for MemoryAutoCurateTool {
         let mut aggregated = String::new();
         let source_keys: Vec<String> = sources.iter().map(|m| m.key.clone()).collect();
         for (i, m) in sources.iter().enumerate() {
-            aggregated.push_str(&format!("\n=== Source {} ({}) ===\n{}", i + 1, m.key, m.content));
+            aggregated.push_str(&format!(
+                "\n=== Source {} ({}) ===\n{}",
+                i + 1,
+                m.key,
+                m.content
+            ));
         }
 
         // ── Run curate pipeline ──────────────────────────────────────────
-        let curate_opts = crate::curate::CurateOptions::from_env_or_defaults()
-            .with_overrides(score_ov, dedup_ov);
+        let curate_opts =
+            crate::curate::CurateOptions::from_env_or_defaults().with_overrides(score_ov, dedup_ov);
 
         let mut candidates = crate::curate::curate_conversation_with_options(
             &aggregated,
@@ -4102,6 +4857,548 @@ impl McpTool for MemoryAutoCurateTool {
 }
 
 // ===========================================================================
+//                         plan_save / plan_load / plan_update (W5)
+// ===========================================================================
+
+fn enrich_plan_json(rec: &PlanRecord) -> Value {
+    let total = rec.steps.len();
+    let done = rec.steps.iter().filter(|s| s.status == "done").count();
+    let progress = format!("{done}/{total} done");
+    let next = rec
+        .steps
+        .iter()
+        .find(|s| s.status != "done" && s.status != "cancelled")
+        .map(|s| s.id.clone());
+    json!({
+        "plan_id": rec.plan_id,
+        "title": rec.title,
+        "steps": rec.steps,
+        "created_at": rec.created_at,
+        "updated_at": rec.updated_at,
+        "progress": progress,
+        "done_count": done,
+        "total_steps": total,
+        "next_step_id": next,
+    })
+}
+
+pub struct PlanSaveTool {
+    hub: Hub,
+}
+impl PlanSaveTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for PlanSaveTool {
+    fn name(&self) -> &'static str {
+        "plan_save"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Persist a structured task plan to SQLite (survives sessions). \
+                 Each step has id, desc, optional status (default pending), optional deps (step ids)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "plan_id": { "type": "string", "description": "Stable plan identifier." },
+                    "title": { "type": "string", "description": "Human-readable plan title." },
+                    "steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string" },
+                                "desc": { "type": "string" },
+                                "status": { "type": "string", "description": "pending | in_progress | done | cancelled (free-form allowed)" },
+                                "deps": { "type": "array", "items": { "type": "string" } }
+                            },
+                            "required": ["id", "desc"]
+                        },
+                        "description": "Ordered steps."
+                    }
+                },
+                "required": ["plan_id", "title", "steps"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let plan_id = match args
+            .get("plan_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing or empty 'plan_id'")),
+        };
+        let title = match args
+            .get("title")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing or empty 'title'")),
+        };
+        let steps_val = match args.get("steps") {
+            Some(v) if v.is_array() => v.clone(),
+            _ => return Ok(ToolResult::error("missing 'steps' array")),
+        };
+        let steps: Vec<PlanStep> = serde_json::from_value(steps_val)
+            .map_err(|e| ab_core::Error::InvalidArgument(format!("invalid steps: {e}")))?;
+        if steps.is_empty() {
+            return Ok(ToolResult::error("'steps' must be non-empty"));
+        }
+        store
+            .plan_save(&plan_id, &title, &steps)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("plan_save: {e}")))?;
+        Ok(ToolResult::json_text(
+            &json!({ "status": "ok", "plan_id": plan_id, "title": title, "step_count": steps.len() }),
+        ))
+    }
+}
+
+pub struct PlanLoadTool {
+    hub: Hub,
+}
+impl PlanLoadTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for PlanLoadTool {
+    fn name(&self) -> &'static str {
+        "plan_load"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Load a persisted plan by plan_id. Includes progress string and next_step_id heuristic."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "plan_id": { "type": "string" }
+                },
+                "required": ["plan_id"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let plan_id = match args
+            .get("plan_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing or empty 'plan_id'")),
+        };
+        match store
+            .plan_load(plan_id)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("plan_load: {e}")))?
+        {
+            Some(rec) => Ok(ToolResult::json_text(&enrich_plan_json(&rec))),
+            None => Ok(ToolResult::error(format!("plan not found: '{plan_id}'"))),
+        }
+    }
+}
+
+pub struct PlanUpdateTool {
+    hub: Hub,
+}
+impl PlanUpdateTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for PlanUpdateTool {
+    fn name(&self) -> &'static str {
+        "plan_update"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Update one plan step's status by step id. Returns updated plan envelope or error if missing."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "plan_id": { "type": "string" },
+                    "step_id": { "type": "string" },
+                    "status": { "type": "string", "description": "e.g. done | in_progress | pending | cancelled" }
+                },
+                "required": ["plan_id", "step_id", "status"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let plan_id = match args
+            .get("plan_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing or empty 'plan_id'")),
+        };
+        let step_id = match args
+            .get("step_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing or empty 'step_id'")),
+        };
+        let status = match args
+            .get("status")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing or empty 'status'")),
+        };
+        let ok = store
+            .plan_update_step(plan_id, step_id, status)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("plan_update: {e}")))?;
+        if !ok {
+            return Ok(ToolResult::error(format!(
+                "plan '{plan_id}' or step '{step_id}' not found"
+            )));
+        }
+        let rec = store
+            .plan_load(plan_id)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("plan_load: {e}")))?
+            .expect("row exists after update");
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "plan": enrich_plan_json(&rec),
+        })))
+    }
+}
+
+// ===========================================================================
+//                            context_budget (W5)
+// ===========================================================================
+
+pub struct ContextBudgetTool;
+
+impl ContextBudgetTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for ContextBudgetTool {
+    fn name(&self) -> &'static str {
+        "context_budget"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Estimate token usage from optional conversation text + turn count using offline heuristics; \
+                 compare to an approximate model context limit and get a compaction recommendation. No API calls."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "model": {
+                        "type": "string",
+                        "description": "Model name hint for context window size (default: claude-sonnet-4).",
+                        "default": "claude-sonnet-4"
+                    },
+                    "conversation_turns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "When transcript is unavailable, each turn adds a coarse token guess.",
+                        "default": 0
+                    },
+                    "text_sample": {
+                        "type": "string",
+                        "description": "Optional excerpt / transcript sample to token-estimate (mixed EN/CJK heuristic)."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let model = args
+            .get("model")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("claude-sonnet-4");
+        let turns = args
+            .get("conversation_turns")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let text = args
+            .get("text_sample")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let limit = model_context_limit(model);
+        let estimated = estimated_usage_tokens(text, turns);
+        let pct_raw = if limit == 0 {
+            0.0
+        } else {
+            (estimated as f64 / limit as f64) * 100.0
+        };
+        let pct_used = (pct_raw * 10.0).round() / 10.0;
+        let recommendation = budget_recommendation(pct_raw);
+        Ok(ToolResult::json_text(&json!({
+            "model_hint": model,
+            "model_limit": limit,
+            "estimated_tokens_used": estimated,
+            "pct_used": pct_used,
+            "recommendation": recommendation,
+            "heuristic_note": "Offline estimate only; actual tokenizer usage varies.",
+        })))
+    }
+}
+
+// ===========================================================================
+//                  Warp URI tools (W4 — DESIGN-warp-first-agent-shell)
+// ===========================================================================
+
+fn warp_resolve_tab_window_path(raw: Option<&str>) -> Result<String> {
+    match raw.filter(|s| !s.is_empty()) {
+        Some(p) => Ok(resolve_cwd(Some(p))?.display().to_string()),
+        None => Ok(resolve_cwd(None)?.display().to_string()),
+    }
+}
+
+pub struct WarpOpenTabTool;
+
+impl WarpOpenTabTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for WarpOpenTabTool {
+    fn name(&self) -> &'static str {
+        "warp_open_tab"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Open a new Warp tab via URI scheme (warp://action/new_tab). \
+                 Optional `path` sets initial cwd (defaults to bridge process cwd). \
+                 Dispatches through AGENT_BRIDGE_WARP_OPENER (xdg-open / open)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory for ?path= (absolute or relative); omit for current cwd."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let raw = args.get("path").and_then(|v| v.as_str());
+        let cwd = warp_resolve_tab_window_path(raw)?;
+        let uri = warp_scheme_new_tab(Some(&cwd));
+        dispatch_warp_scheme_uri(&uri)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("warp_open_tab: {e}")))?;
+        Ok(ToolResult::json_text(
+            &json!({ "status": "ok", "uri": uri }),
+        ))
+    }
+}
+
+pub struct WarpOpenWindowTool;
+
+impl WarpOpenWindowTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for WarpOpenWindowTool {
+    fn name(&self) -> &'static str {
+        "warp_open_window"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Open a new Warp window via warp://action/new_window (optional ?path=)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory for ?path=; omit for current cwd."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let raw = args.get("path").and_then(|v| v.as_str());
+        let cwd = warp_resolve_tab_window_path(raw)?;
+        let uri = warp_scheme_new_window(Some(&cwd));
+        dispatch_warp_scheme_uri(&uri)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("warp_open_window: {e}")))?;
+        Ok(ToolResult::json_text(
+            &json!({ "status": "ok", "uri": uri }),
+        ))
+    }
+}
+
+pub struct WarpOpenSettingsTool;
+
+impl WarpOpenSettingsTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for WarpOpenSettingsTool {
+    fn name(&self) -> &'static str {
+        "warp_open_settings"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Try to open Warp settings via warp://action/open_settings_page (best-effort; \
+                 not documented on docs.warp.dev — may no-op on some versions)."
+                    .into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let uri = warp_scheme_open_settings_page();
+        dispatch_warp_scheme_uri(uri)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("warp_open_settings: {e}")))?;
+        Ok(ToolResult::json_text(
+            &json!({ "status": "ok", "uri": uri }),
+        ))
+    }
+}
+
+pub struct WarpLaunchWorkflowTool;
+
+impl WarpLaunchWorkflowTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for WarpLaunchWorkflowTool {
+    fn name(&self) -> &'static str {
+        "warp_launch_workflow"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Open a saved Warp Launch Configuration by name (warp://launch/<name>). \
+                 See Warp docs — configs live under the Warp data directory."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "configuration_name": {
+                        "type": "string",
+                        "description": "Launch configuration name (same as in Warp UI / YAML name field)."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Alias for configuration_name."
+                    }
+                },
+                "required": []
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let name = args
+            .get("configuration_name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                args.get("name")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+            });
+        let Some(name) = name else {
+            return Ok(ToolResult::error(
+                "missing configuration_name (or alias name) — Launch Configuration identifier required",
+            ));
+        };
+        let uri = warp_scheme_launch_configuration(name);
+        dispatch_warp_scheme_uri(&uri)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("warp_launch_workflow: {e}")))?;
+        Ok(ToolResult::json_text(
+            &json!({ "status": "ok", "uri": uri, "configuration_name": name }),
+        ))
+    }
+}
+
+pub struct WarpStatusTool {
+    hub: Hub,
+}
+impl WarpStatusTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for WarpStatusTool {
+    fn name(&self) -> &'static str {
+        "warp_status"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Warp environment probe: shell markers (TERM_PROGRAM / WARP_*), configured hub terminal backend id, \
+                 URL opener, IPC bridge socket readiness, and whether `oz` is on PATH. Does not open Warp."
+                .into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let tid = self.hub.terminal.as_ref().map(|t| t.id().to_string());
+        let snapshot = warp_status_snapshot(tid).await;
+        Ok(ToolResult::json_text(&snapshot))
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -4114,6 +5411,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     // Terminal surface
     reg.register(Arc::new(TerminalListTool::new(hub.clone())));
     reg.register(Arc::new(TerminalSendKeysTool::new(hub.clone())));
+    reg.register(Arc::new(TerminalReadOutputTool::new(hub.clone())));
     reg.register(Arc::new(TerminalSplitTool::new(hub.clone())));
     // Browser surface
     reg.register(Arc::new(BrowserNavigateTool::new(hub.clone())));
@@ -4121,6 +5419,8 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(BrowserSnapshotTool::new(hub.clone())));
     reg.register(Arc::new(BrowserClickTool::new(hub.clone())));
     reg.register(Arc::new(BrowserScreenshotTool::new(hub.clone())));
+    reg.register(Arc::new(BrowserExtractTextTool::new(hub.clone())));
+    reg.register(Arc::new(BrowserFillFormTool::new(hub.clone())));
     // Agent + worktree surface
     reg.register(Arc::new(AgentSpawnTool::new(hub.clone())));
     reg.register(Arc::new(AgentKillTool::new(hub.clone())));
@@ -4148,7 +5448,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(SessionFinalizeTool::new(hub.clone())));
     // v0.9: Cursor capability alignment
     reg.register(Arc::new(SessionCurateTool::new(hub.clone())));
+    // W3: structured handoff + lifecycle dispatcher (DESIGN-warp-first-agent-shell)
+    reg.register(Arc::new(SessionHandoffBriefTool::new(hub.clone())));
+    reg.register(Arc::new(SessionLifecycleStepTool::new(hub.clone())));
     reg.register(Arc::new(HookStatusTool::new(hub.clone())));
+    reg.register(Arc::new(ProjectDetectTool::new(hub.clone())));
+    reg.register(Arc::new(ChangesDigestTool::new(hub.clone())));
     reg.register(Arc::new(CapabilitiesTool::new(hub.clone())));
     reg.register(Arc::new(MemoryStatsTool::new(hub.clone())));
     reg.register(Arc::new(MemorySuggestTool::new(hub.clone())));
@@ -4156,9 +5461,23 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(OzRunGetTool::new(hub.clone())));
     reg.register(Arc::new(OzRunListTool::new(hub.clone())));
     reg.register(Arc::new(OzRunCancelTool::new(hub.clone())));
+    // W4: Warp URI scheme (DESIGN-warp-first-agent-shell)
+    reg.register(Arc::new(WarpOpenTabTool::new(hub.clone())));
+    reg.register(Arc::new(WarpOpenWindowTool::new(hub.clone())));
+    reg.register(Arc::new(WarpOpenSettingsTool::new(hub.clone())));
+    reg.register(Arc::new(WarpLaunchWorkflowTool::new(hub.clone())));
+    reg.register(Arc::new(WarpStatusTool::new(hub.clone())));
     // v0.11: memory graph visualisation
     reg.register(Arc::new(MemoryGraphExportTool::new(hub.clone())));
     // v0.12: automated memory curation
+    // W5: structured plans + context budget (DESIGN-warp-first-agent-shell)
+    reg.register(Arc::new(PlanSaveTool::new(hub.clone())));
+    reg.register(Arc::new(PlanLoadTool::new(hub.clone())));
+    reg.register(Arc::new(PlanUpdateTool::new(hub.clone())));
+    reg.register(Arc::new(ContextBudgetTool::new()));
+    // W6: browser extract/fill + multi-session inbox (DESIGN-warp-first-agent-shell)
+    reg.register(Arc::new(AgentMessageTool::new(hub.clone())));
+    reg.register(Arc::new(AgentInboxTool::new(hub.clone())));
     reg.register(Arc::new(MemoryAutoCurateTool::new(hub)));
     reg
 }

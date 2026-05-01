@@ -92,160 +92,159 @@ const MAX_CHARS: usize = 400;
 /// Knowledge-discovery / epistemic verbs.
 static EPISTEMIC: &[(&str, f32, &str)] = &[
     // English
-    ("found that",      0.50, "lesson"),
-    ("turns out",       0.50, "lesson"),
-    ("realized",        0.45, "lesson"),
-    ("discovered",      0.40, "lesson"),
-    ("the issue is",    0.50, "lesson"),
-    ("root cause",      0.60, "lesson"),
-    ("key insight",     0.60, "lesson"),
-    ("we learned",      0.50, "lesson"),
-    ("the problem is",  0.50, "lesson"),
-    ("it appears",      0.30, "lesson"),
-    ("the bug",         0.35, "lesson"),
+    ("found that", 0.50, "lesson"),
+    ("turns out", 0.50, "lesson"),
+    ("realized", 0.45, "lesson"),
+    ("discovered", 0.40, "lesson"),
+    ("the issue is", 0.50, "lesson"),
+    ("root cause", 0.60, "lesson"),
+    ("key insight", 0.60, "lesson"),
+    ("we learned", 0.50, "lesson"),
+    ("the problem is", 0.50, "lesson"),
+    ("it appears", 0.30, "lesson"),
+    ("the bug", 0.35, "lesson"),
     // Chinese
-    ("发现",            0.40, "lesson"),
-    ("注意到",          0.45, "lesson"),
-    ("意识到",          0.50, "lesson"),
-    ("问题在于",        0.60, "lesson"),
-    ("根源",            0.60, "lesson"),
-    ("关键是",          0.50, "lesson"),
-    ("原来",            0.40, "lesson"),
-    ("真正的问题",      0.55, "lesson"),
+    ("发现", 0.40, "lesson"),
+    ("注意到", 0.45, "lesson"),
+    ("意识到", 0.50, "lesson"),
+    ("问题在于", 0.60, "lesson"),
+    ("根源", 0.60, "lesson"),
+    ("关键是", 0.50, "lesson"),
+    ("原来", 0.40, "lesson"),
+    ("真正的问题", 0.55, "lesson"),
 ];
 
 /// Normative / prescriptive signals.
 static NORMATIVE: &[(&str, f32, &str)] = &[
     // English
-    ("should avoid",    0.50, "lesson"),
-    ("must not",        0.50, "lesson"),
-    ("best practice",   0.50, "lesson"),
-    ("avoid",           0.35, "lesson"),
-    ("should",          0.25, "lesson"),
-    ("prefer",          0.35, "lesson"),
-    ("always",          0.30, "lesson"),
-    ("never",           0.40, "lesson"),
-    ("recommend",       0.35, "lesson"),
-    ("make sure",       0.35, "lesson"),
+    ("should avoid", 0.50, "lesson"),
+    ("must not", 0.50, "lesson"),
+    ("best practice", 0.50, "lesson"),
+    ("avoid", 0.35, "lesson"),
+    ("should", 0.25, "lesson"),
+    ("prefer", 0.35, "lesson"),
+    ("always", 0.30, "lesson"),
+    ("never", 0.40, "lesson"),
+    ("recommend", 0.35, "lesson"),
+    ("make sure", 0.35, "lesson"),
     // Chinese
-    ("应该避免",        0.50, "lesson"),
-    ("必须",            0.35, "lesson"),
-    ("最好",            0.35, "lesson"),
-    ("避免",            0.40, "lesson"),
-    ("应该",            0.25, "lesson"),
-    ("建议",            0.30, "lesson"),
-    ("注意",            0.25, "lesson"),
-    ("重要",            0.20, "lesson"),
+    ("应该避免", 0.50, "lesson"),
+    ("必须", 0.35, "lesson"),
+    ("最好", 0.35, "lesson"),
+    ("避免", 0.40, "lesson"),
+    ("应该", 0.25, "lesson"),
+    ("建议", 0.30, "lesson"),
+    ("注意", 0.25, "lesson"),
+    ("重要", 0.20, "lesson"),
 ];
 
 /// Causal-chain / consequence signals.
 static CAUSAL: &[(&str, f32, &str)] = &[
     // English
-    ("caused by",       0.50, "lesson"),
-    ("as a result",     0.40, "lesson"),
-    ("which means",     0.35, "lesson"),
-    ("this means",      0.35, "lesson"),
-    ("leads to",        0.35, "lesson"),
-    ("therefore",       0.30, "lesson"),
-    ("due to",          0.25, "lesson"),
+    ("caused by", 0.50, "lesson"),
+    ("as a result", 0.40, "lesson"),
+    ("which means", 0.35, "lesson"),
+    ("this means", 0.35, "lesson"),
+    ("leads to", 0.35, "lesson"),
+    ("therefore", 0.30, "lesson"),
+    ("due to", 0.25, "lesson"),
     // Chinese
-    ("导致",            0.40, "lesson"),
-    ("这意味着",        0.40, "lesson"),
-    ("因此",            0.30, "lesson"),
-    ("由于",            0.25, "lesson"),
-    ("造成",            0.35, "lesson"),
+    ("导致", 0.40, "lesson"),
+    ("这意味着", 0.40, "lesson"),
+    ("因此", 0.30, "lesson"),
+    ("由于", 0.25, "lesson"),
+    ("造成", 0.35, "lesson"),
 ];
 
 /// Architecture / trade-off / choice signals.
 static DECISION_KW: &[(&str, f32, &str)] = &[
     // English
-    ("decided to",      0.50, "decision"),
-    ("we chose",        0.50, "decision"),
-    ("going with",      0.40, "decision"),
-    ("trade-off",       0.45, "decision"),
-    ("instead of",      0.35, "decision"),
+    ("decided to", 0.50, "decision"),
+    ("we chose", 0.50, "decision"),
+    ("going with", 0.40, "decision"),
+    ("trade-off", 0.45, "decision"),
+    ("instead of", 0.35, "decision"),
     ("design decision", 0.60, "decision"),
-    ("we will use",     0.40, "decision"),
-    ("architecture",    0.30, "decision"),
+    ("we will use", 0.40, "decision"),
+    ("architecture", 0.30, "decision"),
     // Chinese
-    ("决定",            0.40, "decision"),
-    ("选择",            0.35, "decision"),
-    ("采用",            0.35, "decision"),
-    ("而不是",          0.35, "decision"),
-    ("权衡",            0.40, "decision"),
-    ("改为",            0.35, "decision"),
-    ("设计决策",        0.60, "decision"),
+    ("决定", 0.40, "decision"),
+    ("选择", 0.35, "decision"),
+    ("采用", 0.35, "decision"),
+    ("而不是", 0.35, "decision"),
+    ("权衡", 0.40, "decision"),
+    ("改为", 0.35, "decision"),
+    ("设计决策", 0.60, "decision"),
 ];
 
 /// Future-action / todo signals.
 static TODO_KW: &[(&str, f32, &str)] = &[
     // English
     ("need to implement", 0.50, "todo"),
-    ("will implement",  0.50, "todo"),
-    ("next step",       0.45, "todo"),
-    ("plan to",         0.40, "todo"),
-    ("upcoming",        0.35, "todo"),
+    ("will implement", 0.50, "todo"),
+    ("next step", 0.45, "todo"),
+    ("plan to", 0.40, "todo"),
+    ("upcoming", 0.35, "todo"),
     // Chinese
-    ("下一步",          0.45, "todo"),
-    ("需要实现",        0.50, "todo"),
-    ("计划",            0.30, "todo"),
-    ("待实现",          0.50, "todo"),
-    ("接下来",          0.30, "todo"),
+    ("下一步", 0.45, "todo"),
+    ("需要实现", 0.50, "todo"),
+    ("计划", 0.30, "todo"),
+    ("待实现", 0.50, "todo"),
+    ("接下来", 0.30, "todo"),
 ];
-
 
 // ── Explicit marker tables (Phase 1) ──────────────────────────────────────
 
 /// Line-prefix → kind.  Checked in order; first match wins.
 pub(crate) static CURATE_MARKERS: &[(&str, &str)] = &[
-    ("lesson:",          "lesson"),
-    ("learned:",         "lesson"),
-    ("learning:",        "lesson"),
-    ("gotcha:",          "lesson"),
-    ("pitfall:",         "lesson"),
-    ("bug:",             "lesson"),
-    ("fix:",             "lesson"),
-    ("warning:",         "lesson"),
-    ("pattern:",         "lesson"),
-    ("key insight:",     "lesson"),
-    ("root cause:",      "lesson"),
-    ("decision:",        "decision"),
-    ("decided:",         "decision"),
-    ("design:",          "decision"),
-    ("architecture:",    "decision"),
-    ("we decided:",      "decision"),
-    ("we chose:",        "decision"),
-    ("todo:",            "todo"),
-    ("TODO:",            "todo"),
-    ("action item:",     "todo"),
-    ("next step:",       "todo"),
-    ("note:",            "context"),
-    ("context:",         "context"),
-    ("status:",          "context"),
-    ("state:",           "context"),
-    ("remember:",        "context"),
-    ("important:",       "context"),
-    ("handoff:",         "session_handoff"),
+    ("lesson:", "lesson"),
+    ("learned:", "lesson"),
+    ("learning:", "lesson"),
+    ("gotcha:", "lesson"),
+    ("pitfall:", "lesson"),
+    ("bug:", "lesson"),
+    ("fix:", "lesson"),
+    ("warning:", "lesson"),
+    ("pattern:", "lesson"),
+    ("key insight:", "lesson"),
+    ("root cause:", "lesson"),
+    ("decision:", "decision"),
+    ("decided:", "decision"),
+    ("design:", "decision"),
+    ("architecture:", "decision"),
+    ("we decided:", "decision"),
+    ("we chose:", "decision"),
+    ("todo:", "todo"),
+    ("TODO:", "todo"),
+    ("action item:", "todo"),
+    ("next step:", "todo"),
+    ("note:", "context"),
+    ("context:", "context"),
+    ("status:", "context"),
+    ("state:", "context"),
+    ("remember:", "context"),
+    ("important:", "context"),
+    ("handoff:", "session_handoff"),
     ("session_handoff:", "session_handoff"),
 ];
 
 /// Section-header keyword → kind inherited by following bullet items.
 static SECTION_HEADERS: &[(&str, &str)] = &[
-    ("lesson",       "lesson"),
-    ("learned",      "lesson"),
-    ("learning",     "lesson"),
-    ("gotcha",       "lesson"),
-    ("pitfall",      "lesson"),
-    ("insight",      "lesson"),
-    ("decision",     "decision"),
-    ("decided",      "decision"),
-    ("todo",         "todo"),
-    ("action item",  "todo"),
-    ("next step",    "todo"),
-    ("context",      "context"),
-    ("status",       "context"),
-    ("handoff",      "session_handoff"),
-    ("summary",      "context"),
+    ("lesson", "lesson"),
+    ("learned", "lesson"),
+    ("learning", "lesson"),
+    ("gotcha", "lesson"),
+    ("pitfall", "lesson"),
+    ("insight", "lesson"),
+    ("decision", "decision"),
+    ("decided", "decision"),
+    ("todo", "todo"),
+    ("action item", "todo"),
+    ("next step", "todo"),
+    ("context", "context"),
+    ("status", "context"),
+    ("handoff", "session_handoff"),
+    ("summary", "context"),
 ];
 
 // ── Primitive helpers ──────────────────────────────────────────────────────
@@ -271,14 +270,17 @@ fn word_bag(text: &str) -> std::collections::HashSet<String> {
         .collect()
 }
 
-fn jaccard(
-    a: &std::collections::HashSet<String>,
-    b: &std::collections::HashSet<String>,
-) -> f64 {
-    if a.is_empty() || b.is_empty() { return 0.0; }
+fn jaccard(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
     let inter = a.intersection(b).count();
     let union = a.len() + b.len() - inter;
-    if union == 0 { 1.0 } else { inter as f64 / union as f64 }
+    if union == 0 {
+        1.0
+    } else {
+        inter as f64 / union as f64
+    }
 }
 
 /// Clip to `max` Unicode scalar values, appending `…` if truncated.
@@ -287,9 +289,15 @@ fn clip(s: &str, max: usize) -> String {
     let mut out = String::with_capacity(max + 3);
     let mut n = 0usize;
     loop {
-        if n == max { out.push('…'); break; }
+        if n == max {
+            out.push('…');
+            break;
+        }
         match chars.next() {
-            Some(c) => { out.push(c); n += 1; }
+            Some(c) => {
+                out.push(c);
+                n += 1;
+            }
             None => break,
         }
     }
@@ -309,15 +317,37 @@ fn simple_hash(s: &str) -> String {
 /// Returns `true` when the line should be skipped by implicit scoring.
 fn is_noise(text: &str) -> bool {
     let t = text.trim();
-    if t.ends_with('?') || t.ends_with('？') { return true; }
-    if t.starts_with("http://") || t.starts_with("https://") { return true; }
-    if t.starts_with("```") || t.starts_with("~~~") { return true; }
-    if t.starts_with('#') || t == "---" || t == "===" || t == "***" { return true; }
+    if t.ends_with('?') || t.ends_with('？') {
+        return true;
+    }
+    if t.starts_with("http://") || t.starts_with("https://") {
+        return true;
+    }
+    if t.starts_with("```") || t.starts_with("~~~") {
+        return true;
+    }
+    if t.starts_with('#') || t == "---" || t == "===" || t == "***" {
+        return true;
+    }
     let lower = t.to_lowercase();
     let acks = [
-        "ok", "okay", "sure", "yes", "no", "yep", "nope",
-        "thanks", "thank you", "got it", "understood", "好的", "明白",
-        "谢谢", "嗯", "对", "没问题",
+        "ok",
+        "okay",
+        "sure",
+        "yes",
+        "no",
+        "yep",
+        "nope",
+        "thanks",
+        "thank you",
+        "got it",
+        "understood",
+        "好的",
+        "明白",
+        "谢谢",
+        "嗯",
+        "对",
+        "没问题",
     ];
     acks.iter().any(|a| lower == *a)
 }
@@ -325,7 +355,9 @@ fn is_noise(text: &str) -> bool {
 /// `true` when the line starts with an explicit marker (Phase-1 domain).
 fn has_explicit_marker(trimmed: &str) -> bool {
     let lower = trimmed.to_lowercase();
-    CURATE_MARKERS.iter().any(|(m, _)| lower.starts_with(&m.to_lowercase()))
+    CURATE_MARKERS
+        .iter()
+        .any(|(m, _)| lower.starts_with(&m.to_lowercase()))
 }
 
 /// Detect section header; returns inherited kind.
@@ -338,9 +370,7 @@ fn is_section_header(line: &str) -> Option<&'static str> {
         .trim();
     let lower = bare.to_lowercase();
     for (kw, kind) in SECTION_HEADERS {
-        if lower.contains(kw)
-            && (trimmed.ends_with(':') || trimmed.ends_with(":**"))
-        {
+        if lower.contains(kw) && (trimmed.ends_with(':') || trimmed.ends_with(":**")) {
             return Some(kind);
         }
     }
@@ -351,7 +381,9 @@ fn is_section_header(line: &str) -> Option<&'static str> {
 fn strip_bullet(line: &str) -> Option<&str> {
     let t = line.trim();
     for prefix in &["- ", "* ", "+ ", "• "] {
-        if let Some(rest) = t.strip_prefix(prefix) { return Some(rest.trim()); }
+        if let Some(rest) = t.strip_prefix(prefix) {
+            return Some(rest.trim());
+        }
     }
     if let Some(pos) = t.find(". ") {
         let num = &t[..pos];
@@ -371,12 +403,17 @@ pub(crate) fn push_curated(
     idx: usize,
     now: i64,
 ) {
-    let slug: String = content.chars().take(40)
+    let slug: String = content
+        .chars()
+        .take(40)
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect();
     let key = format!(
         "curated_{}{}_{}{}",
-        kind, sid_suffix, idx, &slug[..slug.len().min(20)]
+        kind,
+        sid_suffix,
+        idx,
+        &slug[..slug.len().min(20)]
     );
     results.push(MemoryRecord {
         key,
@@ -394,22 +431,20 @@ pub(crate) fn push_curated(
     });
 }
 
-
 // ── Phase 1: explicit marker extraction ───────────────────────────────────
 
-fn curate_explicit(
-    text: &str,
-    sid_suffix: &str,
-    max_items: usize,
-    now: i64,
-) -> Vec<MemoryRecord> {
+fn curate_explicit(text: &str, sid_suffix: &str, max_items: usize, now: i64) -> Vec<MemoryRecord> {
     let mut results: Vec<MemoryRecord> = Vec::new();
     let mut section_kind: Option<&'static str> = None;
 
     for (idx, line) in text.lines().enumerate() {
-        if results.len() >= max_items { break; }
+        if results.len() >= max_items {
+            break;
+        }
         let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
 
         // Section header check
         if let Some(kind) = is_section_header(trimmed) {
@@ -456,21 +491,19 @@ fn curate_explicit(
 fn score_sentence(lower: &str, score_threshold: f32) -> Option<(f32, &'static str)> {
     let mut score = 0.0f32;
     // kind → accumulated vote weight
-    let mut lesson_v  = 0.0f32;
+    let mut lesson_v = 0.0f32;
     let mut decision_v = 0.0f32;
-    let mut todo_v    = 0.0f32;
+    let mut todo_v = 0.0f32;
 
-    let all: &[&[(&str, f32, &str)]] = &[
-        EPISTEMIC, NORMATIVE, CAUSAL, DECISION_KW, TODO_KW,
-    ];
+    let all: &[&[(&str, f32, &str)]] = &[EPISTEMIC, NORMATIVE, CAUSAL, DECISION_KW, TODO_KW];
     for table in all {
         for &(kw, w, kind) in *table {
             if lower.contains(kw) {
                 score += w;
                 match kind {
                     "decision" => decision_v += w,
-                    "todo"     => todo_v     += w,
-                    _          => lesson_v   += w,
+                    "todo" => todo_v += w,
+                    _ => lesson_v += w,
                 }
             }
         }
@@ -502,11 +535,19 @@ fn curate_implicit(
     let mut local_bags: Vec<std::collections::HashSet<String>> = seen_bags.to_vec();
 
     for line in text.lines() {
-        if results.len() >= max_items { break; }
+        if results.len() >= max_items {
+            break;
+        }
         let trimmed = line.trim();
-        if trimmed.chars().count() < MIN_CHARS { continue; }
-        if is_noise(trimmed) { continue; }
-        if has_explicit_marker(trimmed) { continue; }
+        if trimmed.chars().count() < MIN_CHARS {
+            continue;
+        }
+        if is_noise(trimmed) {
+            continue;
+        }
+        if has_explicit_marker(trimmed) {
+            continue;
+        }
 
         let lower = trimmed.to_lowercase();
         let Some((score, kind)) = score_sentence(&lower, opts.implicit_score_threshold) else {
@@ -522,9 +563,8 @@ fn curate_implicit(
         local_bags.push(bag);
 
         // Boost importance proportional to signal strength (f64 as required by MemoryRecord)
-        let importance = f64::from(
-            (0.5 + (score - opts.implicit_score_threshold) * 0.25).min(0.85),
-        );
+        let importance =
+            f64::from((0.5 + (score - opts.implicit_score_threshold) * 0.25).min(0.85));
         let key = format!("curated_implicit_{}{}", kind, simple_hash(&content));
 
         results.push(MemoryRecord {
@@ -587,14 +627,11 @@ pub fn curate_conversation_with_options(
     let budget = max_items.saturating_sub(results.len());
     if budget > 0 {
         let seen: Vec<_> = results.iter().map(|r| word_bag(&r.content)).collect();
-        results.extend(curate_implicit(
-            text, &sid, &seen, budget, now, &opts,
-        ));
+        results.extend(curate_implicit(text, &sid, &seen, budget, now, &opts));
     }
 
     results
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -608,8 +645,11 @@ mod tests {
 
     #[test]
     fn score_epistemic_en() {
-        let (s, k) =
-            score_sentence("we found that cargo check is 10x faster than build", thresh()).unwrap();
+        let (s, k) = score_sentence(
+            "we found that cargo check is 10x faster than build",
+            thresh(),
+        )
+        .unwrap();
         assert!(s >= thresh(), "score={s}");
         assert_eq!(k, "lesson");
     }
@@ -637,7 +677,10 @@ mod tests {
 
     #[test]
     fn score_todo_en() {
-        let r = score_sentence("next step is to implement the memory_stats endpoint", thresh());
+        let r = score_sentence(
+            "next step is to implement the memory_stats endpoint",
+            thresh(),
+        );
         assert!(r.is_some());
         let (_, k) = r.unwrap();
         assert_eq!(k, "todo");
@@ -645,8 +688,7 @@ mod tests {
 
     #[test]
     fn score_chinese_epistemic() {
-        let (s, k) =
-            score_sentence("发现问题在于 sqlite 没有正确处理并发写入", thresh()).unwrap();
+        let (s, k) = score_sentence("发现问题在于 sqlite 没有正确处理并发写入", thresh()).unwrap();
         assert!(s >= thresh(), "score={s}");
         assert_eq!(k, "lesson");
     }
@@ -708,8 +750,7 @@ mod tests {
 
     #[test]
     fn implicit_captures_unmarked_insight() {
-        let text =
-            "We found that the root cause of the latency spike was the naive retry loop \
+        let text = "We found that the root cause of the latency spike was the naive retry loop \
              holding the connection pool exhausted under load.";
         let recs = curate_conversation_with_options(text, None, 10, CurateOptions::default());
         assert!(
@@ -717,7 +758,10 @@ mod tests {
             "implicit pass must extract unmarked insight; got 0 records"
         );
         let kinds: Vec<_> = recs.iter().map(|r| r.kind.as_str()).collect();
-        assert!(kinds.contains(&"lesson"), "expected lesson kind; got {kinds:?}");
+        assert!(
+            kinds.contains(&"lesson"),
+            "expected lesson kind; got {kinds:?}"
+        );
     }
 
     #[test]
@@ -726,8 +770,13 @@ mod tests {
         let recs = curate_conversation_with_options(text, None, 10, CurateOptions::default());
         assert!(!recs.is_empty());
         // At least one implicit record carries the "implicit" tag
-        let has_implicit_tag = recs.iter().any(|r| r.tags.contains(&"implicit".to_string()));
-        assert!(has_implicit_tag, "implicit records must carry 'implicit' tag");
+        let has_implicit_tag = recs
+            .iter()
+            .any(|r| r.tags.contains(&"implicit".to_string()));
+        assert!(
+            has_implicit_tag,
+            "implicit records must carry 'implicit' tag"
+        );
     }
 
     #[test]
@@ -738,9 +787,12 @@ mod tests {
             "We found that holding the lock while awaiting async calls causes deadlock.",
         ]
         .join("\n");
-        let recs =
-            curate_conversation_with_options(&text, None, 10, CurateOptions::default());
-        assert!(recs.len() <= 2, "dedup should suppress near-duplicate; got {}", recs.len());
+        let recs = curate_conversation_with_options(&text, None, 10, CurateOptions::default());
+        assert!(
+            recs.len() <= 2,
+            "dedup should suppress near-duplicate; got {}",
+            recs.len()
+        );
     }
 
     #[test]
@@ -749,9 +801,12 @@ mod tests {
             .map(|i| format!("We found that insight number {i} is caused by the entropy system."))
             .collect::<Vec<_>>()
             .join("\n");
-        let recs =
-            curate_conversation_with_options(&text, None, 5, CurateOptions::default());
-        assert!(recs.len() <= 5, "must not exceed max_items=5; got {}", recs.len());
+        let recs = curate_conversation_with_options(&text, None, 5, CurateOptions::default());
+        assert!(
+            recs.len() <= 5,
+            "must not exceed max_items=5; got {}",
+            recs.len()
+        );
     }
 
     #[test]
@@ -763,7 +818,8 @@ mod tests {
             "implicit pass should capture Chinese causal/epistemic line"
         );
         assert!(
-            recs.iter().any(|r| r.tags.contains(&"implicit".to_string())),
+            recs.iter()
+                .any(|r| r.tags.contains(&"implicit".to_string())),
             "expected implicit tag"
         );
     }
@@ -785,12 +841,18 @@ mod tests {
         ]
         .join("\n");
         let recs = curate_conversation_with_options(&text, None, 10, CurateOptions::default());
-        assert!(!recs.is_empty(), "pipeline must extract from aggregated sections; got 0");
+        assert!(
+            !recs.is_empty(),
+            "pipeline must extract from aggregated sections; got 0"
+        );
         let has_lesson_or_decision = recs
             .iter()
             .any(|r| r.kind == "lesson" || r.kind == "decision");
-        assert!(has_lesson_or_decision, "expected lesson or decision kind; got {:?}",
-            recs.iter().map(|r| r.kind.as_str()).collect::<Vec<_>>());
+        assert!(
+            has_lesson_or_decision,
+            "expected lesson or decision kind; got {:?}",
+            recs.iter().map(|r| r.kind.as_str()).collect::<Vec<_>>()
+        );
     }
 
     /// `handoff:` prefix should produce a record with kind == "session_handoff".
@@ -824,6 +886,9 @@ mod tests {
         );
         // Simulating memory_auto_curate's exclude_kinds=["session_handoff"] filter:
         recs.retain(|r| r.kind != "session_handoff");
-        assert!(recs.is_empty(), "after filtering session_handoff, vec must be empty");
+        assert!(
+            recs.is_empty(),
+            "after filtering session_handoff, vec must be empty"
+        );
     }
 }

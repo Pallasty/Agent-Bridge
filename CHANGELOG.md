@@ -5,6 +5,46 @@ All notable changes to **agent-bridge** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Browser MCP tools (W6)** — `browser_extract_text` (`innerText` as JSON) and
+  `browser_fill_form` (CSS selector + value, dispatches input/change).
+  `BrowserBackend` trait extended; `ChromiumCdpBackend` implements both.
+- **Multi-session inbox (W6)** — SQLite schema **v10** `agent_messages` table plus MCP
+  **`agent_message`** (send JSON) and **`agent_inbox`** (poll by `to_session`, optional
+  `since_id` / `unread_only` / `limit`).
+- **Warp URI MCP tools (W4)** — `warp_open_tab`, `warp_open_window`,
+  `warp_open_settings` (best-effort internal action), `warp_launch_workflow`
+  (`warp://launch/<name>`), and `warp_status` (environment + `oz` probe).
+  Uses `ab-terminal` helpers + OS URL opener (`xdg-open` / `open`).
+- **`plan_save` / `plan_load` / `plan_update` MCP tools** — SQLite-backed structured
+  task plans (`plans` table, JSON steps). Survives sessions; `plan_load` adds
+  `progress` and `next_step_id`. DESIGN Phase B / W5.
+- **`context_budget` MCP tool** — Offline EN/CJK token heuristic plus optional
+  `conversation_turns` coarse multiplier vs approximate `model` context limits;
+  returns `pct_used` and `recommendation` (`nominal` / `suggest_session_curate` /
+  `urgent_handoff_or_compact`). No model API calls.
+- **`session_handoff` MCP tool** — JSON brief aggregating todo memories, recent
+  `session_handoff` memory rows, and a git snapshot (`branch`, `log -1 --oneline`,
+  `status --porcelain`, derived file list). Optional `last_task`, `status`,
+  `open_questions`, and `conversation_snippet`. Implements DESIGN-warp-first
+  W3 / D9 (no new tables).
+- **`session_lifecycle_step` MCP tool** — dispatches `bootstrap` / `precompact`
+  (runs `session_curate` then `session_finalize`) / `finalize` with argument
+  pass-through.
+- **`ab-precompact-hook`** now issues a single `session_lifecycle_step` call for
+  the precompact phase instead of two separate tool calls.
+- **`TerminalCapabilities`** on `TerminalBackend` — sync `capabilities()` method;
+  MCP **`capabilities`** exposes nested `terminal.capabilities` plus top-level
+  `can_send_keys` / `can_split`; **`terminal_read_output`** returns structured
+  JSON error when `can_read_output` is false. Warp derives read/send from an IPC
+  socket probe.
+- **`project_detect`** / **`changes_digest`** MCP tools — filesystem manifest scan
+  (`Cargo.toml` via `cargo metadata`, `package.json`, Python/Go/Make markers) plus
+  structured git diff summaries (`git diff --numstat` / `--name-status`). DESIGN W2.
+
 ## [0.9.2] — 2026-04-28
 
 **Memory graph L0 layer + concept-node hook budget.**

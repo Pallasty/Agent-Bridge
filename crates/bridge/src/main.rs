@@ -1,4 +1,6 @@
-use ab_agent::{AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, GitWorktreeManager, OzAgentRuntime};
+use ab_agent::{
+    AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, GitWorktreeManager, OzAgentRuntime,
+};
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
@@ -182,14 +184,12 @@ async fn build_hub() -> Result<Hub> {
             Arc::new(OzAgentRuntime::with_binary(bin).with_store(store.clone()))
         }
         Some("auggie") | Some("augment") => {
-            let bin =
-                std::env::var("AGENT_BRIDGE_AUGGIE_BIN").unwrap_or_else(|_| "auggie".into());
+            let bin = std::env::var("AGENT_BRIDGE_AUGGIE_BIN").unwrap_or_else(|_| "auggie".into());
             tracing::info!(runtime = "auggie", binary = %bin, "agent runtime selected");
             Arc::new(AuggieRuntime::with_binary(bin).with_store(store.clone()))
         }
         _ => {
-            let bin =
-                std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
+            let bin = std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
             tracing::info!(runtime = "claude-code", binary = %bin, "agent runtime selected");
             Arc::new(ClaudeCodeRuntime::with_binary(bin).with_store(store.clone()))
         }

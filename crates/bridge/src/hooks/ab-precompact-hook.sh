@@ -7,12 +7,12 @@
 #   3. Extract last ~60 turns and pre-process the text so bullet items under
 #      "Lessons / Decisions / Summary" sections get `lesson:` / `decision:`
 #      prefix markers — making session_curate's rule engine effective.
-#   4. Call agent-bridge MCP: session_curate  (extract + persist memories).
+#   4. Call agent-bridge MCP: session_lifecycle_step(precompact) — runs
+#      session_curate then session_finalize in one tools/call.
 #      Pass-2 tuning: set AGENT_BRIDGE_CURATE_SCORE_THRESHOLD /
 #      AGENT_BRIDGE_CURATE_DEDUP_JACCARD in the environment of this hook
 #      (or add implicit_* args to the JSON below if you fork this script).
-#   5. Call agent-bridge MCP: session_finalize (importance decay + cleanup)
-#   6. Return systemMessage summary for the IDE.
+#   5. Return systemMessage summary for the IDE.
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 _AB_HOOK_LOG="$HOME/.local/share/agent-bridge/hook-runs.jsonl"
@@ -197,22 +197,17 @@ messages = [
     }},
     # 2. Initialized notification (required by MCP spec)
     {"jsonrpc": "2.0", "method": "notifications/initialized"},
-    # 3. session_curate: extract + save memories from the conversation
-    #    Use a balanced Pass-2 profile validated on mixed CN/EN transcripts.
+    # 3. session_lifecycle_step(precompact): session_curate + session_finalize
     {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
-        "name": "session_curate",
+        "name": "session_lifecycle_step",
         "arguments": {
+            "step": "precompact",
             "conversation_text": text,
             "session_id": session_id,
             "max_items": 10,
             "implicit_score_threshold": 0.50,
             "implicit_dedup_jaccard": 0.58
         }
-    }},
-    # 4. session_finalize: importance decay + stale memory cleanup
-    {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
-        "name": "session_finalize",
-        "arguments": {}
     }},
 ]
 
@@ -243,8 +238,9 @@ try:
                 text = item.get("text", "")
                 try:
                     obj = json.loads(text)
-                    saved = obj.get("saved_count", 0)
-                    skipped = obj.get("skipped_duplicates", 0)
+                    cur = obj.get("session_curate") or obj
+                    saved = cur.get("saved_count", 0)
+                    skipped = cur.get("skipped_duplicates", 0)
                     print(f"curated={saved} skipped={skipped}")
                 except Exception:
                     pass

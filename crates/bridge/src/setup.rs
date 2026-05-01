@@ -84,7 +84,9 @@ fn install_claude_code(home: &Path, bin_dir: &Path) -> Result<()> {
     println!("  2. Start the daemon:  agent-bridge daemon &");
     println!("  3. Register as MCP:   claude mcp add agent-bridge agent-bridge mcp");
     println!("  4. (Optional) Clone the memory-sync repo (private):");
-    println!("       git clone git@github.com:pallasting/agent-bridge-memory.git ~/agent-bridge-memory");
+    println!(
+        "       git clone git@github.com:pallasting/agent-bridge-memory.git ~/agent-bridge-memory"
+    );
     println!("  5. Restart Claude Code — the hooks take effect on the next session.");
 
     Ok(())

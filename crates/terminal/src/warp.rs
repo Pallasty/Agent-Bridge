@@ -57,10 +57,15 @@
 use ab_core::{Error, PaneId, Result};
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::path::Path;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::UnixStream;
 use tokio::process::Command;
 use uuid::Uuid;
 
-use crate::{Pane, SplitDir, TermEvent, TerminalBackend};
+use crate::{Pane, SplitDir, TermEvent, TerminalBackend, TerminalCapabilities};
 
 /// Default URL-handler binary on the current platform.
 ///
@@ -79,6 +84,11 @@ fn default_opener() -> &'static str {
 pub struct WarpBackend {
     /// OS URL-handler binary used to dispatch `warp://...` URIs.
     opener: String,
+    /// Optional local IPC socket path for Warp in-process bridge adapter.
+    ///
+    /// When configured (or when default path exists), this backend prefers
+    /// socket RPC for session listing, input, and output reads.
+    ipc_socket_path: std::path::PathBuf,
 }
 
 impl Default for WarpBackend {
@@ -87,7 +97,15 @@ impl Default for WarpBackend {
             .ok()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| default_opener().to_string());
-        Self { opener }
+        let ipc_socket_path = std::env::var("AGENT_BRIDGE_WARP_IPC_SOCKET")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(Self::default_ipc_socket_path);
+        Self {
+            opener,
+            ipc_socket_path,
+        }
     }
 }
 
@@ -102,7 +120,47 @@ impl WarpBackend {
     pub fn with_opener(opener: impl Into<String>) -> Self {
         Self {
             opener: opener.into(),
+            ..Self::default()
         }
+    }
+
+    fn default_ipc_socket_path() -> std::path::PathBuf {
+        if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+            return std::path::PathBuf::from(runtime).join("warp-agent-bridge.sock");
+        }
+        std::env::temp_dir().join("warp-agent-bridge.sock")
+    }
+
+    fn rpc_timeout_ms() -> u64 {
+        std::env::var("AGENT_BRIDGE_WARP_IPC_TIMEOUT_MS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(1200)
+    }
+
+    fn ipc_socket_ready(&self) -> bool {
+        path_is_unix_socket(&self.ipc_socket_path)
+    }
+
+    /// OS handler binary (`xdg-open` / `open` / `AGENT_BRIDGE_WARP_OPENER`).
+    pub fn url_opener_binary(&self) -> &str {
+        &self.opener
+    }
+
+    /// Path checked for the optional Warp ↔ agent-bridge Unix socket (scrollback / keys).
+    pub fn ipc_bridge_socket_path(&self) -> &Path {
+        &self.ipc_socket_path
+    }
+
+    /// True when [`Self::ipc_bridge_socket_path`] exists as a Unix socket.
+    pub fn ipc_bridge_socket_ready(&self) -> bool {
+        self.ipc_socket_ready()
+    }
+
+    /// Dispatch any `warp://` URI using this backend's opener (same as [`split`](TerminalBackend::split)).
+    pub async fn dispatch_scheme_uri(&self, uri: &str) -> Result<()> {
+        self.dispatch_url(uri).await
     }
 
     /// Read the current Warp session/pane identifier from the env, if any.
@@ -180,6 +238,134 @@ impl WarpBackend {
         }
         Ok(())
     }
+
+    fn pane_id_from_session(session_id: &str) -> PaneId {
+        if session_id.starts_with("warp:") {
+            return PaneId::from_raw(session_id.to_string());
+        }
+        PaneId::from_raw(format!("warp:{session_id}"))
+    }
+
+    fn session_id_from_pane(pane: &PaneId) -> String {
+        pane.as_str()
+            .strip_prefix("warp:")
+            .unwrap_or_else(|| pane.as_str())
+            .to_string()
+    }
+
+    async fn rpc_call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+        let req = BridgeRequest {
+            id: Uuid::new_v4().to_string(),
+            method: method.to_string(),
+            params,
+        };
+        let timeout = std::time::Duration::from_millis(Self::rpc_timeout_ms());
+
+        let connect = tokio::time::timeout(timeout, UnixStream::connect(&self.ipc_socket_path))
+            .await
+            .map_err(|_| Error::Backend("warp ipc: connect timeout".into()))?;
+        let stream = connect.map_err(|e| {
+            Error::Backend(format!(
+                "warp ipc: connect {} failed: {e}",
+                self.ipc_socket_path.display()
+            ))
+        })?;
+
+        let (reader, mut writer) = stream.into_split();
+        let wire = serde_json::to_vec(&req)
+            .map_err(|e| Error::Backend(format!("warp ipc: encode request failed: {e}")))?;
+        tokio::time::timeout(timeout, writer.write_all(&wire))
+            .await
+            .map_err(|_| Error::Backend("warp ipc: write timeout".into()))?
+            .map_err(|e| Error::Backend(format!("warp ipc: write failed: {e}")))?;
+        tokio::time::timeout(timeout, writer.write_all(b"\n"))
+            .await
+            .map_err(|_| Error::Backend("warp ipc: write newline timeout".into()))?
+            .map_err(|e| Error::Backend(format!("warp ipc: write newline failed: {e}")))?;
+        tokio::time::timeout(timeout, writer.flush())
+            .await
+            .map_err(|_| Error::Backend("warp ipc: flush timeout".into()))?
+            .map_err(|e| Error::Backend(format!("warp ipc: flush failed: {e}")))?;
+
+        let mut line = String::new();
+        let mut br = BufReader::new(reader);
+        let bytes = tokio::time::timeout(timeout, br.read_line(&mut line))
+            .await
+            .map_err(|_| Error::Backend("warp ipc: read timeout".into()))?
+            .map_err(|e| Error::Backend(format!("warp ipc: read failed: {e}")))?;
+        if bytes == 0 {
+            return Err(Error::Backend("warp ipc: empty response".into()));
+        }
+
+        let resp: BridgeResponse = serde_json::from_str(&line)
+            .map_err(|e| Error::Backend(format!("warp ipc: decode response failed: {e}")))?;
+        if resp.id != req.id {
+            return Err(Error::Backend(format!(
+                "warp ipc: response id mismatch (expected {}, got {})",
+                req.id, resp.id
+            )));
+        }
+        if let Some(err) = resp.error {
+            return Err(Error::Backend(format!(
+                "warp ipc error {}: {}",
+                err.code, err.message
+            )));
+        }
+        resp.result
+            .ok_or_else(|| Error::Backend("warp ipc: missing result".into()))
+    }
+
+    async fn rpc_list_sessions(&self) -> Result<Vec<BridgeTerminalSession>> {
+        let value = self.rpc_call("list_sessions", json!({})).await?;
+        serde_json::from_value(value)
+            .map_err(|e| Error::Backend(format!("warp ipc: parse list_sessions failed: {e}")))
+    }
+
+    async fn rpc_send_text(&self, session_id: &str, text: &str) -> Result<()> {
+        let _ = self
+            .rpc_call(
+                "send_text",
+                json!({
+                    "session_id": session_id,
+                    "text": text
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn rpc_read_scrollback(
+        &self,
+        session_id: &str,
+        last_n_lines: usize,
+    ) -> Result<Vec<String>> {
+        let value = self
+            .rpc_call(
+                "read_scrollback",
+                json!({
+                    "session_id": session_id,
+                    "last_n_lines": last_n_lines.max(1)
+                }),
+            )
+            .await?;
+        serde_json::from_value(value)
+            .map_err(|e| Error::Backend(format!("warp ipc: parse read_scrollback failed: {e}")))
+    }
+}
+
+fn path_is_unix_socket(path: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        std::fs::metadata(path)
+            .map(|m| m.file_type().is_socket())
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        false
+    }
 }
 
 #[async_trait]
@@ -188,9 +374,34 @@ impl TerminalBackend for WarpBackend {
         "warp"
     }
 
+    fn capabilities(&self) -> TerminalCapabilities {
+        let ipc = self.ipc_socket_ready();
+        TerminalCapabilities {
+            backend_id: self.id().to_string(),
+            can_read_output: ipc,
+            can_send_keys: ipc,
+            can_split: true,
+            warp_ipc_socket_ready: Some(ipc),
+        }
+    }
+
     /// Warp does not expose pane enumeration; we synthesise a single row
     /// for the current shell session so callers see something stable.
     async fn list_panes(&self) -> Result<Vec<Pane>> {
+        if let Ok(sessions) = self.rpc_list_sessions().await {
+            if !sessions.is_empty() {
+                let panes = sessions
+                    .into_iter()
+                    .map(|s| Pane {
+                        id: Self::pane_id_from_session(&s.session_id),
+                        title: s.title.unwrap_or_else(|| "warp session".to_string()),
+                        cwd: s.cwd,
+                        command: std::env::var("SHELL").ok(),
+                    })
+                    .collect();
+                return Ok(panes);
+            }
+        }
         let id = Self::current_pane_id();
         let cwd = std::env::current_dir()
             .ok()
@@ -209,11 +420,25 @@ impl TerminalBackend for WarpBackend {
 
     /// Warp has no public IPC for typing into panes. Failing loudly is
     /// preferable to silently dropping input.
-    async fn send_keys(&self, _pane: &PaneId, _keys: &str) -> Result<()> {
+    async fn send_keys(&self, pane: &PaneId, keys: &str) -> Result<()> {
+        let session_id = Self::session_id_from_pane(pane);
+        if self.rpc_send_text(&session_id, keys).await.is_ok() {
+            return Ok(());
+        }
         Err(Error::Backend(
-            "warp: send_keys is not supported — Warp does not expose a \
-             public CLI/IPC for typing into panes. Use the prompt UI \
-             directly, or invoke a launch config via `warp://launch/<name>`."
+            "warp: send_keys is not supported via URL scheme, and Warp IPC is unavailable. \
+             Use the prompt UI directly, or invoke a launch config via `warp://launch/<name>`."
+                .into(),
+        ))
+    }
+
+    async fn read_output(&self, pane: &PaneId, lines: usize) -> Result<Vec<String>> {
+        let session_id = Self::session_id_from_pane(pane);
+        if let Ok(lines) = self.rpc_read_scrollback(&session_id, lines).await {
+            return Ok(lines);
+        }
+        Err(Error::Backend(
+            "warp: read_output is not supported via URL scheme, and Warp IPC is unavailable."
                 .into(),
         ))
     }
@@ -278,6 +503,79 @@ fn url_encode_query_value(s: &str) -> String {
         }
     }
     out
+}
+
+/// Build `warp://action/new_tab` ([Warp URI docs](https://docs.warp.dev/terminal/more-features/uri-scheme)).
+/// Non-empty `path` becomes `?path=<percent-encoded>`.
+pub fn warp_scheme_new_tab(path: Option<&str>) -> String {
+    match path.filter(|p| !p.is_empty()) {
+        Some(p) => format!("warp://action/new_tab?path={}", url_encode_query_value(p)),
+        None => "warp://action/new_tab".into(),
+    }
+}
+
+/// Build `warp://action/new_window`.
+pub fn warp_scheme_new_window(path: Option<&str>) -> String {
+    match path.filter(|p| !p.is_empty()) {
+        Some(p) => format!(
+            "warp://action/new_window?path={}",
+            url_encode_query_value(p)
+        ),
+        None => "warp://action/new_window".into(),
+    }
+}
+
+/// Open Warp settings (bridge roadmap / DESIGN-warp-first-agent-shell).
+///
+/// This action id is **not** listed in the public Warp docs as of 2026; it may
+/// require a recent client or become a no-op. Prefer trying from inside Warp.
+pub fn warp_scheme_open_settings_page() -> &'static str {
+    "warp://action/open_settings_page"
+}
+
+/// Open a saved **Launch Configuration** by name: `warp://launch/<name>` (Warp docs).
+///
+/// `configuration_name` is percent-encoded for spaces and special characters.
+pub fn warp_scheme_launch_configuration(configuration_name: &str) -> String {
+    let name = configuration_name.trim();
+    format!("warp://launch/{}", url_encode_query_value(name))
+}
+
+/// Dispatch a `warp://…` URI using default opener + env (`WarpBackend::default()`).
+pub async fn dispatch_warp_scheme_uri(uri: &str) -> Result<()> {
+    WarpBackend::new().dispatch_scheme_uri(uri).await
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BridgeRequest {
+    id: String,
+    method: String,
+    #[serde(default)]
+    params: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BridgeResponse {
+    id: String,
+    #[serde(default)]
+    result: Option<serde_json::Value>,
+    #[serde(default)]
+    error: Option<BridgeError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BridgeError {
+    code: i32,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BridgeTerminalSession {
+    session_id: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
 }
 
 // ─── tests ─────────────────────────────────────────────────────────────
@@ -390,7 +688,26 @@ mod tests {
             url_encode_query_value("/Users/me/My Code"),
             "/Users/me/My%20Code"
         );
-        assert_eq!(url_encode_query_value("/data/中文"), "/data/%E4%B8%AD%E6%96%87");
+        assert_eq!(
+            url_encode_query_value("/data/中文"),
+            "/data/%E4%B8%AD%E6%96%87"
+        );
+    }
+
+    #[test]
+    fn capabilities_reflect_missing_ipc_socket() {
+        std::env::set_var(
+            "AGENT_BRIDGE_WARP_IPC_SOCKET",
+            "/nonexistent/agent-bridge-no-socket.sock",
+        );
+        let backend = WarpBackend::new();
+        let c = crate::TerminalBackend::capabilities(&backend);
+        assert_eq!(c.backend_id, "warp");
+        assert!(!c.can_read_output);
+        assert!(!c.can_send_keys);
+        assert!(c.can_split);
+        assert_eq!(c.warp_ipc_socket_ready, Some(false));
+        std::env::remove_var("AGENT_BRIDGE_WARP_IPC_SOCKET");
     }
 
     #[tokio::test]
@@ -422,5 +739,26 @@ mod tests {
         let mut stream = backend.subscribe().await.expect("subscribe");
         // poll once — empty stream resolves to None immediately.
         assert!(stream.next().await.is_none());
+    }
+
+    #[test]
+    fn warp_scheme_tabs_windows_without_path() {
+        assert_eq!(warp_scheme_new_tab(None), "warp://action/new_tab");
+        assert_eq!(warp_scheme_new_window(None), "warp://action/new_window");
+    }
+
+    #[test]
+    fn warp_scheme_tabs_encode_spaces_in_path() {
+        let u = warp_scheme_new_tab(Some("/tmp/foo bar"));
+        assert!(u.starts_with("warp://action/new_tab?path="));
+        assert!(u.contains("%20"));
+    }
+
+    #[test]
+    fn warp_scheme_launch_configuration_trims_and_encodes() {
+        assert_eq!(
+            warp_scheme_launch_configuration(" My LC "),
+            "warp://launch/My%20LC"
+        );
     }
 }

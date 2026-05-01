@@ -13,7 +13,7 @@ use futures::stream::{self, BoxStream};
 use serde::Deserialize;
 use tokio::process::Command;
 
-use crate::{Pane, SplitDir, TermEvent, TerminalBackend};
+use crate::{Pane, SplitDir, TermEvent, TerminalBackend, TerminalCapabilities};
 
 #[derive(Clone)]
 pub struct WezTermBackend {
@@ -71,6 +71,16 @@ impl TerminalBackend for WezTermBackend {
         "wezterm"
     }
 
+    fn capabilities(&self) -> TerminalCapabilities {
+        TerminalCapabilities {
+            backend_id: self.id().to_string(),
+            can_read_output: true,
+            can_send_keys: true,
+            can_split: true,
+            warp_ipc_socket_ready: None,
+        }
+    }
+
     async fn list_panes(&self) -> Result<Vec<Pane>> {
         let stdout = run(&self.binary, &["cli", "list", "--format", "json"]).await?;
         let rows: Vec<WezPaneRow> = serde_json::from_str(&stdout).map_err(|e| {
@@ -114,6 +124,24 @@ impl TerminalBackend for WezTermBackend {
             )));
         }
         Ok(())
+    }
+
+    async fn read_output(&self, pane: &PaneId, lines: usize) -> Result<Vec<String>> {
+        let pane = pane.as_str().to_string();
+        let start = format!("-{}", lines.max(1));
+        let stdout = run(
+            &self.binary,
+            &[
+                "cli",
+                "get-text",
+                "--pane-id",
+                &pane,
+                "--start-line",
+                &start,
+            ],
+        )
+        .await?;
+        Ok(stdout.lines().map(ToString::to_string).collect())
     }
 
     async fn split(&self, pane: &PaneId, dir: SplitDir) -> Result<PaneId> {

@@ -303,10 +303,8 @@ impl AgentRuntime for OzAgentRuntime {
                                         break;
                                     }
                                     if let Some(status) = fetch_run_status(&bin, &rid).await {
-                                        let state_str = status
-                                            .state
-                                            .as_deref()
-                                            .unwrap_or("UNKNOWN");
+                                        let state_str =
+                                            status.state.as_deref().unwrap_or("UNKNOWN");
                                         let _ = store
                                             .set_cloud_run_state(
                                                 &sid,
@@ -431,10 +429,22 @@ pub fn parse_run_output(stdout: &str) -> OzRunOutput {
     // Try full JSON parse first.
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(stdout) {
         return OzRunOutput {
-            run_id: v.get("run_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            state: v.get("state").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            session_link: v.get("session_link").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            title: v.get("title").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            run_id: v
+                .get("run_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            state: v
+                .get("state")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            session_link: v
+                .get("session_link")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            title: v
+                .get("title")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
         };
     }
     // Fallback: look for UUID-like run_id in plain text.
@@ -618,7 +628,10 @@ mod tests {
             env: HashMap::new(),
             initial_prompt: None,
         };
-        let err = runtime.spawn(cfg).await.expect_err("must reject empty prompt");
+        let err = runtime
+            .spawn(cfg)
+            .await
+            .expect_err("must reject empty prompt");
         match err {
             Error::InvalidArgument(msg) => {
                 assert!(msg.contains("initial_prompt"), "got: {msg}");

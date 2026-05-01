@@ -1267,7 +1267,9 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
                         };
                         println!(
                             "  {:<8.3}  {:<5.2}  {:<30}  {:<16}  {}",
-                            e.energy, e.weight, from_disp,
+                            e.energy,
+                            e.weight,
+                            from_disp,
                             truncate(&e.edge_type, 16),
                             &e.to_key,
                         );
@@ -1322,19 +1324,29 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
         } => {
             // ── 1. Gather source memories ────────────────────────────────
             let sources = store
-                .list_memories(Some(&source_kind), MemoryListSort::ByImportance, max_sources)
+                .list_memories(
+                    Some(&source_kind),
+                    MemoryListSort::ByImportance,
+                    max_sources,
+                )
                 .await?;
 
             if sources.is_empty() {
                 if as_json {
-                    println!("{}", serde_json::to_string_pretty(&json!({
-                        "status": "no_sources",
-                        "source_kind": source_kind,
-                        "sources_found": 0,
-                        "saved_count": 0,
-                    }))?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json!({
+                            "status": "no_sources",
+                            "source_kind": source_kind,
+                            "sources_found": 0,
+                            "saved_count": 0,
+                        }))?
+                    );
                 } else {
-                    println!("(no memories of kind '{}' — nothing to curate)", source_kind);
+                    println!(
+                        "(no memories of kind '{}' — nothing to curate)",
+                        source_kind
+                    );
                 }
                 return Ok(());
             }
@@ -1345,16 +1357,15 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
             for (i, m) in sources.iter().enumerate() {
                 aggregated.push_str(&format!(
                     "\n=== Source {} ({}) ===\n{}",
-                    i + 1, m.key, m.content
+                    i + 1,
+                    m.key,
+                    m.content
                 ));
             }
 
             // ── 3. Run two-pass curate pipeline ──────────────────────────
             let opts = ab_bridge::curate::CurateOptions::from_env_or_defaults()
-                .with_overrides(
-                    score_threshold.map(|x| x as f32),
-                    dedup_jaccard,
-                );
+                .with_overrides(score_threshold.map(|x| x as f32), dedup_jaccard);
             let mut candidates = ab_bridge::curate::curate_conversation_with_options(
                 &aggregated,
                 None, // global distillation — no session_id namespace
@@ -1367,26 +1378,31 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
             // ── 4. Dry-run: print preview and exit ────────────────────────
             if dry_run {
                 if as_json {
-                    println!("{}", serde_json::to_string_pretty(&json!({
-                        "dry_run": true,
-                        "source_kind": source_kind,
-                        "sources_used": source_keys,
-                        "aggregated_chars": aggregated.len(),
-                        "options": {
-                            "implicit_score_threshold": opts.implicit_score_threshold,
-                            "implicit_dedup_jaccard":   opts.implicit_dedup_jaccard,
-                        },
-                        "candidates": candidates.iter().map(|m| json!({
-                            "key":     m.key,
-                            "kind":    m.kind,
-                            "content": m.content,
-                            "tags":    m.tags,
-                        })).collect::<Vec<_>>()
-                    }))?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json!({
+                            "dry_run": true,
+                            "source_kind": source_kind,
+                            "sources_used": source_keys,
+                            "aggregated_chars": aggregated.len(),
+                            "options": {
+                                "implicit_score_threshold": opts.implicit_score_threshold,
+                                "implicit_dedup_jaccard":   opts.implicit_dedup_jaccard,
+                            },
+                            "candidates": candidates.iter().map(|m| json!({
+                                "key":     m.key,
+                                "kind":    m.kind,
+                                "content": m.content,
+                                "tags":    m.tags,
+                            })).collect::<Vec<_>>()
+                        }))?
+                    );
                 } else {
                     println!(
                         "dry-run — {} candidate(s) from {} source(s) ({} chars aggregated):",
-                        candidates.len(), source_keys.len(), aggregated.len()
+                        candidates.len(),
+                        source_keys.len(),
+                        aggregated.len()
                     );
                     for c in &candidates {
                         println!("  [{}] {}  —  {}", c.kind, c.key, truncate(&c.content, 60));
@@ -1415,17 +1431,20 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
             }
 
             if as_json {
-                println!("{}", serde_json::to_string_pretty(&json!({
-                    "status": "ok",
-                    "source_kind": source_kind,
-                    "sources_used": source_keys,
-                    "aggregated_chars": aggregated.len(),
-                    "candidates_found": candidates.len(),
-                    "saved_count": saved.len(),
-                    "new_keys": saved,
-                    "skipped_duplicates": skipped,
-                    "errors": errors,
-                }))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "status": "ok",
+                        "source_kind": source_kind,
+                        "sources_used": source_keys,
+                        "aggregated_chars": aggregated.len(),
+                        "candidates_found": candidates.len(),
+                        "saved_count": saved.len(),
+                        "new_keys": saved,
+                        "skipped_duplicates": skipped,
+                        "errors": errors,
+                    }))?
+                );
             } else {
                 println!(
                     "✓ auto-curate: {} saved, {} skipped (duplicates), {} error(s) — from {} source(s)",
@@ -1480,7 +1499,11 @@ fn importance_bar(imp: f64) -> String {
 fn render_memory_detail(r: &MemoryRecord) {
     println!("key:        {}", r.key);
     println!("kind:       {}", r.kind);
-    println!("importance: {} {:.2}", importance_bar(r.importance), r.importance);
+    println!(
+        "importance: {} {:.2}",
+        importance_bar(r.importance),
+        r.importance
+    );
     println!("status:     {}", r.status);
     if let Some(s) = &r.scope {
         println!("scope:      {s}");

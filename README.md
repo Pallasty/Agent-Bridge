@@ -185,7 +185,7 @@ export AGENT_BRIDGE_MEMORY_REPO=~/agent-bridge-memory
 
 ---
 
-## MCP tools (42 total)
+## MCP tools (60 total)
 
 Claude Code sees these tools when agent-bridge is registered as an MCP server:
 
@@ -202,6 +202,8 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `browser_snapshot` | Get an A11y tree (10–50× cheaper than PNG) |
 | | `browser_click` | Click an element by CSS selector |
 | | `browser_screenshot` | Capture full-page PNG (file or inline) |
+| | `browser_extract_text` | Visible page text (`innerText`), JSON `{ text, chars }` |
+| | `browser_fill_form` | Fill first matching input/textarea (`selector` + `value`) |
 | agent | `agent_spawn` | Launch a sibling Claude Code one-shot |
 | | `agent_kill` | SIGTERM a running sub-agent |
 | | `agent_session_list` | List recent agent sessions |
@@ -225,16 +227,29 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `memory_suggest` | Suggest related memory keys via tag/prefix/content overlap |
 | | `memory_graph_export` | Export memory graph as Graphviz DOT or JSON (v0.11) |
 | | `memory_auto_curate` | Automated batch curation from `session_handoff` memories (v0.12) |
+| multi-session | `agent_message` | Append JSON payload to another session's inbox (`agent_messages`, SQLite v10 / W6) |
+| | `agent_inbox` | Fetch inbox rows (`since_id`, `unread_only`, `limit`) |
+| plan | `plan_save` | Persist a structured task plan (steps, deps, per-step status) to SQLite (W5) |
+| | `plan_load` | Load plan + `progress` / `next_step_id` summary |
+| | `plan_update` | Set one step's status by id |
 | session | `session_bootstrap` | Build a compact memory bootstrap block for the current session |
 | | `session_curate` | Extract structured memories from conversation text (two-pass pipeline) |
 | | `session_finalize` | Session-end: importance decay + compact stale memories + optional export |
 | | `session_handoff` | Structured JSON brief: todos + `session_handoff` memories + git snapshot (W3) |
 | | `session_lifecycle_step` | Dispatch `bootstrap` / `precompact` (curate+finalize) / `finalize` in one call |
 | meta | `capabilities` | Report what agent-bridge can do in this environment |
+| | `context_budget` | Offline token estimate vs approximate model limit + compaction recommendation (W5) |
 | | `hook_status` | Check installed hook scripts and their last run status |
+| perceive | `project_detect` | Detect languages / build hints / Rust workspace members / git snapshot from manifests (W2) |
+| | `changes_digest` | Structured git diff summary (`working_tree` / `staged` / `last_commit` / `branch_vs_main`) |
 | warp-oz | `oz_run_get` | Fetch status of a Warp cloud agent run by `run_id` or `session_id` |
 | | `oz_run_list` | List recent Warp cloud agent runs (optional state filter) |
 | | `oz_run_cancel` | Cancel an in-progress Warp cloud agent run |
+| warp (URI) | `warp_open_tab` | `warp://action/new_tab` — optional `path` for initial cwd (W4) |
+| | `warp_open_window` | `warp://action/new_window` |
+| | `warp_open_settings` | `warp://action/open_settings_page` (best-effort) |
+| | `warp_launch_workflow` | `warp://launch/<configuration_name>` — saved Launch Configuration |
+| | `warp_status` | Env / opener / IPC bridge socket / `oz` on PATH — does not open UI |
 
 ### Memory scopes
 
@@ -279,7 +294,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | `AgentRuntime` | `ClaudeCodeRuntime` (one-shot), `OzAgentRuntime` (Warp cloud) | codex, aider, gemini-cli |
 | `TerminalBackend` | `KittyBackend`, `ZellijBackend`, `WezTermBackend`, `WarpBackend` | ghostty, tmux |
 | `StateStore` | `SqliteStore` (rusqlite-bundled) | in-memory, postgres |
-| `McpTool` | 42 built-in tools | drop in any `Box<dyn McpTool>` |
+| `McpTool` | 56 built-in tools | drop in any `Box<dyn McpTool>` |
 
 ## Configuration (env vars)
 
@@ -374,7 +389,7 @@ MCP **`capabilities`** reports `terminal.capabilities` (`TerminalCapabilities`),
 | P1-B | OSC 9/99/777 parser + terminal backends | ✅ |
 | P1-C | GitWorktreeManager + ClaudeCodeRuntime | ✅ |
 | P1-D | ChromiumCdpBackend (CDP) | ✅ |
-| P1-E | MCP stdio server (42 tools) | ✅ |
+| P1-E | MCP stdio server (56 tools) | ✅ |
 | P1-F | Cross-session memory (FTS5 + graph edges + scopes) | ✅ |
 | P1-G | PreCompact curator hook + `agent-bridge setup` | ✅ |
 

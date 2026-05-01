@@ -56,9 +56,10 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 }
 
 use crate::{
-    CompactPolicy, ImportConflictPolicy, ImportReport, MemoryEdge, MemoryExportFilter,
-    MemoryListSort, MemoryRecord, MemorySearchHit, MemoryStats, NotificationRecord, SessionFilter,
-    StateStore, StoredSession, MEMORY_CONTENT_CAP, STDIO_CAP,
+    AgentMessageRecord, CompactPolicy, ImportConflictPolicy, ImportReport, MemoryEdge,
+    MemoryExportFilter, MemoryListSort, MemoryRecord, MemorySearchHit, MemoryStats,
+    NotificationRecord, PlanRecord, PlanStep, SessionFilter, StateStore, StoredSession,
+    MEMORY_CONTENT_CAP, STDIO_CAP,
 };
 
 const SCHEMA_V1: &str = r#"
@@ -172,6 +173,30 @@ const SCHEMA_V8: &str = r#"
 ALTER TABLE sessions ADD COLUMN cloud_run_id TEXT;
 ALTER TABLE sessions ADD COLUMN cloud_run_state TEXT;
 ALTER TABLE sessions ADD COLUMN cloud_session_link TEXT;
+"#;
+
+// W5: structured task plans (DESIGN-warp-first-agent-shell)
+const SCHEMA_V9: &str = r#"
+CREATE TABLE IF NOT EXISTS plans (
+    plan_id     TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    steps_json  TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+"#;
+
+// W6: lightweight inbox between sessions / agents
+const SCHEMA_V10: &str = r#"
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_session   TEXT    NOT NULL,
+    to_session     TEXT    NOT NULL,
+    payload_json   TEXT    NOT NULL,
+    created_at     INTEGER NOT NULL,
+    read           INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_to ON agent_messages(to_session, created_at DESC);
 "#;
 
 // v1.0: importance score + status column for cognitive memory
@@ -375,7 +400,7 @@ impl SqliteStore {
                          CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);",
                     )?;
                 }
-                c.execute("UPDATE schema_meta SET value='7' WHERE key='version'", []);
+                let _ = c.execute("UPDATE schema_meta SET value='7' WHERE key='version'", []);
             }
 
             // ── v8 migration: cloud-run lifecycle columns on sessions ──
@@ -398,7 +423,33 @@ impl SqliteStore {
                 if !has_col {
                     c.execute_batch(SCHEMA_V8)?;
                 }
-                c.execute("UPDATE schema_meta SET value='8' WHERE key='version'", []);
+                let _ = c.execute("UPDATE schema_meta SET value='8' WHERE key='version'", []);
+            }
+
+            // ── v9: plans table (W5) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "8".to_string());
+            if cur.as_str() == "8" {
+                c.execute_batch(SCHEMA_V9)?;
+                let _ = c.execute("UPDATE schema_meta SET value='9' WHERE key='version'", []);
+            }
+
+            // ── v10: agent_messages inbox (W6) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "9".to_string());
+            if cur.as_str() == "9" {
+                c.execute_batch(SCHEMA_V10)?;
+                let _ = c.execute("UPDATE schema_meta SET value='10' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -491,13 +542,20 @@ fn overlap_tokens(text: &str) -> std::collections::HashSet<String> {
 }
 
 /// Jaccard-style overlap ratio between two token sets.
-fn token_overlap_ratio(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f64 {
+fn token_overlap_ratio(
+    a: &std::collections::HashSet<String>,
+    b: &std::collections::HashSet<String>,
+) -> f64 {
     if a.is_empty() || b.is_empty() {
         return 0.0;
     }
     let intersection = a.intersection(b).count();
     let union = a.union(b).count();
-    if union == 0 { 0.0 } else { intersection as f64 / union as f64 }
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
 }
 
 fn parse_str_array(s: &str) -> Vec<String> {
@@ -820,7 +878,9 @@ impl StateStore for SqliteStore {
                             WHEN memories.status = 'superseded' THEN 'active'
                             ELSE excluded.status
                         END",
-                    params![key, kind_clone, content, tags, related, scope, now, importance, status],
+                    params![
+                        key, kind_clone, content, tags, related, scope, now, importance, status
+                    ],
                 )?;
 
                 // ── Contradiction detection ──────────────────────────────────
@@ -898,7 +958,9 @@ impl StateStore for SqliteStore {
                             last_accessed_at: row.get(8)?,
                             access_count: row.get::<_, i64>(9)? as u64,
                             importance: row.get::<_, f64>(10).unwrap_or(0.5),
-                            status: row.get::<_, String>(11).unwrap_or_else(|_| "active".to_string()),
+                            status: row
+                                .get::<_, String>(11)
+                                .unwrap_or_else(|_| "active".to_string()),
                         })
                     })
                     .ok();
@@ -975,7 +1037,9 @@ impl StateStore for SqliteStore {
                             last_accessed_at: row.get(8)?,
                             access_count: row.get::<_, i64>(9)? as u64,
                             importance: row.get::<_, f64>(11).unwrap_or(0.5),
-                            status: row.get::<_, String>(12).unwrap_or_else(|_| "active".to_string()),
+                            status: row
+                                .get::<_, String>(12)
+                                .unwrap_or_else(|_| "active".to_string()),
                         };
                         let bm25: f64 = row.get(10)?;
                         Ok((rec, bm25))
@@ -1024,7 +1088,9 @@ impl StateStore for SqliteStore {
                                 last_accessed_at: row.get(8)?,
                                 access_count: row.get::<_, i64>(9)? as u64,
                                 importance: row.get::<_, f64>(10).unwrap_or(0.5),
-                                status: row.get::<_, String>(11).unwrap_or_else(|_| "active".to_string()),
+                                status: row
+                                    .get::<_, String>(11)
+                                    .unwrap_or_else(|_| "active".to_string()),
                             })
                         })
                         .ok()
@@ -1080,7 +1146,10 @@ impl StateStore for SqliteStore {
         let mut graph_scores: HashMap<String, f64> = HashMap::new();
 
         for hit in fts_hits.iter().take(expand_n) {
-            let edges = self.memory_neighbors(&hit.record.key).await.unwrap_or_default();
+            let edges = self
+                .memory_neighbors(&hit.record.key)
+                .await
+                .unwrap_or_default();
             for edge in edges {
                 // Neighbour key is the other end of the edge
                 let neighbour_key = if edge.from_key == hit.record.key {
@@ -1138,10 +1207,14 @@ impl StateStore for SqliteStore {
         // Collect all unique MemoryRecords (prefer FTS5 record since it was freshly bumped)
         let mut all_records: HashMap<String, MemoryRecord> = HashMap::new();
         for hit in fts_hits {
-            all_records.entry(hit.record.key.clone()).or_insert(hit.record);
+            all_records
+                .entry(hit.record.key.clone())
+                .or_insert(hit.record);
         }
         for hit in graph_hits {
-            all_records.entry(hit.record.key.clone()).or_insert(hit.record);
+            all_records
+                .entry(hit.record.key.clone())
+                .or_insert(hit.record);
         }
 
         let mut merged: Vec<MemorySearchHit> = rrf_scores
@@ -1241,7 +1314,9 @@ impl StateStore for SqliteStore {
                             last_accessed_at: row.get(8)?,
                             access_count: row.get::<_, i64>(9)? as u64,
                             importance: row.get::<_, f64>(10).unwrap_or(0.5),
-                            status: row.get::<_, String>(11).unwrap_or_else(|_| "active".to_string()),
+                            status: row
+                                .get::<_, String>(11)
+                                .unwrap_or_else(|_| "active".to_string()),
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1332,18 +1407,18 @@ impl StateStore for SqliteStore {
         let all_edges = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<MemoryEdge>> {
-                let mut stmt = c.prepare(
-                    "SELECT from_key, to_key, edge_type, weight FROM memory_edges",
-                )?;
-                let rows = stmt.query_map([], |row| {
-                    Ok(MemoryEdge {
-                        from_key: row.get(0)?,
-                        to_key: row.get(1)?,
-                        edge_type: row.get(2)?,
-                        weight: row.get(3)?,
-                    })
-                })?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
+                let mut stmt =
+                    c.prepare("SELECT from_key, to_key, edge_type, weight FROM memory_edges")?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok(MemoryEdge {
+                            from_key: row.get(0)?,
+                            to_key: row.get(1)?,
+                            edge_type: row.get(2)?,
+                            weight: row.get(3)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
                 Ok(rows)
             })
             .await
@@ -1563,7 +1638,9 @@ impl StateStore for SqliteStore {
                             last_accessed_at: row.get(8)?,
                             access_count: row.get::<_, i64>(9)? as u64,
                             importance: row.get::<_, f64>(10).unwrap_or(0.5),
-                            status: row.get::<_, String>(11).unwrap_or_else(|_| "active".to_string()),
+                            status: row
+                                .get::<_, String>(11)
+                                .unwrap_or_else(|_| "active".to_string()),
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1642,7 +1719,11 @@ impl StateStore for SqliteStore {
                     } else {
                         importance_for_kind(&r.kind)
                     };
-                    let stat = if r.status.is_empty() { "active" } else { r.status.as_str() };
+                    let stat = if r.status.is_empty() {
+                        "active"
+                    } else {
+                        r.status.as_str()
+                    };
                     match existing {
                         None => {
                             // Brand-new row — insert with the imported timestamps verbatim.
@@ -1715,7 +1796,6 @@ impl StateStore for SqliteStore {
     }
 
     async fn memory_stats(&self) -> Result<MemoryStats> {
-
         let stats = self
             .conn
             .call(move |c| -> RusqliteResult<MemoryStats> {
@@ -1794,8 +1874,8 @@ impl StateStore for SqliteStore {
                 let mut tag_counts: std::collections::HashMap<String, u64> =
                     std::collections::HashMap::new();
                 {
-                    let mut stmt = c
-                        .prepare("SELECT tags FROM memories WHERE status = 'active'")?;
+                    let mut stmt =
+                        c.prepare("SELECT tags FROM memories WHERE status = 'active'")?;
                     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
                     for tags_s in rows.flatten() {
                         for tag in parse_str_array(&tags_s) {
@@ -1863,12 +1943,328 @@ impl StateStore for SqliteStore {
             .map_err(|e| Error::Backend(format!("set_cloud_run_state: {e}")))?;
         Ok(())
     }
+
+    // ─── W5: plans ───────────────────────────────────────────────────────
+
+    async fn plan_save(&self, plan_id: &str, title: &str, steps: &[PlanStep]) -> Result<()> {
+        let pid = plan_id.to_string();
+        let ttl = title.to_string();
+        let steps_json = serde_json::to_string(steps).map_err(Error::Serde)?;
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                let now = now_secs();
+                let cnt: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM plans WHERE plan_id = ?1",
+                    params![&pid],
+                    |r| r.get(0),
+                )?;
+                if cnt > 0 {
+                    c.execute(
+                        "UPDATE plans SET title = ?2, steps_json = ?3, updated_at = ?4 WHERE plan_id = ?1",
+                        params![&pid, &ttl, &steps_json, now],
+                    )?;
+                } else {
+                    c.execute(
+                        "INSERT INTO plans (plan_id, title, steps_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![&pid, &ttl, &steps_json, now, now],
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("plan_save: {e}")))?;
+        Ok(())
+    }
+
+    async fn plan_load(&self, plan_id: &str) -> Result<Option<PlanRecord>> {
+        let pid = plan_id.to_string();
+        let row = self
+            .conn
+            .call(move |c| -> RusqliteResult<Option<(String, String, String, i64, i64)>> {
+                let mut stmt = c.prepare(
+                    "SELECT plan_id, title, steps_json, created_at, updated_at FROM plans WHERE plan_id = ?",
+                )?;
+                let mut rows = stmt.query(params![pid])?;
+                if let Some(r) = rows.next()? {
+                    Ok(Some((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+                } else {
+                    Ok(None)
+                }
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("plan_load: {e}")))?;
+
+        Ok(match row {
+            Some((plan_id, title, steps_json, created_at, updated_at)) => {
+                let steps: Vec<PlanStep> = serde_json::from_str(&steps_json)
+                    .map_err(|e| Error::Backend(format!("plan_load: corrupt steps_json: {e}")))?;
+                Some(PlanRecord {
+                    plan_id,
+                    title,
+                    steps,
+                    created_at,
+                    updated_at,
+                })
+            }
+            None => None,
+        })
+    }
+
+    async fn plan_update_step(&self, plan_id: &str, step_id: &str, status: &str) -> Result<bool> {
+        let pid = plan_id.to_string();
+        let sid = step_id.to_string();
+        let st = status.to_string();
+
+        let maybe_json = self
+            .conn
+            .call({
+                let pid = pid.clone();
+                move |c| -> RusqliteResult<Option<String>> {
+                    let mut stmt = c.prepare("SELECT steps_json FROM plans WHERE plan_id = ?")?;
+                    let mut rows = stmt.query(params![pid])?;
+                    if let Some(r) = rows.next()? {
+                        Ok(Some(r.get::<_, String>(0)?))
+                    } else {
+                        Ok(None)
+                    }
+                }
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("plan_update_step(select): {e}")))?;
+
+        let Some(steps_json) = maybe_json else {
+            return Ok(false);
+        };
+
+        let mut steps: Vec<PlanStep> = serde_json::from_str(&steps_json)
+            .map_err(|e| Error::Backend(format!("plan_update_step: corrupt steps_json: {e}")))?;
+
+        let mut found = false;
+        for step in &mut steps {
+            if step.id == sid {
+                step.status = st.clone();
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Ok(false);
+        }
+
+        let new_json = serde_json::to_string(&steps).map_err(Error::Serde)?;
+        let now = now_secs();
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE plans SET steps_json = ?2, updated_at = ?3 WHERE plan_id = ?1",
+                    params![pid, new_json, now],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("plan_update_step(update): {e}")))?;
+
+        Ok(true)
+    }
+
+    // ─── W6: agent_messages ────────────────────────────────────────────────
+
+    async fn agent_message_send(
+        &self,
+        from_session: &str,
+        to_session: &str,
+        payload: &serde_json::Value,
+    ) -> Result<i64> {
+        let from_s = from_session.to_string();
+        let to_s = to_session.to_string();
+        let payload_json = serde_json::to_string(payload).map_err(Error::Serde)?;
+        let ts = now_secs();
+        let id = self
+            .conn
+            .call(move |c| -> RusqliteResult<i64> {
+                c.execute(
+                    "INSERT INTO agent_messages (from_session, to_session, payload_json, created_at, read)
+                     VALUES (?1, ?2, ?3, ?4, 0)",
+                    params![from_s, to_s, payload_json, ts],
+                )?;
+                Ok(c.last_insert_rowid())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("agent_message_send: {e}")))?;
+        Ok(id)
+    }
+
+    async fn agent_inbox_fetch(
+        &self,
+        to_session: &str,
+        since_id: Option<i64>,
+        unread_only: bool,
+        limit: u32,
+    ) -> Result<Vec<AgentMessageRecord>> {
+        let to_s = to_session.to_string();
+        let lim = i64::from(limit.max(1).min(500));
+        let unread_flag: i64 = if unread_only { 1 } else { 0 };
+
+        let rows = self
+            .conn
+            .call(
+                move |c| -> RusqliteResult<Vec<(i64, String, String, String, i64, i64)>> {
+                    let mut stmt = c.prepare(
+                        "SELECT id, from_session, to_session, payload_json, created_at, read
+                     FROM agent_messages
+                     WHERE to_session = ?1
+                       AND (?2 IS NULL OR id > ?2)
+                       AND (?3 = 0 OR read = 0)
+                     ORDER BY id ASC
+                     LIMIT ?4",
+                    )?;
+                    let mut out = Vec::new();
+                    let mut q = stmt.query(params![to_s, since_id, unread_flag, lim])?;
+                    while let Some(r) = q.next()? {
+                        out.push((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ));
+                    }
+                    Ok(out)
+                },
+            )
+            .await
+            .map_err(|e| Error::Backend(format!("agent_inbox_fetch: {e}")))?;
+
+        let mut recs = Vec::with_capacity(rows.len());
+        for (id, from_session, to_session, payload_json, created_at, read_i) in rows {
+            let payload: serde_json::Value = serde_json::from_str(&payload_json).map_err(|e| {
+                Error::Backend(format!(
+                    "agent_inbox_fetch: corrupt payload_json id={id}: {e}"
+                ))
+            })?;
+            recs.push(AgentMessageRecord {
+                id,
+                from_session,
+                to_session,
+                payload,
+                created_at,
+                read: read_i != 0,
+            });
+        }
+        Ok(recs)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MemoryListSort, StateStore};
+    use crate::{MemoryListSort, PlanStep, StateStore};
+
+    #[tokio::test]
+    async fn plan_save_load_update_roundtrip() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-plan-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path)
+            .await
+            .expect("open sqlite store");
+
+        let steps = vec![
+            PlanStep {
+                id: "a".into(),
+                desc: "first".into(),
+                status: "pending".into(),
+                deps: vec![],
+            },
+            PlanStep {
+                id: "b".into(),
+                desc: "second".into(),
+                status: "done".into(),
+                deps: vec!["a".into()],
+            },
+        ];
+        store
+            .plan_save("p1", "title", &steps)
+            .await
+            .expect("plan_save");
+
+        let loaded = store
+            .plan_load("p1")
+            .await
+            .expect("plan_load")
+            .expect("row");
+        assert_eq!(loaded.title, "title");
+        assert_eq!(loaded.steps.len(), 2);
+        assert_eq!(loaded.created_at, loaded.updated_at);
+
+        let ok = store
+            .plan_update_step("p1", "a", "done")
+            .await
+            .expect("plan_update_step");
+        assert!(ok);
+
+        let loaded2 = store
+            .plan_load("p1")
+            .await
+            .expect("plan_load2")
+            .expect("row");
+        assert_eq!(loaded2.steps[0].status, "done");
+        assert!(loaded2.updated_at >= loaded2.created_at);
+
+        let missing = store
+            .plan_update_step("p1", "nope", "done")
+            .await
+            .expect("plan_update_step missing");
+        assert!(!missing);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn agent_messages_send_inbox_roundtrip() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-agent-msg-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path)
+            .await
+            .expect("open sqlite store");
+
+        let payload = serde_json::json!({ "hello": "world", "n": 1 });
+        let id = store
+            .agent_message_send("sess-a", "sess-b", &payload)
+            .await
+            .expect("send");
+        assert!(id > 0);
+
+        let rows = store
+            .agent_inbox_fetch("sess-b", None, false, 10)
+            .await
+            .expect("inbox");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].from_session, "sess-a");
+        assert_eq!(rows[0].to_session, "sess-b");
+        assert_eq!(rows[0].payload, payload);
+        assert!(!rows[0].read);
+
+        let empty = store
+            .agent_inbox_fetch("sess-b", Some(id), false, 10)
+            .await
+            .expect("after_cursor");
+        assert!(empty.is_empty());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
 
     #[tokio::test]
     async fn memory_search_falls_back_to_exact_key_match() {
