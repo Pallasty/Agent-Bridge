@@ -64,6 +64,15 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 - **`verify-warp-integration` CI** — `push` to `master` uses `paths-ignore` so
   markdown-only / docs / snapshot commits skip the job; **`workflow_dispatch`**
   remains unfiltered for full manual runs.
+- **`context_budget` heuristic calibration** — non-CJK divisor adjusted from
+  `3.5` to `3.3` chars/token to reduce under-estimation on repository-scale
+  technical text; CJK divisor remains `1.5`.
+
+### Added
+
+- **`scripts/calibrate_context_budget.py`** — tokenizer-backed calibration tool
+  (default: `tiktoken` `cl100k_base`) that reports MAPE/worst error and fails
+  when MAPE exceeds target (`15%` by default).
 
 ## [0.9.2] — 2026-04-28
 

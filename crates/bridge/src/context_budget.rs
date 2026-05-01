@@ -4,6 +4,10 @@
 
 /// Rough tokens-per-turn overhead when only turn count is known (conversation skeleton).
 pub const PER_TURN_TOKEN_GUESS: u64 = 2_000;
+/// Non-CJK heuristic rate (empirically calibrated for repository-sized text samples).
+pub const NON_CJK_CHARS_PER_TOKEN: f64 = 3.3;
+/// CJK heuristic rate.
+pub const CJK_CHARS_PER_TOKEN: f64 = 1.5;
 
 #[inline]
 fn is_cjk(ch: char) -> bool {
@@ -14,7 +18,7 @@ fn is_cjk(ch: char) -> bool {
     )
 }
 
-/// Fast heuristic: non‑CJK ≈ 3.5 chars/token; CJK ≈ 1.5 chars/token (DESIGN defaults).
+/// Fast heuristic: non‑CJK ≈ 3.3 chars/token; CJK ≈ 1.5 chars/token.
 pub fn estimate_tokens_from_text(sample: &str) -> u64 {
     let mut non_cjk: u64 = 0;
     let mut cjk: u64 = 0;
@@ -28,8 +32,8 @@ pub fn estimate_tokens_from_text(sample: &str) -> u64 {
             non_cjk += 1;
         }
     }
-    let en_tokens = (non_cjk as f64 / 3.5).ceil() as u64;
-    let zh_tokens = (cjk as f64 / 1.5).ceil() as u64;
+    let en_tokens = (non_cjk as f64 / NON_CJK_CHARS_PER_TOKEN).ceil() as u64;
+    let zh_tokens = (cjk as f64 / CJK_CHARS_PER_TOKEN).ceil() as u64;
     en_tokens.saturating_add(zh_tokens)
 }
 
@@ -74,10 +78,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ascii_uses_divisor_35() {
-        // 35 letters → ~10 tokens
-        let s = "a".repeat(35);
+    fn ascii_uses_divisor_33() {
+        // 33 letters → ~10 tokens
+        let s = "a".repeat(33);
         assert_eq!(estimate_tokens_from_text(&s), 10);
+    }
+
+    #[test]
+    fn cjk_uses_divisor_15() {
+        // 15 CJK chars → ~10 tokens
+        let s = "测".repeat(15);
+        assert_eq!(estimate_tokens_from_text(&s), 10);
+    }
+
+    #[test]
+    fn mixed_text_estimate_is_positive() {
+        let s = "Warp终端上下文预算 calibration test";
+        assert!(estimate_tokens_from_text(s) > 0);
+    }
+
+    #[test]
+    fn estimated_usage_adds_turn_overhead() {
+        let s = "a".repeat(35);
+        let base = estimate_tokens_from_text(&s);
+        let with_turns = estimated_usage_tokens(&s, 3);
+        assert_eq!(with_turns, base + PER_TURN_TOKEN_GUESS * 3);
     }
 
     #[test]

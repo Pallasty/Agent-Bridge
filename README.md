@@ -178,6 +178,18 @@ For profile tuning/regression on a real session transcript, run:
 This compares `baseline / balanced / strict / aggressive` profiles on the same
 input, printing candidate counts, kind distributions, and sample diffs vs baseline.
 
+For `context_budget` heuristic calibration against a tokenizer baseline:
+
+```bash
+# Example with a temporary venv:
+python3 -m venv /tmp/ab-calib-venv
+/tmp/ab-calib-venv/bin/pip install tiktoken
+/tmp/ab-calib-venv/bin/python scripts/calibrate_context_budget.py --default-set
+```
+
+The script reports MAPE/worst error and exits non-zero if MAPE exceeds the target
+(default 15%).
+
 Optional JSON report:
 
 ```bash
