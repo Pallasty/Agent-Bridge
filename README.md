@@ -24,8 +24,8 @@ agent-bridge daemon &
 # 5. Register as MCP server (Claude Code reads this at startup)
 claude mcp add agent-bridge agent-bridge mcp
 
-# 6. (Optional) Clone the memory-sync repo for cross-machine memory
-git clone git@github.com:<you>/agent-bridge-memory.git ~/agent-bridge-memory
+# 6. (Optional) Clone the private memory-sync repo for cross-machine memory
+git clone git@github.com:pallasting/agent-bridge-memory.git ~/agent-bridge-memory
 
 # 7. Restart Claude Code — hooks fire automatically from here on
 ```
@@ -109,7 +109,7 @@ Warp profile (`--frontend warp`):
 | Script | Claude Code event | Purpose |
 |--------|------------------|---------|
 | `ab-memory-hook` | `UserPromptSubmit` | Inject scope-aware memory index at session start (once per session) |
-| `ab-precompact-hook` | `PreCompact` (manual + auto) | Reads the transcript, calls `session_curate` + `session_finalize` over MCP (no sub-agent) |
+| `ab-precompact-hook` | `PreCompact` (manual + auto) | Reads the transcript, calls `session_lifecycle_step(precompact)` over MCP (runs `session_curate` then `session_finalize`; no sub-agent) |
 | `ab-session-end-hook` | `Stop` | Compact memories older than 90 days; sync to git remote |
 
 ### Memory lifecycle
@@ -122,7 +122,7 @@ Session start  ──► ab-memory-hook injects relevant memories into context
      │
      ▼
 /compact or     ──► ab-precompact-hook runs transcript → MCP
-context full         └─► session_curate + session_finalize (lessons/decisions)
+context full         └─► session_lifecycle_step(precompact) → curate + finalize
      │
      ▼
 Session end     ──► ab-session-end-hook compacts stale + syncs to git
@@ -168,15 +168,19 @@ Optional JSON report:
 ### Cross-machine memory sync
 
 Memory is stored in SQLite at `~/.local/share/agent-bridge/state.db`.
-The optional `agent-bridge-memory` companion repo provides git-backed sync:
+The companion repo **[pallasting/agent-bridge-memory](https://github.com/pallasting/agent-bridge-memory)**
+(private) holds exported JSONL / sync scripts for git-backed backup across machines.
 
 ```bash
-# Sync manually
+# Clone (requires GitHub access to the private repo)
+git clone git@github.com:pallasting/agent-bridge-memory.git ~/agent-bridge-memory
+
+# Sync manually — writes into that repo; commit & push from there as you prefer
 AGENT_BRIDGE_BIN=agent-bridge bash ~/agent-bridge-memory/sync.sh
 
 # Automatic: the Stop hook runs sync.sh in the background on every session end
-# Point at a custom repo location:
-export AGENT_BRIDGE_MEMORY_REPO=~/my-memory-repo
+# Point at a custom checkout path:
+export AGENT_BRIDGE_MEMORY_REPO=~/agent-bridge-memory
 ```
 
 ---
@@ -224,6 +228,8 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | session | `session_bootstrap` | Build a compact memory bootstrap block for the current session |
 | | `session_curate` | Extract structured memories from conversation text (two-pass pipeline) |
 | | `session_finalize` | Session-end: importance decay + compact stale memories + optional export |
+| | `session_handoff` | Structured JSON brief: todos + `session_handoff` memories + git snapshot (W3) |
+| | `session_lifecycle_step` | Dispatch `bootstrap` / `precompact` (curate+finalize) / `finalize` in one call |
 | meta | `capabilities` | Report what agent-bridge can do in this environment |
 | | `hook_status` | Check installed hook scripts and their last run status |
 | warp-oz | `oz_run_get` | Fetch status of a Warp cloud agent run by `run_id` or `session_id` |
@@ -353,9 +359,11 @@ feature set:
 | Op | Behaviour |
 |----|-----------|
 | `list_panes` | Returns one synthetic row for the current shell session (id from `WARP_SESSION_ID` if exported, else `warp:current`). |
-| `send_keys`  | Returns `Error::Backend` — no public IPC for typing into another pane. |
+| `send_keys` / `read_output` | When the in-process Warp IPC Unix socket is present (`AGENT_BRIDGE_WARP_IPC_SOCKET` or default under `$XDG_RUNTIME_DIR`), uses bridge RPC; otherwise `Error::Backend` (URL scheme alone cannot drive another pane). |
 | `split`      | Vertical → `warp://action/new_tab?path=<cwd>`; Horizontal → `warp://action/new_window?path=<cwd>`. New pane id is synthetic. |
 | `subscribe`  | Empty stream (OSC notifications still flow through `osc.parse`). |
+
+MCP **`capabilities`** reports `terminal.capabilities` (`TerminalCapabilities`), including `warp_ipc_socket_ready` and effective `can_read_output` / `can_send_keys`.
 
 ## Status
 
