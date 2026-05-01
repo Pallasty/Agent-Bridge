@@ -478,64 +478,50 @@ Complete the session continuity story.
 
 ## 9. Warp In-Repo Migration Status
 
-### 9.1 What was migrated now
+### 9.1 What was migrated (complete as of 2026-05-01)
 
-We started direct in-repo migration inside the open-source Warp tree at:
+Full Warp-side IPC server is implemented in the Warp fork at:
 
-- `warp/crates/agent_bridge/`
+- `warp/crates/agent_bridge/` — shared protocol crate
+  - `src/lib.rs`: `default_ipc_socket_path()` (`$XDG_RUNTIME_DIR/warp-agent-bridge.sock`)
+  - `src/protocol.rs`: `BridgeRequest/Response`, `BridgeError`, `TerminalSession`,
+    `ReadScrollbackParams`, `AgentBridgeBackend` trait
 
-Initial crate includes:
+- `warp/app/src/agent_bridge/` — in-process bridge module
+  - `mod.rs`: `init(ctx)` — registers singleton and starts IPC server
+  - `registry.rs`: `AgentBridgeRegistry` GPUI singleton model
+    - `HashMap<session_id, SessionEntry>` with `PtyWriter` + `Arc<FairMutex<TerminalModel>>`
+    - `Arc<AtomicBool>` alive flag per session (Drop-safe, no AppContext needed)
+    - methods: `register()`, `list_sessions()`, `send_text()`, `read_scrollback()`
+  - `server.rs`: async Unix socket IPC server (async-io + futures-lite)
+    - JSON-line protocol dispatcher for `list_sessions`, `send_text`, `read_scrollback`
+    - All ops dispatched to main thread via `ModelSpawner<AgentBridgeRegistry>`
+    - Socket permissions: 0o600 (owner-only)
 
-- `src/lib.rs`:
-  - `default_ipc_socket_path()` helper (`$XDG_RUNTIME_DIR/warp-agent-bridge.sock`)
-- `src/protocol.rs`:
-  - `BridgeRequest` / `BridgeResponse` envelopes
-  - `BridgeError`
-  - `TerminalSession`
-  - `ReadScrollbackParams`
-  - `AgentBridgeBackend` trait with:
-    - `list_sessions`
-    - `send_text`
-    - `read_scrollback`
+- `warp/app/src/terminal/local_tty/terminal_manager.rs` — session hook
+  - Wraps `event_loop_tx` in `Arc<Mutex<>>` early; passes `PtyWriter` closure to registry
+  - Registers `FairMutex<TerminalModel>` for zero-copy scrollback reads
+  - `bridge_alive.store(false)` in `Drop` atomically marks session dead
 
-This is a **protocol-first adapter skeleton** that keeps migration traceable
-without coupling immediately to Warp UI internals.
+- `warp/app/src/lib.rs` — startup
+  - `agent_bridge::init(ctx)` called in `initialize_app()` before any terminal sessions
 
-In parallel, `agent-bridge` side has now moved to **IPC-first Warp backend**
-for the three key operations:
+The `agent-bridge` MCP side uses **IPC-first Warp backend** for the three key operations:
 
-- `list_panes` → tries Unix socket RPC `list_sessions` first, then synthetic fallback
-- `send_keys` → tries RPC `send_text`, returns structured unsupported only if IPC unavailable
-- `read_output` → tries RPC `read_scrollback`, returns unsupported if IPC unavailable
+- `terminal_list` → RPC `list_sessions`, then synthetic fallback
+- `terminal_send_keys` → RPC `send_text`, unsupported only if IPC unavailable
+- `terminal_read_output` → RPC `read_scrollback`, unsupported if IPC unavailable
 
-This completes milestone 3 at the client side ("IPC preferred + URL fallback")
-and unblocks Warp-side server implementation as the next critical step.
+### 9.2 Warp fork layout
 
-### 9.2 Recommended target layout in Warp repo
+- `warp/crates/agent_bridge/` (protocol types)
+- `warp/app/src/agent_bridge/` (GPUI singleton + IPC server)
 
-Primary location:
+### 9.3 Remaining validation steps
 
-- `warp/crates/agent_bridge/` (adapter crate)
-
-Optional split for long-term protocol versioning:
-
-- `warp/crates/agent_bridge_ipc/` (serde protocol types + version negotiation)
-
-Why this layout:
-
-- Aligns with Warp's Rust workspace architecture (`crates/*`)
-- Avoids over-coupling to `app/src` view/UI code
-- Supports feature-gating and independent tests
-- Makes upstream sync easier (external `agent-bridge` core + Warp-specific adapter)
-
-### 9.3 Next migration milestones
-
-1. Implement Warp-side backend for `AgentBridgeBackend`:
-   - map active/internal terminal sessions to `TerminalSession`
-   - wire text send path via existing terminal input routing APIs
-   - expose scrollback read from terminal model
-2. Add local IPC service in Warp (Unix socket):
-   - methods: `list_sessions`, `send_text`, `read_scrollback`
-3. Validate end-to-end with IPC enabled:
-   - `agent-bridge` should auto-detect socket and stop falling back
-   - add integration smoke test for list/send/read roundtrip
+1. Build Warp from the fork with `cargo build --release -p warp`
+2. Verify `/run/user/$UID/warp-agent-bridge.sock` appears on startup
+3. Run `mcp__agent-bridge__terminal_list` → sessions should enumerate
+4. Run `mcp__agent-bridge__terminal_send_keys` + `terminal_read_output` roundtrip
+5. Close a terminal pane → session disappears from list (alive flag cleared)
+6. Add integration smoke test for list/send/read roundtrip to CI
