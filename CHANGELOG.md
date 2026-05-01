@@ -53,6 +53,11 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 - **`scripts/verify_warp_integration.sh`** — W8-style integration smoke script that
   validates lifecycle bootstrap, perception tools, structured handoff, plan
   save/load/update, Warp status, agent messaging, and per-response `backend_id`.
+- **Warp IPC `terminal_read_output` E2E coverage** — added:
+  - `scripts/verify_warp_terminal_read_output_e2e.sh` (MCP-level end-to-end check
+    using a local Unix-socket Warp IPC stub for `list_sessions`/`read_scrollback`)
+  - `WarpBackend` socket-RPC test (`warp_ipc_e2e_list_send_read`) covering
+    list/send/read through the backend protocol path.
 
 ### Changed
 

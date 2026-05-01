@@ -583,6 +583,8 @@ struct BridgeTerminalSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::UnixListener;
 
     #[test]
     fn id_is_stable() {
@@ -739,6 +741,68 @@ mod tests {
         let mut stream = backend.subscribe().await.expect("subscribe");
         // poll once — empty stream resolves to None immediately.
         assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn warp_ipc_e2e_list_send_read() {
+        let socket = std::env::temp_dir().join(format!("ab-warp-ipc-{}.sock", Uuid::new_v4()));
+        let _ = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).expect("bind unix socket");
+
+        let server = tokio::spawn(async move {
+            for _ in 0..3 {
+                let (stream, _) = listener.accept().await.expect("accept");
+                let (reader, mut writer) = stream.into_split();
+                let mut br = BufReader::new(reader);
+                let mut line = String::new();
+                br.read_line(&mut line).await.expect("read request");
+                let req: BridgeRequest = serde_json::from_str(&line).expect("decode request");
+                let result = match req.method.as_str() {
+                    "list_sessions" => json!([{
+                        "session_id": "test-session",
+                        "title": "Warp Test Session",
+                        "cwd": "/tmp"
+                    }]),
+                    "send_text" => json!({"ok": true}),
+                    "read_scrollback" => json!(["line one", "line two"]),
+                    _ => json!(null),
+                };
+                let resp = BridgeResponse {
+                    id: req.id,
+                    result: Some(result),
+                    error: None,
+                };
+                let mut wire = serde_json::to_vec(&resp).expect("encode response");
+                wire.push(b'\n');
+                writer.write_all(&wire).await.expect("write response");
+                writer.flush().await.expect("flush response");
+            }
+        });
+
+        std::env::set_var("AGENT_BRIDGE_WARP_IPC_SOCKET", socket.display().to_string());
+        let backend = WarpBackend::new();
+        let caps = backend.capabilities();
+        assert!(caps.can_read_output);
+        assert!(caps.can_send_keys);
+
+        let panes = backend.list_panes().await.expect("list_panes via ipc");
+        assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].id.as_str(), "warp:test-session");
+
+        let lines = backend
+            .read_output(&PaneId::from_raw("warp:test-session"), 20)
+            .await
+            .expect("read_output via ipc");
+        assert_eq!(lines, vec!["line one".to_string(), "line two".to_string()]);
+
+        backend
+            .send_keys(&PaneId::from_raw("warp:test-session"), "echo hi\n")
+            .await
+            .expect("send_keys via ipc");
+
+        server.await.expect("server task");
+        std::env::remove_var("AGENT_BRIDGE_WARP_IPC_SOCKET");
+        let _ = std::fs::remove_file(&socket);
     }
 
     #[test]

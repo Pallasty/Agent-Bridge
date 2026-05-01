@@ -158,6 +158,17 @@ This validates end-to-end MCP calls for `capabilities`, lifecycle bootstrap,
 `project_detect`, `changes_digest`, `session_handoff`, plan persistence,
 `warp_status`, and `agent_message`/`agent_inbox`.
 
+For Warp IPC + `terminal_read_output` path validation (MCP-level E2E with a
+local Unix-socket stub), run:
+
+```bash
+./scripts/verify_warp_terminal_read_output_e2e.sh
+```
+
+This asserts `capabilities.terminal.can_read_output=true` when the Warp IPC
+socket is available, and verifies `terminal_list` + `terminal_read_output`
+through the full stdio MCP server path.
+
 For profile tuning/regression on a real session transcript, run:
 
 ```bash
