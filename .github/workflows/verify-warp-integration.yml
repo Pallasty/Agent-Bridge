@@ -1,0 +1,33 @@
+name: Verify Warp Integration
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build agent-bridge binary
+        run: cargo build -p ab-bridge --bin agent-bridge
+
+      - name: Run workspace tests
+        run: cargo test --workspace
+
+      - name: Run Warp integration verification
+        env:
+          AGENT_BRIDGE_BIN: ${{ github.workspace }}/target/debug/agent-bridge
+        run: ./scripts/verify_warp_integration.sh
