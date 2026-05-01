@@ -70,6 +70,9 @@ pub struct ToolResult {
     pub content: Vec<ContentBlock>,
     #[serde(default, rename = "isError")]
     pub is_error: bool,
+    /// Injected by the MCP stdio server on every `tools/call` response for support logs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_id: Option<Value>,
 }
 
 impl ToolResult {
@@ -77,12 +80,14 @@ impl ToolResult {
         Self {
             content: vec![ContentBlock::text(s)],
             is_error: false,
+            backend_id: None,
         }
     }
     pub fn error(s: impl Into<String>) -> Self {
         Self {
             content: vec![ContentBlock::text(s)],
             is_error: true,
+            backend_id: None,
         }
     }
     pub fn json_text(v: &Value) -> Self {
@@ -93,6 +98,7 @@ impl ToolResult {
         Self {
             content: vec![ContentBlock::image(base64, mime)],
             is_error: false,
+            backend_id: None,
         }
     }
     /// Image + a one-line text caption (some clients prefer the caption for
@@ -108,6 +114,7 @@ impl ToolResult {
                 ContentBlock::text(caption),
             ],
             is_error: false,
+            backend_id: None,
         }
     }
 }

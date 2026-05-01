@@ -706,6 +706,7 @@ async fn run_evolve(
                 access_count: 0,
                 importance: 0.5,
                 status: "active".to_string(),
+                trigger_pattern: None,
             };
             store.memory_save(&rec).await?;
 
@@ -951,6 +952,7 @@ async fn run_evolve(
                     access_count: 0,
                     importance: 0.5,
                     status: "active".to_string(),
+                    trigger_pattern: None,
                 };
                 store.memory_save(&rec).await?;
             }
@@ -1152,6 +1154,7 @@ async fn run_memory(db_path: &std::path::Path, cmd: MemoryCmd) -> Result<()> {
                 access_count: 0,
                 importance: 0.5,
                 status: "active".to_string(),
+                trigger_pattern: None,
             };
             store.memory_save(&rec).await?;
             println!("✓ saved {key}");

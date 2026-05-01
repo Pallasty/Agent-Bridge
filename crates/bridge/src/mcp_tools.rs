@@ -1650,7 +1650,8 @@ impl McpTool for MemorySaveTool {
                     "tags":         { "type": "array", "items": { "type": "string" }, "default": [] },
                     "related_keys": { "type": "array", "items": { "type": "string" }, "default": [] },
                     "scope":        { "type": "string", "description": "Visibility: omit/global=everywhere, project:/abs/path=cwd-scoped, domain:rust=tech-domain." },
-                    "importance":   { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Override importance (0.0–1.0). Omit to auto-assign from kind: decision=0.8, lesson=0.7, todo=0.6, fact=0.5, observation=0.3." }
+                    "importance":   { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Override importance (0.0–1.0). Omit to auto-assign from kind: decision=0.8, lesson=0.7, todo=0.6, fact=0.5, observation=0.3." },
+                    "trigger_pattern": { "type": "string", "description": "For kind=error_pattern: surfacing when session_bootstrap `error_hint` contains this substring (case-insensitive)." }
                 },
                 "required": ["key", "kind", "content"]
             }),
@@ -1704,6 +1705,12 @@ impl McpTool for MemorySaveTool {
             .unwrap_or(0.5)
             .clamp(0.0, 1.0);
 
+        let trigger_pattern = args
+            .get("trigger_pattern")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
         let mem = MemoryRecord {
             key: key.clone(),
             kind,
@@ -1717,6 +1724,7 @@ impl McpTool for MemorySaveTool {
             access_count: 0,
             importance,
             status: "active".to_string(),
+            trigger_pattern,
         };
         match store.memory_save(&mem).await {
             Ok(()) => {
@@ -2410,6 +2418,29 @@ impl McpTool for MemoryNeighborsTool {
     }
 }
 
+fn format_bootstrap_memory_rows(rows: &[MemoryRecord], snippet_len: usize) -> Vec<String> {
+    rows.iter()
+        .map(|r| {
+            let tags = if r.tags.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", r.tags.join(", "))
+            };
+            let snippet: String = r.content.chars().take(snippet_len).collect();
+            let ellipsis = if r.content.chars().count() > snippet_len {
+                "…"
+            } else {
+                ""
+            };
+            let imp_marker = if r.importance >= 0.7 { "★" } else { "" };
+            format!(
+                "[{}] {}{}{}: {}{}",
+                r.kind, r.key, imp_marker, tags, snippet, ellipsis
+            )
+        })
+        .collect()
+}
+
 pub struct SessionBootstrapTool {
     hub: Hub,
 }
@@ -2443,6 +2474,10 @@ impl McpTool for SessionBootstrapTool {
                         "enum": ["claude-code", "cursor", "warp", "auto"],
                         "default": "auto",
                         "description": "Output format: 'cursor'/'warp' for compact, 'claude-code' for full, 'auto' detects from env."
+                    },
+                    "error_hint": {
+                        "type": "string",
+                        "description": "Optional error text (e.g. last command stderr). When set, surfaces active kind=error_pattern memories whose non-empty trigger_pattern appears as a substring in this hint (case-insensitive)."
                     }
                 }
             }),
@@ -2483,6 +2518,47 @@ impl McpTool for SessionBootstrapTool {
             _ => detect_frontend() != "claude-code" && detect_frontend() != "unknown",
         };
 
+        let snippet_len = if is_compact { 80 } else { 120 };
+
+        let error_hint = args
+            .get("error_hint")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        let mut error_section: Vec<String> = Vec::new();
+        if let Some(hint) = error_hint {
+            let hint_lc = hint.to_lowercase();
+            let ep_rows = store
+                .list_memories_in_scope(
+                    &cwd,
+                    Some("error_pattern"),
+                    MemoryListSort::ByImportance,
+                    80,
+                )
+                .await?;
+            let ep_rows: Vec<_> = ep_rows
+                .into_iter()
+                .filter(|r| r.status == "active")
+                .filter(|r| {
+                    r.trigger_pattern.as_ref().is_some_and(|p| {
+                        let pl = p.trim().to_lowercase();
+                        !pl.is_empty() && hint_lc.contains(&pl)
+                    })
+                })
+                .collect();
+            if !ep_rows.is_empty() {
+                error_section.push(if is_compact {
+                    "=== Error patterns (hint) ===".to_string()
+                } else {
+                    "=== Error patterns (matched error_hint) ===".to_string()
+                });
+                error_section.push(String::new());
+                error_section.extend(format_bootstrap_memory_rows(&ep_rows, snippet_len));
+                error_section.push(String::new());
+            }
+        }
+
         let rows = store
             .list_memories_in_scope(&cwd, None, MemoryListSort::ByImportance, limit)
             .await?;
@@ -2492,7 +2568,7 @@ impl McpTool for SessionBootstrapTool {
         let rows: Vec<_> = rows.into_iter().filter(|r| r.status == "active").collect();
         let rows = prioritize_session_handoff(rows);
 
-        if rows.is_empty() {
+        if rows.is_empty() && error_section.is_empty() {
             let lifecycle_hint = session_lifecycle_hint();
             return Ok(ToolResult::text(format!(
                 "(no scoped memories yet)\n\n{lifecycle_hint}"
@@ -2510,25 +2586,8 @@ impl McpTool for SessionBootstrapTool {
             ]
         };
 
-        let snippet_len = if is_compact { 80 } else { 120 };
-        for r in &rows {
-            let tags = if r.tags.is_empty() {
-                String::new()
-            } else {
-                format!(" [{}]", r.tags.join(", "))
-            };
-            let snippet: String = r.content.chars().take(snippet_len).collect();
-            let ellipsis = if r.content.chars().count() > snippet_len {
-                "…"
-            } else {
-                ""
-            };
-            let imp_marker = if r.importance >= 0.7 { "★" } else { "" };
-            lines.push(format!(
-                "[{}] {}{}{}: {}{}",
-                r.kind, r.key, imp_marker, tags, snippet, ellipsis
-            ));
-        }
+        lines.extend(error_section);
+        lines.extend(format_bootstrap_memory_rows(&rows, snippet_len));
         lines.push("=== End Bootstrap ===".to_string());
         lines.push(String::new());
         lines.push(session_lifecycle_hint());

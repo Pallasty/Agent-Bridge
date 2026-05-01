@@ -44,6 +44,15 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 - **`project_detect`** / **`changes_digest`** MCP tools — filesystem manifest scan
   (`Cargo.toml` via `cargo metadata`, `package.json`, Python/Go/Make markers) plus
   structured git diff summaries (`git diff --numstat` / `--name-status`). DESIGN W2.
+- **Global MCP `backend_id` diagnostics** — all `tools/call` responses now include a
+  top-level `backend_id` object (`terminal`, `browser`, `agent_runtime`, `memory`),
+  injected centrally by the stdio MCP server for both success and tool-error results.
+- **`AGENT_BRIDGE_DB` override in bridge runtime** — `agent-bridge mcp` / daemon can
+  use an explicit SQLite path instead of platform default `state.db`, enabling
+  isolated end-to-end verification runs without mutating the main memory store.
+- **`scripts/verify_warp_integration.sh`** — W8-style integration smoke script that
+  validates lifecycle bootstrap, perception tools, structured handoff, plan
+  save/load/update, Warp status, agent messaging, and per-response `backend_id`.
 
 ## [0.9.2] — 2026-04-28
 

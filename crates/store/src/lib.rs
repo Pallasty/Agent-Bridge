@@ -87,6 +87,10 @@ pub struct MemoryRecord {
     /// auto-detected as replacing this one.
     #[serde(default = "default_status")]
     pub status: String,
+    /// When `kind == error_pattern`, optional substring to match against
+    /// `session_bootstrap`'s `error_hint` (case-insensitive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_pattern: Option<String>,
 }
 
 fn default_importance() -> f64 {
@@ -516,6 +520,7 @@ mod session_handoff_order_tests {
             access_count: 0,
             importance: 0.5,
             status: "active".into(),
+            trigger_pattern: None,
         }
     }
 

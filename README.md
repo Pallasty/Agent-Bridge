@@ -148,6 +148,16 @@ After upgrading or changing Cursor/Warp MCP settings, smoke-test the stdio serve
 
 Requires `agent-bridge` on `PATH` or `~/.local/bin/agent-bridge`.
 
+For W8 integration coverage (Warp-first roadmap), run:
+
+```bash
+./scripts/verify_warp_integration.sh
+```
+
+This validates end-to-end MCP calls for `capabilities`, lifecycle bootstrap,
+`project_detect`, `changes_digest`, `session_handoff`, plan persistence,
+`warp_status`, and `agent_message`/`agent_inbox`.
+
 For profile tuning/regression on a real session transcript, run:
 
 ```bash
@@ -263,6 +273,27 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 
 ---
 
+### MCP response diagnostics
+
+Every `tools/call` response now includes a top-level `backend_id` object for
+support logging and environment diagnostics:
+
+```json
+{
+  "backend_id": {
+    "terminal": "wezterm",
+    "browser": "chromium-cdp",
+    "agent_runtime": "claude-code",
+    "memory": "sqlite"
+  }
+}
+```
+
+This metadata is injected by the MCP stdio server on both success and
+tool-error results.
+
+---
+
 ## Architecture
 
 ```
@@ -302,6 +333,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 |----------|---------|--------|
 | `AGENT_BRIDGE_SOCKET` | `$XDG_RUNTIME_DIR/agent-bridge/bridge.sock` | Override socket path |
 | `AGENT_BRIDGE_REPO` | `$PWD` | Repo for `worktree_*` tools |
+| `AGENT_BRIDGE_DB` | platform default `state.db` | Override SQLite DB path (useful for isolated integration tests) |
 | `AGENT_BRIDGE_HEADLESS` | (unset = headed) | `1` for headless Chromium |
 | `AGENT_BRIDGE_CHROME` | auto-detect | Path to chrome/chromium binary |
 | `AGENT_BRIDGE_CLAUDE_BIN` | `claude` | Override claude CLI path |

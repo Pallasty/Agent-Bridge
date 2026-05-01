@@ -25,6 +25,7 @@ pub async fn serve_stdio(
     store: Option<Arc<dyn StateStore>>,
     server_name: &str,
     version: &str,
+    tool_backend_id: Option<Value>,
 ) {
     info!(server = server_name, "MCP stdio server starting");
     let mut stdin = BufReader::new(tokio::io::stdin()).lines();
@@ -59,7 +60,15 @@ pub async fn serve_stdio(
             continue;
         }
 
-        let resp = handle(&registry, store.as_deref(), req, server_name, version).await;
+        let resp = handle(
+            &registry,
+            store.as_deref(),
+            req,
+            server_name,
+            version,
+            tool_backend_id.as_ref(),
+        )
+        .await;
         write_response(&mut stdout, &resp).await;
     }
 
@@ -72,6 +81,7 @@ async fn handle(
     req: McpRequest,
     server_name: &str,
     version: &str,
+    tool_backend_id: Option<&Value>,
 ) -> McpResponse {
     let id = req.id.clone().unwrap_or(Value::Null);
     debug!(method = %req.method, "dispatch");
@@ -135,14 +145,22 @@ async fn handle(
 
             let ctx = ToolContext::default();
             match tool.execute(args, &ctx).await {
-                Ok(result) => match serde_json::to_value(result) {
-                    Ok(v) => McpResponse::success(id, v),
-                    Err(e) => McpResponse::error(id, INTERNAL_ERROR, format!("serialize: {e}")),
-                },
+                Ok(mut result) => {
+                    if let Some(meta) = tool_backend_id {
+                        result.backend_id = Some(meta.clone());
+                    }
+                    match serde_json::to_value(result) {
+                        Ok(v) => McpResponse::success(id, v),
+                        Err(e) => McpResponse::error(id, INTERNAL_ERROR, format!("serialize: {e}")),
+                    }
+                }
                 Err(e) => {
                     warn!(tool = %name, error = %e, "tool execution failed");
-                    let err_result =
+                    let mut err_result =
                         crate::ToolResult::error(format!("tool '{name}' failed: {e}"));
+                    if let Some(meta) = tool_backend_id {
+                        err_result.backend_id = Some(meta.clone());
+                    }
                     match serde_json::to_value(err_result) {
                         Ok(v) => McpResponse::success(id, v),
                         Err(e2) => {

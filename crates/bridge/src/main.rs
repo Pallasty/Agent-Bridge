@@ -8,6 +8,8 @@ use ab_store::{default_db_path, SqliteStore, StateStore};
 use ab_terminal::{auto_backend, TerminalBackend, WarpBackend};
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
+use serde_json::json;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
@@ -129,10 +131,23 @@ async fn main() -> Result<()> {
             serve(&socket, Router::new(hub)).await
         }
         Cmd::Mcp => {
+            let tool_backend_id = json!({
+                "terminal": hub.terminal.as_ref().map(|t| t.id()).unwrap_or("none"),
+                "browser": hub.browser.as_ref().map(|b| b.id()).unwrap_or("none"),
+                "agent_runtime": hub.agent.as_ref().map(|a| a.id()).unwrap_or("none"),
+                "memory": if hub.store.is_some() { "sqlite" } else { "none" },
+            });
             let store = hub.store.clone();
             let registry = build_registry(hub);
             tracing::info!(tools = registry.list().len(), "starting MCP stdio server");
-            serve_stdio(registry, store, "agent-bridge", env!("CARGO_PKG_VERSION")).await;
+            serve_stdio(
+                registry,
+                store,
+                "agent-bridge",
+                env!("CARGO_PKG_VERSION"),
+                Some(tool_backend_id),
+            )
+            .await;
             Ok(())
         }
         Cmd::Setup { .. } => unreachable!(),
@@ -163,7 +178,14 @@ async fn build_hub() -> Result<Hub> {
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     compile_error!("agent-bridge requires Linux or macOS");
 
-    let store: Arc<dyn StateStore> = Arc::new(SqliteStore::open(&default_db_path()).await?);
+    let db_path = std::env::var("AGENT_BRIDGE_DB")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(default_db_path);
+    tracing::info!(path = %db_path.display(), "SQLite store");
+    let store: Arc<dyn StateStore> = Arc::new(SqliteStore::open(&db_path).await?);
     let terminal: Arc<dyn TerminalBackend> = auto_backend();
     tracing::info!(terminal_backend = %terminal.id(), "terminal backend selected");
     let browser: Arc<dyn BrowserBackend> = Arc::new(ChromiumCdpBackend::new());

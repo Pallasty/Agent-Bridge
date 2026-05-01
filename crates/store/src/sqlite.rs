@@ -199,6 +199,11 @@ CREATE TABLE IF NOT EXISTS agent_messages (
 CREATE INDEX IF NOT EXISTS idx_agent_messages_to ON agent_messages(to_session, created_at DESC);
 "#;
 
+// W7: optional substring for kind=error_pattern (session_bootstrap `error_hint` matching)
+const SCHEMA_V11: &str = r#"
+ALTER TABLE memories ADD COLUMN trigger_pattern TEXT;
+"#;
+
 // v1.0: importance score + status column for cognitive memory
 const SCHEMA_V7: &str = r#"
 ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5;
@@ -451,6 +456,29 @@ impl SqliteStore {
                 c.execute_batch(SCHEMA_V10)?;
                 let _ = c.execute("UPDATE schema_meta SET value='10' WHERE key='version'", []);
             }
+
+            // ── v11: memories.trigger_pattern (W7) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "10".to_string());
+            if cur.as_str() == "10" {
+                let has_col: bool = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name='trigger_pattern'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .unwrap_or(0)
+                    > 0;
+                if !has_col {
+                    c.execute_batch(SCHEMA_V11)?;
+                }
+                let _ = c.execute("UPDATE schema_meta SET value='11' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -525,6 +553,7 @@ fn importance_for_kind(kind: &str) -> f64 {
     match kind {
         "decision" | "architecture" | "design" => 0.8,
         "lesson" | "bug" | "fix" | "pitfall" => 0.7,
+        "error_pattern" => 0.72,
         "todo" | "action" => 0.6,
         "fact" | "context" | "preference" | "session_handoff" => 0.5,
         "observation" | "note" => 0.3,
@@ -852,6 +881,11 @@ impl StateStore for SqliteStore {
         } else {
             mem.status.clone()
         };
+        let trigger_pattern = mem
+            .trigger_pattern
+            .clone()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         let now = now_secs();
 
         // Pre-compute overlap tokens for contradiction detection (outside closure).
@@ -864,8 +898,8 @@ impl StateStore for SqliteStore {
                     "INSERT INTO memories
                        (key, kind, content, tags, related_keys, scope,
                         created_at, updated_at, last_accessed_at, access_count,
-                        importance, status)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9)
+                        importance, status, trigger_pattern)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10)
                      ON CONFLICT(key) DO UPDATE SET
                         kind          = excluded.kind,
                         content       = excluded.content,
@@ -877,9 +911,19 @@ impl StateStore for SqliteStore {
                         status        = CASE
                             WHEN memories.status = 'superseded' THEN 'active'
                             ELSE excluded.status
-                        END",
+                        END,
+                        trigger_pattern = excluded.trigger_pattern",
                     params![
-                        key, kind_clone, content, tags, related, scope, now, importance, status
+                        key,
+                        kind_clone,
+                        content,
+                        tags,
+                        related,
+                        scope,
+                        now,
+                        importance,
+                        status,
+                        trigger_pattern
                     ],
                 )?;
 
@@ -939,7 +983,7 @@ impl StateStore for SqliteStore {
                 let mut stmt = c.prepare(
                     "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count,
-                            importance, status
+                            importance, status, trigger_pattern
                      FROM memories WHERE key = ?1",
                 )?;
                 let r = stmt
@@ -961,6 +1005,7 @@ impl StateStore for SqliteStore {
                             status: row
                                 .get::<_, String>(11)
                                 .unwrap_or_else(|_| "active".to_string()),
+                            trigger_pattern: row.get::<_, Option<String>>(12)?,
                         })
                     })
                     .ok();
@@ -1014,7 +1059,7 @@ impl StateStore for SqliteStore {
                     "SELECT m.key, m.kind, m.content, m.tags, m.related_keys, m.scope,
                             m.created_at, m.updated_at, m.last_accessed_at, m.access_count,
                             bm25(memories_fts) AS bm25_score,
-                            m.importance, m.status
+                            m.importance, m.status, m.trigger_pattern
                      FROM memories_fts
                      JOIN memories m ON m.rowid = memories_fts.rowid
                      WHERE memories_fts MATCH ?1
@@ -1040,6 +1085,7 @@ impl StateStore for SqliteStore {
                             status: row
                                 .get::<_, String>(12)
                                 .unwrap_or_else(|_| "active".to_string()),
+                            trigger_pattern: row.get::<_, Option<String>>(13)?,
                         };
                         let bm25: f64 = row.get(10)?;
                         Ok((rec, bm25))
@@ -1067,7 +1113,7 @@ impl StateStore for SqliteStore {
                     let mut exact_stmt = c.prepare(
                         "SELECT key, kind, content, tags, related_keys, scope,
                                 created_at, updated_at, last_accessed_at, access_count,
-                                importance, status
+                                importance, status, trigger_pattern
                          FROM memories
                          WHERE key = ?1 COLLATE NOCASE
                          LIMIT 1",
@@ -1091,6 +1137,7 @@ impl StateStore for SqliteStore {
                                 status: row
                                     .get::<_, String>(11)
                                     .unwrap_or_else(|_| "active".to_string()),
+                                trigger_pattern: row.get::<_, Option<String>>(12)?,
                             })
                         })
                         .ok()
@@ -1285,7 +1332,7 @@ impl StateStore for SqliteStore {
                 let sql = format!(
                     "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count,
-                            importance, status
+                            importance, status, trigger_pattern
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
                        AND (?3 IS NULL
@@ -1317,6 +1364,7 @@ impl StateStore for SqliteStore {
                             status: row
                                 .get::<_, String>(11)
                                 .unwrap_or_else(|_| "active".to_string()),
+                            trigger_pattern: row.get::<_, Option<String>>(12)?,
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1616,7 +1664,7 @@ impl StateStore for SqliteStore {
                 let mut stmt = c.prepare(
                     "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count,
-                            importance, status
+                            importance, status, trigger_pattern
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
                        AND (?2 IS NULL OR updated_at >= ?2)
@@ -1641,6 +1689,7 @@ impl StateStore for SqliteStore {
                             status: row
                                 .get::<_, String>(11)
                                 .unwrap_or_else(|_| "active".to_string()),
+                            trigger_pattern: row.get::<_, Option<String>>(12)?,
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1724,6 +1773,11 @@ impl StateStore for SqliteStore {
                     } else {
                         r.status.as_str()
                     };
+                    let trig = r
+                        .trigger_pattern
+                        .clone()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty());
                     match existing {
                         None => {
                             // Brand-new row — insert with the imported timestamps verbatim.
@@ -1731,8 +1785,8 @@ impl StateStore for SqliteStore {
                                 "INSERT INTO memories
                                    (key, kind, content, tags, related_keys, scope,
                                     created_at, updated_at, last_accessed_at, access_count,
-                                    importance, status)
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                                    importance, status, trigger_pattern)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                                 params![
                                     r.key,
                                     r.kind,
@@ -1746,6 +1800,7 @@ impl StateStore for SqliteStore {
                                     r.access_count as i64,
                                     imp,
                                     stat,
+                                    trig,
                                 ],
                             )?;
                             report.inserted += 1;
@@ -1761,7 +1816,8 @@ impl StateStore for SqliteStore {
                                     "UPDATE memories SET
                                         kind = ?2, content = ?3, tags = ?4, related_keys = ?5,
                                         scope = ?6, updated_at = ?7, last_accessed_at = ?8,
-                                        access_count = ?9, importance = ?10, status = ?11
+                                        access_count = ?9, importance = ?10, status = ?11,
+                                        trigger_pattern = ?12
                                      WHERE key = ?1",
                                     params![
                                         r.key,
@@ -1775,6 +1831,7 @@ impl StateStore for SqliteStore {
                                         r.access_count as i64,
                                         imp,
                                         stat,
+                                        trig,
                                     ],
                                 )?;
                                 report.updated += 1;
@@ -2293,6 +2350,7 @@ mod tests {
             access_count: 0,
             importance: 0.5,
             status: "active".to_string(),
+            trigger_pattern: None,
         };
         store.memory_save(&rec).await.expect("memory_save");
 
@@ -2311,5 +2369,45 @@ mod tests {
             .await
             .expect("list_memories");
         assert!(!list.is_empty());
+    }
+
+    #[tokio::test]
+    async fn memory_trigger_pattern_roundtrip() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-trigger-pat-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path)
+            .await
+            .expect("open sqlite store");
+
+        let rec = MemoryRecord {
+            key: "errpat_demo_signal_exit".to_string(),
+            kind: "error_pattern".to_string(),
+            content: "avoid SIGKILL during cargo test; use timeout".to_string(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: Some("SIGKILL".to_string()),
+        };
+        store.memory_save(&rec).await.expect("memory_save");
+        let loaded = store
+            .memory_get("errpat_demo_signal_exit")
+            .await
+            .expect("memory_get")
+            .expect("row");
+        assert_eq!(loaded.trigger_pattern.as_deref(), Some("SIGKILL"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 }
