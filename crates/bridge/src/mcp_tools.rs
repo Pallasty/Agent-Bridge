@@ -28,6 +28,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::process::Command as TokioCommand;
 
 use crate::context_budget::{budget_recommendation, estimated_usage_tokens, model_context_limit};
 use crate::hub::Hub;
@@ -436,6 +437,159 @@ impl McpTool for TerminalReadOutputTool {
             }))),
             Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
         }
+    }
+}
+
+// ===========================================================================
+//                              shell_exec tool
+// ===========================================================================
+
+const SHELL_EXEC_TRUNCATE_BYTES: usize = 131_072; // 128 KB
+
+pub struct ShellExecTool;
+
+impl ShellExecTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for ShellExecTool {
+    fn name(&self) -> &'static str {
+        "shell_exec"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Run a shell command synchronously and return its exit code, stdout, \
+                 stderr, and wall-clock duration. Unlike terminal_send_keys this captures \
+                 output directly — no PTY or scrollback parsing needed. \
+                 stdout/stderr are truncated at 128 KB; check `truncated` flag. \
+                 Default timeout: 30 s. Max timeout: 300 s."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cmd": {
+                        "type": "string",
+                        "description": "Shell command to run (executed via sh -c)."
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Working directory. Defaults to the agent-bridge process cwd."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 300000,
+                        "default": 30000,
+                        "description": "Milliseconds before the process is killed."
+                    },
+                    "env": {
+                        "type": "object",
+                        "description": "Extra environment variables to inject (string keys + values).",
+                        "additionalProperties": { "type": "string" }
+                    }
+                },
+                "required": ["cmd"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let cmd = match args.get("cmd").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => return Ok(ToolResult::error("missing or empty 'cmd'")),
+        };
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30_000)
+            .clamp(1_000, 300_000);
+
+        let mut child = {
+            let mut builder = TokioCommand::new("sh");
+            builder.arg("-c").arg(&cmd);
+            builder.stdout(std::process::Stdio::piped());
+            builder.stderr(std::process::Stdio::piped());
+            if let Some(cwd) = args.get("cwd").and_then(|v| v.as_str()) {
+                builder.current_dir(cwd);
+            }
+            if let Some(env_map) = args.get("env").and_then(|v| v.as_object()) {
+                for (k, v) in env_map {
+                    if let Some(val) = v.as_str() {
+                        builder.env(k, val);
+                    }
+                }
+            }
+            match builder.spawn() {
+                Ok(c) => c,
+                Err(e) => return Ok(ToolResult::error(format!("spawn failed: {e}"))),
+            }
+        };
+
+        let started = Instant::now();
+        let deadline = Duration::from_millis(timeout_ms);
+
+        // Drain stdout + stderr in background tasks so the process doesn't block on full pipes.
+        use tokio::io::AsyncReadExt as _;
+        let mut stdout_pipe = child.stdout.take().expect("stdout piped");
+        let mut stderr_pipe = child.stderr.take().expect("stderr piped");
+        let stdout_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let _ = stdout_pipe.read_to_end(&mut buf).await;
+            buf
+        });
+        let stderr_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let _ = stderr_pipe.read_to_end(&mut buf).await;
+            buf
+        });
+
+        let timed_out = tokio::time::timeout(deadline, child.wait()).await;
+        let duration_ms = started.elapsed().as_millis() as u64;
+
+        let exit_code = match timed_out {
+            Err(_) => {
+                child.start_kill().ok();
+                stdout_task.abort();
+                stderr_task.abort();
+                return Ok(ToolResult::json_text(&json!({
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": format!("killed after {timeout_ms} ms timeout"),
+                    "duration_ms": duration_ms,
+                    "truncated": false
+                })));
+            }
+            Ok(Err(e)) => return Ok(ToolResult::error(format!("wait failed: {e}"))),
+            Ok(Ok(status)) => status.code().unwrap_or(-1),
+        };
+
+        let stdout_bytes = stdout_task.await.unwrap_or_default();
+        let stderr_bytes = stderr_task.await.unwrap_or_default();
+        let (stdout_str, stdout_truncated) = lossy_truncate(&stdout_bytes);
+        let (stderr_str, stderr_truncated) = lossy_truncate(&stderr_bytes);
+
+        Ok(ToolResult::json_text(&json!({
+            "exit_code": exit_code,
+            "stdout": stdout_str,
+            "stderr": stderr_str,
+            "duration_ms": duration_ms,
+            "truncated": stdout_truncated || stderr_truncated
+        })))
+    }
+}
+
+fn lossy_truncate(bytes: &[u8]) -> (String, bool) {
+    if bytes.len() <= SHELL_EXEC_TRUNCATE_BYTES {
+        (String::from_utf8_lossy(bytes).into_owned(), false)
+    } else {
+        let s = String::from_utf8_lossy(&bytes[..SHELL_EXEC_TRUNCATE_BYTES]).into_owned();
+        (
+            format!("{s}\n[... truncated at {} KB]", SHELL_EXEC_TRUNCATE_BYTES / 1024),
+            true,
+        )
     }
 }
 
@@ -5516,6 +5670,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(TerminalSendKeysTool::new(hub.clone())));
     reg.register(Arc::new(TerminalReadOutputTool::new(hub.clone())));
     reg.register(Arc::new(TerminalSplitTool::new(hub.clone())));
+    reg.register(Arc::new(ShellExecTool::new()));
     // Browser surface
     reg.register(Arc::new(BrowserNavigateTool::new(hub.clone())));
     reg.register(Arc::new(BrowserEvalTool::new(hub.clone())));
