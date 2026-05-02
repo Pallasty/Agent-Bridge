@@ -277,13 +277,13 @@ print(f"OK: agent_message + agent_inbox ({len(rows)} row(s))")
 # terminal_list — always runs; result depends on whether Warp IPC socket is live
 tl = parse_inner_json(by_id[21]["result"], "terminal_list")
 # capabilities already fetched above; re-parse for warp_ipc_socket_ready
-warp_ipc_ready = caps.get("terminal", {}).get("warp_ipc_socket_ready", False)
+# warp_ipc_socket_ready is nested under terminal.capabilities in the response
+warp_ipc_ready = caps.get("terminal", {}).get("capabilities", {}).get("warp_ipc_socket_ready", False)
 if warp_ipc_ready:
-    sessions = tl.get("sessions")
-    if not isinstance(sessions, list):
-        print(f"FAIL: terminal_list with live IPC should return sessions list: {tl!r}", file=sys.stderr)
+    if not isinstance(tl, list):
+        print(f"FAIL: terminal_list with live IPC should return a list: {tl!r}", file=sys.stderr)
         sys.exit(1)
-    print(f"OK: terminal_list via Warp IPC — {len(sessions)} session(s) active")
+    print(f"OK: terminal_list via Warp IPC — {len(tl)} session(s) active")
 else:
     import os
     sock_path = os.path.join(

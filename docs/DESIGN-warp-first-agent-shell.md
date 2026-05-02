@@ -462,27 +462,27 @@ error patterns in the bootstrap block.
 
 ### Phase A gate (end of W3)
 
-- ✅ `terminal_read_output` works on Zellij + WezTerm + Kitty
-- ⬜ `terminal_read_output` works on Warp (IPC server merged to fork; E2E smoke pending Warp fork binary build)
-- ✅ `project_detect` correctly identifies Rust/Node/Python/Go projects
-- ✅ `changes_digest` produces structured JSON for all scopes
-- ✅ `session_handoff` returns a machine-readable brief with git + memory data
-- ✅ `session_lifecycle_step` dispatches all three phases
+- `terminal_read_output` works on Zellij + WezTerm + Kitty
+- `terminal_read_output` works on Warp (IPC server in Warp + E2E smoke)
+- `project_detect` correctly identifies Rust/Node/Python/Go projects
+- `changes_digest` produces structured JSON for all scopes
+- `session_handoff` returns a machine-readable brief with git + memory data
+- `session_lifecycle_step` dispatches all three phases
 
 ### Phase B gate (end of W5)
 
-- ✅ `warp_*` tools work from inside Warp terminal (`warp_status`, `warp_open_tab`, `warp_open_window`, `warp_launch_workflow` verified via xdg-open URI dispatch)
-- ✅ `plan_save/load/update` persists across sessions
-- ✅ `context_budget` returns estimates within 15% for code/prose/markdown (multi-class heuristic; recalibrated 2026-05-01)
+- `warp`_* tools work from inside Warp terminal
+- `plan_save/load/update` persists across sessions
+- `context_budget` returns estimates within 15% of actual token count
 
 ### Phase C gate (end of W8)
 
-- ✅ `browser_extract_text` and `browser_fill_form` available
-- ✅ `agent_message` + `agent_inbox` enable basic two-agent coordination
-- ✅ Error patterns surfaced in `session_bootstrap` output
-- ✅ `scripts/verify_warp_integration.sh` covers all new tools (incl. IPC socket check)
-- ✅ README "Warp-first" section documents full 50+ tool matrix
-- ✅ All tool responses include `backend_id` for diagnostics
+- `browser_extract_text` and `browser_fill_form` available
+- `agent_message` + `agent_inbox` enable basic two-agent coordination
+- Error patterns surfaced in `session_bootstrap` output
+- `scripts/verify_warp_integration.sh` covers all new tools
+- README "Warp-first" section documents full 50+ tool matrix
+- All tool responses include `backend_id` for diagnostics
 
 ### Future (Phase D, W9+)
 

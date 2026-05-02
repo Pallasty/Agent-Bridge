@@ -300,8 +300,11 @@ impl McpTool for TerminalSendKeysTool {
             Some(s) => PaneId::from_raw(s.to_string()),
             None => return Ok(ToolResult::error("missing 'pane'")),
         };
-        let keys = args.get("keys").and_then(|v| v.as_str()).unwrap_or("");
-        match term.send_keys(&pane, keys).await {
+        let raw = args.get("keys").and_then(|v| v.as_str()).unwrap_or("");
+        // Callers write escape sequences as literal text (e.g. \n, \r, \x1b).
+        // Unescape them so the PTY receives the actual control bytes.
+        let keys = unescape_keys(raw);
+        match term.send_keys(&pane, &keys).await {
             Ok(()) => Ok(ToolResult::text(format!(
                 "sent {} bytes to {pane}",
                 keys.len()
@@ -5591,4 +5594,41 @@ fn parse_severity(s: &str) -> Option<NotifySeverity> {
         "attention" => NotifySeverity::Attention,
         _ => return None,
     })
+}
+
+/// Process escape sequences in `terminal_send_keys` input so callers can write
+/// `\n`, `\r`, `\t`, `\x1b` as literal text and have them arrive as real bytes.
+fn unescape_keys(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('n')  => out.push('\n'),
+            Some('r')  => out.push('\r'),
+            Some('t')  => out.push('\t'),
+            Some('\\') => out.push('\\'),
+            // \x1b → ESC, \x<HH> → single byte
+            Some('x') => {
+                let h1 = chars.next();
+                let h2 = chars.next();
+                if let (Some(a), Some(b)) = (h1, h2) {
+                    if let Ok(byte) = u8::from_str_radix(&format!("{a}{b}"), 16) {
+                        out.push(byte as char);
+                        continue;
+                    }
+                    // not valid hex — emit literally
+                    out.push('\\'); out.push('x');
+                    if let Some(a) = h1 { out.push(a); }
+                    if let Some(b) = h2 { out.push(b); }
+                }
+            }
+            Some(other) => { out.push('\\'); out.push(other); }
+            None        => out.push('\\'),
+        }
+    }
+    out
 }
