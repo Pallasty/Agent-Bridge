@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod sqlite;
 pub use sqlite::{default_db_path, temporal_bonus, weight_for_edge_type, SqliteStore};
+pub mod vector;
+pub use vector::{cosine_similarity, decode_embedding, embed_text, encode_embedding, VECTOR_DIM};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredSession {
@@ -455,6 +457,16 @@ pub trait StateStore: Send + Sync {
     /// Return aggregate statistics about the memory store.
     /// Intended for `memory_stats` MCP tool and session-curate diagnostics.
     async fn memory_stats(&self) -> Result<MemoryStats>;
+
+    /// Semantic search: embed `query` via feature hashing, load all stored
+    /// embeddings, return memories ranked by cosine similarity ≥ `threshold`.
+    /// Falls back gracefully when no embeddings are stored yet.
+    async fn memory_search_semantic(
+        &self,
+        query: &str,
+        limit: u32,
+        threshold: f32,
+    ) -> Result<Vec<MemorySearchHit>>;
 
     // ─── v8: cloud-run lifecycle helpers (warp-oz) ──────────────────
 

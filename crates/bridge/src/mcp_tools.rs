@@ -1969,24 +1969,26 @@ impl McpTool for MemorySearchTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Search memories by keyword (FTS5) with optional graph-neighbor expansion. \
-                 Two modes: \
+            description: "Search memories by keyword or semantic similarity. \
+                 Three modes: \
                  (1) mode='fts' (default): FTS5 full-text search ranked by bm25 + recency + importance. \
                  (2) mode='hybrid': FTS5 results expanded via graph neighbors, fused with \
                  Reciprocal Rank Fusion (RRF k=60). Surfaces memories connected to top hits \
                  even if they don't contain the query keyword. \
-                 Results always exclude archived/superseded memories. \
-                 Use 'hybrid' when you want broader discovery; 'fts' when you need precision."
+                 (3) mode='semantic': cosine similarity over local feature-hash embeddings — \
+                 finds near-synonym matches that keyword search misses (e.g. 'IPC socket' \
+                 finds 'Unix socket connection'). No external API required. \
+                 Results always exclude archived/superseded memories."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "query":      { "type": "string", "description": "Search query (FTS5 match syntax supported)." },
+                    "query":      { "type": "string", "description": "Search query (FTS5 match syntax for fts/hybrid; natural language for semantic)." },
                     "tags_any":   { "type": "array", "items": { "type": "string" }, "default": [] },
                     "limit":      { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 },
                     "mode":       {
-                        "type": "string", "enum": ["fts", "hybrid"], "default": "fts",
-                        "description": "'fts' = keyword only; 'hybrid' = FTS5 + graph RRF fusion."
+                        "type": "string", "enum": ["fts", "hybrid", "semantic"], "default": "fts",
+                        "description": "'fts' = keyword BM25; 'hybrid' = FTS5 + graph RRF fusion; 'semantic' = cosine similarity."
                     },
                     "expand_top": {
                         "type": "integer", "minimum": 1, "maximum": 20, "default": 10,
@@ -1995,6 +1997,10 @@ impl McpTool for MemorySearchTool {
                     "rrf_k":      {
                         "type": "number", "minimum": 1.0, "maximum": 200.0, "default": 60.0,
                         "description": "[hybrid only] RRF constant k. Higher k = less rank compression."
+                    },
+                    "threshold":  {
+                        "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.3,
+                        "description": "[semantic only] Minimum cosine similarity to include. 0.3 = broad, 0.7 = tight."
                     }
                 },
                 "required": ["query"]
@@ -2040,6 +2046,15 @@ impl McpTool for MemorySearchTool {
                 .clamp(1.0, 200.0);
             store
                 .memory_search_hybrid(&q, &tags, limit, rrf_k, expand_top)
+                .await?
+        } else if mode == "semantic" {
+            let threshold = args
+                .get("threshold")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.3)
+                .clamp(0.0, 1.0) as f32;
+            store
+                .memory_search_semantic(&q, limit, threshold)
                 .await?
         } else {
             store.memory_search(&q, &tags, limit).await?
@@ -2742,6 +2757,16 @@ impl McpTool for SessionBootstrapTool {
                 String::new(),
             ]
         };
+
+        // Inject USER.md profile if present.
+        if let Ok(profile) = std::fs::read_to_string(user_profile_path()) {
+            if !profile.trim().is_empty() {
+                lines.push("=== User Profile ===".to_string());
+                lines.push(profile.trim().to_string());
+                lines.push("=== End User Profile ===".to_string());
+                lines.push(String::new());
+            }
+        }
 
         lines.extend(error_section);
         lines.extend(format_bootstrap_memory_rows(&rows, snippet_len));
@@ -3903,7 +3928,13 @@ impl McpTool for SessionFinalizeTool {
                         "type": "boolean", "default": false,
                         "description": "If true, skip the importance decay pass (compact still runs)."
                     },
-                    "export_path": { "type": "string", "description": "Optional JSONL export output path." }
+                    "export_path": { "type": "string", "description": "Optional JSONL export output path." },
+                    "user_profile": {
+                        "type": "string",
+                        "description": "Markdown text describing the user (name, role, expertise, preferences, focus). \
+                            Written to ~/.local/share/agent-bridge/USER.md and injected into \
+                            future session_bootstrap calls. Synthesize from the current session before calling."
+                    }
                 }
             }),
         }
@@ -3992,6 +4023,21 @@ impl McpTool for SessionFinalizeTool {
             }),
         };
 
+        // Optional: persist user profile to USER.md for future session_bootstrap.
+        let user_profile_written = if let Some(profile) = args.get("user_profile").and_then(|v| v.as_str()) {
+            if !profile.trim().is_empty() && !dry_run {
+                let path = user_profile_path();
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                std::fs::write(&path, profile.as_bytes()).is_ok()
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
         Ok(ToolResult::json_text(&json!({
             "dry_run": dry_run,
             "decay": {
@@ -4008,6 +4054,7 @@ impl McpTool for SessionFinalizeTool {
             "removed_keys": removed,
             "export": export_summary,
             "follow_up": follow_up,
+            "user_profile_written": user_profile_written,
         })))
     }
 }
@@ -5445,11 +5492,13 @@ fn warp_resolve_tab_window_path(raw: Option<&str>) -> Result<String> {
     }
 }
 
-pub struct WarpOpenTabTool;
+pub struct WarpOpenTabTool {
+    hub: Hub,
+}
 
 impl WarpOpenTabTool {
-    pub fn new(_hub: Hub) -> Self {
-        Self
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
     }
 }
 
@@ -5461,9 +5510,10 @@ impl McpTool for WarpOpenTabTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Open a new Warp tab via URI scheme (warp://action/new_tab). \
+            description: "Open a new Warp tab via URI scheme and return the new session's UUID. \
+                 Polls terminal_list for up to 3 s to detect the newly registered session. \
                  Optional `path` sets initial cwd (defaults to bridge process cwd). \
-                 Dispatches through AGENT_BRIDGE_WARP_OPENER (xdg-open / open)."
+                 Returns `session_id` (string) when detected, null otherwise."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -5480,12 +5530,46 @@ impl McpTool for WarpOpenTabTool {
         let raw = args.get("path").and_then(|v| v.as_str());
         let cwd = warp_resolve_tab_window_path(raw)?;
         let uri = warp_scheme_new_tab(Some(&cwd));
+
+        // Snapshot existing sessions so we can detect the new one.
+        let before: std::collections::HashSet<String> = if let Some(term) = &self.hub.terminal {
+            term.list_panes()
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|p| p.id.to_string())
+                .collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+
         dispatch_warp_scheme_uri(&uri)
             .await
             .map_err(|e| ab_core::Error::Backend(format!("warp_open_tab: {e}")))?;
-        Ok(ToolResult::json_text(
-            &json!({ "status": "ok", "uri": uri }),
-        ))
+
+        // Poll up to 3 s (20 × 150 ms) for a session UUID that was not in `before`.
+        let new_session_id: Option<String> = if let Some(term) = &self.hub.terminal {
+            let mut found = None;
+            for _ in 0..20 {
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                if let Ok(panes) = term.list_panes().await {
+                    if let Some(p) = panes.into_iter().find(|p| !before.contains(&p.id.to_string())) {
+                        found = Some(p.id.to_string());
+                        break;
+                    }
+                }
+            }
+            found
+        } else {
+            None
+        };
+
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "uri": uri,
+            "session_id": new_session_id,
+            "detected": new_session_id.is_some()
+        })))
     }
 }
 
@@ -5738,6 +5822,20 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(AgentInboxTool::new(hub.clone())));
     reg.register(Arc::new(MemoryAutoCurateTool::new(hub)));
     reg
+}
+
+/// Path to the persistent user profile document.
+/// Mirrors the state.db data directory: `$XDG_DATA_HOME/agent-bridge/USER.md`.
+fn user_profile_path() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        return PathBuf::from(xdg).join("agent-bridge").join("USER.md");
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home)
+            .join(".local/share/agent-bridge")
+            .join("USER.md");
+    }
+    PathBuf::from("./USER.md")
 }
 
 fn parse_severity(s: &str) -> Option<NotifySeverity> {

@@ -479,6 +479,31 @@ impl SqliteStore {
                 }
                 let _ = c.execute("UPDATE schema_meta SET value='11' WHERE key='version'", []);
             }
+
+            // ── v12: memories.embedding BLOB for local vector search ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "11".to_string());
+            if cur.as_str() == "11" {
+                let has_col: bool = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name='embedding'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .unwrap_or(0)
+                    > 0;
+                if !has_col {
+                    c.execute_batch(
+                        "ALTER TABLE memories ADD COLUMN embedding BLOB;",
+                    )?;
+                }
+                let _ = c.execute("UPDATE schema_meta SET value='12' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -888,6 +913,11 @@ impl StateStore for SqliteStore {
             .filter(|s| !s.is_empty());
         let now = now_secs();
 
+        // Pre-compute embedding (CPU-only, safe outside the async call closure).
+        let embedding_bytes = crate::vector::encode_embedding(
+            &crate::vector::embed_text(&content)
+        );
+
         // Pre-compute overlap tokens for contradiction detection (outside closure).
         let new_tokens = overlap_tokens(&content);
         let kind_clone = kind.clone();
@@ -898,8 +928,8 @@ impl StateStore for SqliteStore {
                     "INSERT INTO memories
                        (key, kind, content, tags, related_keys, scope,
                         created_at, updated_at, last_accessed_at, access_count,
-                        importance, status, trigger_pattern)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10)
+                        importance, status, trigger_pattern, embedding)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11)
                      ON CONFLICT(key) DO UPDATE SET
                         kind          = excluded.kind,
                         content       = excluded.content,
@@ -912,7 +942,8 @@ impl StateStore for SqliteStore {
                             WHEN memories.status = 'superseded' THEN 'active'
                             ELSE excluded.status
                         END,
-                        trigger_pattern = excluded.trigger_pattern",
+                        trigger_pattern = excluded.trigger_pattern,
+                        embedding     = excluded.embedding",
                     params![
                         key,
                         kind_clone,
@@ -923,7 +954,8 @@ impl StateStore for SqliteStore {
                         now,
                         importance,
                         status,
-                        trigger_pattern
+                        trigger_pattern,
+                        embedding_bytes
                     ],
                 )?;
 
@@ -1959,6 +1991,85 @@ impl StateStore for SqliteStore {
             .map_err(|e| Error::Backend(format!("memory_stats: {e}")))?;
 
         Ok(stats)
+    }
+
+    // ─── v12: semantic vector search ────────────────────────────────────
+
+    async fn memory_search_semantic(
+        &self,
+        query: &str,
+        limit: u32,
+        threshold: f32,
+    ) -> Result<Vec<MemorySearchHit>> {
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let query_vec = crate::vector::embed_text(query);
+        let limit_usize = limit as usize;
+        let now = now_secs();
+
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<(MemoryRecord, Vec<u8>)>> {
+                let mut stmt = c.prepare(
+                    "SELECT key, kind, content, tags, related_keys, scope,
+                            created_at, updated_at, last_accessed_at, access_count,
+                            importance, status, trigger_pattern, embedding
+                     FROM memories
+                     WHERE status = 'active' AND embedding IS NOT NULL",
+                )?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        let tags_s: String = row.get(3)?;
+                        let related_s: String = row.get(4)?;
+                        let rec = MemoryRecord {
+                            key: row.get(0)?,
+                            kind: row.get(1)?,
+                            content: row.get(2)?,
+                            tags: parse_str_array(&tags_s),
+                            related_keys: parse_str_array(&related_s),
+                            scope: row.get(5)?,
+                            created_at: row.get(6)?,
+                            updated_at: row.get(7)?,
+                            last_accessed_at: row.get(8)?,
+                            access_count: row.get::<_, i64>(9)? as u64,
+                            importance: row.get::<_, f64>(10).unwrap_or(0.5),
+                            status: row
+                                .get::<_, String>(11)
+                                .unwrap_or_else(|_| "active".to_string()),
+                            trigger_pattern: row.get::<_, Option<String>>(12)?,
+                        };
+                        let emb_bytes: Vec<u8> = row.get(13)?;
+                        Ok((rec, emb_bytes))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_search_semantic: {e}")))?;
+
+        let mut hits: Vec<MemorySearchHit> = rows
+            .into_iter()
+            .filter_map(|(rec, emb_bytes)| {
+                let stored_vec = crate::vector::decode_embedding(&emb_bytes);
+                if stored_vec.is_empty() {
+                    return None;
+                }
+                let cosine = crate::vector::cosine_similarity(&query_vec, &stored_vec);
+                if cosine < threshold {
+                    return None;
+                }
+                // Blend cosine similarity with recency / importance bonus.
+                let score = cosine as f64
+                    + 0.2 * rec.importance
+                    + 0.1 * memory_score(rec.last_accessed_at, rec.access_count, now);
+                Some(MemorySearchHit { record: rec, score })
+            })
+            .collect();
+
+        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        hits.truncate(limit_usize);
+        Ok(hits)
     }
 
     // ─── v8: cloud-run lifecycle (warp-oz) ──────────────────────────────
