@@ -88,4 +88,5 @@
 | A | **已完成**（2026-05-02）：README「Memory search / embeddings」、`ab_ai_bridge_feedback_v1.jsonl`、`AGENT-BRIDGE-EVOLUTION-CORE` §8.2 互链 |
 | B | **已完成**：`memory_export` / `memory_import` 可选 companion `MemoryEdgeExport` JSONL（双文件对称）+ 集成测试 |
 | C | **已完成**：`mcp_tool_errors` 表 + stdio `tools/call` 失败写入 + MCP `mcp_recent_errors` |
-| D2–E | 未启动；按上表顺序在后续 PR 推进 |
+| D2 | **已完成**（2026-05-03）：`docs/FRONTEND-MATRIX.md` — 多前端行为矩阵（工具可用性、安全策略、启动序列、已知差异）；`capabilities` 工具加 `security` 节 |
+| E | **已完成**（2026-05-03）：`crates/bridge/src/security.rs` — `SecurityPolicy` + `Cap` enum；`Hub.security` 字段；`shell_exec` / `agent_spawn` / `terminal_send_keys` / `terminal_split` / `browser_navigate` 加门控检查；env vars: `AB_ALLOW_*` + `AB_SHELL_EXEC_TIMEOUT_MAX` |

@@ -3834,7 +3834,8 @@ impl McpTool for CapabilitiesTool {
             name: self.name().into(),
             description: "Return what the agent-bridge backend can do in this environment: \
                  terminal backend, browser availability, memory store status, \
-                 configured hooks, detected frontend, and binary version. \
+                 configured hooks, detected frontend, security policy (which high-risk \
+                 tools are enabled/disabled), and binary version. \
                  Call once at session start to avoid wasting tokens on unavailable features."
                 .into(),
             input_schema: json!({ "type": "object", "properties": {} }),
@@ -3917,6 +3918,7 @@ impl McpTool for CapabilitiesTool {
         // Version from binary
         let version = env!("CARGO_PKG_VERSION");
 
+        let sec = &self.hub.security;
         Ok(ToolResult::json_text(&json!({
             "terminal": {
                 "backend": terminal_id,
@@ -3946,6 +3948,14 @@ impl McpTool for CapabilitiesTool {
             "hooks": {
                 "configured": configured_hooks,
                 "frontend": frontend
+            },
+            "security": {
+                "shell_exec": sec.allow_shell_exec,
+                "agent_spawn": sec.allow_agent_spawn,
+                "terminal_write": sec.allow_terminal_write,
+                "browser": sec.allow_browser,
+                "shell_exec_timeout_max_ms": sec.shell_exec_timeout_max_ms,
+                "env_vars": "AB_ALLOW_SHELL_EXEC, AB_ALLOW_AGENT_SPAWN, AB_ALLOW_TERMINAL_WRITE, AB_ALLOW_BROWSER, AB_SHELL_EXEC_TIMEOUT_MAX"
             },
             "oz_run_tools": runtime_id == "warp-oz",
             "version": version
