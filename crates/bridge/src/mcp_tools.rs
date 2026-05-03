@@ -2014,6 +2014,19 @@ impl McpTool for MemorySaveTool {
         };
         match store.memory_save(&mem).await {
             Ok(()) => {
+                // Keep embedding cache coherent: upsert the new/updated record.
+                {
+                    let cache = self.hub.memory_embed_cache.clone();
+                    let rec = mem.clone();
+                    let emb = embed_text(&rec.content);
+                    tokio::spawn(async move {
+                        let mut guard = cache.lock().await;
+                        if let Some(ref mut cached) = *guard {
+                            cached.retain(|(r, _)| r.key != rec.key);
+                            cached.push((rec, emb));
+                        }
+                    });
+                }
                 let hint = build_proactive_hint(&store, &key, &mem.content, &mem.tags).await;
                 let resp = json!({
                     "status": "saved",
@@ -2315,6 +2328,16 @@ impl McpTool for MemoryDeleteTool {
             None => return Ok(ToolResult::error("missing 'key'")),
         };
         let removed = store.memory_delete(&key).await?;
+        if removed {
+            let cache = self.hub.memory_embed_cache.clone();
+            let del_key = key.clone();
+            tokio::spawn(async move {
+                let mut guard = cache.lock().await;
+                if let Some(ref mut cached) = *guard {
+                    cached.retain(|(r, _)| r.key != del_key);
+                }
+            });
+        }
         Ok(ToolResult::json_text(&json!({ "deleted": removed })))
     }
 }
@@ -2385,6 +2408,16 @@ impl McpTool for MemoryCompactTool {
             policy = def;
         }
         let keys = store.memory_compact(policy).await?;
+        if !dry_run && !keys.is_empty() {
+            let cache = self.hub.memory_embed_cache.clone();
+            let removed_keys: std::collections::HashSet<String> = keys.iter().cloned().collect();
+            tokio::spawn(async move {
+                let mut guard = cache.lock().await;
+                if let Some(ref mut cached) = *guard {
+                    cached.retain(|(r, _)| !removed_keys.contains(&r.key));
+                }
+            });
+        }
         Ok(ToolResult::json_text(&json!({
             "dry_run": dry_run,
             "applied_defaults": applied_defaults,
