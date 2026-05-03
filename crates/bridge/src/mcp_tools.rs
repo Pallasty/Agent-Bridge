@@ -3111,6 +3111,18 @@ impl McpTool for SessionBootstrapTool {
             }
         }
 
+        // Inject AGENT.md self-profile if present — this is the agent's own
+        // values / working style / self-observations, companion to USER.md.
+        // Maintained by the agent itself via session_finalize(agent_profile=...).
+        if let Ok(profile) = std::fs::read_to_string(agent_profile_path()) {
+            if !profile.trim().is_empty() {
+                lines.push("=== Agent Self-Profile ===".to_string());
+                lines.push(profile.trim().to_string());
+                lines.push("=== End Agent Self-Profile ===".to_string());
+                lines.push(String::new());
+            }
+        }
+
         lines.extend(error_section);
         lines.extend(format_bootstrap_memory_rows(&rows, snippet_len));
         lines.push("=== End Bootstrap ===".to_string());
@@ -4374,6 +4386,15 @@ impl McpTool for SessionFinalizeTool {
                         "description": "Markdown text describing the user (name, role, expertise, preferences, focus). \
                             Written to ~/.local/share/agent-bridge/USER.md and injected into \
                             future session_bootstrap calls. Synthesize from the current session before calling."
+                    },
+                    "agent_profile": {
+                        "type": "string",
+                        "description": "Markdown text describing the AGENT's own values, working style, and \
+                            self-observations on this project. Written to ~/.local/share/agent-bridge/AGENT.md \
+                            and injected as `Agent Self-Profile` block in future session_bootstrap calls. \
+                            Maintained by the agent itself for cross-session identity continuity. \
+                            Long-term destination: AiOT Seed `SelfModel` initialization (see memory \
+                            decision_aiot_seed_as_agent_continuity_substrate_20260503)."
                     }
                 }
             }),
@@ -4484,6 +4505,22 @@ impl McpTool for SessionFinalizeTool {
                 false
             };
 
+        // Optional: persist agent self-profile to AGENT.md.
+        let agent_profile_written =
+            if let Some(profile) = args.get("agent_profile").and_then(|v| v.as_str()) {
+                if !profile.trim().is_empty() && !dry_run {
+                    let path = agent_profile_path();
+                    if let Some(parent) = path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    std::fs::write(&path, profile.as_bytes()).is_ok()
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
         Ok(ToolResult::json_text(&json!({
             "dry_run": dry_run,
             "decay": {
@@ -4501,6 +4538,7 @@ impl McpTool for SessionFinalizeTool {
             "export": export_summary,
             "follow_up": follow_up,
             "user_profile_written": user_profile_written,
+            "agent_profile_written": agent_profile_written,
         })))
     }
 }
@@ -6483,6 +6521,23 @@ fn user_profile_path() -> PathBuf {
             .join("USER.md");
     }
     PathBuf::from("./USER.md")
+}
+
+/// Path to the persistent **agent self-profile** document — the agent's own
+/// values, working style, and self-observations. Companion to `USER.md`.
+/// Long-term destination for AiOT Seed `SelfModel` initialization (see
+/// `decision_aiot_seed_as_agent_continuity_substrate_20260503`); for now it
+/// is a plain Markdown file the agent maintains itself.
+fn agent_profile_path() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        return PathBuf::from(xdg).join("agent-bridge").join("AGENT.md");
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home)
+            .join(".local/share/agent-bridge")
+            .join("AGENT.md");
+    }
+    PathBuf::from("./AGENT.md")
 }
 
 fn parse_severity(s: &str) -> Option<NotifySeverity> {

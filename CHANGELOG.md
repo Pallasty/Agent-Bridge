@@ -9,6 +9,14 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`AGENT.md` — agent self-profile companion to `USER.md`** —
+  `~/.local/share/agent-bridge/AGENT.md` is now read at `session_bootstrap`
+  and injected as `=== Agent Self-Profile ===` block (after User Profile,
+  before memory rows). The agent maintains its own values, working style,
+  observations, and growth markers across sessions. Editable via
+  `session_finalize(agent_profile="<markdown>")`. v0 implementation is plain
+  Markdown; long-term destination is AiOT Seed `SelfModel` initialization
+  (see memory `decision_aiot_seed_as_agent_continuity_substrate_20260503`).
 - **`EmbeddingBackend` trait — pluggable inference kernel** —
   `crates/store/src/embedding.rs` introduces a `Send + Sync` trait
   (`name() / dim() / embed() / embed_batch()`) with two built-in impls:
