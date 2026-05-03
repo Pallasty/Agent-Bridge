@@ -8,6 +8,7 @@ pub mod hub;
 pub mod mcp_tools;
 pub mod project;
 pub mod router;
+pub mod security;
 pub mod server;
 pub mod session_handoff;
 pub mod socket_path;

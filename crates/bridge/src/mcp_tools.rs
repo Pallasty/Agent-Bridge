@@ -35,6 +35,7 @@ use tokio::process::Command as TokioCommand;
 use crate::context_budget::{budget_recommendation, estimated_usage_tokens, model_context_limit};
 use crate::hub::Hub;
 use crate::project::{changes_digest, detect_project, resolve_cwd};
+use crate::security::Cap;
 use crate::session_handoff::build_handoff_brief;
 use crate::warp_actions::warp_status_snapshot;
 
@@ -295,6 +296,9 @@ impl McpTool for TerminalSendKeysTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
+            return Ok(ToolResult::error(e));
+        }
         let term = match &self.hub.terminal {
             Some(t) => t.clone(),
             None => return Ok(ToolResult::error("no terminal backend configured")),
@@ -347,6 +351,9 @@ impl McpTool for TerminalSplitTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
+            return Ok(ToolResult::error(e));
+        }
         let term = match &self.hub.terminal {
             Some(t) => t.clone(),
             None => return Ok(ToolResult::error("no terminal backend configured")),
@@ -448,11 +455,13 @@ impl McpTool for TerminalReadOutputTool {
 
 const SHELL_EXEC_TRUNCATE_BYTES: usize = 131_072; // 128 KB
 
-pub struct ShellExecTool;
+pub struct ShellExecTool {
+    hub: Hub,
+}
 
 impl ShellExecTool {
-    pub fn new() -> Self {
-        Self
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
     }
 }
 
@@ -499,15 +508,19 @@ impl McpTool for ShellExecTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
         let cmd = match args.get("cmd").and_then(|v| v.as_str()) {
             Some(s) if !s.is_empty() => s.to_string(),
             _ => return Ok(ToolResult::error("missing or empty 'cmd'")),
         };
+        let timeout_max = self.hub.security.shell_exec_timeout_max_ms;
         let timeout_ms = args
             .get("timeout_ms")
             .and_then(|v| v.as_u64())
             .unwrap_or(30_000)
-            .clamp(1_000, 300_000);
+            .clamp(1_000, timeout_max);
 
         let mut child = {
             let mut builder = TokioCommand::new("sh");
@@ -754,6 +767,9 @@ impl McpTool for BrowserNavigateTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::Browser) {
+            return Ok(ToolResult::error(e));
+        }
         let b = match &self.hub.browser {
             Some(b) => b.clone(),
             None => return Ok(ToolResult::error("no browser backend configured")),
@@ -1275,6 +1291,9 @@ impl McpTool for AgentSpawnTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::AgentSpawn) {
+            return Ok(ToolResult::error(e));
+        }
         let agent = match &self.hub.agent {
             Some(a) => a.clone(),
             None => return Ok(ToolResult::error("no agent runtime configured")),
@@ -6279,7 +6298,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(TerminalReadOutputTool::new(hub.clone())));
     reg.register(Arc::new(TerminalReadBlocksTool::new(hub.clone())));
     reg.register(Arc::new(TerminalSplitTool::new(hub.clone())));
-    reg.register(Arc::new(ShellExecTool::new()));
+    reg.register(Arc::new(ShellExecTool::new(hub.clone())));
     // Browser surface
     reg.register(Arc::new(BrowserNavigateTool::new(hub.clone())));
     reg.register(Arc::new(BrowserEvalTool::new(hub.clone())));

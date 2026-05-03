@@ -9,6 +9,8 @@ use ab_terminal::TerminalBackend;
 use std::sync::Arc;
 use tracing::warn;
 
+use crate::security::SecurityPolicy;
+
 #[derive(Clone)]
 pub struct Hub {
     pub notifiers: Vec<Arc<dyn Notifier>>,
@@ -20,6 +22,8 @@ pub struct Hub {
     /// D2.3: per-turn semantic search cache — populated by session_bootstrap,
     /// consumed by memory_search(mode=semantic) to skip the DB round-trip.
     pub memory_embed_cache: Arc<tokio::sync::Mutex<Option<Vec<(MemoryRecord, Vec<f32>)>>>>,
+    /// Phase E: runtime security policy (read from env vars at startup).
+    pub security: SecurityPolicy,
 }
 
 impl Hub {
@@ -91,6 +95,7 @@ impl HubBuilder {
             agent: self.agent,
             worktree: self.worktree,
             memory_embed_cache: Arc::new(tokio::sync::Mutex::new(None)),
+            security: SecurityPolicy::from_env(),
         }
     }
 }
