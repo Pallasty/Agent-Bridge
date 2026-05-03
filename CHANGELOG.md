@@ -9,6 +9,14 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`ab-memory-hook` v2.0 — semantic UserPromptSubmit injection** — upgrades
+  the `UserPromptSubmit` hook from static kind-tier+recency sort to FNV-1a
+  semantic re-ranking. The user's first message is embedded with the same
+  512-dim hash-trick as `ab_store::embed_text` (pure Python, no deps). Memories
+  are ranked by `cosine_similarity + 0.15×importance`; concept nodes and
+  session_handoff rows are always-injected first (not subject to ranking).
+  Falls back to static sort for short/vague prompts (< 3 non-stop tokens).
+  Execution time: ~265 ms on 280 memories (well within 5-second hook timeout).
 - **`codebase_index` / `codebase_search` MCP tools (D3.2)** — pure-Rust symbol
   extractor (Rust, Python, TypeScript/JavaScript, Go) stores indexed symbols in
   SQLite `codebase_symbols` table (schema v14 + v15 embedding column). Exact
