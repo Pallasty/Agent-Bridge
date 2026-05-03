@@ -7,6 +7,22 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`EmbeddingBackend` trait — pluggable inference kernel** —
+  `crates/store/src/embedding.rs` introduces a `Send + Sync` trait
+  (`name() / dim() / embed() / embed_batch()`) with two built-in impls:
+  `OnnxBackend` (all-MiniLM-L6-v2 via fastembed) and `HashBackend` (FNV-1a
+  fallback). Selection precedence: `set_default_backend()` override →
+  `AGENT_BRIDGE_EMBED_BACKEND` env var (`onnx` | `hash`) → compile-time
+  default. The free function `embed_text()` now delegates to the active
+  backend, so existing call sites are unchanged. External crates (e.g. AIoT
+  Rust Seed) plug in by implementing the trait and calling
+  `set_default_backend(Arc::new(MyBackend::new()))` at startup.
+- **`capabilities` exposes active embedding backend** — response now
+  includes `memory.embedding.{backend,dim,env_override}` so agents can
+  introspect which inference kernel is active without grepping logs.
+
 ### Changed
 
 - **`ab-memory-hook` v3.0 — pure-SQL static ranking** — reverts the v2.0

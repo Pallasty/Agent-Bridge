@@ -3959,6 +3959,13 @@ impl McpTool for CapabilitiesTool {
             (false, String::new())
         };
 
+        // Embedding backend (active default — set by env var or set_default_backend()).
+        // Calling default_backend() lazily initializes it; safe to do so here.
+        let (embed_backend_name, embed_dim) = {
+            let b = ab_store::default_backend();
+            (b.name().to_string(), b.dim())
+        };
+
         // Agent spawn. The active runtime is whatever `build_hub()`
         // selected via `AGENT_BRIDGE_AGENT_RUNTIME`; we read the same
         // env var here so capabilities reflects the live wiring,
@@ -4014,7 +4021,12 @@ impl McpTool for CapabilitiesTool {
             "memory": {
                 "available": memory_available,
                 "db_path": db_path,
-                "fts5": true
+                "fts5": true,
+                "embedding": {
+                    "backend": embed_backend_name,
+                    "dim": embed_dim,
+                    "env_override": "AGENT_BRIDGE_EMBED_BACKEND (values: onnx | hash; custom backends register via ab_store::set_default_backend)"
+                }
             },
             "agent_spawn": {
                 "available": agent_available,

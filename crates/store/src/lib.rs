@@ -8,9 +8,13 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub mod codebase;
+pub mod embedding;
 pub mod sqlite;
 pub use sqlite::{default_db_path, temporal_bonus, weight_for_edge_type, SqliteStore};
 pub mod vector;
+pub use embedding::{
+    default_backend, set_default_backend, EmbeddingBackend, HashBackend, OnnxBackend,
+};
 pub use vector::{cosine_similarity, decode_embedding, embed_text, encode_embedding, VECTOR_DIM};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

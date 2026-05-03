@@ -1,23 +1,25 @@
-//! Text embedding for semantic search.
+//! Text embedding for semantic search — low-level primitives.
 //!
-//! Two backends, selected at runtime:
+//! This module provides the two **built-in** embedding implementations:
 //!
 //! 1. **ONNX** (`onnx-embed` feature, default): `all-MiniLM-L6-v2` via `fastembed`.
-//!    384-dimensional sentence embeddings. Model downloaded once to
-//!    `~/.cache/fastembed/` on first use (~22 MB).
+//!    384-dim sentence embeddings; model auto-downloads to `~/.cache/fastembed/`.
+//! 2. **Hash fallback**: FNV-1a feature hashing (unigrams + bigrams). 384-dim,
+//!    no external deps, deterministic.
 //!
-//! 2. **Hash fallback**: FNV-1a feature hashing (unigrams + bigrams).
-//!    384-dimensional, no external dependencies, deterministic.
-//!    Used when the ONNX model is unavailable or the feature is disabled.
+//! Both paths produce 384-dim unit vectors so cosine similarity is consistent
+//! regardless of which path ran. `VECTOR_DIM = 384` is the canonical dimension.
 //!
-//! `VECTOR_DIM = 384` is the canonical dimension for both paths.
+//! Pluggable backend selection (e.g. swapping in AIoT Rust Seed) lives in
+//! [`crate::embedding`]. The free function [`embed_text`] is a compatibility
+//! shim that delegates to `embedding::default_backend()`.
 
 pub const VECTOR_DIM: usize = 384;
 
 // ── ONNX backend (optional) ───────────────────────────────────────────────
 
 #[cfg(feature = "onnx-embed")]
-mod onnx {
+pub(crate) mod onnx {
     use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
     use std::sync::{Mutex, OnceLock};
     use tracing::{info, warn};
@@ -58,17 +60,16 @@ mod onnx {
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
-/// Compute a 384-dim f32 embedding for `text`.
+/// Compute a 384-dim f32 embedding for `text` using the active default backend.
 ///
-/// Uses `all-MiniLM-L6-v2` (ONNX) when available; otherwise falls back to
-/// FNV-1a feature hashing. Both paths produce 384-dim unit vectors, so
-/// cosine similarity works consistently regardless of which path ran.
+/// The default backend is resolved once per process via
+/// [`crate::embedding::default_backend`] (selected by the
+/// `AGENT_BRIDGE_EMBED_BACKEND` env var, falling back to ONNX when the
+/// `onnx-embed` feature is on, otherwise hash). Custom backends — e.g. the
+/// AIoT Rust Seed inference kernel — can be installed at startup via
+/// [`crate::embedding::set_default_backend`] and will be used here too.
 pub fn embed_text(text: &str) -> Vec<f32> {
-    #[cfg(feature = "onnx-embed")]
-    if let Some(v) = onnx::embed(text) {
-        return v;
-    }
-    embed_text_hash(text)
+    crate::embedding::default_backend().embed(text)
 }
 
 /// Cosine similarity between two equal-length vectors.
