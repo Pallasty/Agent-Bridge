@@ -9,6 +9,10 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`session_bootstrap` optional `query` parameter** — when provided, memories
+  are ranked by cosine similarity (FNV-1a embeddings, threshold 0.15) instead of
+  static importance. `session_handoff` rows are always prepended for continuity.
+  Output header reflects active mode: `scope: ... | semantic`.
 - **`ab-memory-hook` v2.0 — semantic UserPromptSubmit injection** — upgrades
   the `UserPromptSubmit` hook from static kind-tier+recency sort to FNV-1a
   semantic re-ranking. The user's first message is embedded with the same
