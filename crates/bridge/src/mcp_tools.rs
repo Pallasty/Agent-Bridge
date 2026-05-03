@@ -2806,6 +2806,8 @@ impl McpTool for SessionBootstrapTool {
             description: "Build a compact memory bootstrap block for the current session. \
                  Returns top scoped memories (global + project), with session_handoff \
                  rows first for continuity. \
+                 Pass query= to enable semantic ranking (cosine similarity over FNV-1a \
+                 embeddings) — surfaces memories most relevant to what you are about to do. \
                  Pass frontend='cursor' or 'warp' for the compact \
                  token-efficient format, or frontend='claude-code' \
                  (default) for the full format."
@@ -2815,6 +2817,10 @@ impl McpTool for SessionBootstrapTool {
                 "properties": {
                     "cwd": { "type": "string", "description": "Optional project path for scope filtering. Defaults to process cwd." },
                     "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 60 },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional natural-language description of the current task (e.g. 'fix Warp IPC socket reconnect bug'). When provided, memories are ranked by semantic similarity instead of static importance. session_handoff rows are always prepended regardless."
+                    },
                     "frontend": {
                         "type": "string",
                         "enum": ["claude-code", "cursor", "warp", "auto"],
@@ -2905,14 +2911,48 @@ impl McpTool for SessionBootstrapTool {
             }
         }
 
-        let rows = store
-            .list_memories_in_scope(&cwd, None, MemoryListSort::ByImportance, limit)
-            .await?;
+        // Optional semantic query: rank by cosine similarity when provided.
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
 
-        // Filter to active memories only — archived and superseded are hidden
-        // from bootstrap to keep context clean.
-        let rows: Vec<_> = rows.into_iter().filter(|r| r.status == "active").collect();
-        let rows = prioritize_session_handoff(rows);
+        let rows: Vec<MemoryRecord> = if let Some(ref q) = query {
+            // Semantic path: cosine-ranked results, session_handoff always prepended.
+            let semantic_hits = store
+                .memory_search_semantic(q, limit, 0.15)
+                .await
+                .unwrap_or_default();
+            let mut ranked: Vec<MemoryRecord> = semantic_hits
+                .into_iter()
+                .filter(|h| h.record.status == "active")
+                .map(|h| h.record)
+                .collect();
+            // Always prepend session_handoff rows for continuity.
+            let handoff = store
+                .list_memories_in_scope(&cwd, Some("session_handoff"), MemoryListSort::Recent, 8)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.status == "active")
+                .collect::<Vec<_>>();
+            let handoff_keys: std::collections::HashSet<_> =
+                handoff.iter().map(|r| r.key.clone()).collect();
+            ranked.retain(|r| !handoff_keys.contains(&r.key));
+            let mut combined = handoff;
+            combined.extend(ranked);
+            combined.truncate(limit as usize);
+            combined
+        } else {
+            // Static path: existing ByImportance sort, session_handoff floated first.
+            let rows = store
+                .list_memories_in_scope(&cwd, None, MemoryListSort::ByImportance, limit)
+                .await?;
+            let rows: Vec<_> = rows.into_iter().filter(|r| r.status == "active").collect();
+            prioritize_session_handoff(rows)
+        };
 
         if rows.is_empty() && error_section.is_empty() {
             let lifecycle_hint = session_lifecycle_hint();
@@ -2921,12 +2961,12 @@ impl McpTool for SessionBootstrapTool {
             )));
         }
 
+        let mode_tag = if query.is_some() { " | semantic" } else { "" };
         let mut lines = if is_compact {
-            // Compact format (Cursor / Warp): minimal headers, 80-char snippets
-            vec![format!("=== Bootstrap (scope: {}) ===", cwd), String::new()]
+            vec![format!("=== Bootstrap (scope: {}{mode_tag}) ===", cwd), String::new()]
         } else {
             vec![
-                format!("=== Agent-Bridge Session Bootstrap (scope: {cwd}) ==="),
+                format!("=== Agent-Bridge Session Bootstrap (scope: {cwd}{mode_tag}) ==="),
                 "Use memory_get <key> for full content, memory_search for lookup.".to_string(),
                 String::new(),
             ]
