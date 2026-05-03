@@ -596,6 +596,14 @@ pub trait StateStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Re-compute embeddings for all active memories that have `embedding IS NULL`.
+    /// Processes up to `batch_size` rows per call; returns the number of rows updated.
+    /// Default impl returns 0 (no-op for non-SQLite backends).
+    async fn memory_reindex_embeddings(&self, batch_size: usize) -> Result<usize> {
+        let _ = batch_size;
+        Ok(0)
+    }
+
     // ── D3.2: codebase symbol index ──────────────────────────────────────────
 
     /// Scan `root_path`, extract symbols from files matching `languages`

@@ -2413,6 +2413,60 @@ impl StateStore for SqliteStore {
             .collect())
     }
 
+    async fn memory_reindex_embeddings(&self, batch_size: usize) -> Result<usize> {
+        let cap = batch_size.max(1).min(1000);
+        // Load rows needing re-embedding (embedding IS NULL or wrong-dim).
+        let to_update: Vec<(String, String)> = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<(String, String)>> {
+                let mut stmt = c.prepare(
+                    "SELECT key, content FROM memories
+                     WHERE status = 'active' AND embedding IS NULL
+                     LIMIT ?1",
+                )?;
+                let rows = stmt
+                    .query_map([cap as i64], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_reindex list: {e}")))?;
+
+        if to_update.is_empty() {
+            return Ok(0);
+        }
+
+        // Compute embeddings on the calling thread (CPU work outside DB conn).
+        let pairs: Vec<(String, Vec<u8>)> = to_update
+            .into_iter()
+            .map(|(key, content)| {
+                let emb = crate::vector::embed_text(&content);
+                let bytes = crate::vector::encode_embedding(&emb);
+                (key, bytes)
+            })
+            .collect();
+
+        let updated = pairs.len();
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                let tx = c.unchecked_transaction()?;
+                let mut stmt =
+                    tx.prepare("UPDATE memories SET embedding = ?2 WHERE key = ?1")?;
+                for (key, emb_bytes) in &pairs {
+                    stmt.execute(params![key, emb_bytes])?;
+                }
+                drop(stmt);
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_reindex update: {e}")))?;
+
+        Ok(updated)
+    }
+
     // ─── D3.2: codebase symbol index ────────────────────────────────────
 
     async fn codebase_index(

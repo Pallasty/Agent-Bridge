@@ -2451,6 +2451,83 @@ impl McpTool for MemoryCompactTool {
 }
 
 // ===========================================================================
+//                       memory_reindex (re-embed after dim migration)
+// ===========================================================================
+
+pub struct MemoryReindexTool {
+    hub: Hub,
+}
+impl MemoryReindexTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryReindexTool {
+    fn name(&self) -> &'static str {
+        "memory_reindex"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Re-compute embeddings for active memories that have no stored \
+                 embedding (e.g. after an embedding-dimension migration). Processes \
+                 up to `batch_size` rows per call (default 100, max 1000). \
+                 Call repeatedly until `updated` is 0 to fully rebuild the index. \
+                 Also refreshes the in-process embedding cache so \
+                 memory_search(mode=semantic) sees the new vectors immediately."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "batch_size": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 100,
+                        "description": "Number of rows to re-embed per call."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let batch_size = args
+            .get("batch_size")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100) as usize;
+
+        let updated = store.memory_reindex_embeddings(batch_size).await?;
+
+        // Refresh the in-process embedding cache so the new vectors are visible.
+        if updated > 0 {
+            let cache = self.hub.memory_embed_cache.clone();
+            let refresh_store = store.clone();
+            tokio::spawn(async move {
+                if let Ok(rows) = refresh_store.memory_load_embeddings().await {
+                    let mut guard = cache.lock().await;
+                    *guard = Some(rows);
+                }
+            });
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "updated": updated,
+            "batch_size": batch_size,
+            "hint": if updated == batch_size {
+                format!("Batch full — call memory_reindex again to continue ({batch_size} rows/call).")
+            } else {
+                format!("Done. {updated} rows re-embedded this call.")
+            }
+        })))
+    }
+}
+
+// ===========================================================================
 //                       memory portability (v0.6)
 // ===========================================================================
 
@@ -6333,6 +6410,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(MemoryListTool::new(hub.clone())));
     reg.register(Arc::new(MemoryDeleteTool::new(hub.clone())));
     reg.register(Arc::new(MemoryCompactTool::new(hub.clone())));
+    reg.register(Arc::new(MemoryReindexTool::new(hub.clone())));
     reg.register(Arc::new(MemoryExportTool::new(hub.clone())));
     reg.register(Arc::new(MemoryImportTool::new(hub.clone())));
     reg.register(Arc::new(MemoryConsolidateTool::new(hub.clone())));
