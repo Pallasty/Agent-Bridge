@@ -329,6 +329,14 @@ fn is_noise(text: &str) -> bool {
     if t.starts_with('#') || t == "---" || t == "===" || t == "***" {
         return true;
     }
+    // Source-separator headers from memory_auto_curate aggregation, e.g.
+    // `=== Source 1 (session_handoff_2026_01) ===`. These leaked through
+    // Pass-2 because their "session_handoff" / kind keywords scored above
+    // threshold despite being internal scaffolding, not real content.
+    // Detected 2026-05-03; see lesson_memory_tools_audit_20260503.
+    if t.starts_with("=== ") && t.ends_with(" ===") {
+        return true;
+    }
     let lower = t.to_lowercase();
     let acks = [
         "ok",
@@ -736,6 +744,21 @@ mod tests {
     fn noise_passes_valuable_sentence() {
         assert!(!is_noise(
             "we found that using &str slices instead of String avoids needless allocation"
+        ));
+    }
+
+    /// Regression: memory_auto_curate aggregation inserts `=== Source N (key) ===`
+    /// headers between source memories. These leaked into Pass-2 candidates
+    /// because they contain kind/handoff keywords. Detected 2026-05-03.
+    #[test]
+    fn noise_filters_source_separator() {
+        assert!(is_noise(
+            "=== Source 1 (curated_session_handoff_verify-w_5Next_session_should_) ==="
+        ));
+        assert!(is_noise("=== Source 2 (session_handoff_20260429) ==="));
+        // Don't false-positive on a sentence that merely contains "===" inside
+        assert!(!is_noise(
+            "we use === as a divider in markdown headers throughout the project"
         ));
     }
 
