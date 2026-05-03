@@ -7,6 +7,7 @@ use ab_core::{NotifyEvent, Result, SessionId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub mod codebase;
 pub mod sqlite;
 pub use sqlite::{default_db_path, temporal_bonus, weight_for_edge_type, SqliteStore};
 pub mod vector;
@@ -48,6 +49,17 @@ pub struct NotificationRecord {
     pub ts: i64,
     pub event: NotifyEvent,
 }
+
+/// One failed MCP `tools/call` kept in the SQLite ring buffer (`mcp_tool_errors`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpToolErrorRecord {
+    pub ts: i64,
+    pub tool_name: String,
+    pub message: String,
+}
+
+/// Max rows retained in `mcp_tool_errors` after each insert (oldest pruned).
+pub const MCP_TOOL_ERROR_RING_CAP: u32 = 100;
 
 /// Hard cap on stdout/stderr we persist per agent session, to keep the DB
 /// file from growing unbounded if a sub-agent goes haywire.
@@ -112,6 +124,16 @@ pub struct MemoryEdge {
     /// Optional strength weight (0.0–1.0). Default 1.0.
     #[serde(default = "default_weight")]
     pub weight: f64,
+}
+
+/// One `memory_edges` row for JSONL export / import (portable graph slice).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemoryEdgeExport {
+    pub from_key: String,
+    pub to_key: String,
+    pub edge_type: String,
+    pub weight: f64,
+    pub created_at: i64,
 }
 
 fn default_weight() -> f64 {
@@ -183,6 +205,35 @@ pub struct AgentMessageRecord {
     pub payload: serde_json::Value,
     pub created_at: i64,
     pub read: bool,
+}
+
+// ── D3.2: codebase symbol index ──────────────────────────────────────────────
+
+/// One symbol extracted from a source file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseSymbol {
+    pub file_path: String,
+    pub line: u32,
+    pub col: u32,
+    /// Canonical kind: fn | struct | enum | trait | type | const | static |
+    ///   mod | impl | macro | class | def | function | interface | method | var | func
+    pub kind: String,
+    pub name: String,
+    /// First ~200 chars of the declaration line.
+    pub signature: String,
+    pub language: String,
+    /// Cosine similarity score (0–1). Set only when `mode = "semantic"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
+}
+
+/// Stats returned by [`StateStore::codebase_index`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseIndexStats {
+    pub indexed_files: u32,
+    pub symbols: u32,
+    pub duration_ms: u64,
+    pub root_path: String,
 }
 
 /// Reorder memories so `kind == "session_handoff"` rows appear first.
@@ -280,6 +331,16 @@ pub struct MemoryExportFilter {
     pub tags_any: Option<Vec<String>>,
     /// Only export memories with `updated_at >= since_ts` (unix epoch secs).
     pub since_ts: Option<i64>,
+    /// When set, also write [`MemoryEdgeExport`] JSONL for edges whose **both**
+    /// endpoints appear among the exported memory keys (same filter as rows).
+    pub edges_out_path: Option<std::path::PathBuf>,
+}
+
+/// Result of [`StateStore::memory_export`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MemoryExportResult {
+    pub memories_written: u64,
+    pub edges_written: u64,
 }
 
 /// Conflict resolution policy for `memory_import` (v0.6).
@@ -302,6 +363,10 @@ pub struct ImportReport {
     pub updated: u64,
     pub skipped: u64,
     pub malformed: u64,
+    #[serde(default)]
+    pub edges_upserted: u64,
+    #[serde(default)]
+    pub edges_malformed: u64,
 }
 
 #[async_trait]
@@ -329,6 +394,13 @@ pub trait StateStore: Send + Sync {
     async fn append_notification(&self, evt: &NotifyEvent) -> Result<()>;
 
     async fn recent_notifications(&self, limit: u32) -> Result<Vec<NotificationRecord>>;
+
+    /// Record a failed MCP tool call for [`Self::recent_mcp_tool_errors`].
+    /// Messages are truncated; table size is capped at [`MCP_TOOL_ERROR_RING_CAP`].
+    async fn record_mcp_tool_error(&self, tool_name: &str, message: &str) -> Result<()>;
+
+    /// Newest-first recent MCP tool errors (`limit` clamped to 1..=500).
+    async fn recent_mcp_tool_errors(&self, limit: u32) -> Result<Vec<McpToolErrorRecord>>;
 
     // ─── memory.* — agent self-memory (v0.4) ───────────────────────────
 
@@ -437,21 +509,25 @@ pub trait StateStore: Send + Sync {
     async fn memory_compact(&self, policy: CompactPolicy) -> Result<Vec<String>>;
 
     /// Export memories matching `filter` to a newline-delimited JSON file
-    /// (one [`MemoryRecord`] per line). Returns the number of rows written.
-    /// Caller is responsible for the path being writeable.
+    /// (one [`MemoryRecord`] per line). Optionally writes a sibling edge file
+    /// when [`MemoryExportFilter::edges_out_path`] is set.
     async fn memory_export(
         &self,
         filter: &MemoryExportFilter,
         out_path: &std::path::Path,
-    ) -> Result<u64>;
+    ) -> Result<MemoryExportResult>;
 
     /// Import memories from a JSONL file. Each line is parsed as a
     /// [`MemoryRecord`]; malformed lines are counted but do not abort the
     /// import. Conflict resolution per [`ImportConflictPolicy`].
+    ///
+    /// When `edges_path` is set, each line must parse as [`MemoryEdgeExport`];
+    /// rows are upserted into `memory_edges` (`ON CONFLICT` updates `weight` only).
     async fn memory_import(
         &self,
         in_path: &std::path::Path,
         policy: ImportConflictPolicy,
+        edges_path: Option<&std::path::Path>,
     ) -> Result<ImportReport>;
 
     /// Return aggregate statistics about the memory store.
@@ -512,6 +588,53 @@ pub trait StateStore: Send + Sync {
         unread_only: bool,
         limit: u32,
     ) -> Result<Vec<AgentMessageRecord>>;
+
+    /// D2.3: load all active memories with embeddings into an in-process cache.
+    /// Returns `(record, embedding)` pairs. Default impl returns an empty vec
+    /// so non-SQLite backends degrade gracefully.
+    async fn memory_load_embeddings(&self) -> Result<Vec<(MemoryRecord, Vec<f32>)>> {
+        Ok(Vec::new())
+    }
+
+    // ── D3.2: codebase symbol index ──────────────────────────────────────────
+
+    /// Scan `root_path`, extract symbols from files matching `languages`
+    /// (e.g. `["rust", "python"]`; empty = all supported), and persist them
+    /// to the `codebase_symbols` table. Previous symbols for the same root
+    /// are replaced.
+    async fn codebase_index(
+        &self,
+        root_path: &str,
+        languages: &[String],
+    ) -> Result<CodebaseIndexStats> {
+        let _ = (root_path, languages);
+        Err(ab_core::Error::Backend(
+            "codebase_index not implemented".into(),
+        ))
+    }
+
+    /// Search indexed symbols by name/signature substring or semantic similarity.
+    ///
+    /// - `query` — substring (exact) or natural-language description (semantic).
+    /// - `kind` — optional exact filter (`fn`, `struct`, `class`, …).
+    /// - `file_filter` — optional substring matched against `file_path`.
+    /// - `root_path` — optional exact root to restrict results.
+    /// - `limit` — capped to 500.
+    /// - `mode` — `"exact"` (substring LIKE, default) or `"semantic"` (cosine similarity).
+    async fn codebase_search(
+        &self,
+        query: &str,
+        kind: Option<&str>,
+        file_filter: Option<&str>,
+        root_path: Option<&str>,
+        limit: u32,
+        mode: &str,
+    ) -> Result<Vec<CodebaseSymbol>> {
+        let _ = (query, kind, file_filter, root_path, limit, mode);
+        Err(ab_core::Error::Backend(
+            "codebase_search not implemented".into(),
+        ))
+    }
 }
 
 #[cfg(test)]

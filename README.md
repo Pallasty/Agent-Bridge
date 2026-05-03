@@ -273,6 +273,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | meta | `capabilities` | Report what agent-bridge can do in this environment |
 | | `context_budget` | Offline token estimate vs approximate model limit + compaction recommendation (W5) |
 | | `hook_status` | Check installed hook scripts and their last run status |
+| | `mcp_recent_errors` | List recent failed MCP `tools/call` rows from the SQLite ring buffer |
 | perceive | `project_detect` | Detect languages / build hints / Rust workspace members / git snapshot from manifests (W2) |
 | | `changes_digest` | Structured git diff summary (`working_tree` / `staged` / `last_commit` / `branch_vs_main`) |
 | warp-oz | `oz_run_get` | Fetch status of a Warp cloud agent run by `run_id` or `session_id` |
@@ -294,6 +295,19 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | `"project:/abs/path"` | Only when cwd is inside `/abs/path` |
 | `"domain:rust"` | Any session tagged with the `rust` domain |
 
+### Memory search / embeddings (operators & agents)
+
+Memories get a **512-dim feature-hash embedding** (`embed_text` in `ab-store`)
+computed from `content` on every `memory_save` and on every `memory_import`
+row — **no external embedding API**.
+
+| Audience | What to read |
+|----------|----------------|
+| **Human operators** | Pick `memory_search` **mode**: `fts` (BM25 keywords), `hybrid` (FTS + graph RRF), `semantic` (cosine on hash vectors). Tune `threshold` on semantic (≈0.3 broad, ≈0.7 tight). |
+| **Coding agents** | Same rules via MCP schema; do not assume OpenAI-style embeddings — near-synonym recall is **local hash space**, best for **hundreds** of notes, not million-scale semantic search. |
+
+See also: `docs/AGENT-BRIDGE-EVOLUTION-CORE.md` §8, `docs/AGENT-BRIDGE-AGENT-UX-ROADMAP.md` (phased follow-ups).
+
 ---
 
 ### MCP response diagnostics
@@ -314,6 +328,11 @@ support logging and environment diagnostics:
 
 This metadata is injected by the MCP stdio server on both success and
 tool-error results.
+
+When a SQLite store is configured, failed `tools/call` outcomes (unknown tool,
+handler `Err`, `isError` tool results, and a few serialization edge cases) are
+also appended to a bounded ring buffer. Inspect them with the **`mcp_recent_errors`**
+MCP tool (`limit` 1–500, default 20).
 
 ---
 

@@ -50,6 +50,7 @@ tokio-rusqlite = { version = "0.6", features = ["bundled"] }
 chromiumoxide = { version = "0.9", default-features = false, features = ["bytes"] }
 base64 = "0.22"
 dashmap = "6"
+walkdir = "2"
 
 # Internal crates
 ab-core = { path = "crates/core" }

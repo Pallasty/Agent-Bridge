@@ -13,3 +13,8 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tokio-rusqlite.workspace = true
+walkdir.workspace = true
+
+[[bin]]
+name = "backfill-embeddings"
+path = "src/bin/backfill_embeddings.rs"

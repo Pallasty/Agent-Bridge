@@ -57,6 +57,24 @@ pub struct TerminalCapabilities {
     pub warp_ipc_socket_ready: Option<bool>,
 }
 
+/// A single structured Warp terminal block (command + output + metadata).
+///
+/// Available only when the Warp IPC bridge is connected; other backends
+/// return `Error::Backend("not supported")` from `read_blocks`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalBlock {
+    pub block_id: String,
+    /// The command text (empty for background / static blocks).
+    pub command: String,
+    /// The rendered output of the block.
+    pub output: String,
+    /// Exit code; 0 if not yet finished.
+    pub exit_code: i32,
+    /// One of: BeforeExecution | Executing | DoneWithExecution | DoneWithNoExecution | Background | Static.
+    pub state: String,
+    pub is_running: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TermEvent {
     PaneOpened(PaneId),
@@ -80,6 +98,22 @@ pub trait TerminalBackend: Send + Sync {
     /// Backends that cannot expose scrollback should return an
     /// `Error::Backend` explaining the limitation.
     async fn read_output(&self, pane: &PaneId, lines: usize) -> Result<Vec<String>>;
+
+    /// Return structured blocks for a session (Warp IPC only).
+    ///
+    /// `limit` caps the number of most-recent blocks returned.
+    /// `since_block` is an optional 0-based index floor (skip older blocks).
+    /// Default impl returns `Error::Backend("not supported")`.
+    async fn read_blocks(
+        &self,
+        _pane: &PaneId,
+        _limit: usize,
+        _since_block: Option<usize>,
+    ) -> Result<Vec<TerminalBlock>> {
+        Err(ab_core::Error::Backend(
+            "read_blocks is only available via the Warp IPC bridge".into(),
+        ))
+    }
 
     async fn split(&self, pane: &PaneId, dir: SplitDir) -> Result<PaneId>;
 

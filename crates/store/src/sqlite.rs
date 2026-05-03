@@ -56,10 +56,11 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 }
 
 use crate::{
-    AgentMessageRecord, CompactPolicy, ImportConflictPolicy, ImportReport, MemoryEdge,
-    MemoryExportFilter, MemoryListSort, MemoryRecord, MemorySearchHit, MemoryStats,
+    AgentMessageRecord, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, ImportConflictPolicy,
+    ImportReport, McpToolErrorRecord, MemoryEdge, MemoryEdgeExport, MemoryExportFilter,
+    MemoryExportResult, MemoryListSort, MemoryRecord, MemorySearchHit, MemoryStats,
     NotificationRecord, PlanRecord, PlanStep, SessionFilter, StateStore, StoredSession,
-    MEMORY_CONTENT_CAP, STDIO_CAP,
+    MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, STDIO_CAP,
 };
 
 const SCHEMA_V1: &str = r#"
@@ -204,6 +205,17 @@ const SCHEMA_V11: &str = r#"
 ALTER TABLE memories ADD COLUMN trigger_pattern TEXT;
 "#;
 
+// Phase C: ring buffer of recent MCP `tools/call` failures (observability).
+const SCHEMA_V13: &str = r#"
+CREATE TABLE IF NOT EXISTS mcp_tool_errors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    tool_name TEXT NOT NULL,
+    message TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_errors_ts ON mcp_tool_errors(ts DESC, id DESC);
+"#;
+
 // v1.0: importance score + status column for cognitive memory
 const SCHEMA_V7: &str = r#"
 ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5;
@@ -250,6 +262,26 @@ CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
     INSERT INTO memories_fts(rowid, key, content)
     VALUES (new.rowid, new.key, new.content);
 END;
+"#;
+
+// D3.2: codebase symbol index
+const SCHEMA_V14: &str = r#"
+CREATE TABLE IF NOT EXISTS codebase_symbols (
+    id         INTEGER PRIMARY KEY,
+    file_path  TEXT    NOT NULL,
+    line       INTEGER NOT NULL,
+    col        INTEGER NOT NULL DEFAULT 0,
+    kind       TEXT    NOT NULL,
+    name       TEXT    NOT NULL,
+    signature  TEXT    NOT NULL DEFAULT '',
+    language   TEXT    NOT NULL,
+    root_path  TEXT    NOT NULL,
+    indexed_at INTEGER NOT NULL,
+    embedding  BLOB
+);
+CREATE INDEX IF NOT EXISTS idx_csym_root ON codebase_symbols(root_path);
+CREATE INDEX IF NOT EXISTS idx_csym_name ON codebase_symbols(name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_csym_kind ON codebase_symbols(kind);
 "#;
 
 /// Default database path.
@@ -504,6 +536,57 @@ impl SqliteStore {
                 }
                 let _ = c.execute("UPDATE schema_meta SET value='12' WHERE key='version'", []);
             }
+
+            // ── v13: mcp_tool_errors (Phase C) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "12".to_string());
+            if cur.as_str() == "12" {
+                c.execute_batch(SCHEMA_V13)?;
+                let _ = c.execute("UPDATE schema_meta SET value='13' WHERE key='version'", []);
+            }
+
+            // ── v14: codebase_symbols table (D3.2) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "13".to_string());
+            if cur.as_str() == "13" {
+                c.execute_batch(SCHEMA_V14)?;
+                let _ = c.execute("UPDATE schema_meta SET value='14' WHERE key='version'", []);
+            }
+
+            // ── v15: codebase_symbols.embedding BLOB (D3.2b semantic search) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "14".to_string());
+            if cur.as_str() == "14" {
+                let col_exists: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('codebase_symbols') \
+                         WHERE name='embedding'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                if col_exists == 0 {
+                    c.execute_batch(
+                        "ALTER TABLE codebase_symbols ADD COLUMN embedding BLOB;",
+                    )?;
+                }
+                let _ = c.execute("UPDATE schema_meta SET value='15' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -511,6 +594,108 @@ impl SqliteStore {
 
         info!(path = %path.display(), "SqliteStore ready");
         Ok(Self { conn })
+    }
+
+    /// Write [`MemoryEdgeExport`] JSONL for edges whose endpoints are both in `keys`.
+    async fn export_edges_for_key_set(
+        &self,
+        keys: &std::collections::HashSet<String>,
+        out_path: &Path,
+    ) -> Result<u64> {
+        let keys_clone = keys.clone();
+        let rows: Vec<MemoryEdgeExport> = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<MemoryEdgeExport>> {
+                let mut stmt = c.prepare(
+                    "SELECT from_key, to_key, edge_type, weight, created_at FROM memory_edges",
+                )?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok(MemoryEdgeExport {
+                            from_key: row.get(0)?,
+                            to_key: row.get(1)?,
+                            edge_type: row.get(2)?,
+                            weight: row.get(3)?,
+                            created_at: row.get(4)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("export_edges query: {e}")))?;
+
+        let selected: Vec<MemoryEdgeExport> = rows
+            .into_iter()
+            .filter(|e| keys_clone.contains(&e.from_key) && keys_clone.contains(&e.to_key))
+            .collect();
+
+        if let Some(parent) = out_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| Error::Backend(format!("mkdir {parent:?}: {e}")))?;
+        }
+        let mut buf = String::new();
+        for e in &selected {
+            buf.push_str(&serde_json::to_string(e)?);
+            buf.push('\n');
+        }
+        tokio::fs::write(out_path, buf)
+            .await
+            .map_err(|e| Error::Backend(format!("write edges {out_path:?}: {e}")))?;
+        Ok(selected.len() as u64)
+    }
+
+    /// Upsert edges from JSONL (`MemoryEdgeExport` per line).
+    async fn import_edges_jsonl(&self, edges_path: &Path) -> Result<(u64, u64)> {
+        let bytes = tokio::fs::read(edges_path)
+            .await
+            .map_err(|e| Error::Backend(format!("read edges {edges_path:?}: {e}")))?;
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+
+        let mut parsed: Vec<MemoryEdgeExport> = Vec::new();
+        let mut malformed = 0u64;
+        for line in text.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<MemoryEdgeExport>(line) {
+                Ok(e) => parsed.push(e),
+                Err(_) => malformed += 1,
+            }
+        }
+
+        let now = now_secs();
+        let upserted = self
+            .conn
+            .call(move |c| -> RusqliteResult<u64> {
+                let tx = c.unchecked_transaction()?;
+                let mut n = 0u64;
+                for e in parsed {
+                    let from = e.from_key.trim();
+                    let to = e.to_key.trim();
+                    let et = e.edge_type.trim();
+                    if from.is_empty() || to.is_empty() || et.is_empty() {
+                        continue;
+                    }
+                    let w = e.weight.clamp(0.0, 2.0);
+                    let ca = if e.created_at > 0 { e.created_at } else { now };
+                    tx.execute(
+                        "INSERT INTO memory_edges (from_key, to_key, edge_type, weight, created_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5)
+                         ON CONFLICT(from_key, to_key, edge_type) DO UPDATE SET
+                            weight = excluded.weight",
+                        params![from, to, et, w, ca],
+                    )?;
+                    n += 1;
+                }
+                tx.commit()?;
+                Ok(n)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("import_edges tx: {e}")))?;
+
+        Ok((upserted, malformed))
     }
 }
 
@@ -886,6 +1071,63 @@ impl StateStore for SqliteStore {
         Ok(rows)
     }
 
+    async fn record_mcp_tool_error(&self, tool_name: &str, message: &str) -> Result<()> {
+        const MSG_CAP: usize = 2048;
+        let msg = clamp(message, MSG_CAP);
+        let tn = {
+            let t = tool_name.trim();
+            if t.is_empty() {
+                "(unknown)".to_string()
+            } else {
+                clamp(t, 512)
+            }
+        };
+        let cap = i64::from(MCP_TOOL_ERROR_RING_CAP);
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                let ts = now_secs();
+                c.execute(
+                    "INSERT INTO mcp_tool_errors (ts, tool_name, message) VALUES (?1, ?2, ?3)",
+                    params![ts, tn, msg],
+                )?;
+                c.execute(
+                    "DELETE FROM mcp_tool_errors WHERE id NOT IN (
+                        SELECT id FROM mcp_tool_errors ORDER BY ts DESC, id DESC LIMIT ?1
+                    )",
+                    params![cap],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("record_mcp_tool_error: {e}")))?;
+        Ok(())
+    }
+
+    async fn recent_mcp_tool_errors(&self, limit: u32) -> Result<Vec<McpToolErrorRecord>> {
+        let limit = limit.min(500).max(1) as i64;
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<McpToolErrorRecord>> {
+                let mut stmt = c.prepare(
+                    "SELECT ts, tool_name, message FROM mcp_tool_errors
+                     ORDER BY ts DESC, id DESC LIMIT ?1",
+                )?;
+                let rows = stmt
+                    .query_map(params![limit], |row| {
+                        Ok(McpToolErrorRecord {
+                            ts: row.get(0)?,
+                            tool_name: row.get(1)?,
+                            message: row.get(2)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("recent_mcp_tool_errors: {e}")))?;
+        Ok(rows)
+    }
+
     // ─── memory.* (v0.4) ──────────────────────────────────────────────
 
     async fn memory_save(&self, mem: &MemoryRecord) -> Result<()> {
@@ -914,9 +1156,7 @@ impl StateStore for SqliteStore {
         let now = now_secs();
 
         // Pre-compute embedding (CPU-only, safe outside the async call closure).
-        let embedding_bytes = crate::vector::encode_embedding(
-            &crate::vector::embed_text(&content)
-        );
+        let embedding_bytes = crate::vector::encode_embedding(&crate::vector::embed_text(&content));
 
         // Pre-compute overlap tokens for contradiction detection (outside closure).
         let new_tokens = overlap_tokens(&content);
@@ -1685,7 +1925,7 @@ impl StateStore for SqliteStore {
         &self,
         filter: &MemoryExportFilter,
         out_path: &std::path::Path,
-    ) -> Result<u64> {
+    ) -> Result<MemoryExportResult> {
         let kind = filter.kind.clone();
         let tags = filter.tags_any.clone();
         let since = filter.since_ts;
@@ -1752,22 +1992,35 @@ impl StateStore for SqliteStore {
         tokio::fs::write(out_path, buf)
             .await
             .map_err(|e| Error::Backend(format!("write {out_path:?}: {e}")))?;
-        Ok(filtered.len() as u64)
+
+        let edges_written = if let Some(ref ep) = filter.edges_out_path {
+            let keys: std::collections::HashSet<String> =
+                filtered.iter().map(|r| r.key.clone()).collect();
+            self.export_edges_for_key_set(&keys, ep.as_path()).await?
+        } else {
+            0
+        };
+
+        Ok(MemoryExportResult {
+            memories_written: filtered.len() as u64,
+            edges_written,
+        })
     }
 
     async fn memory_import(
         &self,
         in_path: &std::path::Path,
         policy: ImportConflictPolicy,
+        edges_path: Option<&std::path::Path>,
     ) -> Result<ImportReport> {
         let bytes = tokio::fs::read(in_path)
             .await
             .map_err(|e| Error::Backend(format!("read {in_path:?}: {e}")))?;
         let text = String::from_utf8_lossy(&bytes).into_owned();
 
-        let mut report = ImportReport::default();
         // Parse first; we apply the conflict policy in a single transaction
         // for atomicity (a malformed line shouldn't half-import).
+        let mut malformed_mem = 0u64;
         let mut parsed: Vec<MemoryRecord> = Vec::new();
         for line in text.lines() {
             if line.trim().is_empty() {
@@ -1775,13 +2028,14 @@ impl StateStore for SqliteStore {
             }
             match serde_json::from_str::<MemoryRecord>(line) {
                 Ok(r) => parsed.push(r),
-                Err(_) => report.malformed += 1,
+                Err(_) => malformed_mem += 1,
             }
         }
 
         let mut report = self
             .conn
             .call(move |c| -> RusqliteResult<ImportReport> {
+                let mut report = ImportReport::default();
                 let tx = c.unchecked_transaction()?;
                 for r in &parsed {
                     let existing: Option<i64> = tx
@@ -1795,6 +2049,10 @@ impl StateStore for SqliteStore {
                     let related_s =
                         serde_json::to_string(&r.related_keys).unwrap_or_else(|_| "[]".into());
                     let content = clamp(&r.content, MEMORY_CONTENT_CAP);
+                    // Match `memory_save`: feature-hash embedding for semantic search.
+                    let embedding_bytes = crate::vector::encode_embedding(
+                        &crate::vector::embed_text(&content),
+                    );
                     let imp = if (r.importance - 0.5).abs() > 1e-9 {
                         r.importance
                     } else {
@@ -1817,8 +2075,8 @@ impl StateStore for SqliteStore {
                                 "INSERT INTO memories
                                    (key, kind, content, tags, related_keys, scope,
                                     created_at, updated_at, last_accessed_at, access_count,
-                                    importance, status, trigger_pattern)
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                    importance, status, trigger_pattern, embedding)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                                 params![
                                     r.key,
                                     r.kind,
@@ -1833,6 +2091,7 @@ impl StateStore for SqliteStore {
                                     imp,
                                     stat,
                                     trig,
+                                    embedding_bytes,
                                 ],
                             )?;
                             report.inserted += 1;
@@ -1849,7 +2108,7 @@ impl StateStore for SqliteStore {
                                         kind = ?2, content = ?3, tags = ?4, related_keys = ?5,
                                         scope = ?6, updated_at = ?7, last_accessed_at = ?8,
                                         access_count = ?9, importance = ?10, status = ?11,
-                                        trigger_pattern = ?12
+                                        trigger_pattern = ?12, embedding = ?13
                                      WHERE key = ?1",
                                     params![
                                         r.key,
@@ -1864,6 +2123,7 @@ impl StateStore for SqliteStore {
                                         imp,
                                         stat,
                                         trig,
+                                        embedding_bytes,
                                     ],
                                 )?;
                                 report.updated += 1;
@@ -1879,8 +2139,12 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("memory_import tx: {e}")))?;
 
-        // Adjust report.malformed (we updated this field outside the closure).
-        report.malformed += 0; // (already counted above; placeholder for clarity)
+        report.malformed += malformed_mem;
+        if let Some(ep) = edges_path {
+            let (u, m) = self.import_edges_jsonl(ep).await?;
+            report.edges_upserted = u;
+            report.edges_malformed = m;
+        }
         Ok(report)
     }
 
@@ -2067,10 +2331,233 @@ impl StateStore for SqliteStore {
             })
             .collect();
 
-        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         hits.truncate(limit_usize);
         Ok(hits)
     }
+
+    async fn memory_load_embeddings(&self) -> Result<Vec<(MemoryRecord, Vec<f32>)>> {
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<(MemoryRecord, Vec<u8>)>> {
+                let mut stmt = c.prepare(
+                    "SELECT key, kind, content, tags, related_keys, scope,
+                            created_at, updated_at, last_accessed_at, access_count,
+                            importance, status, trigger_pattern, embedding
+                     FROM memories
+                     WHERE status = 'active' AND embedding IS NOT NULL",
+                )?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        let tags_s: String = row.get(3)?;
+                        let related_s: String = row.get(4)?;
+                        let rec = MemoryRecord {
+                            key: row.get(0)?,
+                            kind: row.get(1)?,
+                            content: row.get(2)?,
+                            tags: parse_str_array(&tags_s),
+                            related_keys: parse_str_array(&related_s),
+                            scope: row.get(5)?,
+                            created_at: row.get(6)?,
+                            updated_at: row.get(7)?,
+                            last_accessed_at: row.get(8)?,
+                            access_count: row.get::<_, i64>(9)? as u64,
+                            importance: row.get::<_, f64>(10).unwrap_or(0.5),
+                            status: row
+                                .get::<_, String>(11)
+                                .unwrap_or_else(|_| "active".to_string()),
+                            trigger_pattern: row.get::<_, Option<String>>(12)?,
+                        };
+                        let emb_bytes: Vec<u8> = row.get(13)?;
+                        Ok((rec, emb_bytes))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_load_embeddings: {e}")))?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|(rec, emb_bytes)| {
+                let emb = crate::vector::decode_embedding(&emb_bytes);
+                if emb.is_empty() {
+                    return None;
+                }
+                Some((rec, emb))
+            })
+            .collect())
+    }
+
+    // ─── D3.2: codebase symbol index ────────────────────────────────────
+
+    async fn codebase_index(
+        &self,
+        root_path: &str,
+        languages: &[String],
+    ) -> Result<CodebaseIndexStats> {
+        use crate::codebase::{detect_language, extract_symbols};
+        use walkdir::WalkDir;
+
+        let start = std::time::Instant::now();
+        let root = root_path.to_string();
+        let langs: Vec<String> = languages.to_vec();
+
+        // File walking, symbol extraction, and embedding computation run in a blocking thread.
+        let root_for_walk = root.clone();
+        let (all_symbols, indexed_files) = tokio::task::spawn_blocking(move || {
+            let mut symbols: Vec<(CodebaseSymbol, Vec<u8>)> = Vec::new();
+            let mut count = 0u32;
+            for entry in WalkDir::new(&root_for_walk)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+            {
+                let path = entry.path();
+                // Skip common non-source directories.
+                let skip = path.components().any(|c| {
+                    matches!(
+                        c.as_os_str().to_str(),
+                        Some(".git")
+                            | Some("target")
+                            | Some("node_modules")
+                            | Some(".venv")
+                            | Some("__pycache__")
+                            | Some(".mypy_cache")
+                            | Some("dist")
+                            | Some("build")
+                    )
+                });
+                if skip {
+                    continue;
+                }
+                let lang = match detect_language(path) {
+                    Some(l) => l,
+                    None => continue,
+                };
+                if !langs.is_empty() && !langs.iter().any(|l| l.as_str() == lang) {
+                    continue;
+                }
+                let file_path_str = path.to_string_lossy().to_string();
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    for sym in extract_symbols(&content, &file_path_str, lang) {
+                        let emb_input = format!("{} {}", sym.name, sym.signature);
+                        let emb = crate::vector::encode_embedding(
+                            &crate::vector::embed_text(&emb_input),
+                        );
+                        symbols.push((sym, emb));
+                    }
+                    count += 1;
+                }
+            }
+            (symbols, count)
+        })
+        .await
+        .map_err(|e| Error::Backend(format!("codebase_index blocking: {e}")))?;
+
+        let symbol_count = all_symbols.len() as u32;
+        let root_for_return = root_path.to_string();
+        let now = now_secs();
+
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                // Replace previous index for this root path.
+                c.execute(
+                    "DELETE FROM codebase_symbols WHERE root_path = ?1",
+                    params![root],
+                )?;
+                let mut stmt = c.prepare(
+                    "INSERT INTO codebase_symbols
+                     (file_path, line, col, kind, name, signature, language, root_path,
+                      indexed_at, embedding)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                )?;
+                for (sym, emb) in &all_symbols {
+                    stmt.execute(params![
+                        sym.file_path,
+                        sym.line,
+                        sym.col,
+                        sym.kind,
+                        sym.name,
+                        sym.signature,
+                        sym.language,
+                        root,
+                        now,
+                        emb
+                    ])?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("codebase_index write: {e}")))?;
+
+        Ok(CodebaseIndexStats {
+            indexed_files,
+            symbols: symbol_count,
+            duration_ms: start.elapsed().as_millis() as u64,
+            root_path: root_for_return,
+        })
+    }
+
+    async fn codebase_search(
+        &self,
+        query: &str,
+        kind: Option<&str>,
+        file_filter: Option<&str>,
+        root_path: Option<&str>,
+        limit: u32,
+        mode: &str,
+    ) -> Result<Vec<CodebaseSymbol>> {
+        if mode == "semantic" {
+            return self
+                .codebase_search_semantic(query, kind, file_filter, root_path, limit)
+                .await;
+        }
+
+        let pattern = format!("%{}%", query);
+        let kind_f = kind.map(|s| s.to_string());
+        let file_f = file_filter.map(|s| format!("%{}%", s));
+        let root_f = root_path.map(|s| s.to_string());
+        let lim = limit.min(500) as i64;
+
+        self.conn
+            .call(move |c| -> RusqliteResult<Vec<CodebaseSymbol>> {
+                let mut stmt = c.prepare(
+                    "SELECT file_path, line, col, kind, name, signature, language
+                     FROM codebase_symbols
+                     WHERE (name LIKE ?1 OR signature LIKE ?1)
+                       AND (?2 IS NULL OR kind = ?2)
+                       AND (?3 IS NULL OR root_path = ?3)
+                       AND (?4 IS NULL OR file_path LIKE ?4)
+                     GROUP BY file_path, line, kind, name
+                     ORDER BY length(name), name
+                     LIMIT ?5",
+                )?;
+                let rows = stmt
+                    .query_map(params![pattern, kind_f, root_f, file_f, lim], |row| {
+                        Ok(CodebaseSymbol {
+                            file_path: row.get(0)?,
+                            line: row.get::<_, i64>(1)? as u32,
+                            col: row.get::<_, i64>(2)? as u32,
+                            kind: row.get(3)?,
+                            name: row.get(4)?,
+                            signature: row.get(5)?,
+                            language: row.get(6)?,
+                            score: None,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("codebase_search: {e}")))
+    }
+
 
     // ─── v8: cloud-run lifecycle (warp-oz) ──────────────────────────────
 
@@ -2324,6 +2811,79 @@ impl StateStore for SqliteStore {
     }
 }
 
+impl SqliteStore {
+    async fn codebase_search_semantic(
+        &self,
+        query: &str,
+        kind: Option<&str>,
+        file_filter: Option<&str>,
+        root_path: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<CodebaseSymbol>> {
+        let query_vec = crate::vector::embed_text(query);
+        let kind_f = kind.map(|s| s.to_string());
+        let file_f = file_filter.map(|s| format!("%{}%", s));
+        let root_f = root_path.map(|s| s.to_string());
+        let lim = limit.min(500) as usize;
+
+        // Load all matching symbols with embeddings (no name filter — semantic scoring does that).
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<(CodebaseSymbol, Option<Vec<u8>>)>> {
+                let mut stmt = c.prepare(
+                    "SELECT file_path, line, col, kind, name, signature, language, embedding
+                     FROM codebase_symbols
+                     WHERE (?1 IS NULL OR kind = ?1)
+                       AND (?2 IS NULL OR root_path = ?2)
+                       AND (?3 IS NULL OR file_path LIKE ?3)",
+                )?;
+                let rows = stmt
+                    .query_map(params![kind_f, root_f, file_f], |row| {
+                        Ok((
+                            CodebaseSymbol {
+                                file_path: row.get(0)?,
+                                line: row.get::<_, i64>(1)? as u32,
+                                col: row.get::<_, i64>(2)? as u32,
+                                kind: row.get(3)?,
+                                name: row.get(4)?,
+                                signature: row.get(5)?,
+                                language: row.get(6)?,
+                                score: None,
+                            },
+                            row.get::<_, Option<Vec<u8>>>(7)?,
+                        ))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("codebase_search_semantic load: {e}")))?;
+
+        // Score and rank by cosine similarity.
+        let mut scored: Vec<(f32, CodebaseSymbol)> = rows
+            .into_iter()
+            .filter_map(|(mut sym, emb_bytes)| {
+                let bytes = emb_bytes?;
+                let emb = crate::vector::decode_embedding(&bytes);
+                let score = crate::vector::cosine_similarity(&query_vec, &emb);
+                sym.score = Some(score);
+                Some((score, sym))
+            })
+            .collect();
+
+        // Deduplicate across overlapping root-path indexes: keep highest-scored
+        // entry per (file_path, line, kind, name).
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        let mut seen = std::collections::HashSet::new();
+        scored.retain(|(_, sym)| {
+            seen.insert((sym.file_path.clone(), sym.line, sym.kind.clone(), sym.name.clone()))
+        });
+        scored.truncate(lim);
+
+        Ok(scored.into_iter().map(|(_, sym)| sym).collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2518,6 +3078,183 @@ mod tests {
             .expect("memory_get")
             .expect("row");
         assert_eq!(loaded.trigger_pattern.as_deref(), Some("SIGKILL"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_import_populates_embedding_for_semantic_search() {
+        use crate::ImportConflictPolicy;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-import-emb-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path)
+            .await
+            .expect("open sqlite store");
+
+        let jsonl_path = temp_dir.join("probe.jsonl");
+        let line = serde_json::json!({
+            "key": "import_sem_embed_ipc_warp_socket",
+            "kind": "context",
+            "content": "Warp terminal uses Unix IPC socket bridge agent-bridge for semantic vector recall testing",
+            "tags": ["import-test"],
+            "related_keys": [],
+            "scope": null,
+            "created_at": 1700000000_i64,
+            "updated_at": 1700000000_i64,
+            "last_accessed_at": 0_i64,
+            "access_count": 0_u64,
+            "importance": 0.5,
+            "status": "active",
+            "trigger_pattern": null,
+        });
+        tokio::fs::write(&jsonl_path, format!("{}\n", line))
+            .await
+            .expect("write jsonl");
+
+        let report = store
+            .memory_import(&jsonl_path, ImportConflictPolicy::Skip, None)
+            .await
+            .expect("import");
+        assert!(report.inserted >= 1);
+
+        let hits = store
+            .memory_search_semantic("IPC socket warp bridge", 10, 0.25_f32)
+            .await
+            .expect("semantic search");
+        assert!(
+            hits.iter()
+                .any(|h| h.record.key == "import_sem_embed_ipc_warp_socket"),
+            "semantic search should find imported row; keys={:?}",
+            hits.iter().map(|h| &h.record.key).collect::<Vec<_>>()
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_export_import_roundtrip_edges_jsonl() {
+        use crate::{ImportConflictPolicy, MemoryExportFilter, MemoryRecord};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-edge-rt-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path)
+            .await
+            .expect("open sqlite store");
+
+        let mk = |k: &str| MemoryRecord {
+            key: k.to_string(),
+            kind: "fact".to_string(),
+            content: format!("content {k}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000002,
+            updated_at: 1700000002,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+        };
+        store.memory_save(&mk("edge_rt_a")).await.expect("save a");
+        store.memory_save(&mk("edge_rt_b")).await.expect("save b");
+        store
+            .memory_link("edge_rt_a", "edge_rt_b", "relates", 1.0)
+            .await
+            .expect("link");
+
+        let mem_out = temp_dir.join("mem.jsonl");
+        let edges_out = temp_dir.join("edges.jsonl");
+        let filter = MemoryExportFilter {
+            edges_out_path: Some(edges_out.clone()),
+            ..Default::default()
+        };
+        let res = store
+            .memory_export(&filter, &mem_out)
+            .await
+            .expect("export");
+        assert_eq!(res.memories_written, 2);
+        assert_eq!(res.edges_written, 1);
+
+        let db2 = temp_dir.join("state2.db");
+        let store2 = SqliteStore::open(&db2).await.expect("open second store");
+        let report = store2
+            .memory_import(&mem_out, ImportConflictPolicy::Skip, Some(&edges_out))
+            .await
+            .expect("import");
+        assert_eq!(report.inserted, 2);
+        assert_eq!(report.edges_upserted, 1);
+
+        let n = store2
+            .memory_neighbors("edge_rt_a")
+            .await
+            .expect("neighbors");
+        assert!(
+            n.iter()
+                .any(|e| e.to_key == "edge_rt_b" && e.edge_type == "relates"),
+            "expected relates edge; got {n:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn mcp_tool_errors_ring_prunes_and_recent_is_newest_first() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-mcp-err-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path)
+            .await
+            .expect("open sqlite store");
+
+        for i in 0..102_u32 {
+            store
+                .record_mcp_tool_error("probe_tool", &format!("msg-{i}"))
+                .await
+                .expect("record");
+        }
+
+        let recent100 = store
+            .recent_mcp_tool_errors(MCP_TOOL_ERROR_RING_CAP)
+            .await
+            .expect("recent 100");
+        assert_eq!(
+            recent100.len(),
+            usize::try_from(MCP_TOOL_ERROR_RING_CAP).unwrap()
+        );
+        assert_eq!(recent100[0].message, "msg-101");
+        assert_eq!(
+            recent100[recent100.len() - 1].message,
+            "msg-2",
+            "oldest retained after 102 inserts"
+        );
+
+        let recent = store.recent_mcp_tool_errors(3).await.expect("recent");
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent[0].message, "msg-101");
+        assert_eq!(recent[1].message, "msg-100");
+        assert_eq!(recent[2].message, "msg-99");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

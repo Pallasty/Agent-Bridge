@@ -1,24 +1,28 @@
 # Phase D Roadmap — agent-bridge
 
-> Status: **Planning** · 2026-05-02
+> Status: **D1–D3.2 完成** · 2026-05-03 · D3.3 延期（Warp WebView 架构评估后决策）
 >
 > Baseline: W1–W8 全部完成并验证。Warp IPC 通道可用，50+ MCP 工具可用。
 > Phase D 目标: 补齐「同步命令执行」「结构化终端输出」「语义记忆搜索」三个核心缺口。
+>
+> **See also:** `docs/AGENT-BRIDGE-AGENT-UX-ROADMAP.md` — agent/operator UX,
+> memory-graph export, observability, multi-frontend matrix, security phases **A–E**
+> (complementary to D1–D3 here).
 
 ---
 
 ## 优先级矩阵
 
-| 任务 | 影响 | 工作量 | 优先级 |
-|------|------|--------|--------|
-| D1.1 shell_exec 工具 | 高 | 低 | **最高** |
-| D1.2 warp_open_tab → session UUID | 中高 | 低中 | **高** |
-| D2.1 Warp block-level API | 高 | 中 | **高** |
-| D2.2 USER.md 用户画像合成 | 中 | 低 | **中** |
-| D2.3 Per-turn 记忆预取 | 中 | 低中 | **中** |
-| D3.1 语义向量搜索 | 高 | 高 | **中高** |
-| D3.2 codebase_index / codebase_search | 高 | 高 | **中高** |
-| D3.3 Warp WebView BrowserBackend | 中 | 高 | **低中** |
+| 任务 | 影响 | 工作量 | 优先级 | 状态 |
+|------|------|--------|--------|------|
+| D1.1 shell_exec 工具 | 高 | 低 | **最高** | ✅ 完成 |
+| D1.2 warp_open_tab → session UUID | 中高 | 低中 | **高** | ✅ 完成 |
+| D2.1 Warp block-level API | 高 | 中 | **高** | ✅ 完成 |
+| D2.2 USER.md 用户画像合成 | 中 | 低 | **中** | ✅ 完成 |
+| D2.3 Per-turn 记忆预取 | 中 | 低中 | **中** | ✅ 完成 |
+| D3.1 语义向量搜索 | 高 | 高 | **中高** | ✅ 完成 |
+| D3.2 codebase_index / codebase_search | 高 | 高 | **中高** | ✅ 完成 |
+| D3.3 Warp WebView BrowserBackend | 中 | 高 | **低中** | ⏸ 延期 |
 
 ---
 

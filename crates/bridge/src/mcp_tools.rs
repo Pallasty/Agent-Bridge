@@ -5,13 +5,14 @@ use ab_agent::{oz::fetch_run_status, GitWorktreeManager, SpawnConfig};
 use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
 use ab_mcp::{ContentBlock, McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
 use ab_store::{
-    prioritize_session_handoff,
+    cosine_similarity, embed_text, prioritize_session_handoff,
     // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
     CompactPolicy,
     ImportConflictPolicy,
     MemoryExportFilter,
     MemoryListSort,
     MemoryRecord,
+    MemorySearchHit,
     PlanRecord,
     PlanStep,
     SessionFilter,
@@ -20,6 +21,7 @@ use ab_store::{
 use ab_terminal::{
     dispatch_warp_scheme_uri, warp_scheme_launch_configuration, warp_scheme_new_tab,
     warp_scheme_new_window, warp_scheme_open_settings_page, OscEvent, OscParser, SplitDir,
+    TerminalBlock,
 };
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
@@ -587,9 +589,136 @@ fn lossy_truncate(bytes: &[u8]) -> (String, bool) {
     } else {
         let s = String::from_utf8_lossy(&bytes[..SHELL_EXEC_TRUNCATE_BYTES]).into_owned();
         (
-            format!("{s}\n[... truncated at {} KB]", SHELL_EXEC_TRUNCATE_BYTES / 1024),
+            format!(
+                "{s}\n[... truncated at {} KB]",
+                SHELL_EXEC_TRUNCATE_BYTES / 1024
+            ),
             true,
         )
+    }
+}
+
+// ===========================================================================
+//                        terminal_read_blocks tool
+// ===========================================================================
+
+pub struct TerminalReadBlocksTool {
+    hub: Hub,
+}
+impl TerminalReadBlocksTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for TerminalReadBlocksTool {
+    fn name(&self) -> &'static str {
+        "terminal_read_blocks"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Return structured blocks from a Warp terminal session. \
+                Each block contains the command text, its output, exit code, and execution state. \
+                More reliable than terminal_read_output for command→output mapping. \
+                Only available when the Warp IPC bridge is connected."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pane": {
+                        "type": "string",
+                        "description": "Pane/session id from terminal_list."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 20,
+                        "description": "Maximum number of most-recent blocks to return."
+                    },
+                    "since_block": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "If set, only return blocks with 0-based index >= since_block (skip older blocks)."
+                    },
+                    "output_max_chars": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65536,
+                        "default": 4000,
+                        "description": "Truncate each block's output to this many characters (default 4000). Set to 0 to omit output entirely."
+                    }
+                },
+                "required": ["pane"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let term = match &self.hub.terminal {
+            Some(t) => t.clone(),
+            None => return Ok(ToolResult::error("no terminal backend configured")),
+        };
+        let pane = match args.get("pane").and_then(|v| v.as_str()) {
+            Some(s) => PaneId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'pane'")),
+        };
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 200) as usize;
+        let since_block = args.get("since_block").and_then(|v| v.as_u64()).map(|v| v as usize);
+        let output_max = args
+            .get("output_max_chars")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(4000)
+            .min(65536) as usize;
+
+        match term.read_blocks(&pane, limit, since_block).await {
+            Ok(blocks) => {
+                let backend_id = term.id().to_string();
+                let count = blocks.len();
+                let blocks_json: Vec<serde_json::Value> = blocks
+                    .into_iter()
+                    .map(|b: TerminalBlock| {
+                        let (out, truncated) = if output_max == 0 {
+                            (String::new(), false)
+                        } else {
+                            let byte_end = b.output
+                                .char_indices()
+                                .nth(output_max)
+                                .map(|(i, _)| i)
+                                .unwrap_or(b.output.len());
+                            if byte_end < b.output.len() {
+                                (b.output[..byte_end].to_string(), true)
+                            } else {
+                                (b.output, false)
+                            }
+                        };
+                        let mut v = json!({
+                            "block_id": b.block_id,
+                            "command": b.command,
+                            "output": out,
+                            "exit_code": b.exit_code,
+                            "state": b.state,
+                            "is_running": b.is_running,
+                        });
+                        if truncated {
+                            v["output_truncated"] = json!(true);
+                        }
+                        v
+                    })
+                    .collect();
+                Ok(ToolResult::json_text(&json!({
+                    "pane": pane.as_str(),
+                    "backend": backend_id,
+                    "count": count,
+                    "blocks": blocks_json,
+                })))
+            }
+            Err(e) => Ok(ToolResult::error(format!("terminal_read_blocks: {e}"))),
+        }
     }
 }
 
@@ -2053,9 +2182,32 @@ impl McpTool for MemorySearchTool {
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.3)
                 .clamp(0.0, 1.0) as f32;
-            store
-                .memory_search_semantic(&q, limit, threshold)
-                .await?
+            let cache_guard = self.hub.memory_embed_cache.lock().await;
+            if let Some(cached) = cache_guard.as_ref() {
+                let query_vec = embed_text(&q);
+                let mut hits: Vec<MemorySearchHit> = cached
+                    .iter()
+                    .filter_map(|(rec, emb)| {
+                        let cosine = cosine_similarity(&query_vec, emb);
+                        if cosine < threshold {
+                            return None;
+                        }
+                        Some(MemorySearchHit {
+                            score: cosine as f64 + 0.2 * rec.importance,
+                            record: rec.clone(),
+                        })
+                    })
+                    .collect();
+                hits.sort_by(|a, b| {
+                    b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                hits.truncate(limit as usize);
+                drop(cache_guard);
+                hits
+            } else {
+                drop(cache_guard);
+                store.memory_search_semantic(&q, limit, threshold).await?
+            }
         } else {
             store.memory_search(&q, &tags, limit).await?
         };
@@ -2268,10 +2420,12 @@ impl McpTool for MemoryExportTool {
             name: self.name().into(),
             description: "Export memories to a newline-delimited JSON file (one record \
                  per line — JSONL is grep-friendly and stable across versions). \
-                 Optional filters narrow what's exported. The output file can \
-                 then be moved across machines via any transport (scp, email \
-                 attachment, cloud drive, git repo) and consumed by \
-                 `memory_import` on the other side."
+                 Optional filters narrow what's exported. When `edges_out_path` \
+                 is set, a second JSONL file is written: one [`MemoryEdgeExport`] \
+                 per line for every `memory_edges` row whose **both** endpoints \
+                 are among the exported memory keys. The main file can then be \
+                 moved with the edge companion and consumed by `memory_import` \
+                 (pass the same paths as `path` + optional `edges_path`)."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2279,7 +2433,8 @@ impl McpTool for MemoryExportTool {
                     "path":     { "type": "string", "description": "Absolute output path; parent dirs auto-created." },
                     "kind":     { "type": "string", "description": "Optional kind filter." },
                     "tags_any": { "type": "array", "items": {"type": "string"}, "description": "Match if memory has at least one tag." },
-                    "since_ts": { "type": "integer", "description": "Only memories with updated_at >= this unix-epoch seconds value." }
+                    "since_ts": { "type": "integer", "description": "Only memories with updated_at >= this unix-epoch seconds value." },
+                    "edges_out_path": { "type": "string", "description": "Optional absolute path for companion edge JSONL (both endpoints must be in the exported memory set)." }
                 },
                 "required": ["path"]
             }),
@@ -2305,10 +2460,17 @@ impl McpTool for MemoryExportTool {
                     .collect()
             }),
             since_ts: args.get("since_ts").and_then(|v| v.as_i64()),
+            edges_out_path: args
+                .get("edges_out_path")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from),
         };
         match store.memory_export(&filter, &path).await {
-            Ok(n) => Ok(ToolResult::json_text(&json!({
-                "exported": n,
+            Ok(res) => Ok(ToolResult::json_text(&json!({
+                "exported": res.memories_written,
+                "memories_written": res.memories_written,
+                "edges_written": res.edges_written,
                 "path": path.display().to_string(),
             }))),
             Err(e) => Ok(ToolResult::error(format!("export: {e}"))),
@@ -2333,17 +2495,21 @@ impl McpTool for MemoryImportTool {
         ToolSchema {
             name: self.name().into(),
             description: "Import memories from a JSONL file (the format `memory_export` \
-                 produces). `conflict_policy` decides what happens when a key \
+                 produces). Optional `edges_path` is a companion JSONL of \
+                 `MemoryEdgeExport` lines (same convention as `memory_export` \
+                 `edges_out_path`); edges are upserted after memories. \
+                 `conflict_policy` decides what happens when a key \
                  already exists locally:\n\
                    - `skip` (default): keep local row\n\
                    - `overwrite`: always replace with the imported row\n\
                    - `newer_wins`: replace only if imported.updated_at is greater\n\
-                 Returns a per-row summary {inserted, updated, skipped, malformed}."
+                 Returns {inserted, updated, skipped, malformed, edges_upserted, edges_malformed}."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "path":            { "type": "string" },
+                    "edges_path":      { "type": "string", "description": "Optional companion JSONL produced by memory_export(edges_out_path=...)." },
                     "conflict_policy": {
                         "type": "string",
                         "enum": ["skip","overwrite","newer_wins"],
@@ -2372,7 +2538,15 @@ impl McpTool for MemoryImportTool {
             "newer_wins" => ImportConflictPolicy::NewerWins,
             _ => ImportConflictPolicy::Skip,
         };
-        match store.memory_import(&path, policy).await {
+        let edges_path = args
+            .get("edges_path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        match store
+            .memory_import(&path, policy, edges_path.as_deref())
+            .await
+        {
             Ok(report) => Ok(ToolResult::json_text(
                 &serde_json::to_value(report).unwrap_or(Value::Null),
             )),
@@ -2773,6 +2947,20 @@ impl McpTool for SessionBootstrapTool {
         lines.push("=== End Bootstrap ===".to_string());
         lines.push(String::new());
         lines.push(session_lifecycle_hint());
+
+        // D2.3: prime the embedding cache in the background so subsequent
+        // memory_search(mode=semantic) calls skip the DB round-trip.
+        {
+            let prefetch_store = store.clone();
+            let prefetch_cache = self.hub.memory_embed_cache.clone();
+            tokio::spawn(async move {
+                if let Ok(rows) = prefetch_store.memory_load_embeddings().await {
+                    let mut guard = prefetch_cache.lock().await;
+                    *guard = Some(rows);
+                }
+            });
+        }
+
         Ok(ToolResult::text(lines.join("\n")))
     }
 }
@@ -3471,6 +3659,67 @@ impl McpTool for HookStatusTool {
 }
 
 // ===========================================================================
+//                       mcp_recent_errors (Phase C)
+// ===========================================================================
+
+pub struct McpRecentErrorsTool {
+    hub: Hub,
+}
+impl McpRecentErrorsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for McpRecentErrorsTool {
+    fn name(&self) -> &'static str {
+        "mcp_recent_errors"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Return recent MCP tools/call failures persisted in the state DB \
+                 (newest first, ring buffer). Use to debug flaky tools or client integration \
+                 after `isError` responses or tool panics."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max rows to return (1–500). Default 20."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 500) as u32;
+        match store.recent_mcp_tool_errors(limit).await {
+            Ok(rows) => {
+                let n = rows.len();
+                let cap = ab_store::MCP_TOOL_ERROR_RING_CAP;
+                Ok(ToolResult::json_text(&json!({
+                    "errors": rows,
+                    "returned": n,
+                    "ring_cap": cap,
+                })))
+            }
+            Err(e) => Ok(ToolResult::error(format!("store: {e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                              capabilities
 // ===========================================================================
 
@@ -3991,7 +4240,12 @@ impl McpTool for SessionFinalizeTool {
         if let Some(path) = args.get("export_path").and_then(|v| v.as_str()) {
             let filter = MemoryExportFilter::default();
             let exported = store.memory_export(&filter, &PathBuf::from(path)).await?;
-            export_summary = json!({ "path": path, "exported": exported });
+            export_summary = json!({
+                "path": path,
+                "exported": exported.memories_written,
+                "memories_written": exported.memories_written,
+                "edges_written": exported.edges_written,
+            });
         }
 
         // After compaction/decay, nudge operators toward periodic dedup when the graph grows.
@@ -4024,19 +4278,20 @@ impl McpTool for SessionFinalizeTool {
         };
 
         // Optional: persist user profile to USER.md for future session_bootstrap.
-        let user_profile_written = if let Some(profile) = args.get("user_profile").and_then(|v| v.as_str()) {
-            if !profile.trim().is_empty() && !dry_run {
-                let path = user_profile_path();
-                if let Some(parent) = path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
+        let user_profile_written =
+            if let Some(profile) = args.get("user_profile").and_then(|v| v.as_str()) {
+                if !profile.trim().is_empty() && !dry_run {
+                    let path = user_profile_path();
+                    if let Some(parent) = path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    std::fs::write(&path, profile.as_bytes()).is_ok()
+                } else {
+                    false
                 }
-                std::fs::write(&path, profile.as_bytes()).is_ok()
             } else {
                 false
-            }
-        } else {
-            false
-        };
+            };
 
         Ok(ToolResult::json_text(&json!({
             "dry_run": dry_run,
@@ -4644,27 +4899,30 @@ impl McpTool for OzRunCancelTool {
         // Generate one at: Warp Settings → Platform.
         let api_key = match std::env::var("WARP_API_KEY") {
             Ok(k) if !k.is_empty() => k,
-            _ => return Ok(ToolResult::error(
-                "WARP_API_KEY env var not set. \
+            _ => {
+                return Ok(ToolResult::error(
+                    "WARP_API_KEY env var not set. \
                  Generate an API key at Warp Settings → Platform \
-                 (warp://settings/platform), then export WARP_API_KEY=<key>."
-            )),
+                 (warp://settings/platform), then export WARP_API_KEY=<key>.",
+                ))
+            }
         };
 
         // ── POST .../cancel via curl ──────────────────────────────────────
         // The oz CLI has no 'oz run cancel' subcommand; we call the REST API directly.
         // Endpoint: POST https://app.warp.dev/api/v1/agent/runs/{runId}/cancel
-        let url = format!(
-            "https://app.warp.dev/api/v1/agent/runs/{}/cancel",
-            run_id
-        );
+        let url = format!("https://app.warp.dev/api/v1/agent/runs/{}/cancel", run_id);
         let out = tokio::process::Command::new("curl")
             .args([
-                "-s",                           // silent
-                "-X", "POST",
-                "-H", &format!("Authorization: Bearer {api_key}"),
-                "-H", "Content-Type: application/json",
-                "-w", "\n__HTTP_STATUS__%{http_code}",
+                "-s", // silent
+                "-X",
+                "POST",
+                "-H",
+                &format!("Authorization: Bearer {api_key}"),
+                "-H",
+                "Content-Type: application/json",
+                "-w",
+                "\n__HTTP_STATUS__%{http_code}",
                 &url,
             ])
             .stdin(std::process::Stdio::null())
@@ -5553,7 +5811,10 @@ impl McpTool for WarpOpenTabTool {
             for _ in 0..20 {
                 tokio::time::sleep(Duration::from_millis(150)).await;
                 if let Ok(panes) = term.list_panes().await {
-                    if let Some(p) = panes.into_iter().find(|p| !before.contains(&p.id.to_string())) {
+                    if let Some(p) = panes
+                        .into_iter()
+                        .find(|p| !before.contains(&p.id.to_string()))
+                    {
                         found = Some(p.id.to_string());
                         break;
                     }
@@ -5740,6 +6001,196 @@ impl McpTool for WarpStatusTool {
 }
 
 // ===========================================================================
+//                         codebase_index / codebase_search  (D3.2)
+// ===========================================================================
+
+pub struct CodebaseIndexTool {
+    hub: Hub,
+}
+impl CodebaseIndexTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for CodebaseIndexTool {
+    fn name(&self) -> &'static str {
+        "codebase_index"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Scan a directory and build a symbol index (functions, structs, classes, \
+                 traits, enums, …) stored in SQLite. Subsequent codebase_search calls query \
+                 this index without re-reading the filesystem. Re-indexing the same root \
+                 replaces the previous index. Supported languages: rust, python, \
+                 typescript, javascript, go (auto-detected from extension)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path to the directory to index. Defaults to process cwd."
+                    },
+                    "languages": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": [],
+                        "description": "Limit to these languages (e.g. [\"rust\"]). Empty = all supported."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let path = args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()))
+            .unwrap_or_else(|| "/".to_string());
+        let languages: Vec<String> = args
+            .get("languages")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        match store.codebase_index(&path, &languages).await {
+            Ok(stats) => Ok(ToolResult::json_text(
+                &serde_json::to_value(stats).unwrap_or(Value::Null),
+            )),
+            Err(e) => Ok(ToolResult::error(&format!("codebase_index failed: {e}"))),
+        }
+    }
+}
+
+pub struct CodebaseSearchTool {
+    hub: Hub,
+}
+impl CodebaseSearchTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for CodebaseSearchTool {
+    fn name(&self) -> &'static str {
+        "codebase_search"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Search the codebase symbol index built by codebase_index. \
+                 Returns file_path, line, kind (fn/struct/class/…), name, and signature \
+                 for each matching symbol. Use mode=semantic for natural-language queries \
+                 (e.g. \"parse HTTP headers\"). Run codebase_index first if no results appear."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Substring to match (exact) or description to match by meaning (semantic)."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["exact", "semantic"],
+                        "default": "exact",
+                        "description": "exact: substring LIKE match (default). semantic: vector cosine similarity — finds symbols by meaning even without exact name match."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Optional exact kind filter: fn | struct | enum | trait | type | const | mod | impl | class | def | function | interface | method | macro"
+                    },
+                    "file_filter": {
+                        "type": "string",
+                        "description": "Optional substring matched against file_path (e.g. 'hub.rs' or 'src/store')."
+                    },
+                    "root_path": {
+                        "type": "string",
+                        "description": "Optional root directory to restrict results to a specific index."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 30
+                    }
+                },
+                "required": ["query"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if query.is_empty() {
+            return Ok(ToolResult::error("'query' is required"));
+        }
+        let mode = args
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .filter(|s| *s == "semantic")
+            .unwrap_or("exact")
+            .to_string();
+        let kind = args
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let file_filter = args
+            .get("file_filter")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let root_path = args
+            .get("root_path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30)
+            .min(500) as u32;
+
+        match store
+            .codebase_search(
+                &query,
+                kind.as_deref(),
+                file_filter.as_deref(),
+                root_path.as_deref(),
+                limit,
+                &mode,
+            )
+            .await
+        {
+            Ok(hits) => Ok(ToolResult::json_text(
+                &serde_json::to_value(hits).unwrap_or(Value::Null),
+            )),
+            Err(e) => Ok(ToolResult::error(&format!("codebase_search failed: {e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -5753,6 +6204,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(TerminalListTool::new(hub.clone())));
     reg.register(Arc::new(TerminalSendKeysTool::new(hub.clone())));
     reg.register(Arc::new(TerminalReadOutputTool::new(hub.clone())));
+    reg.register(Arc::new(TerminalReadBlocksTool::new(hub.clone())));
     reg.register(Arc::new(TerminalSplitTool::new(hub.clone())));
     reg.register(Arc::new(ShellExecTool::new()));
     // Browser surface
@@ -5794,6 +6246,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(SessionHandoffBriefTool::new(hub.clone())));
     reg.register(Arc::new(SessionLifecycleStepTool::new(hub.clone())));
     reg.register(Arc::new(HookStatusTool::new(hub.clone())));
+    reg.register(Arc::new(McpRecentErrorsTool::new(hub.clone())));
     reg.register(Arc::new(ProjectDetectTool::new(hub.clone())));
     reg.register(Arc::new(ChangesDigestTool::new(hub.clone())));
     reg.register(Arc::new(CapabilitiesTool::new(hub.clone())));
@@ -5820,7 +6273,9 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     // W6: browser extract/fill + multi-session inbox (DESIGN-warp-first-agent-shell)
     reg.register(Arc::new(AgentMessageTool::new(hub.clone())));
     reg.register(Arc::new(AgentInboxTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryAutoCurateTool::new(hub)));
+    reg.register(Arc::new(MemoryAutoCurateTool::new(hub.clone())));
+    reg.register(Arc::new(CodebaseIndexTool::new(hub.clone())));
+    reg.register(Arc::new(CodebaseSearchTool::new(hub)));
     reg
 }
 
@@ -5860,9 +6315,9 @@ fn unescape_keys(s: &str) -> String {
             continue;
         }
         match chars.next() {
-            Some('n')  => out.push('\n'),
-            Some('r')  => out.push('\r'),
-            Some('t')  => out.push('\t'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
             Some('\\') => out.push('\\'),
             // \x1b → ESC, \x<HH> → single byte
             Some('x') => {
@@ -5874,13 +6329,21 @@ fn unescape_keys(s: &str) -> String {
                         continue;
                     }
                     // not valid hex — emit literally
-                    out.push('\\'); out.push('x');
-                    if let Some(a) = h1 { out.push(a); }
-                    if let Some(b) = h2 { out.push(b); }
+                    out.push('\\');
+                    out.push('x');
+                    if let Some(a) = h1 {
+                        out.push(a);
+                    }
+                    if let Some(b) = h2 {
+                        out.push(b);
+                    }
                 }
             }
-            Some(other) => { out.push('\\'); out.push(other); }
-            None        => out.push('\\'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
         }
     }
     out

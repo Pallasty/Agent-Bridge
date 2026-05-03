@@ -65,7 +65,7 @@ use tokio::net::UnixStream;
 use tokio::process::Command;
 use uuid::Uuid;
 
-use crate::{Pane, SplitDir, TermEvent, TerminalBackend, TerminalCapabilities};
+use crate::{Pane, SplitDir, TermEvent, TerminalBackend, TerminalBlock, TerminalCapabilities};
 
 /// Default URL-handler binary on the current platform.
 ///
@@ -351,6 +351,24 @@ impl WarpBackend {
         serde_json::from_value(value)
             .map_err(|e| Error::Backend(format!("warp ipc: parse read_scrollback failed: {e}")))
     }
+
+    async fn rpc_read_blocks(
+        &self,
+        session_id: &str,
+        limit: usize,
+        since_block: Option<usize>,
+    ) -> Result<Vec<TerminalBlock>> {
+        let mut params = json!({
+            "session_id": session_id,
+            "limit": limit.max(1)
+        });
+        if let Some(since) = since_block {
+            params["since_block"] = json!(since);
+        }
+        let value = self.rpc_call("read_blocks", params).await?;
+        serde_json::from_value(value)
+            .map_err(|e| Error::Backend(format!("warp ipc: parse read_blocks failed: {e}")))
+    }
 }
 
 fn path_is_unix_socket(path: &std::path::Path) -> bool {
@@ -441,6 +459,16 @@ impl TerminalBackend for WarpBackend {
             "warp: read_output is not supported via URL scheme, and Warp IPC is unavailable."
                 .into(),
         ))
+    }
+
+    async fn read_blocks(
+        &self,
+        pane: &PaneId,
+        limit: usize,
+        since_block: Option<usize>,
+    ) -> Result<Vec<TerminalBlock>> {
+        let session_id = Self::session_id_from_pane(pane);
+        self.rpc_read_blocks(&session_id, limit, since_block).await
     }
 
     /// Best-effort split via the URL scheme.

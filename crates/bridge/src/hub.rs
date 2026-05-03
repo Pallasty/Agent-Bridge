@@ -4,7 +4,7 @@ use ab_agent::{AgentRuntime, GitWorktreeManager};
 use ab_browser::BrowserBackend;
 use ab_core::NotifyEvent;
 use ab_notifier::Notifier;
-use ab_store::StateStore;
+use ab_store::{MemoryRecord, StateStore};
 use ab_terminal::TerminalBackend;
 use std::sync::Arc;
 use tracing::warn;
@@ -17,6 +17,9 @@ pub struct Hub {
     pub browser: Option<Arc<dyn BrowserBackend>>,
     pub agent: Option<Arc<dyn AgentRuntime>>,
     pub worktree: Option<Arc<GitWorktreeManager>>,
+    /// D2.3: per-turn semantic search cache — populated by session_bootstrap,
+    /// consumed by memory_search(mode=semantic) to skip the DB round-trip.
+    pub memory_embed_cache: Arc<tokio::sync::Mutex<Option<Vec<(MemoryRecord, Vec<f32>)>>>>,
 }
 
 impl Hub {
@@ -87,6 +90,7 @@ impl HubBuilder {
             browser: self.browser,
             agent: self.agent,
             worktree: self.worktree,
+            memory_embed_cache: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 }

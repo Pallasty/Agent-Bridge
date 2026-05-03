@@ -9,7 +9,7 @@ use crate::protocol::{
     ToolsCapability, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
     PARSE_ERROR, PROTOCOL_VERSION,
 };
-use crate::{ToolContext, ToolRegistry};
+use crate::{ContentBlock, ToolContext, ToolRegistry, ToolResult};
 use ab_store::{prioritize_session_handoff, MemoryListSort, StateStore};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -75,6 +75,31 @@ pub async fn serve_stdio(
     info!("MCP stdio server stopped (stdin closed)");
 }
 
+fn tool_result_error_summary(result: &ToolResult) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for block in &result.content {
+        match block {
+            ContentBlock::Text { text } => parts.push(text.as_str()),
+            ContentBlock::Image { .. } => parts.push("(image)"),
+        }
+    }
+    let joined = parts.join(" ").trim().to_string();
+    if joined.is_empty() {
+        "tool returned isError with no text content".to_string()
+    } else {
+        joined
+    }
+}
+
+async fn record_mcp_tool_failure(store: Option<&dyn StateStore>, tool_name: &str, message: &str) {
+    let Some(s) = store else {
+        return;
+    };
+    if let Err(e) = s.record_mcp_tool_error(tool_name, message).await {
+        warn!(tool = %tool_name, error = %e, "record_mcp_tool_error failed");
+    }
+}
+
 async fn handle(
     registry: &ToolRegistry,
     store: Option<&dyn StateStore>,
@@ -127,6 +152,12 @@ async fn handle(
             let name = match params.get("name").and_then(|v| v.as_str()) {
                 Some(n) => n.to_string(),
                 None => {
+                    record_mcp_tool_failure(
+                        store,
+                        "<missing>",
+                        "missing 'name' in tools/call params",
+                    )
+                    .await;
                     return McpResponse::error(id, INVALID_PARAMS, "missing 'name'");
                 }
             };
@@ -135,27 +166,39 @@ async fn handle(
             let tool = match registry.get(&name) {
                 Some(t) => t,
                 None => {
-                    return McpResponse::error(
-                        id,
-                        METHOD_NOT_FOUND,
-                        format!("unknown tool: {name}"),
-                    );
+                    let msg = format!("unknown tool: {name}");
+                    record_mcp_tool_failure(store, &name, &msg).await;
+                    return McpResponse::error(id, METHOD_NOT_FOUND, msg);
                 }
             };
 
             let ctx = ToolContext::default();
             match tool.execute(args, &ctx).await {
                 Ok(mut result) => {
+                    if result.is_error {
+                        let summary = tool_result_error_summary(&result);
+                        record_mcp_tool_failure(store, &name, &summary).await;
+                    }
                     if let Some(meta) = tool_backend_id {
                         result.backend_id = Some(meta.clone());
                     }
                     match serde_json::to_value(result) {
                         Ok(v) => McpResponse::success(id, v),
-                        Err(e) => McpResponse::error(id, INTERNAL_ERROR, format!("serialize: {e}")),
+                        Err(e) => {
+                            record_mcp_tool_failure(
+                                store,
+                                &name,
+                                &format!("serialize tool result: {e}"),
+                            )
+                            .await;
+                            McpResponse::error(id, INTERNAL_ERROR, format!("serialize: {e}"))
+                        }
                     }
                 }
                 Err(e) => {
                     warn!(tool = %name, error = %e, "tool execution failed");
+                    record_mcp_tool_failure(store, &name, &format!("tool '{name}' failed: {e}"))
+                        .await;
                     let mut err_result =
                         crate::ToolResult::error(format!("tool '{name}' failed: {e}"));
                     if let Some(meta) = tool_backend_id {
@@ -164,6 +207,12 @@ async fn handle(
                     match serde_json::to_value(err_result) {
                         Ok(v) => McpResponse::success(id, v),
                         Err(e2) => {
+                            record_mcp_tool_failure(
+                                store,
+                                &name,
+                                &format!("serialize error ToolResult: {e2}"),
+                            )
+                            .await;
                             McpResponse::error(id, INTERNAL_ERROR, format!("serialize: {e2}"))
                         }
                     }

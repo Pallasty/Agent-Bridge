@@ -9,6 +9,52 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`codebase_index` / `codebase_search` MCP tools (D3.2)** — pure-Rust symbol
+  extractor (Rust, Python, TypeScript/JavaScript, Go) stores indexed symbols in
+  SQLite `codebase_symbols` table (schema v14 + v15 embedding column). Exact
+  (`LIKE`) and semantic (cosine similarity over FNV-hash embeddings) search modes.
+  Search deduplicates across overlapping root-path indexes via `GROUP BY
+  (file_path, line, kind, name)`. Returns `file_path`, `line`, `kind`, `name`,
+  `signature`, `language`, and optional `score`.
+- **D2.3 per-turn embedding cache** — `session_bootstrap` spawns a background
+  `tokio::spawn` that pre-loads all active memories with embeddings into
+  `Hub::memory_embed_cache` (`Arc<Mutex<Option<Vec<(MemoryRecord, Vec<f32>)>>>>`).
+  `memory_search(mode=semantic)` checks the cache first; on hit, scores are
+  computed in-process (cosine + 0.2 × importance) without a DB round-trip.
+  Cache stays warm for the session; cold path falls back to `memory_search_semantic`.
+- **`StateStore::memory_load_embeddings`** — new trait method (default returns
+  empty vec); `SqliteStore` SELECTs all active rows with non-NULL embeddings in
+  one query and decodes `Vec<f32>` pairs.
+
+### Fixed
+
+- **`memory_import` now writes `embedding`** — bulk JSONL import applies the same
+  feature-hash vector as `memory_save`, so `memory_search` with `mode=semantic`
+  immediately ranks imported rows (no `NULL embedding` gap).
+
+### Added
+
+- **`mcp_recent_errors` MCP tool (Phase C)** — reads newest-first rows from SQLite
+  `mcp_tool_errors` (ring buffer, default cap 100). The stdio MCP server records
+  failures on `tools/call`: missing tool name, unknown tool, `execute` `Err`,
+  `ToolResult` with `isError`, and result serialization errors (when a store is
+  configured).
+- **`memory_export` / `memory_import` graph round-trip (Phase B)** — optional
+  `edges_out_path` on export writes companion `MemoryEdgeExport` JSONL (edges
+  whose **both** endpoints are in the exported memory set). `memory_import`
+  accepts optional `edges_path` to upsert `memory_edges`. `memory_export` returns
+  `{ memories_written, edges_written }`; import report includes
+  `edges_upserted` / `edges_malformed`. MCP tools expose `edges_out_path` /
+  `edges_path`; `session_finalize` export summary lists both counts.
+- **`memory_snapshots/inject/ab_ai_kernel_v1.jsonl`** — compact AI-oriented
+  memory bundle (SIGNAL / WHEN / MUST / KEYWORDS + 中文摘要, tags `ab-inject`)
+  intended for `memory_import` + semantic or hybrid recall.
+- **`memory_snapshots/inject/ab_ai_bridge_feedback_v1.jsonl`** — agent-UX /
+  ops feedback cards (observability, graph export, embedding docs audience,
+  multi-frontend matrix, security defaults); tags `ab-feedback`.
+- **`docs/AGENT-BRIDGE-AGENT-UX-ROADMAP.md`** — phased implementation plan
+  (Phases A–E) complementing `docs/PHASE-D-roadmap.md`; Phase A landed with
+  README embedding guidance + inject bundle + `AGENT-BRIDGE-EVOLUTION-CORE` §8.2.
 - **Browser MCP tools (W6)** — `browser_extract_text` (`innerText` as JSON) and
   `browser_fill_form` (CSS selector + value, dispatches input/change).
   `BrowserBackend` trait extended; `ChromiumCdpBackend` implements both.
