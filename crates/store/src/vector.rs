@@ -1,40 +1,74 @@
-//! Lightweight local text embedding via feature hashing (hash trick).
+//! Text embedding for semantic search.
 //!
-//! Converts any text to a fixed-size f32 vector without external models or APIs.
-//! Uses 512-dimensional hash space with word unigrams + bigrams; good for a
-//! corpus of a few hundred memories where BM25 keyword misses near-synonyms.
+//! Two backends, selected at runtime:
 //!
-//! Cosine similarity function adapted from project-resonance (same author).
+//! 1. **ONNX** (`onnx-embed` feature, default): `all-MiniLM-L6-v2` via `fastembed`.
+//!    384-dimensional sentence embeddings. Model downloaded once to
+//!    `~/.cache/fastembed/` on first use (~22 MB).
+//!
+//! 2. **Hash fallback**: FNV-1a feature hashing (unigrams + bigrams).
+//!    384-dimensional, no external dependencies, deterministic.
+//!    Used when the ONNX model is unavailable or the feature is disabled.
+//!
+//! `VECTOR_DIM = 384` is the canonical dimension for both paths.
 
-pub const VECTOR_DIM: usize = 512;
+pub const VECTOR_DIM: usize = 384;
 
-/// Compute a 512-dim f32 embedding for `text` using the hash trick.
+// ── ONNX backend (optional) ───────────────────────────────────────────────
+
+#[cfg(feature = "onnx-embed")]
+mod onnx {
+    use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+    use std::sync::{Mutex, OnceLock};
+    use tracing::{info, warn};
+
+    // TextEmbedding::embed() requires &mut self, so we wrap in Mutex.
+    static EMBEDDER: OnceLock<Option<Mutex<TextEmbedding>>> = OnceLock::new();
+
+    fn cell() -> &'static Option<Mutex<TextEmbedding>> {
+        EMBEDDER.get_or_init(|| {
+            let opts = InitOptions::new(EmbeddingModel::AllMiniLML6V2);
+            match TextEmbedding::try_new(opts) {
+                Ok(e) => {
+                    info!("fastembed: all-MiniLM-L6-v2 ready (384-dim)");
+                    Some(Mutex::new(e))
+                }
+                Err(e) => {
+                    warn!("fastembed init failed, falling back to hash embedding: {e}");
+                    None
+                }
+            }
+        })
+    }
+
+    /// Embed a single text string; returns `None` when ONNX is unavailable.
+    pub fn embed(text: &str) -> Option<Vec<f32>> {
+        let mutex = cell().as_ref()?;
+        let mut guard = mutex.lock().ok()?;
+        match guard.embed(vec![text], None) {
+            Ok(mut vecs) if !vecs.is_empty() => Some(vecs.remove(0)),
+            Ok(_) => None,
+            Err(e) => {
+                warn!("fastembed embed error: {e}");
+                None
+            }
+        }
+    }
+}
+
+// ── Public API ─────────────────────────────────────────────────────────────
+
+/// Compute a 384-dim f32 embedding for `text`.
 ///
-/// Steps:
-///  1. Lowercase + tokenize on non-alphanumeric boundaries
-///  2. Remove stopwords
-///  3. Hash unigrams + bigrams to [0, VECTOR_DIM) → accumulate counts
-///  4. L2-normalize to unit length
-///
-/// Deterministic: same text always produces the same vector.
+/// Uses `all-MiniLM-L6-v2` (ONNX) when available; otherwise falls back to
+/// FNV-1a feature hashing. Both paths produce 384-dim unit vectors, so
+/// cosine similarity works consistently regardless of which path ran.
 pub fn embed_text(text: &str) -> Vec<f32> {
-    let tokens = tokenize(text);
-    let mut vec = vec![0.0f32; VECTOR_DIM];
-
-    // Unigrams
-    for tok in &tokens {
-        let idx = fnv1a(tok.as_bytes()) % VECTOR_DIM;
-        vec[idx] += 1.0;
+    #[cfg(feature = "onnx-embed")]
+    if let Some(v) = onnx::embed(text) {
+        return v;
     }
-    // Bigrams
-    for pair in tokens.windows(2) {
-        let bigram = format!("{}\x00{}", pair[0], pair[1]);
-        let idx = fnv1a(bigram.as_bytes()) % VECTOR_DIM;
-        vec[idx] += 0.5; // bigrams down-weighted
-    }
-
-    l2_normalize(&mut vec);
-    vec
+    embed_text_hash(text)
 }
 
 /// Cosine similarity between two equal-length vectors.
@@ -75,7 +109,29 @@ pub fn decode_embedding(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
-// ── internals ────────────────────────────────────────────────────────────────
+// ── Hash fallback ─────────────────────────────────────────────────────────
+
+/// FNV-1a feature-hash embedding: 384-dim, no external dependencies.
+/// Used when the ONNX backend is unavailable.
+pub fn embed_text_hash(text: &str) -> Vec<f32> {
+    let tokens = tokenize(text);
+    let mut vec = vec![0.0f32; VECTOR_DIM];
+
+    for tok in &tokens {
+        let idx = fnv1a(tok.as_bytes()) % VECTOR_DIM;
+        vec[idx] += 1.0;
+    }
+    for pair in tokens.windows(2) {
+        let bigram = format!("{}\x00{}", pair[0], pair[1]);
+        let idx = fnv1a(bigram.as_bytes()) % VECTOR_DIM;
+        vec[idx] += 0.5;
+    }
+
+    l2_normalize(&mut vec);
+    vec
+}
+
+// ── Internals ─────────────────────────────────────────────────────────────
 
 fn tokenize(text: &str) -> Vec<String> {
     let lower = text.to_lowercase();
@@ -95,7 +151,6 @@ fn l2_normalize(v: &mut [f32]) {
     }
 }
 
-/// FNV-1a 32-bit hash, mapped to usize index.
 fn fnv1a(bytes: &[u8]) -> usize {
     let mut h: u32 = 2_166_136_261;
     for &b in bytes {
@@ -177,36 +232,45 @@ fn is_stopword(w: &str) -> bool {
     )
 }
 
+// ── Tests ─────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn same_text_same_vector() {
-        let a = embed_text("Warp IPC socket");
-        let b = embed_text("Warp IPC socket");
+        let a = embed_text_hash("Warp IPC socket");
+        let b = embed_text_hash("Warp IPC socket");
         assert_eq!(a, b);
     }
 
     #[test]
+    fn hash_dim_is_384() {
+        let v = embed_text_hash("hello world");
+        assert_eq!(v.len(), VECTOR_DIM);
+        assert_eq!(VECTOR_DIM, 384);
+    }
+
+    #[test]
     fn similar_texts_high_similarity() {
-        let a = embed_text("terminal send keys IPC socket warp");
-        let b = embed_text("IPC socket warp terminal");
+        let a = embed_text_hash("terminal send keys IPC socket warp");
+        let b = embed_text_hash("IPC socket warp terminal");
         let sim = cosine_similarity(&a, &b);
         assert!(sim > 0.5, "expected high similarity, got {sim}");
     }
 
     #[test]
     fn unrelated_texts_low_similarity() {
-        let a = embed_text("cargo build rust terminal");
-        let b = embed_text("user profile markdown photo camera");
+        let a = embed_text_hash("cargo build rust terminal");
+        let b = embed_text_hash("user profile markdown photo camera");
         let sim = cosine_similarity(&a, &b);
         assert!(sim < 0.5, "expected low similarity, got {sim}");
     }
 
     #[test]
     fn roundtrip_encode_decode() {
-        let v = embed_text("hello world test");
+        let v = embed_text_hash("hello world test");
         let bytes = encode_embedding(&v);
         let decoded = decode_embedding(&bytes);
         assert_eq!(v.len(), decoded.len());

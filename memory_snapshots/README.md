@@ -13,7 +13,7 @@ Each file is **JSONL** (one `MemoryRecord` per line), compatible with
 |---|---|---|---|
 | `memory_20260501.jsonl` | 2026-05-01 | 233 | Initial sync — AiOT + agent-bridge sessions |
 | `inject/ab_ai_kernel_v1.jsonl` | 2026-05-02 | 14 | AI-first kernel: layered architecture, Hub, memory/search/graph, lifecycle, checklist (`tags`: `ab-inject`) |
-| `inject/ab_ai_bridge_feedback_v1.jsonl` | 2026-05-02 | 8 | Agent-UX / ops feedback + phased roadmap pointers (`tags`: `ab-feedback`) |
+| `inject/ab_ai_bridge_feedback_v1.jsonl` | 2026-05-02 | 9 | Agent-UX / ops feedback + phased roadmap + Phase B/C shipped anchor (`tags`: `ab-feedback`) |
 
 ## AI-oriented injection bundle (`inject/`)
 

@@ -587,6 +587,26 @@ impl SqliteStore {
                 }
                 let _ = c.execute("UPDATE schema_meta SET value='15' WHERE key='version'", []);
             }
+
+            // ── v16: clear stale 512-dim hash embeddings → force re-embed at 384-dim ──
+            // VECTOR_DIM changed from 512 to 384 (all-MiniLM-L6-v2).  Old stored
+            // blobs are 2048 bytes (512×f32); new ones will be 1536 bytes (384×f32).
+            // cosine_similarity returns 0.0 on dimension mismatch, so we must clear
+            // before the new embedder runs the backfill.
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "15".to_string());
+            if cur.as_str() == "15" {
+                c.execute_batch(
+                    "UPDATE memories          SET embedding = NULL;
+                     UPDATE codebase_symbols  SET embedding = NULL;",
+                )?;
+                let _ = c.execute("UPDATE schema_meta SET value='16' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await

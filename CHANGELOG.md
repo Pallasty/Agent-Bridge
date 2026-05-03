@@ -125,6 +125,12 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 - **`context_budget` heuristic calibration** — non-CJK divisor adjusted from
   `3.5` to `3.3` chars/token to reduce under-estimation on repository-scale
   technical text; CJK divisor remains `1.5`.
+- **Git-tracked memory snapshots** — `memory_snapshots/inject/ab_ai_bridge_feedback_v1.jsonl`
+  and `ab_ai_kernel_v1.jsonl` cards now describe optional `edges_out_path` /
+  `edges_path`, `mcp_recent_errors`, and roadmap status A–E; archived JSONL rows
+  `lesson_memory_export_excludes_edges` and `agent_bridge_memory_sync_procedure`
+  updated so import/sync docs match shipped behavior. Feedback bundle adds index
+  entry **`ab_feedback_k08_phase_bc_shipped`** (Phase B+C anchor card).
 
 ### Added
 
