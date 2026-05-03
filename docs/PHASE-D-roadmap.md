@@ -143,28 +143,26 @@ tokio::spawn(async move {
 
 ## D3 — 长期（各 1–2 周）
 
-### D3.1 语义向量搜索
+### D3.1 语义向量搜索 ✅
 
-**动机**：当前 `memory_search` 是 SQLite FTS5（关键词匹配）。语义相近但用词不同的记忆无法检索。
+**最终落地**（2026-05-03）：
+1. `crates/store/src/vector.rs` — `embed_text()` + `cosine_similarity()`，运行时双 backend
+2. **嵌入后端**：`fastembed 5` 包 `all-MiniLM-L6-v2` ONNX，384-dim 句向量；ORT 静态链接 38 MB；模型 ~22 MB 首次自动下载到 `~/.cache/fastembed/`。`onnx-embed` feature 关闭时回落 FNV-1a hash（同 384-dim）
+3. SQLite `memories.embedding BLOB` 列（schema v12）+ `codebase_symbols.embedding`（v15）
+4. v16 migration 清空 512-dim 旧向量；新增 `memory_reindex` MCP 工具批量重建
+5. `memory_search` 三模式：fts / hybrid / **semantic**（threshold 0.3=宽，0.7=紧；ONNX 真语义下相关结果分数典型 0.5–0.75）
 
-**借用代码**:
-```
-/Data/CascadeProjects/project-resonance/crates/resonance-field/src/field.rs
-  → cosine_similarity(a: &[f32], b: &[f32]) -> f32
-  → SemanticField::resonate() 检索模式
-```
+**性能**（实测）：
+- `memory_save`: ~55 ms（embed 50 ms + SQL 5 ms）
+- `memory_search(semantic)`: ~25 ms（embed query + cosine over in-memory cache）
+- `memory_search(fts)`: ~15 ms（不变）
+- 模型首次加载：~1 s（每个 MCP 进程仅一次）
 
-**实现路径**:
-1. `crates/bridge/src/memory/vector.rs` — `VectorIndex` 结构（DashMap + cosine search）
-2. Embedding 生成：优先 OpenAI/Anthropic embedding API；备选 candle + MiniLM-L6
-3. SQLite 新增 `embeddings` 表 (`memory_id TEXT, embedding BLOB`)
-4. 记录数 >10K 时引入 `hnsw` crate（已在 project-resonance 中验证）
+**未做**：
+- `hnsw` 索引（当前 ~280 条记忆线性扫足够）
+- 远程 embedding API（无外部依赖是显式目标）
 
-**新 MCP 工具参数扩展**:
-```json
-// memory_search 新增 mode 参数
-{"query": "Warp IPC socket", "mode": "semantic", "limit": 10, "threshold": 0.7}
-```
+**长期方向**：抽 `EmbeddingBackend` trait，未来可换 AIoT Rust Seed 神经网络（见 `docs/AGENT-BRIDGE-EVOLUTION-CORE.md` §8.4）
 
 ---
 

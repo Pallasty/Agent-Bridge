@@ -7,8 +7,33 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`ab-memory-hook` v3.0 — pure-SQL static ranking** — reverts the v2.0
+  Python FNV-1a re-ranking that became mathematically broken after the
+  512→384-dim embedding migration (the hook still computed 512-dim hash
+  vectors, which `cosine()` then silently truncated against 384-dim ONNX
+  vectors, producing meaningless scores). v3.0 ranks by SQL only:
+  `kind tier + access*recency + importance × 10⁷`. Hook stays cheap
+  (~50 ms incl. process startup) and deterministic. Agents that want
+  semantic ranking should call `session_bootstrap(query="...")` or
+  `memory_search(mode=semantic)` — both routes use the real ONNX model.
+
 ### Added
 
+- **ONNX semantic embeddings — `all-MiniLM-L6-v2` via `fastembed`** — replaces
+  the FNV-1a hash-trick embedding for `memory_search(mode=semantic)`,
+  `session_bootstrap(query=…)`, and `codebase_search(mode=semantic)`. Static
+  link to ONNX Runtime via `ort` (no system deps); 384-dim sentence vectors;
+  model auto-downloads to `~/.cache/fastembed/` (~22 MB) on first call.
+  Steady-state cost: `memory_save` +50 ms (single embed),
+  `memory_search(semantic)` +20 ms (cosine over in-memory cache).
+  Hash backend remains as fallback when `onnx-embed` feature disabled.
+- **`memory_reindex` MCP tool** — re-computes embeddings for active memories
+  with `embedding IS NULL`. Needed once after the 512→384-dim migration to
+  populate vectors for existing rows. Batch size 1–1000 per call; refreshes
+  the in-process embedding cache on each batch so semantic search sees new
+  vectors without restart.
 - **`session_bootstrap` optional `query` parameter** — when provided, memories
   are ranked by cosine similarity (FNV-1a embeddings, threshold 0.15) instead of
   static importance. `session_handoff` rows are always prepended for continuity.

@@ -209,14 +209,30 @@ pub async fn build_handoff_brief(
 
 ### 8.1 AI 偏好批量注入 + 语义检索
 
-- **注入包**：`memory_snapshots/inject/ab_ai_kernel_v1.jsonl` — 每条为原子卡片，`content` 顶部用 `SIGNAL:` / `FACTS:` / `MUST:` / `KEYWORDS:` 便于模型解析；内嵌英文关键词以配合 **512 维特征哈希向量**（`crates/store/src/vector.rs` 的 `embed_text`，无外部 API）。
+- **注入包**：`memory_snapshots/inject/ab_ai_kernel_v1.jsonl` — 每条为原子卡片，`content` 顶部用 `SIGNAL:` / `FACTS:` / `MUST:` / `KEYWORDS:` 便于模型解析。
+- **嵌入后端**（2026-05-03 起）：默认 `all-MiniLM-L6-v2` ONNX 模型经 `fastembed` + `ort` 静态链接，**384 维**句向量，无 Python / 无外部 API；模型首次调用时自动下载到 `~/.cache/fastembed/`（~22 MB）。`onnx-embed` feature 关闭时回落到 FNV-1a 哈希向量（同 384 维）。代码在 `crates/store/src/vector.rs`。
 - **导入**：`memory_import(..., conflict_policy="skip"|"newer_wins")`；导入路径与 `memory_save` **同样写入 `embedding` 列**，可直接 `memory_search(..., mode="semantic")`。
-- **召回**：优先 `tags_any=["ab-inject"]` + `mode="hybrid"`（图扩展）；纯释义对齐用 `mode="semantic"` 调 `threshold`（宽 0.3、紧 0.7 量级，见 MCP `memory_search` 描述）。
+- **召回**：优先 `tags_any=["ab-inject"]` + `mode="hybrid"`（图扩展）；纯释义对齐用 `mode="semantic"` 调 `threshold`（ONNX 真语义下，相关结果分数典型 0.5–0.75，宽 0.3、紧 0.6 量级）。
+- **维度迁移**：从 512→384 时 `migration v16` 清空旧 embedding，新 MCP `memory_reindex(batch_size=100)` 用现行 backend 重建索引；调用至 `updated=0` 即完成。
 
 ### 8.2 智能体体验改进建议（已写入注入包 + 路线图）
 
 - **路线图（分阶段）**：`docs/AGENT-BRIDGE-AGENT-UX-ROADMAP.md` — 说明「使用者」在文档里多指**人类运维**，智能体通过 schema + 同一事实源受益；并列出可观测性、图导出、多前端矩阵、安全默认等 **Phase B–E**。
 - **可导入记忆卡片**：`memory_snapshots/inject/ab_ai_bridge_feedback_v1.jsonl` — `tags` 含 `ab-feedback`，与 `ab-inject` 内核包区分；导入后可用 `memory_search(..., tags_any=["ab-feedback"])` 拉取本组建议。
+
+### 8.3 Hook 静态 / Agent 语义 分层（2026-05-03 决策）
+
+`UserPromptSubmit` hook（`ab-memory-hook`）**只做静态 SQL 排序**——不嵌入用户 prompt、不做 cosine、不调 ONNX。理由：
+
+- **延迟敏感**：hook 阻塞用户首条消息显示。ONNX 模型首次加载 ~1 s，每次 hook 重新启动一个 Python 解释器都会重复这个成本。
+- **确定性**：hook 是裸进程，没有失败重试通道；任何模型错误都会让 hook 输出空，吞掉重要 memory 注入。
+- **职责分离**：hook 注入"高频访问 + 高重要性 + 项目相关"的稳定上下文（concept 节点 + session_handoff + top-N），保证语义不偏。**真正的语义对齐由 agent 主动调** `session_bootstrap(query="...")` 或 `memory_search(mode=semantic)` —— 这两个路径走持久 MCP 进程，模型仅加载一次，每次查询 ~25 ms。
+
+**反面教训**：v2.0 hook（2026-05-03 当日）尝试在 hook 里做 Python FNV-1a 嵌入 + cosine。维度从 512 迁到 384 后，hook 仍写 512，`zip()` 静默截断到 384，分数全是噪声。**两小时内回归 v3.0 静态排序**。
+
+### 8.4 嵌入后端可插拔（路线图 §B）
+
+当前 `embed_text()` 是裸函数 + cargo feature 切换（`onnx-embed`）。中期目标是抽 `EmbeddingBackend` trait（`dim() / embed(&[&str]) / name()`），让 ONNX / Hash / 未来的 Rust Seed (AIoT) 等 backend 可在启动时通过环境变量或 `capabilities` 选择。这是把 agent-bridge 从"链接特定推理引擎"改成"可承载多种推理引擎"的关键。
 
 ---
 
