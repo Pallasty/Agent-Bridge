@@ -62,6 +62,19 @@ pub struct McpToolErrorRecord {
     pub message: String,
 }
 
+/// Aggregate statistics for one MCP tool over a time window — output of
+/// [`StateStore::mcp_tool_call_stats`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct McpToolCallStats {
+    pub tool_name: String,
+    pub call_count: u64,
+    pub error_count: u64,
+    pub avg_duration_ms: f64,
+    pub p95_duration_ms: u32,
+    pub max_duration_ms: u32,
+    pub avg_result_size: f64,
+}
+
 /// Max rows retained in `mcp_tool_errors` after each insert (oldest pruned).
 pub const MCP_TOOL_ERROR_RING_CAP: u32 = 100;
 
@@ -405,6 +418,33 @@ pub trait StateStore: Send + Sync {
 
     /// Newest-first recent MCP tool errors (`limit` clamped to 1..=500).
     async fn recent_mcp_tool_errors(&self, limit: u32) -> Result<Vec<McpToolErrorRecord>>;
+
+    /// v17: full telemetry — record every MCP `tools/call` (success + failure)
+    /// for the observation period that drives the ab-shell decision (see memory
+    /// `plan_warp_observation_metrics_20260503`). Default impl is a no-op so
+    /// non-SQLite backends degrade gracefully.
+    async fn record_mcp_tool_call(
+        &self,
+        tool_name: &str,
+        duration_ms: u32,
+        ok: bool,
+        args_size: Option<u32>,
+        result_size: Option<u32>,
+    ) -> Result<()> {
+        let _ = (tool_name, duration_ms, ok, args_size, result_size);
+        Ok(())
+    }
+
+    /// Aggregate stats over `mcp_tool_calls` within the last `window_secs`
+    /// seconds, sorted by call count desc. Default impl returns empty.
+    async fn mcp_tool_call_stats(
+        &self,
+        window_secs: i64,
+        top_n: u32,
+    ) -> Result<Vec<McpToolCallStats>> {
+        let _ = (window_secs, top_n);
+        Ok(Vec::new())
+    }
 
     // ─── memory.* — agent self-memory (v0.4) ───────────────────────────
 

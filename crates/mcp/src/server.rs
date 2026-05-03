@@ -100,6 +100,28 @@ async fn record_mcp_tool_failure(store: Option<&dyn StateStore>, tool_name: &str
     }
 }
 
+/// v17 telemetry — record every `tools/call` (success + failure) with timing
+/// and size. Fire-and-forget; failures are logged but do not fail the call.
+async fn record_mcp_tool_call_telemetry(
+    store: Option<&dyn StateStore>,
+    tool_name: &str,
+    call_start: &std::time::Instant,
+    ok: bool,
+    args_size: Option<u32>,
+    result_size: Option<u32>,
+) {
+    let Some(s) = store else {
+        return;
+    };
+    let duration_ms = call_start.elapsed().as_millis().min(u32::MAX as u128) as u32;
+    if let Err(e) = s
+        .record_mcp_tool_call(tool_name, duration_ms, ok, args_size, result_size)
+        .await
+    {
+        warn!(tool = %tool_name, error = %e, "record_mcp_tool_call failed");
+    }
+}
+
 async fn handle(
     registry: &ToolRegistry,
     store: Option<&dyn StateStore>,
@@ -148,6 +170,7 @@ async fn handle(
         }
 
         "tools/call" => {
+            let call_start = std::time::Instant::now();
             let params = req.params.unwrap_or(Value::Null);
             let name = match params.get("name").and_then(|v| v.as_str()) {
                 Some(n) => n.to_string(),
@@ -158,16 +181,25 @@ async fn handle(
                         "missing 'name' in tools/call params",
                     )
                     .await;
+                    record_mcp_tool_call_telemetry(
+                        store, "<missing>", &call_start, false, None, None,
+                    )
+                    .await;
                     return McpResponse::error(id, INVALID_PARAMS, "missing 'name'");
                 }
             };
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
+            let args_size = serde_json::to_string(&args).map(|s| s.len() as u32).ok();
 
             let tool = match registry.get(&name) {
                 Some(t) => t,
                 None => {
                     let msg = format!("unknown tool: {name}");
                     record_mcp_tool_failure(store, &name, &msg).await;
+                    record_mcp_tool_call_telemetry(
+                        store, &name, &call_start, false, args_size, None,
+                    )
+                    .await;
                     return McpResponse::error(id, METHOD_NOT_FOUND, msg);
                 }
             };
@@ -175,6 +207,7 @@ async fn handle(
             let ctx = ToolContext::default();
             match tool.execute(args, &ctx).await {
                 Ok(mut result) => {
+                    let ok = !result.is_error;
                     if result.is_error {
                         let summary = tool_result_error_summary(&result);
                         record_mcp_tool_failure(store, &name, &summary).await;
@@ -183,12 +216,29 @@ async fn handle(
                         result.backend_id = Some(meta.clone());
                     }
                     match serde_json::to_value(result) {
-                        Ok(v) => McpResponse::success(id, v),
+                        Ok(v) => {
+                            let result_size =
+                                serde_json::to_string(&v).map(|s| s.len() as u32).ok();
+                            record_mcp_tool_call_telemetry(
+                                store,
+                                &name,
+                                &call_start,
+                                ok,
+                                args_size,
+                                result_size,
+                            )
+                            .await;
+                            McpResponse::success(id, v)
+                        }
                         Err(e) => {
                             record_mcp_tool_failure(
                                 store,
                                 &name,
                                 &format!("serialize tool result: {e}"),
+                            )
+                            .await;
+                            record_mcp_tool_call_telemetry(
+                                store, &name, &call_start, false, args_size, None,
                             )
                             .await;
                             McpResponse::error(id, INTERNAL_ERROR, format!("serialize: {e}"))
@@ -199,6 +249,10 @@ async fn handle(
                     warn!(tool = %name, error = %e, "tool execution failed");
                     record_mcp_tool_failure(store, &name, &format!("tool '{name}' failed: {e}"))
                         .await;
+                    record_mcp_tool_call_telemetry(
+                        store, &name, &call_start, false, args_size, None,
+                    )
+                    .await;
                     let mut err_result =
                         crate::ToolResult::error(format!("tool '{name}' failed: {e}"));
                     if let Some(meta) = tool_backend_id {

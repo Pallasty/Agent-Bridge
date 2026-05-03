@@ -57,10 +57,10 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 
 use crate::{
     AgentMessageRecord, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, ImportConflictPolicy,
-    ImportReport, McpToolErrorRecord, MemoryEdge, MemoryEdgeExport, MemoryExportFilter,
-    MemoryExportResult, MemoryListSort, MemoryRecord, MemorySearchHit, MemoryStats,
-    NotificationRecord, PlanRecord, PlanStep, SessionFilter, StateStore, StoredSession,
-    MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, STDIO_CAP,
+    ImportReport, McpToolCallStats, McpToolErrorRecord, MemoryEdge, MemoryEdgeExport,
+    MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryRecord, MemorySearchHit,
+    MemoryStats, NotificationRecord, PlanRecord, PlanStep, SessionFilter, StateStore,
+    StoredSession, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, STDIO_CAP,
 };
 
 const SCHEMA_V1: &str = r#"
@@ -214,6 +214,23 @@ CREATE TABLE IF NOT EXISTS mcp_tool_errors (
     message TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_tool_errors_ts ON mcp_tool_errors(ts DESC, id DESC);
+"#;
+
+// v17: full call telemetry (every tools/call success+failure logged for the
+// observation period that drives the ab-shell decision — see memory
+// plan_warp_observation_metrics_20260503).
+const SCHEMA_V17: &str = r#"
+CREATE TABLE IF NOT EXISTS mcp_tool_calls (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          INTEGER NOT NULL,
+    tool_name   TEXT    NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    ok          INTEGER NOT NULL,
+    args_size   INTEGER,
+    result_size INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_ts   ON mcp_tool_calls(ts DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_tool ON mcp_tool_calls(tool_name, ts DESC);
 "#;
 
 // v1.0: importance score + status column for cognitive memory
@@ -606,6 +623,19 @@ impl SqliteStore {
                      UPDATE codebase_symbols  SET embedding = NULL;",
                 )?;
                 let _ = c.execute("UPDATE schema_meta SET value='16' WHERE key='version'", []);
+            }
+
+            // ── v17: mcp_tool_calls full telemetry table ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "16".to_string());
+            if cur.as_str() == "16" {
+                c.execute_batch(SCHEMA_V17)?;
+                let _ = c.execute("UPDATE schema_meta SET value='17' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -1145,6 +1175,113 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("recent_mcp_tool_errors: {e}")))?;
+        Ok(rows)
+    }
+
+    async fn record_mcp_tool_call(
+        &self,
+        tool_name: &str,
+        duration_ms: u32,
+        ok: bool,
+        args_size: Option<u32>,
+        result_size: Option<u32>,
+    ) -> Result<()> {
+        let ts = now_secs();
+        let tn = tool_name.to_string();
+        let ok_int = if ok { 1 } else { 0 };
+        let args_size_i = args_size.map(|v| v as i64);
+        let result_size_i = result_size.map(|v| v as i64);
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "INSERT INTO mcp_tool_calls
+                       (ts, tool_name, duration_ms, ok, args_size, result_size)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![ts, tn, duration_ms as i64, ok_int, args_size_i, result_size_i],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("record_mcp_tool_call: {e}")))?;
+        Ok(())
+    }
+
+    async fn mcp_tool_call_stats(
+        &self,
+        window_secs: i64,
+        top_n: u32,
+    ) -> Result<Vec<McpToolCallStats>> {
+        let cutoff = now_secs() - window_secs.max(0);
+        let limit = top_n.min(200).max(1) as i64;
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<McpToolCallStats>> {
+                // SQLite has no built-in percentile; we compute p95 via window function.
+                // For correctness we read raw durations per tool and aggregate in Rust.
+                let mut stmt = c.prepare(
+                    "SELECT tool_name, duration_ms, ok, COALESCE(result_size, 0)
+                     FROM mcp_tool_calls
+                     WHERE ts >= ?1
+                     ORDER BY tool_name",
+                )?;
+                let mut buckets: std::collections::HashMap<
+                    String,
+                    Vec<(u32, bool, u32)>,
+                > = std::collections::HashMap::new();
+                let iter = stmt.query_map(params![cutoff], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)? as u32,
+                        row.get::<_, i64>(2)? != 0,
+                        row.get::<_, i64>(3)? as u32,
+                    ))
+                })?;
+                for r in iter {
+                    let (name, dur, ok, sz) = r?;
+                    buckets.entry(name).or_default().push((dur, ok, sz));
+                }
+
+                let mut out: Vec<McpToolCallStats> = buckets
+                    .into_iter()
+                    .map(|(name, mut rows)| {
+                        rows.sort_by_key(|(d, _, _)| *d);
+                        let count = rows.len() as u64;
+                        let errors = rows.iter().filter(|(_, ok, _)| !ok).count() as u64;
+                        let sum_dur: u64 = rows.iter().map(|(d, _, _)| *d as u64).sum();
+                        let avg_dur = if count > 0 {
+                            sum_dur as f64 / count as f64
+                        } else {
+                            0.0
+                        };
+                        let max_dur = rows.last().map(|(d, _, _)| *d).unwrap_or(0);
+                        // p95: index = ceil(0.95 * n) - 1
+                        let p95_idx = ((count as f64 * 0.95).ceil() as usize)
+                            .saturating_sub(1)
+                            .min(rows.len().saturating_sub(1));
+                        let p95_dur = rows.get(p95_idx).map(|(d, _, _)| *d).unwrap_or(0);
+                        let sum_sz: u64 = rows.iter().map(|(_, _, s)| *s as u64).sum();
+                        let avg_sz = if count > 0 {
+                            sum_sz as f64 / count as f64
+                        } else {
+                            0.0
+                        };
+                        McpToolCallStats {
+                            tool_name: name,
+                            call_count: count,
+                            error_count: errors,
+                            avg_duration_ms: avg_dur,
+                            p95_duration_ms: p95_dur,
+                            max_duration_ms: max_dur,
+                            avg_result_size: avg_sz,
+                        }
+                    })
+                    .collect();
+                out.sort_by(|a, b| b.call_count.cmp(&a.call_count));
+                out.truncate(limit as usize);
+                Ok(out)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("mcp_tool_call_stats: {e}")))?;
         Ok(rows)
     }
 

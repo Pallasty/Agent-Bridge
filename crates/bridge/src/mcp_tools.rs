@@ -3901,6 +3901,86 @@ impl McpTool for McpRecentErrorsTool {
 }
 
 // ===========================================================================
+//                       mcp_call_stats — v17 telemetry query
+// ===========================================================================
+
+pub struct McpCallStatsTool {
+    hub: Hub,
+}
+impl McpCallStatsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for McpCallStatsTool {
+    fn name(&self) -> &'static str {
+        "mcp_call_stats"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Aggregate MCP `tools/call` telemetry over a recent time window. \
+                 Returns per-tool call_count / error_count / avg+p95+max duration_ms / \
+                 avg result_size, sorted by call_count desc. Powers the observation period \
+                 that drives the ab-shell decision (see memory \
+                 plan_warp_observation_metrics_20260503). Telemetry is recorded by the MCP \
+                 stdio dispatcher on every successful or failed call."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_days": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 365,
+                        "default": 7,
+                        "description": "Look-back window in days. Default 7."
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 30,
+                        "description": "Max number of tools in the result, sorted by call_count desc."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_days = args
+            .get("window_days")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(7)
+            .clamp(1, 365);
+        let top_n = args
+            .get("top_n")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30)
+            .clamp(1, 200) as u32;
+        let window_secs = window_days * 86_400;
+        match store.mcp_tool_call_stats(window_secs, top_n).await {
+            Ok(stats) => {
+                let total_calls: u64 = stats.iter().map(|s| s.call_count).sum();
+                let total_errors: u64 = stats.iter().map(|s| s.error_count).sum();
+                Ok(ToolResult::json_text(&json!({
+                    "window_days": window_days,
+                    "tools": stats,
+                    "total_calls": total_calls,
+                    "total_errors": total_errors,
+                })))
+            }
+            Err(e) => Ok(ToolResult::error(format!("store: {e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                              capabilities
 // ===========================================================================
 
@@ -6477,6 +6557,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(SessionLifecycleStepTool::new(hub.clone())));
     reg.register(Arc::new(HookStatusTool::new(hub.clone())));
     reg.register(Arc::new(McpRecentErrorsTool::new(hub.clone())));
+    reg.register(Arc::new(McpCallStatsTool::new(hub.clone())));
     reg.register(Arc::new(ProjectDetectTool::new(hub.clone())));
     reg.register(Arc::new(ChangesDigestTool::new(hub.clone())));
     reg.register(Arc::new(CapabilitiesTool::new(hub.clone())));

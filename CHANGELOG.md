@@ -9,6 +9,14 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **MCP `tools/call` full telemetry (schema v17)** — `mcp_tool_calls` table
+  records every successful and failed tool call with timestamp, duration_ms,
+  ok flag, args_size, result_size. Hook lives in the MCP stdio dispatcher
+  (`crates/mcp/src/server.rs`); fire-and-forget, never fails the call.
+  New MCP tool `mcp_call_stats(window_days, top_n)` returns per-tool aggregate
+  call_count / error_count / avg+p95+max duration / avg result size, sorted
+  by call_count desc. Powers the observation period that drives the
+  ab-shell decision (see memory `plan_warp_observation_metrics_20260503`).
 - **`AGENT.md` — agent self-profile companion to `USER.md`** —
   `~/.local/share/agent-bridge/AGENT.md` is now read at `session_bootstrap`
   and injected as `=== Agent Self-Profile ===` block (after User Profile,
