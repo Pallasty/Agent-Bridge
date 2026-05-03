@@ -101,6 +101,26 @@ impl EmbeddingBackend for OnnxBackend {
         // Fall through to hash if ONNX disabled or the model didn't load.
         HashBackend.embed(text)
     }
+
+    /// Override to use `fastembed`'s native batch inference — runs a single
+    /// forward pass across all texts, amortising attention compute. Real
+    /// observation (2026-05-03 friction record): per-row pushed
+    /// `memory_import` to ~16s for ~100 rows; batch should bring this to
+    /// O(seconds) total. Falls back to per-row hash on failure.
+    fn embed_batch(&self, texts: &[&str]) -> Vec<Vec<f32>> {
+        if texts.is_empty() {
+            return Vec::new();
+        }
+        #[cfg(feature = "onnx-embed")]
+        {
+            let owned: Vec<String> = texts.iter().map(|s| s.to_string()).collect();
+            if let Some(vecs) = crate::vector::onnx::embed_batch(owned) {
+                return vecs;
+            }
+        }
+        // Fall back to per-row hash if ONNX path unavailable.
+        texts.iter().map(|t| HashBackend.embed(t)).collect()
+    }
 }
 
 // ── Default backend selection ─────────────────────────────────────────────

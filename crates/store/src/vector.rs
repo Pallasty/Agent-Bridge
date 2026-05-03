@@ -56,6 +56,27 @@ pub(crate) mod onnx {
             }
         }
     }
+
+    /// Batch-embed multiple texts in one forward pass. Amortises the
+    /// attention compute across `texts.len()` items — significantly faster
+    /// than per-row [`embed`] when N > a few. Returns `None` when ONNX is
+    /// unavailable; on individual failure, returns `None` for the whole
+    /// batch (caller should fall back to hash per-row).
+    pub fn embed_batch(texts: Vec<String>) -> Option<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Some(Vec::new());
+        }
+        let mutex = cell().as_ref()?;
+        let mut guard = mutex.lock().ok()?;
+        let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+        match guard.embed(refs, None) {
+            Ok(vecs) => Some(vecs),
+            Err(e) => {
+                warn!("fastembed embed_batch error: {e}");
+                None
+            }
+        }
+    }
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────

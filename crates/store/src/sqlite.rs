@@ -2189,12 +2189,28 @@ impl StateStore for SqliteStore {
             }
         }
 
+        // Pre-compute all embeddings via the active backend's batch path —
+        // amortises ONNX attention compute across the import. Triggered by
+        // friction_workflow_20260503_memory_import_batch_embed (16s for
+        // ~100 rows in per-row mode → expected O(seconds) total in batch).
+        let clamped_contents: Vec<String> = parsed
+            .iter()
+            .map(|r| clamp(&r.content, MEMORY_CONTENT_CAP))
+            .collect();
+        let content_refs: Vec<&str> = clamped_contents.iter().map(|s| s.as_str()).collect();
+        let backend = crate::embedding::default_backend();
+        let embeddings: Vec<Vec<u8>> = backend
+            .embed_batch(&content_refs)
+            .into_iter()
+            .map(|v| crate::vector::encode_embedding(&v))
+            .collect();
+
         let mut report = self
             .conn
             .call(move |c| -> RusqliteResult<ImportReport> {
                 let mut report = ImportReport::default();
                 let tx = c.unchecked_transaction()?;
-                for r in &parsed {
+                for (idx, r) in parsed.iter().enumerate() {
                     let existing: Option<i64> = tx
                         .query_row(
                             "SELECT updated_at FROM memories WHERE key = ?1",
@@ -2205,11 +2221,8 @@ impl StateStore for SqliteStore {
                     let tags_s = serde_json::to_string(&r.tags).unwrap_or_else(|_| "[]".into());
                     let related_s =
                         serde_json::to_string(&r.related_keys).unwrap_or_else(|_| "[]".into());
-                    let content = clamp(&r.content, MEMORY_CONTENT_CAP);
-                    // Match `memory_save`: feature-hash embedding for semantic search.
-                    let embedding_bytes = crate::vector::encode_embedding(
-                        &crate::vector::embed_text(&content),
-                    );
+                    let content = &clamped_contents[idx];
+                    let embedding_bytes = &embeddings[idx];
                     let imp = if (r.importance - 0.5).abs() > 1e-9 {
                         r.importance
                     } else {

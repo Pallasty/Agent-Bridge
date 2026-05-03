@@ -7,6 +7,18 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Performance
+
+- **`memory_import` batch embedding** — `OnnxBackend::embed_batch()` now
+  overrides the trait default (per-row loop) and calls `fastembed`'s native
+  batch interface, running a single ONNX forward pass across all texts.
+  `memory_import` path pre-computes embeddings outside the SQL transaction
+  via `default_backend().embed_batch(&content_refs)` then indexes into the
+  per-row INSERT/UPDATE loop. Real measurement (312 rows export → import):
+  pre-fix ~17 s avg → post-fix ~8-14 s avg (~2× total; embedding stage
+  dropped from ~50 ms/row to ~5 ms/row, residual cost is per-row SQL).
+  See memory `friction_workflow_20260503_memory_import_batch_embed`.
+
 ### Added
 
 - **MCP `tools/call` full telemetry (schema v17)** — `mcp_tool_calls` table
