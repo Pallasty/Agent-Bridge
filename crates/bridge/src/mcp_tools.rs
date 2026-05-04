@@ -3138,6 +3138,23 @@ impl McpTool for SessionBootstrapTool {
             lines.push(String::new());
         }
 
+        // Inject Agent-Bridge Seed sidecar grid state if available — symmetric
+        // to AiOT Soul. AiOT Soul = Python EMA on AiOT carrier trajectory;
+        // Agent-Bridge Seed = Rust DynamicGrid self-organizing on the
+        // agent-bridge memory stream. Both are read-only views of "another
+        // substrate's identity" — together they triangulate self across
+        // markdown / Python EMA / Rust grid. See
+        // `plan_seed_integration_gaps_20260504`.
+        if let Some(seed_block) = format_agent_bridge_seed_block() {
+            lines.push(
+                "=== Agent-Bridge Seed (self-organized network on memory stream) ==="
+                    .to_string(),
+            );
+            lines.push(seed_block);
+            lines.push("=== End Seed ===".to_string());
+            lines.push(String::new());
+        }
+
         // Inject up to 3 most recent letter-to-future-self entries.
         // Letters are written by the agent via session_finalize(letter=...);
         // they sit between AGENT.md (stable identity) and memory rows
@@ -6942,6 +6959,151 @@ fn format_aiot_soul_block() -> Option<String> {
     Some(block)
 }
 
+// ── Agent-Bridge Seed (Phase α′ symmetry) ───────────────────────────────────
+//
+// Symmetric to the AiOT Soul block but for a different substrate.
+//
+// `agent-bridge-seed` is a separate sidecar (Python) that tails the
+// `~/agent-bridge-memory/memory.jsonl` cross-machine memory feed, encodes
+// each MemoryRecord into a 32-d vector via `claude_state_encoder.py`, and
+// steps a `seed_neuron::DynamicGrid` (Rust crate borrowed from AiOT) on the
+// stream. The grid self-organizes connection topology based on the patterns
+// of agent-bridge memory operations themselves — an *implicit* memory layer
+// complementing the explicit SQLite store.
+//
+// The sidecar writes its state to `state/seed_state.json`. We read it
+// read-only here; we never write back. The sidecar owns mutation, just like
+// AiOT owns `soul_final.json`. The agent's cross-substrate view becomes:
+//
+//   AiOT Soul          = Python EMA on AiOT carrier trajectory (256-dim)
+//   Agent-Bridge Seed  = Rust DynamicGrid on agent-bridge memory stream  (≤30 neurons)
+//   AGENT.md           = markdown self-portrait
+//
+// Together these triangulate identity across three independent substrates
+// — the dual-mechanism continuity architecture's full cross-substrate
+// surface. See `plan_seed_integration_gaps_20260504` for the broader plan.
+
+/// Resolve path to `agent-bridge-seed/state/seed_state.json` if present.
+/// Override via `AGENT_BRIDGE_SEED_STATE_PATH`.
+fn agent_bridge_seed_state_path() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("AGENT_BRIDGE_SEED_STATE_PATH") {
+        let pb = PathBuf::from(p);
+        if pb.exists() {
+            return Some(pb);
+        }
+    }
+    let default = PathBuf::from("/Data/CascadeProjects/agent-bridge-seed/state/seed_state.json");
+    if default.exists() {
+        Some(default)
+    } else {
+        None
+    }
+}
+
+/// Format a compact human-readable summary of the seed grid state. Pure
+/// JSON-string-in, string-or-None-out — testable without filesystem.
+/// Returns `None` if the JSON lacks the minimum fields (`step`/`n_alive`).
+fn format_agent_bridge_seed_block_from_json(content: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(content).ok()?;
+
+    let step = v.get("step").and_then(|x| x.as_i64())?;
+    let n_alive = v.get("n_alive").and_then(|x| x.as_i64())?;
+    let spawns = v.get("spawn_count").and_then(|x| x.as_i64()).unwrap_or(0);
+    let deaths = v.get("death_count").and_then(|x| x.as_i64()).unwrap_or(0);
+    let ae = v
+        .get("adaptive_entropy_baseline")
+        .and_then(|x| x.as_f64())
+        .unwrap_or(0.0);
+    let depth = v.get("depth_ratio").and_then(|x| x.as_f64()).unwrap_or(0.0);
+    let mode = v.get("mode").and_then(|x| x.as_str()).unwrap_or("");
+    let processed = v.get("n_records_processed").and_then(|x| x.as_i64());
+
+    let mut top_lines: Vec<String> = Vec::new();
+    if let Some(arr) = v.get("neurons").and_then(|x| x.as_array()) {
+        let mut entries: Vec<(i64, i64, f64, Option<i64>)> = arr
+            .iter()
+            .filter_map(|n| {
+                let id = n.get("id")?.as_i64()?;
+                let age = n.get("age")?.as_i64()?;
+                let in_strength = n.get("in_strength")?.as_f64()?;
+                let target = n.get("argmax_target").and_then(|t| t.as_i64());
+                Some((id, age, in_strength, target))
+            })
+            .collect();
+        // Highest in_strength first.
+        entries.sort_by(|a, b| {
+            b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for (id, age, in_s, target) in entries.into_iter().take(3) {
+            match target {
+                Some(t) => top_lines.push(format!(
+                    "  n{id} (age {age}, in={in_s:.2}) → attends n{t}"
+                )),
+                None => top_lines.push(format!(
+                    "  n{id} (age {age}, in={in_s:.2}) [carrier]"
+                )),
+            }
+        }
+    }
+
+    let mut spawn_lines: Vec<String> = Vec::new();
+    if let Some(arr) = v.get("spawn_events").and_then(|x| x.as_array()) {
+        let total = arr.len();
+        // Take the LAST 3 spawn events in chronological order.
+        let start = total.saturating_sub(3);
+        for s in &arr[start..] {
+            let Some(at) = s.get("at_record").and_then(|x| x.as_i64()) else {
+                continue;
+            };
+            let kind = s.get("kind").and_then(|x| x.as_str()).unwrap_or("?");
+            let n_after = s
+                .get("n_alive_after")
+                .and_then(|x| x.as_i64())
+                .unwrap_or(0);
+            let key = s.get("key").and_then(|x| x.as_str()).unwrap_or("?");
+            let key_short: String = if key.chars().count() > 50 {
+                let s: String = key.chars().take(50).collect();
+                format!("{s}…")
+            } else {
+                key.to_string()
+            };
+            spawn_lines.push(format!(
+                "  @ rec {at} ({kind}) → n={n_after}, key={key_short}"
+            ));
+        }
+    }
+
+    let mut block = String::new();
+    if !mode.is_empty() {
+        if let Some(p) = processed {
+            block.push_str(&format!("mode={mode} | records_processed={p}\n"));
+        } else {
+            block.push_str(&format!("mode={mode}\n"));
+        }
+    }
+    block.push_str(&format!(
+        "step={step} | n_alive={n_alive} | spawns={spawns} | deaths={deaths}\n\
+         adaptive_entropy_baseline: {ae:.3} | depth_ratio: {depth:.2}"
+    ));
+    if !top_lines.is_empty() {
+        block.push_str("\n\nTop-3 attended neurons (by in_strength):\n");
+        block.push_str(&top_lines.join("\n"));
+    }
+    if !spawn_lines.is_empty() {
+        block.push_str("\n\nRecent spawn events:\n");
+        block.push_str(&spawn_lines.join("\n"));
+    }
+    Some(block)
+}
+
+/// Build the bootstrap-injection block. Returns None when sidecar state
+/// isn't available or is malformed — block is hidden in that case.
+fn format_agent_bridge_seed_block() -> Option<String> {
+    let path = agent_bridge_seed_state_path()?;
+    let content = std::fs::read_to_string(&path).ok()?;
+    format_agent_bridge_seed_block_from_json(&content)
+}
+
 // ── Decision review trigger ─────────────────────────────────────────────────
 //
 // Closes the dual-mechanism continuity loop. AGENT.md (attractor) + drift_cap
@@ -7236,6 +7398,134 @@ mod tests {
         // Overdue counters are visible.
         assert!(block.contains("overdue 90d"));
         assert!(block.contains("overdue 15d"));
+    }
+
+    // ── Agent-Bridge Seed block tests ───────────────────────────────────
+
+    #[test]
+    fn seed_block_returns_none_on_malformed_json() {
+        assert!(format_agent_bridge_seed_block_from_json("").is_none());
+        assert!(format_agent_bridge_seed_block_from_json("not json").is_none());
+        assert!(format_agent_bridge_seed_block_from_json("{}").is_none()); // missing required
+        assert!(
+            format_agent_bridge_seed_block_from_json(r#"{"step":1}"#).is_none(),
+            "n_alive missing should fail"
+        );
+    }
+
+    #[test]
+    fn seed_block_minimal_state_renders() {
+        let json = r#"{
+            "step": 322,
+            "n_alive": 30,
+            "spawn_count": 26,
+            "death_count": 0,
+            "adaptive_entropy_baseline": 0.9666,
+            "depth_ratio": 1.0
+        }"#;
+        let block = format_agent_bridge_seed_block_from_json(json).unwrap();
+        assert!(block.contains("step=322"));
+        assert!(block.contains("n_alive=30"));
+        assert!(block.contains("spawns=26"));
+        assert!(block.contains("0.967"));
+        assert!(block.contains("depth_ratio: 1.00"));
+        // No optional sections.
+        assert!(!block.contains("Top-3"));
+        assert!(!block.contains("Recent spawn"));
+    }
+
+    #[test]
+    fn seed_block_top3_neurons_sorted_by_in_strength() {
+        let json = r#"{
+            "step": 100, "n_alive": 5, "spawn_count": 1, "death_count": 0,
+            "adaptive_entropy_baseline": 0.85, "depth_ratio": 0.6,
+            "neurons": [
+                {"id": 0, "age": 100, "in_strength": 0.5, "argmax_target": null},
+                {"id": 1, "age": 100, "in_strength": 2.7, "argmax_target": 3},
+                {"id": 2, "age": 90,  "in_strength": 1.2, "argmax_target": 1},
+                {"id": 3, "age": 80,  "in_strength": 0.8, "argmax_target": 2},
+                {"id": 4, "age": 70,  "in_strength": 1.9, "argmax_target": 1}
+            ]
+        }"#;
+        let block = format_agent_bridge_seed_block_from_json(json).unwrap();
+        // Top 3 are id=1 (2.7), id=4 (1.9), id=2 (1.2) — must appear in that order.
+        let pos1 = block.find("n1 ").unwrap();
+        let pos4 = block.find("n4 ").unwrap();
+        let pos2 = block.find("n2 ").unwrap();
+        assert!(pos1 < pos4, "n1 must come first (highest in_strength)");
+        assert!(pos4 < pos2, "n4 must come before n2");
+        assert!(!block.contains("n0 "), "id=0 below top-3");
+        assert!(!block.contains("n3 "), "id=3 below top-3");
+        // Carrier (target null) must render with [carrier] tag if it appears.
+        // Here id=0 doesn't appear in top-3; the test for [carrier] uses minimal-state.
+    }
+
+    #[test]
+    fn seed_block_carrier_label_for_null_target() {
+        let json = r#"{
+            "step": 100, "n_alive": 2, "spawn_count": 0, "death_count": 0,
+            "adaptive_entropy_baseline": 0.5, "depth_ratio": 0.0,
+            "neurons": [
+                {"id": 0, "age": 100, "in_strength": 1.0, "argmax_target": null},
+                {"id": 1, "age": 100, "in_strength": 0.5, "argmax_target": null}
+            ]
+        }"#;
+        let block = format_agent_bridge_seed_block_from_json(json).unwrap();
+        assert!(block.contains("[carrier]"), "null target → [carrier] tag");
+    }
+
+    #[test]
+    fn seed_block_recent_spawn_events_take_last_three_chronological() {
+        let json = r#"{
+            "step": 322, "n_alive": 6, "spawn_count": 5, "death_count": 0,
+            "adaptive_entropy_baseline": 0.95, "depth_ratio": 0.8,
+            "spawn_events": [
+                {"at_record": 50,  "key": "k_old1",   "kind": "lesson",   "n_alive_after": 3},
+                {"at_record": 120, "key": "k_old2",   "kind": "decision", "n_alive_after": 4},
+                {"at_record": 200, "key": "k_recent1","kind": "context",  "n_alive_after": 5},
+                {"at_record": 280, "key": "k_recent2","kind": "lesson",   "n_alive_after": 6},
+                {"at_record": 305, "key": "k_recent3","kind": "decision", "n_alive_after": 6}
+            ]
+        }"#;
+        let block = format_agent_bridge_seed_block_from_json(json).unwrap();
+        // Most recent 3, in chronological (oldest-first-within-window) order.
+        assert!(block.contains("k_recent1"));
+        assert!(block.contains("k_recent2"));
+        assert!(block.contains("k_recent3"));
+        assert!(!block.contains("k_old1"), "older events must be dropped");
+        assert!(!block.contains("k_old2"));
+        let p1 = block.find("k_recent1").unwrap();
+        let p2 = block.find("k_recent2").unwrap();
+        let p3 = block.find("k_recent3").unwrap();
+        assert!(p1 < p2 && p2 < p3, "spawns kept in chronological order");
+    }
+
+    #[test]
+    fn seed_block_truncates_very_long_keys() {
+        let long_key = "k_".to_string() + &"x".repeat(200);
+        let json = format!(
+            r#"{{
+                "step": 1, "n_alive": 1, "spawn_count": 1, "death_count": 0,
+                "adaptive_entropy_baseline": 0.5, "depth_ratio": 0.0,
+                "spawn_events": [
+                    {{"at_record": 0, "key": "{long_key}", "kind": "x", "n_alive_after": 1}}
+                ]
+            }}"#
+        );
+        let block = format_agent_bridge_seed_block_from_json(&json).unwrap();
+        assert!(block.contains("…"), "long key must be truncated");
+    }
+
+    #[test]
+    fn seed_block_mode_field_when_present() {
+        let json = r#"{
+            "mode": "backfill", "n_records_processed": 322,
+            "step": 322, "n_alive": 30, "spawn_count": 26, "death_count": 0,
+            "adaptive_entropy_baseline": 0.97, "depth_ratio": 1.0
+        }"#;
+        let block = format_agent_bridge_seed_block_from_json(json).unwrap();
+        assert!(block.contains("mode=backfill"));
+        assert!(block.contains("records_processed=322"));
     }
 
     #[test]
