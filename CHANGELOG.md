@@ -9,6 +9,17 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added (continuity layer)
 
+- **AGENT.md drift cap (50%)** — `session_finalize(agent_profile=...)` now
+  computes line-set Jaccard distance between old and new AGENT.md content;
+  writes that change > 50% of unique lines are rejected with
+  `agent_profile_capped: true` + a `reason` string. Pass
+  `agent_profile_force: true` to bypass (intended for deliberate major
+  rewrites). First write (empty old) is always allowed. Response always
+  reports `agent_profile_diff_ratio` so the caller can audit afterwards.
+  Borrowed from AiOT `identity_anchor.py::MAX_STEP_DRIFT` —
+  the stable identity layer should not be rewritable in one shot.
+  Backed by 7 unit tests covering identity, partial change, additions,
+  total rewrite, and the cap boundary.
 - **Letter-to-future-self protocol** — append-only Markdown notes the agent
   writes at `session_finalize(letter="...")`. Each call creates
   `~/.local/share/agent-bridge/letters/letter_<unix_ts>.md`. `session_bootstrap`

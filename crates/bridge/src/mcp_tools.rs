@@ -4492,7 +4492,19 @@ impl McpTool for SessionFinalizeTool {
                             and injected as `Agent Self-Profile` block in future session_bootstrap calls. \
                             Maintained by the agent itself for cross-session identity continuity. \
                             Long-term destination: AiOT Seed `SelfModel` initialization (see memory \
-                            decision_aiot_seed_as_agent_continuity_substrate_20260503)."
+                            decision_aiot_seed_as_agent_continuity_substrate_20260503). \
+                            **Drift cap**: writes that change > 50% of line-set (Jaccard distance) \
+                            are rejected unless `agent_profile_force=true`. Borrowed from AiOT \
+                            identity_anchor.py MAX_STEP_DRIFT — stable identity should not be \
+                            rewritable in one shot."
+                    },
+                    "agent_profile_force": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Bypass the 50% drift cap on AGENT.md. Use only when intentionally \
+                            doing a large rewrite (e.g. project migration, major reframing). The response \
+                            always reports `agent_profile_diff_ratio` so the caller can decide afterwards \
+                            whether the change was as expected."
                     },
                     "letter": {
                         "type": "string",
@@ -4613,20 +4625,46 @@ impl McpTool for SessionFinalizeTool {
                 false
             };
 
-        // Optional: persist agent self-profile to AGENT.md.
-        let agent_profile_written =
+        // Optional: persist agent self-profile to AGENT.md, with drift cap.
+        // Returns (written: bool, diff_ratio: f32, capped: bool, reason: Option<String>).
+        let force_profile = args
+            .get("agent_profile_force")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let (agent_profile_written, agent_profile_diff_ratio_v, agent_profile_capped, agent_profile_reason) =
             if let Some(profile) = args.get("agent_profile").and_then(|v| v.as_str()) {
-                if !profile.trim().is_empty() && !dry_run {
-                    let path = agent_profile_path();
-                    if let Some(parent) = path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    std::fs::write(&path, profile.as_bytes()).is_ok()
+                if profile.trim().is_empty() {
+                    (false, 0.0_f32, false, None)
                 } else {
-                    false
+                    let path = agent_profile_path();
+                    let old = std::fs::read_to_string(&path).unwrap_or_default();
+                    let ratio = agent_profile_diff_ratio(&old, profile);
+                    let exceeds = ratio > AGENT_PROFILE_DRIFT_CAP;
+                    if exceeds && !force_profile && !old.trim().is_empty() {
+                        // Reject — would rewrite > 50% of identity. Caller can retry
+                        // with agent_profile_force=true if intentional.
+                        (
+                            false,
+                            ratio,
+                            true,
+                            Some(format!(
+                                "drift {:.1}% > cap {:.0}%; pass agent_profile_force=true to override",
+                                ratio * 100.0,
+                                AGENT_PROFILE_DRIFT_CAP * 100.0
+                            )),
+                        )
+                    } else if dry_run {
+                        (false, ratio, false, None)
+                    } else {
+                        if let Some(parent) = path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        let ok = std::fs::write(&path, profile.as_bytes()).is_ok();
+                        (ok, ratio, exceeds && force_profile, None)
+                    }
                 }
             } else {
-                false
+                (false, 0.0, false, None)
             };
 
         // Optional: persist letter-to-future-self. Append-only — each call
@@ -4670,6 +4708,9 @@ impl McpTool for SessionFinalizeTool {
             "follow_up": follow_up,
             "user_profile_written": user_profile_written,
             "agent_profile_written": agent_profile_written,
+            "agent_profile_diff_ratio": agent_profile_diff_ratio_v,
+            "agent_profile_capped": agent_profile_capped,
+            "agent_profile_reason": agent_profile_reason,
             "letter_written": letter_written,
         })))
     }
@@ -6673,6 +6714,36 @@ fn agent_profile_path() -> PathBuf {
     PathBuf::from("./AGENT.md")
 }
 
+/// Default cap on per-call AGENT.md change ratio. 0.5 means at most half
+/// of (old_lines ∪ new_lines) may be different. Borrowed from AiOT's
+/// `identity_anchor.py::MAX_STEP_DRIFT`: the stable identity layer should
+/// not be rewritable in one shot. Pass `agent_profile_force=true` to bypass.
+const AGENT_PROFILE_DRIFT_CAP: f32 = 0.5;
+
+/// Compute change ratio between two AGENT.md texts using line-set Jaccard
+/// distance (treating each non-empty trimmed line as a trait token).
+/// Returns 0.0 if `old` is empty (first write is unconstrained).
+/// Range: 0.0 (identical) → 1.0 (no shared lines).
+fn agent_profile_diff_ratio(old: &str, new: &str) -> f32 {
+    let collect = |s: &str| -> std::collections::HashSet<String> {
+        s.lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
+    };
+    let old_set = collect(old);
+    if old_set.is_empty() {
+        return 0.0; // first write, no drift cap
+    }
+    let new_set = collect(new);
+    let intersection = old_set.intersection(&new_set).count();
+    let union = old_set.union(&new_set).count();
+    if union == 0 {
+        return 0.0;
+    }
+    1.0 - (intersection as f32 / union as f32)
+}
+
 /// Directory holding **letter-to-future-self** files. Each letter is an
 /// append-only Markdown snippet written by the agent at session end (via
 /// `session_finalize(letter=...)`). Filename is `letter_<unix_ts>.md` so
@@ -6769,4 +6840,76 @@ fn unescape_keys(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drift_ratio_first_write_is_zero() {
+        // Empty old → first write, no constraint.
+        assert_eq!(agent_profile_diff_ratio("", "## Identity\n\nI am Claude."), 0.0);
+        assert_eq!(agent_profile_diff_ratio("   \n   \n", "anything"), 0.0);
+    }
+
+    #[test]
+    fn drift_ratio_identical_is_zero() {
+        let txt = "## Values\n\n- honesty\n- conservative mutations";
+        assert_eq!(agent_profile_diff_ratio(txt, txt), 0.0);
+    }
+
+    #[test]
+    fn drift_ratio_disjoint_is_one() {
+        let old = "line one\nline two\nline three";
+        let new = "alpha\nbeta\ngamma";
+        assert!((agent_profile_diff_ratio(old, new) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn drift_ratio_partial_change_is_bounded() {
+        // 4 old lines, change 1 → ratio ~ 0.4 (1 removed + 1 added) / (4 + 1 union) = 2/5
+        let old = "a\nb\nc\nd";
+        let new = "a\nb\nc\ne";
+        let r = agent_profile_diff_ratio(old, new);
+        assert!(r > 0.3 && r < 0.5, "expected ~0.4, got {r}");
+    }
+
+    #[test]
+    fn drift_ratio_pure_addition_grows_slowly() {
+        // 3 old lines, add 1 → 1 new uniqueness, intersection=3, union=4 → 0.25
+        let old = "a\nb\nc";
+        let new = "a\nb\nc\nd";
+        let r = agent_profile_diff_ratio(old, new);
+        assert!((r - 0.25).abs() < 1e-6, "expected 0.25, got {r}");
+    }
+
+    #[test]
+    fn drift_ratio_below_cap_passes() {
+        // Add a Growth-marker style entry to a substantial profile.
+        let old = (1..=20)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let new = format!("{old}\nnew growth marker");
+        let r = agent_profile_diff_ratio(&old, &new);
+        assert!(r < AGENT_PROFILE_DRIFT_CAP, "expected < cap, got {r}");
+    }
+
+    #[test]
+    fn drift_ratio_total_rewrite_blocked_by_cap() {
+        let old = (1..=10)
+            .map(|i| format!("old line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let new = (1..=10)
+            .map(|i| format!("new line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let r = agent_profile_diff_ratio(&old, &new);
+        assert!(
+            r > AGENT_PROFILE_DRIFT_CAP,
+            "total rewrite must exceed cap, got {r}"
+        );
+    }
 }
