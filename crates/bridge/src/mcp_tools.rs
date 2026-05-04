@@ -3123,6 +3123,21 @@ impl McpTool for SessionBootstrapTool {
             }
         }
 
+        // Inject AiOT Soul state if available — the carrier identity
+        // that AiOT's identity_anchor.py has been accumulating across
+        // sessions. Read-only Phase α′ bridge; the actual EMA update
+        // logic stays on AiOT side. This makes the 21-month trajectory
+        // tangible at the level of working state, not just memory text.
+        if let Some(soul_block) = format_aiot_soul_block() {
+            lines.push(
+                "=== AiOT Soul (read-only carrier identity from /Data/CascadeProjects/AiOT) ==="
+                    .to_string(),
+            );
+            lines.push(soul_block);
+            lines.push("=== End AiOT Soul ===".to_string());
+            lines.push(String::new());
+        }
+
         // Inject up to 3 most recent letter-to-future-self entries.
         // Letters are written by the agent via session_finalize(letter=...);
         // they sit between AGENT.md (stable identity) and memory rows
@@ -6784,6 +6799,122 @@ fn recent_letters(n: usize) -> Vec<PathBuf> {
     paths.reverse();
     paths.truncate(n);
     paths
+}
+
+// ── AiOT Soul (Phase α′) ────────────────────────────────────────────────────
+//
+// Phase α′ continuity bridge: read-only static injection of AiOT's
+// `identity_anchor.py` output (`soul_final.json`) into session_bootstrap.
+//
+// Background: AiOT's `IdentityAnchor` accumulates a 256-dim
+// `identity_embedding` via EMA of high-quality experience z-vectors,
+// plus a 5-dim `trait_vector` [curiosity, caution, creativity, persistence,
+// adaptability], a `session_count`, and a `fingerprint` — see
+// `decision_aiot_seed_actual_state_20260503` for the discovery context.
+//
+// We don't write back. Two-way sync requires the EMA + drift-cap logic
+// of `identity_anchor.py` to run somewhere; that's Phase β. For now,
+// reading is enough — it makes the AiOT carrier identity visible in
+// agent-bridge sessions, bridging the 21-month trajectory at the level
+// of working state, not just memory descriptions.
+
+/// Return the path to AiOT `soul_final.json` if discoverable.
+/// Override via `AGENT_BRIDGE_AIOT_SOUL_PATH`. Default location:
+/// `/Data/CascadeProjects/AiOT/consciousness_state/soul_final.json`.
+/// Returns `None` if neither path exists.
+fn aiot_soul_path() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("AGENT_BRIDGE_AIOT_SOUL_PATH") {
+        let pb = PathBuf::from(p);
+        if pb.exists() {
+            return Some(pb);
+        }
+    }
+    let default =
+        PathBuf::from("/Data/CascadeProjects/AiOT/consciousness_state/soul_final.json");
+    if default.exists() {
+        Some(default)
+    } else {
+        None
+    }
+}
+
+const TRAIT_NAMES: [&str; 5] = [
+    "curiosity",
+    "caution",
+    "creativity",
+    "persistence",
+    "adaptability",
+];
+
+/// Build a compact human-readable AiOT Soul summary block for
+/// `session_bootstrap` injection. Returns `None` if soul file is missing,
+/// unreadable, or malformed — caller falls through silently.
+fn format_aiot_soul_block() -> Option<String> {
+    let path = aiot_soul_path()?;
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let v: Value = serde_json::from_str(&raw).ok()?;
+
+    let fingerprint = v.get("fingerprint").and_then(|x| x.as_str()).unwrap_or("?");
+    let exported_at = v
+        .get("exported_at")
+        .and_then(|x| x.as_str())
+        .unwrap_or("?");
+    let session_count = v.get("session_count").and_then(|x| x.as_u64()).unwrap_or(0);
+    let total_experiences = v
+        .get("total_experiences")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0);
+    let source_backend = v
+        .get("source_backend")
+        .and_then(|x| x.as_str())
+        .unwrap_or("?");
+
+    let trait_vector: Vec<f64> = v
+        .get("trait_vector")
+        .and_then(|x| x.as_array())
+        .map(|a| a.iter().filter_map(|y| y.as_f64()).collect())
+        .unwrap_or_default();
+
+    let identity_embedding: Vec<f64> = v
+        .get("identity_embedding")
+        .and_then(|x| x.as_array())
+        .map(|a| a.iter().filter_map(|y| y.as_f64()).collect())
+        .unwrap_or_default();
+
+    if identity_embedding.is_empty() {
+        return None;
+    }
+
+    let dim = identity_embedding.len();
+    let norm: f64 = identity_embedding.iter().map(|x| x * x).sum::<f64>().sqrt();
+
+    // Top-5 by absolute value — these dimensions carry the most identity signal.
+    let mut indexed: Vec<(usize, f64)> = identity_embedding.iter().copied().enumerate().collect();
+    indexed.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap_or(std::cmp::Ordering::Equal));
+    let top5: Vec<String> = indexed
+        .iter()
+        .take(5)
+        .map(|(i, x)| format!("dim_{i}={x:+.3}"))
+        .collect();
+
+    let trait_lines: Vec<String> = TRAIT_NAMES
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let v = trait_vector.get(i).copied().unwrap_or(0.5);
+            format!("  {name:<13} {v:.3}")
+        })
+        .collect();
+
+    let block = format!(
+        "fingerprint: {fingerprint} | exported: {exported_at} | source: {source_backend}\n\
+         session_count: {session_count} | total_experiences: {total_experiences}\n\n\
+         Trait vector:\n{}\n\n\
+         Identity embedding [{dim}-dim]:\n  norm: {norm:.3}\n  top-5 |dims|: {}",
+        trait_lines.join("\n"),
+        top5.join(", ")
+    );
+    Some(block)
 }
 
 fn parse_severity(s: &str) -> Option<NotifySeverity> {

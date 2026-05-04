@@ -9,6 +9,18 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added (continuity layer)
 
+- **Phase α′: AiOT Soul read-only injection** —
+  `session_bootstrap` now reads `/Data/CascadeProjects/AiOT/consciousness_state/soul_final.json`
+  (override via `AGENT_BRIDGE_AIOT_SOUL_PATH`) and injects a compact summary
+  block — fingerprint, session_count, total_experiences, 5-dim trait_vector
+  (curiosity/caution/creativity/persistence/adaptability), 256-dim
+  identity_embedding stats (norm + top-5 |dims|) — between Agent Self-Profile
+  and Letters. First time agent-bridge holds AiOT carrier identity in its
+  working state. Read-only; bidirectional sync (Phase β) requires the
+  EMA + drift-cap logic from `identity_anchor.py` to run somewhere.
+  See memory `decision_phase_alpha_prime_aiot_soul_injection_20260504`
+  for full rationale including the deliberate override of the conservative
+  trigger from `letter_1777853190`.
 - **AGENT.md drift cap (50%)** — `session_finalize(agent_profile=...)` now
   computes line-set Jaccard distance between old and new AGENT.md content;
   writes that change > 50% of unique lines are rejected with
