@@ -3156,6 +3156,31 @@ impl McpTool for SessionBootstrapTool {
             }
         }
 
+        // Inject "Decisions Due for Review" — closes the reflection loop in
+        // the dual-mechanism continuity architecture. Decisions tagged with
+        // `review:Nd` re-surface here once they exceed their review interval.
+        // Hidden when nothing is due (avoids visual noise on fresh sessions).
+        {
+            let now_ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            let decision_pool = store
+                .list_memories_in_scope(&cwd, Some("decision"), MemoryListSort::Newest, 200)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.status == "active")
+                .collect::<Vec<_>>();
+            if let Some(block) = format_due_review_block(&decision_pool, now_ts) {
+                let count = block.matches("\n- ").count() + 1;
+                lines.push(format!("=== Decisions Due for Review ({count}) ==="));
+                lines.push(block);
+                lines.push("=== End Reviews ===".to_string());
+                lines.push(String::new());
+            }
+        }
+
         lines.extend(error_section);
         lines.extend(format_bootstrap_memory_rows(&rows, snippet_len));
         lines.push("=== End Bootstrap ===".to_string());
@@ -6917,6 +6942,87 @@ fn format_aiot_soul_block() -> Option<String> {
     Some(block)
 }
 
+// ── Decision review trigger ─────────────────────────────────────────────────
+//
+// Closes the dual-mechanism continuity loop. AGENT.md (attractor) + drift_cap
+// (guard) + letters (anchor) keep identity stable across sessions, but they
+// don't surface STORED decisions for re-examination. Without that, decisions
+// accumulate as static records — never revisited until something breaks.
+//
+// Convention: decisions tagged `review:Nd` (e.g. `review:30d`, `review:12w`)
+// re-surface in `session_bootstrap` when `now - updated_at >= N days`. Agent
+// re-saves (resets clock) or links `supersedes` (closes the review).
+//
+// Mechanism is read-only: no auto-mutation. The review block is a dashboard,
+// not an action queue. Conservative-mutations principle from AGENT.md.
+
+/// Parse a `review:Nd` / `review:Nw` tag from a tags list. Returns the
+/// review interval in days, or `None` if no review tag is present.
+/// First match wins; later tags in the list are ignored.
+fn parse_review_interval_days(tags: &[String]) -> Option<i64> {
+    for tag in tags {
+        let Some(rest) = tag.strip_prefix("review:") else {
+            continue;
+        };
+        if let Some(n_str) = rest.strip_suffix('d') {
+            if let Ok(n) = n_str.parse::<i64>() {
+                if n > 0 {
+                    return Some(n);
+                }
+            }
+        } else if let Some(n_str) = rest.strip_suffix('w') {
+            if let Ok(n) = n_str.parse::<i64>() {
+                if n > 0 {
+                    return Some(n * 7);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Format a "Decisions Due for Review" block from a pool of decision records.
+/// Returns `None` if no record is due (no block will be injected).
+/// Sort order: most overdue first (largest `now - updated_at - interval`).
+fn format_due_review_block(rows: &[MemoryRecord], now_ts: i64) -> Option<String> {
+    let mut due: Vec<(&MemoryRecord, i64, i64)> = Vec::new();
+    for r in rows {
+        let Some(interval_days) = parse_review_interval_days(&r.tags) else {
+            continue;
+        };
+        let age_days = (now_ts - r.updated_at) / 86400;
+        if age_days >= interval_days {
+            due.push((r, interval_days, age_days - interval_days));
+        }
+    }
+    if due.is_empty() {
+        return None;
+    }
+    due.sort_by(|a, b| b.2.cmp(&a.2));
+    let lines: Vec<String> = due
+        .iter()
+        .map(|(r, interval, overdue)| {
+            let snippet = r
+                .content
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .trim();
+            let snippet_short: String = if snippet.chars().count() > 100 {
+                let s: String = snippet.chars().take(100).collect();
+                format!("{s}…")
+            } else {
+                snippet.to_string()
+            };
+            format!(
+                "- {} (imp {:.2}, review:{}d) — overdue {}d\n  > {}",
+                r.key, r.importance, interval, overdue, snippet_short
+            )
+        })
+        .collect();
+    Some(lines.join("\n"))
+}
+
 fn parse_severity(s: &str) -> Option<NotifySeverity> {
     Some(match s {
         "info" => NotifySeverity::Info,
@@ -7042,5 +7148,103 @@ mod tests {
             r > AGENT_PROFILE_DRIFT_CAP,
             "total rewrite must exceed cap, got {r}"
         );
+    }
+
+    // ── Decision review trigger tests ───────────────────────────────────
+
+    fn mk_decision(key: &str, importance: f64, tags: &[&str], updated_at: i64) -> MemoryRecord {
+        MemoryRecord {
+            key: key.into(),
+            kind: "decision".into(),
+            content: format!("First line for {key}.\nMore detail here."),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            related_keys: Vec::new(),
+            scope: None,
+            created_at: updated_at,
+            updated_at,
+            last_accessed_at: updated_at,
+            access_count: 0,
+            importance,
+            status: "active".into(),
+            trigger_pattern: None,
+        }
+    }
+
+    #[test]
+    fn parse_review_days_basic() {
+        assert_eq!(
+            parse_review_interval_days(&["review:30d".into()]),
+            Some(30)
+        );
+        assert_eq!(parse_review_interval_days(&["review:1w".into()]), Some(7));
+        assert_eq!(
+            parse_review_interval_days(&["review:12w".into()]),
+            Some(84)
+        );
+        assert_eq!(
+            parse_review_interval_days(&["L3".into(), "review:90d".into(), "decision".into()]),
+            Some(90)
+        );
+    }
+
+    #[test]
+    fn parse_review_days_rejects_invalid() {
+        assert_eq!(parse_review_interval_days(&[]), None);
+        assert_eq!(parse_review_interval_days(&["L3".into()]), None);
+        assert_eq!(parse_review_interval_days(&["review:".into()]), None);
+        assert_eq!(parse_review_interval_days(&["review:0d".into()]), None);
+        assert_eq!(parse_review_interval_days(&["review:-5d".into()]), None);
+        assert_eq!(parse_review_interval_days(&["review:30".into()]), None);
+        assert_eq!(parse_review_interval_days(&["review:abcd".into()]), None);
+    }
+
+    #[test]
+    fn due_review_block_empty_when_no_due() {
+        let now = 1_780_000_000_i64;
+        let rows = vec![
+            mk_decision("d1", 0.9, &["L2"], now - 5 * 86400), // no review tag
+            mk_decision("d2", 0.9, &["review:30d"], now - 10 * 86400), // tagged but not due
+        ];
+        assert!(format_due_review_block(&rows, now).is_none());
+    }
+
+    #[test]
+    fn due_review_block_surfaces_overdue_records() {
+        let now = 1_780_000_000_i64;
+        let rows = vec![
+            mk_decision("d_recent", 0.95, &["review:30d"], now - 5 * 86400), // not due
+            mk_decision("d_due", 0.92, &["review:30d"], now - 45 * 86400),   // 15d overdue
+            mk_decision(
+                "d_very_overdue",
+                0.88,
+                &["review:30d"],
+                now - 120 * 86400,
+            ), // 90d overdue
+        ];
+        let block = format_due_review_block(&rows, now).expect("should produce block");
+        // Only the two overdue ones present.
+        assert!(block.contains("d_due"));
+        assert!(block.contains("d_very_overdue"));
+        assert!(!block.contains("d_recent"));
+        // Most overdue listed first.
+        let pos_very = block.find("d_very_overdue").unwrap();
+        let pos_due = block.find("d_due").unwrap();
+        assert!(
+            pos_very < pos_due,
+            "most-overdue must come first; got block:\n{block}"
+        );
+        // Overdue counters are visible.
+        assert!(block.contains("overdue 90d"));
+        assert!(block.contains("overdue 15d"));
+    }
+
+    #[test]
+    fn due_review_block_truncates_long_snippets() {
+        let now = 1_780_000_000_i64;
+        let long = "x".repeat(500);
+        let mut r = mk_decision("d_long", 0.9, &["review:7d"], now - 30 * 86400);
+        r.content = long;
+        let block = format_due_review_block(&[r], now).unwrap();
+        assert!(block.contains("…"), "long snippet must be truncated");
     }
 }
