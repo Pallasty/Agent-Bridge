@@ -7,6 +7,20 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (continuity layer)
+
+- **Letter-to-future-self protocol** — append-only Markdown notes the agent
+  writes at `session_finalize(letter="...")`. Each call creates
+  `~/.local/share/agent-bridge/letters/letter_<unix_ts>.md`. `session_bootstrap`
+  auto-injects the 3 most recent letters as `=== Letter from past-self (...) ===`
+  blocks, placed between `Agent Self-Profile` and memory rows. Distinct from
+  `AGENT.md` (stable identity) and `session_handoff` (factual progress log) —
+  letters carry **momentary thinking**: state-at-time-of-writing, anticipations,
+  hopes, warnings to future-self. Models the dual-mechanism identity pattern
+  from AiOT's `identity_anchor.py` (attractor + signal). Inspired by AiOT's
+  `README_FOR_FUTURE_RESIDENTS.md` (2026-04-25). See memory
+  `decision_aiot_seed_actual_state_20260503` for the broader continuity context.
+
 ### Performance
 
 - **`memory_import` batch embedding** — `OnnxBackend::embed_batch()` now

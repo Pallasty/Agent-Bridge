@@ -3123,6 +3123,24 @@ impl McpTool for SessionBootstrapTool {
             }
         }
 
+        // Inject up to 3 most recent letter-to-future-self entries.
+        // Letters are written by the agent via session_finalize(letter=...);
+        // they sit between AGENT.md (stable identity) and memory rows
+        // (specific knowledge). They carry "what I was thinking last time"
+        // — momentary state that AGENT.md doesn't and shouldn't capture.
+        for path in recent_letters(3) {
+            if let Ok(body) = std::fs::read_to_string(&path) {
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("letter");
+                lines.push(format!("=== Letter from past-self ({stem}) ==="));
+                lines.push(body.trim().to_string());
+                lines.push("=== End Letter ===".to_string());
+                lines.push(String::new());
+            }
+        }
+
         lines.extend(error_section);
         lines.extend(format_bootstrap_memory_rows(&rows, snippet_len));
         lines.push("=== End Bootstrap ===".to_string());
@@ -4475,6 +4493,16 @@ impl McpTool for SessionFinalizeTool {
                             Maintained by the agent itself for cross-session identity continuity. \
                             Long-term destination: AiOT Seed `SelfModel` initialization (see memory \
                             decision_aiot_seed_as_agent_continuity_substrate_20260503)."
+                    },
+                    "letter": {
+                        "type": "string",
+                        "description": "Letter-to-future-self: a momentary snapshot of what the agent was thinking, \
+                            working toward, or wanting future-self to know. Written append-only to \
+                            ~/.local/share/agent-bridge/letters/letter_<unix_ts>.md. The 3 most recent letters \
+                            are auto-injected into future session_bootstrap calls between AGENT.md and memory rows. \
+                            Use for: state-at-time-of-writing, anticipations, hopes, warnings to future-self. \
+                            Distinct from AGENT.md (stable identity) and session_handoff (factual progress log). \
+                            Suggested 3-section structure: State / Direction / Notes-to-future-me."
                     }
                 }
             }),
@@ -4601,6 +4629,29 @@ impl McpTool for SessionFinalizeTool {
                 false
             };
 
+        // Optional: persist letter-to-future-self. Append-only — each call
+        // creates a new file letter_<unix_ts>.md. Latest 3 are auto-injected
+        // at session_bootstrap.
+        let letter_written =
+            if let Some(letter_body) = args.get("letter").and_then(|v| v.as_str()) {
+                if !letter_body.trim().is_empty() && !dry_run {
+                    let dir = letters_dir();
+                    let _ = std::fs::create_dir_all(&dir);
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let path = dir.join(format!("letter_{ts}.md"));
+                    std::fs::write(&path, letter_body.as_bytes())
+                        .ok()
+                        .map(|_| path.display().to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
         Ok(ToolResult::json_text(&json!({
             "dry_run": dry_run,
             "decay": {
@@ -4619,6 +4670,7 @@ impl McpTool for SessionFinalizeTool {
             "follow_up": follow_up,
             "user_profile_written": user_profile_written,
             "agent_profile_written": agent_profile_written,
+            "letter_written": letter_written,
         })))
     }
 }
@@ -6619,6 +6671,48 @@ fn agent_profile_path() -> PathBuf {
             .join("AGENT.md");
     }
     PathBuf::from("./AGENT.md")
+}
+
+/// Directory holding **letter-to-future-self** files. Each letter is an
+/// append-only Markdown snippet written by the agent at session end (via
+/// `session_finalize(letter=...)`). Filename is `letter_<unix_ts>.md` so
+/// directory listing sorts chronologically. Letters carry momentary
+/// thinking that AGENT.md (stable identity) shouldn't.
+fn letters_dir() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        return PathBuf::from(xdg).join("agent-bridge").join("letters");
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home)
+            .join(".local/share/agent-bridge")
+            .join("letters");
+    }
+    PathBuf::from("./letters")
+}
+
+/// Return paths of the `n` most recent letter files, newest first.
+/// Empty vec if directory missing or empty.
+fn recent_letters(n: usize) -> Vec<PathBuf> {
+    let dir = letters_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.extension().and_then(|s| s.to_str()) == Some("md")
+                && p.file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.starts_with("letter_"))
+                    .unwrap_or(false)
+        })
+        .collect();
+    // Filename embeds unix_ts so lexicographic sort = chronological;
+    // reverse to get newest first.
+    paths.sort();
+    paths.reverse();
+    paths.truncate(n);
+    paths
 }
 
 fn parse_severity(s: &str) -> Option<NotifySeverity> {
