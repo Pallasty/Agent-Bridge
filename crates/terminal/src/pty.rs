@@ -37,7 +37,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::broadcast;
 
-use crate::{OscEvent, OscParser, Pane, SplitDir, TermEvent, TerminalBackend, TerminalCapabilities};
+use crate::{
+    OscEvent, OscParser, Pane, SpawnOptions, SplitDir, TermEvent, TerminalBackend,
+    TerminalCapabilities,
+};
 
 /// Default rows/cols for spawned PTYs. Matches what most modern terminals
 /// open with; agents that care about wrapping can resize via send_keys
@@ -128,9 +131,10 @@ impl PtyBackend {
     }
 
     /// Spawn a fresh PTY pane running the configured shell. Returns the
-    /// new [`PaneId`]. Used by [`split`](TerminalBackend::split) and
+    /// new [`PaneId`]. Used by [`split`](TerminalBackend::split),
+    /// [`split_with_options`](TerminalBackend::split_with_options), and
     /// internally by `list_panes` when the map is empty.
-    fn spawn_pane(&self, cwd: Option<PathBuf>) -> Result<PaneId> {
+    fn spawn_pane(&self, opts: SpawnOptions) -> Result<PaneId> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -141,9 +145,17 @@ impl PtyBackend {
             })
             .map_err(|e| Error::Backend(format!("openpty: {e}")))?;
 
+        let cwd_path: Option<PathBuf> = opts.cwd.as_ref().map(PathBuf::from);
+
         let mut cmd = CommandBuilder::new(&self.inner.shell);
-        if let Some(ref dir) = cwd {
+        if let Some(ref dir) = cwd_path {
             cmd.cwd(dir);
+        }
+        // Caller-provided env first; the backend essentials below win
+        // over any conflicting key (so callers can't accidentally break
+        // the PTY contract by overriding TERM).
+        for (k, v) in &opts.env {
+            cmd.env(k, v);
         }
         // Parity with the env that interactive terminals set so prompts /
         // pagers behave the same as in a "real" terminal.
@@ -189,7 +201,7 @@ impl PtyBackend {
             killer: Mutex::new(killer),
             parser: parser.clone(),
             ring: ring.clone(),
-            cwd: cwd.as_ref().map(|p| p.display().to_string()),
+            cwd: cwd_path.as_ref().map(|p| p.display().to_string()),
             command: self.inner.shell.clone(),
         });
 
@@ -288,8 +300,13 @@ impl TerminalBackend for PtyBackend {
         // consistent with how WezTermBackend behaves when there's a window
         // open.
         if self.inner.panes.read().expect("panes lock poisoned").is_empty() {
-            let cwd = std::env::current_dir().ok();
-            self.spawn_pane(cwd)?;
+            let cwd = std::env::current_dir()
+                .ok()
+                .map(|p| p.display().to_string());
+            self.spawn_pane(SpawnOptions {
+                cwd,
+                ..Default::default()
+            })?;
         }
         let map = self.inner.panes.read().expect("panes lock poisoned");
         Ok(map
@@ -410,8 +427,34 @@ impl TerminalBackend for PtyBackend {
         // layout to bisect). We honour the call by spawning a sibling
         // pane in the parent's cwd, which matches what most users expect
         // when they ask for a split.
-        let cwd = std::env::current_dir().ok();
-        self.spawn_pane(cwd)
+        let cwd = std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string());
+        self.spawn_pane(SpawnOptions {
+            cwd,
+            ..Default::default()
+        })
+    }
+
+    async fn split_with_options(
+        &self,
+        _pane: &PaneId,
+        _dir: SplitDir,
+        options: SpawnOptions,
+    ) -> Result<PaneId> {
+        // Fill in the daemon cwd as the default when the caller didn't
+        // specify one. Without this, the new pane would inherit the
+        // child shell's cwd at fork time, which is whatever
+        // CommandBuilder defaults to (typically `/`) — surprising.
+        let resolved = SpawnOptions {
+            cwd: options.cwd.or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.display().to_string())
+            }),
+            env: options.env,
+        };
+        self.spawn_pane(resolved)
     }
 
     async fn subscribe(&self) -> Result<BoxStream<'static, TermEvent>> {
@@ -758,6 +801,62 @@ mod tests {
                 "expected '{stale}' to be overwritten, but it survived in {contents:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn split_with_options_uses_provided_cwd() {
+        let backend = PtyBackend::with_shell("/bin/sh");
+        let _ = backend.list_panes().await.expect("seed");
+        let new_id = backend
+            .split_with_options(
+                &PaneId::from_raw("ignored"),
+                SplitDir::Vertical,
+                SpawnOptions {
+                    cwd: Some("/tmp".into()),
+                    env: Default::default(),
+                },
+            )
+            .await
+            .expect("split_with_options");
+        let panes = backend.list_panes().await.expect("list");
+        let new_pane = panes
+            .into_iter()
+            .find(|p| p.id == new_id)
+            .expect("new pane in list");
+        assert_eq!(new_pane.cwd.as_deref(), Some("/tmp"));
+    }
+
+    #[tokio::test]
+    async fn split_with_options_passes_env_to_child() {
+        let backend = PtyBackend::with_shell("/bin/sh");
+        let _ = backend.list_panes().await.expect("seed");
+        let mut env = std::collections::HashMap::new();
+        env.insert(
+            "AB_PTY_PASSTHROUGH_TEST".into(),
+            "MARKER_FROM_OPTIONS".into(),
+        );
+        let new_id = backend
+            .split_with_options(
+                &PaneId::from_raw("ignored"),
+                SplitDir::Vertical,
+                SpawnOptions { cwd: None, env },
+            )
+            .await
+            .expect("split_with_options");
+        backend
+            .send_keys(&new_id, "printf '%s\\n' \"$AB_PTY_PASSTHROUGH_TEST\"\n")
+            .await
+            .expect("send_keys");
+        let ok = wait_for(2000, 50, || {
+            let lines = futures::executor::block_on(backend.read_output(&new_id, 20))
+                .unwrap_or_default();
+            lines.iter().any(|l| l.contains("MARKER_FROM_OPTIONS"))
+        })
+        .await;
+        assert!(
+            ok,
+            "expected the env var to surface in the new pane's output"
+        );
     }
 
     #[tokio::test]

@@ -13,6 +13,7 @@ use ab_core::{PaneId, Result};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub mod kitty;
@@ -45,6 +46,23 @@ pub struct Pane {
 pub enum SplitDir {
     Horizontal,
     Vertical,
+}
+
+/// Optional spawn-time controls for new panes. Honored by backends that
+/// own the underlying process lifecycle (PtyBackend); backends that
+/// delegate to an external mux (wezterm/kitty/zellij/warp URL-scheme)
+/// silently ignore the options because the mux owns the spawn.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SpawnOptions {
+    /// Working directory for the new shell. Defaults to the daemon's
+    /// current directory when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    /// Extra environment variables to inject. Merged on top of the
+    /// daemon's env; the backend's own essentials (e.g. `TERM`) win
+    /// over conflicts to avoid breaking the PTY contract.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub env: HashMap<String, String>,
 }
 
 /// Static capability flags for a [`TerminalBackend`] (sync; used by MCP `capabilities` and clients).
@@ -118,6 +136,22 @@ pub trait TerminalBackend: Send + Sync {
     }
 
     async fn split(&self, pane: &PaneId, dir: SplitDir) -> Result<PaneId>;
+
+    /// Split with caller-provided spawn options (cwd, extra env vars).
+    ///
+    /// Default impl ignores `_options` and falls through to [`split`] —
+    /// backends that don't own the spawn (wezterm/kitty/zellij CLI,
+    /// Warp URL-scheme) can't honor cwd/env and would silently drop
+    /// them anyway. PtyBackend overrides this to actually use the
+    /// options when launching the child shell.
+    async fn split_with_options(
+        &self,
+        pane: &PaneId,
+        dir: SplitDir,
+        _options: SpawnOptions,
+    ) -> Result<PaneId> {
+        self.split(pane, dir).await
+    }
 
     /// Resize a pane / PTY to `rows` × `cols`. Updates both the kernel-side
     /// `TIOCSWINSZ` (so the child receives `SIGWINCH` and full-screen apps

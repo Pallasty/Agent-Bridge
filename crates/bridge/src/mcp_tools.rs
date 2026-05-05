@@ -20,8 +20,8 @@ use ab_store::{
 };
 use ab_terminal::{
     dispatch_warp_scheme_uri, warp_scheme_launch_configuration, warp_scheme_new_tab,
-    warp_scheme_new_window, warp_scheme_open_settings_page, OscEvent, OscParser, SplitDir,
-    TerminalBlock,
+    warp_scheme_new_window, warp_scheme_open_settings_page, OscEvent, OscParser, SpawnOptions,
+    SplitDir, TerminalBlock,
 };
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
@@ -338,13 +338,27 @@ impl McpTool for TerminalSplitTool {
         ToolSchema {
             name: self.name().into(),
             description: "Split a terminal pane horizontally or vertically and return the new \
-                 pane's id."
+                 pane's id. Optionally takes `cwd` (working directory for the new shell) and \
+                 `env` (extra environment variables); these are honoured by the in-daemon PTY \
+                 backend and silently ignored by backends that delegate spawning to an \
+                 external multiplexer."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "pane": { "type": "string" },
-                    "dir":  { "type": "string", "enum": ["horizontal", "vertical"], "default": "vertical" }
+                    "dir":  { "type": "string", "enum": ["horizontal", "vertical"], "default": "vertical" },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Working directory for the new shell (PtyBackend only). \
+                                        Defaults to the daemon's cwd."
+                    },
+                    "env": {
+                        "type": "object",
+                        "description": "Extra environment variables for the new shell (PtyBackend only). \
+                                        TERM is preserved by the backend.",
+                        "additionalProperties": { "type": "string" }
+                    }
                 },
                 "required": ["pane"]
             }),
@@ -370,7 +384,28 @@ impl McpTool for TerminalSplitTool {
             "horizontal" => SplitDir::Horizontal,
             _ => SplitDir::Vertical,
         };
-        match term.split(&pane, dir).await {
+        let cwd = args
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string);
+        let env_map: HashMap<String, String> = args
+            .get("env")
+            .and_then(|v| v.as_object())
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let has_options = cwd.is_some() || !env_map.is_empty();
+        let result = if has_options {
+            term.split_with_options(&pane, dir, SpawnOptions { cwd, env: env_map })
+                .await
+        } else {
+            term.split(&pane, dir).await
+        };
+        match result {
             Ok(new_pane) => Ok(ToolResult::text(format!("new pane: {new_pane}"))),
             Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
         }
