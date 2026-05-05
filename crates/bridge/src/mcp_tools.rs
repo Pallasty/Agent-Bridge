@@ -4219,6 +4219,460 @@ impl McpTool for CapabilitiesTool {
     }
 }
 
+// ===========================================================================
+//                           mcp_config_audit
+// ===========================================================================
+
+pub struct McpConfigAuditTool;
+impl McpConfigAuditTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for McpConfigAuditTool {
+    fn name(&self) -> &'static str {
+        "mcp_config_audit"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Audit local CLI MCP configuration for agent-bridge. \
+                 Checks Codex (~/.codex/config.toml), Gemini CLI \
+                 (~/.gemini/settings.json), Claude Code (`claude mcp get`), \
+                 and runs a direct stdio smoke test against the configured \
+                 agent-bridge command when possible."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "include_cli_checks": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Run client CLI checks such as `codex mcp get`, `gemini mcp list -d`, and `claude mcp get`."
+                    },
+                    "include_smoke_test": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Spawn the configured agent-bridge command and send an MCP initialize request over stdio."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "default": 5000,
+                        "minimum": 1000,
+                        "maximum": 30000,
+                        "description": "Per-command timeout for CLI checks and stdio smoke tests."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let include_cli_checks = args
+            .get("include_cli_checks")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let include_smoke_test = args
+            .get("include_smoke_test")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5000)
+            .clamp(1000, 30000);
+        let timeout = Duration::from_millis(timeout_ms);
+
+        let codex = audit_codex_config(include_cli_checks, timeout).await;
+        let gemini = audit_gemini_config(include_cli_checks, timeout).await;
+        let claude = audit_claude_config(include_cli_checks, timeout).await;
+
+        let configured = [&codex, &gemini, &claude]
+            .iter()
+            .filter(|v| v.get("configured").and_then(|x| x.as_bool()).unwrap_or(false))
+            .count();
+        let connected = [&codex, &gemini, &claude]
+            .iter()
+            .filter(|v| v.get("connected").and_then(|x| x.as_bool()).unwrap_or(false))
+            .count();
+
+        let smoke = if include_smoke_test {
+            let mut candidates = Vec::new();
+            for v in [&codex, &gemini, &claude] {
+                if let Some(cmd) = v.get("command").and_then(|x| x.as_str()) {
+                    let args = v
+                        .get("args")
+                        .and_then(|x| x.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    candidates.push((cmd.to_string(), args));
+                }
+            }
+            candidates.sort();
+            candidates.dedup();
+            let mut results = Vec::new();
+            for (cmd, args) in candidates {
+                results.push(audit_stdio_smoke(&cmd, &args, timeout).await);
+            }
+            Value::Array(results)
+        } else {
+            Value::Null
+        };
+
+        Ok(ToolResult::json_text(&json!({
+            "summary": {
+                "configured_clients": configured,
+                "connected_clients": connected,
+                "cli_checks": include_cli_checks,
+                "smoke_test": include_smoke_test,
+                "timeout_ms": timeout_ms
+            },
+            "clients": {
+                "codex": codex,
+                "gemini_cli": gemini,
+                "claude_code": claude
+            },
+            "stdio_smoke": smoke,
+            "recommendations": mcp_audit_recommendations(&codex, &gemini, &claude)
+        })))
+    }
+}
+
+async fn audit_codex_config(include_cli_checks: bool, timeout: Duration) -> Value {
+    let path = dirs_home().join(".codex/config.toml");
+    let raw = std::fs::read_to_string(&path).ok();
+    let (command, args, enabled) = raw
+        .as_deref()
+        .and_then(parse_codex_agent_bridge_toml)
+        .unwrap_or((None, Vec::new(), None));
+    let configured = command.is_some();
+    let exists = command
+        .as_deref()
+        .map(|p| std::path::Path::new(p).exists())
+        .unwrap_or(false);
+    let cli = if include_cli_checks {
+        command_output_json("codex", &["mcp", "get", "agent-bridge"], timeout).await
+    } else {
+        Value::Null
+    };
+    let connected = cli
+        .get("ok")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        && cli
+            .get("stdout")
+            .and_then(|v| v.as_str())
+            .map(|s| s.contains("agent-bridge"))
+            .unwrap_or(false);
+    json!({
+        "configured": configured,
+        "config_path": path.display().to_string(),
+        "config_exists": path.exists(),
+        "command": command,
+        "args": args,
+        "enabled": enabled,
+        "command_exists": exists,
+        "connected": connected,
+        "cli_check": cli
+    })
+}
+
+async fn audit_gemini_config(include_cli_checks: bool, timeout: Duration) -> Value {
+    let path = dirs_home().join(".gemini/settings.json");
+    let raw = std::fs::read_to_string(&path).ok();
+    let (command, args) = raw
+        .as_deref()
+        .and_then(parse_gemini_agent_bridge_json)
+        .unwrap_or((None, Vec::new()));
+    let configured = command.is_some();
+    let exists = command
+        .as_deref()
+        .map(|p| std::path::Path::new(p).exists())
+        .unwrap_or(false);
+    let cli = if include_cli_checks {
+        command_output_json("gemini", &["mcp", "list", "-d"], timeout).await
+    } else {
+        Value::Null
+    };
+    let cli_text = format!(
+        "{}\n{}",
+        cli.get("stdout").and_then(|v| v.as_str()).unwrap_or(""),
+        cli.get("stderr").and_then(|v| v.as_str()).unwrap_or("")
+    );
+    let connected = cli_text.contains("agent-bridge") && cli_text.contains("Connected");
+    json!({
+        "configured": configured,
+        "config_path": path.display().to_string(),
+        "config_exists": path.exists(),
+        "command": command,
+        "args": args,
+        "command_exists": exists,
+        "connected": connected,
+        "cli_check": cli
+    })
+}
+
+async fn audit_claude_config(include_cli_checks: bool, timeout: Duration) -> Value {
+    let cli = if include_cli_checks {
+        command_output_json("claude", &["mcp", "get", "agent-bridge"], timeout).await
+    } else {
+        Value::Null
+    };
+    let stdout = cli.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+    let command = parse_line_value(stdout, "Command:");
+    let args: Vec<String> = parse_line_value(stdout, "Args:")
+        .map(|s| s.split_whitespace().map(|x| x.to_string()).collect())
+        .unwrap_or_default();
+    let status = parse_line_value(stdout, "Status:");
+    let connected = status
+        .as_deref()
+        .map(|s| s.contains("Connected"))
+        .unwrap_or(false);
+    let exists = command
+        .as_deref()
+        .map(|p| std::path::Path::new(p).exists())
+        .unwrap_or(false);
+    json!({
+        "configured": command.is_some(),
+        "command": command,
+        "args": args,
+        "command_exists": exists,
+        "connected": connected,
+        "cli_check": cli
+    })
+}
+
+async fn audit_stdio_smoke(command: &str, args: &[String], timeout: Duration) -> Value {
+    let input = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"agent-bridge-audit\",\"version\":\"0\"}}}\n";
+    let mut child = match TokioCommand::new(command)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return json!({
+                "command": command,
+                "args": args,
+                "ok": false,
+                "error": e.to_string()
+            })
+        }
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        let _ = stdin.write_all(input.as_bytes()).await;
+    }
+
+    let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
+        Ok(Ok(o)) => o,
+        Ok(Err(e)) => {
+            return json!({
+                "command": command,
+                "args": args,
+                "ok": false,
+                "error": e.to_string()
+            })
+        }
+        Err(_) => {
+            return json!({
+                "command": command,
+                "args": args,
+                "ok": false,
+                "error": "timeout"
+            })
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let ok = output.status.success()
+        && stdout.contains("\"serverInfo\"")
+        && stdout.contains("\"agent-bridge\"");
+    json!({
+        "command": command,
+        "args": args,
+        "ok": ok,
+        "exit_code": output.status.code(),
+        "stdout": truncate_for_audit(&stdout),
+        "stderr": truncate_for_audit(&stderr)
+    })
+}
+
+async fn command_output_json(command: &str, args: &[&str], timeout: Duration) -> Value {
+    let fut = TokioCommand::new(command).args(args).output();
+    match tokio::time::timeout(timeout, fut).await {
+        Ok(Ok(o)) => json!({
+            "ok": o.status.success(),
+            "exit_code": o.status.code(),
+            "stdout": truncate_for_audit(&String::from_utf8_lossy(&o.stdout)),
+            "stderr": truncate_for_audit(&String::from_utf8_lossy(&o.stderr))
+        }),
+        Ok(Err(e)) => json!({ "ok": false, "error": e.to_string() }),
+        Err(_) => json!({ "ok": false, "error": "timeout" }),
+    }
+}
+
+fn parse_codex_agent_bridge_toml(raw: &str) -> Option<(Option<String>, Vec<String>, Option<bool>)> {
+    let section = toml_table_body(raw, "mcp_servers.agent-bridge")?;
+    let command = parse_toml_string_value(section, "command");
+    let args = parse_toml_string_array(section, "args");
+    let enabled = parse_toml_bool_value(section, "enabled");
+    Some((command, args, enabled))
+}
+
+fn parse_gemini_agent_bridge_json(raw: &str) -> Option<(Option<String>, Vec<String>)> {
+    let v: Value = serde_json::from_str(raw).ok()?;
+    let server = v.get("mcpServers")?.get("agent-bridge")?;
+    let command = server
+        .get("command")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
+    let args = server
+        .get("args")
+        .and_then(|x| x.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    Some((command, args))
+}
+
+fn toml_table_body<'a>(raw: &'a str, table: &str) -> Option<&'a str> {
+    let header = format!("[{table}]");
+    let start = raw.find(&header)? + header.len();
+    let rest = &raw[start..];
+    let end = rest
+        .lines()
+        .scan(0usize, |offset, line| {
+            let current = *offset;
+            *offset += line.len() + 1;
+            Some((current, line))
+        })
+        .find(|(_, line)| line.trim_start().starts_with('['))
+        .map(|(idx, _)| idx)
+        .unwrap_or(rest.len());
+    Some(&rest[..end])
+}
+
+fn parse_toml_string_value(section: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key} =");
+    section.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let value = trimmed.strip_prefix(&prefix)?.trim();
+        value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .map(|s| s.to_string())
+    })
+}
+
+fn parse_toml_bool_value(section: &str, key: &str) -> Option<bool> {
+    let prefix = format!("{key} =");
+    section.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let value = trimmed.strip_prefix(&prefix)?.trim();
+        match value {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        }
+    })
+}
+
+fn parse_toml_string_array(section: &str, key: &str) -> Vec<String> {
+    let prefix = format!("{key} =");
+    section
+        .lines()
+        .find_map(|line| {
+            let trimmed = line.trim();
+            let value = trimmed.strip_prefix(&prefix)?.trim();
+            let inner = value.strip_prefix('[')?.strip_suffix(']')?;
+            Some(
+                inner
+                    .split(',')
+                    .filter_map(|part| {
+                        part.trim()
+                            .strip_prefix('"')
+                            .and_then(|v| v.strip_suffix('"'))
+                            .map(|s| s.to_string())
+                    })
+                    .collect(),
+            )
+        })
+        .unwrap_or_default()
+}
+
+fn parse_line_value(raw: &str, prefix: &str) -> Option<String> {
+    raw.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix(prefix)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    })
+}
+
+fn truncate_for_audit(s: &str) -> String {
+    const MAX: usize = 4000;
+    if s.len() <= MAX {
+        return s.to_string();
+    }
+    let mut end = MAX;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &s[..end])
+}
+
+fn mcp_audit_recommendations(codex: &Value, gemini: &Value, claude: &Value) -> Vec<String> {
+    let mut recs = Vec::new();
+    for (name, v) in [
+        ("Codex", codex),
+        ("Gemini CLI", gemini),
+        ("Claude Code", claude),
+    ] {
+        if !v
+            .get("configured")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false)
+        {
+            recs.push(format!(
+                "{name}: not configured; run `agent-bridge setup --frontend local-cli`."
+            ));
+        } else if !v
+            .get("command_exists")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false)
+        {
+            recs.push(format!(
+                "{name}: configured command does not exist; rerun setup or repair the command path."
+            ));
+        } else if !v
+            .get("connected")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false)
+        {
+            recs.push(format!(
+                "{name}: config exists but CLI check did not report connected; restart the client or run its MCP diagnostics."
+            ));
+        }
+    }
+    if recs.is_empty() {
+        recs.push("All audited CLI clients are configured and connected.".to_string());
+    }
+    recs
+}
+
 fn which_binary(name: &str) -> bool {
     std::process::Command::new("which")
         .arg(name)
@@ -6711,6 +7165,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(ProjectDetectTool::new(hub.clone())));
     reg.register(Arc::new(ChangesDigestTool::new(hub.clone())));
     reg.register(Arc::new(CapabilitiesTool::new(hub.clone())));
+    reg.register(Arc::new(McpConfigAuditTool::new()));
     reg.register(Arc::new(MemoryStatsTool::new(hub.clone())));
     reg.register(Arc::new(MemorySuggestTool::new(hub.clone())));
     // v0.10: warp-oz cloud-run lifecycle tools

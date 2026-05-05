@@ -17,12 +17,14 @@ use std::sync::Arc;
 
 pub mod kitty;
 pub mod osc;
+pub mod pty;
 pub mod warp;
 pub mod wezterm;
 pub mod zellij;
 
 pub use kitty::KittyBackend;
 pub use osc::{OscEvent, OscParser};
+pub use pty::PtyBackend;
 pub use warp::{
     dispatch_warp_scheme_uri, warp_scheme_launch_configuration, warp_scheme_new_tab,
     warp_scheme_new_window, warp_scheme_open_settings_page, WarpBackend,
@@ -125,13 +127,16 @@ pub trait TerminalBackend: Send + Sync {
 /// Pick a [`TerminalBackend`] from the environment.
 ///
 /// Resolution order:
-/// 1. Explicit override: `AGENT_BRIDGE_TERMINAL` ∈ {`kitty`, `zellij`, `wezterm`, `warp`}.
+/// 1. Explicit override: `AGENT_BRIDGE_TERMINAL` ∈ {`pty`, `kitty`, `zellij`, `wezterm`, `warp`}.
 /// 2. Auto-detect:
 ///    - `ZELLIJ` set → zellij
 ///    - `KITTY_WINDOW_ID` set → kitty
 ///    - [`WarpBackend::detect`] (i.e. `TERM_PROGRAM=WarpTerminal` or any
 ///      `WARP_*` shell-session marker) → warp
-/// 3. Fallback: wezterm (preserves pre-multi-backend behaviour).
+/// 3. Fallback: `pty` — the in-daemon backend, which always works because
+///    it owns the shell itself and needs nothing on the host but a Rust
+///    runtime. (Previously wezterm; that needed `wezterm` on PATH and
+///    failed loudly on bare hosts.)
 ///
 /// Unknown override values silently fall through to the auto-detect step
 /// rather than panicking — prefer logging a warning at the call site.
@@ -141,6 +146,7 @@ pub fn auto_backend() -> Arc<dyn TerminalBackend> {
         .map(|s| s.trim().to_lowercase());
 
     let chosen = match explicit.as_deref() {
+        Some("pty") => "pty",
         Some("kitty") => "kitty",
         Some("zellij") => "zellij",
         Some("wezterm") => "wezterm",
@@ -153,7 +159,7 @@ pub fn auto_backend() -> Arc<dyn TerminalBackend> {
             } else if WarpBackend::detect() {
                 "warp"
             } else {
-                "wezterm"
+                "pty"
             }
         }
     };
@@ -162,6 +168,7 @@ pub fn auto_backend() -> Arc<dyn TerminalBackend> {
         "kitty" => Arc::new(KittyBackend::new()),
         "zellij" => Arc::new(ZellijBackend::new()),
         "warp" => Arc::new(WarpBackend::new()),
-        _ => Arc::new(WezTermBackend::new()),
+        "wezterm" => Arc::new(WezTermBackend::new()),
+        _ => Arc::new(PtyBackend::new()),
     }
 }

@@ -34,13 +34,22 @@ enum Cmd {
     /// `~/.local/bin/agent-bridge`, writes the three Claude Code hook
     /// scripts, and merges hook entries into `~/.claude/settings.json`.
     ///
+    /// `--frontend codex`: copies the binary and registers the MCP server in
+    /// `~/.codex/config.toml`. Codex does not have Claude Code hook events.
+    ///
+    /// `--frontend gemini-cli`: copies the binary and registers the MCP server
+    /// in `~/.gemini/settings.json`.
+    ///
+    /// `--frontend local-cli`: copies the binary and registers the MCP server
+    /// with local CLI clients that can consume stdio MCP servers.
+    ///
     /// `--frontend warp`: copies the binary only and prints guidance for
     /// registering the MCP server in Warp's settings UI. Skips all
     /// Claude-specific hook installation since Warp does not have
     /// equivalent hook-event slots.
     ///
-    /// `--frontend auto`: detect from `WarpBackend::detect()` /
-    /// CLAUDE_* env vars. Defaults to claude-code if neither is found.
+    /// `--frontend auto`: detect Warp, Codex, Gemini CLI, Auggie, then
+    /// fall back to claude-code if none are found.
     Setup {
         #[arg(long, value_enum, default_value_t = SetupFrontend::Auto)]
         frontend: SetupFrontend,
@@ -56,6 +65,12 @@ pub enum SetupFrontend {
     /// Install for Augment Code (auggie) — registers MCP via
     /// `auggie mcp add`; no hook scripts.
     Auggie,
+    /// Install for OpenAI Codex — registers MCP in ~/.codex/config.toml.
+    Codex,
+    /// Install for Gemini CLI — registers MCP in ~/.gemini/settings.json.
+    GeminiCli,
+    /// Install MCP config for local CLI clients (Codex, Gemini CLI, Claude Code).
+    LocalCli,
     /// Auto-detect from the running shell's environment.
     Auto,
 }
@@ -63,16 +78,26 @@ pub enum SetupFrontend {
 impl SetupFrontend {
     /// Resolve `Auto` to a concrete frontend by inspecting the env.
     ///
-    /// Detection order: Warp → Auggie (`~/.augment` exists or `auggie`
-    /// on PATH) → Claude Code (default fallback).
+    /// Detection order: Warp → Codex (`~/.codex/config.toml`,
+    /// `CODEX_HOME`, or `codex` on PATH) → Gemini CLI
+    /// (`~/.gemini/settings.json` or `gemini` on PATH) → Auggie
+    /// (`~/.augment` exists or `auggie` on PATH) → Claude Code
+    /// (default fallback).
     fn resolve(self) -> setup::Frontend {
         match self {
             Self::ClaudeCode => setup::Frontend::ClaudeCode,
             Self::Warp => setup::Frontend::Warp,
             Self::Auggie => setup::Frontend::Auggie,
+            Self::Codex => setup::Frontend::Codex,
+            Self::GeminiCli => setup::Frontend::GeminiCli,
+            Self::LocalCli => setup::Frontend::LocalCli,
             Self::Auto => {
                 if WarpBackend::detect() {
                     setup::Frontend::Warp
+                } else if detect_codex() {
+                    setup::Frontend::Codex
+                } else if detect_gemini_cli() {
+                    setup::Frontend::GeminiCli
                 } else if detect_auggie() {
                     setup::Frontend::Auggie
                 } else {
@@ -81,6 +106,41 @@ impl SetupFrontend {
             }
         }
     }
+}
+
+/// Heuristic: Codex keeps its config under `$CODEX_HOME/config.toml`
+/// or `~/.codex/config.toml`; a `codex` binary on PATH is also enough
+/// to prefer the Codex installer profile over the Claude Code fallback.
+fn detect_codex() -> bool {
+    if let Some(home) = std::env::var_os("CODEX_HOME") {
+        if std::path::Path::new(&home).join("config.toml").exists() {
+            return true;
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        if std::path::Path::new(&home)
+            .join(".codex/config.toml")
+            .exists()
+        {
+            return true;
+        }
+    }
+    which_in_path("codex")
+}
+
+/// Heuristic: Gemini CLI stores global settings in
+/// `~/.gemini/settings.json`; a `gemini` binary on PATH also indicates
+/// the Gemini CLI profile is useful.
+fn detect_gemini_cli() -> bool {
+    if let Some(home) = std::env::var_os("HOME") {
+        if std::path::Path::new(&home)
+            .join(".gemini/settings.json")
+            .exists()
+        {
+            return true;
+        }
+    }
+    which_in_path("gemini")
 }
 
 /// Heuristic: an `~/.augment` directory or an `auggie` binary on

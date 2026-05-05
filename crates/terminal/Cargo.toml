@@ -12,3 +12,8 @@ serde_json.workspace = true
 tokio.workspace = true
 futures.workspace = true
 uuid.workspace = true
+
+# In-daemon PTY backend
+portable-pty = "0.9"
+strip-ansi-escapes = "0.2"
+async-stream = "0.3"

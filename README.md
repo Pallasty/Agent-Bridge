@@ -35,6 +35,100 @@ and git-backed sync to any other machine running agent-bridge.
 
 ---
 
+## Quick start (Codex)
+
+OpenAI Codex is supported as a first-class frontend. The MCP server uses
+stdio and is registered in `~/.codex/config.toml`; Codex reloads that
+configuration when a new session starts.
+
+```bash
+# 1. Build (same as above)
+git clone git@github.com:pallasting/Agent-Bridge.git ~/agent-bridge
+cd ~/agent-bridge && cargo build --release
+
+# 2. Install — Codex profile copies the binary and merges MCP config.
+./target/release/agent-bridge setup --frontend codex
+# (Or rely on auto-detect when ~/.codex/config.toml exists:
+#   ./target/release/agent-bridge setup)
+
+# 3. Restart Codex or open a new Codex session.
+```
+
+The Codex profile writes this MCP server entry:
+
+```toml
+[mcp_servers.agent-bridge]
+command = "/home/you/.local/bin/agent-bridge"
+args = ["mcp"]
+enabled = true
+startup_timeout_sec = 20
+tool_timeout_sec = 300
+supports_parallel_tool_calls = false
+```
+
+The command path is written as the expanded absolute path on your
+machine, for example `/Users/pallasting/.local/bin/agent-bridge` on
+macOS.
+
+`supports_parallel_tool_calls` is deliberately false because
+agent-bridge tools share SQLite, browser, and terminal state.
+
+Codex does not have analogues for the Claude Code `UserPromptSubmit /
+Stop / PreCompact` hook events, so the `setup --frontend codex`
+profile skips writing the three `ab-*-hook` scripts and the
+`~/.claude/settings.json` rewrite. Instead, the agent should call the
+equivalent MCP tools directly:
+
+| Lifecycle moment | What to call instead of a hook |
+|------------------|--------------------------------|
+| Session start    | Read `agent-bridge://session/bootstrap` resource, or call `session_bootstrap` |
+| Before summarising / compacting context | `session_curate(conversation_text=...)` |
+| Session end      | `session_finalize()` |
+
+---
+
+## Quick start (local CLI clients)
+
+agent-bridge is a stdio MCP server, so any local CLI client that can
+spawn an MCP server command can use the same binary:
+
+```bash
+cargo build --release
+
+# Register with local stdio-capable CLI clients in one pass:
+# - Codex      → ~/.codex/config.toml
+# - Gemini CLI → ~/.gemini/settings.json
+# - Claude Code best effort via `claude mcp add`
+./target/release/agent-bridge setup --frontend local-cli
+```
+
+You can also target one client explicitly:
+
+```bash
+./target/release/agent-bridge setup --frontend codex
+./target/release/agent-bridge setup --frontend gemini-cli
+./target/release/agent-bridge setup --frontend claude-code
+```
+
+Gemini CLI uses this JSON shape in `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-bridge": {
+      "command": "/home/you/.local/bin/agent-bridge",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Claude Code is still the only profile with automatic hook scripts.
+Codex, Gemini CLI, Warp, and Auggie should use the lifecycle MCP tools
+directly: `session_bootstrap`, `session_curate`, and `session_finalize`.
+
+---
+
 ## Quick start (Warp)
 
 [Warp](https://www.warp.dev) is supported as a first-class frontend. The
@@ -84,7 +178,8 @@ a compact, Block-UI-friendly format.
 
 `agent-bridge setup` is idempotent and safe to re-run after upgrades.
 The `--frontend` flag selects the install profile (default: `auto`,
-which detects Warp via env vars and falls back to claude-code).
+which detects Warp, Codex, Gemini CLI, then Auggie before falling back
+to claude-code).
 
 Claude Code profile (`--frontend claude-code`):
 
@@ -103,6 +198,33 @@ Warp profile (`--frontend warp`):
 | Hook scripts | **Skipped** — Warp has no equivalent hook events |
 | Curator settings | **Skipped** — only consumed by `ab-precompact-hook.sh` |
 | Settings file | **Skipped** — prints registration guidance for `Settings → MCP servers` instead |
+
+Codex profile (`--frontend codex`):
+
+| Step | What happens |
+|------|-------------|
+| Binary | Copies itself to `~/.local/bin/agent-bridge` |
+| Hook scripts | **Skipped** — Codex has no equivalent hook events |
+| Curator settings | **Skipped** — only consumed by `ab-precompact-hook.sh` |
+| Settings file | Merges `[mcp_servers.agent-bridge]` into `~/.codex/config.toml` |
+
+Gemini CLI profile (`--frontend gemini-cli`):
+
+| Step | What happens |
+|------|-------------|
+| Binary | Copies itself to `~/.local/bin/agent-bridge` |
+| Hook scripts | **Skipped** — Gemini CLI has no equivalent hook events |
+| Curator settings | **Skipped** — only consumed by `ab-precompact-hook.sh` |
+| Settings file | Merges `mcpServers.agent-bridge` into `~/.gemini/settings.json` |
+
+Local CLI profile (`--frontend local-cli`):
+
+| Step | What happens |
+|------|-------------|
+| Binary | Copies itself to `~/.local/bin/agent-bridge` |
+| Codex | Merges `[mcp_servers.agent-bridge]` into `~/.codex/config.toml` |
+| Gemini CLI | Merges `mcpServers.agent-bridge` into `~/.gemini/settings.json` |
+| Claude Code | Best-effort `claude mcp add -s user`; prints the manual command if unavailable |
 
 ### Hook scripts
 
@@ -177,6 +299,10 @@ For profile tuning/regression on a real session transcript, run:
 
 This compares `baseline / balanced / strict / aggressive` profiles on the same
 input, printing candidate counts, kind distributions, and sample diffs vs baseline.
+
+After registering local CLI clients, ask any connected agent to call
+`mcp_config_audit`. It checks Codex, Gemini CLI, and Claude Code MCP config,
+client-reported connection status, and a direct stdio initialize smoke test.
 
 For `context_budget` heuristic calibration against a tokenizer baseline:
 
@@ -271,6 +397,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `session_handoff` | Structured JSON brief: todos + `session_handoff` memories + git snapshot (W3) |
 | | `session_lifecycle_step` | Dispatch `bootstrap` / `precompact` (curate+finalize) / `finalize` in one call |
 | meta | `capabilities` | Report what agent-bridge can do in this environment |
+| | `mcp_config_audit` | Audit Codex / Gemini CLI / Claude Code MCP config and direct stdio connectivity |
 | | `context_budget` | Offline token estimate vs approximate model limit + compaction recommendation (W5) |
 | | `hook_status` | Check installed hook scripts and their last run status |
 | | `mcp_recent_errors` | List recent failed MCP `tools/call` rows from the SQLite ring buffer |
