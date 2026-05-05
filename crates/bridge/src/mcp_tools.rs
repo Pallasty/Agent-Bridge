@@ -3296,6 +3296,21 @@ impl McpTool for SessionBootstrapTool {
             lines.push(String::new());
         }
 
+        // Inject Perception Filter (path B) state if available — parallel
+        // 384-d MiniLM + thermodynamic-filter substrate. Read-only, same as
+        // the 32-d Seed above. Together they cross-validate "what does the
+        // current memory corpus look like to a self-organizing network?"
+        // See `decision_path_b_perception_filter_validated_20260505`.
+        if let Some(pf_block) = format_perception_filter_block() {
+            lines.push(
+                "=== Perception Filter (384-d MiniLM + thermodynamic filter) ==="
+                    .to_string(),
+            );
+            lines.push(pf_block);
+            lines.push("=== End Perception Filter ===".to_string());
+            lines.push(String::new());
+        }
+
         // Inject up to 3 most recent letter-to-future-self entries.
         // Letters are written by the agent via session_finalize(letter=...);
         // they sit between AGENT.md (stable identity) and memory rows
@@ -7932,6 +7947,178 @@ fn format_agent_bridge_seed_block() -> Option<String> {
     format_agent_bridge_seed_block_from_json(&content)
 }
 
+// ── Agent-Bridge Perception Filter (Path B, 2026-05-05) ─────────────────────
+//
+// Parallel to the 32-d Seed block above. The Perception Filter sidecar
+// (`perception_filter_sidecar.py tail`) embeds each MemoryRecord via
+// MiniLM-L6-v2 (384-d), filters by Mahalanobis surprisal vs the streaming
+// prior (drop high-surprisal outliers / "高熵杂讯", keep "低熵效信息"),
+// and steps a separate DynamicGrid (dim=384, max_n=50) over the kept stream.
+//
+// Both sidecars run side-by-side: the 32-d encoder is a control (validated
+// L2+L3 emergence on AiOT seed_demo); the 384-d filter is the treatment
+// (tested for "new memory finds home", cos>0.5 for related neighbors).
+// We surface both at bootstrap so future-Claude can compare topology.
+//
+// Schema differs from the 32-d version: grid fields are nested under
+// `grid:`, plus filter-level metadata (n_kept, surprisal_stats,
+// high/low_surprisal_top10).
+
+/// Resolve path to `agent-bridge-seed/state_pf/perception_filter_state.json` if present.
+/// Override via `AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH`.
+fn agent_bridge_perception_filter_state_path() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH") {
+        let pb = PathBuf::from(p);
+        if pb.exists() {
+            return Some(pb);
+        }
+    }
+    let default =
+        PathBuf::from("/Data/CascadeProjects/agent-bridge-seed/state_pf/perception_filter_state.json");
+    if default.exists() {
+        Some(default)
+    } else {
+        None
+    }
+}
+
+/// Format a compact summary of the perception-filter state. Pure JSON-in,
+/// string-or-None-out — testable without filesystem. Returns `None` if the
+/// JSON lacks the minimum fields (`n_total` and `grid.step`).
+fn format_perception_filter_block_from_json(content: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(content).ok()?;
+
+    let n_total = v.get("n_total").and_then(|x| x.as_i64())?;
+    let grid = v.get("grid")?;
+    let step = grid.get("step").and_then(|x| x.as_i64())?;
+    let n_alive = grid.get("n_alive").and_then(|x| x.as_i64()).unwrap_or(0);
+    let spawns = grid
+        .get("spawn_count")
+        .and_then(|x| x.as_i64())
+        .unwrap_or(0);
+    let deaths = grid
+        .get("death_count")
+        .and_then(|x| x.as_i64())
+        .unwrap_or(0);
+    let ae = grid
+        .get("adaptive_entropy_baseline")
+        .and_then(|x| x.as_f64())
+        .unwrap_or(0.0);
+    let depth = grid
+        .get("depth_ratio")
+        .and_then(|x| x.as_f64())
+        .unwrap_or(0.0);
+
+    let n_kept = v.get("n_kept").and_then(|x| x.as_i64()).unwrap_or(0);
+    let keep_ratio = v
+        .get("keep_ratio")
+        .and_then(|x| x.as_f64())
+        .unwrap_or(0.0);
+    let direction = v
+        .get("filter_direction")
+        .and_then(|x| x.as_str())
+        .unwrap_or("low");
+    let mode = v.get("mode").and_then(|x| x.as_str()).unwrap_or("");
+    let model = v.get("model").and_then(|x| x.as_str()).unwrap_or("?");
+    let dim = v.get("embed_dim").and_then(|x| x.as_i64()).unwrap_or(0);
+    // Friendly model label (drop "sentence-transformers/" prefix for compactness).
+    let model_short = model.rsplit('/').next().unwrap_or(model);
+
+    // Surprisal distribution (one line).
+    let mut surprisal_line = String::new();
+    if let Some(stats) = v.get("surprisal_stats") {
+        let median = stats.get("median").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        let p25 = stats.get("p25").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        let p75 = stats.get("p75").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        let max = stats.get("max").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        surprisal_line = format!(
+            "surprisal: median={median:.0} | p25={p25:.0} | p75={p75:.0} | max={max:.0}"
+        );
+    }
+
+    // Top-3 attended neurons (same logic as Seed block, on grid.neurons).
+    let mut top_lines: Vec<String> = Vec::new();
+    if let Some(arr) = grid.get("neurons").and_then(|x| x.as_array()) {
+        let mut entries: Vec<(i64, i64, f64, Option<i64>)> = arr
+            .iter()
+            .filter_map(|n| {
+                let id = n.get("id")?.as_i64()?;
+                let age = n.get("age")?.as_i64()?;
+                let in_strength = n.get("in_strength")?.as_f64()?;
+                let target = n.get("argmax_target").and_then(|t| t.as_i64());
+                Some((id, age, in_strength, target))
+            })
+            .collect();
+        entries.sort_by(|a, b| {
+            b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for (id, age, in_s, target) in entries.into_iter().take(3) {
+            match target {
+                Some(t) => top_lines.push(format!(
+                    "  n{id} (age {age}, in={in_s:.2}) → attends n{t}"
+                )),
+                None => top_lines.push(format!(
+                    "  n{id} (age {age}, in={in_s:.2}) [carrier]"
+                )),
+            }
+        }
+    }
+
+    // High-surprisal markers — potential novelty / anomaly. Useful for
+    // future-Claude to flag "what looks anomalous in the current corpus".
+    // Always shown regardless of filter direction (signal works both ways).
+    let mut novelty_lines: Vec<String> = Vec::new();
+    if let Some(arr) = v.get("high_surprisal_top10").and_then(|x| x.as_array()) {
+        for entry in arr.iter().take(3) {
+            let s = entry.get("surprisal").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            let kind = entry.get("kind").and_then(|x| x.as_str()).unwrap_or("?");
+            let key = entry.get("key").and_then(|x| x.as_str()).unwrap_or("?");
+            let key_short: String = if key.chars().count() > 50 {
+                let truncated: String = key.chars().take(50).collect();
+                format!("{truncated}…")
+            } else {
+                key.to_string()
+            };
+            novelty_lines.push(format!(
+                "  s={s:.0} ({kind:>10}) {key_short}"
+            ));
+        }
+    }
+
+    let mut block = String::new();
+    let mode_tag = if mode.is_empty() {
+        String::new()
+    } else {
+        format!(" | mode={mode}")
+    };
+    block.push_str(&format!(
+        "filter: {direction} (keep {pct:.0}%) | n_total={n_total} → kept={n_kept} | model={model_short} ({dim}d){mode_tag}\n\
+         grid: step={step} | n_alive={n_alive} | spawns={spawns} | deaths={deaths} | ae={ae:.3} | depth={depth:.2}",
+        pct = keep_ratio * 100.0
+    ));
+    if !surprisal_line.is_empty() {
+        block.push('\n');
+        block.push_str(&surprisal_line);
+    }
+    if !top_lines.is_empty() {
+        block.push_str("\n\nTop-3 attended neurons (by in_strength):\n");
+        block.push_str(&top_lines.join("\n"));
+    }
+    if !novelty_lines.is_empty() {
+        block.push_str("\n\nHigh-surprisal markers (potential novelty/anomaly, top 3):\n");
+        block.push_str(&novelty_lines.join("\n"));
+    }
+    Some(block)
+}
+
+/// Build the perception-filter bootstrap block. Returns None when sidecar
+/// state isn't available or is malformed.
+fn format_perception_filter_block() -> Option<String> {
+    let path = agent_bridge_perception_filter_state_path()?;
+    let content = std::fs::read_to_string(&path).ok()?;
+    format_perception_filter_block_from_json(&content)
+}
+
 // ── Decision review trigger ─────────────────────────────────────────────────
 //
 // Closes the dual-mechanism continuity loop. AGENT.md (attractor) + drift_cap
@@ -8158,6 +8345,138 @@ mod tests {
             status: "active".into(),
             trigger_pattern: None,
         }
+    }
+
+    // ── Perception Filter block tests ───────────────────────────────────
+
+    #[test]
+    fn pf_block_returns_none_on_malformed_or_missing() {
+        assert!(format_perception_filter_block_from_json("").is_none());
+        assert!(format_perception_filter_block_from_json("not json").is_none());
+        assert!(format_perception_filter_block_from_json("{}").is_none());
+        // Missing nested grid.step
+        assert!(
+            format_perception_filter_block_from_json(r#"{"n_total":10,"grid":{}}"#).is_none()
+        );
+        // Missing n_total
+        assert!(
+            format_perception_filter_block_from_json(r#"{"grid":{"step":1}}"#).is_none()
+        );
+    }
+
+    #[test]
+    fn pf_block_minimal_state_renders() {
+        let json = r#"{
+            "n_total": 350,
+            "n_kept": 175,
+            "keep_ratio": 0.5,
+            "filter_direction": "low",
+            "mode": "tail",
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "embed_dim": 384,
+            "grid": {
+                "step": 175, "n_alive": 22, "spawn_count": 18, "death_count": 0,
+                "adaptive_entropy_baseline": 0.857, "depth_ratio": 0.30
+            }
+        }"#;
+        let block = format_perception_filter_block_from_json(json).unwrap();
+        assert!(block.contains("filter: low (keep 50%)"));
+        assert!(block.contains("n_total=350"));
+        assert!(block.contains("kept=175"));
+        assert!(block.contains("model=all-MiniLM-L6-v2 (384d)"));
+        assert!(block.contains("mode=tail"));
+        assert!(block.contains("step=175"));
+        assert!(block.contains("n_alive=22"));
+        assert!(block.contains("ae=0.857"));
+        assert!(block.contains("depth=0.30"));
+        // No optional sections.
+        assert!(!block.contains("Top-3"));
+        assert!(!block.contains("High-surprisal markers"));
+        assert!(!block.contains("surprisal: median"));
+    }
+
+    #[test]
+    fn pf_block_renders_surprisal_stats_and_markers() {
+        let json = r#"{
+            "n_total": 350,
+            "n_kept": 175,
+            "keep_ratio": 0.5,
+            "filter_direction": "low",
+            "mode": "tail",
+            "model": "MiniLM",
+            "embed_dim": 384,
+            "surprisal_stats": {
+                "min": 280.0, "p25": 371.0, "median": 383.4,
+                "p75": 400.5, "max": 621.1, "threshold": 383.4
+            },
+            "high_surprisal_top10": [
+                {"surprisal": 621.1, "key": "test_key_smoke", "kind": "lesson",   "importance": 0.5},
+                {"surprisal": 518.0, "key": "anomaly_one",   "kind": "decision", "importance": 0.6},
+                {"surprisal": 485.2, "key": "anomaly_two",   "kind": "context",  "importance": 0.7},
+                {"surprisal": 400.0, "key": "below_top3",    "kind": "lesson",   "importance": 0.5}
+            ],
+            "grid": {
+                "step": 175, "n_alive": 5, "spawn_count": 3, "death_count": 0,
+                "adaptive_entropy_baseline": 0.86, "depth_ratio": 0.4
+            }
+        }"#;
+        let block = format_perception_filter_block_from_json(json).unwrap();
+        assert!(block.contains("surprisal: median=383"));
+        assert!(block.contains("p25=371"));
+        assert!(block.contains("max=621"));
+        assert!(block.contains("High-surprisal markers"));
+        assert!(block.contains("test_key_smoke"));
+        assert!(block.contains("anomaly_one"));
+        assert!(block.contains("anomaly_two"));
+        assert!(!block.contains("below_top3"), "only top-3 surfaced");
+    }
+
+    #[test]
+    fn pf_block_top3_neurons_sorted_by_in_strength() {
+        let json = r#"{
+            "n_total": 100, "n_kept": 50, "keep_ratio": 0.5,
+            "filter_direction": "low", "mode": "tail",
+            "model": "MiniLM", "embed_dim": 384,
+            "grid": {
+                "step": 50, "n_alive": 5, "spawn_count": 1, "death_count": 0,
+                "adaptive_entropy_baseline": 0.85, "depth_ratio": 0.6,
+                "neurons": [
+                    {"id": 0, "age": 50, "in_strength": 0.5, "argmax_target": null},
+                    {"id": 1, "age": 50, "in_strength": 2.7, "argmax_target": 3},
+                    {"id": 2, "age": 40, "in_strength": 1.2, "argmax_target": 1},
+                    {"id": 3, "age": 30, "in_strength": 0.8, "argmax_target": 2},
+                    {"id": 4, "age": 20, "in_strength": 1.9, "argmax_target": 1}
+                ]
+            }
+        }"#;
+        let block = format_perception_filter_block_from_json(json).unwrap();
+        let p1 = block.find("n1 ").unwrap();
+        let p4 = block.find("n4 ").unwrap();
+        let p2 = block.find("n2 ").unwrap();
+        assert!(p1 < p4 && p4 < p2, "top-3 in in_strength order: 1 > 4 > 2");
+        assert!(!block.contains("n0 "));
+        assert!(!block.contains("n3 "));
+    }
+
+    #[test]
+    fn pf_block_truncates_long_surprisal_keys() {
+        let long_key = "k_".to_string() + &"x".repeat(120);
+        let json = format!(
+            r#"{{
+                "n_total": 1, "n_kept": 1, "keep_ratio": 1.0,
+                "filter_direction": "low", "mode": "tail",
+                "model": "MiniLM", "embed_dim": 384,
+                "high_surprisal_top10": [
+                    {{"surprisal": 500.0, "key": "{long_key}", "kind": "x", "importance": 0.5}}
+                ],
+                "grid": {{
+                    "step": 1, "n_alive": 1, "spawn_count": 0, "death_count": 0,
+                    "adaptive_entropy_baseline": 0.5, "depth_ratio": 0.0
+                }}
+            }}"#
+        );
+        let block = format_perception_filter_block_from_json(&json).unwrap();
+        assert!(block.contains("…"), "long key must be truncated");
     }
 
     #[test]
