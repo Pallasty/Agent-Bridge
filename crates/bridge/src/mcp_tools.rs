@@ -450,6 +450,78 @@ impl McpTool for TerminalReadOutputTool {
 }
 
 // ===========================================================================
+//                            terminal_resize tool
+// ===========================================================================
+
+pub struct TerminalResizeTool {
+    hub: Hub,
+}
+impl TerminalResizeTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for TerminalResizeTool {
+    fn name(&self) -> &'static str {
+        "terminal_resize"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Resize a terminal pane / PTY to the given rows × cols. \
+                 Triggers SIGWINCH on the child process so full-screen apps \
+                 (vim/less/man/htop) re-flow. Backends that don't own the \
+                 underlying PTY (e.g. WarpBackend in URL-scheme mode) will \
+                 reject this call with a 'not supported' error."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pane": { "type": "string", "description": "Pane id from terminal_list." },
+                    "rows": { "type": "integer", "minimum": 1, "maximum": 500,
+                              "description": "New row count (vertical lines)." },
+                    "cols": { "type": "integer", "minimum": 1, "maximum": 1000,
+                              "description": "New column count (horizontal width)." }
+                },
+                "required": ["pane", "rows", "cols"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
+            return Ok(ToolResult::error(e));
+        }
+        let term = match &self.hub.terminal {
+            Some(t) => t.clone(),
+            None => return Ok(ToolResult::error("no terminal backend configured")),
+        };
+        let pane = match args.get("pane").and_then(|v| v.as_str()) {
+            Some(s) => PaneId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'pane'")),
+        };
+        let rows = match args.get("rows").and_then(|v| v.as_u64()) {
+            Some(r) => r.clamp(1, 500) as u16,
+            None => return Ok(ToolResult::error("missing 'rows'")),
+        };
+        let cols = match args.get("cols").and_then(|v| v.as_u64()) {
+            Some(c) => c.clamp(1, 1000) as u16,
+            None => return Ok(ToolResult::error("missing 'cols'")),
+        };
+        match term.resize(&pane, rows, cols).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({
+                "pane": pane.as_str(),
+                "backend": term.id(),
+                "rows": rows,
+                "cols": cols,
+                "ok": true
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                              shell_exec tool
 // ===========================================================================
 
@@ -7119,6 +7191,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg.register(Arc::new(TerminalReadOutputTool::new(hub.clone())));
     reg.register(Arc::new(TerminalReadBlocksTool::new(hub.clone())));
     reg.register(Arc::new(TerminalSplitTool::new(hub.clone())));
+    reg.register(Arc::new(TerminalResizeTool::new(hub.clone())));
     reg.register(Arc::new(ShellExecTool::new(hub.clone())));
     // Browser surface
     reg.register(Arc::new(BrowserNavigateTool::new(hub.clone())));

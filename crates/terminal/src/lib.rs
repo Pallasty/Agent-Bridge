@@ -119,6 +119,18 @@ pub trait TerminalBackend: Send + Sync {
 
     async fn split(&self, pane: &PaneId, dir: SplitDir) -> Result<PaneId>;
 
+    /// Resize a pane / PTY to `rows` × `cols`. Updates both the kernel-side
+    /// `TIOCSWINSZ` (so the child receives `SIGWINCH` and full-screen apps
+    /// like vim/less re-flow) and the backend's render state where it has
+    /// one. Default impl returns `Error::Backend("not supported")` —
+    /// backends that don't own the PTY (e.g. WarpBackend in URL-scheme
+    /// mode) fall through to this.
+    async fn resize(&self, _pane: &PaneId, _rows: u16, _cols: u16) -> Result<()> {
+        Err(ab_core::Error::Backend(
+            "resize is not supported by this backend".into(),
+        ))
+    }
+
     /// Stream lifecycle + OSC events. Backends without push semantics may
     /// return an empty/never-emitting stream.
     async fn subscribe(&self) -> Result<BoxStream<'static, TermEvent>>;

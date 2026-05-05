@@ -73,6 +73,9 @@ struct Inner {
 
 struct PtyHandle {
     id: PaneId,
+    /// PTY master. Kept around (rather than dropped after `take_writer`)
+    /// because resize() needs it to issue `TIOCSWINSZ` to the kernel.
+    master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     /// Writer to the PTY master (typing into the shell).
     writer: Mutex<Box<dyn Write + Send>>,
     /// Async-friendly child kill handle (so we can kill from any thread).
@@ -166,6 +169,11 @@ impl PtyBackend {
         // PTY and stall reader cleanup.
         drop(pair.slave);
 
+        // Keep the master alive for resize(). `take_writer` and
+        // `try_clone_reader` both take `&self`, so the master remains
+        // usable after they are called.
+        let master = Arc::new(Mutex::new(pair.master));
+
         let id = PaneId::new();
         let ring = Arc::new(Mutex::new(RingBuffer::new(self.inner.ring_cap)));
         // vt100 scrollback set to 0: we already keep history in the ring,
@@ -176,6 +184,7 @@ impl PtyBackend {
         )));
         let handle = Arc::new(PtyHandle {
             id: id.clone(),
+            master,
             writer: Mutex::new(writer),
             killer: Mutex::new(killer),
             parser: parser.clone(),
@@ -359,6 +368,41 @@ impl TerminalBackend for PtyBackend {
         let ring_lines: Vec<String> = ring_text.lines().map(str::to_owned).collect();
         let start = ring_lines.len().saturating_sub(n);
         Ok(ring_lines[start..].to_vec())
+    }
+
+    async fn resize(&self, pane: &PaneId, rows: u16, cols: u16) -> Result<()> {
+        // Sanity floor: 1×1 is technically legal but useless and breaks
+        // some apps; keep it slightly more conservative.
+        let rows = rows.max(1);
+        let cols = cols.max(1);
+        let handle = self.get_handle(pane)?;
+        let master = handle.master.clone();
+        let parser = handle.parser.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            // 1. Tell the kernel — this is what triggers SIGWINCH and
+            //    lets full-screen apps (vim/less/man) re-flow.
+            master
+                .lock()
+                .expect("pty master lock poisoned")
+                .resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(|e| Error::Backend(format!("pty resize: {e}")))?;
+            // 2. Resize our render grid so read_output reflects the new
+            //    geometry. Without this, vt100 would keep wrapping at
+            //    the old column width.
+            parser
+                .lock()
+                .expect("pty parser lock poisoned")
+                .screen_mut()
+                .set_size(rows, cols);
+            Ok(())
+        })
+        .await
+        .map_err(|e| Error::Backend(format!("resize join: {e}")))?
     }
 
     async fn split(&self, _pane: &PaneId, _dir: SplitDir) -> Result<PaneId> {
@@ -713,6 +757,31 @@ mod tests {
                 !contents.contains(stale),
                 "expected '{stale}' to be overwritten, but it survived in {contents:?}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn resize_succeeds_on_valid_pane() {
+        let backend = PtyBackend::with_shell("/bin/sh");
+        let _ = backend.list_panes().await.expect("seed");
+        let pane = backend.list_panes().await.expect("list")[0].id.clone();
+        backend.resize(&pane, 80, 200).await.expect("first resize");
+        backend.resize(&pane, 24, 80).await.expect("second resize");
+        // Floor: rows=0/cols=0 should not error — implementation clamps
+        // them to 1 to keep the underlying ioctl happy.
+        backend.resize(&pane, 0, 0).await.expect("clamped resize");
+    }
+
+    #[tokio::test]
+    async fn resize_unknown_pane_errors() {
+        let backend = PtyBackend::with_shell("/bin/sh");
+        let err = backend
+            .resize(&PaneId::from_raw("does-not-exist"), 24, 80)
+            .await
+            .expect_err("must error");
+        match err {
+            Error::Backend(msg) => assert!(msg.contains("unknown pane")),
+            other => panic!("expected Error::Backend, got {other:?}"),
         }
     }
 
