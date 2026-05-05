@@ -17,3 +17,4 @@ uuid.workspace = true
 portable-pty = "0.9"
 strip-ansi-escapes = "0.2"
 async-stream = "0.3"
+vt100 = "0.16"

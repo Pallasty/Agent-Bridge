@@ -11,14 +11,21 @@
 //! coupling: anywhere a Rust binary can run, the agent can read & write a
 //! shell session, full stop.
 //!
-//! Output handling: bytes coming back from the PTY master are split into
-//! two streams. One copy is fed to [`crate::OscParser`] so OSC 9 / 99 / 777
-//! notifications still surface as `TermEvent::OscNotification`s; the other
-//! is run through `strip-ansi-escapes` and stored in a per-pane
-//! [`RingBuffer`]. `read_output` returns the last N lines of that ring.
-//! That keeps `read_output` callers from having to deal with raw VT
-//! sequences, while preserving the OSC notification path that the rest of
-//! the bridge depends on.
+//! Output handling: bytes coming back from the PTY master fan out three ways.
+//! 1. A copy is fed to [`crate::OscParser`] so OSC 9 / 99 / 777 notifications
+//!    still surface as `TermEvent::OscNotification`s.
+//! 2. A copy is fed to a per-pane [`vt100::Parser`], which maintains a real
+//!    rows×cols screen grid (default 40×120). `read_output` prefers the
+//!    rendered screen for short queries, so `vim`/`top`/progress bars come
+//!    out the way a human would see them — not as ANSI-stripped fragments.
+//! 3. The same chunk, post-`strip-ansi-escapes`, is appended to a per-pane
+//!    [`RingBuffer`]. The ring acts as a long-N fallback: when the caller
+//!    asks for more lines than fit on the visible screen, we serve from the
+//!    ring (lower fidelity, but more history).
+//!
+//! The dual-state design lets us pay the high-quality rendering cost only
+//! when it matters (short windows, interactive TUIs) while keeping the
+//! cheap "last 200 lines of `cat` output" path working out of the box.
 
 use ab_core::{Error, NotifyEvent, NotifySource, PaneId, Result};
 use async_trait::async_trait;
@@ -70,7 +77,12 @@ struct PtyHandle {
     writer: Mutex<Box<dyn Write + Send>>,
     /// Async-friendly child kill handle (so we can kill from any thread).
     killer: Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
-    /// Per-pane scrollback (post-ANSI-strip).
+    /// Virtual terminal grid for high-fidelity rendering of the visible
+    /// screen (vim/top/progress-bar handling). Read by `read_output`
+    /// when the caller's `lines` request fits within rows.
+    parser: Arc<Mutex<vt100::Parser>>,
+    /// Per-pane scrollback (post-ANSI-strip). Used as a long-N fallback
+    /// when the caller asks for more rows than the screen has.
     ring: Arc<Mutex<RingBuffer>>,
     /// Initial cwd snapshot (set at spawn time; not tracked thereafter).
     cwd: Option<String>,
@@ -156,27 +168,37 @@ impl PtyBackend {
 
         let id = PaneId::new();
         let ring = Arc::new(Mutex::new(RingBuffer::new(self.inner.ring_cap)));
+        // vt100 scrollback set to 0: we already keep history in the ring,
+        // so the parser only needs to cover the visible screen. Fewer
+        // rows allocated = less memory per pane.
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(
+            DEFAULT_ROWS, DEFAULT_COLS, 0,
+        )));
         let handle = Arc::new(PtyHandle {
             id: id.clone(),
             writer: Mutex::new(writer),
             killer: Mutex::new(killer),
+            parser: parser.clone(),
             ring: ring.clone(),
             cwd: cwd.as_ref().map(|p| p.display().to_string()),
             command: self.inner.shell.clone(),
         });
 
         // Start the background reader. PTY reads are blocking std::io, so
-        // run on a dedicated OS thread (not a tokio task) — feed both the
-        // OSC parser (for notifications) and the ring (for read_output).
+        // run on a dedicated OS thread (not a tokio task) — fan the bytes
+        // out three ways: OSC parser (notifications), vt100 parser (live
+        // screen render), and the ring (long-N fallback / history).
         let inner_for_thread: Arc<Inner> = self.inner.clone();
         let pane_for_thread = id.clone();
         let ring_for_thread = ring;
+        let parser_for_thread = parser;
         std::thread::Builder::new()
             .name(format!("ab-pty-reader-{}", id.as_str()))
             .spawn(move || {
                 reader_loop(
                     reader,
                     ring_for_thread,
+                    parser_for_thread,
                     inner_for_thread.events_tx.clone(),
                     &pane_for_thread,
                 );
@@ -294,20 +316,49 @@ impl TerminalBackend for PtyBackend {
 
     async fn read_output(&self, pane: &PaneId, lines: usize) -> Result<Vec<String>> {
         let handle = self.get_handle(pane)?;
+        let parser = handle.parser.clone();
         let ring = handle.ring.clone();
-        // Locking the ring is fast (memcpy a VecDeque to Vec); still keep
-        // it off the runtime for correctness on slow disks / etc.
-        let snapshot = tokio::task::spawn_blocking(move || {
-            let g = ring.lock().expect("ring lock poisoned");
-            g.snapshot()
+        // Snapshot both states under their own short locks. Splitting them
+        // (rather than holding both) avoids a potential deadlock with the
+        // reader thread, which acquires parser then ring in that order.
+        let (visible, ring_bytes) = tokio::task::spawn_blocking(move || {
+            let visible = {
+                let p = parser.lock().expect("parser lock poisoned");
+                p.screen().contents()
+            };
+            let bytes = {
+                let g = ring.lock().expect("ring lock poisoned");
+                g.snapshot()
+            };
+            (visible, bytes)
         })
         .await
         .map_err(|e| Error::Backend(format!("read_output join: {e}")))?;
-        let text = String::from_utf8_lossy(&snapshot);
-        let all: Vec<String> = text.lines().map(str::to_owned).collect();
+
         let n = lines.max(1);
-        let start = all.len().saturating_sub(n);
-        Ok(all[start..].to_vec())
+        let grid_rows = DEFAULT_ROWS as usize;
+        let visible_lines: Vec<String> = visible.lines().map(str::to_owned).collect();
+
+        // Fast path: as long as the request fits inside the grid, the
+        // rendered visible screen is the truth — vim / top / clear /
+        // progress bars look right. Note `visible_lines.len()` may be
+        // smaller than `grid_rows` because vt100::Screen::contents()
+        // trims trailing blank rows; that's still the correct answer
+        // (those rows are empty), so we serve fewer lines rather than
+        // falling back to the ring (which keeps OLD content vt100 has
+        // already cleared with \e[2J).
+        if n <= grid_rows {
+            let start = visible_lines.len().saturating_sub(n);
+            return Ok(visible_lines[start..].to_vec());
+        }
+
+        // Long-N fallback: caller wants more than the grid can hold.
+        // Serve from the ring (post-ANSI-strip; older history at the
+        // cost of fidelity).
+        let ring_text = String::from_utf8_lossy(&ring_bytes);
+        let ring_lines: Vec<String> = ring_text.lines().map(str::to_owned).collect();
+        let start = ring_lines.len().saturating_sub(n);
+        Ok(ring_lines[start..].to_vec())
     }
 
     async fn split(&self, _pane: &PaneId, _dir: SplitDir) -> Result<PaneId> {
@@ -385,6 +436,7 @@ impl RingBuffer {
 fn reader_loop(
     mut reader: Box<dyn Read + Send>,
     ring: Arc<Mutex<RingBuffer>>,
+    parser: Arc<Mutex<vt100::Parser>>,
     events_tx: broadcast::Sender<TermEvent>,
     pane: &PaneId,
 ) {
@@ -418,10 +470,15 @@ fn reader_loop(
                         });
                     }
                 }
-                // 2) ANSI-strip into the ring so read_output returns clean
-                //    text. strip-ansi-escapes 0.2 returns Vec<u8> directly
-                //    (no Result), preserving CR/LF/etc. — exactly what we
-                //    want for line splitting downstream.
+                // 2) Feed the vt100 parser so read_output's fast path
+                //    can serve high-fidelity rendered screens. Cheap —
+                //    process() is a state machine over the bytes.
+                if let Ok(mut p) = parser.lock() {
+                    p.process(chunk);
+                }
+                // 3) ANSI-strip into the ring as the long-N fallback.
+                //    strip-ansi-escapes 0.2 returns Vec<u8> directly
+                //    (no Result), preserving CR/LF/etc.
                 let stripped = strip_ansi_escapes::strip(chunk);
                 if let Ok(mut g) = ring.lock() {
                     g.append(&stripped);
@@ -535,6 +592,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pty_progress_bar_via_perl_round_trip() {
+        // Real end-to-end: spawn a shell, send a perl one-liner that
+        // emits raw CR-separated tokens, verify the rendered visible
+        // screen shows only the final token (CR overwrote the others).
+        // This is the "vim/top/progress bar" headline win for the
+        // vt100 upgrade.
+        let backend = PtyBackend::with_shell("/bin/sh");
+        let _ = backend.list_panes().await.expect("seed");
+        let pane = backend.list_panes().await.expect("list")[0].id.clone();
+        backend
+            .send_keys(
+                &pane,
+                "perl -e 'print \"BAR_A\\x0dBAR_B\\x0dBAR_DONE\\n\"'\n",
+            )
+            .await
+            .expect("send_keys");
+        let ok = wait_for(3000, 50, || {
+            let lines = futures::executor::block_on(backend.read_output(&pane, 20))
+                .unwrap_or_default();
+            // Must contain the final token AND must not contain the
+            // earlier ones as standalone lines.
+            let has_done = lines.iter().any(|l| l.contains("BAR_DONE"));
+            let leaked = lines.iter().any(|l| l == "BAR_A" || l == "BAR_B");
+            has_done && !leaked
+        })
+        .await;
+        assert!(
+            ok,
+            "expected only BAR_DONE on rendered screen; got leaked tokens"
+        );
+    }
+
+    #[tokio::test]
     async fn split_creates_sibling_pane() {
         let backend = PtyBackend::with_shell("/bin/sh");
         let _ = backend.list_panes().await.expect("seed");
@@ -561,6 +651,68 @@ mod tests {
         match ev {
             TermEvent::PaneOpened(_) => {}
             other => panic!("expected PaneOpened, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vt100_clear_screen_drops_old_content() {
+        // Real clear-screen sequence: ESC[2J = erase whole display,
+        // ESC[H = move cursor to home. After this, the visible grid
+        // should be entirely blank.
+        let mut p = vt100::Parser::new(DEFAULT_ROWS, DEFAULT_COLS, 0);
+        p.process(b"hello before clear\nsome more text\n");
+        p.process(b"\x1b[2J\x1b[H");
+        let contents = p.screen().contents();
+        let non_blank: Vec<&str> = contents.lines().filter(|l| !l.is_empty()).collect();
+        assert!(
+            non_blank.is_empty(),
+            "expected blank screen after \\e[2J\\e[H, got {:?}",
+            non_blank
+        );
+    }
+
+    #[test]
+    fn vt100_clear_with_intermediate_prompt_drops_old_lines() {
+        // Mimic the real integration byte stream: prompt → cmd echo →
+        // output → clear → new echo → new prompt. If vt100 handles
+        // \e[2J\e[H correctly under this exact pattern, the OLD line
+        // must not appear in screen contents after the clear.
+        let mut p = vt100::Parser::new(DEFAULT_ROWS, DEFAULT_COLS, 0);
+        p.process(b"$ echo OLD; printf '\\e[2J\\e[H'; echo NEW\r\n");
+        p.process(b"OLD\r\n");
+        p.process(b"\x1b[2J\x1b[H");
+        p.process(b"NEW\r\n");
+        p.process(b"$ ");
+        let contents = p.screen().contents();
+        assert!(
+            contents.contains("NEW"),
+            "expected NEW after clear, got {contents:?}"
+        );
+        assert!(
+            !contents.contains("OLD"),
+            "expected OLD to be erased by \\e[2J, but it survived: {contents:?}"
+        );
+    }
+
+    #[test]
+    fn vt100_progress_bar_overwrite_via_carriage_return() {
+        // Carriage return without newline → cursor returns to column 0
+        // without scrolling. Each successive write overwrites the previous
+        // value, so only the *last* version is visible. This is exactly
+        // what a `printf 'X%%\r'` style progress bar relies on, and the
+        // case strip-ansi-escapes gets wrong (it would dump every step).
+        let mut p = vt100::Parser::new(DEFAULT_ROWS, DEFAULT_COLS, 0);
+        p.process(b"10%\r20%\r30%\rfinal\n");
+        let contents = p.screen().contents();
+        assert!(
+            contents.contains("final"),
+            "expected 'final' on rendered screen, got {contents:?}"
+        );
+        for stale in &["10%", "20%", "30%"] {
+            assert!(
+                !contents.contains(stale),
+                "expected '{stale}' to be overwritten, but it survived in {contents:?}"
+            );
         }
     }
 
