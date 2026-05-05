@@ -4512,7 +4512,15 @@ async fn audit_gemini_config(include_cli_checks: bool, timeout: Duration) -> Val
         cli.get("stdout").and_then(|v| v.as_str()).unwrap_or(""),
         cli.get("stderr").and_then(|v| v.as_str()).unwrap_or("")
     );
-    let connected = cli_text.contains("agent-bridge") && cli_text.contains("Connected");
+    // Walk only the agent-bridge lines so a sibling server's verdict can't
+    // leak in. Naive `cli_text.contains("Connected")` flips agent-bridge to
+    // `connected:true` whenever any *other* configured MCP server is
+    // connected — a real false-positive in multi-server setups (filesystem
+    // server, etc.).
+    let connected = cli_text
+        .lines()
+        .filter(|line| line.contains("agent-bridge"))
+        .any(cli_status_indicates_connected);
     json!({
         "configured": configured,
         "config_path": path.display().to_string(),
@@ -4539,7 +4547,7 @@ async fn audit_claude_config(include_cli_checks: bool, timeout: Duration) -> Val
     let status = parse_line_value(stdout, "Status:");
     let connected = status
         .as_deref()
-        .map(|s| s.contains("Connected"))
+        .map(cli_status_indicates_connected)
         .unwrap_or(false);
     let exists = command
         .as_deref()
@@ -4556,6 +4564,25 @@ async fn audit_claude_config(include_cli_checks: bool, timeout: Duration) -> Val
 }
 
 async fn audit_stdio_smoke(command: &str, args: &[String], timeout: Duration) -> Value {
+    // Self-binary short-circuit. The audit runs *inside* a daemon; spawning a
+    // second instance of the same binary contends with us for the state.db
+    // WAL write lock, which (with default 5 s busy_timeout vs 5 s smoke
+    // timeout) reliably manifests as `ok:false, error:"timeout"` even though
+    // the configured command is in fact a working daemon — that's why we're
+    // alive to run this audit. Skip with a benign verdict in this case;
+    // mismatched paths still get a real smoke test.
+    if is_self_binary(command) {
+        return json!({
+            "command": command,
+            "args": args,
+            "ok": true,
+            "skipped": true,
+            "skipped_reason": "configured-binary-matches-current-daemon",
+            "note": "smoke spawn would contend with running daemon for state.db lock; \
+                     the configured binary is already proven by being the daemon executing this audit"
+        });
+    }
+
     let input = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"agent-bridge-audit\",\"version\":\"0\"}}}\n";
     let mut child = match TokioCommand::new(command)
         .args(args)
@@ -4727,6 +4754,34 @@ fn parse_line_value(raw: &str, prefix: &str) -> Option<String> {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
     })
+}
+
+/// Returns true iff `text` indicates an active connection.
+///
+/// Defensive: strips `"Disconnected"` before searching for `"Connected"` so
+/// any future case-insensitive comparison (or output format change that
+/// uses lowercase) cannot produce a false-positive via the substring trap.
+/// With current capital-C output (`Connected` / `Disconnected`) the strip
+/// is a no-op for the disconnected path, but cheap to keep.
+fn cli_status_indicates_connected(text: &str) -> bool {
+    text.replace("Disconnected", "").contains("Connected")
+}
+
+/// True iff `command` resolves (canonicalized) to the same binary as the
+/// process running this audit. Used by `audit_stdio_smoke` to skip the
+/// `agent-bridge mcp` spawn — see comment at the call site for why
+/// spawning a sibling racks up false negatives via state.db lock contention.
+fn is_self_binary(command: &str) -> bool {
+    let Ok(self_path) = std::env::current_exe() else {
+        return false;
+    };
+    let Ok(self_canon) = self_path.canonicalize() else {
+        return false;
+    };
+    let Ok(cfg_canon) = std::path::Path::new(command).canonicalize() else {
+        return false;
+    };
+    self_canon == cfg_canon
 }
 
 fn truncate_for_audit(s: &str) -> String {
@@ -8099,5 +8154,50 @@ mod tests {
         r.content = long;
         let block = format_due_review_block(&[r], now).unwrap();
         assert!(block.contains("…"), "long snippet must be truncated");
+    }
+
+    // ── mcp_config_audit edge cases ───────────────────────────────────────
+
+    #[test]
+    fn cli_status_disconnected_does_not_match_connected() {
+        // The substring trap that produced the original false-positive.
+        assert!(!cli_status_indicates_connected("Disconnected"));
+        assert!(!cli_status_indicates_connected("✘ Disconnected"));
+        assert!(!cli_status_indicates_connected("🔴 agent-bridge - Disconnected"));
+    }
+
+    #[test]
+    fn cli_status_connected_is_recognized() {
+        assert!(cli_status_indicates_connected("Connected"));
+        assert!(cli_status_indicates_connected("✔ Connected"));
+        assert!(cli_status_indicates_connected("Connected (45 tools)"));
+        assert!(cli_status_indicates_connected("🟢 agent-bridge - Connected"));
+    }
+
+    #[test]
+    fn cli_status_handles_blank_and_unknown() {
+        assert!(!cli_status_indicates_connected(""));
+        assert!(!cli_status_indicates_connected("Pending"));
+    }
+
+    #[test]
+    fn gemini_multi_server_attributes_disconnect_to_correct_row() {
+        // Per-line filtering must not bleed a sibling server's verdict
+        // onto agent-bridge.
+        let stdout =
+            "🔴 agent-bridge - Disconnected\n🟢 some-other - Connected (12 tools)";
+        let connected = stdout
+            .lines()
+            .filter(|l| l.contains("agent-bridge"))
+            .any(cli_status_indicates_connected);
+        assert!(!connected);
+
+        let stdout =
+            "🟢 agent-bridge - Connected (45 tools)\n🔴 some-other - Disconnected";
+        let connected = stdout
+            .lines()
+            .filter(|l| l.contains("agent-bridge"))
+            .any(cli_status_indicates_connected);
+        assert!(connected);
     }
 }
