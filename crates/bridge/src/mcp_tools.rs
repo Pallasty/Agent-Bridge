@@ -7331,92 +7331,171 @@ impl McpTool for CodebaseSearchTool {
 //                                  registry
 // ===========================================================================
 
+/// Per-tool surface-area tier for `AGENT_BRIDGE_TOOL_PROFILE` filtering.
+///
+/// Claude Code (and similar MCP clients) cap the live tool list at ~64
+/// across *all* configured MCP servers. With agent-bridge alone registering
+/// 69 tools today, that cap was getting hit and clients silently dropped
+/// 5–20 tools at startup. Tiers let us keep the most-used 40-ish in the
+/// default registration and gate the rest behind an env flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tier {
+    /// Always registered. The smallest set that lets a typical interactive
+    /// Claude session work end-to-end (memory navigation, terminal control,
+    /// agent_spawn, plan, shell_exec, session lifecycle bootstrap/finalize).
+    Essential,
+    /// Default-on. Adds hook-friendly + multi-agent + maintenance ops:
+    /// memory consolidation, session curation, agent inbox, codebase index,
+    /// terminal_read_blocks (Warp), notify.
+    Standard,
+    /// Default-off. Specialty surfaces: browser_*, warp_*, oz_*, MCP
+    /// introspection (mcp_recent_errors / mcp_call_stats / mcp_config_audit),
+    /// memory admin (export/import/consolidate/auto_curate/graph_export),
+    /// osc_parse, hook_status, context_budget. Enable explicitly with
+    /// `AGENT_BRIDGE_TOOL_PROFILE=all` (or pick what you need via finer
+    /// gates in the future).
+    Niche,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ToolProfile {
+    Essential,
+    Standard,
+    All,
+}
+
+impl ToolProfile {
+    pub fn from_env() -> Self {
+        match std::env::var("AGENT_BRIDGE_TOOL_PROFILE")
+            .ok()
+            .map(|s| s.trim().to_lowercase())
+            .as_deref()
+        {
+            Some("essential") | Some("minimal") => Self::Essential,
+            Some("all") | Some("full") => Self::All,
+            _ => Self::Standard,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Essential => "essential",
+            Self::Standard => "standard",
+            Self::All => "all",
+        }
+    }
+
+    pub fn includes(self, tier: Tier) -> bool {
+        match (self, tier) {
+            (Self::All, _) => true,
+            (Self::Standard, Tier::Niche) => false,
+            (Self::Standard, _) => true,
+            (Self::Essential, Tier::Essential) => true,
+            (Self::Essential, _) => false,
+        }
+    }
+}
+
+fn reg_if(reg: &mut ToolRegistry, profile: ToolProfile, tier: Tier, tool: Arc<dyn McpTool>) {
+    if profile.includes(tier) {
+        reg.register(tool);
+    }
+}
+
 pub fn build_registry(hub: Hub) -> ToolRegistry {
+    let profile = ToolProfile::from_env();
     let mut reg = ToolRegistry::new();
-    // Notification surface
-    reg.register(Arc::new(NotifyTool::new(hub.clone())));
-    reg.register(Arc::new(NotificationsRecentTool::new(hub.clone())));
-    reg.register(Arc::new(OscParseTool::new(hub.clone())));
-    // Terminal surface
-    reg.register(Arc::new(TerminalListTool::new(hub.clone())));
-    reg.register(Arc::new(TerminalSendKeysTool::new(hub.clone())));
-    reg.register(Arc::new(TerminalReadOutputTool::new(hub.clone())));
-    reg.register(Arc::new(TerminalReadBlocksTool::new(hub.clone())));
-    reg.register(Arc::new(TerminalSplitTool::new(hub.clone())));
-    reg.register(Arc::new(TerminalResizeTool::new(hub.clone())));
-    reg.register(Arc::new(ShellExecTool::new(hub.clone())));
-    // Browser surface
-    reg.register(Arc::new(BrowserNavigateTool::new(hub.clone())));
-    reg.register(Arc::new(BrowserEvalTool::new(hub.clone())));
-    reg.register(Arc::new(BrowserSnapshotTool::new(hub.clone())));
-    reg.register(Arc::new(BrowserClickTool::new(hub.clone())));
-    reg.register(Arc::new(BrowserScreenshotTool::new(hub.clone())));
-    reg.register(Arc::new(BrowserExtractTextTool::new(hub.clone())));
-    reg.register(Arc::new(BrowserFillFormTool::new(hub.clone())));
-    // Agent + worktree surface
-    reg.register(Arc::new(AgentSpawnTool::new(hub.clone())));
-    reg.register(Arc::new(AgentKillTool::new(hub.clone())));
-    reg.register(Arc::new(AgentSessionListTool::new(hub.clone())));
-    reg.register(Arc::new(AgentSessionGetTool::new(hub.clone())));
-    reg.register(Arc::new(AgentSessionWaitTool::new(hub.clone())));
-    reg.register(Arc::new(WorktreeListTool::new(hub.clone())));
-    reg.register(Arc::new(WorktreeCreateTool::new(hub.clone())));
-    reg.register(Arc::new(WorktreeRemoveTool::new(hub.clone())));
-    // v0.4: agent self-memory
-    reg.register(Arc::new(MemorySaveTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryGetTool::new(hub.clone())));
-    reg.register(Arc::new(MemorySearchTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryListTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryDeleteTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryCompactTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryReindexTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryExportTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryImportTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryConsolidateTool::new(hub.clone())));
-    // v0.6: graph edges
-    reg.register(Arc::new(MemoryLinkTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryNeighborsTool::new(hub.clone())));
-    // Cursor-friendly manual equivalents for Claude hook lifecycle.
-    reg.register(Arc::new(SessionBootstrapTool::new(hub.clone())));
-    reg.register(Arc::new(SessionFinalizeTool::new(hub.clone())));
-    // v0.9: Cursor capability alignment
-    reg.register(Arc::new(SessionCurateTool::new(hub.clone())));
-    // W3: structured handoff + lifecycle dispatcher (DESIGN-warp-first-agent-shell)
-    reg.register(Arc::new(SessionHandoffBriefTool::new(hub.clone())));
-    reg.register(Arc::new(SessionLifecycleStepTool::new(hub.clone())));
-    reg.register(Arc::new(HookStatusTool::new(hub.clone())));
-    reg.register(Arc::new(McpRecentErrorsTool::new(hub.clone())));
-    reg.register(Arc::new(McpCallStatsTool::new(hub.clone())));
-    reg.register(Arc::new(ProjectDetectTool::new(hub.clone())));
-    reg.register(Arc::new(ChangesDigestTool::new(hub.clone())));
-    reg.register(Arc::new(CapabilitiesTool::new(hub.clone())));
-    reg.register(Arc::new(McpConfigAuditTool::new()));
-    reg.register(Arc::new(MemoryStatsTool::new(hub.clone())));
-    reg.register(Arc::new(MemorySuggestTool::new(hub.clone())));
-    // v0.10: warp-oz cloud-run lifecycle tools
-    reg.register(Arc::new(OzRunGetTool::new(hub.clone())));
-    reg.register(Arc::new(OzRunListTool::new(hub.clone())));
-    reg.register(Arc::new(OzRunCancelTool::new(hub.clone())));
-    // W4: Warp URI scheme (DESIGN-warp-first-agent-shell)
-    reg.register(Arc::new(WarpOpenTabTool::new(hub.clone())));
-    reg.register(Arc::new(WarpOpenWindowTool::new(hub.clone())));
-    reg.register(Arc::new(WarpOpenSettingsTool::new(hub.clone())));
-    reg.register(Arc::new(WarpLaunchWorkflowTool::new(hub.clone())));
-    reg.register(Arc::new(WarpStatusTool::new(hub.clone())));
-    // v0.11: memory graph visualisation
-    reg.register(Arc::new(MemoryGraphExportTool::new(hub.clone())));
-    // v0.12: automated memory curation
-    // W5: structured plans + context budget (DESIGN-warp-first-agent-shell)
-    reg.register(Arc::new(PlanSaveTool::new(hub.clone())));
-    reg.register(Arc::new(PlanLoadTool::new(hub.clone())));
-    reg.register(Arc::new(PlanUpdateTool::new(hub.clone())));
-    reg.register(Arc::new(ContextBudgetTool::new()));
-    // W6: browser extract/fill + multi-session inbox (DESIGN-warp-first-agent-shell)
-    reg.register(Arc::new(AgentMessageTool::new(hub.clone())));
-    reg.register(Arc::new(AgentInboxTool::new(hub.clone())));
-    reg.register(Arc::new(MemoryAutoCurateTool::new(hub.clone())));
-    reg.register(Arc::new(CodebaseIndexTool::new(hub.clone())));
-    reg.register(Arc::new(CodebaseSearchTool::new(hub)));
+
+    // ── ESSENTIAL ──────────────────────────────────────────────────────
+    // Memory: query + write + delete + graph navigation.
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemorySearchTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemorySaveTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryGetTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryListTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryDeleteTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryNeighborsTool::new(hub.clone())));
+    // Terminal: list + send + read + split + resize.
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalListTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalSendKeysTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalReadOutputTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalSplitTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalResizeTool::new(hub.clone())));
+    // Agent runtime: spawn + observe sessions.
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(AgentSpawnTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(AgentSessionGetTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(AgentSessionWaitTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(AgentSessionListTool::new(hub.clone())));
+    // Shell + lifecycle bootstrap + ops introspection that callers ask first.
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(ShellExecTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(SessionBootstrapTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(SessionFinalizeTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CapabilitiesTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(ProjectDetectTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(ChangesDigestTool::new(hub.clone())));
+    // Plans + worktrees + codebase search.
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PlanSaveTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PlanLoadTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PlanUpdateTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(WorktreeCreateTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseSearchTool::new(hub.clone())));
+
+    // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryStatsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySuggestTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentKillTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentMessageTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentInboxTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(WorktreeListTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(WorktreeRemoveTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseIndexTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(TerminalReadBlocksTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotifyTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotificationsRecentTool::new(hub.clone())));
+
+    // ── NICHE (opt-in via AGENT_BRIDGE_TOOL_PROFILE=all) ───────────────
+    // Browser automation surface.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserNavigateTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserEvalTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserSnapshotTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserClickTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserScreenshotTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserExtractTextTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserFillFormTool::new(hub.clone())));
+    // Warp URL-scheme + status.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenSettingsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpLaunchWorkflowTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpStatusTool::new(hub.clone())));
+    // Warp-Oz cloud runs.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(OzRunGetTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(OzRunListTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(OzRunCancelTool::new(hub.clone())));
+    // Ops introspection / debugging.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(OscParseTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(McpRecentErrorsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(McpCallStatsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(McpConfigAuditTool::new()));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(ContextBudgetTool::new()));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(HookStatusTool::new(hub.clone())));
+    // Memory admin / visualisation.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryExportTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryImportTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryConsolidateTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryAutoCurateTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryGraphExportTool::new(hub)));
+
+    tracing::info!(
+        profile = profile.label(),
+        tools = reg.list().len(),
+        "MCP tool registry built (set AGENT_BRIDGE_TOOL_PROFILE=essential|standard|all)"
+    );
     reg
 }
 
@@ -8261,5 +8340,28 @@ mod tests {
             .filter(|l| l.contains("agent-bridge"))
             .any(cli_status_indicates_connected);
         assert!(connected);
+    }
+
+    // ── tool profile tier filter ──────────────────────────────────────────
+
+    #[test]
+    fn tool_profile_includes_correct_tiers() {
+        // Essential profile: only essential tools.
+        let p = ToolProfile::Essential;
+        assert!(p.includes(Tier::Essential));
+        assert!(!p.includes(Tier::Standard));
+        assert!(!p.includes(Tier::Niche));
+
+        // Standard profile: essential + standard, not niche.
+        let p = ToolProfile::Standard;
+        assert!(p.includes(Tier::Essential));
+        assert!(p.includes(Tier::Standard));
+        assert!(!p.includes(Tier::Niche));
+
+        // All profile: everything.
+        let p = ToolProfile::All;
+        assert!(p.includes(Tier::Essential));
+        assert!(p.includes(Tier::Standard));
+        assert!(p.includes(Tier::Niche));
     }
 }
