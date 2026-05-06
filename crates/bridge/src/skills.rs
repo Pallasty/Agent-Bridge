@@ -68,6 +68,7 @@ struct Frontmatter {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Info reserved for future heuristics that flag without warning.
 enum LintSev {
     Info,
     Warn,
