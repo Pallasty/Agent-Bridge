@@ -279,10 +279,12 @@ tl = parse_inner_json(by_id[21]["result"], "terminal_list")
 # capabilities already fetched above; re-parse for warp_ipc_socket_ready
 # warp_ipc_socket_ready is nested under terminal.capabilities in the response
 warp_ipc_ready = caps.get("terminal", {}).get("capabilities", {}).get("warp_ipc_socket_ready", False)
+ipc_sessions = []
 if warp_ipc_ready:
     if not isinstance(tl, list):
         print(f"FAIL: terminal_list with live IPC should return a list: {tl!r}", file=sys.stderr)
         sys.exit(1)
+    ipc_sessions = tl
     print(f"OK: terminal_list via Warp IPC — {len(tl)} session(s) active")
 else:
     import os
@@ -293,6 +295,111 @@ else:
     print(f"NOTE: Warp IPC socket not ready ({sock_path}); terminal_list returned: {tl!r}")
     print("      Build Warp fork and launch it to verify full end-to-end path.")
 
+# Store session list for second-pass read_blocks test
+import json as _json
+with open(os.path.join(os.environ["TMPDIR_RUN"], "ipc_sessions.json"), "w") as _f:
+    _json.dump(ipc_sessions, _f)
+
 print("")
 print("verify_warp_integration.sh: all checks passed")
 PY
+
+# ── Second-pass: terminal_read_blocks (only when Warp IPC has live sessions) ───
+python3 <<'PY2'
+import json, os, sys, subprocess, tempfile
+
+out_dir = os.environ["TMPDIR_RUN"]
+root    = os.environ["ROOT"]
+ab_bin  = os.environ.get("AGENT_BRIDGE_BIN") or (
+    f"{root}/target/release/agent-bridge" if os.path.exists(f"{root}/target/release/agent-bridge")
+    else f"{root}/target/debug/agent-bridge"
+)
+db      = os.environ["AGENT_BRIDGE_DB"]
+
+sessions = json.load(open(os.path.join(out_dir, "ipc_sessions.json")))
+if not sessions:
+    print("SKIP: terminal_read_blocks — no live Warp IPC sessions")
+    sys.exit(0)
+
+pane_id = sessions[0].get("id") or sessions[0].get("session_id", "")
+if not pane_id:
+    print(f"SKIP: terminal_read_blocks — could not extract pane id from {sessions[0]!r}")
+    sys.exit(0)
+
+msgs = [
+    {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {"name": "verify-read-blocks", "version": "1"},
+    }},
+    {"jsonrpc": "2.0", "method": "notifications/initialized"},
+    {"jsonrpc": "2.0", "id": 30, "method": "tools/call", "params": {
+        "name": "terminal_read_blocks",
+        "arguments": {"pane": pane_id, "limit": 5},
+    }},
+]
+
+inp = os.path.join(out_dir, "rb_in.jsonl")
+out = os.path.join(out_dir, "rb_out.jsonl")
+with open(inp, "w") as f:
+    for m in msgs:
+        f.write(json.dumps(m) + "\n")
+
+subprocess.run(
+    [ab_bin, "mcp"],
+    stdin=open(inp), stdout=open(out, "w"),
+    stderr=subprocess.DEVNULL,
+    env={**os.environ, "AGENT_BRIDGE_DB": db},
+    timeout=30,
+)
+
+by_id = {}
+for line in open(out):
+    line = line.strip()
+    if not line: continue
+    try:
+        d = json.loads(line)
+    except Exception:
+        continue
+    if d.get("id") is not None:
+        by_id[d["id"]] = d
+
+resp = by_id.get(30)
+if resp is None:
+    print("FAIL: terminal_read_blocks — no response received", file=sys.stderr)
+    sys.exit(1)
+if resp.get("error"):
+    print(f"FAIL: terminal_read_blocks MCP error: {resp['error']}", file=sys.stderr)
+    sys.exit(1)
+
+result = resp.get("result", {})
+content = result.get("content", [{}])
+text = content[0].get("text", "{}") if content else "{}"
+try:
+    data = json.loads(text)
+except Exception:
+    print(f"FAIL: terminal_read_blocks — non-JSON result: {text[:200]!r}", file=sys.stderr)
+    sys.exit(1)
+
+if "error" in data:
+    print(f"FAIL: terminal_read_blocks tool error: {data['error']!r}", file=sys.stderr)
+    sys.exit(1)
+
+blocks = data.get("blocks")
+if not isinstance(blocks, list):
+    print(f"FAIL: terminal_read_blocks — expected 'blocks' list, got: {data!r}", file=sys.stderr)
+    sys.exit(1)
+
+# Validate timestamp fields when blocks are present
+for b in blocks:
+    for ts_key in ("start_ms", "end_ms"):
+        if ts_key in b and not isinstance(b[ts_key], int):
+            print(f"FAIL: terminal_read_blocks — {ts_key} must be int, got {b[ts_key]!r}", file=sys.stderr)
+            sys.exit(1)
+    if "duration_ms" in b and not isinstance(b["duration_ms"], int):
+        print(f"FAIL: terminal_read_blocks — duration_ms must be int, got {b['duration_ms']!r}", file=sys.stderr)
+        sys.exit(1)
+
+ts_present = sum(1 for b in blocks if "start_ms" in b)
+print(f"OK: terminal_read_blocks — {len(blocks)} block(s), {ts_present} with timestamps")
+PY2
