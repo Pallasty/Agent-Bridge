@@ -1,40 +1,26 @@
-//! Auggie agent runtime.
+//! `opencode` / `kilo` CLI family runtime.
 //!
-//! Wraps the [`auggie`](https://docs.augmentcode.com/cli) CLI (npm
-//! package `@augmentcode/auggie`) to drive Augment Code from
-//! agent-bridge. Architecturally identical to
-//! [`ClaudeCodeRuntime`](crate::claude_code::ClaudeCodeRuntime) — same
-//! store-finalise / PID-tracking / SIGTERM model — but the subprocess
-//! command line is `auggie --print --quiet "<prompt>"` instead of
-//! `claude -p "<prompt>"`.
+//! `kilo` is a fork of `opencode`, so the two share an identical
+//! non-interactive `run` shape:
 //!
-//! ## What `auggie --print` does
+//! ```text
+//! <bin> run [--model PROVIDER/MODEL] [--dangerously-skip-permissions] "<prompt>"
+//! ```
 //!
-//! - runs a single non-interactive turn against the user's existing
-//!   Auggie session (auth lives in `~/.augment` or the
-//!   `AUGMENT_SESSION_AUTH` env var);
-//! - streams agent output to stdout; `--quiet` suppresses the
-//!   thinking / tool-call chrome so only the final assistant text
-//!   reaches us;
-//! - exits with the agent's terminal status.
+//! We model both as a single struct parameterised by binary + runtime id +
+//! optional default model. Two convenience constructors,
+//! [`OpenCodeFamilyRuntime::opencode`] and [`OpenCodeFamilyRuntime::kilo`],
+//! pick up sensible defaults from env (`AGENT_BRIDGE_OPENCODE_BIN`,
+//! `AGENT_BRIDGE_OPENCODE_MODEL`, `AGENT_BRIDGE_KILO_BIN`,
+//! `AGENT_BRIDGE_KILO_MODEL`).
 //!
-//! Hence the local child is the agent — long-lived for big prompts,
-//! short-lived for trivial ones — and we capture stdout/stderr the
-//! same way as Claude Code.
+//! Per-call model selection comes from [`SpawnConfig::model`]. If neither
+//! the call nor the default is set, the binary picks its own default
+//! (which today is `anthropic/claude-sonnet` for kilo and a free-tier model
+//! for opencode — both fine for smoke testing).
 //!
-//! ## Why the CLI rather than the HTTP API?
-//!
-//! - **Auth stays in `auggie`** — agent-bridge never sees the
-//!   session token.
-//! - **No new dependencies** — reuses the same tokio child-process
-//!   plumbing as `ClaudeCodeRuntime` and `OzAgentRuntime`.
-//! - **Symmetry** — `claude`, `oz`, and `auggie` are all first-party
-//!   CLIs; we already require users to install one.
-//!
-//! Override the binary path with `AGENT_BRIDGE_AUGGIE_BIN` (default:
-//! `auggie`). Pass per-spawn environment overrides via
-//! `SpawnConfig.env` — notably `AUGMENT_SESSION_AUTH` for
-//! headless/CI auth.
+//! Like [`crate::ClaudeCodeRuntime`] this is a one-shot wrapper: spawn,
+//! capture stdout+stderr to the store, surface PID for kill.
 
 use ab_core::{Error, Result, SessionId};
 use ab_store::{StateStore, StoredSession};
@@ -49,40 +35,53 @@ use tracing::{info, warn};
 
 use crate::{AgentCapabilities, AgentRuntime, AgentSession, SpawnConfig};
 
-/// Default Auggie CLI binary name on `$PATH`.
-pub const DEFAULT_AUGGIE_BIN: &str = "auggie";
-
 #[derive(Clone)]
-pub struct AuggieRuntime {
+pub struct OpenCodeFamilyRuntime {
     binary: String,
+    runtime_id: &'static str,
+    default_model: Option<String>,
     store: Option<Arc<dyn StateStore>>,
-    /// SessionId → PID of the live `auggie` child.
     children: Arc<DashMap<String, u32>>,
 }
 
-impl Default for AuggieRuntime {
-    fn default() -> Self {
+impl OpenCodeFamilyRuntime {
+    /// Build the `opencode` runtime, picking up
+    /// `AGENT_BRIDGE_OPENCODE_BIN` / `AGENT_BRIDGE_OPENCODE_MODEL` if set.
+    pub fn opencode() -> Self {
         Self {
-            binary: DEFAULT_AUGGIE_BIN.into(),
+            binary: std::env::var("AGENT_BRIDGE_OPENCODE_BIN")
+                .unwrap_or_else(|_| "opencode".into()),
+            runtime_id: "opencode",
+            default_model: env_nonempty("AGENT_BRIDGE_OPENCODE_MODEL"),
             store: None,
             children: Arc::new(DashMap::new()),
         }
     }
-}
 
-impl AuggieRuntime {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn with_binary(binary: impl Into<String>) -> Self {
+    /// Build the `kilo` runtime, picking up
+    /// `AGENT_BRIDGE_KILO_BIN` / `AGENT_BRIDGE_KILO_MODEL` if set.
+    pub fn kilo() -> Self {
         Self {
-            binary: binary.into(),
+            binary: std::env::var("AGENT_BRIDGE_KILO_BIN").unwrap_or_else(|_| "kilo".into()),
+            runtime_id: "kilo",
+            default_model: env_nonempty("AGENT_BRIDGE_KILO_MODEL"),
             store: None,
             children: Arc::new(DashMap::new()),
         }
     }
+
     pub fn with_store(mut self, store: Arc<dyn StateStore>) -> Self {
         self.store = Some(store);
+        self
+    }
+
+    pub fn with_binary(mut self, binary: impl Into<String>) -> Self {
+        self.binary = binary.into();
+        self
+    }
+
+    pub fn with_default_model(mut self, model: impl Into<String>) -> Self {
+        self.default_model = Some(model.into());
         self
     }
 
@@ -90,6 +89,13 @@ impl AuggieRuntime {
     pub fn live_count(&self) -> usize {
         self.children.len()
     }
+}
+
+fn env_nonempty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 fn now_secs() -> i64 {
@@ -100,18 +106,20 @@ fn now_secs() -> i64 {
 }
 
 #[async_trait]
-impl AgentRuntime for AuggieRuntime {
+impl AgentRuntime for OpenCodeFamilyRuntime {
     fn id(&self) -> &str {
-        "auggie"
+        self.runtime_id
     }
 
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
         let prompt = cfg.initial_prompt.clone().unwrap_or_default();
         if prompt.is_empty() {
-            return Err(Error::InvalidArgument(
-                "auggie: 'initial_prompt' is required for one-shot spawn".into(),
-            ));
+            return Err(Error::InvalidArgument(format!(
+                "{}: 'initial_prompt' is required for one-shot spawn",
+                self.runtime_id
+            )));
         }
+        let model = cfg.model.clone().or_else(|| self.default_model.clone());
 
         let session_id = SessionId::new();
         let cwd = cfg.cwd.clone();
@@ -119,7 +127,7 @@ impl AgentRuntime for AuggieRuntime {
         if let Some(store) = &self.store {
             let initial = StoredSession {
                 id: session_id.clone(),
-                runtime_id: self.id().into(),
+                runtime_id: self.runtime_id.into(),
                 cwd: cwd.clone(),
                 started_at: now_secs(),
                 ended_at: None,
@@ -136,10 +144,14 @@ impl AgentRuntime for AuggieRuntime {
         }
 
         let mut cmd = Command::new(&self.binary);
-        cmd.arg("--print")
-            .arg("--quiet")
-            .arg(&prompt)
-            .current_dir(&cwd)
+        cmd.arg("run").arg("--dangerously-skip-permissions");
+        if let Some(m) = &model {
+            cmd.arg("--model").arg(m);
+        }
+        // The prompt comes last as a positional argument so any preceding
+        // flag values (model strings, etc.) can't shadow it.
+        cmd.arg(&prompt);
+        cmd.current_dir(&cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -147,13 +159,21 @@ impl AgentRuntime for AuggieRuntime {
 
         let child = cmd
             .spawn()
-            .map_err(|e| Error::Backend(format!("spawn auggie: {e}")))?;
+            .map_err(|e| Error::Backend(format!("spawn {}: {e}", self.runtime_id)))?;
         let pid = child.id().unwrap_or(0);
         if pid != 0 {
             self.children.insert(session_id.as_str().to_string(), pid);
         }
-        info!(session = %session_id, pid, cwd = %cwd, "auggie session started");
+        info!(
+            session = %session_id,
+            pid,
+            runtime = %self.runtime_id,
+            model = ?model,
+            cwd = %cwd,
+            "session started"
+        );
 
+        let runtime_id = self.runtime_id;
         let sid_bg = session_id.clone();
         let store_bg = self.store.clone();
         let children_bg = self.children.clone();
@@ -167,10 +187,11 @@ impl AgentRuntime for AuggieRuntime {
                     let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
                     info!(
                         session = %sid_bg,
+                        runtime = %runtime_id,
                         exit = ?o.status.code(),
                         stdout_preview = %truncate(&stdout, 200),
                         stderr_preview = %truncate(&stderr, 200),
-                        "auggie session finished"
+                        "session finished"
                     );
                     let exit_code = o.status.code().or_else(|| {
                         #[cfg(unix)]
@@ -196,7 +217,12 @@ impl AgentRuntime for AuggieRuntime {
                     }
                 }
                 Err(e) => {
-                    warn!(session = %sid_bg, error = %e, "auggie wait failed");
+                    warn!(
+                        session = %sid_bg,
+                        runtime = %runtime_id,
+                        error = %e,
+                        "wait failed"
+                    );
                     if let Some(store) = store_bg {
                         let _ = store
                             .finalise_session(
@@ -214,17 +240,17 @@ impl AgentRuntime for AuggieRuntime {
 
         Ok(AgentSession {
             id: session_id,
-            runtime_id: self.id().into(),
+            runtime_id: self.runtime_id.into(),
             cwd,
         })
     }
 
     async fn send_input(&self, _session: &SessionId, _text: &str) -> Result<()> {
-        Err(Error::InvalidArgument(
-            "auggie: send_input requires PTY mode (P2). \
-             Use spawn() with initial_prompt for one-shot invocations."
-                .into(),
-        ))
+        Err(Error::InvalidArgument(format!(
+            "{}: send_input requires interactive (PTY) mode, not yet supported. \
+             Use spawn() with initial_prompt for one-shot invocations.",
+            self.runtime_id
+        )))
     }
 
     async fn kill(&self, session: &SessionId) -> Result<()> {
@@ -245,7 +271,12 @@ impl AgentRuntime for AuggieRuntime {
         if !status.success() {
             return Err(Error::Backend(format!("/bin/kill exited with {status:?}")));
         }
-        info!(session = %session, pid, "SIGTERM sent");
+        info!(
+            session = %session,
+            pid,
+            runtime = %self.runtime_id,
+            "SIGTERM sent"
+        );
         Ok(())
     }
 
@@ -255,13 +286,9 @@ impl AgentRuntime for AuggieRuntime {
 
     async fn capabilities(&self) -> AgentCapabilities {
         AgentCapabilities {
-            // Auggie reads MCP servers from ~/.augment/settings.json.
             supports_mcp: true,
-            // No multi-tenant/team scoping in the CLI today.
             supports_teams: false,
-            // Augment exposes extended thinking via the underlying
-            // model; the CLI passes through whatever the account allows.
-            supports_thinking: true,
+            supports_thinking: false,
         }
     }
 }
@@ -283,64 +310,5 @@ fn truncate(s: &str, max: usize) -> String {
             .collect::<String>()
             .replace('\n', " ⏎ ");
         format!("{head}…")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn id_is_auggie() {
-        assert_eq!(AuggieRuntime::new().id(), "auggie");
-    }
-
-    #[test]
-    fn with_binary_overrides_default() {
-        let rt = AuggieRuntime::with_binary("/opt/auggie/bin/auggie");
-        assert_eq!(rt.binary, "/opt/auggie/bin/auggie");
-        assert_eq!(rt.live_count(), 0);
-    }
-
-    #[tokio::test]
-    async fn spawn_rejects_empty_prompt() {
-        let rt = AuggieRuntime::new();
-        let err = rt
-            .spawn(SpawnConfig {
-                cwd: "/tmp".into(),
-                env: HashMap::new(),
-                initial_prompt: None,
-                model: None,
-            })
-            .await
-            .expect_err("empty prompt must fail");
-        assert!(matches!(err, Error::InvalidArgument(_)));
-    }
-
-    #[tokio::test]
-    async fn send_input_is_rejected() {
-        let rt = AuggieRuntime::new();
-        let sid = SessionId::new();
-        let err = rt
-            .send_input(&sid, "hello")
-            .await
-            .expect_err("send_input must fail in one-shot mode");
-        assert!(matches!(err, Error::InvalidArgument(_)));
-    }
-
-    #[tokio::test]
-    async fn kill_unknown_session_returns_not_found() {
-        let rt = AuggieRuntime::new();
-        let sid = SessionId::new();
-        let err = rt.kill(&sid).await.expect_err("unknown session");
-        assert!(matches!(err, Error::NotFound(_)));
-    }
-
-    #[tokio::test]
-    async fn capabilities_advertise_mcp_and_thinking() {
-        let caps = AuggieRuntime::new().capabilities().await;
-        assert!(caps.supports_mcp);
-        assert!(caps.supports_thinking);
-        assert!(!caps.supports_teams);
     }
 }

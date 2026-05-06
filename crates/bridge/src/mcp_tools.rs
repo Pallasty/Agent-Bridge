@@ -1382,16 +1382,30 @@ impl McpTool for AgentSpawnTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Spawn a sibling AI agent (today: Claude Code one-shot mode). \
-                 Pass `prompt` and `cwd` (typically a git worktree path); the agent \
-                 runs to completion in the background. Returns the new session id."
+            description: "Spawn a sibling AI agent (one-shot mode). Pass `prompt` and \
+                 `cwd` (typically a git worktree path); the agent runs to completion in \
+                 the background. Returns the new session id.\n\n\
+                 Optional `backend` selects the runtime: `claude-code` (default), \
+                 `opencode`, `kilo`, `auggie`, or `warp-oz`. Pair with `model` to pin a \
+                 specific model (`opencode/gpt-5-nano`, `kilo/~anthropic/claude-haiku-latest`, \
+                 etc.). Honored by opencode/kilo today; ignored by claude-code (no \
+                 model flag in `-p` mode)."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "cwd":    { "type": "string", "description": "Working directory." },
-                    "prompt": { "type": "string", "description": "Initial prompt." },
-                    "env":    { "type": "object", "additionalProperties": { "type": "string" } }
+                    "cwd":     { "type": "string", "description": "Working directory." },
+                    "prompt":  { "type": "string", "description": "Initial prompt." },
+                    "env":     { "type": "object", "additionalProperties": { "type": "string" } },
+                    "backend": {
+                        "type": "string",
+                        "description": "Runtime id to dispatch to. Omit to use the daemon's default (AGENT_BRIDGE_AGENT_RUNTIME).",
+                        "enum": ["claude-code", "opencode", "kilo", "auggie", "warp-oz", "oz"]
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Provider/model string honored by opencode/kilo (e.g. 'opencode/gpt-5-nano')."
+                    }
                 },
                 "required": ["cwd", "prompt"]
             }),
@@ -1401,9 +1415,13 @@ impl McpTool for AgentSpawnTool {
         if let Err(e) = self.hub.security.check(Cap::AgentSpawn) {
             return Ok(ToolResult::error(e));
         }
-        let agent = match &self.hub.agent {
-            Some(a) => a.clone(),
-            None => return Ok(ToolResult::error("no agent runtime configured")),
+        let backend_arg = args
+            .get("backend")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let agent = match resolve_agent_backend(&self.hub, backend_arg.as_deref()) {
+            Ok(a) => a,
+            Err(e) => return Ok(ToolResult::error(e)),
         };
         let cwd = match args.get("cwd").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
@@ -1423,10 +1441,15 @@ impl McpTool for AgentSpawnTool {
             })
             .unwrap_or_default();
 
+        let model = args
+            .get("model")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let cfg = SpawnConfig {
             cwd,
             env,
             initial_prompt: prompt,
+            model,
         };
         match agent.spawn(cfg).await {
             Ok(s) => Ok(ToolResult::json_text(
@@ -1434,6 +1457,44 @@ impl McpTool for AgentSpawnTool {
             )),
             Err(e) => Ok(ToolResult::error(format!("agent: {e}"))),
         }
+    }
+}
+
+/// Look up the agent runtime to use for a spawn call.
+///
+/// - If `backend` is `Some`, fetch from the registry. Unknown ids return a
+///   helpful error listing what's available.
+/// - If `backend` is `None`, fall back to the daemon's default (`hub.agent`).
+fn resolve_agent_backend(
+    hub: &Hub,
+    backend: Option<&str>,
+) -> std::result::Result<Arc<dyn ab_agent::AgentRuntime>, String> {
+    match backend {
+        Some(id) => {
+            let id = id.trim();
+            // `oz` and `warp-oz` are aliases for the same runtime; normalize
+            // here so callers can use either spelling.
+            let canonical = match id {
+                "oz" => "warp-oz",
+                other => other,
+            };
+            hub.agents
+                .get(canonical)
+                .cloned()
+                .ok_or_else(|| {
+                    let mut available: Vec<&str> =
+                        hub.agents.keys().map(|s| s.as_str()).collect();
+                    available.sort();
+                    format!(
+                        "unknown backend '{id}'; available: [{}]",
+                        available.join(", ")
+                    )
+                })
+        }
+        None => hub
+            .agent
+            .clone()
+            .ok_or_else(|| "no default agent runtime configured".to_string()),
     }
 }
 

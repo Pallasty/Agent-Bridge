@@ -1,5 +1,6 @@
 use ab_agent::{
-    AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, GitWorktreeManager, OzAgentRuntime,
+    AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, GitWorktreeManager, OpenCodeFamilyRuntime,
+    OzAgentRuntime,
 };
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
@@ -283,12 +284,23 @@ async fn build_hub() -> Result<Hub> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
     let worktree = Arc::new(GitWorktreeManager::new(repo));
 
+    // Always register the opencode-family runtimes so `agent_spawn` can fan
+    // out to them when the caller passes `backend: "opencode" | "kilo"`.
+    // The `binary` field on each is just the CLI name; if it's not on PATH,
+    // spawn() returns a clear error at call time rather than at startup.
+    let opencode: Arc<dyn AgentRuntime> =
+        Arc::new(OpenCodeFamilyRuntime::opencode().with_store(store.clone()));
+    let kilo: Arc<dyn AgentRuntime> =
+        Arc::new(OpenCodeFamilyRuntime::kilo().with_store(store.clone()));
+
     Ok(Hub::builder()
         .notifier(notifier)
         .store(store)
         .terminal(terminal)
         .browser(browser)
         .agent(agent)
+        .register_agent(opencode)
+        .register_agent(kilo)
         .worktree(worktree)
         .build())
 }

@@ -627,6 +627,7 @@ mod tests {
             cwd: "/tmp".into(),
             env: HashMap::new(),
             initial_prompt: None,
+            model: None,
         };
         let err = runtime
             .spawn(cfg)

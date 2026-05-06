@@ -17,11 +17,13 @@ use std::collections::HashMap;
 
 pub mod auggie;
 pub mod claude_code;
+pub mod opencode_family;
 pub mod oz;
 pub mod worktree;
 
 pub use auggie::AuggieRuntime;
 pub use claude_code::ClaudeCodeRuntime;
+pub use opencode_family::OpenCodeFamilyRuntime;
 pub use oz::OzAgentRuntime;
 pub use worktree::{GitWorktreeManager, Worktree};
 
@@ -32,6 +34,12 @@ pub struct SpawnConfig {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub initial_prompt: Option<String>,
+    /// Optional model override, in the runtime's expected format
+    /// (e.g. `opencode/gpt-5-nano`, `kilo/~anthropic/claude-haiku-latest`).
+    /// Honored by [`OpenCodeFamilyRuntime`]; other runtimes ignore it for
+    /// now (Claude Code's `-p` mode has no model flag).
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
