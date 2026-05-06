@@ -3306,13 +3306,14 @@ impl McpTool for SessionBootstrapTool {
         }
 
         // Inject Perception Filter (path B) state if available — parallel
-        // 384-d MiniLM + thermodynamic-filter substrate. Read-only, same as
-        // the 32-d Seed above. Together they cross-validate "what does the
+        // learned-encoder + thermodynamic-filter substrate. Read-only, same
+        // as the 32-d Seed above. Together they cross-validate "what does the
         // current memory corpus look like to a self-organizing network?"
-        // See `decision_path_b_perception_filter_validated_20260505`.
+        // Model and dim are dynamic (env-overridable in the sidecar) — the
+        // body of the block carries the ground-truth `model=... ({dim}d)`.
         if let Some(pf_block) = format_perception_filter_block() {
             lines.push(
-                "=== Perception Filter (384-d MiniLM + thermodynamic filter) ==="
+                "=== Perception Filter (thermodynamic surprisal filter on memory stream) ==="
                     .to_string(),
             );
             lines.push(pf_block);
