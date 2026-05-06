@@ -17,12 +17,16 @@ use std::collections::HashMap;
 
 pub mod auggie;
 pub mod claude_code;
+pub mod codex;
+pub mod gemini;
 pub mod opencode_family;
 pub mod oz;
 pub mod worktree;
 
 pub use auggie::AuggieRuntime;
 pub use claude_code::ClaudeCodeRuntime;
+pub use codex::CodexRuntime;
+pub use gemini::GeminiRuntime;
 pub use opencode_family::OpenCodeFamilyRuntime;
 pub use oz::OzAgentRuntime;
 pub use worktree::{GitWorktreeManager, Worktree};

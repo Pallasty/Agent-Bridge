@@ -1,6 +1,6 @@
 use ab_agent::{
-    AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, GitWorktreeManager, OpenCodeFamilyRuntime,
-    OzAgentRuntime,
+    AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, CodexRuntime, GeminiRuntime,
+    GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
@@ -284,14 +284,17 @@ async fn build_hub() -> Result<Hub> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
     let worktree = Arc::new(GitWorktreeManager::new(repo));
 
-    // Always register the opencode-family runtimes so `agent_spawn` can fan
-    // out to them when the caller passes `backend: "opencode" | "kilo"`.
-    // The `binary` field on each is just the CLI name; if it's not on PATH,
-    // spawn() returns a clear error at call time rather than at startup.
+    // Always register the auxiliary CLI agent runtimes so `agent_spawn` can
+    // fan out to them when the caller passes `backend: "opencode" | "kilo"
+    // | "gemini" | "codex"`. The `binary` on each is just the CLI name; if
+    // it's not on PATH, spawn() returns a clear error at call time rather
+    // than failing daemon startup.
     let opencode: Arc<dyn AgentRuntime> =
         Arc::new(OpenCodeFamilyRuntime::opencode().with_store(store.clone()));
     let kilo: Arc<dyn AgentRuntime> =
         Arc::new(OpenCodeFamilyRuntime::kilo().with_store(store.clone()));
+    let gemini: Arc<dyn AgentRuntime> = Arc::new(GeminiRuntime::new().with_store(store.clone()));
+    let codex: Arc<dyn AgentRuntime> = Arc::new(CodexRuntime::new().with_store(store.clone()));
 
     Ok(Hub::builder()
         .notifier(notifier)
@@ -301,6 +304,8 @@ async fn build_hub() -> Result<Hub> {
         .agent(agent)
         .register_agent(opencode)
         .register_agent(kilo)
+        .register_agent(gemini)
+        .register_agent(codex)
         .worktree(worktree)
         .build())
 }

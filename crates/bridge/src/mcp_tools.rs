@@ -1386,10 +1386,11 @@ impl McpTool for AgentSpawnTool {
                  `cwd` (typically a git worktree path); the agent runs to completion in \
                  the background. Returns the new session id.\n\n\
                  Optional `backend` selects the runtime: `claude-code` (default), \
-                 `opencode`, `kilo`, `auggie`, or `warp-oz`. Pair with `model` to pin a \
-                 specific model (`opencode/gpt-5-nano`, `kilo/~anthropic/claude-haiku-latest`, \
-                 etc.). Honored by opencode/kilo today; ignored by claude-code (no \
-                 model flag in `-p` mode)."
+                 `opencode`, `kilo`, `gemini`, `codex`, `auggie`, or `warp-oz`. Pair with \
+                 `model` to pin a specific model (`opencode/gpt-5-nano`, \
+                 `kilo/~anthropic/claude-haiku-latest`, `gemini-3-pro`, `gpt-5.4`, etc.). \
+                 Honored by opencode/kilo/gemini/codex; ignored by claude-code (no model \
+                 flag in `-p` mode)."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -1400,11 +1401,11 @@ impl McpTool for AgentSpawnTool {
                     "backend": {
                         "type": "string",
                         "description": "Runtime id to dispatch to. Omit to use the daemon's default (AGENT_BRIDGE_AGENT_RUNTIME).",
-                        "enum": ["claude-code", "opencode", "kilo", "auggie", "warp-oz", "oz"]
+                        "enum": ["claude-code", "opencode", "kilo", "gemini", "codex", "auggie", "warp-oz", "oz"]
                     },
                     "model": {
                         "type": "string",
-                        "description": "Provider/model string honored by opencode/kilo (e.g. 'opencode/gpt-5-nano')."
+                        "description": "Provider/model string honored by opencode/kilo/gemini/codex (e.g. 'opencode/gpt-5-nano', 'gpt-5.4')."
                     }
                 },
                 "required": ["cwd", "prompt"]
