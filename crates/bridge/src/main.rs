@@ -15,6 +15,7 @@ use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod setup;
+mod skills;
 mod sync;
 
 #[derive(Parser, Debug)]
@@ -70,6 +71,16 @@ enum Cmd {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// Index third-party Claude Code skill libraries into memory.
+    ///
+    /// Walks SKILL.md / .claude/skills/*.md / skills/*.md inside the source,
+    /// parses YAML frontmatter, runs a heuristic safety lint, and saves
+    /// each skill as a memory record (kind=skill). Subsequent runs upsert
+    /// by key. See `skills seed` for the curated bootstrap set.
+    Skills {
+        #[command(subcommand)]
+        op: SkillsOp,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -82,6 +93,38 @@ enum SyncOp {
     },
     /// Print resolved repo path, remote, and last sync; no network calls.
     Status,
+}
+
+#[derive(Subcommand, Debug)]
+enum SkillsOp {
+    /// Clone (URL) or read (local path) a repo and index every SKILL.md /
+    /// `.claude/skills/*.md` it contains.
+    Index {
+        /// `https://...` GitHub URL or local path to a checkout.
+        source: String,
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
+    /// Index the curated seed corpus (anthropics/skills + ~7 community libs).
+    Seed {
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
+    /// Semantic search over indexed skills.
+    Search {
+        query: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
+    /// List indexed skills, most-recent first.
+    List {
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Print one skill's body and metadata (use a key from `list` / `search`).
+    Show {
+        key: String,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -208,6 +251,19 @@ async fn main() -> Result<()> {
         };
     }
 
+    // Skills subcommand: short-lived; no daemon hub needed.
+    if let Cmd::Skills { op } = &cmd {
+        return match op {
+            SkillsOp::Index { source, verbose } => {
+                skills::run_index(source, *verbose).await.map(|_| ())
+            }
+            SkillsOp::Seed { verbose } => skills::run_seed(*verbose).await,
+            SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
+            SkillsOp::List { limit } => skills::run_list(*limit).await,
+            SkillsOp::Show { key } => skills::run_show(key).await,
+        };
+    }
+
     let log_layer = match cmd {
         Cmd::Mcp => tracing_subscriber::fmt::layer()
             .with_writer(std::io::stderr)
@@ -247,7 +303,7 @@ async fn main() -> Result<()> {
             .await;
             Ok(())
         }
-        Cmd::Setup { .. } | Cmd::Sync { .. } => unreachable!(),
+        Cmd::Setup { .. } | Cmd::Sync { .. } | Cmd::Skills { .. } => unreachable!(),
     }
 }
 

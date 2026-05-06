@@ -32,6 +32,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 clap.workspace = true
+walkdir.workspace = true
 
 [[bin]]
 name = "agent-bridge"

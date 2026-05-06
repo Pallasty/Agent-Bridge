@@ -7,6 +7,17 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`agent-bridge skills` subcommand** — index third-party open-source
+  Claude Code skill repos into the memory store and search across them.
+  Walks `**/SKILL.md`, `.claude/skills/*.md`, `skills/*.md`; parses YAML
+  frontmatter (name/description/allowed-tools); runs a heuristic safety
+  lint (pipe-to-shell, dangerous-rm, creds-path, eval-substitution); saves
+  each as `kind=skill` memory record keyed by `skill:<owner>/<repo>/<path>`.
+  Subcommands: `index <url|path>`, `seed` (curated 8-repo corpus →
+  ~470 skills), `search <query>`, `list`, `show <key>`. Lint flags surface
+  to stderr but never refuse to save — judgment stays with the user.
+
 ## [0.11.0] - 2026-05-06
 
 **Theme: ONNX-free prebuilts — Intel Mac and any-glibc Linux unblocked.**

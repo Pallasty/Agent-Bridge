@@ -125,6 +125,34 @@ The repo location is resolved in this order: `AGENT_BRIDGE_MEMORY_REPO` env →
 legacy `~/agent-bridge-memory` or `~/Projects/agent-bridge-memory` (if they
 have a `.git`) → `<state-dir>/memory-sync` next to `state.db` (the new default).
 
+### Skill library indexer
+
+`agent-bridge skills` indexes third-party open-source Claude Code skill
+repos into the local memory store, so you can search across them and
+pick a skill on demand. It walks `**/SKILL.md`, `.claude/skills/*.md`,
+and `skills/*.md`, parses YAML frontmatter, and runs a heuristic safety
+lint (`pipe-to-shell`, `dangerous-rm`, `creds-path`, `eval-substitution`).
+Lint findings are surfaced — they do **not** mean a skill is unsafe,
+just that it warrants manual review before installing.
+
+```bash
+# Bootstrap with the curated 8-repo seed corpus (anthropics/skills + community libs).
+agent-bridge skills seed
+
+# Or index a specific repo:
+agent-bridge skills index https://github.com/anthropics/skills
+
+# Search across everything indexed so far.
+agent-bridge skills search "review pdf document"
+
+# List recent / show one.
+agent-bridge skills list --limit 20
+agent-bridge skills show skill:anthropics/skills/pdf
+```
+
+Indexed skills are stored as memory records (`kind=skill`) and persist
+across `state.db` sessions; running `index` again upserts by key.
+
 ---
 
 ## Quick start (Codex)
