@@ -337,11 +337,10 @@ impl McpTool for TerminalSplitTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Split a terminal pane horizontally or vertically and return the new \
-                 pane's id. Optionally takes `cwd` (working directory for the new shell) and \
-                 `env` (extra environment variables); these are honoured by the in-daemon PTY \
-                 backend and silently ignored by backends that delegate spawning to an \
-                 external multiplexer."
+            description: "Split a terminal pane horizontally or vertically and return the \
+                 new pane's id. Optional cwd (working directory) and env (extra vars) — \
+                 honored by the in-daemon PTY backend; silently ignored by backends that \
+                 delegate spawning to an external multiplexer."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -504,11 +503,10 @@ impl McpTool for TerminalResizeTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Resize a terminal pane / PTY to the given rows × cols. \
-                 Triggers SIGWINCH on the child process so full-screen apps \
-                 (vim/less/man/htop) re-flow. Backends that don't own the \
-                 underlying PTY (e.g. WarpBackend in URL-scheme mode) will \
-                 reject this call with a 'not supported' error."
+            description: "Resize a terminal pane / PTY to rows × cols. Triggers SIGWINCH \
+                 on the child so full-screen apps (vim, less, man, htop) re-flow. Backends \
+                 that don't own the PTY (e.g. WarpBackend in URL-scheme mode) reject with \
+                 'not supported'."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -580,11 +578,10 @@ impl McpTool for ShellExecTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Run a shell command synchronously and return its exit code, stdout, \
-                 stderr, and wall-clock duration. Unlike terminal_send_keys this captures \
-                 output directly — no PTY or scrollback parsing needed. \
-                 stdout/stderr are truncated at 128 KB; check `truncated` flag. \
-                 Default timeout: 30 s. Max timeout: 300 s."
+            description: "Run a shell command synchronously; returns exit code, stdout, \
+                 stderr, wall-clock duration. Unlike terminal_send_keys this captures \
+                 output directly — no PTY needed. stdout/stderr truncated at 128 KB. \
+                 Default timeout 30 s, max 300 s."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -738,10 +735,10 @@ impl McpTool for TerminalReadBlocksTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Return structured blocks from a Warp terminal session. \
-                Each block contains the command text, its output, exit code, and execution state. \
-                More reliable than terminal_read_output for command→output mapping. \
-                Only available when the Warp IPC bridge is connected."
+            description: "Return structured blocks from a Warp terminal session. Each \
+                block: command text, output, exit code, execution state. More reliable \
+                than terminal_read_output for command→output mapping. Available only \
+                with Warp IPC bridge connected."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -1382,15 +1379,10 @@ impl McpTool for AgentSpawnTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Spawn a sibling AI agent (one-shot mode). Pass `prompt` and \
-                 `cwd` (typically a git worktree path); the agent runs to completion in \
-                 the background. Returns the new session id.\n\n\
-                 Optional `backend` selects the runtime: `claude-code` (default), \
-                 `opencode`, `kilo`, `gemini`, `codex`, `auggie`, or `warp-oz`. Pair with \
-                 `model` to pin a specific model (`opencode/gpt-5-nano`, \
-                 `kilo/~anthropic/claude-haiku-latest`, `gemini-3-pro`, `gpt-5.4`, etc.). \
-                 Honored by opencode/kilo/gemini/codex; ignored by claude-code (no model \
-                 flag in `-p` mode)."
+            description: "Spawn a sibling AI agent (one-shot). Pass prompt + cwd; runs to \
+                 completion, returns session id. backend: claude-code (default), opencode, \
+                 kilo, gemini, codex, auggie, warp-oz. model pins a specific model — \
+                 honored by opencode/kilo/gemini/codex."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -1535,10 +1527,10 @@ impl McpTool for WorktreeListTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "List git worktrees of a repository. Pass `repo` to point at any local \
-                 git checkout for this call; if omitted, falls back to the bridge-wide \
-                 default (AGENT_BRIDGE_REPO env var, else the daemon's launch cwd). \
-                 Lets the agent see what parallel branches are already in flight."
+            description: "List git worktrees of a repository. Pass repo for a specific \
+                 checkout; otherwise uses the bridge-wide default (AGENT_BRIDGE_REPO env \
+                 var, else daemon launch cwd). Lets the agent see what parallel branches \
+                 are in flight."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -1578,11 +1570,10 @@ impl McpTool for WorktreeCreateTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Create a new git worktree on a fresh branch. Pass `repo` to target any \
-                 local git checkout; otherwise uses the bridge-wide default. Use this \
-                 when the agent wants to try multiple approaches in parallel without \
-                 polluting the main checkout. Pair with `agent_spawn` to launch a \
-                 sibling Claude in the new worktree."
+            description: "Create a new git worktree on a fresh branch. Pass repo to target \
+                 a checkout; otherwise uses the bridge-wide default. Use to try multiple \
+                 approaches in parallel without polluting main. Pair with agent_spawn to \
+                 launch a sibling agent there."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -1686,11 +1677,10 @@ impl McpTool for AgentKillTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Send SIGTERM to a running agent session. Use when a sub-agent has \
-                 stalled, gone off-task, or you no longer need its result. The \
-                 background wait task will subsequently finalise the session row \
-                 with the SIGTERM exit code, so `agent_session_get(id)` afterwards \
-                 still shows what (partial) output was captured."
+            description: "Send SIGTERM to a running agent session. Use when a sub-agent \
+                 stalled, went off-task, or its result is no longer needed. The background \
+                 wait task finalises the session with the signal exit code; \
+                 agent_session_get(id) still shows captured output."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -1737,17 +1727,10 @@ impl McpTool for AgentSessionListTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "List recent agent sessions (default 20, max 1000). Returns one row \
-                 per spawn with id / runtime / cwd / started_at / ended_at / exit_code. \
-                 All filters are optional and combine with AND: \
-                 `runtime_id` exact match, `cwd_prefix` prefix match, \
-                 `state` (\"running\"|\"finished\"), `exit_code` exact match \
-                 (use negative for signal kills, e.g. -15 = SIGTERM). \
-                 **v0.8**: each running row carries a `liveness` field — \
-                 `alive` (PID still in /proc), `dead` (PID gone but \
-                 finalise_session never ran → zombie row), or `unknown` \
-                 (bridge restarted since spawn, no in-memory PID). \
-                 Use `agent_session_get(id)` to fetch the full stdout/stderr."
+            description: "List recent agent sessions (default 20, max 1000). Row: id, \
+                 runtime, cwd, started_at, ended_at, exit_code. Filters: runtime_id, \
+                 cwd_prefix, state, exit_code (negative=signal). Running rows carry \
+                 liveness. Use agent_session_get(id) for full output."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2108,12 +2091,10 @@ impl McpTool for MemorySaveTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Persist one note to agent self-memory (cross-session). Use this to \
-                 record lessons, decisions, todos, or context the next-session-you \
-                 (or other Claude instances) should know. Same `key` overwrites — \
-                 `created_at` is preserved, `updated_at` bumps. `related_keys` is a \
-                 free-form list of OTHER memory keys you think are causally linked \
-                 (no graph algorithms — Claude declares relationships explicitly)."
+            description: "Persist one note to agent self-memory (cross-session). Record \
+                 lessons, decisions, todos, or context the next-session-you should know. \
+                 Same key overwrites: created_at preserved, updated_at bumps. related_keys: \
+                 free-form list of related memory keys."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2299,16 +2280,10 @@ impl McpTool for MemorySearchTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Search memories by keyword or semantic similarity. \
-                 Three modes: \
-                 (1) mode='fts' (default): FTS5 full-text search ranked by bm25 + recency + importance. \
-                 (2) mode='hybrid': FTS5 results expanded via graph neighbors, fused with \
-                 Reciprocal Rank Fusion (RRF k=60). Surfaces memories connected to top hits \
-                 even if they don't contain the query keyword. \
-                 (3) mode='semantic': cosine similarity over local feature-hash embeddings — \
-                 finds near-synonym matches that keyword search misses (e.g. 'IPC socket' \
-                 finds 'Unix socket connection'). No external API required. \
-                 Results always exclude archived/superseded memories."
+            description: "Search memories by keyword or semantic similarity. mode='fts': \
+                 FTS5 by bm25+recency+importance. mode='hybrid': FTS5 + graph neighbors \
+                 via RRF fusion. mode='semantic': cosine over local embeddings — catches \
+                 synonyms FTS misses. Excludes archived/superseded."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2435,11 +2410,10 @@ impl McpTool for MemoryListTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "List memories, optionally filtered by `kind`, sorted by one of \
-                 'recent' (default — last_accessed_at desc), 'frequent' \
-                 (access_count desc), or 'newest' (created_at desc). Use this at \
-                 session start with kind='lesson' to surface what previous-you \
-                 learned."
+            description: "List memories, optionally filtered by `kind`, sorted by 'recent' \
+                 (default, last_accessed_at desc), 'frequent' (access_count desc), or \
+                 'newest' (created_at desc). Use at session start with kind='lesson' to \
+                 surface what previous-you learned."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2546,16 +2520,10 @@ impl McpTool for MemoryCompactTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Prune low-value memories. A row is removed only if BOTH thresholds \
-                 match (AND): `min_uses` (access_count strictly less than) AND \
-                 `older_than_days` (last_accessed_at older than now - that many \
-                 days). A 1-hour grace period on `created_at` further protects \
-                 freshly-saved rows. Set `dry_run=true` to preview the keys that \
-                 would be deleted without actually removing them. **v0.8**: if \
-                 BOTH thresholds are omitted, a balanced default is applied \
-                 (`min_uses=2`, `older_than_days=90`) so callers don't get a \
-                 silent no-op — the response field `applied_defaults` flags \
-                 when this happens."
+            description: "Prune low-value memories. Removes only when BOTH match: min_uses \
+                 (access_count <) AND older_than_days (last_accessed_at older than). \
+                 1-hour grace on created_at. dry_run=true previews. Both omitted → \
+                 defaults (min_uses=2, older_than_days=90)."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2639,12 +2607,10 @@ impl McpTool for MemoryReindexTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Re-compute embeddings for active memories that have no stored \
-                 embedding (e.g. after an embedding-dimension migration). Processes \
-                 up to `batch_size` rows per call (default 100, max 1000). \
-                 Call repeatedly until `updated` is 0 to fully rebuild the index. \
-                 Also refreshes the in-process embedding cache so \
-                 memory_search(mode=semantic) sees the new vectors immediately."
+            description: "Re-compute embeddings for active memories with no stored vector \
+                 (e.g. after dim migration). Processes batch_size rows per call \
+                 (default 100, max 1000). Call repeatedly until updated=0. Refreshes the \
+                 embedding cache so semantic search sees new vectors."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2873,20 +2839,10 @@ impl McpTool for MemoryLinkTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Create or update a directed edge between two memory records. \
-                 Edges are typed and weights are auto-assigned by type unless overridden. \
-                 Standard types and base weights: \
-                 updates(1.5) — newest replaces old; \
-                 caused_by(1.3) — causal chain; \
-                 supersedes(1.3) — explicit supersession; \
-                 implements(1.1) — concrete realisation; \
-                 relates(1.0) — generic relation; \
-                 part_of(0.8) — structural containment; \
-                 derived_from(0.8) — loose derivation; \
-                 contradicts(0.5) — known conflict; \
-                 invalidates(0.5) — explicit invalidation. \
-                 Causal edge types get a ×1.2 temporal bonus in BFS traversal. \
-                 Pairs with `memory_neighbors` (BFS) to walk the knowledge graph."
+            description: "Create/update a directed edge between two memories. Type/weight: \
+                 updates 1.5, caused_by 1.3, supersedes 1.3, implements 1.1, relates 1.0, \
+                 part_of 0.8, derived_from 0.8, contradicts 0.5, invalidates 0.5. Causal \
+                 ×1.2 in BFS. Pair with memory_neighbors."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2964,14 +2920,10 @@ impl McpTool for MemoryNeighborsTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Return graph edges (and optionally BFS-traverse multi-hop) from a memory key. \
-                 With depth=1 (default) returns direct neighbors ordered by weight DESC. \
-                 With depth>1 performs BFS traversal, propagating energy as \
-                 energy × edge_weight × temporal_bonus × decay_factor. \
-                 Returns [{from_key, to_key, edge_type, weight, energy}] sorted by energy DESC. \
-                 Causal edge types (updates, caused_by, supersedes, implements) get ×1.2 temporal bonus. \
-                 Conflict edges (contradicts, invalidates) get ×0.85. \
-                 Use this to discover chains of related decisions, bug-fix histories, and design evolutions."
+            description: "Return graph edges (optionally BFS multi-hop) from a memory key. \
+                 depth=1: direct neighbors by weight. depth>1: BFS propagating \
+                 energy × weight × temporal × decay. Row: from_key, to_key, edge_type, \
+                 weight, energy. Causal ×1.2, conflicts ×0.85."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -3101,14 +3053,10 @@ impl McpTool for SessionBootstrapTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Build a compact memory bootstrap block for the current session. \
-                 Returns top scoped memories (global + project), with session_handoff \
-                 rows first for continuity. \
-                 Pass query= to enable semantic ranking (cosine similarity over FNV-1a \
-                 embeddings) — surfaces memories most relevant to what you are about to do. \
-                 Pass frontend='cursor' or 'warp' for the compact \
-                 token-efficient format, or frontend='claude-code' \
-                 (default) for the full format."
+            description: "Build a compact memory bootstrap block. Returns top scoped \
+                 memories (global + project), session_handoff rows first. query= enables \
+                 semantic ranking. frontend='cursor'|'warp' uses compact format; default \
+                 'claude-code' is full."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -3426,13 +3374,10 @@ impl McpTool for SessionCurateTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Extract structured memories from conversation text using a two-pass \
-                 pipeline: (1) explicit marker detection (lesson:, decision:, todo:, \
-                 handoff:, etc.) and (2) implicit lexical signal scoring that catches \
-                 unmarked insights via epistemic/normative/causal/decision signals \
-                 in English and Chinese. Persists results to the memory store. \
-                 Replaces the PreCompact hook's claude -p dependency — works in any \
-                 frontend. Pass dry_run=true to preview without writing."
+            description: "Extract structured memories from conversation text. Two-pass: \
+                 (1) explicit markers (lesson:, decision:, todo:, handoff:) and \
+                 (2) lexical scoring of epistemic/normative/causal/decision signals \
+                 (English + Chinese). dry_run=true previews."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -4245,11 +4190,10 @@ impl McpTool for CapabilitiesTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Return what the agent-bridge backend can do in this environment: \
-                 terminal backend, browser availability, memory store status, \
-                 configured hooks, detected frontend, security policy (which high-risk \
-                 tools are enabled/disabled), and binary version. \
-                 Call once at session start to avoid wasting tokens on unavailable features."
+            description: "Return what the agent-bridge backend can do here: terminal \
+                 backend, browser availability, memory store status, configured hooks, \
+                 detected frontend, security policy, binary version. Call at session \
+                 start to avoid wasted tokens on unavailable features."
                 .into(),
             input_schema: json!({ "type": "object", "properties": {} }),
         }
@@ -4969,13 +4913,10 @@ impl McpTool for MemoryStatsTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Return aggregate statistics about the memory store: \
-                 total counts by status (active/archived/superseded), \
-                 counts per kind for active memories, number of graph edges, \
-                 oldest/newest timestamps, average importance, top tags, \
-                 and approximate DB size. \
-                 Call before session_curate or session_finalize to understand \
-                 store health without reading individual records."
+            description: "Aggregate statistics about the memory store: counts by status, \
+                 per-kind counts for active rows, edge count, oldest/newest timestamps, \
+                 average importance, top tags, approximate DB size. Call before \
+                 session_curate / session_finalize to gauge store health."
                 .into(),
             input_schema: json!({ "type": "object", "properties": {} }),
         }
@@ -5189,11 +5130,10 @@ impl McpTool for SessionFinalizeTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Manual session-end maintenance for Cursor: run importance decay, \
-                 compact stale memories, and optionally export JSONL. \
-                 Equivalent to Claude Code's Stop hook pipeline. \
-                 Response includes follow_up with active_total and an optional hint to run memory_consolidate \
-                 when the active graph is large."
+            description: "Manual session-end maintenance: importance decay, compact stale \
+                 memories, optionally export JSONL. Equivalent to Claude Code's Stop hook \
+                 pipeline. Response includes follow_up with active_total and a hint to run \
+                 memory_consolidate if the graph is large."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -5485,10 +5425,10 @@ impl McpTool for ProjectDetectTool {
         ToolSchema {
             name: self.name().into(),
             description:
-                "Scan a directory for common project manifests (Cargo.toml, package.json, \
-                 pyproject.toml, go.mod, Makefile), infer languages and suggested test/lint/format \
-                 commands, list Rust workspace members via cargo metadata, and snapshot git \
-                 branch/clean/recent commit. Optional cwd defaults to process working directory."
+                "Scan a directory for project manifests (Cargo.toml, package.json, \
+                 pyproject.toml, go.mod, Makefile), infer languages + test/lint/format \
+                 commands, list Rust workspace members, snapshot git branch+clean+recent \
+                 commit. cwd defaults to process cwd."
                     .into(),
             input_schema: json!({
                 "type": "object",
@@ -5592,10 +5532,10 @@ impl McpTool for SessionHandoffBriefTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Build a machine-readable session handoff brief for the next agent: \
-                 aggregates active todos, recent session_handoff memories, git branch / \
-                 last commit / working-tree files, plus optional narrative fields. \
-                 No new tables — combines memory store + git only (DESIGN D9)."
+            description: "Build a machine-readable session handoff brief for the next \
+                 agent: aggregates active todos, recent session_handoff memories, git \
+                 branch / last commit / working-tree files, plus optional narrative \
+                 fields. No new tables — memory + git only."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -7157,11 +7097,10 @@ impl McpTool for CodebaseIndexTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Scan a directory and build a symbol index (functions, structs, classes, \
-                 traits, enums, …) stored in SQLite. Subsequent codebase_search calls query \
-                 this index without re-reading the filesystem. Re-indexing the same root \
-                 replaces the previous index. Supported languages: rust, python, \
-                 typescript, javascript, go (auto-detected from extension)."
+            description: "Build a SQLite symbol index (functions, structs, classes, \
+                 traits, enums) for a directory. codebase_search queries this without \
+                 re-reading the filesystem. Re-indexing replaces. Languages: rust, \
+                 python, typescript, javascript, go."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -7228,9 +7167,9 @@ impl McpTool for CodebaseSearchTool {
         ToolSchema {
             name: self.name().into(),
             description: "Search the codebase symbol index built by codebase_index. \
-                 Returns file_path, line, kind (fn/struct/class/…), name, and signature \
-                 for each matching symbol. Use mode=semantic for natural-language queries \
-                 (e.g. \"parse HTTP headers\"). Run codebase_index first if no results appear."
+                 Returns file_path, line, kind (fn/struct/class/…), name, signature for \
+                 each match. mode=semantic enables natural-language queries. Run \
+                 codebase_index first if no results appear."
                 .into(),
             input_schema: json!({
                 "type": "object",
