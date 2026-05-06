@@ -62,9 +62,13 @@ jobs:
         run: cargo build --release -p ab-bridge --bin agent-bridge --target ${{ matrix.target }}
 
       - name: Smoke-test the binary
+        # Only --version and --help are guaranteed across all v* tags;
+        # subcommands come and go between releases. Don't tie the smoke
+        # test to a feature that may not exist on the historical tag we're
+        # building (e.g., `sync` was added after v0.9.1).
         run: |
           ./target/${{ matrix.target }}/release/agent-bridge --version
-          ./target/${{ matrix.target }}/release/agent-bridge sync --help > /dev/null
+          ./target/${{ matrix.target }}/release/agent-bridge --help > /dev/null
 
       - name: Package tarball
         id: pkg
