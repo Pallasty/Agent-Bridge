@@ -7,19 +7,32 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-05-06
+
+**Theme: ONNX-free prebuilts — Intel Mac and any-glibc Linux unblocked.**
+
 ### Changed
 - **Prebuilt binaries are now ONNX-free.** `ab-bridge` exposes an
   `onnx-embed` feature (default on for source builds); the release
   workflow builds with `--no-default-features` to drop the ONNX
-  sentence-transformer backend. Effect: tarballs ~3× smaller (30 MB →
-  11 MB uncompressed on macOS arm64), Linux binary works on any glibc
+  sentence-transformer backend. Effect: tarballs ~3× smaller (compressed
+  4.9–6.0 MB instead of 12.9–15.3 MB), Linux binary works on any glibc
   2.35+ instead of requiring 2.38+, and `x86_64-apple-darwin` (Intel
   Mac) is back in the prebuilt matrix. Hash-based 384-dim fallback
   keeps memory/embedding APIs functional; users wanting the full
   sentence-transformer backend should `cargo install --git` instead.
 - **Release matrix expanded** to three targets:
   `x86_64-unknown-linux-gnu` (ubuntu-22.04), `aarch64-apple-darwin`
-  (macos-14), `x86_64-apple-darwin` (macos-14 + cross-compile).
+  (macos-14), `x86_64-apple-darwin` (macos-14 + cross-compile via
+  Rosetta 2 for smoke).
+- Workspace dep `ab-store` switched to `default-features = false`; only
+  `ab-bridge`'s `onnx-embed` feature pulls fastembed into the dep graph.
+
+### Other
+- `feat(agent_spawn): policy → backend routing layer` — `policy` field
+  on `agent_spawn` maps high-level intents to backends (default →
+  claude-code, cheap → kilo, second_opinion/openai → codex). `backend`
+  wins if both given; unknown values fall through gracefully.
 
 ## [0.10.0] - 2026-05-06
 
