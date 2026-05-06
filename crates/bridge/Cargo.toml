@@ -4,6 +4,16 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# `onnx-embed` is on by default so source builds (`cargo install --git`,
+# local `cargo build`) keep the full sentence-transformer embedding
+# backend. Prebuilt release binaries are built with `--no-default-features`
+# to ship a smaller, ONNX-free tarball that runs on any glibc and on
+# x86_64-apple-darwin (where ort-sys has no prebuilt). The hash-only
+# fallback in ab-store keeps memory/embedding APIs functional without ONNX.
+default = ["onnx-embed"]
+onnx-embed = ["ab-store/onnx-embed"]
+
 [dependencies]
 ab-core.workspace = true
 ab-notifier.workspace = true

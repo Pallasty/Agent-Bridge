@@ -7,6 +7,20 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Prebuilt binaries are now ONNX-free.** `ab-bridge` exposes an
+  `onnx-embed` feature (default on for source builds); the release
+  workflow builds with `--no-default-features` to drop the ONNX
+  sentence-transformer backend. Effect: tarballs ~3× smaller (30 MB →
+  11 MB uncompressed on macOS arm64), Linux binary works on any glibc
+  2.35+ instead of requiring 2.38+, and `x86_64-apple-darwin` (Intel
+  Mac) is back in the prebuilt matrix. Hash-based 384-dim fallback
+  keeps memory/embedding APIs functional; users wanting the full
+  sentence-transformer backend should `cargo install --git` instead.
+- **Release matrix expanded** to three targets:
+  `x86_64-unknown-linux-gnu` (ubuntu-22.04), `aarch64-apple-darwin`
+  (macos-14), `x86_64-apple-darwin` (macos-14 + cross-compile).
+
 ## [0.10.0] - 2026-05-06
 
 **Theme: cross-device sync, multi-frontend agent matrix, first prebuilt binaries.**

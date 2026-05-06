@@ -35,19 +35,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ubuntu-24.04 (glibc 2.39) is required because `ort-sys` (pulled in
-          # by `fastembed` / the ONNX embedding backend) ships prebuilt binaries
-          # that reference `__isoc23_strtoll` and friends — symbols introduced
-          # in glibc 2.38. End users running our binary need glibc ≥ 2.38, so
-          # this is documented in the README install section.
+          # Prebuilt binaries are built with `--no-default-features` to drop
+          # the ONNX embedding backend (fastembed + ort-sys). This makes the
+          # tarball ~3x smaller and removes the glibc 2.38+ requirement that
+          # ort-sys imposes (so ubuntu-22.04 works as the build host) and
+          # also unblocks x86_64-apple-darwin (ort-sys ships no prebuilt for
+          # that target). Source builds via `cargo install --git` keep ONNX
+          # on by default. Hash-only fallback in ab-store keeps memory and
+          # embedding APIs functional in the prebuilt binary.
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-24.04
-          # x86_64-apple-darwin is intentionally NOT shipped: `ort-sys` does
-          # not provide prebuilt binaries for that target, and source-building
-          # ONNX Runtime takes 30+ minutes per release. Intel Mac users build
-          # from source via `cargo install --git`. Reconsider in v0.11+ once
-          # we feature-gate ONNX so a no-features build can ship.
+            os: ubuntu-22.04
           - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-apple-darwin
             os: macos-14
 
     steps:
@@ -67,13 +67,16 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release -p ab-bridge --bin agent-bridge --target ${{ matrix.target }}
+        run: cargo build --release -p ab-bridge --bin agent-bridge --no-default-features --target ${{ matrix.target }}
 
       - name: Smoke-test the binary
         # Only --version and --help are guaranteed across all v* tags;
         # subcommands come and go between releases. Don't tie the smoke
         # test to a feature that may not exist on the historical tag we're
         # building (e.g., `sync` was added after v0.9.1).
+        # Cross-compiled targets (x86_64-apple-darwin on macos-14 arm64)
+        # rely on Rosetta 2 to execute the binary; this is preinstalled
+        # on GitHub-hosted macos-14 runners.
         run: |
           ./target/${{ matrix.target }}/release/agent-bridge --version
           ./target/${{ matrix.target }}/release/agent-bridge --help > /dev/null

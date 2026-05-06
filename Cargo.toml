@@ -58,7 +58,7 @@ ab-terminal = { path = "crates/terminal" }
 ab-browser = { path = "crates/browser" }
 ab-notifier = { path = "crates/notifier" }
 ab-agent = { path = "crates/agent" }
-ab-store = { path = "crates/store" }
+ab-store = { path = "crates/store", default-features = false }
 ab-mcp = { path = "crates/mcp" }
 ab-bridge = { path = "crates/bridge" }
 

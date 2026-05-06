@@ -16,21 +16,25 @@ Pick whichever is easiest:
 
 ### Pre-built tarball (recommended)
 
-Prebuilt binaries are published on GitHub Releases for two targets:
+Prebuilt binaries are published on GitHub Releases for three targets:
 
 - `aarch64-apple-darwin` — Apple Silicon (M1/M2/M3/M4)
-- `x86_64-unknown-linux-gnu` — x86_64 Linux, **requires glibc 2.38+**
-  (Ubuntu 24.04+, Debian 13+, Fedora 39+, Arch). Built on `ubuntu-24.04`
-  because the bundled ONNX Runtime references symbols from newer glibc.
+- `x86_64-apple-darwin` — Intel Mac
+- `x86_64-unknown-linux-gnu` — x86_64 Linux (built on Ubuntu 22.04, runs
+  on any glibc 2.35+ distro: Ubuntu 22.04+, Debian 12+, Fedora 36+, Arch,
+  Amazon Linux 2023)
 
-Intel Macs and older Linux distros (Ubuntu 22.04, Debian 12, Amazon Linux 2023)
-need to use **`cargo install --git`** (next section) since `ort-sys` doesn't
-ship a prebuilt for x86_64 macOS and the Linux binary requires modern glibc.
+Prebuilt binaries are compiled with `--no-default-features` to drop the
+ONNX sentence-transformer backend, falling back to a built-in 384-dim
+hash embedding. Memory and embedding APIs work identically; semantic
+search quality is lower. If you want the full ONNX backend, use
+`cargo install --git` instead — it builds with default features.
 
 ```bash
 # 1. Pick your target.
 TARGET=aarch64-apple-darwin           # Apple Silicon
-# TARGET=x86_64-unknown-linux-gnu     # Ubuntu 24.04+ / Debian 13+ x86_64
+# TARGET=x86_64-apple-darwin          # Intel Mac
+# TARGET=x86_64-unknown-linux-gnu     # x86_64 Linux (any glibc 2.35+)
 
 # 2. Download the latest release (or pin to a specific vX.Y.Z).
 VER=$(curl -sSL https://api.github.com/repos/pallasting/Agent-Bridge/releases/latest \
