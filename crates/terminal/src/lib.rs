@@ -93,6 +93,12 @@ pub struct TerminalBlock {
     /// One of: BeforeExecution | Executing | DoneWithExecution | DoneWithNoExecution | Background | Static.
     pub state: String,
     pub is_running: bool,
+    /// Unix epoch milliseconds when the command was submitted to the shell.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_ms: Option<i64>,
+    /// Unix epoch milliseconds when output reception finished.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

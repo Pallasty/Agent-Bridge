@@ -821,6 +821,15 @@ impl McpTool for TerminalReadBlocksTool {
                             "state": b.state,
                             "is_running": b.is_running,
                         });
+                        if let Some(ms) = b.start_ms {
+                            v["start_ms"] = json!(ms);
+                        }
+                        if let Some(ms) = b.end_ms {
+                            v["end_ms"] = json!(ms);
+                            if let Some(start) = b.start_ms {
+                                v["duration_ms"] = json!(ms - start);
+                            }
+                        }
                         if truncated {
                             v["output_truncated"] = json!(true);
                         }
