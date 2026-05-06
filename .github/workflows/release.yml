@@ -35,14 +35,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # ubuntu-24.04 (glibc 2.39) is required because `ort-sys` (pulled in
+          # by `fastembed` / the ONNX embedding backend) ships prebuilt binaries
+          # that reference `__isoc23_strtoll` and friends — symbols introduced
+          # in glibc 2.38. End users running our binary need glibc ≥ 2.38, so
+          # this is documented in the README install section.
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
-          # Cross-compile Intel macOS on the Apple Silicon runner — `macos-13`
-          # (Intel) is heavily backlogged in the free-tier queue and routinely
-          # waits 30+ minutes for a runner. macos-14 ships Rosetta 2, so the
-          # x86_64 binary can still run for the smoke test.
-          - target: x86_64-apple-darwin
-            os: macos-14
+            os: ubuntu-24.04
+          # x86_64-apple-darwin is intentionally NOT shipped: `ort-sys` does
+          # not provide prebuilt binaries for that target, and source-building
+          # ONNX Runtime takes 30+ minutes per release. Intel Mac users build
+          # from source via `cargo install --git`. Reconsider in v0.11+ once
+          # we feature-gate ONNX so a no-features build can ship.
           - target: aarch64-apple-darwin
             os: macos-14
 

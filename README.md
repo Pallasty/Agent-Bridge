@@ -16,11 +16,21 @@ Pick whichever is easiest:
 
 ### Pre-built tarball (recommended)
 
+Prebuilt binaries are published on GitHub Releases for two targets:
+
+- `aarch64-apple-darwin` — Apple Silicon (M1/M2/M3/M4)
+- `x86_64-unknown-linux-gnu` — x86_64 Linux, **requires glibc 2.38+**
+  (Ubuntu 24.04+, Debian 13+, Fedora 39+, Arch). Built on `ubuntu-24.04`
+  because the bundled ONNX Runtime references symbols from newer glibc.
+
+Intel Macs and older Linux distros (Ubuntu 22.04, Debian 12, Amazon Linux 2023)
+need to use **`cargo install --git`** (next section) since `ort-sys` doesn't
+ship a prebuilt for x86_64 macOS and the Linux binary requires modern glibc.
+
 ```bash
 # 1. Pick your target.
 TARGET=aarch64-apple-darwin           # Apple Silicon
-# TARGET=x86_64-apple-darwin          # Intel Mac
-# TARGET=x86_64-unknown-linux-gnu     # Ubuntu / Debian / Fedora x86_64
+# TARGET=x86_64-unknown-linux-gnu     # Ubuntu 24.04+ / Debian 13+ x86_64
 
 # 2. Download the latest release (or pin to a specific vX.Y.Z).
 VER=$(curl -sSL https://api.github.com/repos/pallasting/Agent-Bridge/releases/latest \
