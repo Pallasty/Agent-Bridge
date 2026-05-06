@@ -1380,9 +1380,9 @@ impl McpTool for AgentSpawnTool {
         ToolSchema {
             name: self.name().into(),
             description: "Spawn a sibling AI agent (one-shot). Pass prompt + cwd; runs to \
-                 completion, returns session id. backend: claude-code (default), opencode, \
-                 kilo, gemini, codex, auggie, warp-oz. model pins a specific model — \
-                 honored by opencode/kilo/gemini/codex."
+                 completion, returns session id. Pick a backend explicitly, or a policy \
+                 ('cheap'=kilo, 'second_opinion'/'openai'=codex). backend takes precedence \
+                 over policy; both omitted = daemon default."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -1392,8 +1392,13 @@ impl McpTool for AgentSpawnTool {
                     "env":     { "type": "object", "additionalProperties": { "type": "string" } },
                     "backend": {
                         "type": "string",
-                        "description": "Runtime id to dispatch to. Omit to use the daemon's default (AGENT_BRIDGE_AGENT_RUNTIME).",
+                        "description": "Explicit runtime id. Wins over 'policy' if both given.",
                         "enum": ["claude-code", "opencode", "kilo", "gemini", "codex", "auggie", "warp-oz", "oz"]
+                    },
+                    "policy": {
+                        "type": "string",
+                        "description": "Higher-level intent → backend mapping. default→claude-code, cheap→kilo, second_opinion→codex, openai→codex.",
+                        "enum": ["default", "cheap", "second_opinion", "openai"]
                     },
                     "model": {
                         "type": "string",
@@ -1412,7 +1417,14 @@ impl McpTool for AgentSpawnTool {
             .get("backend")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        let agent = match resolve_agent_backend(&self.hub, backend_arg.as_deref()) {
+        let policy_arg = args
+            .get("policy")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let resolved_backend = backend_arg
+            .clone()
+            .or_else(|| policy_arg.as_deref().and_then(policy_to_backend).map(String::from));
+        let agent = match resolve_agent_backend(&self.hub, resolved_backend.as_deref()) {
             Ok(a) => a,
             Err(e) => return Ok(ToolResult::error(e)),
         };
@@ -1450,6 +1462,18 @@ impl McpTool for AgentSpawnTool {
             )),
             Err(e) => Ok(ToolResult::error(format!("agent: {e}"))),
         }
+    }
+}
+
+/// Map a `policy` value to a concrete backend id. Unknown policies return
+/// `None` (caller falls through to daemon default rather than erroring —
+/// matches "policy ignored" semantics if MCP client sends a future value).
+fn policy_to_backend(policy: &str) -> Option<&'static str> {
+    match policy.trim() {
+        "default" => Some("claude-code"),
+        "cheap" => Some("kilo"),
+        "second_opinion" | "openai" => Some("codex"),
+        _ => None,
     }
 }
 
@@ -8302,5 +8326,20 @@ mod tests {
         assert!(p.includes(Tier::Essential));
         assert!(p.includes(Tier::Standard));
         assert!(p.includes(Tier::Niche));
+    }
+
+    // ── agent_spawn policy → backend mapping ──────────────────────────────
+
+    #[test]
+    fn policy_routes_to_expected_backends() {
+        assert_eq!(policy_to_backend("default"), Some("claude-code"));
+        assert_eq!(policy_to_backend("cheap"), Some("kilo"));
+        assert_eq!(policy_to_backend("second_opinion"), Some("codex"));
+        assert_eq!(policy_to_backend("openai"), Some("codex"));
+        // Whitespace-tolerant.
+        assert_eq!(policy_to_backend("  cheap  "), Some("kilo"));
+        // Unknown policy falls through (caller uses daemon default).
+        assert_eq!(policy_to_backend("nonsense"), None);
+        assert_eq!(policy_to_backend(""), None);
     }
 }
