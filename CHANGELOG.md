@@ -7,20 +7,11 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-06
+
+**Theme: skill-library indexer — find, search, recommend, install third-party Claude Code skills.**
+
 ### Added
-- **Skills Phase C: install + in-loop recommendation.**
-  - `agent-bridge skills install <key>` re-clones the source repo and
-    copies the original SKILL.md plus any sibling scripts/data into
-    `~/.claude/skills/<name>/`. Bails when lint flags are present or
-    the destination exists, unless `--yes` is given.
-  - `mcp__agent-bridge__skills_recommend(query, limit)` MCP tool wraps
-    the existing skill index so agents can query for pre-written skills
-    in-loop. Returns key, source, summary, lint status, and a ready-to-
-    run install command. Registered in the Standard tier (default-on).
-  - Indexer now stores `path:<rel-path>` tag on each record so install
-    can locate the original SKILL.md without searching. Re-run
-    `agent-bridge skills index` / `seed` to backfill on records indexed
-    before this change.
 - **`agent-bridge skills` subcommand** — index third-party open-source
   Claude Code skill repos into the memory store and search across them.
   Walks `**/SKILL.md`, `.claude/skills/*.md`, `skills/*.md`; parses YAML
@@ -28,8 +19,26 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   lint (pipe-to-shell, dangerous-rm, creds-path, eval-substitution); saves
   each as `kind=skill` memory record keyed by `skill:<owner>/<repo>/<path>`.
   Subcommands: `index <url|path>`, `seed` (curated 8-repo corpus →
-  ~470 skills), `search <query>`, `list`, `show <key>`. Lint flags surface
-  to stderr but never refuse to save — judgment stays with the user.
+  ~470 skills), `search <query>`, `list`, `show <key>`, `install <key>`.
+  Lint flags surface to stderr but never refuse to save — judgment stays
+  with the user.
+- **`agent-bridge skills install <key>`** — re-clones the source repo and
+  copies the original SKILL.md plus any sibling scripts/data into
+  `~/.claude/skills/<name>/`. Bails when lint flags are present or the
+  destination exists, unless `--yes` is given.
+- **`mcp__agent-bridge__skills_recommend(query, limit)` MCP tool** — wraps
+  the skill index so agents can query for pre-written skills in-loop.
+  Returns key, source, summary, lint status, and a ready-to-run install
+  command. Registered in the Standard tier (default-on). Use case: when
+  an agent starts a task ("audit a Helm chart", "edit a PDF form"), it
+  queries `skills_recommend` first and surfaces matching pre-written
+  skills instead of writing instructions from scratch.
+
+### Changed
+- Indexer records now carry a `path:<rel-path>` tag recording the
+  original SKILL.md location. Pre-existing records (from manual
+  v0.11-era usage of `agent-bridge skills`) need a re-index to backfill;
+  `skills install` will surface a clear error pointing at this.
 
 ## [0.11.0] - 2026-05-06
 
