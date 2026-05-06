@@ -1,0 +1,128 @@
+name: Release
+
+# Triggered by `git push origin v0.1.0` (or any `v*` tag). Builds the
+# agent-bridge binary on each target's native runner, packages a .tar.gz,
+# generates SHA256SUMS, and publishes a GitHub Release.
+#
+# Adding a target: append a row to the matrix below; no other changes
+# needed. Native runners only — no cross-compilation. This keeps the
+# build closer to what users will run, at the cost of one extra runner
+# per target.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (must already exist; only used for manual reruns)'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: aarch64-apple-darwin
+            os: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release -p ab-bridge --bin agent-bridge --target ${{ matrix.target }}
+
+      - name: Smoke-test the binary
+        run: |
+          ./target/${{ matrix.target }}/release/agent-bridge --version
+          ./target/${{ matrix.target }}/release/agent-bridge sync --help > /dev/null
+
+      - name: Package tarball
+        id: pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tag="${{ inputs.tag || github.ref_name }}"
+          name="agent-bridge-${tag}-${{ matrix.target }}"
+          stage="$(mktemp -d)/${name}"
+          mkdir -p "$stage"
+          cp "target/${{ matrix.target }}/release/agent-bridge" "$stage/"
+          cp README.md LICENSE CHANGELOG.md "$stage/"
+          tar -czf "dist/${name}.tar.gz" -C "$(dirname "$stage")" "$name"
+          ( cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.sha256" )
+          echo "tarball=dist/${name}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${name}.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-bridge-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout (for release notes)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Aggregate SHA256SUMS
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          # Combine the per-tarball .sha256 files into one canonical SHA256SUMS.
+          cat *.sha256 > SHA256SUMS
+          rm -f *.sha256
+          ls -la
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          generate_release_notes: true
+          fail_on_unmatched_files: true

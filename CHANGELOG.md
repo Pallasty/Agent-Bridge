@@ -7,6 +7,47 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Release infrastructure
+
+- **`.github/workflows/release.yml`** — tag-driven release workflow.
+  Pushes of any `v*` tag trigger native builds on `ubuntu-22.04`,
+  `macos-13`, and `macos-14`, producing tarballs for
+  `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, and
+  `aarch64-apple-darwin`. SHA256SUMS aggregated; auto-generated release
+  notes; `softprops/action-gh-release@v2` publishes to GitHub Releases.
+- **`.github/workflows/ci.yml`** — PR-time matrix build + test on
+  `ubuntu-22.04` and `macos-14`. Complements the existing
+  master-push-only `verify-warp-integration.yml`.
+- **Fix flaky `oz::tests::resolve_environment_id_*`** — four tests
+  mutate the same process-wide env var and raced on multi-thread test
+  runners. Serialised with a static `Mutex`. Verified stable across
+  five consecutive `cargo test` runs.
+
+### Added (cross-device memory sync)
+
+- **`agent-bridge sync` first-class subcommand** — replaces the bash +
+  python `~/agent-bridge-memory/sync.sh` with a Rust implementation that
+  shells out to `git` only. One round = `git pull --rebase --autostash`
+  → `memory_import(NewerWins)` → `memory_export` → `git add` + commit +
+  push if anything changed. Idempotent and safe to call from cron / hooks.
+  The Stop hook (`ab-session-end-hook.sh`) now invokes `agent-bridge sync`
+  directly, removing the dependency on the external `sync.sh` script and
+  the hardcoded `~/agent-bridge/target/release/agent-bridge` path.
+- **`agent-bridge sync init`** — one-shot bootstrap on a new machine via
+  `gh` CLI. Verifies `gh auth status`, derives the user's login, detects
+  or creates the private repo (`<user>/agent-bridge-memory` by default,
+  `--repo <name>` to override), clones it to the configured path, and
+  runs the first sync. Removes the previous "you must `git clone` the
+  private repo by hand" step from quick-start.
+- **`agent-bridge sync status`** — prints resolved repo path, origin
+  remote, last commit, and dirty state. No network.
+- **`AGENT_BRIDGE_MEMORY_REPO` is the single source of truth** for the
+  memory-sync repo location. Resolution order: env var → legacy
+  `~/agent-bridge-memory` (if `.git` present) → legacy
+  `~/Projects/agent-bridge-memory` → `<state-dir>/memory-sync` next to
+  `state.db` (new canonical default). Existing setups keep working
+  without configuration; new installs land beside the database.
+
 ### Added (continuity layer)
 
 - **Phase α′: AiOT Soul read-only injection** —

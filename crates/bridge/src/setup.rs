@@ -115,10 +115,9 @@ fn install_claude_code(home: &Path, bin_dir: &Path) -> Result<()> {
     println!("  1. Add ~/.local/bin to your PATH if it isn't already.");
     println!("  2. Start the daemon:  agent-bridge daemon &");
     println!("  3. Register as MCP:   claude mcp add agent-bridge agent-bridge mcp");
-    println!("  4. (Optional) Clone the memory-sync repo (private):");
-    println!(
-        "       git clone git@github.com:pallasting/agent-bridge-memory.git ~/agent-bridge-memory"
-    );
+    println!("  4. (Optional) Bootstrap cross-device memory sync:");
+    println!("       gh auth login          # one-time, if not already authenticated");
+    println!("       agent-bridge sync init # creates/clones the private memory repo");
     println!("  5. Restart Claude Code — the hooks take effect on the next session.");
 
     Ok(())
@@ -463,8 +462,7 @@ fn merge_gemini_settings(home: &Path, bin_dst: &Path) -> Result<()> {
         fs::create_dir_all(parent).context("create ~/.gemini")?;
     }
     let out = serde_json::to_string_pretty(&settings).context("re-serialize Gemini settings")?;
-    fs::write(&settings_path, out)
-        .with_context(|| format!("write {}", settings_path.display()))?;
+    fs::write(&settings_path, out).with_context(|| format!("write {}", settings_path.display()))?;
     println!(
         "  ✓  settings     → {} (MCP server merged)",
         settings_path.display()
@@ -705,10 +703,8 @@ enabled = true
 
     #[test]
     fn merges_gemini_mcp_server_while_preserving_settings() {
-        let tmp = std::env::temp_dir().join(format!(
-            "agent-bridge-gemini-test-{}",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("agent-bridge-gemini-test-{}", std::process::id()));
         let settings_dir = tmp.join(".gemini");
         fs::create_dir_all(&settings_dir).unwrap();
         fs::write(

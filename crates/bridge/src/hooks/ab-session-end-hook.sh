@@ -19,7 +19,6 @@ DB="$HOME/.local/share/agent-bridge/state.db"
 [[ -f "$DB" ]] || exit 0
 
 AB=$(command -v agent-bridge 2>/dev/null || echo "$HOME/.local/bin/agent-bridge")
-SYNC="${AGENT_BRIDGE_MEMORY_REPO:-$HOME/agent-bridge-memory}/sync.sh"
 
 # Compact: time-only policy — remove memories not accessed in 90 days.
 # min_uses is intentionally omitted: new memories start at access_count=0
@@ -31,9 +30,11 @@ if [[ -x "$AB" ]]; then
 JSONRPC
 fi
 
-# Sync to git remote if the memory repo exists.
-if [[ -x "$SYNC" ]]; then
-    AGENT_BRIDGE_BIN="$AB" bash "$SYNC" >/dev/null 2>&1 &
+# Sync to git remote in the background (no-op if not initialised).
+# Path resolution lives inside `agent-bridge sync`; honours
+# AGENT_BRIDGE_MEMORY_REPO and falls back to legacy locations.
+if [[ -x "$AB" ]]; then
+    "$AB" sync >/dev/null 2>&1 &
 fi
 
 exit 0

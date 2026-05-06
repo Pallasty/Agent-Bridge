@@ -501,6 +501,11 @@ fn truncate(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
 
+    // Tests that mutate `DAEMON_ENV_KEY_ENVIRONMENT_ID` race when run on
+    // the default multi-threaded test runner, since `set_var`/`remove_var`
+    // are process-wide. Serialise just those tests through this lock.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn id_is_stable() {
         assert_eq!(OzAgentRuntime::new().id(), "warp-oz");
@@ -579,6 +584,7 @@ mod tests {
 
     #[test]
     fn resolve_environment_id_prefers_per_spawn_env() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var(DAEMON_ENV_KEY_ENVIRONMENT_ID);
         let mut env = HashMap::new();
         env.insert(ENV_KEY_ENVIRONMENT_ID.into(), "PER_SPAWN".into());
@@ -590,6 +596,7 @@ mod tests {
 
     #[test]
     fn resolve_environment_id_falls_back_to_daemon_env() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var(DAEMON_ENV_KEY_ENVIRONMENT_ID, "DAEMON_DEFAULT");
         let env = HashMap::new();
         assert_eq!(
@@ -601,6 +608,7 @@ mod tests {
 
     #[test]
     fn resolve_environment_id_returns_none_when_unset() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var(DAEMON_ENV_KEY_ENVIRONMENT_ID);
         let env = HashMap::new();
         assert!(OzAgentRuntime::resolve_environment_id(&env).is_none());
@@ -608,6 +616,7 @@ mod tests {
 
     #[test]
     fn resolve_environment_id_treats_empty_as_unset() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var(DAEMON_ENV_KEY_ENVIRONMENT_ID);
         let mut env = HashMap::new();
         env.insert(ENV_KEY_ENVIRONMENT_ID.into(), String::new());

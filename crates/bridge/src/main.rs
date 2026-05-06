@@ -15,6 +15,7 @@ use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod setup;
+mod sync;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "agent-bridge — Unix-native AI agent control plane")]
@@ -55,6 +56,32 @@ enum Cmd {
         #[arg(long, value_enum, default_value_t = SetupFrontend::Auto)]
         frontend: SetupFrontend,
     },
+    /// Cross-device memory sync via a private GitHub repo.
+    ///
+    /// With no subcommand, runs one sync round: pull → import → export →
+    /// commit + push. Idempotent; safe to call from cron / hooks.
+    ///
+    /// `init` bootstraps the repo on a new machine via `gh`.
+    /// `status` prints the resolved repo path and last sync (no network).
+    Sync {
+        #[command(subcommand)]
+        op: Option<SyncOp>,
+        /// Verbose logging on the default `sync` action.
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SyncOp {
+    /// Bootstrap the cross-device memory repo via `gh` CLI.
+    Init {
+        /// Override the GitHub repo name (default: `agent-bridge-memory`).
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Print resolved repo path, remote, and last sync; no network calls.
+    Status,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -172,6 +199,15 @@ async fn main() -> Result<()> {
         return setup::run(frontend.resolve());
     }
 
+    // Sync subcommand: short-lived; no daemon hub needed.
+    if let Cmd::Sync { op, verbose } = &cmd {
+        return match op {
+            None => sync::run_sync(*verbose).await.map(|_| ()),
+            Some(SyncOp::Init { repo }) => sync::run_init(repo.clone()).await,
+            Some(SyncOp::Status) => sync::run_status(),
+        };
+    }
+
     let log_layer = match cmd {
         Cmd::Mcp => tracing_subscriber::fmt::layer()
             .with_writer(std::io::stderr)
@@ -211,7 +247,7 @@ async fn main() -> Result<()> {
             .await;
             Ok(())
         }
-        Cmd::Setup { .. } => unreachable!(),
+        Cmd::Setup { .. } | Cmd::Sync { .. } => unreachable!(),
     }
 }
 

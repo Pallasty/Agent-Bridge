@@ -4,34 +4,112 @@ A Unix-native AI-agent control plane: desktop notifications, cross-session memor
 MCP tool registry, terminal multiplexer glue, browser automation (CDP), git-worktree
 orchestration, and sub-agent spawning — all pluggable via Rust traits.
 
-## Quick start (new machine)
+## Install
+
+Pick whichever is easiest:
+
+| Method | When to use | Time |
+|---|---|---|
+| **Pre-built tarball** | Default — works on macOS (Apple Silicon / Intel) and x86_64 Linux | ~10 s |
+| **`cargo install --git`** | You already have a Rust toolchain | ~2–3 min cold |
+| **Source build** | You're hacking on agent-bridge itself | same |
+
+### Pre-built tarball (recommended)
 
 ```bash
-# 1. Clone and build (cold compile ≈ 2–3 min; incremental < 15 s)
+# 1. Pick your target.
+TARGET=aarch64-apple-darwin           # Apple Silicon
+# TARGET=x86_64-apple-darwin          # Intel Mac
+# TARGET=x86_64-unknown-linux-gnu     # Ubuntu / Debian / Fedora x86_64
+
+# 2. Download the latest release (or pin to a specific vX.Y.Z).
+VER=$(curl -sSL https://api.github.com/repos/pallasting/Agent-Bridge/releases/latest \
+        | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+curl -L "https://github.com/pallasting/Agent-Bridge/releases/download/${VER}/agent-bridge-${VER}-${TARGET}.tar.gz" \
+   | tar -xz -C /tmp
+install -m 755 "/tmp/agent-bridge-${VER}-${TARGET}/agent-bridge" ~/.local/bin/agent-bridge
+```
+
+Then jump to **[Configure](#configure)** below.
+
+> **Windows users:** v0.1 ships Linux + macOS only. Run agent-bridge inside
+> WSL2 (Ubuntu) — there is no native Windows build yet. See `docs/` for the
+> Windows port roadmap.
+
+### `cargo install --git` (any platform with Rust)
+
+```bash
+cargo install --git https://github.com/pallasting/Agent-Bridge.git --bin agent-bridge
+```
+
+Then jump to **[Configure](#configure)**.
+
+### Source build
+
+```bash
 git clone git@github.com:pallasting/Agent-Bridge.git ~/agent-bridge
 cd ~/agent-bridge && cargo build --release
+```
 
-# 2. Install binary + Claude Code hooks in one step
-./target/release/agent-bridge setup
+Cold compile ≈ 2–3 min on a modern laptop; incremental < 15 s. The
+binary lands at `target/release/agent-bridge`. Then jump to
+**[Configure](#configure)**.
 
-# 3. Add to PATH (fish)
+> **Linux notes for source builds:** no system libraries required —
+> `zbus` (D-Bus client) and `rusqlite` (SQLite, bundled feature) are
+> both pure Rust. You only need `cargo` and a working C linker.
+
+## Configure
+
+These steps are the same regardless of how you got the binary above.
+
+```bash
+# 1. Install hooks (Claude Code) and register MCP config.
+agent-bridge setup --frontend claude-code
+# (or --frontend codex / gemini-cli / warp / auggie / local-cli / auto)
+
+# 2. Make sure ~/.local/bin is on PATH.
 fish_add_path ~/.local/bin
 # bash/zsh: export PATH="$HOME/.local/bin:$PATH"
 
-# 4. Start the long-lived daemon
+# 3. Start the long-lived daemon.
 agent-bridge daemon &
 
-# 5. Register as MCP server (Claude Code reads this at startup)
+# 4. Register as an MCP server (Claude Code only — other frontends were
+#    auto-configured in step 1).
 claude mcp add agent-bridge agent-bridge mcp
 
-# 6. (Optional) Clone the private memory-sync repo for cross-machine memory
-git clone git@github.com:pallasting/agent-bridge-memory.git ~/agent-bridge-memory
+# 5. (Optional) Bootstrap cross-device memory sync via GitHub. Creates
+#    (or reuses) a private `<your-user>/agent-bridge-memory` repo, clones
+#    it next to state.db, and runs the first sync. Subsequent syncs are
+#    automatic — the Stop hook calls `agent-bridge sync` at session end.
+gh auth login            # one-time; HTTPS token, no SSH keys needed
+agent-bridge sync init
 
-# 7. Restart Claude Code — hooks fire automatically from here on
+# 6. Restart Claude Code — hooks fire automatically from here on.
 ```
 
-That's it. Claude Code now has persistent cross-session memory, automatic compaction,
-and git-backed sync to any other machine running agent-bridge.
+That's it. Claude Code now has persistent cross-session memory, automatic
+compaction, and git-backed sync to any other machine running agent-bridge.
+
+### Memory sync — what it does
+
+`agent-bridge sync` is one idempotent round of:
+
+1. `git pull --rebase --autostash` on the memory repo,
+2. `memory_import` (newer-wins) from `memory.jsonl` into the local SQLite store,
+3. `memory_export` of the local store back into `memory.jsonl`,
+4. `git add` + commit + push if anything changed.
+
+Run it manually any time, or let the Stop hook call it at session end.
+Other useful subcommands:
+
+- `agent-bridge sync init [--repo <name>]` — bootstrap via `gh` CLI
+- `agent-bridge sync status` — print resolved repo path, remote, last commit
+
+The repo location is resolved in this order: `AGENT_BRIDGE_MEMORY_REPO` env →
+legacy `~/agent-bridge-memory` or `~/Projects/agent-bridge-memory` (if they
+have a `.git`) → `<state-dir>/memory-sync` next to `state.db` (the new default).
 
 ---
 
