@@ -8,6 +8,19 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Skills Phase C: install + in-loop recommendation.**
+  - `agent-bridge skills install <key>` re-clones the source repo and
+    copies the original SKILL.md plus any sibling scripts/data into
+    `~/.claude/skills/<name>/`. Bails when lint flags are present or
+    the destination exists, unless `--yes` is given.
+  - `mcp__agent-bridge__skills_recommend(query, limit)` MCP tool wraps
+    the existing skill index so agents can query for pre-written skills
+    in-loop. Returns key, source, summary, lint status, and a ready-to-
+    run install command. Registered in the Standard tier (default-on).
+  - Indexer now stores `path:<rel-path>` tag on each record so install
+    can locate the original SKILL.md without searching. Re-run
+    `agent-bridge skills index` / `seed` to backfill on records indexed
+    before this change.
 - **`agent-bridge skills` subcommand** — index third-party open-source
   Claude Code skill repos into the memory store and search across them.
   Walks `**/SKILL.md`, `.claude/skills/*.md`, `skills/*.md`; parses YAML

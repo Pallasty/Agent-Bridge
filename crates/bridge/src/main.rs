@@ -125,6 +125,18 @@ enum SkillsOp {
     Show {
         key: String,
     },
+    /// Install an indexed skill into `~/.claude/skills/<name>/`.
+    ///
+    /// Re-clones the source repo and copies the original SKILL.md (plus
+    /// any sibling scripts/data, for canonical-layout skills). Bails with
+    /// guidance when the skill has lint warnings or the destination
+    /// already exists, unless `--yes` is given.
+    Install {
+        key: String,
+        /// Skip lint-warning and overwrite confirmation prompts.
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -261,6 +273,7 @@ async fn main() -> Result<()> {
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::List { limit } => skills::run_list(*limit).await,
             SkillsOp::Show { key } => skills::run_show(key).await,
+            SkillsOp::Install { key, yes } => skills::run_install(key, *yes).await,
         };
     }
 

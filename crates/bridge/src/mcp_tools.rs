@@ -7365,6 +7365,110 @@ fn reg_if(reg: &mut ToolRegistry, profile: ToolProfile, tier: Tier, tool: Arc<dy
     }
 }
 
+pub struct SkillsRecommendTool {
+    hub: Hub,
+}
+impl SkillsRecommendTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for SkillsRecommendTool {
+    fn name(&self) -> &'static str {
+        "skills_recommend"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Recommend relevant indexed Claude Code skills for a task. Searches \
+                 the local skill index (built via `agent-bridge skills index|seed`) and returns \
+                 top-K matches with source repo, lint status, and install command. Use this \
+                 before reaching for ad-hoc instructions when the user describes a coding/ops \
+                 task that might already have a skill written for it."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Task description in natural language (e.g. 'edit pdf forms', 'audit helm chart security')." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5 }
+                },
+                "required": ["query"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let q = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if q.trim().is_empty() {
+            return Ok(ToolResult::error("query is required"));
+        }
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5)
+            .clamp(1, 50) as u32;
+
+        let tag_filter = vec!["skill".to_string()];
+        let hits = store.memory_search(&q, &tag_filter, limit).await?;
+        let recs: Vec<Value> = hits
+            .into_iter()
+            .map(|h| {
+                let src = tag_value_in(&h.record.tags, "src:");
+                let lint = tag_value_in(&h.record.tags, "lint:")
+                    .map(|v| format!("lint:{}", v))
+                    .unwrap_or_else(|| "lint:?".to_string());
+                let tools = tag_value_in(&h.record.tags, "tools:");
+                // First non-empty paragraph is the description we stored
+                // (frontmatter description ‖ first body line). Truncate
+                // for token thrift; agents can call memory_get for full.
+                let summary: String = h
+                    .record
+                    .content
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("")
+                    .chars()
+                    .take(400)
+                    .collect();
+                json!({
+                    "key": h.record.key,
+                    "src": src,
+                    "summary": summary,
+                    "tools": tools,
+                    "lint": lint,
+                    "score": h.score,
+                    "install": format!("agent-bridge skills install {} --yes", h.record.key),
+                })
+            })
+            .collect();
+        let resp = json!({
+            "query": q,
+            "count": recs.len(),
+            "skills": recs,
+            "hint": if recs.is_empty() {
+                "no indexed skills match — bootstrap via `agent-bridge skills seed` if the index is empty."
+            } else {
+                "review the top hit's `summary` and `lint`; install with the `install` command (or call `memory_get` on the key for the full SKILL.md)."
+            },
+        });
+        Ok(ToolResult::json_text(&resp))
+    }
+}
+
+fn tag_value_in(tags: &[String], prefix: &str) -> Option<String> {
+    tags.iter()
+        .find(|t| t.starts_with(prefix))
+        .map(|t| t[prefix.len()..].to_string())
+}
+
 pub fn build_registry(hub: Hub) -> ToolRegistry {
     let profile = ToolProfile::from_env();
     let mut reg = ToolRegistry::new();
@@ -7420,6 +7524,8 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(TerminalReadBlocksTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotifyTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotificationsRecentTool::new(hub.clone())));
+    // Skill library (Phase C): in-loop recommendation over the local skill index.
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SkillsRecommendTool::new(hub.clone())));
 
     // ── NICHE (opt-in via AGENT_BRIDGE_TOOL_PROFILE=all) ───────────────
     // Browser automation surface.

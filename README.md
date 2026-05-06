@@ -148,10 +148,20 @@ agent-bridge skills search "review pdf document"
 # List recent / show one.
 agent-bridge skills list --limit 20
 agent-bridge skills show skill:anthropics/skills/pdf
+
+# Install one — re-clones source, copies SKILL.md plus any sibling
+# scripts/data into ~/.claude/skills/<name>/. Lint warnings require --yes.
+agent-bridge skills install skill:anthropics/skills/pdf --yes
 ```
 
 Indexed skills are stored as memory records (`kind=skill`) and persist
 across `state.db` sessions; running `index` again upserts by key.
+
+The MCP tool `skills_recommend(query, limit)` exposes the same retrieval
+to agents in-loop — when an agent describes a task ("audit a Helm chart",
+"edit a PDF form"), it can call `skills_recommend` first and surface
+matching pre-written skills with their lint status and install command,
+instead of writing instructions from scratch.
 
 ---
 

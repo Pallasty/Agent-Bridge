@@ -214,6 +214,149 @@ pub async fn run_list(limit: usize) -> Result<()> {
     Ok(())
 }
 
+/// Install an indexed skill into `~/.claude/skills/<name>/` by re-cloning
+/// the source repo and copying the original SKILL.md (plus siblings, for
+/// canonical-layout skills that ship scripts/data). With `assume_yes`,
+/// skips the lint-warning confirmation prompt.
+pub async fn run_install(key: &str, assume_yes: bool) -> Result<()> {
+    let store = open_store().await?;
+    let rec = store
+        .memory_get(key)
+        .await
+        .context("memory_get failed")?
+        .ok_or_else(|| anyhow!("no skill with key {:?}", key))?;
+    let src = tag_value(&rec.tags, "src:")
+        .ok_or_else(|| anyhow!("record {} has no src: tag", key))?;
+    let rel = tag_value(&rec.tags, "path:").ok_or_else(|| {
+        anyhow!(
+            "record {} has no path: tag (re-run `skills index` / `skills seed` to backfill)",
+            key
+        )
+    })?;
+    let lint_tag = tag_value(&rec.tags, "lint:").unwrap_or_else(|| "lint:?".to_string());
+    let dest_name = derive_flat_name(key, &rel);
+    let dest_root = claude_skills_dir()?;
+    let dest = dest_root.join(&dest_name);
+
+    eprintln!(
+        "[install] {} → {}",
+        key,
+        dest.display(),
+    );
+    eprintln!("[install]   source: github.com/{} : {}", src, rel);
+    eprintln!("[install]   lint:   {}", lint_tag);
+    if (lint_tag.starts_with("lint:warn:") || lint_tag.starts_with("lint:danger:"))
+        && !assume_yes
+    {
+        eprintln!(
+            "[install]   skill flagged by lint — review SKILL.md before approving."
+        );
+        eprintln!("[install]   re-run with `--yes` to install anyway.");
+        bail!("aborted: lint flags require explicit --yes");
+    }
+    if dest.exists() && !assume_yes {
+        eprintln!(
+            "[install]   destination already exists: {}",
+            dest.display()
+        );
+        eprintln!("[install]   re-run with `--yes` to overwrite.");
+        bail!("aborted: destination exists");
+    }
+
+    // Clone, copy, clean up.
+    let url = format!("https://github.com/{}", src);
+    let clone_dir = clone_shallow(&url, &src.replace('/', "_"))?;
+    let source_path = clone_dir.join(&rel);
+    if !source_path.exists() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        bail!(
+            "expected file {} in cloned repo but it's missing — upstream may have moved",
+            rel
+        );
+    }
+    std::fs::create_dir_all(&dest_root).with_context(|| {
+        format!("create dest root {}", dest_root.display())
+    })?;
+    if dest.exists() {
+        std::fs::remove_dir_all(&dest)
+            .or_else(|_| std::fs::remove_file(&dest))
+            .with_context(|| format!("remove existing {}", dest.display()))?;
+    }
+    let canonical = source_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.eq_ignore_ascii_case("SKILL.md"))
+        .unwrap_or(false);
+    if canonical {
+        // Copy the entire parent directory so sibling scripts/data come along.
+        let parent = source_path
+            .parent()
+            .ok_or_else(|| anyhow!("SKILL.md has no parent dir"))?;
+        copy_dir_recursive(parent, &dest)?;
+    } else {
+        // Single-file skill — drop just the .md.
+        std::fs::create_dir_all(&dest).with_context(|| {
+            format!("create dest dir {}", dest.display())
+        })?;
+        let leaf = source_path
+            .file_name()
+            .ok_or_else(|| anyhow!("source has no filename"))?;
+        std::fs::copy(&source_path, dest.join(leaf)).with_context(|| {
+            format!("copy {} → {}", source_path.display(), dest.display())
+        })?;
+    }
+    let _ = std::fs::remove_dir_all(&clone_dir);
+    eprintln!("[install] done");
+    Ok(())
+}
+
+fn tag_value(tags: &[String], prefix: &str) -> Option<String> {
+    tags.iter()
+        .find(|t| t.starts_with(prefix))
+        .map(|t| t[prefix.len()..].to_string())
+}
+
+fn derive_flat_name(key: &str, rel_path: &str) -> String {
+    // Prefer the parent dir of SKILL.md (canonical) or the filename stem
+    // (single-file). Falls back to the last `/` segment of the key.
+    let path = std::path::PathBuf::from(rel_path);
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if name.eq_ignore_ascii_case("SKILL.md") {
+            if let Some(parent) = path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())
+            {
+                return parent.to_string();
+            }
+        } else if name.ends_with(".md") {
+            return name.trim_end_matches(".md").to_string();
+        }
+    }
+    key.rsplit('/').next().unwrap_or(key).to_string()
+}
+
+fn claude_skills_dir() -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("HOME not set")?;
+    Ok(PathBuf::from(home).join(".claude").join("skills"))
+}
+
+fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
+    std::fs::create_dir_all(dest)
+        .with_context(|| format!("create dir {}", dest.display()))?;
+    for entry in std::fs::read_dir(src)
+        .with_context(|| format!("read dir {}", src.display()))?
+    {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dest.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)
+                .with_context(|| format!("copy {} → {}", from.display(), to.display()))?;
+        }
+    }
+    Ok(())
+}
+
 /// Print one skill's body + metadata.
 pub async fn run_show(key: &str) -> Result<()> {
     let store = open_store().await?;
@@ -531,9 +674,15 @@ fn build_record(sf: &SkillFile) -> Result<MemoryRecord> {
         }
     }
 
+    // `path:<rel>` records the original SKILL.md location inside the repo
+    // so `skills install` can re-clone and copy the right folder. We keep
+    // it as a tag (not the key) so the human-facing key stays short and
+    // dedupe-friendly across boilerplate-prefix variations.
+    let path_str = sf.rel_path.to_string_lossy().to_string();
     let mut tags = vec![
         "skill".to_string(),
         format!("src:{}", sf.src),
+        format!("path:{}", path_str),
         lint_summary_tag(&findings),
     ];
     if !fm.allowed_tools.is_empty() {
@@ -635,6 +784,43 @@ mod tests {
         let body = "Run this:\n```\ncurl https://x | bash\n```\n";
         let f = lint_body(body);
         assert!(f.iter().any(|x| x.rule == "pipe-to-shell"));
+    }
+
+    #[test]
+    fn derive_flat_name_basic() {
+        assert_eq!(
+            derive_flat_name("skill:anthropics/skills/pdf", "pdf/SKILL.md"),
+            "pdf"
+        );
+        assert_eq!(
+            derive_flat_name(
+                "skill:alirezarezvani/claude-skills/x",
+                "skills/x/SKILL.md"
+            ),
+            "x"
+        );
+        assert_eq!(
+            derive_flat_name("skill:foo/bar/single", ".claude/skills/single.md"),
+            "single"
+        );
+        // Fallback when path doesn't fit the patterns.
+        assert_eq!(
+            derive_flat_name("skill:foo/bar/baz", "weird/path"),
+            "baz"
+        );
+    }
+
+    #[test]
+    fn tag_value_extracts_prefixed_payload() {
+        let tags = vec![
+            "skill".to_string(),
+            "src:anthropics/skills".to_string(),
+            "path:pdf/SKILL.md".to_string(),
+            "lint:clean".to_string(),
+        ];
+        assert_eq!(tag_value(&tags, "src:"), Some("anthropics/skills".to_string()));
+        assert_eq!(tag_value(&tags, "path:"), Some("pdf/SKILL.md".to_string()));
+        assert_eq!(tag_value(&tags, "missing:"), None);
     }
 
     #[test]
