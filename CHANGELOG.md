@@ -7,6 +7,25 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-06
+
+**Theme: cross-device sync, multi-frontend agent matrix, first prebuilt binaries.**
+
+The biggest release since v0.9.1 (75 commits). Notable shifts:
+1. **Memory sync becomes a first-class subcommand** — `agent-bridge sync`
+   replaces the bash + python `sync.sh`; `agent-bridge sync init` bootstraps
+   the cross-device repo via `gh` CLI on a new machine.
+2. **Multi-frontend agent_spawn** — opencode / kilo / gemini / codex are all
+   first-class spawn backends, joining the existing claude-code / warp-oz /
+   auggie runtimes.
+3. **PTY + vt100 in the daemon** — `terminal_resize`, vim/top/clear/progress
+   rendering, multi-frontend setup support.
+4. **Continuity layer matures** — AiOT Soul read-only injection, letter-to-
+   future-self protocol, AGENT.md self-profile + 50% drift cap, agent-bridge-
+   seed grid state injection.
+5. **Release infrastructure ships** — first agent-bridge release with prebuilt
+   binaries (Linux x86_64, macOS Intel & Apple Silicon). Tag-driven CI matrix.
+
 ### Release infrastructure
 
 - **`.github/workflows/release.yml`** — tag-driven release workflow.
