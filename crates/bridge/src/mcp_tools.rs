@@ -3054,6 +3054,10 @@ impl McpTool for MemorySearchTool {
             store.memory_search(&q, &tags, limit).await?
         };
 
+        // Path C actuator: rerank using perception_filter hub_clusters.
+        // Fail-soft (no state file / disable env / empty hub_clusters → pass-through).
+        let hits = apply_seed_boost(hits);
+
         Ok(ToolResult::json_text(
             &serde_json::to_value(hits).unwrap_or(Value::Null),
         ))
@@ -8618,6 +8622,10 @@ fn format_agent_bridge_seed_block() -> Option<String> {
 
 /// Resolve path to `agent-bridge-seed/state_pf/perception_filter_state.json` if present.
 /// Override via `AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH`.
+///
+/// Search order: env var → `~/Projects/agent-bridge-seed/...` (macOS Projects layout)
+/// → `~/agent-bridge-seed/...` (Linux home layout) → `/Data/CascadeProjects/agent-bridge-seed/...`
+/// (legacy source-box default). First existing path wins.
 fn agent_bridge_perception_filter_state_path() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH") {
         let pb = PathBuf::from(p);
@@ -8625,13 +8633,17 @@ fn agent_bridge_perception_filter_state_path() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    let default =
-        PathBuf::from("/Data/CascadeProjects/agent-bridge-seed/state_pf/perception_filter_state.json");
-    if default.exists() {
-        Some(default)
-    } else {
-        None
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        let h = PathBuf::from(home);
+        candidates
+            .push(h.join("Projects/agent-bridge-seed/state_pf/perception_filter_state.json"));
+        candidates.push(h.join("agent-bridge-seed/state_pf/perception_filter_state.json"));
     }
+    candidates.push(PathBuf::from(
+        "/Data/CascadeProjects/agent-bridge-seed/state_pf/perception_filter_state.json",
+    ));
+    candidates.into_iter().find(|p| p.exists())
 }
 
 /// Format a compact summary of the perception-filter state. Pure JSON-in,
@@ -8769,6 +8781,112 @@ fn format_perception_filter_block() -> Option<String> {
     let path = agent_bridge_perception_filter_state_path()?;
     let content = std::fs::read_to_string(&path).ok()?;
     format_perception_filter_block_from_json(&content)
+}
+
+// ── Path C actuator: seed-grid-driven memory_search rerank ─────────────────
+//
+// Path B sidecar (perception_filter_sidecar.py) writes hub_clusters into
+// state_pf/perception_filter_state.json — a list of (neuron_id, basin_size,
+// near_keys) entries identifying which existing record keys cluster around
+// the most populous hubs in the perception grid.
+//
+// Here we read those near_keys, union them into a HashSet, and use it as a
+// boost set for memory_search results: any result key that appears in the
+// set has its score multiplied by SEED_BOOST_FACTOR. This is the "active
+// influence" half of Path C — the seed grid topology actively shifts which
+// records get surfaced, not just an observation block in bootstrap.
+//
+// Disable at runtime by setting AGENT_BRIDGE_SEED_BOOST_DISABLE=1.
+//
+// Cache: HashSet is rebuilt only when the state JSON's mtime changes —
+// minimal overhead per memory_search call (a stat() + a hashset clone).
+
+const SEED_BOOST_FACTOR: f64 = 1.20;
+
+struct SeedBoostCache {
+    path_mtime: Option<std::time::SystemTime>,
+    boost_keys: std::collections::HashSet<String>,
+}
+
+static SEED_BOOST_CACHE: std::sync::LazyLock<std::sync::Mutex<SeedBoostCache>> =
+    std::sync::LazyLock::new(|| {
+        std::sync::Mutex::new(SeedBoostCache {
+            path_mtime: None,
+            boost_keys: std::collections::HashSet::new(),
+        })
+    });
+
+fn seed_boost_keys() -> std::collections::HashSet<String> {
+    if std::env::var("AGENT_BRIDGE_SEED_BOOST_DISABLE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return std::collections::HashSet::new();
+    }
+    let path = match agent_bridge_perception_filter_state_path() {
+        Some(p) => p,
+        None => return std::collections::HashSet::new(),
+    };
+    let mtime = match std::fs::metadata(&path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+    {
+        Some(m) => m,
+        None => return std::collections::HashSet::new(),
+    };
+    let mut cache = match SEED_BOOST_CACHE.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    if cache.path_mtime == Some(mtime) {
+        return cache.boost_keys.clone();
+    }
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => {
+            cache.path_mtime = Some(mtime);
+            cache.boost_keys.clear();
+            return cache.boost_keys.clone();
+        }
+    };
+    let mut keys = std::collections::HashSet::new();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+        if let Some(arr) = v.get("hub_clusters").and_then(|x| x.as_array()) {
+            for hc in arr {
+                if let Some(near) = hc.get("near_keys").and_then(|x| x.as_array()) {
+                    for k in near {
+                        if let Some(s) = k.as_str() {
+                            keys.insert(s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    cache.path_mtime = Some(mtime);
+    cache.boost_keys = keys.clone();
+    keys
+}
+
+/// Re-rank memory_search hits by applying SEED_BOOST_FACTOR to scores whose
+/// record.key appears in the current seed-grid hub_clusters near_keys union.
+/// Idempotent and fail-soft — empty boost set ⇒ pass-through.
+fn apply_seed_boost(mut hits: Vec<MemorySearchHit>) -> Vec<MemorySearchHit> {
+    let boost = seed_boost_keys();
+    if boost.is_empty() {
+        return hits;
+    }
+    for h in hits.iter_mut() {
+        if boost.contains(&h.record.key) {
+            h.score *= SEED_BOOST_FACTOR;
+        }
+    }
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits
 }
 
 // ── Decision review trigger ─────────────────────────────────────────────────
@@ -9129,6 +9247,155 @@ mod tests {
         );
         let block = format_perception_filter_block_from_json(&json).unwrap();
         assert!(block.contains("…"), "long key must be truncated");
+    }
+
+    // ── Path C actuator: seed boost rerank ─────────────────────────────────
+
+    fn make_hit(key: &str, score: f64) -> MemorySearchHit {
+        MemorySearchHit {
+            record: MemoryRecord {
+                key: key.to_string(),
+                kind: "lesson".into(),
+                content: String::new(),
+                tags: Vec::new(),
+                related_keys: Vec::new(),
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                scope: None,
+                importance: 0.5,
+                status: "active".into(),
+                trigger_pattern: None,
+            },
+            score,
+        }
+    }
+
+    /// With AGENT_BRIDGE_SEED_BOOST_DISABLE=1 set, the rerank is a pass-through
+    /// even when the state file exists. Verifies the kill-switch.
+    #[test]
+    fn seed_boost_disabled_via_env_is_passthrough() {
+        // Best-effort: this test runs in a process where other tests may have
+        // mutated env. Set, run, restore.
+        let prev = std::env::var("AGENT_BRIDGE_SEED_BOOST_DISABLE").ok();
+        std::env::set_var("AGENT_BRIDGE_SEED_BOOST_DISABLE", "1");
+
+        let hits_in = vec![
+            make_hit("a", 1.0),
+            make_hit("b", 2.0),
+            make_hit("c", 0.5),
+        ];
+        let hits_out = apply_seed_boost(hits_in.clone());
+
+        // Order and scores unchanged because boost set is forced empty.
+        assert_eq!(hits_out.len(), 3);
+        for (got, want) in hits_out.iter().zip(hits_in.iter()) {
+            assert_eq!(got.record.key, want.record.key);
+            assert_eq!(got.score, want.score);
+        }
+
+        match prev {
+            Some(v) => std::env::set_var("AGENT_BRIDGE_SEED_BOOST_DISABLE", v),
+            None => std::env::remove_var("AGENT_BRIDGE_SEED_BOOST_DISABLE"),
+        }
+    }
+
+    /// When the state file exists but has no hub_clusters (older schema /
+    /// pre-Stage-A snapshot), seed_boost_keys returns an empty set and
+    /// apply_seed_boost is a strict pass-through (no reorder).
+    #[test]
+    fn seed_boost_state_without_hub_clusters_is_passthrough() {
+        let prev_path = std::env::var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH").ok();
+        let prev_disable = std::env::var("AGENT_BRIDGE_SEED_BOOST_DISABLE").ok();
+        std::env::remove_var("AGENT_BRIDGE_SEED_BOOST_DISABLE");
+
+        let dir = std::env::temp_dir().join(format!(
+            "ab-pathc-empty-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state_path = dir.join("perception_filter_state.json");
+        // No hub_clusters key — older schema / fresh tail before Stage A landed.
+        std::fs::write(&state_path, r#"{"n_total":100,"grid":{"step":100}}"#).unwrap();
+        std::env::set_var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH", &state_path);
+
+        // Pre-sorted desc by score so pass-through preserves order trivially.
+        let hits = vec![make_hit("y", 2.0), make_hit("x", 1.0)];
+        let out = apply_seed_boost(hits.clone());
+        assert_eq!(out.len(), 2);
+        for (got, want) in out.iter().zip(hits.iter()) {
+            assert_eq!(got.record.key, want.record.key);
+            assert_eq!(got.score, want.score);
+        }
+
+        std::fs::remove_file(&state_path).ok();
+        std::fs::remove_dir(&dir).ok();
+        match prev_path {
+            Some(v) => std::env::set_var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH", v),
+            None => std::env::remove_var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH"),
+        }
+        match prev_disable {
+            Some(v) => std::env::set_var("AGENT_BRIDGE_SEED_BOOST_DISABLE", v),
+            None => std::env::remove_var("AGENT_BRIDGE_SEED_BOOST_DISABLE"),
+        }
+    }
+
+    /// End-to-end: pointing PERCEPTION_FILTER_STATE_PATH at a file containing
+    /// hub_clusters with specific near_keys boosts those keys' scores by the
+    /// expected factor and re-sorts.
+    #[test]
+    fn seed_boost_applies_factor_and_resorts() {
+        let prev_path = std::env::var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH").ok();
+        let prev_disable = std::env::var("AGENT_BRIDGE_SEED_BOOST_DISABLE").ok();
+        std::env::remove_var("AGENT_BRIDGE_SEED_BOOST_DISABLE");
+
+        let dir = std::env::temp_dir().join(format!("ab-pathc-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state_path = dir.join("perception_filter_state.json");
+        std::fs::write(
+            &state_path,
+            r#"{"hub_clusters":[{"neuron_id":2,"in_strength":4.0,"basin_size":3,"follower_count":1,"near_keys":["boosted_a","boosted_b"]},{"neuron_id":3,"in_strength":1.0,"basin_size":1,"follower_count":0,"near_keys":["boosted_c"]}]}"#,
+        )
+        .unwrap();
+        std::env::set_var(
+            "AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH",
+            &state_path,
+        );
+
+        let hits = vec![
+            make_hit("unboosted_high", 2.0),
+            make_hit("boosted_a", 1.5),
+            make_hit("boosted_b", 1.8),
+            make_hit("unboosted_mid", 1.6),
+        ];
+        let out = apply_seed_boost(hits);
+
+        assert_eq!(out.len(), 4);
+        // boosted_b: 1.8 * 1.20 = 2.16 — should now be top.
+        // unboosted_high: 2.0 — second.
+        // boosted_a: 1.5 * 1.20 = 1.80 — third.
+        // unboosted_mid: 1.6 — fourth (1.6 < 1.8).
+        assert_eq!(out[0].record.key, "boosted_b");
+        assert!((out[0].score - 2.16).abs() < 1e-9, "got {}", out[0].score);
+        assert_eq!(out[1].record.key, "unboosted_high");
+        assert_eq!(out[2].record.key, "boosted_a");
+        assert!((out[2].score - 1.80).abs() < 1e-9, "got {}", out[2].score);
+        assert_eq!(out[3].record.key, "unboosted_mid");
+
+        std::fs::remove_file(&state_path).ok();
+        match prev_path {
+            Some(v) => std::env::set_var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH", v),
+            None => std::env::remove_var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH"),
+        }
+        match prev_disable {
+            Some(v) => std::env::set_var("AGENT_BRIDGE_SEED_BOOST_DISABLE", v),
+            None => std::env::remove_var("AGENT_BRIDGE_SEED_BOOST_DISABLE"),
+        }
     }
 
     #[test]
