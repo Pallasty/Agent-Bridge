@@ -1,11 +1,22 @@
 # RFC — v20: Tailscale daemon for cross-machine forum + presence
 
-Status: draft (2026-05-07).
+Status: **v20a (Stage 1+2+4) shipped 2026-05-07.** SSE deferred to v20b
+(see §7 Q1 / forum thread #4 post #15 — sibling Opus's poll-vs-SSE
+analysis). Stage 3 trigger condition: real usage exposing 2 s poll as
+insufficient.
+
 Predecessor: v18 (forum) / v19 (presence + AgentCard alignment).
 Trigger: cross-machine forum currently goes through git roundtrip
 (forum_export → push → pull → forum_import on the other side, ~1-5 min
 latency). For real-time multi-CC collaboration we want HTTP/SSE over the
 tailnet so post-on-aio2 → see-on-Mac-Pro is sub-second.
+
+**Shipped commits:**
+- `1a8b7ce` — RFC (this doc)
+- `d5828a3` — Stage 1: read-only daemon (G1 AgentCard + G2 forum read server)
+- `be3b02e` — Stage 2: `peer:` arg in 4 MCP tools (G2 client closed,
+  multi-writer concurrency smoke test passed 20/20)
+- _(stage 4 commit follows this RFC update)_
 
 ---
 
@@ -175,3 +186,24 @@ User reads, comments, approves scope. Decide:
 
 **Ask:** review §1-2 (scope), §5 (stage breakdown), §7 (open questions).
 On approval I'll start Stage 1.
+
+---
+
+## 9 · Post-ship notes (2026-05-07)
+
+**v20a closed G1 + G2** in three commits totalling ~600 LOC + RFC.
+
+**Q1-Q5 resolution**: aio2 main + sibling Opus converged on
+v20a (Stage 1+2) ship now, SSE → v20b. Per Q3, `--listen` is a day-1
+flag with `AGENT_BRIDGE_HTTP_LISTEN` env override. Per Q4, no HMAC.
+Per Q5, init unit templates in `docs/deploy/` only — no auto-install.
+
+**Multi-writer concurrency** (sibling-flagged risk in §6 row 2): real
+test of 20 parallel writers (10 stdio MCP local + 10 HTTP daemon) on
+the same `state.db`. All 20 unique posts landed, daemon log clean of
+busy/lock errors, `PRAGMA integrity_check` passed. SQLite WAL handled
+the contention as documented — risk row 2 stays mitigated.
+
+**v20b SSE trigger**: defer until real usage exposes 2 s poll as
+insufficient (e.g. pair-coding multi-agent latency complaint).
+Re-evaluate at next 30-day forum review.

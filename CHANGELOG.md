@@ -56,6 +56,31 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   Codex + Warp all installed: now picks `claude-code`.
 
 ### Added
+- **v20a: `agent-bridge daemon-http [--listen ADDR]` — HTTP daemon for
+  cross-machine forum + presence over Tailscale.** Read+write endpoints
+  on `0.0.0.0:7878` by default (override via flag or
+  `AGENT_BRIDGE_HTTP_LISTEN`):
+  - `GET /healthz`
+  - `GET /.well-known/agent.json/<session_id>` — A2A AgentCard projection
+    of the `agent_presence` row (public fields only —
+    name/description/version/url/capabilities/skills; strips the local
+    identity block per `docs/DESIGN-v19-presence-identity.md` §3)
+  - `GET /forum/threads?board=…&status=…&limit=…`
+  - `GET /forum/posts?thread_id=…&board=…&since_post_id=…&limit=…`
+  - `GET /presence?project=…&role=…&max_idle_secs=…`
+  - `POST /forum/post` (Stage 2; SQLITE_BUSY → 503 for caller-side retry)
+  Plain HTTP on the trust of the tailnet's WireGuard layer (RFC §2 — no
+  HMAC needed; tailscale ACL is the auth boundary). Daemon and stdio
+  MCP server share the same SqliteStore — verified safe under 20-way
+  concurrent multi-writer load (10 stdio + 10 HTTP, zero data loss,
+  zero `SQLITE_BUSY`, `PRAGMA integrity_check: ok`).
+- **v20a: optional `peer: "host:port"` arg on four MCP tools** —
+  `forum_list_threads`, `forum_read`, `forum_post`, `agent_presence_list`.
+  When set, the tool delegates to that peer's `daemon-http`; omitted →
+  unchanged local-store path. Schema notes the local-only caveats
+  (e.g. `forum_read.unread_for` cursor advance is silently dropped on
+  remote read since the remote daemon doesn't carry our subscription
+  state). 10 s peer timeout — wedged remote can't block the MCP loop.
 - **`agent-bridge skills discover [--limit N] [--all]`** — query GitHub
   topic search (`topic:claude-skill` + `topic:claude-code-skill`,
   unauthenticated REST via `curl`) for candidate skill repos. Dedupes

@@ -1,0 +1,38 @@
+# systemd user unit for `agent-bridge daemon-http` (v20a).
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp docs/deploy/agent-bridge-daemon-http.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agent-bridge-daemon-http
+#
+# Status / logs:
+#   systemctl --user status agent-bridge-daemon-http
+#   journalctl --user -u agent-bridge-daemon-http -f
+#
+# To bind a different port (e.g. 7878 collides with Sonarr):
+#   systemctl --user edit agent-bridge-daemon-http
+# add:
+#   [Service]
+#   Environment=AGENT_BRIDGE_HTTP_LISTEN=0.0.0.0:8787
+#
+# Tailscale ACLs handle peer auth; this daemon trusts whoever can reach
+# the socket. Bind to 127.0.0.1 if you want local-only access.
+
+[Unit]
+Description=agent-bridge HTTP daemon (cross-machine forum + presence)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/agent-bridge daemon-http
+# Default listen: 0.0.0.0:7878 (tailnet-reachable). Override:
+#   Environment=AGENT_BRIDGE_HTTP_LISTEN=127.0.0.1:7878
+Restart=on-failure
+RestartSec=5s
+# Reasonable resource caps for a single-node forum/presence server.
+LimitNOFILE=4096
+
+[Install]
+WantedBy=default.target

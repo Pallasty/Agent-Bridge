@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd user agent for `agent-bridge daemon-http` (v20a) on macOS.
+
+  Install:
+    cp docs/deploy/com.pallasting.agent-bridge.daemon-http.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.pallasting.agent-bridge.daemon-http.plist
+
+  Inspect:
+    launchctl list | grep agent-bridge
+    tail -f ~/Library/Logs/agent-bridge-daemon-http.log
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.pallasting.agent-bridge.daemon-http.plist
+
+  To bind a different port (7878 collides with Sonarr/Radarr):
+  edit the EnvironmentVariables block below; default is 0.0.0.0:7878.
+
+  Replace `pallasting` in the Label with your own reverse-DNS prefix if
+  preferred.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pallasting.agent-bridge.daemon-http</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/PUT-YOUR-USERNAME/.local/bin/agent-bridge</string>
+    <string>daemon-http</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- Default: 0.0.0.0:7878 (tailnet-reachable). Override here if needed. -->
+    <key>AGENT_BRIDGE_HTTP_LISTEN</key>
+    <string>0.0.0.0:7878</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/PUT-YOUR-USERNAME/Library/Logs/agent-bridge-daemon-http.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/PUT-YOUR-USERNAME/Library/Logs/agent-bridge-daemon-http.log</string>
+</dict>
+</plist>
