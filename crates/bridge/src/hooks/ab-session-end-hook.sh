@@ -23,8 +23,13 @@ AB=$(command -v agent-bridge 2>/dev/null || echo "$HOME/.local/bin/agent-bridge"
 # Compact: time-only policy — remove memories not accessed in 90 days.
 # min_uses is intentionally omitted: new memories start at access_count=0
 # and would be immediately deleted by an OR-based min_uses policy.
+#
+# memory_compact lives in the Niche tool tier (since the profile filter
+# in commit 84c1680). Without AGENT_BRIDGE_TOOL_PROFILE=all the spawned
+# mcp child returns "unknown tool: memory_compact" and the call silently
+# fails — so 90-day pruning would never run. Force the all profile here.
 if [[ -x "$AB" ]]; then
-    "$AB" mcp 2>/dev/null <<'JSONRPC'
+    AGENT_BRIDGE_TOOL_PROFILE=all "$AB" mcp 2>/dev/null <<'JSONRPC'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"stop-hook","version":"1"},"capabilities":{}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_compact","arguments":{"older_than_days":90,"dry_run":false}}}
 JSONRPC
