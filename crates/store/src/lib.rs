@@ -224,6 +224,107 @@ pub struct AgentMessageRecord {
     pub read: bool,
 }
 
+// ── v18: forum / shared whiteboard ───────────────────────────────────────────
+
+/// One thread (topic) on a board.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForumThreadRecord {
+    pub id: i64,
+    pub board: String,
+    pub title: String,
+    pub created_by: String,
+    pub created_at: i64,
+    pub last_post_at: i64,
+    /// `open` | `resolved` | `archived`
+    pub status: String,
+    pub tags: Vec<String>,
+    pub post_count: i64,
+    /// Posts after the caller's `last_seen_post_id` (only filled when caller
+    /// has a subscription on this thread or its board).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread_count: Option<i64>,
+}
+
+/// One post inside a thread.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForumPostRecord {
+    pub id: i64,
+    pub thread_id: i64,
+    pub author: String,
+    /// `msg` | `finding` | `question` | `decision` | `reply`
+    pub kind: String,
+    pub body: String,
+    pub refs: serde_json::Value,
+    pub created_at: i64,
+}
+
+/// Result of `forum_post`: either a brand-new thread + its first post, or an
+/// appended post on an existing thread.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForumPostOutcome {
+    pub thread_id: i64,
+    pub post_id: i64,
+    /// True when this call also created the thread row.
+    pub created_thread: bool,
+}
+
+// ── v19: agent presence / identity registry ─────────────────────────────────
+
+/// One agent's presence row. Field naming aligns with Google A2A AgentCard so
+/// the public-facing block (name/description/version/url/capabilities/skills)
+/// can be serialized directly to `/.well-known/agent.json` once we daemon-ize.
+/// See `docs/DESIGN-v19-presence-identity.md`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentPresenceRecord {
+    pub session_id: String,
+
+    // A2A AgentCard public block
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills: Option<serde_json::Value>,
+
+    // Identity convention split-out (private to bridge)
+    pub node: String,
+    pub project: String,
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<i64>,
+
+    pub started_at: i64,
+    pub last_heartbeat_at: i64,
+}
+
+/// Optional fields for `agent_presence_announce` upsert. `None` means "leave
+/// existing value untouched" (so heartbeat-only refresh calls work without
+/// re-supplying everything). Internal builder — not meant to cross the wire.
+#[derive(Debug, Clone, Default)]
+pub struct AgentPresenceUpsert<'a> {
+    pub name: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub version: Option<&'a str>,
+    pub url: Option<&'a str>,
+    pub node: Option<&'a str>,
+    pub project: Option<&'a str>,
+    pub role: Option<&'a str>,
+    pub tag: Option<&'a str>,
+    pub cwd: Option<&'a str>,
+    pub pid: Option<i64>,
+    pub capabilities: Option<&'a serde_json::Value>,
+    pub skills: Option<&'a serde_json::Value>,
+}
+
 // ── D3.2: codebase symbol index ──────────────────────────────────────────────
 
 /// One symbol extracted from a source file.
@@ -632,6 +733,139 @@ pub trait StateStore: Send + Sync {
         unread_only: bool,
         limit: u32,
     ) -> Result<Vec<AgentMessageRecord>>;
+
+    // ─── v18: forum / collaboration whiteboard ─────────────────────────────
+
+    /// Create a new thread (when `thread_id` is None) or append a post to an
+    /// existing one. `author` must be non-empty (caller-provided session id).
+    /// `refs` is opaque JSON — typically `{memory_keys:[...], files:[...],
+    /// parent_post_id:N}`.
+    async fn forum_post(
+        &self,
+        thread_id: Option<i64>,
+        board: Option<&str>,
+        title: Option<&str>,
+        author: &str,
+        kind: &str,
+        body: &str,
+        refs: Option<&serde_json::Value>,
+        tags: Option<&[String]>,
+    ) -> Result<ForumPostOutcome> {
+        let _ = (
+            thread_id, board, title, author, kind, body, refs, tags,
+        );
+        Err(ab_core::Error::Backend("forum_post not implemented".into()))
+    }
+
+    /// Read posts from a thread (when `thread_id` is set) or across a board
+    /// (when `board` is set). Cursor: `since_post_id` (exclusive). When
+    /// `unread_for` is set the cursor is inferred from `forum_subscriptions`
+    /// (ignored if no subscription row exists). Limit clamped to 1..=500.
+    ///
+    /// Auto-advance is **scope-symmetric**: a thread-scoped read only advances
+    /// a *thread* subscription cursor (never the board cursor — that would
+    /// wrongly mark unread posts in sibling threads as seen). To get unread
+    /// tracking on a thread, subscribe with `scope_kind = "thread"`.
+    async fn forum_read(
+        &self,
+        thread_id: Option<i64>,
+        board: Option<&str>,
+        since_post_id: Option<i64>,
+        unread_for: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<ForumPostRecord>> {
+        let _ = (thread_id, board, since_post_id, unread_for, limit);
+        Err(ab_core::Error::Backend("forum_read not implemented".into()))
+    }
+
+    /// Subscribe `session_id` to a thread or board. Idempotent: re-subscribing
+    /// preserves existing `last_seen_post_id` unless `reset` is true.
+    /// `scope_kind` must be `"thread"` or `"board"`.
+    async fn forum_subscribe(
+        &self,
+        session_id: &str,
+        scope_kind: &str,
+        scope_value: &str,
+        reset: bool,
+    ) -> Result<()> {
+        let _ = (session_id, scope_kind, scope_value, reset);
+        Err(ab_core::Error::Backend(
+            "forum_subscribe not implemented".into(),
+        ))
+    }
+
+    /// Mark `session_id` as having seen up to `post_id` (for the matching
+    /// thread or board subscription). Used by `forum_read` to advance cursor
+    /// and by explicit ack flows.
+    async fn forum_mark_seen(
+        &self,
+        session_id: &str,
+        scope_kind: &str,
+        scope_value: &str,
+        post_id: i64,
+    ) -> Result<()> {
+        let _ = (session_id, scope_kind, scope_value, post_id);
+        Err(ab_core::Error::Backend(
+            "forum_mark_seen not implemented".into(),
+        ))
+    }
+
+    /// List threads on a board, ordered by `last_post_at DESC`. When
+    /// `unread_for` is set, each row's `unread_count` is filled relative to
+    /// that session's subscription cursors (board-level OR per-thread).
+    async fn forum_list_threads(
+        &self,
+        board: &str,
+        unread_for: Option<&str>,
+        status: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<ForumThreadRecord>> {
+        let _ = (board, unread_for, status, limit);
+        Err(ab_core::Error::Backend(
+            "forum_list_threads not implemented".into(),
+        ))
+    }
+
+    /// Update thread status (`open` | `resolved` | `archived`).
+    async fn forum_set_thread_status(&self, thread_id: i64, status: &str) -> Result<()> {
+        let _ = (thread_id, status);
+        Err(ab_core::Error::Backend(
+            "forum_set_thread_status not implemented".into(),
+        ))
+    }
+
+    // ─── v19: agent presence registry ──────────────────────────────────────
+
+    /// Upsert a presence row keyed by `session_id`. Refreshes
+    /// `last_heartbeat_at`. On insert, all required cols (`name`, `node`,
+    /// `project`, `role`) must be supplied via `upsert`. On update, fields set
+    /// to `None` keep their prior value so heartbeat-only calls are cheap.
+    async fn agent_presence_announce(
+        &self,
+        session_id: &str,
+        upsert: AgentPresenceUpsert<'_>,
+    ) -> Result<AgentPresenceRecord> {
+        let _ = (session_id, upsert);
+        Err(ab_core::Error::Backend(
+            "agent_presence_announce not implemented".into(),
+        ))
+    }
+
+    /// List active presence rows (heartbeat ≥ now − `max_idle_secs`).
+    /// `max_idle_secs = 0` means no TTL filter. Optional filters on
+    /// `project` and `role`. Limit clamped 1..=500.
+    async fn agent_presence_list(
+        &self,
+        project: Option<&str>,
+        role: Option<&str>,
+        max_idle_secs: i64,
+        limit: u32,
+    ) -> Result<Vec<AgentPresenceRecord>> {
+        let _ = (project, role, max_idle_secs, limit);
+        Err(ab_core::Error::Backend(
+            "agent_presence_list not implemented".into(),
+        ))
+    }
 
     /// D2.3: load all active memories with embeddings into an in-process cache.
     /// Returns `(record, embedding)` pairs. Default impl returns an empty vec

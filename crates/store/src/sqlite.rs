@@ -3,7 +3,7 @@
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
-use tokio_rusqlite::{params, Connection};
+use tokio_rusqlite::{params, rusqlite, Connection};
 
 // Local alias matches the `E` parameter that `tokio_rusqlite::Connection::call`
 // expects from the user closure.
@@ -56,11 +56,12 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 }
 
 use crate::{
-    AgentMessageRecord, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, ImportConflictPolicy,
-    ImportReport, McpToolCallStats, McpToolErrorRecord, MemoryEdge, MemoryEdgeExport,
-    MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryRecord, MemorySearchHit,
-    MemoryStats, NotificationRecord, PlanRecord, PlanStep, SessionFilter, StateStore,
-    StoredSession, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, STDIO_CAP,
+    AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CodebaseIndexStats,
+    CodebaseSymbol, CompactPolicy, ForumPostOutcome, ForumPostRecord, ForumThreadRecord,
+    ImportConflictPolicy, ImportReport, McpToolCallStats, McpToolErrorRecord, MemoryEdge,
+    MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryRecord,
+    MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep, SessionFilter,
+    StateStore, StoredSession, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, STDIO_CAP,
 };
 
 const SCHEMA_V1: &str = r#"
@@ -299,6 +300,72 @@ CREATE TABLE IF NOT EXISTS codebase_symbols (
 CREATE INDEX IF NOT EXISTS idx_csym_root ON codebase_symbols(root_path);
 CREATE INDEX IF NOT EXISTS idx_csym_name ON codebase_symbols(name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_csym_kind ON codebase_symbols(kind);
+"#;
+
+// v18: forum / shared whiteboard for cross-process Claude Code collaboration.
+// Keeps "ephemeral discussion" separate from the long-term `memories` graph so
+// embedding-dedup and compaction do not collapse conversation turns.
+const SCHEMA_V18: &str = r#"
+CREATE TABLE IF NOT EXISTS forum_threads (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    board         TEXT    NOT NULL,
+    title         TEXT    NOT NULL,
+    created_by    TEXT    NOT NULL,
+    created_at    INTEGER NOT NULL,
+    last_post_at  INTEGER NOT NULL,
+    status        TEXT    NOT NULL DEFAULT 'open',
+    tags_json     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_forum_threads_board ON forum_threads(board, last_post_at DESC);
+CREATE INDEX IF NOT EXISTS idx_forum_threads_status ON forum_threads(status);
+
+CREATE TABLE IF NOT EXISTS forum_posts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id     INTEGER NOT NULL REFERENCES forum_threads(id) ON DELETE CASCADE,
+    author        TEXT    NOT NULL,
+    kind          TEXT    NOT NULL DEFAULT 'msg',
+    body          TEXT    NOT NULL,
+    refs_json     TEXT,
+    created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_forum_posts_thread ON forum_posts(thread_id, id);
+CREATE INDEX IF NOT EXISTS idx_forum_posts_author ON forum_posts(author, id DESC);
+
+CREATE TABLE IF NOT EXISTS forum_subscriptions (
+    session_id        TEXT    NOT NULL,
+    scope_kind        TEXT    NOT NULL,
+    scope_value       TEXT    NOT NULL,
+    last_seen_post_id INTEGER NOT NULL DEFAULT 0,
+    created_at        INTEGER NOT NULL,
+    PRIMARY KEY (session_id, scope_kind, scope_value)
+);
+CREATE INDEX IF NOT EXISTS idx_forum_subs_scope ON forum_subscriptions(scope_kind, scope_value);
+"#;
+
+// v19: cross-process identity & presence registry. Field naming intentionally
+// aligned with Google A2A AgentCard so a future Tailscale daemon can serve
+// `/.well-known/agent.json` directly off these rows. See
+// docs/DESIGN-v19-presence-identity.md.
+const SCHEMA_V19: &str = r#"
+CREATE TABLE IF NOT EXISTS agent_presence (
+    session_id        TEXT    PRIMARY KEY,
+    name              TEXT    NOT NULL,
+    description       TEXT,
+    version           TEXT,
+    url               TEXT,
+    node              TEXT    NOT NULL,
+    project           TEXT    NOT NULL,
+    role              TEXT    NOT NULL,
+    tag               TEXT,
+    cwd               TEXT,
+    pid               INTEGER,
+    capabilities_json TEXT,
+    skills_json       TEXT,
+    started_at        INTEGER NOT NULL,
+    last_heartbeat_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_presence_active  ON agent_presence(last_heartbeat_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_presence_project ON agent_presence(project, role);
 "#;
 
 /// Default database path.
@@ -637,6 +704,32 @@ impl SqliteStore {
                 c.execute_batch(SCHEMA_V17)?;
                 let _ = c.execute("UPDATE schema_meta SET value='17' WHERE key='version'", []);
             }
+
+            // ── v18: forum tables (cross-process collaboration whiteboard) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "17".to_string());
+            if cur.as_str() == "17" {
+                c.execute_batch(SCHEMA_V18)?;
+                let _ = c.execute("UPDATE schema_meta SET value='18' WHERE key='version'", []);
+            }
+
+            // ── v19: agent_presence registry (identity + heartbeat) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "18".to_string());
+            if cur.as_str() == "18" {
+                c.execute_batch(SCHEMA_V19)?;
+                let _ = c.execute("UPDATE schema_meta SET value='19' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -852,6 +945,41 @@ fn parse_str_array(s: &str) -> Vec<String> {
 }
 
 /// Clamp `s` to at most `max` bytes, preserving UTF-8 boundaries.
+/// Action selected for one row during a [`SqliteStore::memory_import`] preflight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImportAction {
+    Insert,
+    Update,
+    Skip,
+}
+
+/// Decide what `memory_import` will do per row, *without* touching SQLite or the
+/// embedding backend. Pulled out so the "skip everything" fast path is unit-testable
+/// and so we can guarantee `embed_batch` is only called for rows we actually persist.
+fn plan_import_actions(
+    parsed: &[MemoryRecord],
+    existing_uat: &std::collections::HashMap<String, i64>,
+    policy: ImportConflictPolicy,
+) -> Vec<ImportAction> {
+    parsed
+        .iter()
+        .map(|r| match existing_uat.get(&r.key) {
+            None => ImportAction::Insert,
+            Some(&existing) => match policy {
+                ImportConflictPolicy::Skip => ImportAction::Skip,
+                ImportConflictPolicy::Overwrite => ImportAction::Update,
+                ImportConflictPolicy::NewerWins => {
+                    if r.updated_at > existing {
+                        ImportAction::Update
+                    } else {
+                        ImportAction::Skip
+                    }
+                }
+            },
+        })
+        .collect()
+}
+
 fn clamp(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
@@ -2189,40 +2317,86 @@ impl StateStore for SqliteStore {
             }
         }
 
-        // Pre-compute all embeddings via the active backend's batch path —
-        // amortises ONNX attention compute across the import. Triggered by
-        // friction_workflow_20260503_memory_import_batch_embed (16s for
-        // ~100 rows in per-row mode → expected O(seconds) total in batch).
         let clamped_contents: Vec<String> = parsed
             .iter()
             .map(|r| clamp(&r.content, MEMORY_CONTENT_CAP))
             .collect();
-        let content_refs: Vec<&str> = clamped_contents.iter().map(|s| s.as_str()).collect();
-        let backend = crate::embedding::default_backend();
-        let embeddings: Vec<Vec<u8>> = backend
-            .embed_batch(&content_refs)
-            .into_iter()
-            .map(|v| crate::vector::encode_embedding(&v))
-            .collect();
 
+        // Pre-flight (read-only): figure out which keys already exist so we
+        // can decide each row's action *before* paying for embeddings. The
+        // typical sync.sh flow re-imports an unchanged JSONL with Skip
+        // policy — without this gate, every Stop hook spawned a fresh
+        // process that batch-embedded 100s of rows and then threw the
+        // results away, cold-starting fastembed each time.
+        let existing_uat: std::collections::HashMap<String, i64> = if parsed.is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            let keys: Vec<String> = parsed.iter().map(|r| r.key.clone()).collect();
+            self.conn
+                .call(move |c| -> RusqliteResult<std::collections::HashMap<String, i64>> {
+                    let mut map = std::collections::HashMap::with_capacity(keys.len());
+                    // Chunk to stay under SQLite's default max parameter limit (999).
+                    for chunk in keys.chunks(500) {
+                        let placeholders = std::iter::repeat("?")
+                            .take(chunk.len())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let sql = format!(
+                            "SELECT key, updated_at FROM memories WHERE key IN ({placeholders})"
+                        );
+                        let mut stmt = c.prepare(&sql)?;
+                        let mut rows = stmt.query(rusqlite::params_from_iter(chunk.iter()))?;
+                        while let Some(row) = rows.next()? {
+                            let k: String = row.get(0)?;
+                            let u: i64 = row.get(1)?;
+                            map.insert(k, u);
+                        }
+                    }
+                    Ok(map)
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("memory_import preflight: {e}")))?
+        };
+
+        let actions = plan_import_actions(&parsed, &existing_uat, policy);
+
+        // Embed only rows we're actually going to persist. When everything
+        // is Skip (the common sync-no-op case), we never touch the embedding
+        // backend → fastembed never cold-starts.
+        let to_embed_idx: Vec<usize> = actions
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| !matches!(a, ImportAction::Skip))
+            .map(|(i, _)| i)
+            .collect();
+        let mut embeddings: Vec<Option<Vec<u8>>> = vec![None; parsed.len()];
+        if !to_embed_idx.is_empty() {
+            let to_embed_refs: Vec<&str> = to_embed_idx
+                .iter()
+                .map(|&i| clamped_contents[i].as_str())
+                .collect();
+            let backend = crate::embedding::default_backend();
+            let vecs = backend.embed_batch(&to_embed_refs);
+            for (k, &i) in to_embed_idx.iter().enumerate() {
+                embeddings[i] = Some(crate::vector::encode_embedding(&vecs[k]));
+            }
+        }
+
+        let parsed_for_tx = parsed;
+        let clamped_for_tx = clamped_contents;
+        let actions_for_tx = actions;
+        let embeddings_for_tx = embeddings;
         let mut report = self
             .conn
             .call(move |c| -> RusqliteResult<ImportReport> {
                 let mut report = ImportReport::default();
                 let tx = c.unchecked_transaction()?;
-                for (idx, r) in parsed.iter().enumerate() {
-                    let existing: Option<i64> = tx
-                        .query_row(
-                            "SELECT updated_at FROM memories WHERE key = ?1",
-                            params![&r.key],
-                            |row| row.get(0),
-                        )
-                        .ok();
+                for (idx, r) in parsed_for_tx.iter().enumerate() {
+                    let action = actions_for_tx[idx];
                     let tags_s = serde_json::to_string(&r.tags).unwrap_or_else(|_| "[]".into());
                     let related_s =
                         serde_json::to_string(&r.related_keys).unwrap_or_else(|_| "[]".into());
-                    let content = &clamped_contents[idx];
-                    let embedding_bytes = &embeddings[idx];
+                    let content = &clamped_for_tx[idx];
                     let imp = if (r.importance - 0.5).abs() > 1e-9 {
                         r.importance
                     } else {
@@ -2238,9 +2412,11 @@ impl StateStore for SqliteStore {
                         .clone()
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty());
-                    match existing {
-                        None => {
-                            // Brand-new row — insert with the imported timestamps verbatim.
+                    match action {
+                        ImportAction::Insert => {
+                            let embedding_bytes = embeddings_for_tx[idx]
+                                .as_deref()
+                                .unwrap_or(&[]);
                             tx.execute(
                                 "INSERT INTO memories
                                    (key, kind, content, tags, related_keys, scope,
@@ -2266,40 +2442,37 @@ impl StateStore for SqliteStore {
                             )?;
                             report.inserted += 1;
                         }
-                        Some(existing_uat) => {
-                            let do_overwrite = match policy {
-                                ImportConflictPolicy::Skip => false,
-                                ImportConflictPolicy::Overwrite => true,
-                                ImportConflictPolicy::NewerWins => r.updated_at > existing_uat,
-                            };
-                            if do_overwrite {
-                                tx.execute(
-                                    "UPDATE memories SET
-                                        kind = ?2, content = ?3, tags = ?4, related_keys = ?5,
-                                        scope = ?6, updated_at = ?7, last_accessed_at = ?8,
-                                        access_count = ?9, importance = ?10, status = ?11,
-                                        trigger_pattern = ?12, embedding = ?13
-                                     WHERE key = ?1",
-                                    params![
-                                        r.key,
-                                        r.kind,
-                                        content,
-                                        tags_s,
-                                        related_s,
-                                        r.scope,
-                                        r.updated_at,
-                                        r.last_accessed_at,
-                                        r.access_count as i64,
-                                        imp,
-                                        stat,
-                                        trig,
-                                        embedding_bytes,
-                                    ],
-                                )?;
-                                report.updated += 1;
-                            } else {
-                                report.skipped += 1;
-                            }
+                        ImportAction::Update => {
+                            let embedding_bytes = embeddings_for_tx[idx]
+                                .as_deref()
+                                .unwrap_or(&[]);
+                            tx.execute(
+                                "UPDATE memories SET
+                                    kind = ?2, content = ?3, tags = ?4, related_keys = ?5,
+                                    scope = ?6, updated_at = ?7, last_accessed_at = ?8,
+                                    access_count = ?9, importance = ?10, status = ?11,
+                                    trigger_pattern = ?12, embedding = ?13
+                                 WHERE key = ?1",
+                                params![
+                                    r.key,
+                                    r.kind,
+                                    content,
+                                    tags_s,
+                                    related_s,
+                                    r.scope,
+                                    r.updated_at,
+                                    r.last_accessed_at,
+                                    r.access_count as i64,
+                                    imp,
+                                    stat,
+                                    trig,
+                                    embedding_bytes,
+                                ],
+                            )?;
+                            report.updated += 1;
+                        }
+                        ImportAction::Skip => {
+                            report.skipped += 1;
                         }
                     }
                 }
@@ -2634,32 +2807,30 @@ impl StateStore for SqliteStore {
         // File walking, symbol extraction, and embedding computation run in a blocking thread.
         let root_for_walk = root.clone();
         let (all_symbols, indexed_files) = tokio::task::spawn_blocking(move || {
-            let mut symbols: Vec<(CodebaseSymbol, Vec<u8>)> = Vec::new();
+            // Walk source files; prune non-source trees at directory level.
+            let mut symbols: Vec<CodebaseSymbol> = Vec::new();
             let mut count = 0u32;
             for entry in WalkDir::new(&root_for_walk)
                 .follow_links(false)
                 .into_iter()
+                .filter_entry(|e| {
+                    let name = e.file_name().to_str().unwrap_or("");
+                    !matches!(
+                        name,
+                        ".git"
+                            | "target"
+                            | "node_modules"
+                            | ".venv"
+                            | "__pycache__"
+                            | ".mypy_cache"
+                            | "dist"
+                            | "build"
+                    )
+                })
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_file())
             {
                 let path = entry.path();
-                // Skip common non-source directories.
-                let skip = path.components().any(|c| {
-                    matches!(
-                        c.as_os_str().to_str(),
-                        Some(".git")
-                            | Some("target")
-                            | Some("node_modules")
-                            | Some(".venv")
-                            | Some("__pycache__")
-                            | Some(".mypy_cache")
-                            | Some("dist")
-                            | Some("build")
-                    )
-                });
-                if skip {
-                    continue;
-                }
                 let lang = match detect_language(path) {
                     Some(l) => l,
                     None => continue,
@@ -2669,16 +2840,11 @@ impl StateStore for SqliteStore {
                 }
                 let file_path_str = path.to_string_lossy().to_string();
                 if let Ok(content) = std::fs::read_to_string(path) {
-                    for sym in extract_symbols(&content, &file_path_str, lang) {
-                        let emb_input = format!("{} {}", sym.name, sym.signature);
-                        let emb = crate::vector::encode_embedding(
-                            &crate::vector::embed_text(&emb_input),
-                        );
-                        symbols.push((sym, emb));
-                    }
+                    symbols.extend(extract_symbols(&content, &file_path_str, lang));
                     count += 1;
                 }
             }
+            // Embeddings computed lazily on first codebase_search(mode=semantic).
             (symbols, count)
         })
         .await
@@ -2690,18 +2856,19 @@ impl StateStore for SqliteStore {
 
         self.conn
             .call(move |c| -> RusqliteResult<()> {
-                // Replace previous index for this root path.
-                c.execute(
+                // Wrap in explicit transaction: all INSERTs commit in one fsync.
+                let tx = c.savepoint()?;
+                tx.execute(
                     "DELETE FROM codebase_symbols WHERE root_path = ?1",
                     params![root],
                 )?;
-                let mut stmt = c.prepare(
+                let mut stmt = tx.prepare(
                     "INSERT INTO codebase_symbols
                      (file_path, line, col, kind, name, signature, language, root_path,
                       indexed_at, embedding)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL)",
                 )?;
-                for (sym, emb) in &all_symbols {
+                for sym in &all_symbols {
                     stmt.execute(params![
                         sym.file_path,
                         sym.line,
@@ -2711,10 +2878,11 @@ impl StateStore for SqliteStore {
                         sym.signature,
                         sym.language,
                         root,
-                        now,
-                        emb
+                        now
                     ])?;
                 }
+                drop(stmt);
+                tx.commit()?;
                 Ok(())
             })
             .await
@@ -3033,6 +3201,793 @@ impl StateStore for SqliteStore {
         }
         Ok(recs)
     }
+
+    // ── v18: forum / collaboration whiteboard ──────────────────────────────
+
+    async fn forum_post(
+        &self,
+        thread_id: Option<i64>,
+        board: Option<&str>,
+        title: Option<&str>,
+        author: &str,
+        kind: &str,
+        body: &str,
+        refs: Option<&serde_json::Value>,
+        tags: Option<&[String]>,
+    ) -> Result<ForumPostOutcome> {
+        if author.trim().is_empty() {
+            return Err(Error::Backend(
+                "forum_post: 'author' must be a non-empty session id".into(),
+            ));
+        }
+        if body.trim().is_empty() {
+            return Err(Error::Backend("forum_post: 'body' must be non-empty".into()));
+        }
+        let kind_norm = match kind {
+            "" | "msg" => "msg",
+            "finding" | "question" | "decision" | "reply" => kind,
+            other => {
+                return Err(Error::Backend(format!(
+                    "forum_post: unknown kind '{other}'"
+                )))
+            }
+        }
+        .to_string();
+
+        let author = author.to_string();
+        let body = body.to_string();
+        let refs_json = match refs {
+            Some(v) => Some(serde_json::to_string(v).map_err(Error::Serde)?),
+            None => None,
+        };
+        let now = now_secs();
+
+        let outcome = match thread_id {
+            Some(tid) => {
+                self.conn
+                    .call(move |c| -> RusqliteResult<ForumPostOutcome> {
+                        let exists: i64 = c.query_row(
+                            "SELECT COUNT(*) FROM forum_threads WHERE id=?1",
+                            params![tid],
+                            |r| r.get(0),
+                        )?;
+                        if exists == 0 {
+                            return Err(tokio_rusqlite::rusqlite::Error::QueryReturnedNoRows);
+                        }
+                        c.execute(
+                            "INSERT INTO forum_posts \
+                             (thread_id, author, kind, body, refs_json, created_at) \
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            params![tid, author, kind_norm, body, refs_json, now],
+                        )?;
+                        let pid = c.last_insert_rowid();
+                        c.execute(
+                            "UPDATE forum_threads SET last_post_at=?1 WHERE id=?2",
+                            params![now, tid],
+                        )?;
+                        Ok(ForumPostOutcome {
+                            thread_id: tid,
+                            post_id: pid,
+                            created_thread: false,
+                        })
+                    })
+                    .await
+                    .map_err(|e| match e {
+                        tokio_rusqlite::Error::Error(
+                            tokio_rusqlite::rusqlite::Error::QueryReturnedNoRows,
+                        ) => Error::Backend(format!("forum_post: thread_id={tid} not found")),
+                        other => Error::Backend(format!("forum_post append: {other}")),
+                    })?
+            }
+            None => {
+                let board_s = board
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| {
+                        Error::Backend(
+                            "forum_post: 'board' required when creating a new thread".into(),
+                        )
+                    })?
+                    .to_string();
+                let title_s = title
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| {
+                        Error::Backend(
+                            "forum_post: 'title' required when creating a new thread".into(),
+                        )
+                    })?
+                    .to_string();
+                let tags_json = tags
+                    .filter(|t| !t.is_empty())
+                    .map(|t| serde_json::to_string(t))
+                    .transpose()
+                    .map_err(Error::Serde)?;
+                let author2 = author.clone();
+                self.conn
+                    .call(move |c| -> RusqliteResult<ForumPostOutcome> {
+                        c.execute(
+                            "INSERT INTO forum_threads \
+                             (board, title, created_by, created_at, last_post_at, status, tags_json) \
+                             VALUES (?1, ?2, ?3, ?4, ?4, 'open', ?5)",
+                            params![board_s, title_s, author2, now, tags_json],
+                        )?;
+                        let tid = c.last_insert_rowid();
+                        c.execute(
+                            "INSERT INTO forum_posts \
+                             (thread_id, author, kind, body, refs_json, created_at) \
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            params![tid, author, kind_norm, body, refs_json, now],
+                        )?;
+                        let pid = c.last_insert_rowid();
+                        Ok(ForumPostOutcome {
+                            thread_id: tid,
+                            post_id: pid,
+                            created_thread: true,
+                        })
+                    })
+                    .await
+                    .map_err(|e| Error::Backend(format!("forum_post create: {e}")))?
+            }
+        };
+
+        Ok(outcome)
+    }
+
+    async fn forum_read(
+        &self,
+        thread_id: Option<i64>,
+        board: Option<&str>,
+        since_post_id: Option<i64>,
+        unread_for: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<ForumPostRecord>> {
+        if thread_id.is_none() && board.is_none() {
+            return Err(Error::Backend(
+                "forum_read: provide at least one of 'thread_id' or 'board'".into(),
+            ));
+        }
+        let lim = i64::from(limit.clamp(1, 500));
+
+        // If caller asked for unread_for, override since_post_id with the
+        // saved subscription cursor (most specific wins: thread > board).
+        let mut effective_since = since_post_id;
+        if let Some(sess) = unread_for.filter(|s| !s.is_empty()) {
+            let sess_s = sess.to_string();
+            let board_s = board.map(|s| s.to_string());
+            let cursor = self
+                .conn
+                .call(move |c| -> RusqliteResult<Option<i64>> {
+                    if let Some(tid) = thread_id {
+                        if let Ok(v) = c.query_row(
+                            "SELECT last_seen_post_id FROM forum_subscriptions \
+                             WHERE session_id=?1 AND scope_kind='thread' AND scope_value=?2",
+                            params![sess_s, tid.to_string()],
+                            |r| r.get::<_, i64>(0),
+                        ) {
+                            return Ok(Some(v));
+                        }
+                    }
+                    if let Some(b) = board_s {
+                        if let Ok(v) = c.query_row(
+                            "SELECT last_seen_post_id FROM forum_subscriptions \
+                             WHERE session_id=?1 AND scope_kind='board' AND scope_value=?2",
+                            params![sess_s, b],
+                            |r| r.get::<_, i64>(0),
+                        ) {
+                            return Ok(Some(v));
+                        }
+                    }
+                    Ok(None)
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("forum_read cursor: {e}")))?;
+            if let Some(v) = cursor {
+                effective_since = Some(effective_since.map_or(v, |s| s.max(v)));
+            }
+        }
+
+        let board_s = board.map(|s| s.to_string());
+        let rows = self
+            .conn
+            .call(
+                move |c| -> RusqliteResult<Vec<(i64, i64, String, String, String, Option<String>, i64)>> {
+                    let (sql, has_thread, has_board) = match (thread_id.is_some(), board_s.is_some()) {
+                        (true, _) => (
+                            "SELECT p.id, p.thread_id, p.author, p.kind, p.body, p.refs_json, p.created_at \
+                             FROM forum_posts p \
+                             WHERE p.thread_id = ?1 AND (?2 IS NULL OR p.id > ?2) \
+                             ORDER BY p.id ASC LIMIT ?3",
+                            true,
+                            false,
+                        ),
+                        (false, true) => (
+                            "SELECT p.id, p.thread_id, p.author, p.kind, p.body, p.refs_json, p.created_at \
+                             FROM forum_posts p \
+                             JOIN forum_threads t ON t.id = p.thread_id \
+                             WHERE t.board = ?1 AND (?2 IS NULL OR p.id > ?2) \
+                             ORDER BY p.id ASC LIMIT ?3",
+                            false,
+                            true,
+                        ),
+                        _ => unreachable!(),
+                    };
+                    let mut stmt = c.prepare(sql)?;
+                    let mut q = if has_thread {
+                        stmt.query(params![thread_id.unwrap(), effective_since, lim])?
+                    } else if has_board {
+                        stmt.query(params![board_s.as_ref().unwrap(), effective_since, lim])?
+                    } else {
+                        unreachable!()
+                    };
+                    let mut out = Vec::new();
+                    while let Some(r) = q.next()? {
+                        out.push((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                            r.get(6)?,
+                        ));
+                    }
+                    Ok(out)
+                },
+            )
+            .await
+            .map_err(|e| Error::Backend(format!("forum_read: {e}")))?;
+
+        let mut posts = Vec::with_capacity(rows.len());
+        for (id, thread_id, author, kind, body, refs_json, created_at) in rows {
+            let refs = match refs_json {
+                Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::Null),
+                None => serde_json::Value::Null,
+            };
+            posts.push(ForumPostRecord {
+                id,
+                thread_id,
+                author,
+                kind,
+                body,
+                refs,
+                created_at,
+            });
+        }
+
+        // Auto-advance subscription cursor for unread_for caller.
+        if let (Some(sess), Some(last)) = (unread_for, posts.last().map(|p| p.id)) {
+            let sess_s = sess.to_string();
+            let board_s = board.map(|s| s.to_string());
+            let _ = self
+                .conn
+                .call(move |c| -> RusqliteResult<()> {
+                    if let Some(tid) = thread_id {
+                        let n = c.execute(
+                            "UPDATE forum_subscriptions SET last_seen_post_id=?1 \
+                             WHERE session_id=?2 AND scope_kind='thread' AND scope_value=?3 \
+                               AND last_seen_post_id < ?1",
+                            params![last, sess_s, tid.to_string()],
+                        )?;
+                        if n > 0 {
+                            return Ok(());
+                        }
+                    }
+                    if let Some(b) = board_s {
+                        let _ = c.execute(
+                            "UPDATE forum_subscriptions SET last_seen_post_id=?1 \
+                             WHERE session_id=?2 AND scope_kind='board' AND scope_value=?3 \
+                               AND last_seen_post_id < ?1",
+                            params![last, sess_s, b],
+                        )?;
+                    }
+                    Ok(())
+                })
+                .await;
+        }
+
+        Ok(posts)
+    }
+
+    async fn forum_subscribe(
+        &self,
+        session_id: &str,
+        scope_kind: &str,
+        scope_value: &str,
+        reset: bool,
+    ) -> Result<()> {
+        if session_id.trim().is_empty() {
+            return Err(Error::Backend(
+                "forum_subscribe: 'session_id' must be non-empty".into(),
+            ));
+        }
+        if !matches!(scope_kind, "thread" | "board") {
+            return Err(Error::Backend(format!(
+                "forum_subscribe: scope_kind must be 'thread' or 'board' (got '{scope_kind}')"
+            )));
+        }
+        let sess = session_id.to_string();
+        let kind = scope_kind.to_string();
+        let val = scope_value.to_string();
+        let now = now_secs();
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                if reset {
+                    c.execute(
+                        "INSERT INTO forum_subscriptions \
+                         (session_id, scope_kind, scope_value, last_seen_post_id, created_at) \
+                         VALUES (?1, ?2, ?3, 0, ?4) \
+                         ON CONFLICT(session_id, scope_kind, scope_value) \
+                         DO UPDATE SET last_seen_post_id=0",
+                        params![sess, kind, val, now],
+                    )?;
+                } else {
+                    c.execute(
+                        "INSERT OR IGNORE INTO forum_subscriptions \
+                         (session_id, scope_kind, scope_value, last_seen_post_id, created_at) \
+                         VALUES (?1, ?2, ?3, 0, ?4)",
+                        params![sess, kind, val, now],
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("forum_subscribe: {e}")))?;
+        Ok(())
+    }
+
+    async fn forum_mark_seen(
+        &self,
+        session_id: &str,
+        scope_kind: &str,
+        scope_value: &str,
+        post_id: i64,
+    ) -> Result<()> {
+        if !matches!(scope_kind, "thread" | "board") {
+            return Err(Error::Backend(format!(
+                "forum_mark_seen: scope_kind must be 'thread' or 'board' (got '{scope_kind}')"
+            )));
+        }
+        let sess = session_id.to_string();
+        let kind = scope_kind.to_string();
+        let val = scope_value.to_string();
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE forum_subscriptions SET last_seen_post_id=?1 \
+                     WHERE session_id=?2 AND scope_kind=?3 AND scope_value=?4 \
+                       AND last_seen_post_id < ?1",
+                    params![post_id, sess, kind, val],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("forum_mark_seen: {e}")))?;
+        Ok(())
+    }
+
+    async fn forum_list_threads(
+        &self,
+        board: &str,
+        unread_for: Option<&str>,
+        status: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<ForumThreadRecord>> {
+        if board.trim().is_empty() {
+            return Err(Error::Backend("forum_list_threads: 'board' required".into()));
+        }
+        let board_s = board.to_string();
+        let status_f = status.map(|s| s.to_string());
+        let lim = i64::from(limit.clamp(1, 500));
+        let unread_for_s = unread_for.map(|s| s.to_string());
+
+        let rows = self
+            .conn
+            .call(
+                move |c| -> RusqliteResult<Vec<(i64, String, String, String, i64, i64, String, Option<String>, i64, Option<i64>)>> {
+                    // Per-thread board cursor (one value), if caller passed unread_for.
+                    let board_cursor: Option<i64> = match unread_for_s.as_deref() {
+                        Some(sess) => c
+                            .query_row(
+                                "SELECT last_seen_post_id FROM forum_subscriptions \
+                                 WHERE session_id=?1 AND scope_kind='board' AND scope_value=?2",
+                                params![sess, board_s],
+                                |r| r.get(0),
+                            )
+                            .ok(),
+                        None => None,
+                    };
+
+                    let mut stmt = c.prepare(
+                        "SELECT id, board, title, created_by, created_at, last_post_at, \
+                                status, tags_json, \
+                                (SELECT COUNT(*) FROM forum_posts WHERE thread_id = forum_threads.id) AS post_count \
+                         FROM forum_threads \
+                         WHERE board = ?1 AND (?2 IS NULL OR status = ?2) \
+                         ORDER BY last_post_at DESC LIMIT ?3",
+                    )?;
+                    let mut q = stmt.query(params![board_s, status_f, lim])?;
+
+                    let mut out = Vec::new();
+                    while let Some(r) = q.next()? {
+                        let tid: i64 = r.get(0)?;
+                        let unread: Option<i64> = match unread_for_s.as_deref() {
+                            Some(sess) => {
+                                // thread cursor wins over board cursor
+                                let thread_cursor: Option<i64> = c
+                                    .query_row(
+                                        "SELECT last_seen_post_id FROM forum_subscriptions \
+                                         WHERE session_id=?1 AND scope_kind='thread' AND scope_value=?2",
+                                        params![sess, tid.to_string()],
+                                        |r| r.get(0),
+                                    )
+                                    .ok();
+                                let cursor = thread_cursor.or(board_cursor).unwrap_or(0);
+                                let cnt: i64 = c.query_row(
+                                    "SELECT COUNT(*) FROM forum_posts \
+                                     WHERE thread_id=?1 AND id > ?2",
+                                    params![tid, cursor],
+                                    |r| r.get(0),
+                                )?;
+                                Some(cnt)
+                            }
+                            None => None,
+                        };
+                        out.push((
+                            tid,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?,
+                            r.get::<_, String>(3)?,
+                            r.get::<_, i64>(4)?,
+                            r.get::<_, i64>(5)?,
+                            r.get::<_, String>(6)?,
+                            r.get::<_, Option<String>>(7)?,
+                            r.get::<_, i64>(8)?,
+                            unread,
+                        ));
+                    }
+                    Ok(out)
+                },
+            )
+            .await
+            .map_err(|e| Error::Backend(format!("forum_list_threads: {e}")))?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for (
+            id,
+            board,
+            title,
+            created_by,
+            created_at,
+            last_post_at,
+            status,
+            tags_json,
+            post_count,
+            unread_count,
+        ) in rows
+        {
+            let tags: Vec<String> = match tags_json {
+                Some(s) => serde_json::from_str(&s).unwrap_or_default(),
+                None => Vec::new(),
+            };
+            out.push(ForumThreadRecord {
+                id,
+                board,
+                title,
+                created_by,
+                created_at,
+                last_post_at,
+                status,
+                tags,
+                post_count,
+                unread_count,
+            });
+        }
+        Ok(out)
+    }
+
+    async fn forum_set_thread_status(&self, thread_id: i64, status: &str) -> Result<()> {
+        if !matches!(status, "open" | "resolved" | "archived") {
+            return Err(Error::Backend(format!(
+                "forum_set_thread_status: status must be open|resolved|archived (got '{status}')"
+            )));
+        }
+        let st = status.to_string();
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                let n = c.execute(
+                    "UPDATE forum_threads SET status=?1 WHERE id=?2",
+                    params![st, thread_id],
+                )?;
+                if n == 0 {
+                    return Err(tokio_rusqlite::rusqlite::Error::QueryReturnedNoRows);
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|e| match e {
+                tokio_rusqlite::Error::Error(
+                    tokio_rusqlite::rusqlite::Error::QueryReturnedNoRows,
+                ) => Error::Backend(format!(
+                    "forum_set_thread_status: thread_id={thread_id} not found"
+                )),
+                other => Error::Backend(format!("forum_set_thread_status: {other}")),
+            })?;
+        Ok(())
+    }
+
+    // ── v19: agent presence registry ───────────────────────────────────────
+
+    async fn agent_presence_announce(
+        &self,
+        session_id: &str,
+        upsert: AgentPresenceUpsert<'_>,
+    ) -> Result<AgentPresenceRecord> {
+        if session_id.trim().is_empty() {
+            return Err(Error::Backend(
+                "agent_presence_announce: 'session_id' must be non-empty".into(),
+            ));
+        }
+        let session_id = session_id.to_string();
+        let now = now_secs();
+
+        // Owned clones for the move closure.
+        let name = upsert.name.map(|s| s.to_string());
+        let description = upsert.description.map(|s| s.to_string());
+        let version = upsert.version.map(|s| s.to_string());
+        let url = upsert.url.map(|s| s.to_string());
+        let node = upsert.node.map(|s| s.to_string());
+        let project = upsert.project.map(|s| s.to_string());
+        let role = upsert.role.map(|s| s.to_string());
+        let tag = upsert.tag.map(|s| s.to_string());
+        let cwd = upsert.cwd.map(|s| s.to_string());
+        let pid = upsert.pid;
+        let capabilities_json = match upsert.capabilities {
+            Some(v) => Some(serde_json::to_string(v).map_err(Error::Serde)?),
+            None => None,
+        };
+        let skills_json = match upsert.skills {
+            Some(v) => Some(serde_json::to_string(v).map_err(Error::Serde)?),
+            None => None,
+        };
+
+        let row = self
+            .conn
+            .call(move |c| -> RusqliteResult<AgentPresenceRecord> {
+                let exists: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM agent_presence WHERE session_id=?1",
+                    params![session_id],
+                    |r| r.get(0),
+                )?;
+
+                if exists == 0 {
+                    // INSERT path — required fields must be present.
+                    let name = name.ok_or_else(|| {
+                        tokio_rusqlite::rusqlite::Error::InvalidParameterName(
+                            "name (required on first announce)".into(),
+                        )
+                    })?;
+                    let node = node.ok_or_else(|| {
+                        tokio_rusqlite::rusqlite::Error::InvalidParameterName(
+                            "node (required on first announce)".into(),
+                        )
+                    })?;
+                    let project = project.ok_or_else(|| {
+                        tokio_rusqlite::rusqlite::Error::InvalidParameterName(
+                            "project (required on first announce)".into(),
+                        )
+                    })?;
+                    let role = role.ok_or_else(|| {
+                        tokio_rusqlite::rusqlite::Error::InvalidParameterName(
+                            "role (required on first announce)".into(),
+                        )
+                    })?;
+                    c.execute(
+                        "INSERT INTO agent_presence (
+                            session_id, name, description, version, url,
+                            node, project, role, tag, cwd, pid,
+                            capabilities_json, skills_json,
+                            started_at, last_heartbeat_at
+                         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14)",
+                        params![
+                            session_id,
+                            name,
+                            description,
+                            version,
+                            url,
+                            node,
+                            project,
+                            role,
+                            tag,
+                            cwd,
+                            pid,
+                            capabilities_json,
+                            skills_json,
+                            now,
+                        ],
+                    )?;
+                } else {
+                    // UPDATE path — COALESCE so None keeps prior value.
+                    c.execute(
+                        "UPDATE agent_presence SET
+                            name              = COALESCE(?2, name),
+                            description       = COALESCE(?3, description),
+                            version           = COALESCE(?4, version),
+                            url               = COALESCE(?5, url),
+                            node              = COALESCE(?6, node),
+                            project           = COALESCE(?7, project),
+                            role              = COALESCE(?8, role),
+                            tag               = COALESCE(?9, tag),
+                            cwd               = COALESCE(?10, cwd),
+                            pid               = COALESCE(?11, pid),
+                            capabilities_json = COALESCE(?12, capabilities_json),
+                            skills_json       = COALESCE(?13, skills_json),
+                            last_heartbeat_at = ?14
+                         WHERE session_id = ?1",
+                        params![
+                            session_id,
+                            name,
+                            description,
+                            version,
+                            url,
+                            node,
+                            project,
+                            role,
+                            tag,
+                            cwd,
+                            pid,
+                            capabilities_json,
+                            skills_json,
+                            now,
+                        ],
+                    )?;
+                }
+
+                let row = c.query_row(
+                    "SELECT session_id, name, description, version, url,
+                            node, project, role, tag, cwd, pid,
+                            capabilities_json, skills_json,
+                            started_at, last_heartbeat_at
+                     FROM agent_presence WHERE session_id = ?1",
+                    params![session_id],
+                    |r| {
+                        let cap_s: Option<String> = r.get(11)?;
+                        let sk_s: Option<String> = r.get(12)?;
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, Option<String>>(2)?,
+                            r.get::<_, Option<String>>(3)?,
+                            r.get::<_, Option<String>>(4)?,
+                            r.get::<_, String>(5)?,
+                            r.get::<_, String>(6)?,
+                            r.get::<_, String>(7)?,
+                            r.get::<_, Option<String>>(8)?,
+                            r.get::<_, Option<String>>(9)?,
+                            r.get::<_, Option<i64>>(10)?,
+                            cap_s,
+                            sk_s,
+                            r.get::<_, i64>(13)?,
+                            r.get::<_, i64>(14)?,
+                        ))
+                    },
+                )?;
+                let (sid, nm, desc, ver, url, nd, proj, rl, tg, cd, p, cap_s, sk_s, st, hb) = row;
+                let capabilities = cap_s
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str(s).ok());
+                let skills = sk_s.as_deref().and_then(|s| serde_json::from_str(s).ok());
+                Ok(AgentPresenceRecord {
+                    session_id: sid,
+                    name: nm,
+                    description: desc,
+                    version: ver,
+                    url,
+                    capabilities,
+                    skills,
+                    node: nd,
+                    project: proj,
+                    role: rl,
+                    tag: tg,
+                    cwd: cd,
+                    pid: p,
+                    started_at: st,
+                    last_heartbeat_at: hb,
+                })
+            })
+            .await
+            .map_err(|e| match e {
+                tokio_rusqlite::Error::Error(
+                    tokio_rusqlite::rusqlite::Error::InvalidParameterName(field),
+                ) => Error::Backend(format!(
+                    "agent_presence_announce: missing required field on first announce — {field}"
+                )),
+                other => Error::Backend(format!("agent_presence_announce: {other}")),
+            })?;
+        Ok(row)
+    }
+
+    async fn agent_presence_list(
+        &self,
+        project: Option<&str>,
+        role: Option<&str>,
+        max_idle_secs: i64,
+        limit: u32,
+    ) -> Result<Vec<AgentPresenceRecord>> {
+        let lim = i64::from(limit.clamp(1, 500));
+        let cutoff = if max_idle_secs <= 0 {
+            0
+        } else {
+            now_secs() - max_idle_secs
+        };
+        let project_f = project.map(|s| s.to_string());
+        let role_f = role.map(|s| s.to_string());
+
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<_>> {
+                let mut stmt = c.prepare(
+                    "SELECT session_id, name, description, version, url,
+                            node, project, role, tag, cwd, pid,
+                            capabilities_json, skills_json,
+                            started_at, last_heartbeat_at
+                     FROM agent_presence
+                     WHERE last_heartbeat_at >= ?1
+                       AND (?2 IS NULL OR project = ?2)
+                       AND (?3 IS NULL OR role    = ?3)
+                     ORDER BY last_heartbeat_at DESC
+                     LIMIT ?4",
+                )?;
+                let mut q = stmt.query(params![cutoff, project_f, role_f, lim])?;
+                let mut out = Vec::new();
+                while let Some(r) = q.next()? {
+                    out.push((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, Option<String>>(3)?,
+                        r.get::<_, Option<String>>(4)?,
+                        r.get::<_, String>(5)?,
+                        r.get::<_, String>(6)?,
+                        r.get::<_, String>(7)?,
+                        r.get::<_, Option<String>>(8)?,
+                        r.get::<_, Option<String>>(9)?,
+                        r.get::<_, Option<i64>>(10)?,
+                        r.get::<_, Option<String>>(11)?,
+                        r.get::<_, Option<String>>(12)?,
+                        r.get::<_, i64>(13)?,
+                        r.get::<_, i64>(14)?,
+                    ));
+                }
+                Ok(out)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("agent_presence_list: {e}")))?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for (sid, nm, desc, ver, url, nd, proj, rl, tg, cd, p, cap_s, sk_s, st, hb) in rows {
+            let capabilities = cap_s
+                .as_deref()
+                .and_then(|s| serde_json::from_str(s).ok());
+            let skills = sk_s.as_deref().and_then(|s| serde_json::from_str(s).ok());
+            out.push(AgentPresenceRecord {
+                session_id: sid,
+                name: nm,
+                description: desc,
+                version: ver,
+                url,
+                capabilities,
+                skills,
+                node: nd,
+                project: proj,
+                role: rl,
+                tag: tg,
+                cwd: cd,
+                pid: p,
+                started_at: st,
+                last_heartbeat_at: hb,
+            });
+        }
+        Ok(out)
+    }
 }
 
 impl SqliteStore {
@@ -3112,6 +4067,128 @@ impl SqliteStore {
 mod tests {
     use super::*;
     use crate::{MemoryListSort, PlanStep, StateStore};
+
+    fn mk_record(key: &str, updated_at: i64) -> MemoryRecord {
+        MemoryRecord {
+            key: key.into(),
+            kind: "fact".into(),
+            content: format!("content-{key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+        }
+    }
+
+    #[test]
+    fn plan_import_actions_skip_existing_under_skip_policy() {
+        // Regression: sync.sh re-imports the same JSONL every Stop hook.
+        // Under Skip policy and pre-existing keys, every action must be Skip
+        // so the caller never invokes the embedding backend.
+        let parsed = vec![mk_record("k1", 100), mk_record("k2", 200)];
+        let mut existing = std::collections::HashMap::new();
+        existing.insert("k1".to_string(), 100);
+        existing.insert("k2".to_string(), 200);
+        let actions = plan_import_actions(&parsed, &existing, ImportConflictPolicy::Skip);
+        assert_eq!(actions, vec![ImportAction::Skip, ImportAction::Skip]);
+    }
+
+    #[test]
+    fn plan_import_actions_inserts_unknown_keys() {
+        let parsed = vec![mk_record("new", 500), mk_record("known", 200)];
+        let mut existing = std::collections::HashMap::new();
+        existing.insert("known".to_string(), 200);
+        let actions = plan_import_actions(&parsed, &existing, ImportConflictPolicy::Skip);
+        assert_eq!(actions, vec![ImportAction::Insert, ImportAction::Skip]);
+    }
+
+    #[test]
+    fn plan_import_actions_newer_wins_compares_updated_at() {
+        let parsed = vec![
+            mk_record("stale", 100),  // local 200 → keep local
+            mk_record("fresh", 300),  // local 200 → take import
+            mk_record("equal", 200),  // local 200 → keep local (strictly greater)
+        ];
+        let mut existing = std::collections::HashMap::new();
+        existing.insert("stale".to_string(), 200);
+        existing.insert("fresh".to_string(), 200);
+        existing.insert("equal".to_string(), 200);
+        let actions = plan_import_actions(&parsed, &existing, ImportConflictPolicy::NewerWins);
+        assert_eq!(
+            actions,
+            vec![ImportAction::Skip, ImportAction::Update, ImportAction::Skip]
+        );
+    }
+
+    #[test]
+    fn plan_import_actions_overwrite_always_updates_existing() {
+        let parsed = vec![mk_record("k1", 100)];
+        let mut existing = std::collections::HashMap::new();
+        existing.insert("k1".to_string(), 999);
+        let actions = plan_import_actions(&parsed, &existing, ImportConflictPolicy::Overwrite);
+        assert_eq!(actions, vec![ImportAction::Update]);
+    }
+
+    #[tokio::test]
+    async fn memory_import_skip_all_does_not_disturb_existing_embeddings() {
+        // End-to-end check that the pre-flight gate works: import the same
+        // JSONL twice with Skip policy and verify the second pass touches
+        // nothing (no embedding rewrite, accurate skipped count).
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-import-skip-noop-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        let jsonl = temp_dir.join("rows.jsonl");
+        let line = serde_json::to_string(&serde_json::json!({
+            "key": "skip_noop_row",
+            "kind": "fact",
+            "content": "stable content for skip-path regression test",
+            "tags": [],
+            "related_keys": [],
+            "scope": null,
+            "created_at": 1_700_000_000_i64,
+            "updated_at": 1_700_000_000_i64,
+            "last_accessed_at": 0_i64,
+            "access_count": 0_u64,
+            "importance": 0.5,
+            "status": "active",
+            "trigger_pattern": null,
+        }))
+        .unwrap();
+        tokio::fs::write(&jsonl, format!("{line}\n"))
+            .await
+            .expect("write jsonl");
+
+        let r1 = store
+            .memory_import(&jsonl, ImportConflictPolicy::Skip, None)
+            .await
+            .expect("first import");
+        assert_eq!(r1.inserted, 1);
+        assert_eq!(r1.skipped, 0);
+
+        let r2 = store
+            .memory_import(&jsonl, ImportConflictPolicy::Skip, None)
+            .await
+            .expect("second import");
+        assert_eq!(r2.inserted, 0);
+        assert_eq!(r2.updated, 0);
+        assert_eq!(r2.skipped, 1);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
 
     #[tokio::test]
     async fn plan_save_load_update_roundtrip() {
@@ -3481,5 +4558,392 @@ mod tests {
         assert_eq!(recent[2].message, "msg-99");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // ── v18 forum tests ────────────────────────────────────────────────────
+
+    async fn fresh_store(tag: &str) -> (std::path::PathBuf, SqliteStore) {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-forum-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path)
+            .await
+            .expect("open sqlite store");
+        (temp_dir, store)
+    }
+
+    #[tokio::test]
+    async fn forum_post_creates_thread_then_appends() {
+        let (dir, store) = fresh_store("create").await;
+
+        // First call without thread_id → must create thread.
+        let refs = serde_json::json!({"memory_keys": ["k1"], "files": ["x.rs"]});
+        let out1 = store
+            .forum_post(
+                None,
+                Some("design"),
+                Some("Bridge protocol revision"),
+                "cc-A",
+                "finding",
+                "initial proposal: switch stdio→sse",
+                Some(&refs),
+                Some(&["bridge".into(), "rfc".into()]),
+            )
+            .await
+            .expect("create thread");
+        assert!(out1.created_thread);
+        assert!(out1.post_id > 0);
+
+        // Append a reply from a second session.
+        let out2 = store
+            .forum_post(
+                Some(out1.thread_id),
+                None,
+                None,
+                "cc-B",
+                "reply",
+                "+1, but watch backpressure on the SSE side",
+                None,
+                None,
+            )
+            .await
+            .expect("append");
+        assert!(!out2.created_thread);
+        assert_eq!(out2.thread_id, out1.thread_id);
+        assert!(out2.post_id > out1.post_id);
+
+        // Empty author / body must be rejected.
+        assert!(store
+            .forum_post(Some(out1.thread_id), None, None, "", "msg", "x", None, None)
+            .await
+            .is_err());
+        assert!(store
+            .forum_post(Some(out1.thread_id), None, None, "cc-A", "msg", "  ", None, None)
+            .await
+            .is_err());
+
+        // Posting to nonexistent thread fails clearly.
+        let err = store
+            .forum_post(Some(9_999_999), None, None, "cc-A", "msg", "x", None, None)
+            .await
+            .expect_err("missing thread");
+        assert!(format!("{err}").contains("not found"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn forum_read_cursor_and_subscription_advance() {
+        let (dir, store) = fresh_store("cursor").await;
+        let t = store
+            .forum_post(
+                None,
+                Some("general"),
+                Some("Daily standup"),
+                "cc-A",
+                "msg",
+                "post-1",
+                None,
+                None,
+            )
+            .await
+            .expect("create");
+        let p1 = t.post_id;
+        let p2 = store
+            .forum_post(Some(t.thread_id), None, None, "cc-A", "msg", "post-2", None, None)
+            .await
+            .expect("p2")
+            .post_id;
+        let p3 = store
+            .forum_post(Some(t.thread_id), None, None, "cc-B", "msg", "post-3", None, None)
+            .await
+            .expect("p3")
+            .post_id;
+
+        // Plain read returns all 3.
+        let all = store
+            .forum_read(Some(t.thread_id), None, None, None, 50)
+            .await
+            .expect("read all");
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].id, p1);
+        assert_eq!(all[2].id, p3);
+
+        // since_post_id excludes equal id.
+        let after_p1 = store
+            .forum_read(Some(t.thread_id), None, Some(p1), None, 50)
+            .await
+            .expect("after p1");
+        assert_eq!(after_p1.len(), 2);
+        assert_eq!(after_p1[0].id, p2);
+
+        // unread_for without subscription = same as no cursor.
+        let unsub = store
+            .forum_read(Some(t.thread_id), None, None, Some("cc-C"), 50)
+            .await
+            .expect("unsub");
+        assert_eq!(unsub.len(), 3);
+
+        // Subscribe cc-C, mark seen at p1, then unread_for advances after read.
+        store
+            .forum_subscribe("cc-C", "thread", &t.thread_id.to_string(), false)
+            .await
+            .expect("sub");
+        store
+            .forum_mark_seen("cc-C", "thread", &t.thread_id.to_string(), p1)
+            .await
+            .expect("mark seen");
+
+        let unread1 = store
+            .forum_read(Some(t.thread_id), None, None, Some("cc-C"), 50)
+            .await
+            .expect("unread1");
+        assert_eq!(unread1.len(), 2, "should skip post-1");
+        assert_eq!(unread1[0].id, p2);
+
+        // After read, cursor auto-advanced to p3 → next read empty.
+        let unread2 = store
+            .forum_read(Some(t.thread_id), None, None, Some("cc-C"), 50)
+            .await
+            .expect("unread2");
+        assert!(unread2.is_empty(), "cursor should have advanced");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn forum_list_threads_unread_counts() {
+        let (dir, store) = fresh_store("list").await;
+        let t1 = store
+            .forum_post(None, Some("general"), Some("T1"), "cc-A", "msg", "a", None, None)
+            .await
+            .expect("t1")
+            .thread_id;
+        let _ = store
+            .forum_post(Some(t1), None, None, "cc-B", "msg", "b", None, None)
+            .await
+            .expect("t1.2");
+        let t2 = store
+            .forum_post(None, Some("general"), Some("T2"), "cc-A", "msg", "a", None, None)
+            .await
+            .expect("t2")
+            .thread_id;
+
+        // Without unread_for → no counts.
+        let plain = store
+            .forum_list_threads("general", None, None, 50)
+            .await
+            .expect("list");
+        assert_eq!(plain.len(), 2);
+        assert!(plain.iter().all(|t| t.unread_count.is_none()));
+
+        // Subscribe cc-X to the board → all posts unread.
+        store
+            .forum_subscribe("cc-X", "board", "general", false)
+            .await
+            .expect("sub board");
+        let withc = store
+            .forum_list_threads("general", Some("cc-X"), None, 50)
+            .await
+            .expect("list with counts");
+        let totals: i64 = withc.iter().filter_map(|t| t.unread_count).sum();
+        assert_eq!(totals, 3, "all 3 posts unread");
+
+        // Per-thread cursor on t1 wins over board cursor.
+        store
+            .forum_subscribe("cc-X", "thread", &t1.to_string(), false)
+            .await
+            .expect("sub thread");
+        let last_t1 = store
+            .forum_read(Some(t1), None, None, Some("cc-X"), 50)
+            .await
+            .expect("read t1")
+            .last()
+            .map(|p| p.id)
+            .unwrap();
+        // After reading t1 fully, t1's unread should be 0 even though board cursor untouched.
+        let withc2 = store
+            .forum_list_threads("general", Some("cc-X"), None, 50)
+            .await
+            .expect("list 2");
+        let row_t1 = withc2.iter().find(|t| t.id == t1).unwrap();
+        assert_eq!(row_t1.unread_count, Some(0));
+        assert!(last_t1 > 0);
+
+        // Status filter.
+        store
+            .forum_set_thread_status(t2, "resolved")
+            .await
+            .expect("status");
+        let only_open = store
+            .forum_list_threads("general", None, Some("open"), 50)
+            .await
+            .expect("filter");
+        assert_eq!(only_open.len(), 1);
+        assert_eq!(only_open[0].id, t1);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // ── v19 presence tests ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn presence_announce_insert_then_heartbeat_only() {
+        let (dir, store) = fresh_store("presence-hb").await;
+
+        // First call must include all required fields.
+        let first = store
+            .agent_presence_announce(
+                "host-a:agent-bridge:main",
+                AgentPresenceUpsert {
+                    name: Some("agent-bridge main"),
+                    description: Some("v19 smoke"),
+                    version: Some("0.1.0"),
+                    node: Some("host-a"),
+                    project: Some("agent-bridge"),
+                    role: Some("main"),
+                    pid: Some(1234),
+                    capabilities: Some(&serde_json::json!({"forum": true})),
+                    skills: Some(&serde_json::json!([{"id":"design","name":"design"}])),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("first announce");
+        assert_eq!(first.session_id, "host-a:agent-bridge:main");
+        assert_eq!(first.started_at, first.last_heartbeat_at);
+        assert_eq!(first.pid, Some(1234));
+        assert_eq!(
+            first.capabilities,
+            Some(serde_json::json!({"forum": true}))
+        );
+
+        // Sleep a moment to ensure heartbeat changes.
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+
+        // Heartbeat-only refresh: omit everything except session_id.
+        let second = store
+            .agent_presence_announce(
+                "host-a:agent-bridge:main",
+                AgentPresenceUpsert::default(),
+            )
+            .await
+            .expect("heartbeat");
+        assert_eq!(second.name, "agent-bridge main", "kept prior name");
+        assert_eq!(second.pid, Some(1234), "kept prior pid");
+        assert!(
+            second.last_heartbeat_at > first.last_heartbeat_at,
+            "heartbeat advanced"
+        );
+        assert_eq!(
+            second.started_at, first.started_at,
+            "started_at preserved across heartbeats"
+        );
+
+        // Heartbeat-only on a session that doesn't exist must error clearly.
+        let err = store
+            .agent_presence_announce("ghost:proj:role", AgentPresenceUpsert::default())
+            .await
+            .expect_err("missing required");
+        assert!(format!("{err}").to_lowercase().contains("required"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn presence_list_filter_and_ttl() {
+        let (dir, store) = fresh_store("presence-list").await;
+        for (sid, proj, role) in [
+            ("host-a:agent-bridge:main", "agent-bridge", "main"),
+            ("host-a:agent-bridge:reviewer", "agent-bridge", "reviewer"),
+            ("host-b:AiOT:main", "AiOT", "main"),
+        ] {
+            store
+                .agent_presence_announce(
+                    sid,
+                    AgentPresenceUpsert {
+                        name: Some(sid),
+                        node: Some(sid.split(':').next().unwrap()),
+                        project: Some(proj),
+                        role: Some(role),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .expect("ann");
+        }
+
+        let all = store
+            .agent_presence_list(None, None, 300, 50)
+            .await
+            .expect("list all");
+        assert_eq!(all.len(), 3);
+
+        let only_ab = store
+            .agent_presence_list(Some("agent-bridge"), None, 300, 50)
+            .await
+            .expect("by project");
+        assert_eq!(only_ab.len(), 2);
+
+        let only_main = store
+            .agent_presence_list(None, Some("main"), 300, 50)
+            .await
+            .expect("by role");
+        assert_eq!(only_main.len(), 2);
+
+        let only_ab_main = store
+            .agent_presence_list(Some("agent-bridge"), Some("main"), 300, 50)
+            .await
+            .expect("by both");
+        assert_eq!(only_ab_main.len(), 1);
+        assert_eq!(only_ab_main[0].session_id, "host-a:agent-bridge:main");
+
+        // TTL=1 should drop everything we just inserted (they have heartbeat=now,
+        // but cutoff = now-1; rows with heartbeat>=cutoff stay → all stay).
+        // Use a far-past-cutoff trick: directly poke last_heartbeat_at via a manual
+        // update is overkill — instead verify that max_idle_secs=0 returns all.
+        let no_ttl = store
+            .agent_presence_list(None, None, 0, 50)
+            .await
+            .expect("ttl 0");
+        assert_eq!(no_ttl.len(), 3);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn forum_refs_json_roundtrip() {
+        let (dir, store) = fresh_store("refs").await;
+        let refs = serde_json::json!({
+            "memory_keys": ["k1", "k2"],
+            "files": ["a.rs", "b.rs"],
+            "parent_post_id": 42
+        });
+        let out = store
+            .forum_post(
+                None,
+                Some("incidents"),
+                Some("Hot path regression"),
+                "cc-A",
+                "finding",
+                "see refs",
+                Some(&refs),
+                None,
+            )
+            .await
+            .expect("create");
+        let posts = store
+            .forum_read(Some(out.thread_id), None, None, None, 50)
+            .await
+            .expect("read");
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0].refs, refs);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }

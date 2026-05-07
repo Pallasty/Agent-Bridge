@@ -1369,6 +1369,639 @@ impl McpTool for AgentInboxTool {
 }
 
 // ===========================================================================
+//                       forum (v18) — shared whiteboard
+// ===========================================================================
+
+pub struct ForumPostTool {
+    hub: Hub,
+}
+impl ForumPostTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for ForumPostTool {
+    fn name(&self) -> &'static str {
+        "forum_post"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Append a post to a thread (provide `thread_id`) or create a new thread \
+                 (provide `board` + `title`, omit `thread_id`). `author` is REQUIRED — \
+                 use a stable session id so multi-process collaboration stays readable. \
+                 `kind` ∈ {msg, finding, question, decision, reply}. `refs` is opaque \
+                 JSON, conventionally `{memory_keys:[...], files:[...], parent_post_id:N}`."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "thread_id":  { "type": "integer", "description": "Existing thread id; omit to create a new thread." },
+                    "board":      { "type": "string",  "description": "Board name (required when creating a new thread). E.g. 'general', 'design', 'incidents'." },
+                    "title":      { "type": "string",  "description": "Thread title (required when creating)." },
+                    "author":     { "type": "string",  "description": "Author session id (REQUIRED, non-empty)." },
+                    "kind":       { "type": "string",  "default": "msg", "description": "msg | finding | question | decision | reply" },
+                    "body":       { "type": "string",  "description": "Post body (required, non-empty)." },
+                    "refs":       { "type": "object",  "description": "Opaque JSON — e.g. {memory_keys:[...], files:[...], parent_post_id:N}." },
+                    "tags":       { "type": "array",   "items": {"type": "string"}, "description": "Tags applied when creating a new thread." }
+                },
+                "required": ["author", "body"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let thread_id = args.get("thread_id").and_then(|v| v.as_i64());
+        let board = args.get("board").and_then(|v| v.as_str());
+        let title = args.get("title").and_then(|v| v.as_str());
+        let author = match args
+            .get("author")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing or empty 'author'")),
+        };
+        let kind = args.get("kind").and_then(|v| v.as_str()).unwrap_or("msg");
+        let body = match args.get("body").and_then(|v| v.as_str()) {
+            Some(s) if !s.trim().is_empty() => s,
+            _ => return Ok(ToolResult::error("missing or empty 'body'")),
+        };
+        let refs = args.get("refs").cloned();
+        let tags: Option<Vec<String>> = args
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            });
+
+        let outcome = store
+            .forum_post(
+                thread_id,
+                board,
+                title,
+                author,
+                kind,
+                body,
+                refs.as_ref(),
+                tags.as_deref(),
+            )
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("forum_post: {e}")))?;
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "thread_id": outcome.thread_id,
+            "post_id": outcome.post_id,
+            "created_thread": outcome.created_thread
+        })))
+    }
+}
+
+pub struct ForumReadTool {
+    hub: Hub,
+}
+impl ForumReadTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for ForumReadTool {
+    fn name(&self) -> &'static str {
+        "forum_read"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Fetch posts from a thread (set `thread_id`) or across a board \
+                 (set `board`). Posts are ordered by id ASC; use `since_post_id` \
+                 as an exclusive cursor. When `unread_for` is set, the cursor is \
+                 inferred from this session's subscription (thread > board) and \
+                 the cursor is auto-advanced after the read. Limit clamped 1–500.\n\n\
+                 IMPORTANT — auto-advance is scope-symmetric: a thread-scoped read \
+                 only advances a *thread* subscription cursor; it will NOT touch a \
+                 board-level cursor (because that would wrongly mark unread posts in \
+                 sibling threads as seen). If you want unread tracking on a thread, \
+                 call `forum_subscribe` with scope_kind='thread'. Board subscriptions \
+                 are best for casual lurking; thread subscriptions for active \
+                 follow-along."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "thread_id":     { "type": "integer", "description": "Read posts in this thread." },
+                    "board":         { "type": "string",  "description": "Read posts across this board (used when thread_id is absent)." },
+                    "since_post_id": { "type": "integer", "description": "Exclusive cursor — only posts with id > this." },
+                    "unread_for":    { "type": "string",  "description": "Session id; reads from that session's subscription cursor and advances it." },
+                    "limit":         { "type": "integer", "default": 50, "description": "Max rows (1–500)." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let thread_id = args.get("thread_id").and_then(|v| v.as_i64());
+        let board = args.get("board").and_then(|v| v.as_str());
+        if thread_id.is_none() && board.map(|s| s.is_empty()).unwrap_or(true) {
+            return Ok(ToolResult::error(
+                "provide at least one of 'thread_id' or 'board'",
+            ));
+        }
+        let since_post_id = args.get("since_post_id").and_then(|v| v.as_i64());
+        let unread_for = args
+            .get("unread_for")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .clamp(1, 500) as u32;
+
+        let posts = store
+            .forum_read(thread_id, board, since_post_id, unread_for, limit)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("forum_read: {e}")))?;
+
+        let next_cursor = posts.last().map(|p| p.id);
+        Ok(ToolResult::json_text(&json!({
+            "thread_id": thread_id,
+            "board": board,
+            "count": posts.len(),
+            "next_cursor": next_cursor,
+            "posts": posts
+        })))
+    }
+}
+
+pub struct ForumSubscribeTool {
+    hub: Hub,
+}
+impl ForumSubscribeTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for ForumSubscribeTool {
+    fn name(&self) -> &'static str {
+        "forum_subscribe"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Register `session_id`'s interest in a thread or board. Idempotent: \
+                 re-subscribing keeps the existing `last_seen_post_id` unless `reset=true`. \
+                 `scope_kind` ∈ {thread, board}. For threads, `scope_value` is the \
+                 numeric thread id as a string; for boards, the board name.\n\n\
+                 RULE OF THUMB: subscribe at the same scope you intend to read at. \
+                 Board subscription = casual lurking on a whole board (unread_count \
+                 in `forum_list_threads` is computed against this cursor as a backstop). \
+                 Thread subscription = active follow-along on a topic; only thread-\
+                 scoped reads will auto-advance this cursor."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "session_id":  { "type": "string", "description": "Subscriber session id (REQUIRED)." },
+                    "scope_kind":  { "type": "string", "enum": ["thread", "board"] },
+                    "scope_value": { "type": "string", "description": "Thread id (as string) or board name." },
+                    "reset":       { "type": "boolean", "default": false, "description": "Reset cursor to 0." }
+                },
+                "required": ["session_id", "scope_kind", "scope_value"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let session_id = match args
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing or empty 'session_id'")),
+        };
+        let scope_kind = match args.get("scope_kind").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'scope_kind'")),
+        };
+        let scope_value = match args
+            .get("scope_value")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing or empty 'scope_value'")),
+        };
+        let reset = args
+            .get("reset")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        store
+            .forum_subscribe(session_id, scope_kind, scope_value, reset)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("forum_subscribe: {e}")))?;
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "session_id": session_id,
+            "scope_kind": scope_kind,
+            "scope_value": scope_value,
+            "reset": reset
+        })))
+    }
+}
+
+pub struct ForumListThreadsTool {
+    hub: Hub,
+}
+impl ForumListThreadsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for ForumListThreadsTool {
+    fn name(&self) -> &'static str {
+        "forum_list_threads"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "List threads on a `board`, ordered by `last_post_at DESC`. When \
+                 `unread_for` is set, each row's `unread_count` is filled relative \
+                 to that session's subscription cursors (thread cursor wins over \
+                 board cursor; missing cursor counts as 0). Optional `status` \
+                 filter ∈ {open, resolved, archived}."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "board":      { "type": "string", "description": "Board name (REQUIRED)." },
+                    "unread_for": { "type": "string", "description": "Session id — fills unread_count per thread." },
+                    "status":     { "type": "string", "enum": ["open", "resolved", "archived"] },
+                    "limit":      { "type": "integer", "default": 50, "description": "Max rows (1–500)." }
+                },
+                "required": ["board"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let board = match args
+            .get("board")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing or empty 'board'")),
+        };
+        let unread_for = args
+            .get("unread_for")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let status = args
+            .get("status")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .clamp(1, 500) as u32;
+
+        let threads = store
+            .forum_list_threads(board, unread_for, status, limit)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("forum_list_threads: {e}")))?;
+        Ok(ToolResult::json_text(&json!({
+            "board": board,
+            "count": threads.len(),
+            "threads": threads
+        })))
+    }
+}
+
+// ===========================================================================
+//                       presence (v19) — identity + heartbeat
+// ===========================================================================
+
+/// Resolve the canonical `node:project:role[:tag]` session id from env + args.
+/// Pure helper used by both `session_identity` and the announce tool default.
+fn resolve_identity(
+    role: Option<&str>,
+    tag: Option<&str>,
+    node_arg: Option<&str>,
+    project_arg: Option<&str>,
+    cwd_arg: Option<&str>,
+) -> (String, String, String, Option<String>, String) {
+    let node = node_arg
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("AGENT_BRIDGE_NODE").ok())
+        .unwrap_or_else(|| {
+            std::fs::read_to_string("/etc/hostname")
+                .map(|s| s.trim().to_string())
+                .ok()
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    std::process::Command::new("hostname")
+                        .output()
+                        .ok()
+                        .and_then(|o| String::from_utf8(o.stdout).ok())
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                })
+                .unwrap_or_else(|| "unknown".into())
+        });
+    let project = project_arg
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("AGENT_BRIDGE_PROJECT").ok())
+        .or_else(|| {
+            cwd_arg
+                .map(std::path::Path::new)
+                .or_else(|| {
+                    static EMPTY: std::sync::OnceLock<std::path::PathBuf> =
+                        std::sync::OnceLock::new();
+                    let _ = EMPTY.set(std::path::PathBuf::new());
+                    None
+                })
+                .and_then(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str().map(|s| s.to_string()))
+                })
+        })
+        .or_else(|| {
+            std::env::current_dir().ok().and_then(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str().map(|s| s.to_string()))
+            })
+        })
+        .unwrap_or_else(|| "unknown".into());
+    let role = role.unwrap_or("main").to_string();
+    let tag = tag.filter(|s| !s.is_empty()).map(|s| s.to_string());
+    let session_id = match &tag {
+        Some(t) => format!("{node}:{project}:{role}:{t}"),
+        None => format!("{node}:{project}:{role}"),
+    };
+    (node, project, role, tag, session_id)
+}
+
+pub struct SessionIdentityTool;
+impl SessionIdentityTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for SessionIdentityTool {
+    fn name(&self) -> &'static str {
+        "session_identity"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Compute the canonical session id `node:project:role[:tag]` from the \
+                 caller's environment + args. PURE — does not write to the database. \
+                 Use the result as `session_id` / `author` in agent_message, agent_inbox, \
+                 forum_post, agent_presence_announce, etc. Conventions:\n\
+                 • `node`     → arg | $AGENT_BRIDGE_NODE | /etc/hostname | `hostname`\n\
+                 • `project`  → arg | $AGENT_BRIDGE_PROJECT | basename(cwd_arg | cwd)\n\
+                 • `role`     → arg | 'main'\n\
+                 • `tag`      → arg | (omitted)\n\
+                 See docs/DESIGN-v19-presence-identity.md for rationale and the \
+                 Tailscale evolution path."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "role":    { "type": "string", "default": "main", "description": "What this CC is doing — main | explorer | reviewer | test-writer | …" },
+                    "tag":     { "type": "string", "description": "Optional disambiguator when multiple instances share a role (e.g. last-4 of pid)." },
+                    "node":    { "type": "string", "description": "Override hostname." },
+                    "project": { "type": "string", "description": "Override project slug." },
+                    "cwd":     { "type": "string", "description": "Caller's cwd (used to derive project default — MCP server's cwd ≠ Claude Code's)." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let role = args.get("role").and_then(|v| v.as_str());
+        let tag = args.get("tag").and_then(|v| v.as_str());
+        let node = args.get("node").and_then(|v| v.as_str());
+        let project = args.get("project").and_then(|v| v.as_str());
+        let cwd = args.get("cwd").and_then(|v| v.as_str());
+        let (node, project, role, tag, session_id) =
+            resolve_identity(role, tag, node, project, cwd);
+        Ok(ToolResult::json_text(&json!({
+            "session_id": session_id,
+            "node": node,
+            "project": project,
+            "role": role,
+            "tag": tag
+        })))
+    }
+}
+
+pub struct AgentPresenceAnnounceTool {
+    hub: Hub,
+}
+impl AgentPresenceAnnounceTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentPresenceAnnounceTool {
+    fn name(&self) -> &'static str {
+        "agent_presence_announce"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Upsert this agent's presence row keyed by `session_id`. Refreshes \
+                 `last_heartbeat_at` on every call, so call once on startup and \
+                 periodically after (recommend every 60–120 s). On first announce, \
+                 `name`, `node`, `project`, `role` are required; on later calls any \
+                 omitted field keeps its prior value. Field naming aligns with \
+                 Google A2A AgentCard so the row can be served as `/.well-known/\
+                 agent.json` once we add a Tailscale daemon. Tip: pre-compute \
+                 session_id with the `session_identity` tool."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "session_id":   { "type": "string", "description": "Stable identity (REQUIRED). Use session_identity to compute." },
+                    "name":         { "type": "string", "description": "Human-friendly label (REQUIRED on first announce)." },
+                    "description":  { "type": "string", "description": "Free text — what you're working on." },
+                    "version":      { "type": "string", "description": "e.g. 'agent-bridge 0.1.0; cc 1.2.3'." },
+                    "url":          { "type": "string", "description": "Reserved for daemon mode (HTTP endpoint). Leave null locally." },
+                    "node":         { "type": "string", "description": "Host identity (REQUIRED on first announce)." },
+                    "project":      { "type": "string", "description": "Project slug (REQUIRED on first announce)." },
+                    "role":         { "type": "string", "description": "main | explorer | reviewer | … (REQUIRED on first announce)." },
+                    "tag":          { "type": "string", "description": "Optional disambiguator." },
+                    "cwd":          { "type": "string", "description": "Caller's cwd for context (MCP server's cwd is irrelevant)." },
+                    "pid":          { "type": "integer", "description": "Caller's pid (the Claude Code process — MCP server's pid is irrelevant)." },
+                    "capabilities": { "type": "object", "description": "A2A-style capability flags, e.g. {\"forum\":true,\"streaming\":false}." },
+                    "skills":       { "type": "array",  "description": "A2A-style skills array, e.g. [{\"id\":\"code-review\",\"name\":\"...\",\"tags\":[...]}]." }
+                },
+                "required": ["session_id"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let session_id = match args
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing or empty 'session_id'")),
+        };
+
+        // Borrow lifetime gymnastics: hold owned strings + a temp Value slot.
+        let name = args.get("name").and_then(|v| v.as_str());
+        let description = args.get("description").and_then(|v| v.as_str());
+        let version = args.get("version").and_then(|v| v.as_str());
+        let url = args.get("url").and_then(|v| v.as_str());
+        let node = args.get("node").and_then(|v| v.as_str());
+        let project = args.get("project").and_then(|v| v.as_str());
+        let role = args.get("role").and_then(|v| v.as_str());
+        let tag = args.get("tag").and_then(|v| v.as_str());
+        let cwd = args.get("cwd").and_then(|v| v.as_str());
+        let pid = args.get("pid").and_then(|v| v.as_i64());
+        let capabilities_v = args.get("capabilities").cloned();
+        let skills_v = args.get("skills").cloned();
+
+        let upsert = ab_store::AgentPresenceUpsert {
+            name,
+            description,
+            version,
+            url,
+            node,
+            project,
+            role,
+            tag,
+            cwd,
+            pid,
+            capabilities: capabilities_v.as_ref(),
+            skills: skills_v.as_ref(),
+        };
+
+        let row = store
+            .agent_presence_announce(&session_id, upsert)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("agent_presence_announce: {e}")))?;
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "presence": row
+        })))
+    }
+}
+
+pub struct AgentPresenceListTool {
+    hub: Hub,
+}
+impl AgentPresenceListTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentPresenceListTool {
+    fn name(&self) -> &'static str {
+        "agent_presence_list"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "List active agents (heartbeat within `max_idle_secs` of now). Use to \
+                 discover collaborators before posting in forum or sending an \
+                 agent_message. Default TTL = 300 s (5 min) so a crashed CC drops off \
+                 within ~5 min. Pass `max_idle_secs:0` or `include_stale:true` to see \
+                 every row including stale ones. Filters by `project` and `role` so \
+                 you can ask 'who's reviewing AiOT right now'."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "project":       { "type": "string",  "description": "Filter by project slug." },
+                    "role":          { "type": "string",  "description": "Filter by role." },
+                    "max_idle_secs": { "type": "integer", "default": 300, "description": "Skip rows whose heartbeat is older than this. 0 = no TTL." },
+                    "include_stale": { "type": "boolean", "default": false, "description": "Equivalent to max_idle_secs:0." },
+                    "limit":         { "type": "integer", "default": 50, "description": "Max rows (1–500)." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let project = args
+            .get("project")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let role = args
+            .get("role")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let include_stale = args
+            .get("include_stale")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let max_idle_secs = if include_stale {
+            0
+        } else {
+            args.get("max_idle_secs")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(300)
+        };
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .clamp(1, 500) as u32;
+
+        let rows = store
+            .agent_presence_list(project, role, max_idle_secs, limit)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("agent_presence_list: {e}")))?;
+        Ok(ToolResult::json_text(&json!({
+            "count": rows.len(),
+            "max_idle_secs": max_idle_secs,
+            "agents": rows
+        })))
+    }
+}
+
+// ===========================================================================
 //                       agent + worktree tools
 // ===========================================================================
 
@@ -7540,6 +8173,15 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentKillTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentMessageTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentInboxTool::new(hub.clone())));
+    // Forum (v18): cross-process collaboration whiteboard.
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumPostTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumReadTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumSubscribeTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumListThreadsTool::new(hub.clone())));
+    // Presence (v19): identity convention + agent registry (A2A AgentCard-aligned).
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionIdentityTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentPresenceAnnounceTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentPresenceListTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
