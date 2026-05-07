@@ -6,6 +6,7 @@ pub mod context_budget;
 pub mod curate;
 pub mod daemon_http;
 pub mod hub;
+pub mod peer_client;
 pub mod mcp_tools;
 pub mod project;
 pub mod router;

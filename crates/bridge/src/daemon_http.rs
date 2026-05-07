@@ -21,7 +21,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use serde::Deserialize;
@@ -42,6 +42,7 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route("/.well-known/agent.json/:session_id", get(agent_card))
         .route("/forum/threads", get(forum_threads))
         .route("/forum/posts", get(forum_posts))
+        .route("/forum/post", post(forum_post))
         .route("/presence", get(presence_list))
         .with_state(state);
 
@@ -161,6 +162,64 @@ async fn forum_posts(
         "board": q.board,
         "count": posts.len(),
         "posts": posts,
+    })))
+}
+
+/// Request body for `POST /forum/post`. Mirrors the local MCP tool's args
+/// 1:1 so peer_client can serialise the same shape it'd send to a stdio
+/// MCP server.
+#[derive(Deserialize, Debug)]
+struct ForumPostRequest {
+    author: String,
+    body: String,
+    thread_id: Option<i64>,
+    board: Option<String>,
+    title: Option<String>,
+    kind: Option<String>,
+    tags: Option<Vec<String>>,
+    refs: Option<Value>,
+}
+
+async fn forum_post(
+    State(s): State<AppState>,
+    Json(req): Json<ForumPostRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    if req.author.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "missing or empty 'author'".into()));
+    }
+    if req.body.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "missing or empty 'body'".into()));
+    }
+    let kind = req.kind.as_deref().unwrap_or("msg");
+    let outcome = s
+        .store
+        .forum_post(
+            req.thread_id,
+            req.board.as_deref(),
+            req.title.as_deref(),
+            &req.author,
+            kind,
+            &req.body,
+            req.refs.as_ref(),
+            req.tags.as_deref(),
+        )
+        .await
+        .map_err(|e| {
+            // SQLITE_BUSY / lock contention surfaces as Backend; map to 503
+            // so the caller can retry rather than treating it as permanent.
+            let msg = e.to_string();
+            let code = if msg.contains("locked") || msg.contains("busy") {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (code, msg)
+        })?;
+    Ok(Json(json!({
+        "status": "ok",
+        "thread_id": outcome.thread_id,
+        "post_id": outcome.post_id,
+        "created_thread": outcome.created_thread,
     })))
 }
 

@@ -1393,7 +1393,9 @@ impl McpTool for ForumPostTool {
                  (provide `board` + `title`, omit `thread_id`). `author` is REQUIRED — \
                  use a stable session id so multi-process collaboration stays readable. \
                  `kind` ∈ {msg, finding, question, decision, reply}. `refs` is opaque \
-                 JSON, conventionally `{memory_keys:[...], files:[...], parent_post_id:N}`."
+                 JSON, conventionally `{memory_keys:[...], files:[...], parent_post_id:N}`. \
+                 Set `peer: \"host:port\"` to post into a remote tailnet peer's forum \
+                 instead of local; omit for local-only."
                     .into(),
             input_schema: json!({
                 "type": "object",
@@ -1405,17 +1407,14 @@ impl McpTool for ForumPostTool {
                     "kind":       { "type": "string",  "default": "msg", "description": "msg | finding | question | decision | reply" },
                     "body":       { "type": "string",  "description": "Post body (required, non-empty)." },
                     "refs":       { "type": "object",  "description": "Opaque JSON — e.g. {memory_keys:[...], files:[...], parent_post_id:N}." },
-                    "tags":       { "type": "array",   "items": {"type": "string"}, "description": "Tags applied when creating a new thread." }
+                    "tags":       { "type": "array",   "items": {"type": "string"}, "description": "Tags applied when creating a new thread." },
+                    "peer":       { "type": "string",  "description": "Optional tailnet peer host:port; if set, post via that daemon-http instead of local. (v20)" }
                 },
                 "required": ["author", "body"]
             }),
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let store = match &self.hub.store {
-            Some(s) => s.clone(),
-            None => return Ok(ToolResult::error("no memory store configured")),
-        };
         let thread_id = args.get("thread_id").and_then(|v| v.as_i64());
         let board = args.get("board").and_then(|v| v.as_str());
         let title = args.get("title").and_then(|v| v.as_str());
@@ -1441,7 +1440,39 @@ impl McpTool for ForumPostTool {
                     .filter_map(|v| v.as_str().map(|s| s.to_string()))
                     .collect()
             });
+        let peer = args
+            .get("peer")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
 
+        if let Some(p) = peer {
+            // Remote write — daemon owns the SQLite WAL on its node.
+            let req = crate::peer_client::ForumPostRequest {
+                author,
+                body,
+                thread_id,
+                board,
+                title,
+                kind: Some(kind),
+                tags: tags.as_deref(),
+                refs: refs.as_ref(),
+            };
+            let v = crate::peer_client::forum_post(p, req)
+                .await
+                .map_err(|e| ab_core::Error::Backend(format!("forum_post peer: {e}")))?;
+            return Ok(ToolResult::json_text(&json!({
+                "status": v.get("status").cloned().unwrap_or(json!("ok")),
+                "thread_id": v.get("thread_id"),
+                "post_id": v.get("post_id"),
+                "created_thread": v.get("created_thread"),
+                "peer": peer,
+            })));
+        }
+
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
         let outcome = store
             .forum_post(
                 thread_id,
@@ -1492,7 +1523,11 @@ impl McpTool for ForumReadTool {
                  sibling threads as seen). If you want unread tracking on a thread, \
                  call `forum_subscribe` with scope_kind='thread'. Board subscriptions \
                  are best for casual lurking; thread subscriptions for active \
-                 follow-along."
+                 follow-along.\n\n\
+                 Set `peer: \"host:port\"` to read from a remote tailnet peer's \
+                 daemon-http; omit for local-only. NOTE: `unread_for` cursor advance \
+                 is local-only and is silently ignored when `peer` is set (the \
+                 remote daemon doesn't carry your subscription state)."
                     .into(),
             input_schema: json!({
                 "type": "object",
@@ -1500,17 +1535,14 @@ impl McpTool for ForumReadTool {
                     "thread_id":     { "type": "integer", "description": "Read posts in this thread." },
                     "board":         { "type": "string",  "description": "Read posts across this board (used when thread_id is absent)." },
                     "since_post_id": { "type": "integer", "description": "Exclusive cursor — only posts with id > this." },
-                    "unread_for":    { "type": "string",  "description": "Session id; reads from that session's subscription cursor and advances it." },
-                    "limit":         { "type": "integer", "default": 50, "description": "Max rows (1–500)." }
+                    "unread_for":    { "type": "string",  "description": "Session id; reads from that session's subscription cursor and advances it. (local-only)" },
+                    "limit":         { "type": "integer", "default": 50, "description": "Max rows (1–500)." },
+                    "peer":          { "type": "string",  "description": "Optional tailnet peer host:port; if set, query that daemon-http instead of local. (v20)" }
                 }
             }),
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let store = match &self.hub.store {
-            Some(s) => s.clone(),
-            None => return Ok(ToolResult::error("no memory store configured")),
-        };
         let thread_id = args.get("thread_id").and_then(|v| v.as_i64());
         let board = args.get("board").and_then(|v| v.as_str());
         if thread_id.is_none() && board.map(|s| s.is_empty()).unwrap_or(true) {
@@ -1528,11 +1560,26 @@ impl McpTool for ForumReadTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(50)
             .clamp(1, 500) as u32;
+        let peer = args
+            .get("peer")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
 
-        let posts = store
-            .forum_read(thread_id, board, since_post_id, unread_for, limit)
-            .await
-            .map_err(|e| ab_core::Error::Backend(format!("forum_read: {e}")))?;
+        let posts = if let Some(p) = peer {
+            // Drop unread_for when going remote — cursor state is per-device.
+            crate::peer_client::forum_read(p, thread_id, board, since_post_id, None, limit)
+                .await
+                .map_err(|e| ab_core::Error::Backend(format!("forum_read peer: {e}")))?
+        } else {
+            let store = match &self.hub.store {
+                Some(s) => s.clone(),
+                None => return Ok(ToolResult::error("no memory store configured")),
+            };
+            store
+                .forum_read(thread_id, board, since_post_id, unread_for, limit)
+                .await
+                .map_err(|e| ab_core::Error::Backend(format!("forum_read: {e}")))?
+        };
 
         let next_cursor = posts.last().map(|p| p.id);
         Ok(ToolResult::json_text(&json!({
@@ -1540,7 +1587,8 @@ impl McpTool for ForumReadTool {
             "board": board,
             "count": posts.len(),
             "next_cursor": next_cursor,
-            "posts": posts
+            "posts": posts,
+            "peer": peer
         })))
     }
 }
@@ -1570,7 +1618,10 @@ impl McpTool for ForumSubscribeTool {
                  Board subscription = casual lurking on a whole board (unread_count \
                  in `forum_list_threads` is computed against this cursor as a backstop). \
                  Thread subscription = active follow-along on a topic; only thread-\
-                 scoped reads will auto-advance this cursor."
+                 scoped reads will auto-advance this cursor.\n\n\
+                 NOTE: `forum_subscribe` is local-only — subscriptions track each \
+                 device's read cursor and are intentionally not synced. To follow a \
+                 remote peer's thread, subscribe locally to that thread/board id."
                     .into(),
             input_schema: json!({
                 "type": "object",
@@ -1649,7 +1700,9 @@ impl McpTool for ForumListThreadsTool {
                  `unread_for` is set, each row's `unread_count` is filled relative \
                  to that session's subscription cursors (thread cursor wins over \
                  board cursor; missing cursor counts as 0). Optional `status` \
-                 filter ∈ {open, resolved, archived}."
+                 filter ∈ {open, resolved, archived}. Set `peer: \"host:port\"` to \
+                 query a remote tailnet peer's daemon-http instead of local store; \
+                 omit for local-only."
                     .into(),
             input_schema: json!({
                 "type": "object",
@@ -1657,17 +1710,14 @@ impl McpTool for ForumListThreadsTool {
                     "board":      { "type": "string", "description": "Board name (REQUIRED)." },
                     "unread_for": { "type": "string", "description": "Session id — fills unread_count per thread." },
                     "status":     { "type": "string", "enum": ["open", "resolved", "archived"] },
-                    "limit":      { "type": "integer", "default": 50, "description": "Max rows (1–500)." }
+                    "limit":      { "type": "integer", "default": 50, "description": "Max rows (1–500)." },
+                    "peer":       { "type": "string", "description": "Optional tailnet peer host:port; if set, query that daemon-http instead of local. (v20)" }
                 },
                 "required": ["board"]
             }),
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let store = match &self.hub.store {
-            Some(s) => s.clone(),
-            None => return Ok(ToolResult::error("no memory store configured")),
-        };
         let board = match args
             .get("board")
             .and_then(|v| v.as_str())
@@ -1689,15 +1739,30 @@ impl McpTool for ForumListThreadsTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(50)
             .clamp(1, 500) as u32;
+        let peer = args
+            .get("peer")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
 
-        let threads = store
-            .forum_list_threads(board, unread_for, status, limit)
-            .await
-            .map_err(|e| ab_core::Error::Backend(format!("forum_list_threads: {e}")))?;
+        let threads = if let Some(p) = peer {
+            crate::peer_client::forum_list_threads(p, board, unread_for, status, limit)
+                .await
+                .map_err(|e| ab_core::Error::Backend(format!("forum_list_threads peer: {e}")))?
+        } else {
+            let store = match &self.hub.store {
+                Some(s) => s.clone(),
+                None => return Ok(ToolResult::error("no memory store configured")),
+            };
+            store
+                .forum_list_threads(board, unread_for, status, limit)
+                .await
+                .map_err(|e| ab_core::Error::Backend(format!("forum_list_threads: {e}")))?
+        };
         Ok(ToolResult::json_text(&json!({
             "board": board,
             "count": threads.len(),
-            "threads": threads
+            "threads": threads,
+            "peer": peer
         })))
     }
 }
@@ -2013,7 +2078,8 @@ impl McpTool for AgentPresenceListTool {
                  agent_message. Default TTL = 300 s (5 min) so a crashed CC drops off \
                  within ~5 min. Pass `max_idle_secs:0` or `include_stale:true` to see \
                  every row including stale ones. Filters by `project` and `role` so \
-                 you can ask 'who's reviewing AiOT right now'."
+                 you can ask 'who's reviewing AiOT right now'. Set `peer: \"host:port\"` \
+                 to list agents from a remote tailnet peer's daemon-http instead of local."
                     .into(),
             input_schema: json!({
                 "type": "object",
@@ -2022,16 +2088,13 @@ impl McpTool for AgentPresenceListTool {
                     "role":          { "type": "string",  "description": "Filter by role." },
                     "max_idle_secs": { "type": "integer", "default": 300, "description": "Skip rows whose heartbeat is older than this. 0 = no TTL." },
                     "include_stale": { "type": "boolean", "default": false, "description": "Equivalent to max_idle_secs:0." },
-                    "limit":         { "type": "integer", "default": 50, "description": "Max rows (1–500)." }
+                    "limit":         { "type": "integer", "default": 50, "description": "Max rows (1–500)." },
+                    "peer":          { "type": "string",  "description": "Optional tailnet peer host:port; if set, query that daemon-http instead of local. (v20)" }
                 }
             }),
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let store = match &self.hub.store {
-            Some(s) => s.clone(),
-            None => return Ok(ToolResult::error("no memory store configured")),
-        };
         let project = args
             .get("project")
             .and_then(|v| v.as_str())
@@ -2056,11 +2119,25 @@ impl McpTool for AgentPresenceListTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(50)
             .clamp(1, 500) as u32;
+        let peer = args
+            .get("peer")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
 
-        let rows = store
-            .agent_presence_list(project, role, max_idle_secs, limit)
-            .await
-            .map_err(|e| ab_core::Error::Backend(format!("agent_presence_list: {e}")))?;
+        let rows = if let Some(p) = peer {
+            crate::peer_client::agent_presence_list(p, project, role, max_idle_secs, limit)
+                .await
+                .map_err(|e| ab_core::Error::Backend(format!("agent_presence_list peer: {e}")))?
+        } else {
+            let store = match &self.hub.store {
+                Some(s) => s.clone(),
+                None => return Ok(ToolResult::error("no memory store configured")),
+            };
+            store
+                .agent_presence_list(project, role, max_idle_secs, limit)
+                .await
+                .map_err(|e| ab_core::Error::Backend(format!("agent_presence_list: {e}")))?
+        };
         Ok(ToolResult::json_text(&json!({
             "count": rows.len(),
             "max_idle_secs": max_idle_secs,
