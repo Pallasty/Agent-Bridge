@@ -120,6 +120,21 @@ enum SkillsOp {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// Discover candidate skill repos via GitHub topic search.
+    ///
+    /// Queries `topic:claude-skill` and `topic:claude-code-skill` (unauth REST
+    /// API), dedupes, filters out anything already indexed in this DB, and
+    /// prints the top results ranked by stars. Does NOT index anything —
+    /// the user picks candidates and runs `skills index <url>` to approve.
+    Discover {
+        /// Number of candidates to print (after dedupe + already-indexed
+        /// filter). Default 30.
+        #[arg(long, default_value_t = 30)]
+        limit: usize,
+        /// Include candidates already indexed in this DB (default: hide them).
+        #[arg(long)]
+        all: bool,
+    },
     /// Semantic search over indexed skills.
     Search {
         query: String,
@@ -281,6 +296,7 @@ async fn main() -> Result<()> {
             }
             SkillsOp::Seed { verbose } => skills::run_seed(*verbose).await,
             SkillsOp::Refresh { verbose } => skills::run_refresh(*verbose).await,
+            SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::List { limit } => skills::run_list(*limit).await,
             SkillsOp::Show { key } => skills::run_show(key).await,

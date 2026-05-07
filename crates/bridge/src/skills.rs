@@ -8,6 +8,8 @@
 //! - `skills seed` — index the curated seed corpus (see [`SEED_REPOS`]).
 //! - `skills refresh` — re-index every previously-indexed GitHub source to
 //!   pick up upstream changes (cron / Stop-hook friendly).
+//! - `skills discover` — query GitHub topic search for candidate skill repos
+//!   (does not index — surfaces a ranked list for the user to approve).
 //! - `skills search <query>` — semantic search over indexed skills.
 //! - `skills list` — list indexed skills (most-recent first).
 //! - `skills show <key>` — print one skill's body and metadata.
@@ -283,6 +285,165 @@ fn is_github_src(src: &str) -> bool {
     let repo = parts.next().unwrap_or("");
     let extra = parts.next();
     !owner.is_empty() && !repo.is_empty() && extra.is_none()
+}
+
+/// Topics queried by `skills discover`. Both are commonly used by repos
+/// that publish Claude Code skill libraries. Add new ones here when the
+/// ecosystem coalesces around different tags.
+const DISCOVER_TOPICS: &[&str] = &["claude-skill", "claude-code-skill"];
+
+#[derive(Debug, Clone)]
+struct DiscoverHit {
+    full_name: String,
+    stars: u64,
+    pushed_at: String,
+    description: String,
+}
+
+/// Query GitHub topic search for candidate skill repos and print a ranked
+/// list. Does not index anything — the user picks and runs `skills index`.
+///
+/// Uses unauthenticated REST API via `curl` (already a system tool — same
+/// pattern as `git clone` for `index`). Auth doesn't help here: rate limits
+/// for unauth search are 10 req/min, and we make 2 requests total.
+pub async fn run_discover(limit: usize, include_indexed: bool) -> Result<()> {
+    let store = open_store().await?;
+    let known: std::collections::BTreeSet<String> = if include_indexed {
+        Default::default()
+    } else {
+        let rows = store
+            .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
+            .await
+            .context("list_memories failed")?;
+        rows.iter()
+            .filter_map(|r| tag_value(&r.tags, "src:"))
+            .filter(|s| is_github_src(s))
+            .collect()
+    };
+
+    eprintln!(
+        "[discover] querying {} (unauth GitHub REST)",
+        DISCOVER_TOPICS
+            .iter()
+            .map(|t| format!("topic:{}", t))
+            .collect::<Vec<_>>()
+            .join(" + ")
+    );
+
+    let mut by_name: BTreeMap<String, DiscoverHit> = BTreeMap::new();
+    let mut total_seen = 0usize;
+    for topic in DISCOVER_TOPICS {
+        match fetch_topic(topic) {
+            Ok(hits) => {
+                total_seen += hits.len();
+                for h in hits {
+                    // Dedupe across topics: keep the entry already present
+                    // (no semantic difference — same repo, same fields).
+                    by_name.entry(h.full_name.clone()).or_insert(h);
+                }
+            }
+            Err(e) => eprintln!("[discover] topic:{} failed: {}", topic, e),
+        }
+    }
+    let total_unique = by_name.len();
+    let mut hits: Vec<DiscoverHit> = by_name
+        .into_values()
+        .filter(|h| include_indexed || !known.contains(&h.full_name))
+        .collect();
+    hits.sort_by(|a, b| b.stars.cmp(&a.stars).then(a.full_name.cmp(&b.full_name)));
+    let kept = hits.len();
+
+    eprintln!(
+        "[discover] {} candidate(s) total → {} unique → {} not yet indexed",
+        total_seen,
+        total_unique,
+        if include_indexed { total_unique } else { kept }
+    );
+    if hits.is_empty() {
+        eprintln!("[discover] nothing to show — try `--all` to include already-indexed repos");
+        return Ok(());
+    }
+
+    eprintln!("[discover] top {} by stars:\n", limit.min(hits.len()));
+    for h in hits.iter().take(limit) {
+        let date = h.pushed_at.get(..10).unwrap_or(&h.pushed_at);
+        let already = if known.contains(&h.full_name) {
+            " [indexed]"
+        } else {
+            ""
+        };
+        println!("  ★{:>6}  {}  {}{}", h.stars, date, h.full_name, already);
+        if !h.description.is_empty() {
+            println!("          {}", h.description);
+        }
+    }
+    eprintln!(
+        "\n[discover] index a candidate: agent-bridge skills index https://github.com/<full_name>"
+    );
+    Ok(())
+}
+
+/// Fetch one GitHub topic search page via unauth REST. Returns hits sorted
+/// by GitHub's default (best-match). Caller dedupes across topics.
+fn fetch_topic(topic: &str) -> Result<Vec<DiscoverHit>> {
+    let url = format!(
+        "https://api.github.com/search/repositories?q=topic:{}&per_page=100&sort=stars",
+        topic
+    );
+    let out = Command::new("curl")
+        .args([
+            "-sS",
+            "-f",
+            "-H",
+            "Accept: application/vnd.github+json",
+            "-H",
+            "User-Agent: agent-bridge-skills-discover",
+            &url,
+        ])
+        .stderr(Stdio::piped())
+        .output()
+        .context("spawn curl")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        bail!("curl failed: {}", stderr.trim());
+    }
+    parse_search_response(&out.stdout)
+}
+
+fn parse_search_response(body: &[u8]) -> Result<Vec<DiscoverHit>> {
+    let v: serde_json::Value =
+        serde_json::from_slice(body).context("parse GitHub search JSON")?;
+    let items = v
+        .get("items")
+        .and_then(|x| x.as_array())
+        .ok_or_else(|| anyhow!("response missing items[] array"))?;
+    let mut out = Vec::with_capacity(items.len());
+    for it in items {
+        let Some(full_name) = it.get("full_name").and_then(|x| x.as_str()) else {
+            continue;
+        };
+        let stars = it
+            .get("stargazers_count")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0);
+        let pushed_at = it
+            .get("pushed_at")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let description = it
+            .get("description")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        out.push(DiscoverHit {
+            full_name: full_name.to_string(),
+            stars,
+            pushed_at,
+            description,
+        });
+    }
+    Ok(out)
 }
 
 /// Search indexed skills semantically. Filters to `kind = "skill"`.
@@ -932,6 +1093,40 @@ mod tests {
             parse_src_id("git@github.com:foo/bar.git").unwrap(),
             "foo/bar"
         );
+    }
+
+    #[test]
+    fn parse_search_response_extracts_fields() {
+        let body = br#"{
+            "total_count": 2,
+            "items": [
+                {
+                    "full_name": "foo/bar",
+                    "stargazers_count": 42,
+                    "pushed_at": "2026-04-01T12:34:56Z",
+                    "description": "neat library"
+                },
+                {
+                    "full_name": "baz/qux",
+                    "stargazers_count": 0,
+                    "pushed_at": "2025-01-01T00:00:00Z",
+                    "description": null
+                }
+            ]
+        }"#;
+        let hits = parse_search_response(body).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].full_name, "foo/bar");
+        assert_eq!(hits[0].stars, 42);
+        assert!(hits[0].pushed_at.starts_with("2026-04-01"));
+        assert_eq!(hits[0].description, "neat library");
+        assert_eq!(hits[1].description, ""); // null → empty
+    }
+
+    #[test]
+    fn parse_search_response_rejects_missing_items() {
+        let body = br#"{"message": "something else"}"#;
+        assert!(parse_search_response(body).is_err());
     }
 
     #[test]

@@ -8,6 +8,13 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`agent-bridge skills discover [--limit N] [--all]`** — query GitHub
+  topic search (`topic:claude-skill` + `topic:claude-code-skill`,
+  unauthenticated REST via `curl`) for candidate skill repos. Dedupes
+  across topics, filters out anything already indexed in the local DB
+  (use `--all` to include them), prints the top results ranked by stars
+  with description and last-pushed date. Does NOT index anything — the
+  user picks candidates and runs `skills index <url>` to approve.
 - **`agent-bridge skills refresh`** — re-index every previously-indexed
   GitHub source to pick up upstream changes. Walks all `kind=skill`
   records, collects distinct `<owner>/<repo>` values from `src:` tags,
