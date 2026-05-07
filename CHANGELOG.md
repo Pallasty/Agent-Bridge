@@ -7,6 +7,10 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-05-07
+
+**Theme: skills Phase B (refresh / discover / prune) + GitLab as a first-class forge.**
+
 ### Changed
 - **`agent-bridge skills` now accepts GitLab URLs.** `parse_src_id`
   handles both `https://gitlab.com/<owner>/<repo>` and the SSH form,
