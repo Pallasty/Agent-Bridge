@@ -8,6 +8,13 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`agent-bridge skills refresh`** — re-index every previously-indexed
+  GitHub source to pick up upstream changes. Walks all `kind=skill`
+  records, collects distinct `<owner>/<repo>` values from `src:` tags,
+  and re-runs `index` per source. Local-path sources (basenames with
+  no `/`) are reported and skipped — they need a manual `skills index`.
+  Cron / Stop-hook friendly. Stale-entry pruning is intentionally NOT
+  done in this pass; old records persist when upstream removes a skill.
 - **Cross-device forum sync.** `agent-bridge sync` now also writes
   `forum.jsonl` alongside `memory.jsonl` in the cross-device git repo.
   New `StateStore::forum_export` / `forum_import` (SqliteStore impl)

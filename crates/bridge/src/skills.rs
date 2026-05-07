@@ -6,6 +6,8 @@
 //!   repo, walk for skill files, parse frontmatter, lint, and save each
 //!   skill as a memory record (`kind = "skill"`).
 //! - `skills seed` — index the curated seed corpus (see [`SEED_REPOS`]).
+//! - `skills refresh` — re-index every previously-indexed GitHub source to
+//!   pick up upstream changes (cron / Stop-hook friendly).
 //! - `skills search <query>` — semantic search over indexed skills.
 //! - `skills list` — list indexed skills (most-recent first).
 //! - `skills show <key>` — print one skill's body and metadata.
@@ -201,6 +203,86 @@ pub async fn run_seed(verbose: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Re-index every previously-indexed GitHub source.
+///
+/// Walks all `kind=skill` records, collects distinct `src:` tag values that
+/// look like `<owner>/<repo>`, and re-runs [`run_index`] for each as
+/// `https://github.com/<owner>/<repo>`. Local-path sources (basenames with
+/// no `/`) are reported and skipped — they need a manual `skills index`.
+pub async fn run_refresh(verbose: bool) -> Result<()> {
+    let store = open_store().await?;
+    let rows = store
+        .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
+        .await
+        .context("list_memories failed")?;
+    if rows.is_empty() {
+        eprintln!("[skills] none indexed yet — try `agent-bridge skills seed`");
+        return Ok(());
+    }
+    let mut github_srcs: Vec<String> = Vec::new();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut local_srcs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for r in &rows {
+        let Some(src) = tag_value(&r.tags, "src:") else {
+            continue;
+        };
+        if is_github_src(&src) {
+            if seen.insert(src.clone()) {
+                github_srcs.push(src);
+            }
+        } else {
+            local_srcs.insert(src);
+        }
+    }
+    eprintln!(
+        "[skills] refresh: {} github source(s), {} local source(s) skipped, {} record(s) total",
+        github_srcs.len(),
+        local_srcs.len(),
+        rows.len()
+    );
+    if !local_srcs.is_empty() && verbose {
+        eprintln!("[skills]   local sources (re-run `skills index <path>` manually):");
+        for s in &local_srcs {
+            eprintln!("[skills]     - {}", s);
+        }
+    }
+    let mut total = 0usize;
+    let mut failed: Vec<String> = Vec::new();
+    for src in &github_srcs {
+        let url = format!("https://github.com/{}", src);
+        match run_index(&url, verbose).await {
+            Ok(n) => total += n,
+            Err(e) => {
+                eprintln!("[skills] {}: FAILED: {}", src, e);
+                failed.push(src.clone());
+            }
+        }
+    }
+    eprintln!(
+        "[skills] refresh done: {} skills indexed, {} repo(s) failed",
+        total,
+        failed.len()
+    );
+    if !failed.is_empty() {
+        eprintln!("[skills] failed repos:");
+        for s in failed {
+            eprintln!("  - {}", s);
+        }
+    }
+    Ok(())
+}
+
+/// `<owner>/<repo>` shape — the form `parse_src_id` emits for GitHub URLs.
+/// Local-path indexing produces a basename with no `/`, so this filter
+/// distinguishes them.
+fn is_github_src(src: &str) -> bool {
+    let mut parts = src.split('/');
+    let owner = parts.next().unwrap_or("");
+    let repo = parts.next().unwrap_or("");
+    let extra = parts.next();
+    !owner.is_empty() && !repo.is_empty() && extra.is_none()
 }
 
 /// Search indexed skills semantically. Filters to `kind = "skill"`.
@@ -850,6 +932,18 @@ mod tests {
             parse_src_id("git@github.com:foo/bar.git").unwrap(),
             "foo/bar"
         );
+    }
+
+    #[test]
+    fn is_github_src_classification() {
+        assert!(is_github_src("anthropics/skills"));
+        assert!(is_github_src("warpdotdev/oz-skills"));
+        assert!(is_github_src("oz-skills-test/.agents"));
+        assert!(!is_github_src(""));
+        assert!(!is_github_src("local-checkout"));
+        assert!(!is_github_src("anthropics"));
+        assert!(!is_github_src("a/b/c"));
+        assert!(!is_github_src("/foo"));
     }
 
     #[test]

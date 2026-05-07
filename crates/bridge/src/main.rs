@@ -110,6 +110,16 @@ enum SkillsOp {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// Re-index every previously-indexed source to refresh upstream changes.
+    ///
+    /// Walks all `kind=skill` records, collects distinct GitHub `<owner>/<repo>`
+    /// values from `src:` tags, and re-runs `index` for each. Local-path
+    /// sources (no `/` in `src`) are skipped — re-run `index <path>` manually.
+    /// Suitable for cron / Stop hook.
+    Refresh {
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
     /// Semantic search over indexed skills.
     Search {
         query: String,
@@ -270,6 +280,7 @@ async fn main() -> Result<()> {
                 skills::run_index(source, *verbose).await.map(|_| ())
             }
             SkillsOp::Seed { verbose } => skills::run_seed(*verbose).await,
+            SkillsOp::Refresh { verbose } => skills::run_refresh(*verbose).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::List { limit } => skills::run_list(*limit).await,
             SkillsOp::Show { key } => skills::run_show(key).await,
