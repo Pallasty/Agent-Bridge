@@ -236,7 +236,7 @@ pub async fn run_refresh(verbose: bool, prune: bool) -> Result<()> {
         let Some(src) = tag_value(&r.tags, "src:") else {
             continue;
         };
-        if is_github_src(&src) {
+        if is_remote_src(&src) {
             if seen.insert(src.clone()) {
                 github_srcs.push(src);
             }
@@ -265,7 +265,7 @@ pub async fn run_refresh(verbose: bool, prune: bool) -> Result<()> {
     let mut failed: Vec<String> = Vec::new();
     let mut pruned_total = 0usize;
     for src in &github_srcs {
-        let url = format!("https://github.com/{}", src);
+        let url = src_to_clone_url(src);
         match run_index(&url, verbose).await {
             Ok(n) => {
                 total += n;
@@ -351,15 +351,21 @@ fn is_stale_for_src(r: &MemoryRecord, src: &str, threshold: i64) -> bool {
     rec_src == src && r.updated_at < threshold
 }
 
-/// `<owner>/<repo>` shape — the form `parse_src_id` emits for GitHub URLs.
-/// Local-path indexing produces a basename with no `/`, so this filter
-/// distinguishes them.
-fn is_github_src(src: &str) -> bool {
+/// True for any `src_id` that maps to a remote (re-cloneable) source —
+/// either GitHub `<owner>/<repo>` (one slash, both non-empty) or GitLab
+/// `gitlab.com/<owner>/<repo>` (host-prefixed, three segments). Local-path
+/// indexing produces a basename with no `/`, so this filter excludes those.
+fn is_remote_src(src: &str) -> bool {
+    if let Some(rest) = src.strip_prefix("gitlab.com/") {
+        let mut parts = rest.split('/');
+        let owner = parts.next().unwrap_or("");
+        let repo = parts.next().unwrap_or("");
+        return !owner.is_empty() && !repo.is_empty() && parts.next().is_none();
+    }
     let mut parts = src.split('/');
     let owner = parts.next().unwrap_or("");
     let repo = parts.next().unwrap_or("");
-    let extra = parts.next();
-    !owner.is_empty() && !repo.is_empty() && extra.is_none()
+    !owner.is_empty() && !repo.is_empty() && parts.next().is_none()
 }
 
 /// Topics queried by `skills discover`. Both are commonly used by repos
@@ -392,7 +398,7 @@ pub async fn run_discover(limit: usize, include_indexed: bool) -> Result<()> {
             .context("list_memories failed")?;
         rows.iter()
             .filter_map(|r| tag_value(&r.tags, "src:"))
-            .filter(|s| is_github_src(s))
+            .filter(|s| is_remote_src(s))
             .collect()
     };
 
@@ -605,7 +611,7 @@ pub async fn run_install(key: &str, assume_yes: bool) -> Result<()> {
         key,
         dest.display(),
     );
-    eprintln!("[install]   source: github.com/{} : {}", src, rel);
+    eprintln!("[install]   source: {} : {}", src_to_clone_url(&src), rel);
     eprintln!("[install]   lint:   {}", lint_tag);
     if (lint_tag.starts_with("lint:warn:") || lint_tag.starts_with("lint:danger:"))
         && !assume_yes
@@ -626,7 +632,7 @@ pub async fn run_install(key: &str, assume_yes: bool) -> Result<()> {
     }
 
     // Clone, copy, clean up.
-    let url = format!("https://github.com/{}", src);
+    let url = src_to_clone_url(&src);
     let clone_dir = clone_shallow(&url, &src.replace('/', "_"))?;
     let source_path = clone_dir.join(&rel);
     if !source_path.exists() {
@@ -758,20 +764,51 @@ fn resolve_source(source: &str) -> Result<(bool, PathBuf, String)> {
     }
 }
 
+/// Parse a clone URL into the canonical `src_id` we store in `src:` tags.
+///
+/// Format:
+///   - GitHub: `<owner>/<repo>` (no host prefix — back-compat with all
+///     pre-2026-05-07 records that assume github implicitly).
+///   - GitLab: `gitlab.com/<owner>/<repo>` (host prefix lets the reverse
+///     mapping in [`src_to_clone_url`] reconstruct the right URL).
+///
+/// Accepts both `https://...` and `git@...:...` forms for either host.
 fn parse_src_id(url: &str) -> Result<String> {
-    // Accepts https://github.com/owner/repo[.git] and git@github.com:owner/repo.git.
     let stripped = url.trim_end_matches('/').trim_end_matches(".git");
-    let after = stripped
-        .rsplit("github.com")
-        .next()
-        .ok_or_else(|| anyhow!("not a github URL: {}", url))?;
-    // after = "/owner/repo" or ":owner/repo"
-    let cleaned = after.trim_start_matches([':', '/']);
-    let parts: Vec<&str> = cleaned.split('/').collect();
-    if parts.len() < 2 {
-        bail!("could not parse owner/repo from {}", url);
+    // GitLab first: an URL like `https://github.com/foo/gitlab.com-mirror`
+    // would falsely match if we checked github first. (Vanishingly rare,
+    // but the order is harmless.)
+    if let Some((_, after)) = stripped.rsplit_once("gitlab.com") {
+        let (owner, repo) = parse_owner_repo(after, url)?;
+        return Ok(format!("gitlab.com/{}/{}", owner, repo));
     }
-    Ok(format!("{}/{}", parts[0], parts[1]))
+    if let Some((_, after)) = stripped.rsplit_once("github.com") {
+        let (owner, repo) = parse_owner_repo(after, url)?;
+        return Ok(format!("{}/{}", owner, repo));
+    }
+    bail!("not a github/gitlab URL: {}", url)
+}
+
+fn parse_owner_repo<'a>(after_host: &'a str, original: &str) -> Result<(&'a str, &'a str)> {
+    // `after_host` is "/owner/repo" (https) or ":owner/repo" (ssh).
+    let cleaned = after_host.trim_start_matches([':', '/']);
+    let mut parts = cleaned.split('/');
+    let owner = parts.next().unwrap_or("");
+    let repo = parts.next().unwrap_or("");
+    if owner.is_empty() || repo.is_empty() {
+        bail!("could not parse owner/repo from {}", original);
+    }
+    Ok((owner, repo))
+}
+
+/// Reverse of [`parse_src_id`]: given a stored `src_id`, build the
+/// HTTPS clone URL. Defaults to GitHub when no host prefix is present.
+fn src_to_clone_url(src: &str) -> String {
+    if let Some(rest) = src.strip_prefix("gitlab.com/") {
+        format!("https://gitlab.com/{}", rest)
+    } else {
+        format!("https://github.com/{}", src)
+    }
 }
 
 fn clone_shallow(url: &str, src_id: &str) -> Result<PathBuf> {
@@ -1171,6 +1208,50 @@ mod tests {
     }
 
     #[test]
+    fn parse_src_id_gitlab() {
+        assert_eq!(
+            parse_src_id("https://gitlab.com/pallasting/agent-bridge-skills").unwrap(),
+            "gitlab.com/pallasting/agent-bridge-skills"
+        );
+        assert_eq!(
+            parse_src_id("https://gitlab.com/foo/bar.git").unwrap(),
+            "gitlab.com/foo/bar"
+        );
+        assert_eq!(
+            parse_src_id("git@gitlab.com:foo/bar.git").unwrap(),
+            "gitlab.com/foo/bar"
+        );
+    }
+
+    #[test]
+    fn parse_src_id_rejects_unknown_host() {
+        assert!(parse_src_id("https://codeberg.org/foo/bar").is_err());
+        assert!(parse_src_id("not a url").is_err());
+    }
+
+    #[test]
+    fn src_to_clone_url_round_trip() {
+        // GitHub: no host prefix → github URL.
+        assert_eq!(
+            src_to_clone_url("anthropics/skills"),
+            "https://github.com/anthropics/skills"
+        );
+        // GitLab: prefix preserved through the round trip.
+        assert_eq!(
+            src_to_clone_url("gitlab.com/pallasting/agent-bridge-skills"),
+            "https://gitlab.com/pallasting/agent-bridge-skills"
+        );
+        // Round-trip both providers.
+        for url in [
+            "https://github.com/anthropics/skills",
+            "https://gitlab.com/pallasting/agent-bridge-skills",
+        ] {
+            let src = parse_src_id(url).unwrap();
+            assert_eq!(src_to_clone_url(&src), url);
+        }
+    }
+
+    #[test]
     fn parse_search_response_extracts_fields() {
         let body = br#"{
             "total_count": 2,
@@ -1256,15 +1337,22 @@ mod tests {
     }
 
     #[test]
-    fn is_github_src_classification() {
-        assert!(is_github_src("anthropics/skills"));
-        assert!(is_github_src("warpdotdev/oz-skills"));
-        assert!(is_github_src("oz-skills-test/.agents"));
-        assert!(!is_github_src(""));
-        assert!(!is_github_src("local-checkout"));
-        assert!(!is_github_src("anthropics"));
-        assert!(!is_github_src("a/b/c"));
-        assert!(!is_github_src("/foo"));
+    fn is_remote_src_classification() {
+        // GitHub: <owner>/<repo> (no host prefix — back-compat).
+        assert!(is_remote_src("anthropics/skills"));
+        assert!(is_remote_src("warpdotdev/oz-skills"));
+        assert!(is_remote_src("oz-skills-test/.agents"));
+        // GitLab: gitlab.com/<owner>/<repo>.
+        assert!(is_remote_src("gitlab.com/pallasting/agent-bridge-skills"));
+        assert!(is_remote_src("gitlab.com/foo/bar"));
+        // Negatives.
+        assert!(!is_remote_src(""));
+        assert!(!is_remote_src("local-checkout"));
+        assert!(!is_remote_src("anthropics"));
+        assert!(!is_remote_src("a/b/c")); // 3-segment non-gitlab path
+        assert!(!is_remote_src("/foo"));
+        assert!(!is_remote_src("gitlab.com/onlyowner")); // gitlab needs 3 segments
+        assert!(!is_remote_src("gitlab.com/owner/repo/extra")); // 4 segments
     }
 
     #[test]

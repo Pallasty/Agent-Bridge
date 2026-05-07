@@ -85,14 +85,31 @@ enum Cmd {
 
 #[derive(Subcommand, Debug)]
 enum SyncOp {
-    /// Bootstrap the cross-device memory repo via `gh` CLI.
+    /// Bootstrap the cross-device memory repo via `gh` (GitHub) or
+    /// `glab` (GitLab) CLI. Uses `--provider auto` (default) to pick:
+    /// gitlab if `glab` is on PATH and `gh` isn't, github otherwise.
     Init {
-        /// Override the GitHub repo name (default: `agent-bridge-memory`).
+        /// Override the repo name (default: `agent-bridge-memory`).
         #[arg(long)]
         repo: Option<String>,
+        /// Forge to host the cross-device repo on.
+        #[arg(long, value_enum, default_value_t = SyncProvider::Auto)]
+        provider: SyncProvider,
     },
     /// Print resolved repo path, remote, and last sync; no network calls.
     Status,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum SyncProvider {
+    /// Use `gh` CLI to host on GitHub (legacy default).
+    Github,
+    /// Use `glab` CLI to host on GitLab.
+    Gitlab,
+    /// Auto-detect: gitlab if `glab` is on PATH and `gh` isn't,
+    /// github otherwise (preserves legacy behaviour for users who
+    /// only have `gh`).
+    Auto,
 }
 
 #[derive(Subcommand, Debug)]
@@ -188,6 +205,16 @@ pub enum SetupFrontend {
     LocalCli,
     /// Auto-detect from the running shell's environment.
     Auto,
+}
+
+impl From<SyncProvider> for sync::Provider {
+    fn from(p: SyncProvider) -> Self {
+        match p {
+            SyncProvider::Github => sync::Provider::Github,
+            SyncProvider::Gitlab => sync::Provider::Gitlab,
+            SyncProvider::Auto => sync::Provider::Auto,
+        }
+    }
 }
 
 impl SetupFrontend {
@@ -327,7 +354,9 @@ async fn main() -> Result<()> {
     if let Cmd::Sync { op, verbose } = &cmd {
         return match op {
             None => sync::run_sync(*verbose).await.map(|_| ()),
-            Some(SyncOp::Init { repo }) => sync::run_init(repo.clone()).await,
+            Some(SyncOp::Init { repo, provider }) => {
+                sync::run_init(repo.clone(), (*provider).into()).await
+            }
             Some(SyncOp::Status) => sync::run_status(),
         };
     }

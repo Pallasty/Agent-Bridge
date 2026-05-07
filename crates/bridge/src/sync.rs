@@ -156,23 +156,97 @@ pub async fn run_sync(verbose: bool) -> Result<bool> {
     Ok(true)
 }
 
-/// Bootstrap the memory-sync repo on a new machine via `gh` CLI.
-///
-/// `repo_arg` overrides the repo name (default: `agent-bridge-memory`).
-pub async fn run_init(repo_arg: Option<String>) -> Result<()> {
-    ensure_command_on_path(
-        "gh",
-        "Install with: brew install gh   (or see https://cli.github.com)",
-    )?;
+/// Provider for the cross-device memory repo. Resolved from the CLI
+/// `--provider` flag; `Auto` picks gitlab if `glab` is on PATH and
+/// `gh` isn't, github otherwise.
+#[derive(Copy, Clone, Debug)]
+pub enum Provider {
+    Github,
+    Gitlab,
+    Auto,
+}
+
+impl Provider {
+    fn cli(self) -> &'static str {
+        match self {
+            Provider::Github => "gh",
+            Provider::Gitlab => "glab",
+            // Auto is resolved before reaching this point.
+            Provider::Auto => "gh",
+        }
+    }
+
+    fn forge(self) -> &'static str {
+        match self {
+            Provider::Github => "GitHub",
+            Provider::Gitlab => "GitLab",
+            Provider::Auto => "GitHub",
+        }
+    }
+
+    fn install_hint(self) -> &'static str {
+        match self {
+            Provider::Github => {
+                "Install with: brew install gh   (or see https://cli.github.com)"
+            }
+            Provider::Gitlab => {
+                "Install with: brew install glab   (or see https://gitlab.com/gitlab-org/cli)"
+            }
+            Provider::Auto => "",
+        }
+    }
+
+    /// `gh api user --jq .login` (GitHub) vs `glab api user --jq .username`.
+    fn user_jq(self) -> &'static str {
+        match self {
+            Provider::Github => ".login",
+            Provider::Gitlab => ".username",
+            Provider::Auto => ".login",
+        }
+    }
+}
+
+/// Resolve `Auto` based on which CLI is present. Tie-break to github
+/// (legacy default) when both are installed — the user can pick
+/// explicitly with `--provider gitlab` if they want the new path.
+fn resolve_provider(p: Provider) -> Provider {
+    match p {
+        Provider::Auto => {
+            let has_gh = which_on_path("gh");
+            let has_glab = which_on_path("glab");
+            if has_glab && !has_gh {
+                Provider::Gitlab
+            } else {
+                Provider::Github
+            }
+        }
+        explicit => explicit,
+    }
+}
+
+fn which_on_path(cmd: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|p| p.join(cmd).is_file())
+}
+
+/// Bootstrap the memory-sync repo on a new machine via `gh` (GitHub) or
+/// `glab` (GitLab). `repo_arg` overrides the repo name (default:
+/// `agent-bridge-memory`).
+pub async fn run_init(repo_arg: Option<String>, provider: Provider) -> Result<()> {
+    let provider = resolve_provider(provider);
+    let cli = provider.cli();
+    ensure_command_on_path(cli, provider.install_hint())?;
     ensure_command_on_path("git", "git is required for memory sync")?;
 
-    if !gh_authenticated() {
+    if !forge_authenticated(provider) {
         bail!(
-            "`gh` is not authenticated. Run:\n    gh auth login\nthen rerun `agent-bridge sync init`."
+            "`{cli}` is not authenticated. Run:\n    {cli} auth login\nthen rerun `agent-bridge sync init`."
         );
     }
 
-    let user = gh_username()?;
+    let user = forge_username(provider)?;
     let repo_name = repo_arg.unwrap_or_else(|| DEFAULT_REPO_NAME.to_string());
     let full = format!("{user}/{repo_name}");
     let dest = default_memory_repo_path();
@@ -184,25 +258,29 @@ pub async fn run_init(repo_arg: Option<String>) -> Result<()> {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("mkdir {}", parent.display()))?;
         }
-        if !gh_repo_exists(&full) {
-            eprintln!("[init] creating private repo {full}");
-            run_gh(&[
-                "repo",
-                "create",
-                &full,
-                "--private",
-                "--description",
-                "agent-bridge cross-device memory store",
-            ])
-            .context("gh repo create")?;
+        if !forge_repo_exists(provider, &full) {
+            eprintln!("[init] creating private repo {full} on {}", provider.forge());
+            run_forge(
+                provider,
+                &[
+                    "repo",
+                    "create",
+                    &full,
+                    "--private",
+                    "--description",
+                    "agent-bridge cross-device memory store",
+                ],
+            )
+            .with_context(|| format!("{cli} repo create"))?;
         } else {
-            eprintln!("[init] repo {full} already exists on GitHub");
+            eprintln!("[init] repo {full} already exists on {}", provider.forge());
         }
         eprintln!("[init] cloning into {}", dest.display());
         let dest_str = dest
             .to_str()
             .ok_or_else(|| anyhow!("non-UTF8 path: {}", dest.display()))?;
-        run_gh(&["repo", "clone", &full, dest_str]).context("gh repo clone")?;
+        run_forge(provider, &["repo", "clone", &full, dest_str])
+            .with_context(|| format!("{cli} repo clone"))?;
     }
 
     eprintln!("[init] running first sync …");
@@ -262,8 +340,8 @@ fn ensure_command_on_path(cmd: &str, hint: &str) -> Result<()> {
     Ok(())
 }
 
-fn gh_authenticated() -> bool {
-    Command::new("gh")
+fn forge_authenticated(provider: Provider) -> bool {
+    Command::new(provider.cli())
         .args(["auth", "status"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -272,26 +350,28 @@ fn gh_authenticated() -> bool {
         .unwrap_or(false)
 }
 
-fn gh_username() -> Result<String> {
-    let out = Command::new("gh")
-        .args(["api", "user", "--jq", ".login"])
+fn forge_username(provider: Provider) -> Result<String> {
+    let cli = provider.cli();
+    let jq = provider.user_jq();
+    let out = Command::new(cli)
+        .args(["api", "user", "--jq", jq])
         .output()
-        .context("invoke gh api user")?;
+        .with_context(|| format!("invoke {cli} api user"))?;
     if !out.status.success() {
         bail!(
-            "gh api user failed: {}",
+            "{cli} api user failed: {}",
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
     let user = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if user.is_empty() {
-        bail!("gh api user returned an empty login");
+        bail!("{cli} api user returned an empty login");
     }
     Ok(user)
 }
 
-fn gh_repo_exists(full: &str) -> bool {
-    Command::new("gh")
+fn forge_repo_exists(provider: Provider, full: &str) -> bool {
+    Command::new(provider.cli())
         .args(["repo", "view", full])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -300,13 +380,14 @@ fn gh_repo_exists(full: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn run_gh(args: &[&str]) -> Result<()> {
-    let status = Command::new("gh")
+fn run_forge(provider: Provider, args: &[&str]) -> Result<()> {
+    let cli = provider.cli();
+    let status = Command::new(cli)
         .args(args)
         .status()
-        .context("invoke gh")?;
+        .with_context(|| format!("invoke {cli}"))?;
     if !status.success() {
-        bail!("gh {} failed (exit {status})", args.join(" "));
+        bail!("{cli} {} failed (exit {status})", args.join(" "));
     }
     Ok(())
 }
@@ -457,5 +538,22 @@ mod tests {
         let p = default_memory_repo_path();
         assert_ne!(p.as_os_str(), "   ");
         std::env::remove_var("AGENT_BRIDGE_MEMORY_REPO");
+    }
+
+    #[test]
+    fn provider_explicit_passes_through() {
+        // Explicit choices are returned unchanged regardless of PATH.
+        assert!(matches!(resolve_provider(Provider::Github), Provider::Github));
+        assert!(matches!(resolve_provider(Provider::Gitlab), Provider::Gitlab));
+    }
+
+    #[test]
+    fn provider_metadata_consistent() {
+        assert_eq!(Provider::Github.cli(), "gh");
+        assert_eq!(Provider::Gitlab.cli(), "glab");
+        assert_eq!(Provider::Github.user_jq(), ".login");
+        assert_eq!(Provider::Gitlab.user_jq(), ".username");
+        assert_eq!(Provider::Github.forge(), "GitHub");
+        assert_eq!(Provider::Gitlab.forge(), "GitLab");
     }
 }

@@ -8,6 +8,22 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **`agent-bridge skills` now accepts GitLab URLs.** `parse_src_id`
+  handles both `https://gitlab.com/<owner>/<repo>` and the SSH form,
+  storing as `gitlab.com/<owner>/<repo>` in the `src:` tag (host
+  prefix). Existing GitHub records keep the bare `<owner>/<repo>` form
+  for back-compat. New `src_to_clone_url` helper reverses the mapping
+  for `skills install` and `skills refresh`. Live: indexing
+  `https://gitlab.com/pallasting/agent-bridge-skills` produced 4 records
+  with `src:gitlab.com/pallasting/agent-bridge-skills`. Renames
+  `is_github_src` → `is_remote_src`.
+- **`agent-bridge sync init --provider gitlab|github|auto`.** Adds
+  GitLab support via `glab` CLI. `--provider auto` (default) picks
+  gitlab when `glab` is on PATH and `gh` isn't, otherwise github
+  (preserves legacy behaviour). Refactors the four `gh_*` helpers into
+  provider-aware `forge_*` versions. The `glab api user --jq .username`
+  / `gh api user --jq .login` field name difference is captured per
+  provider.
 - **`.gitlab-ci.yml` added** — GitLab CI/CD replicating the GitHub Actions
   CI + release pipeline on Shared Runners. Coverage is **Linux x86_64
   only** on the free tier; macOS prebuilts continue from the GitHub
