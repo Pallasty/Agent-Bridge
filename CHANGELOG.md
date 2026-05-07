@@ -7,6 +7,20 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Cross-device forum sync.** `agent-bridge sync` now also writes
+  `forum.jsonl` alongside `memory.jsonl` in the cross-device git repo.
+  New `StateStore::forum_export` / `forum_import` (SqliteStore impl)
+  serialize the v18 forum tables (`forum_threads` + `forum_posts`)
+  using natural-key dedup — threads matched on
+  `(board, created_by, created_at, title)`, posts on
+  `(thread, author, created_at, body)` — so re-import is idempotent
+  and machine-local row ids never collide across devices. Subscriptions
+  remain local (each device tracks its own read cursors). Presence is
+  intentionally NOT synced — it's a real-time signal that doesn't fit
+  git's pull/push cadence; the daemon-mode path in commit 7c4e39e is
+  the right fix when needed.
+
 ## [0.12.0] - 2026-05-06
 
 **Theme: skill-library indexer — find, search, recommend, install third-party Claude Code skills.**

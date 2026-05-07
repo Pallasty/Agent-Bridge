@@ -57,7 +57,8 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 
 use crate::{
     AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CodebaseIndexStats,
-    CodebaseSymbol, CompactPolicy, ForumPostOutcome, ForumPostRecord, ForumThreadRecord,
+    CodebaseSymbol, CompactPolicy, ForumExportResult, ForumImportReport, ForumPostExport,
+    ForumPostOutcome, ForumPostRecord, ForumThreadExport, ForumThreadRecord,
     ImportConflictPolicy, ImportReport, McpToolCallStats, McpToolErrorRecord, MemoryEdge,
     MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryRecord,
     MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep, SessionFilter,
@@ -3684,6 +3685,229 @@ impl StateStore for SqliteStore {
         Ok(out)
     }
 
+    async fn forum_export(
+        &self,
+        out_path: &std::path::Path,
+    ) -> Result<ForumExportResult> {
+        let threads: Vec<ForumThreadExport> = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<ForumThreadExport>> {
+                let mut tstmt = c.prepare(
+                    "SELECT id, board, title, created_by, created_at, last_post_at,
+                            status, tags_json
+                     FROM forum_threads
+                     ORDER BY created_at ASC, id ASC",
+                )?;
+                let mut out = Vec::new();
+                let rows = tstmt
+                    .query_map([], |row| {
+                        let id: i64 = row.get(0)?;
+                        let tags_json: Option<String> = row.get(7)?;
+                        let tags: Vec<String> = tags_json
+                            .as_deref()
+                            .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+                            .unwrap_or_default();
+                        Ok((
+                            id,
+                            ForumThreadExport {
+                                board: row.get(1)?,
+                                title: row.get(2)?,
+                                created_by: row.get(3)?,
+                                created_at: row.get(4)?,
+                                last_post_at: row.get(5)?,
+                                status: row.get(6)?,
+                                tags,
+                                posts: Vec::new(),
+                            },
+                        ))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                let mut pstmt = c.prepare(
+                    "SELECT author, kind, body, refs_json, created_at
+                     FROM forum_posts
+                     WHERE thread_id = ?1
+                     ORDER BY created_at ASC, id ASC",
+                )?;
+                for (id, mut t) in rows {
+                    let posts = pstmt
+                        .query_map(params![id], |row| {
+                            let refs_json: Option<String> = row.get(3)?;
+                            let refs = refs_json
+                                .as_deref()
+                                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+                            Ok(ForumPostExport {
+                                author: row.get(0)?,
+                                kind: row.get(1)?,
+                                body: row.get(2)?,
+                                refs,
+                                created_at: row.get(4)?,
+                            })
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    t.posts = posts;
+                    out.push(t);
+                }
+                Ok(out)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("forum_export query: {e}")))?;
+
+        if let Some(parent) = out_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| Error::Backend(format!("mkdir {parent:?}: {e}")))?;
+        }
+        let mut posts_written = 0u64;
+        let mut buf = String::new();
+        for t in &threads {
+            posts_written += t.posts.len() as u64;
+            buf.push_str(&serde_json::to_string(t)?);
+            buf.push('\n');
+        }
+        tokio::fs::write(out_path, buf)
+            .await
+            .map_err(|e| Error::Backend(format!("write {out_path:?}: {e}")))?;
+        Ok(ForumExportResult {
+            threads_written: threads.len() as u64,
+            posts_written,
+        })
+    }
+
+    async fn forum_import(
+        &self,
+        in_path: &std::path::Path,
+    ) -> Result<ForumImportReport> {
+        let raw = match tokio::fs::read_to_string(in_path).await {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ForumImportReport::default());
+            }
+            Err(e) => {
+                return Err(Error::Backend(format!("read {in_path:?}: {e}")));
+            }
+        };
+
+        // Parse lines first so we can move owned data into the call closure.
+        let mut threads: Vec<ForumThreadExport> = Vec::new();
+        let mut malformed = 0u64;
+        for line in raw.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<ForumThreadExport>(line) {
+                Ok(t) => threads.push(t),
+                Err(_) => malformed += 1,
+            }
+        }
+
+        let report = self
+            .conn
+            .call(move |c| -> RusqliteResult<ForumImportReport> {
+                let mut rep = ForumImportReport {
+                    malformed,
+                    ..Default::default()
+                };
+                let tx = c.transaction()?;
+                {
+                    let mut find_thread = tx.prepare(
+                        "SELECT id, last_post_at FROM forum_threads
+                         WHERE board=?1 AND created_by=?2 AND created_at=?3 AND title=?4
+                         LIMIT 1",
+                    )?;
+                    let mut insert_thread = tx.prepare(
+                        "INSERT INTO forum_threads
+                            (board, title, created_by, created_at, last_post_at, status, tags_json)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    )?;
+                    let mut bump_last_post = tx.prepare(
+                        "UPDATE forum_threads SET last_post_at=?1 WHERE id=?2",
+                    )?;
+                    let mut find_post = tx.prepare(
+                        "SELECT 1 FROM forum_posts
+                         WHERE thread_id=?1 AND author=?2 AND created_at=?3 AND body=?4
+                         LIMIT 1",
+                    )?;
+                    let mut insert_post = tx.prepare(
+                        "INSERT INTO forum_posts
+                            (thread_id, author, kind, body, refs_json, created_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    )?;
+
+                    for t in &threads {
+                        let tags_json = if t.tags.is_empty() {
+                            None
+                        } else {
+                            Some(serde_json::to_string(&t.tags).unwrap_or_else(|_| "[]".into()))
+                        };
+                        let existing: Option<(i64, i64)> = find_thread
+                            .query_row(
+                                params![&t.board, &t.created_by, t.created_at, &t.title],
+                                |row| Ok((row.get(0)?, row.get(1)?)),
+                            )
+                            .ok();
+                        let (thread_id, prior_last_post) = match existing {
+                            Some((id, lp)) => {
+                                rep.threads_matched += 1;
+                                (id, lp)
+                            }
+                            None => {
+                                insert_thread.execute(params![
+                                    &t.board,
+                                    &t.title,
+                                    &t.created_by,
+                                    t.created_at,
+                                    t.last_post_at,
+                                    &t.status,
+                                    tags_json,
+                                ])?;
+                                rep.threads_inserted += 1;
+                                (tx.last_insert_rowid(), t.last_post_at)
+                            }
+                        };
+
+                        let mut max_post_at = prior_last_post;
+                        for p in &t.posts {
+                            let exists: Option<i64> = find_post
+                                .query_row(
+                                    params![thread_id, &p.author, p.created_at, &p.body],
+                                    |row| row.get(0),
+                                )
+                                .ok();
+                            if exists.is_some() {
+                                rep.posts_skipped += 1;
+                                continue;
+                            }
+                            let refs_json = p
+                                .refs
+                                .as_ref()
+                                .map(|v| v.to_string());
+                            insert_post.execute(params![
+                                thread_id,
+                                &p.author,
+                                &p.kind,
+                                &p.body,
+                                refs_json,
+                                p.created_at,
+                            ])?;
+                            rep.posts_inserted += 1;
+                            if p.created_at > max_post_at {
+                                max_post_at = p.created_at;
+                            }
+                        }
+                        if max_post_at > prior_last_post {
+                            bump_last_post.execute(params![max_post_at, thread_id])?;
+                        }
+                    }
+                }
+                tx.commit()?;
+                Ok(rep)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("forum_import: {e}")))?;
+        Ok(report)
+    }
+
     async fn forum_set_thread_status(&self, thread_id: i64, status: &str) -> Result<()> {
         if !matches!(status, "open" | "resolved" | "archived") {
             return Err(Error::Backend(format!(
@@ -4944,6 +5168,112 @@ mod tests {
         assert_eq!(posts.len(), 1);
         assert_eq!(posts[0].refs, refs);
 
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn forum_export_import_roundtrip_dedupes() {
+        // Simulate two devices: store-A creates a thread + post; we export,
+        // then import the file into a fresh store-B (acting as the other
+        // device) and verify the rows show up. Re-importing on the same
+        // store must be idempotent (matched threads, skipped posts).
+        let (dir_a, store_a) = fresh_store("forum-exp-a").await;
+        let (dir_b, store_b) = fresh_store("forum-exp-b").await;
+
+        let refs = serde_json::json!({"memory_keys": ["plan_v18"]});
+        let t = store_a
+            .forum_post(
+                None,
+                Some("design"),
+                Some("Forum sync RFC"),
+                "node-A:proj:main",
+                "finding",
+                "v1: append-only natural-key dedup",
+                Some(&refs),
+                Some(&["v18".into(), "sync".into()]),
+            )
+            .await
+            .expect("create");
+        store_a
+            .forum_post(
+                Some(t.thread_id),
+                None,
+                None,
+                "node-A:proj:reviewer",
+                "reply",
+                "+1, looks idempotent",
+                None,
+                None,
+            )
+            .await
+            .expect("reply");
+
+        let out_file = dir_a.join("forum.jsonl");
+        let exp = store_a
+            .forum_export(&out_file)
+            .await
+            .expect("export");
+        assert_eq!(exp.threads_written, 1);
+        assert_eq!(exp.posts_written, 2);
+
+        // Import into store-B (cold, no overlap) → both rows materialise.
+        let rep1 = store_b
+            .forum_import(&out_file)
+            .await
+            .expect("import cold");
+        assert_eq!(rep1.threads_inserted, 1);
+        assert_eq!(rep1.threads_matched, 0);
+        assert_eq!(rep1.posts_inserted, 2);
+        assert_eq!(rep1.posts_skipped, 0);
+
+        let threads_b = store_b
+            .forum_list_threads("design", None, None, 10)
+            .await
+            .expect("list");
+        assert_eq!(threads_b.len(), 1);
+        assert_eq!(threads_b[0].title, "Forum sync RFC");
+        assert_eq!(threads_b[0].post_count, 2);
+        let posts_b = store_b
+            .forum_read(Some(threads_b[0].id), None, None, None, 50)
+            .await
+            .expect("read");
+        assert_eq!(posts_b[0].refs, refs);
+
+        // Re-importing the same file on store-B must be a no-op (matched
+        // thread + skipped posts). This is the property that makes the
+        // Stop hook safe to fire repeatedly.
+        let rep2 = store_b
+            .forum_import(&out_file)
+            .await
+            .expect("import warm");
+        assert_eq!(rep2.threads_inserted, 0);
+        assert_eq!(rep2.threads_matched, 1);
+        assert_eq!(rep2.posts_inserted, 0);
+        assert_eq!(rep2.posts_skipped, 2);
+
+        // Importing on store-A (the origin) must also be a no-op — same logic.
+        let rep3 = store_a
+            .forum_import(&out_file)
+            .await
+            .expect("import origin");
+        assert_eq!(rep3.threads_inserted, 0);
+        assert_eq!(rep3.threads_matched, 1);
+        assert_eq!(rep3.posts_inserted, 0);
+        assert_eq!(rep3.posts_skipped, 2);
+
+        let _ = tokio::fs::remove_dir_all(&dir_a).await;
+        let _ = tokio::fs::remove_dir_all(&dir_b).await;
+    }
+
+    #[tokio::test]
+    async fn forum_export_missing_file_import_returns_zero() {
+        // Cold-start sync: forum.jsonl doesn't exist yet → import is a no-op.
+        let (dir, store) = fresh_store("forum-cold").await;
+        let missing = dir.join("does-not-exist.jsonl");
+        let rep = store.forum_import(&missing).await.expect("import missing");
+        assert_eq!(rep.threads_inserted, 0);
+        assert_eq!(rep.posts_inserted, 0);
+        assert_eq!(rep.malformed, 0);
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }

@@ -24,6 +24,7 @@ use std::process::{Command, Stdio};
 
 const DEFAULT_REPO_NAME: &str = "agent-bridge-memory";
 const MEMORY_FILE: &str = "memory.jsonl";
+const FORUM_FILE: &str = "forum.jsonl";
 
 /// Resolve the cross-device memory repo path.
 ///
@@ -86,8 +87,24 @@ pub async fn run_sync(verbose: bool) -> Result<bool> {
             .context("memory_import")?;
         if verbose {
             eprintln!(
-                "[sync] import: inserted={} updated={} skipped={} malformed={}",
+                "[sync] memory import: inserted={} updated={} skipped={} malformed={}",
                 report.inserted, report.updated, report.skipped, report.malformed
+            );
+        }
+    }
+
+    // Forum import — natural-key dedup, append-only. Subscriptions stay local.
+    let forum_file = repo.join(FORUM_FILE);
+    if forum_file.exists() {
+        let freport = store.forum_import(&forum_file).await.context("forum_import")?;
+        if verbose {
+            eprintln!(
+                "[sync] forum import: threads_inserted={} threads_matched={} posts_inserted={} posts_skipped={} malformed={}",
+                freport.threads_inserted,
+                freport.threads_matched,
+                freport.posts_inserted,
+                freport.posts_skipped,
+                freport.malformed
             );
         }
     }
@@ -99,15 +116,28 @@ pub async fn run_sync(verbose: bool) -> Result<bool> {
         .context("memory_export")?;
     if verbose {
         eprintln!(
-            "[sync] export: memories_written={}",
+            "[sync] memory export: memories_written={}",
             result.memories_written
+        );
+    }
+
+    let fresult = store
+        .forum_export(&forum_file)
+        .await
+        .context("forum_export")?;
+    if verbose {
+        eprintln!(
+            "[sync] forum export: threads_written={} posts_written={}",
+            fresult.threads_written, fresult.posts_written
         );
     }
     drop(store);
 
     // Stage first so brand-new files are noticed (git diff doesn't see untracked).
-    run_git(&repo, &["add", MEMORY_FILE]).context("git add")?;
-    if !git_index_changed(&repo, MEMORY_FILE)? {
+    run_git(&repo, &["add", MEMORY_FILE, FORUM_FILE]).context("git add")?;
+    let memory_changed = git_index_changed(&repo, MEMORY_FILE)?;
+    let forum_changed = git_index_changed(&repo, FORUM_FILE)?;
+    if !memory_changed && !forum_changed {
         if verbose {
             eprintln!("[sync] no changes to push.");
         }

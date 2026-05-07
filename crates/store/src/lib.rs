@@ -268,6 +268,53 @@ pub struct ForumPostOutcome {
     pub created_thread: bool,
 }
 
+/// One thread + its posts, in cross-device sync shape. No local id columns —
+/// the receiving side either matches an existing row by natural key
+/// `(board, created_by, created_at, title)` and reuses its local id, or
+/// inserts and gets a fresh local id. Subscriptions are intentionally
+/// excluded from sync — each device tracks its own read cursors.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForumThreadExport {
+    pub board: String,
+    pub title: String,
+    pub created_by: String,
+    pub created_at: i64,
+    pub last_post_at: i64,
+    pub status: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub posts: Vec<ForumPostExport>,
+}
+
+/// One post in a `ForumThreadExport`. Natural key for dedup is
+/// `(thread, author, created_at, body)` — same author posting the same body
+/// at the same epoch second is treated as the same logical post.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForumPostExport {
+    pub author: String,
+    pub kind: String,
+    pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refs: Option<serde_json::Value>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ForumExportResult {
+    pub threads_written: u64,
+    pub posts_written: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ForumImportReport {
+    pub threads_inserted: u64,
+    pub threads_matched: u64,
+    pub posts_inserted: u64,
+    pub posts_skipped: u64,
+    pub malformed: u64,
+}
+
 // ── v19: agent presence / identity registry ─────────────────────────────────
 
 /// One agent's presence row. Field naming aligns with Google A2A AgentCard so
@@ -827,6 +874,35 @@ pub trait StateStore: Send + Sync {
     }
 
     /// Update thread status (`open` | `resolved` | `archived`).
+    /// Export every forum thread (with its posts) to a JSONL file. One thread
+    /// per line; posts are nested inside their thread. Subscriptions are not
+    /// included (each device has its own read cursors). Used by
+    /// `agent-bridge sync` for cross-device collaboration.
+    async fn forum_export(
+        &self,
+        out_path: &std::path::Path,
+    ) -> Result<ForumExportResult> {
+        let _ = out_path;
+        Err(ab_core::Error::Backend(
+            "forum_export not implemented".into(),
+        ))
+    }
+
+    /// Import threads + posts from a JSONL file produced by `forum_export`.
+    /// Idempotent: threads are matched by `(board, created_by, created_at,
+    /// title)`; posts are matched by `(thread, author, created_at, body)`.
+    /// On match, existing local row is reused; on no match, new row is
+    /// inserted. `last_post_at` is updated to `max(local, remote)`.
+    async fn forum_import(
+        &self,
+        in_path: &std::path::Path,
+    ) -> Result<ForumImportReport> {
+        let _ = in_path;
+        Err(ab_core::Error::Backend(
+            "forum_import not implemented".into(),
+        ))
+    }
+
     async fn forum_set_thread_status(&self, thread_id: i64, status: &str) -> Result<()> {
         let _ = (thread_id, status);
         Err(ab_core::Error::Backend(
