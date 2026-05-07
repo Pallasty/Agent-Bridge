@@ -193,11 +193,19 @@ pub enum SetupFrontend {
 impl SetupFrontend {
     /// Resolve `Auto` to a concrete frontend by inspecting the env.
     ///
-    /// Detection order: Warp → Codex (`~/.codex/config.toml`,
-    /// `CODEX_HOME`, or `codex` on PATH) → Gemini CLI
-    /// (`~/.gemini/settings.json` or `gemini` on PATH) → Auggie
-    /// (`~/.augment` exists or `auggie` on PATH) → Claude Code
+    /// Detection order: **Claude Code already wired** (hooks installed
+    /// in `~/.claude/settings.json`) → Warp → Codex
+    /// (`~/.codex/config.toml`, `CODEX_HOME`, or `codex` on PATH) →
+    /// Gemini CLI (`~/.gemini/settings.json` or `gemini` on PATH) →
+    /// Auggie (`~/.augment` exists or `auggie` on PATH) → Claude Code
     /// (default fallback).
+    ///
+    /// The "already wired" check goes first because hooks are the
+    /// strongest signal of user choice — if the user previously ran
+    /// `setup --frontend claude-code` and the hooks are still active,
+    /// re-running `setup --frontend auto` should reinstall the same
+    /// profile, even if other frontends are also installed on the
+    /// machine.
     fn resolve(self) -> setup::Frontend {
         match self {
             Self::ClaudeCode => setup::Frontend::ClaudeCode,
@@ -207,7 +215,9 @@ impl SetupFrontend {
             Self::GeminiCli => setup::Frontend::GeminiCli,
             Self::LocalCli => setup::Frontend::LocalCli,
             Self::Auto => {
-                if WarpBackend::detect() {
+                if detect_claude_code_wired() {
+                    setup::Frontend::ClaudeCode
+                } else if WarpBackend::detect() {
                     setup::Frontend::Warp
                 } else if detect_codex() {
                     setup::Frontend::Codex
@@ -221,6 +231,33 @@ impl SetupFrontend {
             }
         }
     }
+}
+
+/// True when `~/.claude/settings.json` already references at least one
+/// of agent-bridge's hook scripts (`ab-memory-hook`,
+/// `ab-precompact-hook`, `ab-session-end-hook`). This is the strongest
+/// possible "Claude Code is the primary frontend" signal — beats every
+/// other detector because it means the user previously committed to
+/// this profile.
+fn detect_claude_code_wired() -> bool {
+    let Some(home) = std::env::var_os("HOME") else {
+        return false;
+    };
+    let path = std::path::Path::new(&home).join(".claude/settings.json");
+    let Ok(body) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    settings_references_ab_hook(&body)
+}
+
+/// Substring scan rather than full JSON parse — robust to schema drift
+/// (Claude Code reorganises `hooks.*` shape periodically) and to users
+/// hand-editing the file with comments. False positives are unlikely:
+/// the script names are unique to agent-bridge.
+fn settings_references_ab_hook(body: &str) -> bool {
+    body.contains("ab-memory-hook")
+        || body.contains("ab-precompact-hook")
+        || body.contains("ab-session-end-hook")
 }
 
 /// Heuristic: Codex keeps its config under `$CODEX_HOME/config.toml`
@@ -449,4 +486,40 @@ async fn build_hub() -> Result<Hub> {
         .register_agent(codex)
         .worktree(worktree)
         .build())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_with_memory_hook_is_wired() {
+        let body = r#"{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"/Users/x/.local/bin/ab-memory-hook"}]}]}}"#;
+        assert!(settings_references_ab_hook(body));
+    }
+
+    #[test]
+    fn settings_with_precompact_hook_is_wired() {
+        let body = r#"{"hooks":{"PreCompact":[{"hooks":[{"command":"~/.local/bin/ab-precompact-hook"}]}]}}"#;
+        assert!(settings_references_ab_hook(body));
+    }
+
+    #[test]
+    fn settings_with_session_end_hook_is_wired() {
+        let body = r#"{"hooks":{"Stop":[{"hooks":[{"command":"/x/ab-session-end-hook"}]}]}}"#;
+        assert!(settings_references_ab_hook(body));
+    }
+
+    #[test]
+    fn unrelated_hook_command_is_not_wired() {
+        // User has hooks but none point at agent-bridge.
+        let body = r#"{"hooks":{"Stop":[{"hooks":[{"command":"/usr/bin/notify-send"}]}]}}"#;
+        assert!(!settings_references_ab_hook(body));
+    }
+
+    #[test]
+    fn empty_settings_is_not_wired() {
+        assert!(!settings_references_ab_hook("{}"));
+        assert!(!settings_references_ab_hook(""));
+    }
 }

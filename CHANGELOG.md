@@ -7,6 +7,18 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`setup --frontend auto` no longer misroutes** when multiple frontends
+  are installed. Detection now checks "Claude Code already wired"
+  (substring scan of `~/.claude/settings.json` for any of `ab-memory-hook`,
+  `ab-precompact-hook`, `ab-session-end-hook`) FIRST. Previously a
+  machine with both Claude Code hooks active AND `~/.codex/config.toml`
+  present would re-install the Codex profile on every `setup --frontend
+  auto`, silently de-prioritising the user's primary frontend. Hooks
+  are the strongest signal of user choice; they win over any other
+  detector. Verified live on a machine with `~/.claude/settings.json` +
+  Codex + Warp all installed: now picks `claude-code`.
+
 ### Added
 - **`agent-bridge skills discover [--limit N] [--all]`** — query GitHub
   topic search (`topic:claude-skill` + `topic:claude-code-skill`,
