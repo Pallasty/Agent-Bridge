@@ -63,8 +63,52 @@ struct Frontmatter {
     name: Option<String>,
     description: Option<String>,
     allowed_tools: Vec<String>,
-    /// Any other key=value pairs we don't model explicitly.
+    /// agentskills.io spec optional field — license name or filename.
+    license: Option<String>,
+    /// agentskills.io spec optional field — environment requirements (≤500 chars).
+    compatibility: Option<String>,
+    /// Any other key=value pairs we don't model explicitly. Spec-defined
+    /// `metadata` (arbitrary key-value mapping) lands here too — we don't
+    /// expand it per-key because the spec leaves the inner shape open.
     extras: BTreeMap<String, String>,
+}
+
+/// Known vendor / first-party orgs whose skills we treat as `vendor-curated`
+/// for ranking purposes. See `decision_skills_quality_tier_20260507`.
+/// Anything not in this list classifies as `community`.
+///
+/// Sources: agentskills.io client list as of 2026-05-07. Add new orgs here
+/// when they ship official skill catalogs we trust.
+const KNOWN_VENDORS: &[&str] = &[
+    "anthropics",
+    "warpdotdev",
+    "google-gemini",
+    "google-ai-edge",
+    "openai",
+    "microsoft",
+    "github",
+    "block",          // Goose
+    "OpenHands",
+    "letta-ai",
+    "sst",            // OpenCode
+    "RooCodeInc",
+    "mistralai",
+    "bytedance",
+    "spring-projects",
+    "jetbrains",
+    "snowflake",
+    "databricks",
+    "laravel",
+    "cursor",
+];
+
+fn classify_vendor(src: &str) -> &'static str {
+    let owner = src.split('/').next().unwrap_or(src);
+    if KNOWN_VENDORS.iter().any(|v| v.eq_ignore_ascii_case(owner)) {
+        "vendor-curated"
+    } else {
+        "community"
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -507,16 +551,17 @@ fn walk_skill_files(repo: &Path, src_id: &str) -> Result<Vec<SkillFile>> {
     Ok(out)
 }
 
-/// Strip a leading `.claude/skills/` or `skills/` segment from a relative
-/// path so the resulting skill key is shorter and stable across repo layouts.
+/// Strip a leading boilerplate prefix (`.agents/skills/` per agentskills.io
+/// spec, `.claude/skills/` legacy Claude Code, or bare `skills/`) from a
+/// relative path so the resulting skill key is shorter and stable across
+/// repo layouts.
 fn strip_skills_prefix(path: &str) -> &str {
-    if let Some(rest) = path.strip_prefix(".claude/skills/") {
-        rest
-    } else if let Some(rest) = path.strip_prefix("skills/") {
-        rest
-    } else {
-        path
+    for prefix in [".agents/skills/", ".claude/skills/", "skills/"] {
+        if let Some(rest) = path.strip_prefix(prefix) {
+            return rest;
+        }
     }
+    path
 }
 
 // ── frontmatter parser ────────────────────────────────────────────────────
@@ -556,12 +601,23 @@ fn split_frontmatter(body: &str) -> (Frontmatter, &str) {
         match key {
             "name" => fm.name = Some(val),
             "description" => fm.description = Some(val),
+            "license" => fm.license = Some(val),
+            "compatibility" => fm.compatibility = Some(val),
             "allowed-tools" | "allowed_tools" | "tools" => {
-                if val.starts_with('[') && val.ends_with(']') {
+                // Spec (agentskills.io): "space-separated string of pre-approved
+                // tools". Tolerate two legacy forms still in the wild:
+                //   - YAML inline list: `[Read, Grep]` → split on commas
+                //   - Bare string: `Bash(git:*) Read` → split on whitespace
+                let bracketed = val.starts_with('[') && val.ends_with(']');
+                if bracketed {
                     val = val[1..val.len() - 1].to_string();
                 }
-                fm.allowed_tools = val
-                    .split(',')
+                let split_iter: Box<dyn Iterator<Item = &str>> = if bracketed {
+                    Box::new(val.split(','))
+                } else {
+                    Box::new(val.split_whitespace())
+                };
+                fm.allowed_tools = split_iter
                     .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
@@ -684,8 +740,25 @@ fn build_record(sf: &SkillFile) -> Result<MemoryRecord> {
         format!("src:{}", sf.src),
         format!("path:{}", path_str),
         lint_summary_tag(&findings),
+        // vendor classification — feeds ranking / filtering. See
+        // KNOWN_VENDORS const above for what counts as vendor-curated.
+        format!("vendor:{}", classify_vendor(&sf.src)),
     ];
+    // Preserve agentskills.io spec optional fields as tags. They're not
+    // used for embedding signal (which is description + body), but they
+    // matter for compliance, redistribution, and environment-aware
+    // filtering. Keeping them as tags lets `memory_search` filter without
+    // re-parsing.
+    if let Some(lic) = &fm.license {
+        tags.push(format!("license:{}", lic));
+    }
+    if let Some(compat) = &fm.compatibility {
+        tags.push(format!("compatibility:{}", compat));
+    }
     if !fm.allowed_tools.is_empty() {
+        // Stored comma-joined in the tag value for grep/filter ergonomics;
+        // input parser accepts both space-separated (spec) and bracketed
+        // YAML list (legacy).
         tags.push(format!("tools:{}", fm.allowed_tools.join(",")));
     }
 
@@ -827,6 +900,12 @@ mod tests {
     fn strip_skills_prefix_handles_layouts() {
         assert_eq!(strip_skills_prefix("skills/xlsx"), "xlsx");
         assert_eq!(strip_skills_prefix(".claude/skills/foo"), "foo");
+        // agentskills.io standard layout (used by warpdotdev/oz-skills,
+        // sst/opencode, RooCodeInc/Roo-Code, etc.).
+        assert_eq!(
+            strip_skills_prefix(".agents/skills/mcp-builder"),
+            "mcp-builder"
+        );
         assert_eq!(strip_skills_prefix("a/b/c"), "a/b/c");
         // only strips a SINGLE leading segment — nested skills inside
         // skills/ keep their internal structure.
@@ -856,6 +935,105 @@ mod tests {
     #[test]
     fn lint_clean_summary() {
         assert_eq!(lint_summary_tag(&[]), "lint:clean");
+    }
+
+    // ── agentskills.io spec compliance ──────────────────────────────────
+
+    #[test]
+    fn frontmatter_allowed_tools_space_separated_per_spec() {
+        // Spec form: bare string, space-separated.
+        let body = "---\nname: x\nallowed-tools: Bash(git:*) Bash(jq:*) Read\n---\nbody";
+        let (fm, _) = split_frontmatter(body);
+        assert_eq!(fm.allowed_tools, vec!["Bash(git:*)", "Bash(jq:*)", "Read"]);
+    }
+
+    #[test]
+    fn frontmatter_allowed_tools_bracketed_list_still_works() {
+        // Legacy form must keep working — we tolerate both.
+        let body = "---\nname: x\nallowed-tools: [Read, Grep, Bash]\n---\nbody";
+        let (fm, _) = split_frontmatter(body);
+        assert_eq!(fm.allowed_tools, vec!["Read", "Grep", "Bash"]);
+    }
+
+    #[test]
+    fn frontmatter_preserves_license_and_compatibility() {
+        let body = "---\n\
+            name: x\n\
+            description: d\n\
+            license: MIT\n\
+            compatibility: Requires Python 3.14+ and uv\n\
+            ---\nbody";
+        let (fm, _) = split_frontmatter(body);
+        assert_eq!(fm.license.as_deref(), Some("MIT"));
+        assert_eq!(
+            fm.compatibility.as_deref(),
+            Some("Requires Python 3.14+ and uv")
+        );
+    }
+
+    #[test]
+    fn classify_vendor_known_orgs() {
+        assert_eq!(classify_vendor("anthropics/skills"), "vendor-curated");
+        assert_eq!(classify_vendor("warpdotdev/oz-skills"), "vendor-curated");
+        assert_eq!(classify_vendor("openai/codex"), "vendor-curated");
+        // Case-insensitive match for orgs like `OpenHands` whose canonical
+        // capitalization differs from typical lowercase convention.
+        assert_eq!(classify_vendor("openhands/some-repo"), "vendor-curated");
+    }
+
+    #[test]
+    fn classify_vendor_unknown_is_community() {
+        assert_eq!(
+            classify_vendor("alirezarezvani/claude-skills"),
+            "community"
+        );
+        assert_eq!(classify_vendor("Jeffallan/claude-skills"), "community");
+        assert_eq!(classify_vendor("random-user/random-repo"), "community");
+        // Single-segment src (local dir test) — falls back to community.
+        assert_eq!(classify_vendor("oz-skills-test"), "community");
+    }
+
+    #[test]
+    fn build_record_emits_vendor_and_optional_tags() {
+        let sf = SkillFile {
+            src: "warpdotdev/oz-skills".to_string(),
+            name: "mcp-builder".to_string(),
+            rel_path: PathBuf::from(".agents/skills/mcp-builder/SKILL.md"),
+            body: "---\n\
+                name: mcp-builder\n\
+                description: Build high-quality MCP servers.\n\
+                license: Complete terms in LICENSE.txt\n\
+                ---\n\
+                # Body\n"
+                .to_string(),
+        };
+        let rec = build_record(&sf).expect("record");
+        let has = |needle: &str| rec.tags.iter().any(|t| t == needle);
+        assert!(has("skill"));
+        assert!(has("src:warpdotdev/oz-skills"));
+        assert!(has("vendor:vendor-curated"), "tags={:?}", rec.tags);
+        assert!(
+            has("license:Complete terms in LICENSE.txt"),
+            "license must be preserved; tags={:?}",
+            rec.tags
+        );
+        assert!(rec.content.starts_with("Build high-quality MCP servers."));
+    }
+
+    #[test]
+    fn build_record_community_vendor_classification() {
+        let sf = SkillFile {
+            src: "alirezarezvani/claude-skills".to_string(),
+            name: "marketing".to_string(),
+            rel_path: PathBuf::from("skills/marketing/SKILL.md"),
+            body: "---\nname: marketing\ndescription: d\n---\nbody".to_string(),
+        };
+        let rec = build_record(&sf).expect("record");
+        assert!(
+            rec.tags.iter().any(|t| t == "vendor:community"),
+            "tags={:?}",
+            rec.tags
+        );
     }
 
 }
