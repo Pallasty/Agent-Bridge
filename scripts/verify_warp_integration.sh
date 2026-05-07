@@ -39,7 +39,7 @@ fi
 run_mcp() {
 	local inp="$1"
 	local out="$2"
-	timeout 120 env AGENT_BRIDGE_DB="$AGENT_BRIDGE_DB" "$AB_BIN" mcp <"$inp" >"$out" 2>"${out}.stderr" || true
+	timeout 120 env AGENT_BRIDGE_DB="$AGENT_BRIDGE_DB" AGENT_BRIDGE_TOOL_PROFILE=all "$AB_BIN" mcp <"$inp" >"$out" 2>"${out}.stderr" || true
 }
 
 python3 <<'PY'
@@ -349,7 +349,7 @@ subprocess.run(
     [ab_bin, "mcp"],
     stdin=open(inp), stdout=open(out, "w"),
     stderr=subprocess.DEVNULL,
-    env={**os.environ, "AGENT_BRIDGE_DB": db},
+    env={**os.environ, "AGENT_BRIDGE_DB": db, "AGENT_BRIDGE_TOOL_PROFILE": "all"},
     timeout=30,
 )
 
