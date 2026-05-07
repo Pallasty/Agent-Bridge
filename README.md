@@ -37,6 +37,9 @@ TARGET=aarch64-apple-darwin           # Apple Silicon
 # TARGET=x86_64-unknown-linux-gnu     # x86_64 Linux (any glibc 2.35+)
 
 # 2. Download the latest release (or pin to a specific vX.Y.Z).
+# NOTE: prebuilt tarballs are still on GitHub during the GitLab migration
+# until the equivalent GitLab CI release pipeline lands. Source repo is on
+# GitLab — see `cargo install --git` and Source build sections below.
 VER=$(curl -sSL https://api.github.com/repos/pallasting/Agent-Bridge/releases/latest \
         | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
 curl -L "https://github.com/pallasting/Agent-Bridge/releases/download/${VER}/agent-bridge-${VER}-${TARGET}.tar.gz" \
@@ -53,7 +56,7 @@ Then jump to **[Configure](#configure)** below.
 ### `cargo install --git` (any platform with Rust)
 
 ```bash
-cargo install --git https://github.com/pallasting/Agent-Bridge.git --bin agent-bridge
+cargo install --git https://gitlab.com/pallasting/agent-bridge.git --bin agent-bridge
 ```
 
 Then jump to **[Configure](#configure)**.
@@ -61,7 +64,7 @@ Then jump to **[Configure](#configure)**.
 ### Source build
 
 ```bash
-git clone git@github.com:pallasting/Agent-Bridge.git ~/agent-bridge
+git clone git@gitlab.com:pallasting/agent-bridge.git ~/agent-bridge
 cd ~/agent-bridge && cargo build --release
 ```
 
@@ -173,7 +176,7 @@ configuration when a new session starts.
 
 ```bash
 # 1. Build (same as above)
-git clone git@github.com:pallasting/Agent-Bridge.git ~/agent-bridge
+git clone git@gitlab.com:pallasting/agent-bridge.git ~/agent-bridge
 cd ~/agent-bridge && cargo build --release
 
 # 2. Install — Codex profile copies the binary and merges MCP config.
@@ -268,7 +271,7 @@ model, and Warp registers MCP servers via its settings UI rather than a
 
 ```bash
 # 1. Build (same as above)
-git clone git@github.com:pallasting/Agent-Bridge.git ~/agent-bridge
+git clone git@gitlab.com:pallasting/agent-bridge.git ~/agent-bridge
 cd ~/agent-bridge && cargo build --release
 
 # 2. Install — Warp profile copies the binary only and prints UI guidance.
