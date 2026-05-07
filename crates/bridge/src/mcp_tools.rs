@@ -9250,6 +9250,23 @@ mod tests {
     }
 
     // ── Path C actuator: seed boost rerank ─────────────────────────────────
+    //
+    // The three `seed_boost_*` tests below mutate process-global env vars
+    // (`AGENT_BRIDGE_SEED_BOOST_DISABLE`, `AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH`)
+    // and depend on the global `SEED_BOOST_CACHE`. Cargo runs tests in
+    // parallel, so they MUST serialize via `pathc_test_setup` — without it,
+    // one test's env / cache leaks into another and assertions flap. The
+    // setup helper grabs a process-wide lock AND resets the cache so each
+    // test starts from a known state.
+
+    fn pathc_test_setup() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let mut c = SEED_BOOST_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+        c.path_mtime = None;
+        c.boost_keys.clear();
+        g
+    }
 
     fn make_hit(key: &str, score: f64) -> MemorySearchHit {
         MemorySearchHit {
@@ -9276,8 +9293,7 @@ mod tests {
     /// even when the state file exists. Verifies the kill-switch.
     #[test]
     fn seed_boost_disabled_via_env_is_passthrough() {
-        // Best-effort: this test runs in a process where other tests may have
-        // mutated env. Set, run, restore.
+        let _guard = pathc_test_setup();
         let prev = std::env::var("AGENT_BRIDGE_SEED_BOOST_DISABLE").ok();
         std::env::set_var("AGENT_BRIDGE_SEED_BOOST_DISABLE", "1");
 
@@ -9306,6 +9322,7 @@ mod tests {
     /// apply_seed_boost is a strict pass-through (no reorder).
     #[test]
     fn seed_boost_state_without_hub_clusters_is_passthrough() {
+        let _guard = pathc_test_setup();
         let prev_path = std::env::var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH").ok();
         let prev_disable = std::env::var("AGENT_BRIDGE_SEED_BOOST_DISABLE").ok();
         std::env::remove_var("AGENT_BRIDGE_SEED_BOOST_DISABLE");
@@ -9350,6 +9367,7 @@ mod tests {
     /// expected factor and re-sorts.
     #[test]
     fn seed_boost_applies_factor_and_resorts() {
+        let _guard = pathc_test_setup();
         let prev_path = std::env::var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH").ok();
         let prev_disable = std::env::var("AGENT_BRIDGE_SEED_BOOST_DISABLE").ok();
         std::env::remove_var("AGENT_BRIDGE_SEED_BOOST_DISABLE");
