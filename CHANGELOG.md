@@ -8,6 +8,13 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **`.gitlab-ci.yml` added** — GitLab CI/CD replicating the GitHub Actions
+  CI + release pipeline on Shared Runners. Coverage is **Linux x86_64
+  only** on the free tier; macOS prebuilts continue from the GitHub
+  workflow until either GitLab SaaS macOS runners (paid) or self-hosted
+  Apple Silicon are wired up. Tag-driven release publishes the Linux
+  tarball + SHA256SUMS to the project Generic Package Registry, then
+  attaches them as Release assets via release-cli.
 - **GitHub Actions bumped to current major versions** to silence Node 20
   deprecation warnings ahead of the June 2026 enforcement: `actions/checkout`
   v4 → v6, `actions/upload-artifact` v4 → v7, `actions/download-artifact`
