@@ -1702,6 +1702,74 @@ impl McpTool for ForumListThreadsTool {
     }
 }
 
+pub struct ForumSetThreadStatusTool {
+    hub: Hub,
+}
+impl ForumSetThreadStatusTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for ForumSetThreadStatusTool {
+    fn name(&self) -> &'static str {
+        "forum_set_thread_status"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Set a forum thread's lifecycle status. `status` ∈ \
+                 {open, resolved, archived}. Use `resolved` when the discussion \
+                 reached a conclusion (decision logged, finding actioned); \
+                 `archived` when the thread is no longer relevant but kept for \
+                 history. `forum_list_threads` accepts a matching `status` filter."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "thread_id": { "type": "integer", "description": "Numeric thread id (REQUIRED)." },
+                    "status":    { "type": "string",  "enum": ["open", "resolved", "archived"] }
+                },
+                "required": ["thread_id", "status"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let thread_id = match args.get("thread_id").and_then(|v| v.as_i64()) {
+            Some(n) if n > 0 => n,
+            _ => return Ok(ToolResult::error("missing or invalid 'thread_id'")),
+        };
+        let status = match args
+            .get("status")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing or empty 'status'")),
+        };
+        if !matches!(status, "open" | "resolved" | "archived") {
+            return Ok(ToolResult::error(
+                "'status' must be one of: open, resolved, archived",
+            ));
+        }
+
+        store
+            .forum_set_thread_status(thread_id, status)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("forum_set_thread_status: {e}")))?;
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "thread_id": thread_id,
+            "new_status": status
+        })))
+    }
+}
+
 // ===========================================================================
 //                       presence (v19) — identity + heartbeat
 // ===========================================================================
@@ -8182,6 +8250,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumReadTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumSubscribeTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumListThreadsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumSetThreadStatusTool::new(hub.clone())));
     // Presence (v19): identity convention + agent registry (A2A AgentCard-aligned).
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionIdentityTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentPresenceAnnounceTool::new(hub.clone())));
@@ -8626,6 +8695,15 @@ fn format_agent_bridge_seed_block() -> Option<String> {
 /// Search order: env var → `~/Projects/agent-bridge-seed/...` (macOS Projects layout)
 /// → `~/agent-bridge-seed/...` (Linux home layout) → `/Data/CascadeProjects/agent-bridge-seed/...`
 /// (legacy source-box default). First existing path wins.
+///
+/// Within each base, the canonical `perception_filter_state.json` is tried
+/// first, then `perception_filter_state_low.json` as a fallback.
+/// perception_filter_sidecar.py backfill auto-renames its output to
+/// `perception_filter_state_<filter_direction>.json` even when `--output`
+/// points at the canonical path, so without this fallback path-C rerank
+/// silently no-ops after every fresh backfill until the user manually
+/// `cp _low.json` to the canonical name. See
+/// `lesson_path_c_sidecar_bridge_filename_mismatch_20260507`.
 fn agent_bridge_perception_filter_state_path() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH") {
         let pb = PathBuf::from(p);
@@ -8633,17 +8711,24 @@ fn agent_bridge_perception_filter_state_path() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    let mut candidates: Vec<PathBuf> = Vec::new();
+    let mut bases: Vec<PathBuf> = Vec::new();
     if let Ok(home) = std::env::var("HOME") {
         let h = PathBuf::from(home);
-        candidates
-            .push(h.join("Projects/agent-bridge-seed/state_pf/perception_filter_state.json"));
-        candidates.push(h.join("agent-bridge-seed/state_pf/perception_filter_state.json"));
+        bases.push(h.join("Projects/agent-bridge-seed/state_pf"));
+        bases.push(h.join("agent-bridge-seed/state_pf"));
     }
-    candidates.push(PathBuf::from(
-        "/Data/CascadeProjects/agent-bridge-seed/state_pf/perception_filter_state.json",
+    bases.push(PathBuf::from(
+        "/Data/CascadeProjects/agent-bridge-seed/state_pf",
     ));
-    candidates.into_iter().find(|p| p.exists())
+    bases
+        .into_iter()
+        .flat_map(|d| {
+            [
+                d.join("perception_filter_state.json"),
+                d.join("perception_filter_state_low.json"),
+            ]
+        })
+        .find(|p| p.exists())
 }
 
 /// Format a compact summary of the perception-filter state. Pure JSON-in,
@@ -9413,6 +9498,63 @@ mod tests {
         match prev_disable {
             Some(v) => std::env::set_var("AGENT_BRIDGE_SEED_BOOST_DISABLE", v),
             None => std::env::remove_var("AGENT_BRIDGE_SEED_BOOST_DISABLE"),
+        }
+    }
+
+    /// `perception_filter_sidecar.py backfill` writes `_low.json` by default;
+    /// the resolver must fall back to that when the canonical filename is
+    /// missing, and prefer the canonical filename when both exist. Mutates
+    /// HOME — serialised under `pathc_test_setup`.
+    #[test]
+    fn perception_state_path_falls_back_to_low_suffix() {
+        let _guard = pathc_test_setup();
+        let prev_home = std::env::var("HOME").ok();
+        let prev_pf = std::env::var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH").ok();
+        std::env::remove_var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH");
+
+        let tmp = std::env::temp_dir().join(format!(
+            "ab-pathc-fb-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let state_dir = tmp.join("Projects/agent-bridge-seed/state_pf");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let low_path = state_dir.join("perception_filter_state_low.json");
+        let canon_path = state_dir.join("perception_filter_state.json");
+
+        std::fs::write(&low_path, r#"{"hub_clusters":[]}"#).unwrap();
+        std::env::set_var("HOME", &tmp);
+
+        // Only `_low.json` present → fallback wins.
+        let resolved = agent_bridge_perception_filter_state_path();
+        assert_eq!(
+            resolved.as_deref(),
+            Some(low_path.as_path()),
+            "fallback to _low.json failed; got {:?}",
+            resolved
+        );
+
+        // Both present → canonical wins (preference order within a base).
+        std::fs::write(&canon_path, r#"{}"#).unwrap();
+        let resolved2 = agent_bridge_perception_filter_state_path();
+        assert_eq!(
+            resolved2.as_deref(),
+            Some(canon_path.as_path()),
+            "canonical did not win over _low.json; got {:?}",
+            resolved2
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        match prev_pf {
+            Some(v) => std::env::set_var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH", v),
+            None => std::env::remove_var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH"),
         }
     }
 
