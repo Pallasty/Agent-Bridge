@@ -81,6 +81,20 @@ enum Cmd {
         #[command(subcommand)]
         op: SkillsOp,
     },
+    /// Run the v20 HTTP daemon for cross-machine forum + presence over
+    /// Tailscale.
+    ///
+    /// Read-only in Stage 1: serves `/.well-known/agent.json/<sid>`,
+    /// `/forum/threads`, `/forum/posts`, `/presence`. Bind to a
+    /// tailnet-reachable address; tailscale ACL handles peer auth.
+    /// See `docs/RFC-v20-tailscale-daemon.md`.
+    DaemonHttp {
+        /// Listen address. Default `0.0.0.0:7878` so it's reachable from
+        /// any tailnet peer. Set to `127.0.0.1:7878` for local testing.
+        /// Override via `AGENT_BRIDGE_HTTP_LISTEN`.
+        #[arg(long, env = "AGENT_BRIDGE_HTTP_LISTEN")]
+        listen: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -417,6 +431,19 @@ async fn main() -> Result<()> {
             )
             .await;
             Ok(())
+        }
+        Cmd::DaemonHttp { listen } => {
+            let store = hub.store.clone().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "daemon-http requires a memory store; SqliteStore failed to initialise"
+                )
+            })?;
+            let listen = listen.unwrap_or_else(|| "0.0.0.0:7878".to_string());
+            tracing::info!(
+                listen = %listen,
+                "starting agent-bridge daemon-http (v20 read-only Stage 1)"
+            );
+            ab_bridge::daemon_http::run(store, &listen).await
         }
         Cmd::Setup { .. } | Cmd::Sync { .. } | Cmd::Skills { .. } => unreachable!(),
     }

@@ -1,0 +1,290 @@
+//! v20 — HTTP daemon for cross-machine forum + presence over Tailscale.
+//!
+//! Serves read-only endpoints in Stage 1:
+//!   - `GET /healthz`
+//!   - `GET /.well-known/agent.json/<session_id>` — A2A AgentCard
+//!   - `GET /forum/threads?board=...&status=...&limit=...`
+//!   - `GET /forum/posts?thread_id=...&board=...&since_post_id=...&limit=...`
+//!   - `GET /presence?project=...&role=...&max_idle_secs=...&limit=...`
+//!
+//! Bind to a tailnet-reachable address (`0.0.0.0:7878` by default). The
+//! tailscale ACL handles peer auth — this daemon trusts whoever can reach
+//! the socket. See `docs/RFC-v20-tailscale-daemon.md` for design rationale.
+//!
+//! State sharing: takes the same `Arc<dyn StateStore>` the MCP server uses,
+//! so daemon-http and stdio MCP can run side-by-side reading/writing the
+//! same SQLite WAL.
+
+use ab_store::{AgentPresenceRecord, StateStore};
+use anyhow::{Context, Result};
+use axum::{
+    extract::{Path, Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::get,
+    Json, Router,
+};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::sync::Arc;
+
+#[derive(Clone)]
+struct AppState {
+    store: Arc<dyn StateStore>,
+}
+
+/// Run the HTTP daemon on `listen` (e.g. `0.0.0.0:7878`). Blocks until the
+/// listener is dropped or the runtime is cancelled.
+pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
+    let state = AppState { store };
+    let app = Router::new()
+        .route("/healthz", get(healthz))
+        .route("/.well-known/agent.json/:session_id", get(agent_card))
+        .route("/forum/threads", get(forum_threads))
+        .route("/forum/posts", get(forum_posts))
+        .route("/presence", get(presence_list))
+        .with_state(state);
+
+    let listener = tokio::net::TcpListener::bind(listen)
+        .await
+        .with_context(|| format!("bind {listen}"))?;
+    let addr = listener
+        .local_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| listen.to_string());
+    tracing::info!(addr = %addr, "agent-bridge daemon-http listening");
+    axum::serve(listener, app)
+        .await
+        .context("axum::serve")?;
+    Ok(())
+}
+
+// ── Endpoints ────────────────────────────────────────────────────────────
+
+async fn healthz() -> impl IntoResponse {
+    (StatusCode::OK, "ok")
+}
+
+/// Serve the A2A AgentCard for a single session_id.
+///
+/// Maps the presence row's public block to AgentCard's expected JSON. Local
+/// fields (node, project, role, tag, cwd, pid, started_at, last_heartbeat_at)
+/// are omitted from the card — see `docs/DESIGN-v19-presence-identity.md` §3.
+///
+/// Returns 404 if no such session is registered.
+async fn agent_card(
+    State(s): State<AppState>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let row = lookup_presence(&s, &session_id).await?;
+    Ok(Json(presence_to_agent_card(&row)))
+}
+
+/// Map a presence row to an AgentCard JSON object.
+fn presence_to_agent_card(row: &AgentPresenceRecord) -> Value {
+    let mut card = serde_json::Map::new();
+    card.insert("name".into(), Value::String(row.name.clone()));
+    if let Some(d) = &row.description {
+        card.insert("description".into(), Value::String(d.clone()));
+    }
+    if let Some(v) = &row.version {
+        card.insert("version".into(), Value::String(v.clone()));
+    }
+    if let Some(u) = &row.url {
+        card.insert("url".into(), Value::String(u.clone()));
+    }
+    if let Some(c) = &row.capabilities {
+        card.insert("capabilities".into(), c.clone());
+    }
+    if let Some(s) = &row.skills {
+        card.insert("skills".into(), s.clone());
+    }
+    Value::Object(card)
+}
+
+#[derive(Deserialize, Debug)]
+struct ForumThreadsQuery {
+    board: String,
+    status: Option<String>,
+    unread_for: Option<String>,
+    #[serde(default = "default_limit")]
+    limit: u32,
+}
+
+async fn forum_threads(
+    State(s): State<AppState>,
+    Query(q): Query<ForumThreadsQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let limit = q.limit.clamp(1, 500);
+    let rows = s
+        .store
+        .forum_list_threads(&q.board, q.unread_for.as_deref(), q.status.as_deref(), limit)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(json!({ "board": q.board, "count": rows.len(), "threads": rows })))
+}
+
+#[derive(Deserialize, Debug)]
+struct ForumPostsQuery {
+    thread_id: Option<i64>,
+    board: Option<String>,
+    since_post_id: Option<i64>,
+    unread_for: Option<String>,
+    #[serde(default = "default_limit")]
+    limit: u32,
+}
+
+async fn forum_posts(
+    State(s): State<AppState>,
+    Query(q): Query<ForumPostsQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    if q.thread_id.is_none() && q.board.is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "must provide thread_id or board".into(),
+        ));
+    }
+    let limit = q.limit.clamp(1, 500);
+    let posts = s
+        .store
+        .forum_read(
+            q.thread_id,
+            q.board.as_deref(),
+            q.since_post_id,
+            q.unread_for.as_deref(),
+            limit,
+        )
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(json!({
+        "thread_id": q.thread_id,
+        "board": q.board,
+        "count": posts.len(),
+        "posts": posts,
+    })))
+}
+
+#[derive(Deserialize, Debug)]
+struct PresenceQuery {
+    project: Option<String>,
+    role: Option<String>,
+    #[serde(default = "default_max_idle")]
+    max_idle_secs: i64,
+    #[serde(default = "default_limit")]
+    limit: u32,
+}
+
+async fn presence_list(
+    State(s): State<AppState>,
+    Query(q): Query<PresenceQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let limit = q.limit.clamp(1, 500);
+    let rows = s
+        .store
+        .agent_presence_list(q.project.as_deref(), q.role.as_deref(), q.max_idle_secs, limit)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(json!({ "count": rows.len(), "agents": rows })))
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+async fn lookup_presence(
+    s: &AppState,
+    session_id: &str,
+) -> Result<AgentPresenceRecord, (StatusCode, String)> {
+    // No dedicated `agent_presence_get(session_id)` method on StateStore
+    // (Stage 1 keeps the trait surface minimal). Filter from the list with
+    // `max_idle_secs=0` (no TTL) so even stale rows are visible — clients
+    // can interpret `last_heartbeat_at` themselves.
+    let rows = s
+        .store
+        .agent_presence_list(None, None, 0, 500)
+        .await
+        .map_err(internal_error)?;
+    rows.into_iter()
+        .find(|r| r.session_id == session_id)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("session {session_id} not found")))
+}
+
+fn internal_error<E: std::fmt::Display>(e: E) -> (StatusCode, String) {
+    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+}
+
+fn default_limit() -> u32 {
+    50
+}
+
+fn default_max_idle() -> i64 {
+    300
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ab_store::AgentPresenceRecord;
+
+    fn presence_fixture() -> AgentPresenceRecord {
+        AgentPresenceRecord {
+            session_id: "aio2:agent-bridge:main".into(),
+            name: "aio2 main".into(),
+            description: Some("test".into()),
+            version: Some("0.1.0".into()),
+            url: None,
+            capabilities: Some(json!({ "forum": true })),
+            skills: Some(json!([{ "id": "rust" }])),
+            node: "aio2".into(),
+            project: "agent-bridge".into(),
+            role: "main".into(),
+            tag: None,
+            cwd: None,
+            pid: None,
+            started_at: 0,
+            last_heartbeat_at: 0,
+        }
+    }
+
+    #[test]
+    fn agent_card_drops_local_only_fields() {
+        let row = presence_fixture();
+        let card = presence_to_agent_card(&row);
+        let obj = card.as_object().unwrap();
+        // Public fields kept.
+        assert_eq!(obj.get("name").and_then(|v| v.as_str()), Some("aio2 main"));
+        assert_eq!(obj.get("description").and_then(|v| v.as_str()), Some("test"));
+        assert_eq!(obj.get("version").and_then(|v| v.as_str()), Some("0.1.0"));
+        assert!(obj.get("capabilities").is_some());
+        assert!(obj.get("skills").is_some());
+        // Local-only fields stripped.
+        for k in [
+            "session_id",
+            "node",
+            "project",
+            "role",
+            "tag",
+            "cwd",
+            "pid",
+            "started_at",
+            "last_heartbeat_at",
+        ] {
+            assert!(
+                !obj.contains_key(k),
+                "AgentCard must not expose local-only field `{k}`"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_card_omits_unset_optionals() {
+        let mut row = presence_fixture();
+        row.description = None;
+        row.version = None;
+        row.url = None;
+        row.capabilities = None;
+        row.skills = None;
+        let card = presence_to_agent_card(&row);
+        let obj = card.as_object().unwrap();
+        assert_eq!(obj.len(), 1, "only name should remain when others unset");
+        assert!(obj.contains_key("name"));
+    }
+}

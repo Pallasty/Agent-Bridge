@@ -4,6 +4,7 @@
 
 pub mod context_budget;
 pub mod curate;
+pub mod daemon_http;
 pub mod hub;
 pub mod mcp_tools;
 pub mod project;

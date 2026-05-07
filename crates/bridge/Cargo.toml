@@ -34,6 +34,9 @@ tracing-subscriber.workspace = true
 clap.workspace = true
 walkdir.workspace = true
 
+# v20: HTTP daemon for cross-machine forum + presence over Tailscale
+axum = "0.7"
+
 [[bin]]
 name = "agent-bridge"
 path = "src/main.rs"
