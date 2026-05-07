@@ -23,17 +23,28 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use std::collections::HashMap;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use tracing::{info, warn};
 
 use crate::{AgentCapabilities, AgentRuntime, AgentSession, SpawnConfig};
 
+/// Default watchdog timeout for one-shot Gemini spawns. A successful
+/// `gemini -p` round-trip is ~3-8s; quota-exhausted runs retry 3× with
+/// exponential backoff and only exit ~30-60s in. 15s catches the latter
+/// without false-killing slow-network real successes.
+const DEFAULT_GEMINI_TIMEOUT_SECS: u64 = 15;
+
 #[derive(Clone)]
 pub struct GeminiRuntime {
     binary: String,
     default_model: Option<String>,
+    /// `Some(secs)` = enforce a watchdog SIGTERM at deadline; `None` =
+    /// no timeout (matches old behavior). Override via
+    /// `AGENT_BRIDGE_GEMINI_TIMEOUT_SECS`; set the env to `0` to disable.
+    timeout_secs: Option<u64>,
     store: Option<Arc<dyn StateStore>>,
     children: Arc<DashMap<String, u32>>,
 }
@@ -46,9 +57,17 @@ impl Default for GeminiRuntime {
 
 impl GeminiRuntime {
     pub fn new() -> Self {
+        let timeout_secs = match env_nonempty("AGENT_BRIDGE_GEMINI_TIMEOUT_SECS")
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            Some(0) => None,
+            Some(n) => Some(n),
+            None => Some(DEFAULT_GEMINI_TIMEOUT_SECS),
+        };
         Self {
             binary: std::env::var("AGENT_BRIDGE_GEMINI_BIN").unwrap_or_else(|_| "gemini".into()),
             default_model: env_nonempty("AGENT_BRIDGE_GEMINI_MODEL"),
+            timeout_secs,
             store: None,
             children: Arc::new(DashMap::new()),
         }
@@ -61,6 +80,11 @@ impl GeminiRuntime {
 
     pub fn with_default_model(mut self, model: impl Into<String>) -> Self {
         self.default_model = Some(model.into());
+        self
+    }
+
+    pub fn with_timeout_secs(mut self, secs: Option<u64>) -> Self {
+        self.timeout_secs = secs;
         self
     }
 
@@ -156,18 +180,59 @@ impl AgentRuntime for GeminiRuntime {
         let sid_bg = session_id.clone();
         let store_bg = self.store.clone();
         let children_bg = self.children.clone();
+        let timeout_secs = self.timeout_secs;
+        let timeout_fired = Arc::new(AtomicBool::new(false));
+        let watchdog = match (timeout_secs, pid) {
+            (Some(t), pid) if pid != 0 => {
+                let flag = timeout_fired.clone();
+                let sid_for_log = sid_bg.clone();
+                Some(tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(t)).await;
+                    flag.store(true, Ordering::SeqCst);
+                    warn!(
+                        session = %sid_for_log,
+                        pid,
+                        runtime = "gemini",
+                        timeout_secs = t,
+                        "watchdog firing — sending SIGTERM"
+                    );
+                    let _ = tokio::process::Command::new("/bin/kill")
+                        .arg("-TERM")
+                        .arg(pid.to_string())
+                        .status()
+                        .await;
+                }))
+            }
+            _ => None,
+        };
+        let timeout_check = timeout_fired.clone();
         tokio::spawn(async move {
             let out = child.wait_with_output().await;
+            if let Some(h) = watchdog {
+                h.abort();
+            }
             children_bg.remove(sid_bg.as_str());
             let ended_at = now_secs();
+            let timed_out = timeout_check.load(Ordering::SeqCst);
             match out {
                 Ok(o) => {
                     let stdout = String::from_utf8_lossy(&o.stdout).into_owned();
-                    let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
+                    let raw_stderr = String::from_utf8_lossy(&o.stderr).into_owned();
+                    let stderr = if timed_out {
+                        format!(
+                            "[agent-bridge] killed after {}s timeout — likely quota \
+                             (set GEMINI_API_KEY or wait) or auth. Original stderr:\n{}",
+                            timeout_secs.unwrap_or(0),
+                            raw_stderr
+                        )
+                    } else {
+                        raw_stderr
+                    };
                     info!(
                         session = %sid_bg,
                         runtime = "gemini",
                         exit = ?o.status.code(),
+                        timed_out,
                         stdout_preview = %truncate(&stdout, 200),
                         stderr_preview = %truncate(&stderr, 200),
                         "session finished"
