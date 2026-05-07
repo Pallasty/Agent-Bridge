@@ -213,7 +213,13 @@ pub async fn run_seed(verbose: bool) -> Result<()> {
 /// look like `<owner>/<repo>`, and re-runs [`run_index`] for each as
 /// `https://github.com/<owner>/<repo>`. Local-path sources (basenames with
 /// no `/`) are reported and skipped — they need a manual `skills index`.
-pub async fn run_refresh(verbose: bool) -> Result<()> {
+///
+/// When `prune` is set, after re-indexing each GitHub source we delete
+/// records with that `src:` tag whose `updated_at` is still older than the
+/// refresh's start time — those are skills that disappeared upstream. A
+/// failed re-index for a source skips pruning of that source (don't
+/// destroy data when we don't have a fresh authoritative state).
+pub async fn run_refresh(verbose: bool, prune: bool) -> Result<()> {
     let store = open_store().await?;
     let rows = store
         .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
@@ -238,11 +244,16 @@ pub async fn run_refresh(verbose: bool) -> Result<()> {
             local_srcs.insert(src);
         }
     }
+    let started_at = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
     eprintln!(
-        "[skills] refresh: {} github source(s), {} local source(s) skipped, {} record(s) total",
+        "[skills] refresh: {} github source(s), {} local source(s) skipped, {} record(s) total{}",
         github_srcs.len(),
         local_srcs.len(),
-        rows.len()
+        rows.len(),
+        if prune { " (prune ON)" } else { "" }
     );
     if !local_srcs.is_empty() && verbose {
         eprintln!("[skills]   local sources (re-run `skills index <path>` manually):");
@@ -252,10 +263,21 @@ pub async fn run_refresh(verbose: bool) -> Result<()> {
     }
     let mut total = 0usize;
     let mut failed: Vec<String> = Vec::new();
+    let mut pruned_total = 0usize;
     for src in &github_srcs {
         let url = format!("https://github.com/{}", src);
         match run_index(&url, verbose).await {
-            Ok(n) => total += n,
+            Ok(n) => {
+                total += n;
+                if prune {
+                    match prune_stale_for_src(&store, src, started_at, verbose).await {
+                        Ok(d) => pruned_total += d,
+                        Err(e) => {
+                            eprintln!("[skills] {}: prune failed: {}", src, e);
+                        }
+                    }
+                }
+            }
             Err(e) => {
                 eprintln!("[skills] {}: FAILED: {}", src, e);
                 failed.push(src.clone());
@@ -263,9 +285,14 @@ pub async fn run_refresh(verbose: bool) -> Result<()> {
         }
     }
     eprintln!(
-        "[skills] refresh done: {} skills indexed, {} repo(s) failed",
+        "[skills] refresh done: {} skills indexed, {} repo(s) failed{}",
         total,
-        failed.len()
+        failed.len(),
+        if prune {
+            format!(", {} stale record(s) pruned", pruned_total)
+        } else {
+            String::new()
+        }
     );
     if !failed.is_empty() {
         eprintln!("[skills] failed repos:");
@@ -274,6 +301,54 @@ pub async fn run_refresh(verbose: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// After a successful re-index of `src`, delete records with that `src:`
+/// tag whose `updated_at` is still older than `threshold`. Those are
+/// skills that existed before the refresh but were not re-saved during
+/// it — i.e. disappeared upstream.
+async fn prune_stale_for_src(
+    store: &SqliteStore,
+    src: &str,
+    threshold: i64,
+    verbose: bool,
+) -> Result<usize> {
+    let rows = store
+        .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
+        .await
+        .context("list_memories failed")?;
+    let stale: Vec<&MemoryRecord> = rows
+        .iter()
+        .filter(|r| is_stale_for_src(r, src, threshold))
+        .collect();
+    if stale.is_empty() {
+        return Ok(0);
+    }
+    let mut deleted = 0usize;
+    for r in &stale {
+        match store.memory_delete(&r.key).await {
+            Ok(true) => {
+                deleted += 1;
+                if verbose {
+                    eprintln!("[skills]   - pruned {}", r.key);
+                }
+            }
+            Ok(false) => {} // race: already gone
+            Err(e) => eprintln!("[skills]   ! delete {} failed: {}", r.key, e),
+        }
+    }
+    eprintln!("[skills] {}: pruned {} stale record(s)", src, deleted);
+    Ok(deleted)
+}
+
+/// Decide whether `r` is a stale entry for `src`: same `src:` tag and
+/// `updated_at` predates `threshold` (i.e. wasn't re-saved by the
+/// just-completed re-index).
+fn is_stale_for_src(r: &MemoryRecord, src: &str, threshold: i64) -> bool {
+    let Some(rec_src) = tag_value(&r.tags, "src:") else {
+        return false;
+    };
+    rec_src == src && r.updated_at < threshold
 }
 
 /// `<owner>/<repo>` shape — the form `parse_src_id` emits for GitHub URLs.
@@ -1127,6 +1202,57 @@ mod tests {
     fn parse_search_response_rejects_missing_items() {
         let body = br#"{"message": "something else"}"#;
         assert!(parse_search_response(body).is_err());
+    }
+
+    fn mk_skill(src: &str, updated_at: i64) -> MemoryRecord {
+        MemoryRecord {
+            key: format!("skill:{}/x", src),
+            kind: "skill".to_string(),
+            content: "body".to_string(),
+            tags: vec!["skill".to_string(), format!("src:{}", src)],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+        }
+    }
+
+    #[test]
+    fn is_stale_for_src_basic() {
+        let threshold = 1_000_000_i64;
+        // Same src, older updated_at → stale.
+        assert!(is_stale_for_src(
+            &mk_skill("foo/bar", threshold - 1),
+            "foo/bar",
+            threshold
+        ));
+        // Same src, exactly at threshold → NOT stale (boundary: only strictly older).
+        assert!(!is_stale_for_src(
+            &mk_skill("foo/bar", threshold),
+            "foo/bar",
+            threshold
+        ));
+        // Same src, just-refreshed (updated_at >= threshold) → not stale.
+        assert!(!is_stale_for_src(
+            &mk_skill("foo/bar", threshold + 5),
+            "foo/bar",
+            threshold
+        ));
+        // Different src — must NOT match.
+        assert!(!is_stale_for_src(
+            &mk_skill("other/repo", threshold - 100),
+            "foo/bar",
+            threshold
+        ));
+        // No src tag at all → not stale.
+        let mut rec = mk_skill("foo/bar", threshold - 1);
+        rec.tags.retain(|t| !t.starts_with("src:"));
+        assert!(!is_stale_for_src(&rec, "foo/bar", threshold));
     }
 
     #[test]

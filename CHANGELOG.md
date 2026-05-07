@@ -20,8 +20,13 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   records, collects distinct `<owner>/<repo>` values from `src:` tags,
   and re-runs `index` per source. Local-path sources (basenames with
   no `/`) are reported and skipped — they need a manual `skills index`.
-  Cron / Stop-hook friendly. Stale-entry pruning is intentionally NOT
-  done in this pass; old records persist when upstream removes a skill.
+  Cron / Stop-hook friendly.
+- **`agent-bridge skills refresh --prune`** — opt-in deletion of records
+  for skills that disappeared upstream. After a successful re-index of
+  a source, deletes records with that `src:` tag whose `updated_at` is
+  older than the refresh's start time (i.e. weren't re-saved during
+  this run). Failed re-indexes skip pruning of that source — never
+  destroy data without a fresh authoritative state. Off by default.
 - **Cross-device forum sync.** `agent-bridge sync` now also writes
   `forum.jsonl` alongside `memory.jsonl` in the cross-device git repo.
   New `StateStore::forum_export` / `forum_import` (SqliteStore impl)

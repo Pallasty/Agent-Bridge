@@ -116,9 +116,16 @@ enum SkillsOp {
     /// values from `src:` tags, and re-runs `index` for each. Local-path
     /// sources (no `/` in `src`) are skipped — re-run `index <path>` manually.
     /// Suitable for cron / Stop hook.
+    ///
+    /// `--prune`: after re-indexing each GitHub source, delete records that
+    /// have that `src:` tag but were not refreshed in this run (i.e. removed
+    /// upstream). Local-path sources are never pruned, even with `--prune`.
     Refresh {
         #[arg(long, short = 'v')]
         verbose: bool,
+        /// Delete records for skills that disappeared upstream.
+        #[arg(long)]
+        prune: bool,
     },
     /// Discover candidate skill repos via GitHub topic search.
     ///
@@ -295,7 +302,9 @@ async fn main() -> Result<()> {
                 skills::run_index(source, *verbose).await.map(|_| ())
             }
             SkillsOp::Seed { verbose } => skills::run_seed(*verbose).await,
-            SkillsOp::Refresh { verbose } => skills::run_refresh(*verbose).await,
+            SkillsOp::Refresh { verbose, prune } => {
+                skills::run_refresh(*verbose, *prune).await
+            }
             SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::List { limit } => skills::run_list(*limit).await,
