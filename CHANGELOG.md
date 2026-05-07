@@ -7,6 +7,15 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **GitHub Actions bumped to current major versions** to silence Node 20
+  deprecation warnings ahead of the June 2026 enforcement: `actions/checkout`
+  v4 → v6, `actions/upload-artifact` v4 → v7, `actions/download-artifact`
+  v4 → v8. v5 of checkout/upload-artifact was the transitional Node 20
+  release — already obsolete; pinning straight to current. Usage is
+  basic checkout + name/path/if-no-files-found upload, so no breaking
+  options were touched.
+
 ### Fixed
 - **`setup --frontend auto` no longer misroutes** when multiple frontends
   are installed. Detection now checks "Claude Code already wired"
