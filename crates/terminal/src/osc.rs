@@ -1,4 +1,4 @@
-//! Streaming parser for OSC notification escape sequences.
+//! Streaming parser for OSC notification + shell-integration escape sequences.
 //!
 //! Supported payloads:
 //!
@@ -6,9 +6,16 @@
 //! |------|------------------------------------------------|---------------------|
 //! |  9   | `ESC ] 9 ; BODY ST`                            | iTerm2 / WezTerm    |
 //! |  99  | `ESC ] 99 ; { "title": "...", "body": "..." }` | agent-bridge custom |
+//! |  133 | `ESC ] 133 ; A|B|C|D [;exit] ST`               | FinalTerm / iTerm2  |
 //! |  777 | `ESC ] 777 ; notify ; TITLE ; BODY ST`         | urxvt / libnotify   |
 //!
 //! `ST` = `BEL` (`0x07`) or `ESC \` (`0x1B 0x5C`).
+//!
+//! OSC 133 carries shell-integration prompt markers (a.k.a. "FinalTerm"
+//! prompt protocol). They let consumers segment a terminal stream into
+//! discrete prompt / command / output regions without parsing prompt
+//! visuals. `read_blocks` on the PTY backend uses these to recover the
+//! same cmd → output mapping that the Warp IPC bridge provides.
 //!
 //! The parser is **streaming**: feed it chunks of arbitrary bytes via
 //! [`OscParser::feed`] and it returns any complete events found, while
@@ -30,6 +37,10 @@ const MAX_BODY: usize = 64 * 1024;
 pub enum OscEvent {
     /// Successfully parsed notification.
     Notify(NotifyEvent),
+    /// FinalTerm / iTerm2 OSC 133 shell-integration prompt marker. Carries
+    /// no human-readable payload — it segments the byte stream into
+    /// prompt / command-input / output / command-end regions.
+    Prompt(PromptMarker),
     /// OSC 99 payload that wasn't valid JSON; surfaces the raw body so the
     /// caller can decide whether to drop or log.
     Malformed {
@@ -37,6 +48,26 @@ pub enum OscEvent {
         raw: String,
         reason: String,
     },
+}
+
+/// One OSC 133 prompt-protocol marker. See
+/// <https://iterm2.com/documentation-shell-integration.html> and the
+/// FinalTerm spec for full semantics.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "phase")]
+pub enum PromptMarker {
+    /// `OSC 133 ; A ST` — terminal is about to draw a fresh prompt.
+    /// Resets per-command accumulator state.
+    PromptStart,
+    /// `OSC 133 ; B ST` — prompt finished drawing, the user (or shell
+    /// pipeline) is about to type / inject the command.
+    CommandInputStart,
+    /// `OSC 133 ; C ST` — command has been submitted and is now executing;
+    /// bytes after this until the next `D` are command output.
+    OutputStart,
+    /// `OSC 133 ; D [ ; <exit_code> ] ST` — command finished. Some shells
+    /// omit the exit code, in which case `exit_code` is `None`.
+    CommandEnd { exit_code: Option<i32> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,6 +192,7 @@ fn parse_body(s: &str) -> OscEvent {
             context: serde_json::Value::Null,
         }),
         99 => parse_osc99(rest),
+        133 => parse_osc133(rest, s),
         777 => parse_osc777(rest),
         other => OscEvent::Malformed {
             code: other,
@@ -168,6 +200,35 @@ fn parse_body(s: &str) -> OscEvent {
             reason: format!("unsupported OSC code {other}"),
         },
     }
+}
+
+/// Parse an OSC 133 body. Format: `<letter> [ ; <key=value | exit_code> ]*`.
+/// We recognise A/B/C/D; ignore unknown key=value attributes (e.g. `aid=…`
+/// from Warp's shell integration). For D, the second token is interpreted
+/// as the command exit code if it parses as i32.
+fn parse_osc133(rest: &str, full: &str) -> OscEvent {
+    let mut parts = rest.split(';');
+    let letter = parts.next().unwrap_or("").trim();
+    let marker = match letter {
+        "A" => PromptMarker::PromptStart,
+        "B" => PromptMarker::CommandInputStart,
+        "C" => PromptMarker::OutputStart,
+        "D" => {
+            // Find first non-key=value part — that's the exit code.
+            let exit_code = parts
+                .find(|p| !p.contains('='))
+                .and_then(|s| s.trim().parse::<i32>().ok());
+            PromptMarker::CommandEnd { exit_code }
+        }
+        other => {
+            return OscEvent::Malformed {
+                code: 133,
+                raw: full.to_string(),
+                reason: format!("unrecognised OSC 133 letter '{other}' (want A|B|C|D)"),
+            };
+        }
+    };
+    OscEvent::Prompt(marker)
 }
 
 fn parse_osc99(payload: &str) -> OscEvent {
@@ -366,5 +427,123 @@ mod tests {
         let mut p = OscParser::new();
         let evt = one(&mut p, b"\x1b]99;{not json};\x07");
         assert!(matches!(evt, OscEvent::Malformed { code: 99, .. }));
+    }
+
+    // ── OSC 133 (FinalTerm prompt protocol) ────────────────────────────────
+
+    #[test]
+    fn osc133_a_is_prompt_start() {
+        let mut p = OscParser::new();
+        let evt = one(&mut p, b"\x1b]133;A\x07");
+        assert_eq!(evt, OscEvent::Prompt(PromptMarker::PromptStart));
+    }
+
+    #[test]
+    fn osc133_b_is_command_input_start() {
+        let mut p = OscParser::new();
+        let evt = one(&mut p, b"\x1b]133;B\x07");
+        assert_eq!(evt, OscEvent::Prompt(PromptMarker::CommandInputStart));
+    }
+
+    #[test]
+    fn osc133_c_is_output_start() {
+        let mut p = OscParser::new();
+        let evt = one(&mut p, b"\x1b]133;C\x07");
+        assert_eq!(evt, OscEvent::Prompt(PromptMarker::OutputStart));
+    }
+
+    #[test]
+    fn osc133_d_without_exit_code() {
+        let mut p = OscParser::new();
+        let evt = one(&mut p, b"\x1b]133;D\x07");
+        assert_eq!(
+            evt,
+            OscEvent::Prompt(PromptMarker::CommandEnd { exit_code: None })
+        );
+    }
+
+    #[test]
+    fn osc133_d_with_exit_code_zero() {
+        let mut p = OscParser::new();
+        let evt = one(&mut p, b"\x1b]133;D;0\x07");
+        assert_eq!(
+            evt,
+            OscEvent::Prompt(PromptMarker::CommandEnd { exit_code: Some(0) })
+        );
+    }
+
+    #[test]
+    fn osc133_d_with_nonzero_exit_code() {
+        let mut p = OscParser::new();
+        let evt = one(&mut p, b"\x1b]133;D;137\x07");
+        assert_eq!(
+            evt,
+            OscEvent::Prompt(PromptMarker::CommandEnd {
+                exit_code: Some(137)
+            })
+        );
+    }
+
+    #[test]
+    fn osc133_a_with_extra_key_value_pairs_is_tolerated() {
+        // Warp / iTerm2 emit `OSC 133 ; A ; aid=foo` etc. We don't care
+        // about the metadata; only that the marker survives parsing.
+        let mut p = OscParser::new();
+        let evt = one(&mut p, b"\x1b]133;A;aid=warp_block_42\x07");
+        assert_eq!(evt, OscEvent::Prompt(PromptMarker::PromptStart));
+    }
+
+    #[test]
+    fn osc133_d_ignores_key_value_pairs_when_finding_exit_code() {
+        let mut p = OscParser::new();
+        let evt = one(&mut p, b"\x1b]133;D;aid=foo;42\x07");
+        assert_eq!(
+            evt,
+            OscEvent::Prompt(PromptMarker::CommandEnd {
+                exit_code: Some(42)
+            })
+        );
+    }
+
+    #[test]
+    fn osc133_unknown_letter_is_malformed() {
+        let mut p = OscParser::new();
+        let evt = one(&mut p, b"\x1b]133;Z\x07");
+        match evt {
+            OscEvent::Malformed { code, .. } => assert_eq!(code, 133),
+            _ => panic!("expected Malformed"),
+        }
+    }
+
+    #[test]
+    fn osc133_streaming_full_command_lifecycle() {
+        // Simulate a real shell session: prompt → input → output → end.
+        // Verify all 4 markers come back in order.
+        let mut p = OscParser::new();
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"\x1b]133;A\x07");
+        buf.extend_from_slice(b"$ ls /tmp"); // user input (raw bytes, no markers)
+        buf.extend_from_slice(b"\x1b]133;B\x07");
+        buf.extend_from_slice(b"\n"); // enter
+        buf.extend_from_slice(b"\x1b]133;C\x07");
+        buf.extend_from_slice(b"foo\nbar\n"); // command output
+        buf.extend_from_slice(b"\x1b]133;D;0\x07");
+        let evts = p.feed(&buf);
+        assert_eq!(evts.len(), 4);
+        assert_eq!(evts[0], OscEvent::Prompt(PromptMarker::PromptStart));
+        assert_eq!(evts[1], OscEvent::Prompt(PromptMarker::CommandInputStart));
+        assert_eq!(evts[2], OscEvent::Prompt(PromptMarker::OutputStart));
+        assert_eq!(
+            evts[3],
+            OscEvent::Prompt(PromptMarker::CommandEnd { exit_code: Some(0) })
+        );
+    }
+
+    #[test]
+    fn osc133_st_terminator_form() {
+        // Some shells emit OSC 133 with ESC \ instead of BEL.
+        let mut p = OscParser::new();
+        let evt = one(&mut p, b"\x1b]133;A\x1b\\");
+        assert_eq!(evt, OscEvent::Prompt(PromptMarker::PromptStart));
     }
 }

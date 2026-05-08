@@ -110,6 +110,9 @@ impl Router {
                 OscEvent::Malformed { code, reason, .. } => {
                     malformed.push(json!({ "code": code, "reason": reason }));
                 }
+                // OSC 133 prompt markers flow through the read_blocks
+                // state machine, not the notification fan-out.
+                OscEvent::Prompt(_) => {}
             }
         }
         RpcResponse::success(
