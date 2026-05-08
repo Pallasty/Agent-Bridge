@@ -737,6 +737,13 @@ and facts — no human prompt required.
 
 ### `WarpBackend` capabilities
 
+> **Status (2026-05-08, post-2f14d84):** the default terminal backend is
+> now `PtyBackend` — it provides full `read_blocks` via OSC 133 prompt
+> markers (`docs/SHELL-INTEGRATION-OSC133.md`), with no Warp fork or
+> shell-integration patch needed. The section below describes the
+> opt-in Warp IPC path (`AGENT_BRIDGE_TERMINAL=warp`) which remains
+> available for users who specifically want it.
+
 Warp does not expose a public CLI for terminal mux control, only the
 `warp://` URL scheme. The backend therefore supports a reduced
 feature set:

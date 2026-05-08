@@ -24,17 +24,21 @@
 
 ### 2.1 终端工具
 
-| 工具 | Claude Code | Warp (IPC) | Cursor / VS Code | 其他 CLI |
-|------|:-----------:|:----------:|:----------------:|:--------:|
+`auto_backend` 自 2f14d84 起默认选 PTY；显式 `AGENT_BRIDGE_TERMINAL=warp` 仍走 Warp IPC。
+
+| 工具 | PTY (默认) | Warp (IPC, opt-in) | Claude Code | 其他 CLI |
+|------|:----------:|:------------------:|:-----------:|:--------:|
 | `terminal_list` | ✅ | ✅ | ⚠️ 仅合成行 | ⚠️ 仅合成行 |
 | `terminal_read_output` | ✅ | ✅ | ✅ (tmux/Zellij) | ✅ (tmux/Zellij) |
-| `terminal_read_blocks` | ❌¹ | ✅ | ❌¹ | ❌¹ |
+| `terminal_read_blocks` | ✅¹ | ✅ | ❌² | ❌² |
 | `terminal_send_keys` | ✅ | ✅ | ✅ | ✅ |
-| `terminal_split` | ❌¹ | ✅ | ❌¹ | ❌¹ |
+| `terminal_split` | ✅ | ✅ | ❌² | ❌² |
 
-¹ 需要 Warp IPC socket（`warp_ipc_socket_ready: true`）。非 Warp 环境调用返回 `"no terminal backend configured"` 或 `"split not supported"`。
+¹ 需要 shell 端 OSC 133 集成（`agent-bridge shell-init <bash|zsh|fish>`，详见 `docs/SHELL-INTEGRATION-OSC133.md`）。无集成时返回空数组而非错误。
 
-**检测方式**：`capabilities.terminal.capabilities.warp_ipc_socket_ready`
+² 非 PTY/Warp 后端缺乏底层接口；调用返回 `"not supported"`。
+
+**检测方式**：`capabilities.terminal.backend`（`pty` / `warp` / `kitty` / `wezterm` / `zellij`）
 
 ### 2.2 浏览器工具
 
