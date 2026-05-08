@@ -38,8 +38,9 @@ use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::broadcast;
 
 use crate::{
+    osc::{FeedItem, PromptMarker},
     OscEvent, OscParser, Pane, SpawnOptions, SplitDir, TermEvent, TerminalBackend,
-    TerminalCapabilities,
+    TerminalBlock, TerminalCapabilities,
 };
 
 /// Default rows/cols for spawned PTYs. Matches what most modern terminals
@@ -61,6 +62,146 @@ const EVENT_CHANNEL_CAP: usize = 64;
 /// runtime (the reader thread blocks on the PTY master directly).
 #[allow(dead_code)]
 const READER_POLL_HINT_MS: u64 = 5;
+
+/// How many finalised blocks to retain per pane before evicting oldest
+/// from the front. Mirrors the cap that `terminal_read_blocks` assumes
+/// when paging via `since_block`.
+const DEFAULT_BLOCK_CAP: usize = 200;
+
+// ─── OSC 133 → TerminalBlock state machine ───────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockPhase {
+    /// Outside any prompt cycle — text is shell-internal noise; ignore it.
+    Idle,
+    /// Saw `A`, waiting for `B`. The prompt itself is being drawn — text
+    /// here is the prompt visual which we don't capture.
+    PromptDrawing,
+    /// Saw `B`, waiting for `C`. Text is the command-input echo.
+    CommandInput,
+    /// Saw `C`, waiting for `D`. Text is command output.
+    Output,
+}
+
+#[derive(Debug, Clone)]
+struct PartialBlock {
+    block_id: String,
+    command: String,
+    output: String,
+    start_ms: Option<i64>,
+}
+
+/// Per-pane block accumulator. Drives the four-state machine via OSC 133
+/// markers and stuffs ANSI-stripped text into the active bucket.
+pub(crate) struct BlockTracker {
+    phase: BlockPhase,
+    current: Option<PartialBlock>,
+    finalised: VecDeque<TerminalBlock>,
+    cap: usize,
+    next_id: u64,
+}
+
+impl BlockTracker {
+    fn new(cap: usize) -> Self {
+        Self {
+            phase: BlockPhase::Idle,
+            current: None,
+            finalised: VecDeque::new(),
+            cap: cap.max(1),
+            next_id: 1,
+        }
+    }
+
+    fn now_ms() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    }
+
+    /// Start (or reset) a block. Called on `A`. If a partial block is
+    /// already in flight (e.g. user hit Ctrl+C mid-command) we drop it —
+    /// without a `D` we have no exit code, so it's not a complete block.
+    fn on_prompt_start(&mut self) {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.current = Some(PartialBlock {
+            block_id: id.to_string(),
+            command: String::new(),
+            output: String::new(),
+            start_ms: None,
+        });
+        self.phase = BlockPhase::PromptDrawing;
+    }
+
+    fn on_command_input(&mut self) {
+        if self.current.is_some() {
+            self.phase = BlockPhase::CommandInput;
+        }
+    }
+
+    fn on_output_start(&mut self) {
+        if let Some(p) = &mut self.current {
+            p.start_ms = Some(Self::now_ms());
+            self.phase = BlockPhase::Output;
+        }
+    }
+
+    fn on_command_end(&mut self, exit_code: Option<i32>) {
+        if let Some(p) = self.current.take() {
+            // Trim trailing newlines on captured command — shells echo
+            // a newline after Enter that lands in the B→C span.
+            let cmd = p.command.trim_end_matches(['\r', '\n']).to_string();
+            let block = TerminalBlock {
+                block_id: p.block_id,
+                command: cmd,
+                output: p.output,
+                exit_code: exit_code.unwrap_or(0),
+                state: "DoneWithExecution".into(),
+                is_running: false,
+                start_ms: p.start_ms,
+                end_ms: Some(Self::now_ms()),
+            };
+            if self.finalised.len() >= self.cap {
+                self.finalised.pop_front();
+            }
+            self.finalised.push_back(block);
+        }
+        self.phase = BlockPhase::Idle;
+    }
+
+    /// Append a non-OSC text segment to the current bucket (after ANSI
+    /// stripping). Called for every `FeedItem::Text` from the parser.
+    fn on_text(&mut self, bytes: &[u8]) {
+        let phase = self.phase;
+        let target = match phase {
+            BlockPhase::CommandInput => self.current.as_mut().map(|p| &mut p.command),
+            BlockPhase::Output => self.current.as_mut().map(|p| &mut p.output),
+            BlockPhase::PromptDrawing | BlockPhase::Idle => return,
+        };
+        if let Some(buf) = target {
+            let stripped = strip_ansi_escapes::strip(bytes);
+            buf.push_str(&String::from_utf8_lossy(&stripped));
+        }
+    }
+
+    /// Snapshot blocks for `read_blocks`. `since_block` is a 1-based
+    /// floor on `block_id`; `limit` caps the number of returned items.
+    fn snapshot(&self, limit: usize, since_block: Option<usize>) -> Vec<TerminalBlock> {
+        let floor = since_block.unwrap_or(0);
+        self.finalised
+            .iter()
+            .filter(|b| {
+                b.block_id
+                    .parse::<usize>()
+                    .map(|n| n > floor)
+                    .unwrap_or(true)
+            })
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+}
 
 #[derive(Clone)]
 pub struct PtyBackend {
@@ -90,6 +231,9 @@ struct PtyHandle {
     /// Per-pane scrollback (post-ANSI-strip). Used as a long-N fallback
     /// when the caller asks for more rows than the screen has.
     ring: Arc<Mutex<RingBuffer>>,
+    /// Per-pane OSC 133 block accumulator. Powered by the same byte
+    /// stream as the OSC notification path; consumed by `read_blocks`.
+    tracker: Arc<Mutex<BlockTracker>>,
     /// Initial cwd snapshot (set at spawn time; not tracked thereafter).
     cwd: Option<String>,
     /// Command line we asked the PTY to run (`$SHELL` for a default pane).
@@ -194,6 +338,7 @@ impl PtyBackend {
         let parser = Arc::new(Mutex::new(vt100::Parser::new(
             DEFAULT_ROWS, DEFAULT_COLS, 0,
         )));
+        let tracker = Arc::new(Mutex::new(BlockTracker::new(DEFAULT_BLOCK_CAP)));
         let handle = Arc::new(PtyHandle {
             id: id.clone(),
             master,
@@ -201,18 +346,21 @@ impl PtyBackend {
             killer: Mutex::new(killer),
             parser: parser.clone(),
             ring: ring.clone(),
+            tracker: tracker.clone(),
             cwd: cwd_path.as_ref().map(|p| p.display().to_string()),
             command: self.inner.shell.clone(),
         });
 
         // Start the background reader. PTY reads are blocking std::io, so
         // run on a dedicated OS thread (not a tokio task) — fan the bytes
-        // out three ways: OSC parser (notifications), vt100 parser (live
-        // screen render), and the ring (long-N fallback / history).
+        // out four ways: OSC parser (notifications + block markers),
+        // vt100 parser (live screen render), the ring (long-N fallback /
+        // history), and the BlockTracker (OSC 133 → TerminalBlock).
         let inner_for_thread: Arc<Inner> = self.inner.clone();
         let pane_for_thread = id.clone();
         let ring_for_thread = ring;
         let parser_for_thread = parser;
+        let tracker_for_thread = tracker;
         std::thread::Builder::new()
             .name(format!("ab-pty-reader-{}", id.as_str()))
             .spawn(move || {
@@ -220,6 +368,7 @@ impl PtyBackend {
                     reader,
                     ring_for_thread,
                     parser_for_thread,
+                    tracker_for_thread,
                     inner_for_thread.events_tx.clone(),
                     &pane_for_thread,
                 );
@@ -422,6 +571,21 @@ impl TerminalBackend for PtyBackend {
         .map_err(|e| Error::Backend(format!("resize join: {e}")))?
     }
 
+    async fn read_blocks(
+        &self,
+        pane: &PaneId,
+        limit: usize,
+        since_block: Option<usize>,
+    ) -> Result<Vec<TerminalBlock>> {
+        let handle = self.get_handle(pane)?;
+        let blocks = handle
+            .tracker
+            .lock()
+            .expect("pty tracker lock poisoned")
+            .snapshot(limit.max(1).min(500), since_block);
+        Ok(blocks)
+    }
+
     async fn split(&self, _pane: &PaneId, _dir: SplitDir) -> Result<PaneId> {
         // SplitDir doesn't have meaning in a headless PTY backend (no UI
         // layout to bisect). We honour the call by spawning a sibling
@@ -524,6 +688,7 @@ fn reader_loop(
     mut reader: Box<dyn Read + Send>,
     ring: Arc<Mutex<RingBuffer>>,
     parser: Arc<Mutex<vt100::Parser>>,
+    tracker: Arc<Mutex<BlockTracker>>,
     events_tx: broadcast::Sender<TermEvent>,
     pane: &PaneId,
 ) {
@@ -535,26 +700,48 @@ fn reader_loop(
             Ok(n) => {
                 let chunk = &buf[..n];
                 // 1) OSC parse on the raw stream — escape sequences must
-                //    survive intact for this to work.
-                for ev in osc.feed(chunk) {
-                    if let OscEvent::Notify(NotifyEvent {
-                        title, body, severity, source, ..
-                    }) = ev
-                    {
-                        let labelled = match source {
-                            NotifySource::Mcp | NotifySource::Manual => body,
-                            _ => format!("[{:?}/{:?}] {}", severity, source, body)
-                                .replace("[Info/Osc] ", ""),
-                        };
-                        let final_body = if title.is_empty() {
-                            labelled
-                        } else {
-                            format!("{title}: {labelled}")
-                        };
-                        let _ = events_tx.send(TermEvent::OscNotification {
-                            pane: pane.clone(),
-                            body: final_body,
-                        });
+                //    survive intact for this to work. feed_segments
+                //    interleaves text spans with events so the
+                //    BlockTracker can bucket bytes precisely at marker
+                //    boundaries (a chunk may carry both).
+                for item in osc.feed_segments(chunk) {
+                    match item {
+                        FeedItem::Event(OscEvent::Notify(NotifyEvent {
+                            title, body, severity, source, ..
+                        })) => {
+                            let labelled = match source {
+                                NotifySource::Mcp | NotifySource::Manual => body,
+                                _ => format!("[{:?}/{:?}] {}", severity, source, body)
+                                    .replace("[Info/Osc] ", ""),
+                            };
+                            let final_body = if title.is_empty() {
+                                labelled
+                            } else {
+                                format!("{title}: {labelled}")
+                            };
+                            let _ = events_tx.send(TermEvent::OscNotification {
+                                pane: pane.clone(),
+                                body: final_body,
+                            });
+                        }
+                        FeedItem::Event(OscEvent::Prompt(marker)) => {
+                            if let Ok(mut t) = tracker.lock() {
+                                match marker {
+                                    PromptMarker::PromptStart => t.on_prompt_start(),
+                                    PromptMarker::CommandInputStart => t.on_command_input(),
+                                    PromptMarker::OutputStart => t.on_output_start(),
+                                    PromptMarker::CommandEnd { exit_code } => {
+                                        t.on_command_end(exit_code);
+                                    }
+                                }
+                            }
+                        }
+                        FeedItem::Event(OscEvent::Malformed { .. }) => {}
+                        FeedItem::Text(bytes) => {
+                            if let Ok(mut t) = tracker.lock() {
+                                t.on_text(&bytes);
+                            }
+                        }
                     }
                 }
                 // 2) Feed the vt100 parser so read_output's fast path
@@ -894,6 +1081,211 @@ mod tests {
         match err {
             Error::Backend(msg) => assert!(msg.contains("unknown pane")),
             other => panic!("expected Error::Backend, got {other:?}"),
+        }
+    }
+
+    // ── BlockTracker unit tests ─────────────────────────────────────────────
+
+    #[test]
+    fn block_tracker_starts_idle_with_no_blocks() {
+        let t = BlockTracker::new(10);
+        assert_eq!(t.phase, BlockPhase::Idle);
+        assert!(t.current.is_none());
+        assert!(t.finalised.is_empty());
+    }
+
+    #[test]
+    fn block_tracker_text_in_idle_is_dropped() {
+        let mut t = BlockTracker::new(10);
+        t.on_text(b"this should be ignored");
+        assert!(t.current.is_none());
+        assert!(t.finalised.is_empty());
+    }
+
+    #[test]
+    fn block_tracker_full_lifecycle_produces_one_block() {
+        // Drive the same byte sequence the parser would deliver:
+        // A → text(prompt) → B → text(command) → C → text(output) → D;0.
+        let mut t = BlockTracker::new(10);
+        t.on_prompt_start();
+        t.on_text(b"$ ");
+        t.on_command_input();
+        t.on_text(b"echo hello\n");
+        t.on_output_start();
+        t.on_text(b"hello\n");
+        t.on_command_end(Some(0));
+
+        assert_eq!(t.finalised.len(), 1);
+        let b = &t.finalised[0];
+        assert_eq!(b.block_id, "1");
+        assert_eq!(b.command, "echo hello"); // trailing \n stripped
+        assert_eq!(b.output, "hello\n");
+        assert_eq!(b.exit_code, 0);
+        assert_eq!(b.state, "DoneWithExecution");
+        assert!(!b.is_running);
+        assert!(b.start_ms.is_some());
+        assert!(b.end_ms.is_some());
+        assert!(b.end_ms.unwrap() >= b.start_ms.unwrap());
+    }
+
+    #[test]
+    fn block_tracker_carries_nonzero_exit_code() {
+        let mut t = BlockTracker::new(10);
+        t.on_prompt_start();
+        t.on_command_input();
+        t.on_text(b"false\n");
+        t.on_output_start();
+        t.on_command_end(Some(1));
+        assert_eq!(t.finalised[0].exit_code, 1);
+    }
+
+    #[test]
+    fn block_tracker_strips_ansi_inside_buckets() {
+        // Real shells colourize their prompt and (sometimes) output.
+        // Captured strings must be ANSI-free.
+        let mut t = BlockTracker::new(10);
+        t.on_prompt_start();
+        t.on_command_input();
+        t.on_text(b"\x1b[1mls\x1b[0m\n"); // bold "ls"
+        t.on_output_start();
+        t.on_text(b"\x1b[34mfile.txt\x1b[0m\n"); // blue filename
+        t.on_command_end(Some(0));
+        let b = &t.finalised[0];
+        assert_eq!(b.command, "ls");
+        assert_eq!(b.output, "file.txt\n");
+    }
+
+    #[test]
+    fn block_tracker_orphaned_partial_is_dropped_on_next_a() {
+        // Ctrl+C mid-command: A→B→text→A again (no D). The first
+        // partial block is discarded; only the second materialises.
+        let mut t = BlockTracker::new(10);
+        t.on_prompt_start();
+        t.on_command_input();
+        t.on_text(b"slow_cmd\n");
+        // user hits Ctrl+C — shell redraws prompt, emits A again.
+        t.on_prompt_start();
+        t.on_command_input();
+        t.on_text(b"echo done\n");
+        t.on_output_start();
+        t.on_text(b"done\n");
+        t.on_command_end(Some(0));
+        assert_eq!(t.finalised.len(), 1);
+        assert_eq!(t.finalised[0].command, "echo done");
+        // The second block gets id 2 because next_id advanced even
+        // when the first partial was abandoned.
+        assert_eq!(t.finalised[0].block_id, "2");
+    }
+
+    #[test]
+    fn block_tracker_evicts_oldest_at_cap() {
+        let mut t = BlockTracker::new(2);
+        for i in 0..5 {
+            t.on_prompt_start();
+            t.on_command_input();
+            t.on_text(format!("cmd{i}\n").as_bytes());
+            t.on_output_start();
+            t.on_command_end(Some(0));
+        }
+        assert_eq!(t.finalised.len(), 2);
+        // Oldest evicted: blocks 1, 2, 3 are gone; we keep 4, 5.
+        assert_eq!(t.finalised[0].block_id, "4");
+        assert_eq!(t.finalised[1].block_id, "5");
+    }
+
+    #[test]
+    fn block_tracker_snapshot_respects_since_block_and_limit() {
+        let mut t = BlockTracker::new(10);
+        for _ in 0..5 {
+            t.on_prompt_start();
+            t.on_command_input();
+            t.on_output_start();
+            t.on_command_end(Some(0));
+        }
+        // No floor → all 5.
+        assert_eq!(t.snapshot(100, None).len(), 5);
+        // Floor 2 → blocks with id > 2: 3, 4, 5.
+        assert_eq!(t.snapshot(100, Some(2)).len(), 3);
+        // Limit caps the count.
+        assert_eq!(t.snapshot(2, None).len(), 2);
+        // Floor + limit compose.
+        assert_eq!(t.snapshot(1, Some(3)).len(), 1);
+    }
+
+    // ── End-to-end: OscParser → BlockTracker on a fake byte stream ─────────
+
+    #[test]
+    fn osc_parser_drives_block_tracker_through_two_commands() {
+        // Simulates what reader_loop does, but without spinning a real PTY:
+        // feed a synthetic byte stream containing two OSC-133-bracketed
+        // commands and assert the resulting blocks match.
+        let mut osc = crate::osc::OscParser::new();
+        let mut tracker = BlockTracker::new(10);
+
+        let mut stream = Vec::new();
+        // Block 1: pwd → /home
+        stream.extend_from_slice(b"\x1b]133;A\x07$ ");
+        stream.extend_from_slice(b"\x1b]133;B\x07pwd\n");
+        stream.extend_from_slice(b"\x1b]133;C\x07/home\n");
+        stream.extend_from_slice(b"\x1b]133;D;0\x07");
+        // Block 2: false → exit 1, no output
+        stream.extend_from_slice(b"\x1b]133;A\x07$ ");
+        stream.extend_from_slice(b"\x1b]133;B\x07false\n");
+        stream.extend_from_slice(b"\x1b]133;C\x07");
+        stream.extend_from_slice(b"\x1b]133;D;1\x07");
+
+        for item in osc.feed_segments(&stream) {
+            match item {
+                FeedItem::Event(OscEvent::Prompt(m)) => match m {
+                    PromptMarker::PromptStart => tracker.on_prompt_start(),
+                    PromptMarker::CommandInputStart => tracker.on_command_input(),
+                    PromptMarker::OutputStart => tracker.on_output_start(),
+                    PromptMarker::CommandEnd { exit_code } => {
+                        tracker.on_command_end(exit_code);
+                    }
+                },
+                FeedItem::Text(b) => tracker.on_text(&b),
+                _ => {}
+            }
+        }
+
+        let blocks = tracker.snapshot(100, None);
+        assert_eq!(blocks.len(), 2);
+
+        assert_eq!(blocks[0].block_id, "1");
+        assert_eq!(blocks[0].command, "pwd");
+        assert_eq!(blocks[0].output, "/home\n");
+        assert_eq!(blocks[0].exit_code, 0);
+
+        assert_eq!(blocks[1].block_id, "2");
+        assert_eq!(blocks[1].command, "false");
+        assert_eq!(blocks[1].output, "");
+        assert_eq!(blocks[1].exit_code, 1);
+    }
+
+    #[tokio::test]
+    async fn read_blocks_returns_empty_for_pane_with_no_markers() {
+        // A freshly-spawned PTY hasn't seen any OSC 133 traffic yet (the
+        // user hasn't installed the PROMPT_COMMAND snippet, or the shell
+        // hasn't drawn its first prompt). read_blocks must return [] not
+        // an error — agents poll repeatedly to discover progress.
+        let backend = PtyBackend::with_shell("/bin/sh");
+        let panes = backend.list_panes().await.expect("list");
+        let pane = panes.first().expect("at least one pane").id.clone();
+        let blocks = backend.read_blocks(&pane, 10, None).await.expect("read");
+        assert!(blocks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn read_blocks_unknown_pane_errors() {
+        let backend = PtyBackend::with_shell("/bin/sh");
+        let err = backend
+            .read_blocks(&PaneId::from_raw("ghost"), 10, None)
+            .await
+            .expect_err("must error");
+        match err {
+            Error::Backend(msg) => assert!(msg.contains("unknown pane")),
+            other => panic!("expected unknown pane, got {other:?}"),
         }
     }
 }

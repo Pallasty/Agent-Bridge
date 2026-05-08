@@ -77,10 +77,13 @@ pub struct TerminalCapabilities {
     pub warp_ipc_socket_ready: Option<bool>,
 }
 
-/// A single structured Warp terminal block (command + output + metadata).
+/// A single structured terminal block (command + output + metadata).
 ///
-/// Available only when the Warp IPC bridge is connected; other backends
-/// return `Error::Backend("not supported")` from `read_blocks`.
+/// Sourced two ways: Warp IPC delivers blocks straight from Warp's UI
+/// model; the PTY backend reconstructs blocks from OSC 133
+/// (FinalTerm / iTerm2 prompt protocol) markers emitted by the user's
+/// shell integration. Backends with neither path return
+/// `Error::Backend("not supported")` from `read_blocks`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalBlock {
     pub block_id: String,
@@ -125,11 +128,16 @@ pub trait TerminalBackend: Send + Sync {
     /// `Error::Backend` explaining the limitation.
     async fn read_output(&self, pane: &PaneId, lines: usize) -> Result<Vec<String>>;
 
-    /// Return structured blocks for a session (Warp IPC only).
+    /// Return structured blocks for a session.
+    ///
+    /// Implemented by `WarpBackend` (via Warp IPC) and `PtyBackend` (via
+    /// OSC 133 prompt markers — the user's shell must emit them; see
+    /// `docs/SHELL-INTEGRATION-OSC133.md` for one-line snippets). Other
+    /// backends inherit this default which returns `Error::Backend`.
     ///
     /// `limit` caps the number of most-recent blocks returned.
-    /// `since_block` is an optional 0-based index floor (skip older blocks).
-    /// Default impl returns `Error::Backend("not supported")`.
+    /// `since_block` is an optional 1-based id floor (skip blocks with
+    /// `block_id <= since_block`).
     async fn read_blocks(
         &self,
         _pane: &PaneId,
@@ -137,7 +145,7 @@ pub trait TerminalBackend: Send + Sync {
         _since_block: Option<usize>,
     ) -> Result<Vec<TerminalBlock>> {
         Err(ab_core::Error::Backend(
-            "read_blocks is only available via the Warp IPC bridge".into(),
+            "read_blocks is not supported by this backend".into(),
         ))
     }
 

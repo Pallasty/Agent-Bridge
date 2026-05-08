@@ -50,6 +50,17 @@ pub enum OscEvent {
     },
 }
 
+/// One item from [`OscParser::feed_segments`]: either a contiguous run
+/// of non-OSC bytes that passed through the parser, or a finalised OSC
+/// event. Used by `pty.rs` to slice the byte stream at OSC 133 marker
+/// boundaries so command-input and output text land in the right
+/// per-block buckets.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FeedItem {
+    Text(Vec<u8>),
+    Event(OscEvent),
+}
+
 /// One OSC 133 prompt-protocol marker. See
 /// <https://iterm2.com/documentation-shell-integration.html> and the
 /// FinalTerm spec for full semantics.
@@ -100,12 +111,39 @@ impl OscParser {
 
     /// Feed bytes; returns any complete OSC events parsed.
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<OscEvent> {
+        self.feed_segments(bytes)
+            .into_iter()
+            .filter_map(|item| match item {
+                FeedItem::Event(e) => Some(e),
+                FeedItem::Text(_) => None,
+            })
+            .collect()
+    }
+
+    /// Like [`feed`], but interleaves complete OSC events with the
+    /// runs of non-OSC bytes that passed between them. Lets callers
+    /// segment a byte stream at OSC marker boundaries — needed for
+    /// OSC-133-driven block bucketing in `pty.rs`. The parser still
+    /// owns its multi-chunk continuation state, so cross-chunk OSC
+    /// sequences are stitched back together correctly.
+    pub fn feed_segments(&mut self, bytes: &[u8]) -> Vec<FeedItem> {
         let mut out = Vec::new();
+        // Pending text in this chunk (bytes seen in Ground state).
+        let mut text_buf: Vec<u8> = Vec::new();
+        let flush_text = |text_buf: &mut Vec<u8>, out: &mut Vec<FeedItem>| {
+            if !text_buf.is_empty() {
+                out.push(FeedItem::Text(std::mem::take(text_buf)));
+            }
+        };
         for &b in bytes {
             match self.state {
                 State::Ground => {
                     if b == ESC {
+                        // End the text run before stepping into ESC.
+                        flush_text(&mut text_buf, &mut out);
                         self.state = State::Esc;
+                    } else {
+                        text_buf.push(b);
                     }
                 }
                 State::Esc => {
@@ -113,13 +151,18 @@ impl OscParser {
                         self.state = State::OscIntro;
                         self.buf.clear();
                     } else {
+                        // Not actually an OSC; the lone ESC + the
+                        // following byte are passthrough text. Emit
+                        // both so the upstream stripper can handle them.
+                        text_buf.push(ESC);
+                        text_buf.push(b);
                         self.state = State::Ground;
                     }
                 }
                 State::OscIntro | State::OscBody => match b {
                     BEL => {
                         if let Some(evt) = self.finalise() {
-                            out.push(evt);
+                            out.push(FeedItem::Event(evt));
                         }
                         self.state = State::Ground;
                     }
@@ -135,7 +178,7 @@ impl OscParser {
                     if b == BACKSLASH {
                         // ST terminator
                         if let Some(evt) = self.finalise() {
-                            out.push(evt);
+                            out.push(FeedItem::Event(evt));
                         }
                         self.state = State::Ground;
                     } else {
@@ -149,6 +192,7 @@ impl OscParser {
                 }
             }
         }
+        flush_text(&mut text_buf, &mut out);
         out
     }
 
@@ -545,5 +589,136 @@ mod tests {
         let mut p = OscParser::new();
         let evt = one(&mut p, b"\x1b]133;A\x1b\\");
         assert_eq!(evt, OscEvent::Prompt(PromptMarker::PromptStart));
+    }
+
+    // ── feed_segments — chunk-precise text/event interleaving ──────────────
+
+    fn text_of(item: &FeedItem) -> &[u8] {
+        match item {
+            FeedItem::Text(b) => b,
+            FeedItem::Event(_) => panic!("expected Text, got Event"),
+        }
+    }
+    fn event_of(item: &FeedItem) -> &OscEvent {
+        match item {
+            FeedItem::Text(_) => panic!("expected Event, got Text"),
+            FeedItem::Event(e) => e,
+        }
+    }
+
+    #[test]
+    fn segments_pure_text_is_one_text_item() {
+        let mut p = OscParser::new();
+        let items = p.feed_segments(b"hello world");
+        assert_eq!(items.len(), 1);
+        assert_eq!(text_of(&items[0]), b"hello world");
+    }
+
+    #[test]
+    fn segments_pure_osc_is_one_event_item() {
+        let mut p = OscParser::new();
+        let items = p.feed_segments(b"\x1b]133;A\x07");
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            *event_of(&items[0]),
+            OscEvent::Prompt(PromptMarker::PromptStart)
+        );
+    }
+
+    #[test]
+    fn segments_text_then_marker_then_text_split_correctly() {
+        // "foo" + OSC 133 A + "bar" → 3 items in order: Text, Event, Text.
+        let mut p = OscParser::new();
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"foo");
+        buf.extend_from_slice(b"\x1b]133;A\x07");
+        buf.extend_from_slice(b"bar");
+        let items = p.feed_segments(&buf);
+        assert_eq!(items.len(), 3);
+        assert_eq!(text_of(&items[0]), b"foo");
+        assert_eq!(
+            *event_of(&items[1]),
+            OscEvent::Prompt(PromptMarker::PromptStart)
+        );
+        assert_eq!(text_of(&items[2]), b"bar");
+    }
+
+    #[test]
+    fn segments_full_command_lifecycle_yields_text_and_events() {
+        // Realistic shell stream: prompt → command echo → output → end.
+        let mut p = OscParser::new();
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"\x1b]133;A\x07"); // prompt start
+        buf.extend_from_slice(b"$ "); // shell prompt text
+        buf.extend_from_slice(b"\x1b]133;B\x07"); // input start
+        buf.extend_from_slice(b"ls /tmp\n"); // command + enter
+        buf.extend_from_slice(b"\x1b]133;C\x07"); // output start
+        buf.extend_from_slice(b"foo\nbar\n"); // output bytes
+        buf.extend_from_slice(b"\x1b]133;D;0\x07"); // command end
+        let items = p.feed_segments(&buf);
+
+        // 4 events + 3 text spans = 7 items, in interleaved order.
+        assert_eq!(items.len(), 7);
+        assert!(matches!(&items[0], FeedItem::Event(_))); // A
+        assert_eq!(text_of(&items[1]), b"$ "); // prompt rendering
+        assert!(matches!(&items[2], FeedItem::Event(_))); // B
+        assert_eq!(text_of(&items[3]), b"ls /tmp\n"); // command-input bytes
+        assert!(matches!(&items[4], FeedItem::Event(_))); // C
+        assert_eq!(text_of(&items[5]), b"foo\nbar\n"); // output bytes
+        assert!(matches!(&items[6], FeedItem::Event(_))); // D
+    }
+
+    #[test]
+    fn segments_partial_osc_across_chunks_does_not_leak_into_text() {
+        // OSC sequence split across two feed calls. The parser must NOT
+        // emit the sequence's bytes as text on either side of the boundary.
+        let mut p = OscParser::new();
+        let items1 = p.feed_segments(b"head\x1b]133;");
+        // Only "head" is text; the partial OSC stays buffered internally.
+        assert_eq!(items1.len(), 1);
+        assert_eq!(text_of(&items1[0]), b"head");
+
+        let items2 = p.feed_segments(b"A\x07tail");
+        // Now the OSC closes and we see the tail text after it.
+        assert_eq!(items2.len(), 2);
+        assert_eq!(
+            *event_of(&items2[0]),
+            OscEvent::Prompt(PromptMarker::PromptStart)
+        );
+        assert_eq!(text_of(&items2[1]), b"tail");
+    }
+
+    #[test]
+    fn segments_lone_esc_recovers_as_text() {
+        // ESC not followed by ']' is not an OSC opener — those bytes
+        // should resurface as text so downstream ANSI strip can handle
+        // them (they may belong to a CSI / SS3 / etc.).
+        let mut p = OscParser::new();
+        let items = p.feed_segments(b"a\x1b[31mb"); // CSI red, not OSC
+        // The "a" comes out, then ESC and '[' resurface as text, then "31mb".
+        let mut all_text = Vec::new();
+        for item in &items {
+            if let FeedItem::Text(b) = item {
+                all_text.extend_from_slice(b);
+            }
+        }
+        assert_eq!(all_text, b"a\x1b[31mb");
+        // No events for a CSI sequence.
+        assert!(items.iter().all(|i| matches!(i, FeedItem::Text(_))));
+    }
+
+    #[test]
+    fn feed_back_compat_returns_only_events() {
+        // Confirm the public `feed` API is unchanged: text spans dropped,
+        // only events surfaced. Existing callers (router.rs, mcp_tools.rs)
+        // depend on this.
+        let mut p = OscParser::new();
+        let evts = p.feed(b"foo\x1b]133;C\x07bar\x1b]133;D;1\x07");
+        assert_eq!(evts.len(), 2);
+        assert_eq!(evts[0], OscEvent::Prompt(PromptMarker::OutputStart));
+        assert_eq!(
+            evts[1],
+            OscEvent::Prompt(PromptMarker::CommandEnd { exit_code: Some(1) })
+        );
     }
 }
