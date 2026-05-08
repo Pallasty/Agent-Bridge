@@ -1441,8 +1441,38 @@ impl StateStore for SqliteStore {
             .filter(|s| !s.is_empty());
         let now = now_secs();
 
-        // Pre-compute embedding (CPU-only, safe outside the async call closure).
-        let embedding_bytes = crate::vector::encode_embedding(&crate::vector::embed_text(&content));
+        // Preflight: if a row with this key already exists with the same content
+        // and a well-formed embedding, reuse it instead of paying the embed cost
+        // (mirrors the memory_import preflight in this same file). Same-content
+        // re-saves are common — session_curate re-extracts identical lessons,
+        // and users may update tags/importance without touching content.
+        const EXPECTED_EMBED_BYTES: usize = crate::vector::VECTOR_DIM * 4;
+        let key_for_preflight = key.clone();
+        let existing: Option<(String, Vec<u8>)> = self
+            .conn
+            .call(move |c| -> RusqliteResult<Option<(String, Vec<u8>)>> {
+                let mut stmt =
+                    c.prepare("SELECT content, embedding FROM memories WHERE key = ?1")?;
+                let mut rows = stmt.query(params![key_for_preflight])?;
+                if let Some(row) = rows.next()? {
+                    let existing_content: String = row.get(0)?;
+                    let existing_emb: Option<Vec<u8>> = row.get(1)?;
+                    Ok(Some((existing_content, existing_emb.unwrap_or_default())))
+                } else {
+                    Ok(None)
+                }
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_save preflight: {e}")))?;
+
+        let embedding_bytes = match existing {
+            Some((existing_content, existing_emb))
+                if existing_content == content && existing_emb.len() == EXPECTED_EMBED_BYTES =>
+            {
+                existing_emb
+            }
+            _ => crate::vector::encode_embedding(&crate::vector::embed_text(&content)),
+        };
 
         // Pre-compute overlap tokens for contradiction detection (outside closure).
         let new_tokens = overlap_tokens(&content);
@@ -4410,6 +4440,80 @@ mod tests {
         assert_eq!(r2.inserted, 0);
         assert_eq!(r2.updated, 0);
         assert_eq!(r2.skipped, 1);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_save_reuses_embedding_when_content_unchanged() {
+        // Preflight gate for memory_save: when an upsert hits an existing key
+        // whose stored content is byte-identical to the new content, reuse the
+        // existing embedding instead of paying embed_text again. We verify the
+        // gate by writing a sentinel embedding in place, re-saving with the
+        // same content, and asserting the sentinel survives. A subsequent save
+        // with different content must recompute.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-msave-preflight-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        let mut rec = mk_record("preflight_save_key", 1_700_000_000);
+        rec.content = "stable content".into();
+        store.memory_save(&rec).await.expect("first save");
+
+        let sentinel = vec![0x42u8; crate::vector::VECTOR_DIM * 4];
+        let sentinel_for_write = sentinel.clone();
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET embedding = ?1 WHERE key = 'preflight_save_key'",
+                    params![sentinel_for_write],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("install sentinel");
+
+        // Same content → preflight should reuse, sentinel survives.
+        rec.tags = vec!["new-tag".into()];
+        store.memory_save(&rec).await.expect("re-save same content");
+        let reused: Vec<u8> = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT embedding FROM memories WHERE key = 'preflight_save_key'",
+                    [],
+                    |row| row.get::<_, Option<Vec<u8>>>(0),
+                )
+                .map(|o| o.unwrap_or_default())
+            })
+            .await
+            .expect("read reused");
+        assert_eq!(reused, sentinel, "sentinel must survive same-content re-save");
+
+        // Different content → must recompute (sentinel overwritten).
+        rec.content = "different content now".into();
+        store.memory_save(&rec).await.expect("re-save new content");
+        let recomputed: Vec<u8> = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT embedding FROM memories WHERE key = 'preflight_save_key'",
+                    [],
+                    |row| row.get::<_, Option<Vec<u8>>>(0),
+                )
+                .map(|o| o.unwrap_or_default())
+            })
+            .await
+            .expect("read recomputed");
+        assert_ne!(recomputed, sentinel, "sentinel must be replaced on content change");
+        assert_eq!(recomputed.len(), crate::vector::VECTOR_DIM * 4);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
