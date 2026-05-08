@@ -1686,6 +1686,7 @@ impl StateStore for SqliteStore {
                      FROM memories_fts
                      JOIN memories m ON m.rowid = memories_fts.rowid
                      WHERE memories_fts MATCH ?1
+                       AND m.status = 'active'
                      ORDER BY bm25_score
                      LIMIT ?2",
                 )?;
@@ -1739,6 +1740,7 @@ impl StateStore for SqliteStore {
                                 importance, status, trigger_pattern
                          FROM memories
                          WHERE key = ?1 COLLATE NOCASE
+                           AND status = 'active'
                          LIMIT 1",
                     )?;
                     exact_stmt
