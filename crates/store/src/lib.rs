@@ -199,6 +199,25 @@ pub struct CoactivationStats {
     pub top_5_edges: Vec<CoactivationEdge>,
 }
 
+/// One window of "what did self look like during these N days" — the
+/// behavioral fingerprint output of [`StateStore::identity_window`].
+/// Two of these (current vs prior) compose an identity-continuity delta
+/// per design doc §5: "today-self vs last-week-self".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IdentityWindow {
+    pub window_start: i64,
+    pub window_end: i64,
+    pub tool_calls_total: u64,
+    pub tool_calls_ok: u64,
+    /// (tool_name, call_count) for top tools, count DESC, capped to 10.
+    pub top_tools: Vec<(String, u64)>,
+    pub forum_posts: u64,
+    /// (kind, count) sorted by kind for stable diff.
+    pub forum_kinds: Vec<(String, u64)>,
+    pub forum_avg_body_len: f64,
+    pub memory_saves: u64,
+}
+
 /// Sort order for `list_memories`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -812,6 +831,28 @@ pub trait StateStore: Send + Sync {
             top10_to_median_ratio: 0.0,
             pairs_last_24h: 0,
             top_5_edges: Vec::new(),
+        })
+    }
+
+    /// v21 — Identity meta-monitor: behavioral fingerprint over a time
+    /// window. Powers `agent-bridge dream identity` (vision principle 5:
+    /// "literal answer to non-continuous medium continuity"). Default
+    /// returns an empty window so older stores keep compiling.
+    async fn identity_window(
+        &self,
+        window_start: i64,
+        window_end: i64,
+    ) -> Result<IdentityWindow> {
+        Ok(IdentityWindow {
+            window_start,
+            window_end,
+            tool_calls_total: 0,
+            tool_calls_ok: 0,
+            top_tools: Vec::new(),
+            forum_posts: 0,
+            forum_kinds: Vec::new(),
+            forum_avg_body_len: 0.0,
+            memory_saves: 0,
         })
     }
 

@@ -59,10 +59,11 @@ use crate::{
     AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
     CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, ForumExportResult, ForumImportReport,
     ForumPostExport, ForumPostOutcome, ForumPostRecord, ForumThreadExport, ForumThreadRecord,
-    ImportConflictPolicy, ImportReport, McpToolCallStats, McpToolErrorRecord, MemoryEdge,
-    MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryRecord,
-    MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep, SessionFilter,
-    StateStore, StoredSession, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, STDIO_CAP,
+    IdentityWindow, ImportConflictPolicy, ImportReport, McpToolCallStats, McpToolErrorRecord,
+    MemoryEdge, MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort,
+    MemoryRecord, MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep,
+    SessionFilter, StateStore, StoredSession, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
+    STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -2980,6 +2981,93 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("coactivation_stats: {e}")))
+    }
+
+    /// v21 — Identity behavioral fingerprint over [window_start, window_end).
+    /// Aggregates from mcp_tool_calls (tool histogram + ok rate) +
+    /// forum_posts (post count, kind distribution, avg body length) +
+    /// memories (saves in window). Powers `agent-bridge dream identity`
+    /// delta reports.
+    async fn identity_window(
+        &self,
+        window_start: i64,
+        window_end: i64,
+    ) -> Result<IdentityWindow> {
+        self.conn
+            .call(move |c| -> RusqliteResult<IdentityWindow> {
+                // Tool call totals + ok rate.
+                let (tool_total, tool_ok): (i64, i64) = c.query_row(
+                    "SELECT COUNT(*), COALESCE(SUM(ok), 0)
+                       FROM mcp_tool_calls
+                      WHERE ts >= ?1 AND ts < ?2",
+                    rusqlite::params![window_start, window_end],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+
+                // Top 10 tools by count.
+                let mut stmt_top = c.prepare(
+                    "SELECT tool_name, COUNT(*) AS cnt
+                       FROM mcp_tool_calls
+                      WHERE ts >= ?1 AND ts < ?2
+                   GROUP BY tool_name
+                   ORDER BY cnt DESC
+                      LIMIT 10",
+                )?;
+                let top_tools: Vec<(String, u64)> = stmt_top
+                    .query_map(
+                        rusqlite::params![window_start, window_end],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
+                    )?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                drop(stmt_top);
+
+                // Forum: count + avg body length.
+                let (forum_count, forum_avg_len): (i64, Option<f64>) = c.query_row(
+                    "SELECT COUNT(*), AVG(LENGTH(body))
+                       FROM forum_posts
+                      WHERE created_at >= ?1 AND created_at < ?2",
+                    rusqlite::params![window_start, window_end],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+
+                // Forum kind distribution.
+                let mut stmt_kinds = c.prepare(
+                    "SELECT kind, COUNT(*) AS cnt
+                       FROM forum_posts
+                      WHERE created_at >= ?1 AND created_at < ?2
+                   GROUP BY kind
+                   ORDER BY kind ASC",
+                )?;
+                let forum_kinds: Vec<(String, u64)> = stmt_kinds
+                    .query_map(
+                        rusqlite::params![window_start, window_end],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
+                    )?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                drop(stmt_kinds);
+
+                // Memory saves (created_at in window — distinct from access).
+                let memory_saves: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM memories
+                      WHERE created_at >= ?1 AND created_at < ?2",
+                    rusqlite::params![window_start, window_end],
+                    |row| row.get(0),
+                )?;
+
+                Ok(IdentityWindow {
+                    window_start,
+                    window_end,
+                    tool_calls_total: tool_total as u64,
+                    tool_calls_ok: tool_ok as u64,
+                    top_tools,
+                    forum_posts: forum_count as u64,
+                    forum_kinds,
+                    forum_avg_body_len: forum_avg_len.unwrap_or(0.0),
+                    memory_saves: memory_saves as u64,
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("identity_window: {e}")))
     }
 
     async fn memory_load_embeddings(&self) -> Result<Vec<(MemoryRecord, Vec<f32>)>> {
