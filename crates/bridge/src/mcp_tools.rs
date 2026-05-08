@@ -1899,10 +1899,23 @@ fn resolve_identity(
     (node, project, role, tag, session_id)
 }
 
-pub struct SessionIdentityTool;
+/// Freshness window (seconds) that defines a "fresh sibling" presence row.
+/// Within this window of last_heartbeat_at, we consider the canonical id
+/// taken; older rows are presumed crashed/idle and the id is reusable.
+const PRESENCE_FRESH_SECS: i64 = 60;
+
+/// Render the bottom 16 bits of a u32 pid as 4 lowercase hex chars,
+/// matching the convention documented in DESIGN-v19 (e.g. `7f3a`).
+fn pid_tag_short(pid: u32) -> String {
+    format!("{:04x}", pid & 0xffff)
+}
+
+pub struct SessionIdentityTool {
+    hub: Hub,
+}
 impl SessionIdentityTool {
-    pub fn new(_hub: Hub) -> Self {
-        Self
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
     }
 }
 #[async_trait]
@@ -1915,13 +1928,16 @@ impl McpTool for SessionIdentityTool {
             name: self.name().into(),
             description:
                 "Compute the canonical session id `node:project:role[:tag]` from the \
-                 caller's environment + args. PURE — does not write to the database. \
+                 caller's environment + args. Auto-disambiguates by appending a \
+                 short pid-derived tag when an existing fresh-heartbeat (≤ 60 s) \
+                 presence row already holds the proposed id from a different \
+                 process — the multi-CC sibling case. \
                  Use the result as `session_id` / `author` in agent_message, agent_inbox, \
                  forum_post, agent_presence_announce, etc. Conventions:\n\
                  • `node`     → arg | $AGENT_BRIDGE_NODE | /etc/hostname | `hostname`\n\
                  • `project`  → arg | $AGENT_BRIDGE_PROJECT | basename(cwd_arg | cwd)\n\
                  • `role`     → arg | 'main'\n\
-                 • `tag`      → arg | (omitted)\n\
+                 • `tag`      → arg | auto-pid-suffix on collision | (omitted)\n\
                  See docs/DESIGN-v19-presence-identity.md for rationale and the \
                  Tailscale evolution path."
                     .into(),
@@ -1929,28 +1945,68 @@ impl McpTool for SessionIdentityTool {
                 "type": "object",
                 "properties": {
                     "role":    { "type": "string", "default": "main", "description": "What this CC is doing — main | explorer | reviewer | test-writer | …" },
-                    "tag":     { "type": "string", "description": "Optional disambiguator when multiple instances share a role (e.g. last-4 of pid)." },
+                    "tag":     { "type": "string", "description": "Optional disambiguator when multiple instances share a role (e.g. last-4 of pid). Disables auto-tag when set." },
                     "node":    { "type": "string", "description": "Override hostname." },
                     "project": { "type": "string", "description": "Override project slug." },
-                    "cwd":     { "type": "string", "description": "Caller's cwd (used to derive project default — MCP server's cwd ≠ Claude Code's)." }
+                    "cwd":     { "type": "string", "description": "Caller's cwd (used to derive project default — MCP server's cwd ≠ Claude Code's)." },
+                    "auto_tag": { "type": "boolean", "default": true, "description": "When true (default), append a short pid-tag if the bare id collides with a fresh sibling. Set false to keep the old pure-helper behavior." }
                 }
             }),
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let role = args.get("role").and_then(|v| v.as_str());
-        let tag = args.get("tag").and_then(|v| v.as_str());
-        let node = args.get("node").and_then(|v| v.as_str());
-        let project = args.get("project").and_then(|v| v.as_str());
-        let cwd = args.get("cwd").and_then(|v| v.as_str());
+        let role_arg = args.get("role").and_then(|v| v.as_str());
+        let explicit_tag = args.get("tag").and_then(|v| v.as_str());
+        let node_arg = args.get("node").and_then(|v| v.as_str());
+        let project_arg = args.get("project").and_then(|v| v.as_str());
+        let cwd_arg = args.get("cwd").and_then(|v| v.as_str());
+        let auto_tag_enabled = args
+            .get("auto_tag")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
         let (node, project, role, tag, session_id) =
-            resolve_identity(role, tag, node, project, cwd);
+            resolve_identity(role_arg, explicit_tag, node_arg, project_arg, cwd_arg);
+
+        // Auto-tag only when (a) caller did not pass an explicit tag,
+        // (b) caller did not opt out, and (c) a fresh presence row already
+        // holds this id from a different process.
+        let (final_tag, final_session_id, auto_tagged) = if explicit_tag.is_some()
+            || !auto_tag_enabled
+        {
+            (tag, session_id, false)
+        } else if let Some(store) = self.hub.store.as_ref() {
+            match store.agent_presence_get(&session_id).await {
+                Ok(Some(existing)) => {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    let my_pid = std::process::id();
+                    let is_fresh = now - existing.last_heartbeat_at <= PRESENCE_FRESH_SECS;
+                    let other_owner = existing.pid != Some(i64::from(my_pid));
+                    if is_fresh && other_owner {
+                        let auto = pid_tag_short(my_pid);
+                        let new_id = format!("{node}:{project}:{role}:{auto}");
+                        (Some(auto), new_id, true)
+                    } else {
+                        (tag, session_id, false)
+                    }
+                }
+                Ok(None) => (tag, session_id, false),
+                Err(_) => (tag, session_id, false),
+            }
+        } else {
+            (tag, session_id, false)
+        };
+
         Ok(ToolResult::json_text(&json!({
-            "session_id": session_id,
+            "session_id": final_session_id,
             "node": node,
             "project": project,
             "role": role,
-            "tag": tag
+            "tag": final_tag,
+            "auto_tagged": auto_tagged
         })))
     }
 }
@@ -10136,5 +10192,198 @@ mod tests {
         // Unknown policy falls through (caller uses daemon default).
         assert_eq!(policy_to_backend("nonsense"), None);
         assert_eq!(policy_to_backend(""), None);
+    }
+
+    // ── session_identity auto-tag on fresh sibling collision ───────────────
+
+    #[test]
+    fn pid_tag_short_renders_low_16_bits_as_4_hex() {
+        assert_eq!(pid_tag_short(0x12345), "2345");
+        assert_eq!(pid_tag_short(0x7f3a), "7f3a");
+        assert_eq!(pid_tag_short(0), "0000");
+        assert_eq!(pid_tag_short(0xabcd), "abcd");
+    }
+
+    /// Helper: build a Hub backed by a fresh temp SqliteStore. Returns the
+    /// hub plus the temp dir handle (caller drops to clean up).
+    async fn mk_test_hub_with_store() -> (crate::Hub, std::path::PathBuf) {
+        use std::sync::Arc;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-session-identity-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = ab_store::SqliteStore::open(&db_path)
+            .await
+            .expect("open store");
+        let hub = crate::Hub::builder().store(Arc::new(store)).build();
+        (hub, temp_dir)
+    }
+
+    fn announce_args<'a>(
+        node: &'a str,
+        project: &'a str,
+        role: &'a str,
+        pid: i64,
+    ) -> ab_store::AgentPresenceUpsert<'a> {
+        ab_store::AgentPresenceUpsert {
+            name: Some("test-cc"),
+            description: None,
+            version: None,
+            url: None,
+            node: Some(node),
+            project: Some(project),
+            role: Some(role),
+            tag: None,
+            cwd: None,
+            pid: Some(pid),
+            capabilities: None,
+            skills: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn session_identity_no_collision_returns_bare_id() {
+        // Empty DB → resolve_identity stays bare even with auto_tag enabled.
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let tool = SessionIdentityTool::new(hub);
+        let out = tool
+            .execute(
+                json!({"role":"main", "node":"testnode", "project":"proj"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["session_id"], "testnode:proj:main");
+        assert_eq!(payload["auto_tagged"], false);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn session_identity_auto_tags_on_fresh_sibling_collision() {
+        // Pre-populate a presence row with a foreign pid + fresh heartbeat.
+        // session_identity must auto-append a 4-hex pid suffix.
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+        let foreign_pid = 0xfeed_face_u32 as i64; // not us
+        store
+            .agent_presence_announce(
+                "testnode:proj:main",
+                announce_args("testnode", "proj", "main", foreign_pid),
+            )
+            .await
+            .expect("seed sibling row");
+
+        let tool = SessionIdentityTool::new(hub);
+        let out = tool
+            .execute(
+                json!({"role":"main", "node":"testnode", "project":"proj"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        let expected_tag = pid_tag_short(std::process::id());
+        let expected_id = format!("testnode:proj:main:{expected_tag}");
+        assert_eq!(payload["session_id"], expected_id);
+        assert_eq!(payload["tag"], expected_tag);
+        assert_eq!(payload["auto_tagged"], true);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn session_identity_skips_auto_tag_when_explicit_tag_passed() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+        store
+            .agent_presence_announce(
+                "testnode:proj:main",
+                announce_args("testnode", "proj", "main", 0xdead_beef_u32 as i64),
+            )
+            .await
+            .expect("seed sibling");
+
+        let tool = SessionIdentityTool::new(hub);
+        let out = tool
+            .execute(
+                json!({"role":"main", "tag":"manual", "node":"testnode", "project":"proj"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["session_id"], "testnode:proj:main:manual");
+        assert_eq!(payload["tag"], "manual");
+        assert_eq!(payload["auto_tagged"], false);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn session_identity_skips_auto_tag_when_disabled() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+        store
+            .agent_presence_announce(
+                "testnode:proj:main",
+                announce_args("testnode", "proj", "main", 0xc0de_u32 as i64),
+            )
+            .await
+            .expect("seed sibling");
+
+        let tool = SessionIdentityTool::new(hub);
+        let out = tool
+            .execute(
+                json!({"role":"main", "auto_tag": false, "node":"testnode", "project":"proj"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["session_id"], "testnode:proj:main");
+        assert_eq!(payload["auto_tagged"], false);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn session_identity_does_not_auto_tag_when_pid_matches_self() {
+        // Existing row owned by US (same pid) — re-derive the same id, no tag.
+        // This protects the normal case where a single CC re-asks identity.
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+        let my_pid = i64::from(std::process::id());
+        store
+            .agent_presence_announce(
+                "testnode:proj:main",
+                announce_args("testnode", "proj", "main", my_pid),
+            )
+            .await
+            .expect("seed self row");
+
+        let tool = SessionIdentityTool::new(hub);
+        let out = tool
+            .execute(
+                json!({"role":"main", "node":"testnode", "project":"proj"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["session_id"], "testnode:proj:main");
+        assert_eq!(payload["auto_tagged"], false);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    fn result_text_as_json(r: &ToolResult) -> serde_json::Value {
+        let txt = match r.content.first().expect("content") {
+            ContentBlock::Text { text } => text.clone(),
+            _ => panic!("expected text block"),
+        };
+        serde_json::from_str(&txt).expect("parse json")
     }
 }
