@@ -15,6 +15,7 @@ pub mod security;
 pub mod server;
 pub mod session_handoff;
 pub mod socket_path;
+pub mod brave_api;
 pub mod github_api;
 pub mod gitlab_api;
 pub mod notion_api;

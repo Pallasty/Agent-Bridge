@@ -54,6 +54,9 @@ pub fn load_at_startup() {
     set_if_unset("NOTION_TOKEN", || {
         extract_bare_token(&content, "Notion API", &["ntn_", "secret_"])
     });
+    set_if_unset("BRAVE_SEARCH_TOKEN", || {
+        extract_bare_token(&content, "Brave Search API", &["BSA"])
+    });
 }
 
 fn resolve_creds_path() -> Option<PathBuf> {
@@ -162,6 +165,9 @@ glpat-AbCdEf12345
 
 # Notion API
 ntn_NotionTokenABC
+
+# Brave Search API
+BSAFakeBraveTokenXYZ
 ";
 
     #[test]
@@ -197,6 +203,14 @@ ntn_NotionTokenABC
         assert_eq!(
             extract_bare_token(SAMPLE, "Notion API", &["ntn_", "secret_"]),
             Some("ntn_NotionTokenABC".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_brave_bare_token() {
+        assert_eq!(
+            extract_bare_token(SAMPLE, "Brave Search API", &["BSA"]),
+            Some("BSAFakeBraveTokenXYZ".to_string())
         );
     }
 

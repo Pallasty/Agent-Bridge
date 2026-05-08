@@ -8948,6 +8948,63 @@ impl McpTool for NotionPageCreateTool {
 }
 
 // ===========================================================================
+//                            brave_search_* — REST API
+// ===========================================================================
+
+pub struct BraveWebSearchTool;
+impl Default for BraveWebSearchTool {
+    fn default() -> Self { Self }
+}
+impl BraveWebSearchTool {
+    pub fn new() -> Self { Self }
+}
+#[async_trait]
+impl McpTool for BraveWebSearchTool {
+    fn name(&self) -> &'static str { "brave_web_search" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Web search via Brave Search API. Independent of Google; useful \
+                 for fresh / less-indexed material and as a sanity check on \
+                 other engines. Returns title/url/description/age/language. \
+                 Free tier: ~1 query/second, 2000/month — keep `count` modest. \
+                 `safesearch` is one of off/moderate/strict (default moderate)."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query":      { "type": "string", "description": "Search query string" },
+                    "count":      { "type": "integer", "default": 10, "minimum": 1, "maximum": 20 },
+                    "country":    { "type": "string", "description": "Two-letter country code (e.g. us, gb, jp). Optional." },
+                    "safesearch": { "type": "string", "enum": ["off","moderate","strict"], "description": "Adult-content filter (default moderate)" }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let query = match args.get("query").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'query'")),
+        };
+        let count = args.get("count").and_then(|v| v.as_u64()).unwrap_or(10).clamp(1, 20) as u32;
+        let country = args.get("country").and_then(|v| v.as_str());
+        let safesearch = args.get("safesearch").and_then(|v| v.as_str());
+        let client = match crate::brave_api::BraveClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.web_search(query, count, country, safesearch).await {
+            Ok(rows) => Ok(ToolResult::json_text(&json!({
+                "count": rows.len(),
+                "results": rows
+            }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -9201,6 +9258,9 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotionSearchTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotionPageGetTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotionPageCreateTool::new()));
+
+    // Brave Search REST API: independent web search, fallback / fresh-results channel.
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(BraveWebSearchTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
