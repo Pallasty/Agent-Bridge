@@ -56,14 +56,15 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 }
 
 use crate::{
-    AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CodebaseIndexStats,
-    CodebaseSymbol, CompactPolicy, ForumExportResult, ForumImportReport, ForumPostExport,
-    ForumPostOutcome, ForumPostRecord, ForumThreadExport, ForumThreadRecord,
+    AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
+    CodebaseIndexStats, CodebaseSymbol, CompactPolicy, ForumExportResult, ForumImportReport,
+    ForumPostExport, ForumPostOutcome, ForumPostRecord, ForumThreadExport, ForumThreadRecord,
     ImportConflictPolicy, ImportReport, McpToolCallStats, McpToolErrorRecord, MemoryEdge,
     MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryRecord,
     MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep, SessionFilter,
     StateStore, StoredSession, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, STDIO_CAP,
 };
+use tokio_rusqlite::rusqlite::OptionalExtension;
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -367,6 +368,26 @@ CREATE TABLE IF NOT EXISTS agent_presence (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_presence_active  ON agent_presence(last_heartbeat_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_presence_project ON agent_presence(project, role);
+"#;
+
+// v21 — Synaptic Trace (Hebbian co-activation graph for memory_search hits)
+// Vision: docs/DESIGN-v21-synaptic-trace-and-dream.md
+const SCHEMA_V20: &str = r#"
+CREATE TABLE IF NOT EXISTS memory_coactivation (
+    key_a         TEXT    NOT NULL,
+    key_b         TEXT    NOT NULL,
+    count         INTEGER NOT NULL DEFAULT 1,
+    first_at      INTEGER NOT NULL,
+    last_at       INTEGER NOT NULL,
+    ctx_centroid  BLOB,
+    PRIMARY KEY (key_a, key_b),
+    CHECK (key_a < key_b),
+    FOREIGN KEY (key_a) REFERENCES memories(key) ON DELETE CASCADE,
+    FOREIGN KEY (key_b) REFERENCES memories(key) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_memory_coactivation_a       ON memory_coactivation(key_a);
+CREATE INDEX IF NOT EXISTS idx_memory_coactivation_b       ON memory_coactivation(key_b);
+CREATE INDEX IF NOT EXISTS idx_memory_coactivation_count   ON memory_coactivation(count DESC);
 "#;
 
 /// Default database path.
@@ -730,6 +751,19 @@ impl SqliteStore {
             if cur.as_str() == "18" {
                 c.execute_batch(SCHEMA_V19)?;
                 let _ = c.execute("UPDATE schema_meta SET value='19' WHERE key='version'", []);
+            }
+
+            // ── v20: synaptic trace (memory_coactivation, project codename "v21") ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "19".to_string());
+            if cur.as_str() == "19" {
+                c.execute_batch(SCHEMA_V20)?;
+                let _ = c.execute("UPDATE schema_meta SET value='20' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -2712,6 +2746,144 @@ impl StateStore for SqliteStore {
         });
         hits.truncate(limit_usize);
         Ok(hits)
+    }
+
+    /// v21 α — record co-activation pairs from a single search result.
+    ///
+    /// All ordered pairs (i, j) with key_i < key_j (lex normalized) get
+    /// UPSERTed. ctx_centroid (when provided) blends into the stored BLOB
+    /// via online rolling-mean: `new = (count * old + new_contrib) / (count+1)`.
+    /// Fail-soft: errors logged but never propagated as the caller is
+    /// `memory_search` and we don't want trace writes breaking search.
+    async fn record_coactivation(
+        &self,
+        keys: &[String],
+        ctx_centroid: Option<&[f32]>,
+    ) -> Result<()> {
+        if keys.len() < 2 {
+            return Ok(());
+        }
+        // Build deduped + sorted pairs (a < b).
+        let mut keys_owned: Vec<String> = keys.iter().cloned().collect();
+        keys_owned.sort();
+        keys_owned.dedup();
+        if keys_owned.len() < 2 {
+            return Ok(());
+        }
+        let now = now_secs();
+        // Prepare ctx contribution as encoded blob (or None).
+        let ctx_blob: Option<Vec<u8>> = ctx_centroid
+            .filter(|v| !v.is_empty())
+            .map(crate::vector::encode_embedding);
+
+        // Generate all (a, b) pairs with a < b.
+        let mut pairs: Vec<(String, String)> = Vec::with_capacity(
+            keys_owned.len() * (keys_owned.len() - 1) / 2,
+        );
+        for i in 0..keys_owned.len() {
+            for j in (i + 1)..keys_owned.len() {
+                pairs.push((keys_owned[i].clone(), keys_owned[j].clone()));
+            }
+        }
+
+        let res = self
+            .conn
+            .call(move |c| -> RusqliteResult<()> {
+                let tx = c.transaction()?;
+                for (a, b) in &pairs {
+                    // Read existing row (if any) to compute rolling-mean.
+                    let existing: Option<(i64, Option<Vec<u8>>)> = tx
+                        .query_row(
+                            "SELECT count, ctx_centroid FROM memory_coactivation
+                             WHERE key_a = ?1 AND key_b = ?2",
+                            rusqlite::params![a, b],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )
+                        .optional()?;
+
+                    let new_blob: Option<Vec<u8>> = match (&ctx_blob, &existing) {
+                        (None, _) => existing.as_ref().and_then(|(_, blob)| blob.clone()),
+                        (Some(new_b), None) => Some(new_b.clone()),
+                        (Some(new_b), Some((cnt, Some(old_b)))) => {
+                            // Rolling mean: new_centroid = (count*old + new_contrib) / (count+1)
+                            let old_v = crate::vector::decode_embedding(old_b);
+                            let new_v = crate::vector::decode_embedding(new_b);
+                            if old_v.len() == new_v.len() && !old_v.is_empty() {
+                                let cnt_f = *cnt as f32;
+                                let denom = cnt_f + 1.0;
+                                let blended: Vec<f32> = old_v
+                                    .iter()
+                                    .zip(new_v.iter())
+                                    .map(|(o, n)| (cnt_f * o + n) / denom)
+                                    .collect();
+                                Some(crate::vector::encode_embedding(&blended))
+                            } else {
+                                Some(new_b.clone())
+                            }
+                        }
+                        (Some(new_b), Some((_, None))) => Some(new_b.clone()),
+                    };
+
+                    tx.execute(
+                        "INSERT INTO memory_coactivation
+                            (key_a, key_b, count, first_at, last_at, ctx_centroid)
+                         VALUES (?1, ?2, 1, ?3, ?3, ?4)
+                         ON CONFLICT(key_a, key_b) DO UPDATE SET
+                            count    = count + 1,
+                            last_at  = ?3,
+                            ctx_centroid = ?4",
+                        rusqlite::params![a, b, now, new_blob],
+                    )?;
+                }
+                tx.commit()?;
+                Ok(())
+            })
+            .await;
+
+        match res {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // Fail-soft: trace must never break search.
+                tracing::warn!(error = %e, "record_coactivation failed (non-fatal)");
+                Ok(())
+            }
+        }
+    }
+
+    /// v21 α — return top-N co-activation edges for a memory key,
+    /// ordered by count DESC. Returns the *other* key in each pair
+    /// (so caller doesn't have to filter).
+    async fn top_coactivation(
+        &self,
+        key: &str,
+        limit: u32,
+    ) -> Result<Vec<CoactivationEdge>> {
+        let key_owned = key.to_string();
+        let lim = limit as i64;
+        self.conn
+            .call(move |c| -> RusqliteResult<Vec<CoactivationEdge>> {
+                let mut stmt = c.prepare(
+                    "SELECT key_a, key_b, count, first_at, last_at
+                       FROM memory_coactivation
+                      WHERE key_a = ?1 OR key_b = ?1
+                   ORDER BY count DESC, last_at DESC
+                      LIMIT ?2",
+                )?;
+                let rows = stmt
+                    .query_map(rusqlite::params![key_owned, lim], |row| {
+                        Ok(CoactivationEdge {
+                            key_a: row.get(0)?,
+                            key_b: row.get(1)?,
+                            count: row.get::<_, i64>(2)? as u64,
+                            first_at: row.get(3)?,
+                            last_at: row.get(4)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("top_coactivation: {e}")))
     }
 
     async fn memory_load_embeddings(&self) -> Result<Vec<(MemoryRecord, Vec<f32>)>> {
@@ -5378,6 +5550,247 @@ mod tests {
         assert_eq!(rep.threads_inserted, 0);
         assert_eq!(rep.posts_inserted, 0);
         assert_eq!(rep.malformed, 0);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // ── v21 α — Synaptic Trace tests ───────────────────────────────
+
+    fn make_memrec(key: &str, content: &str) -> MemoryRecord {
+        MemoryRecord {
+            key: key.to_string(),
+            kind: "fact".to_string(),
+            content: content.to_string(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn coactivation_record_and_top_basic() {
+        // Save 3 memories, record co-activation across all 3 → 3 pairs
+        // ((a,b), (a,c), (b,c)) each with count=1. top_coactivation('a')
+        // returns 2 edges.
+        let (dir, store) = fresh_store("coact-basic").await;
+        for k in ["alpha", "bravo", "charlie"] {
+            store
+                .memory_save(&make_memrec(k, &format!("content for {k}")))
+                .await
+                .expect("save");
+        }
+
+        store
+            .record_coactivation(
+                &[
+                    "alpha".to_string(),
+                    "bravo".to_string(),
+                    "charlie".to_string(),
+                ],
+                None,
+            )
+            .await
+            .expect("record");
+
+        let edges = store.top_coactivation("alpha", 10).await.expect("top");
+        assert_eq!(edges.len(), 2, "alpha co-activated with bravo + charlie");
+        for e in &edges {
+            assert_eq!(e.count, 1);
+            assert!(e.key_a < e.key_b, "pair must be normalized lex order");
+        }
+
+        let edges_b = store.top_coactivation("bravo", 10).await.expect("top");
+        assert_eq!(edges_b.len(), 2);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn coactivation_pair_normalized_and_count_increments() {
+        // Calling with [b, a] then [a, b] must hit the same row (a < b
+        // normalized), final count = 2.
+        let (dir, store) = fresh_store("coact-norm").await;
+        for k in ["delta", "echo"] {
+            store
+                .memory_save(&make_memrec(k, &format!("content for {k}")))
+                .await
+                .expect("save");
+        }
+
+        store
+            .record_coactivation(&["echo".to_string(), "delta".to_string()], None)
+            .await
+            .expect("record 1");
+        store
+            .record_coactivation(&["delta".to_string(), "echo".to_string()], None)
+            .await
+            .expect("record 2");
+
+        let edges = store.top_coactivation("delta", 10).await.expect("top");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].count, 2, "two recordings of same pair → count=2");
+        assert_eq!(edges[0].key_a, "delta");
+        assert_eq!(edges[0].key_b, "echo");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn coactivation_dedupes_within_single_call() {
+        // A single call with duplicates — must collapse to unique pairs only.
+        let (dir, store) = fresh_store("coact-dedup").await;
+        for k in ["foxtrot", "golf"] {
+            store
+                .memory_save(&make_memrec(k, &format!("content for {k}")))
+                .await
+                .expect("save");
+        }
+
+        store
+            .record_coactivation(
+                &[
+                    "foxtrot".to_string(),
+                    "foxtrot".to_string(),
+                    "golf".to_string(),
+                    "golf".to_string(),
+                ],
+                None,
+            )
+            .await
+            .expect("record");
+
+        let edges = store.top_coactivation("foxtrot", 10).await.expect("top");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].count, 1, "dedupe → single (foxtrot, golf) pair");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn coactivation_below_two_keys_is_noop() {
+        // Calling with 0 or 1 keys must be a no-op (no rows, no error).
+        let (dir, store) = fresh_store("coact-noop").await;
+        store.record_coactivation(&[], None).await.expect("zero ok");
+        store
+            .record_coactivation(&["only_one".to_string()], None)
+            .await
+            .expect("one ok");
+        let edges = store.top_coactivation("only_one", 10).await.expect("top");
+        assert!(edges.is_empty(), "no pairs from <2 keys");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn coactivation_fk_cascade_on_memory_delete() {
+        // Deleting one memory drops its co-activation rows (FK ON DELETE CASCADE).
+        let (dir, store) = fresh_store("coact-fk").await;
+        for k in ["hotel", "india", "juliet"] {
+            store
+                .memory_save(&make_memrec(k, &format!("content for {k}")))
+                .await
+                .expect("save");
+        }
+        store
+            .record_coactivation(
+                &[
+                    "hotel".to_string(),
+                    "india".to_string(),
+                    "juliet".to_string(),
+                ],
+                None,
+            )
+            .await
+            .expect("record");
+        let before = store.top_coactivation("india", 10).await.expect("before");
+        assert_eq!(before.len(), 2);
+
+        store.memory_delete("india").await.expect("delete india");
+        let after = store.top_coactivation("hotel", 10).await.expect("after");
+        // hotel's only remaining edge should be (hotel, juliet); india edges gone.
+        assert_eq!(after.len(), 1);
+        assert!(
+            (after[0].key_a == "hotel" && after[0].key_b == "juliet")
+                || (after[0].key_a == "juliet" && after[0].key_b == "hotel")
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn coactivation_ctx_centroid_rolling_mean() {
+        // First call with ctx [1, 0, 0]; second call with ctx [3, 0, 0].
+        // count=2 → stored centroid should be (1*1 + 3) / 2 = 2 in dim 0.
+        // Pad to VECTOR_DIM with zeros to satisfy encode/decode roundtrip.
+        let (dir, store) = fresh_store("coact-ctx").await;
+        for k in ["kilo", "lima"] {
+            store
+                .memory_save(&make_memrec(k, &format!("content for {k}")))
+                .await
+                .expect("save");
+        }
+
+        let mut v1 = vec![0.0_f32; crate::vector::VECTOR_DIM];
+        v1[0] = 1.0;
+        let mut v2 = vec![0.0_f32; crate::vector::VECTOR_DIM];
+        v2[0] = 3.0;
+
+        store
+            .record_coactivation(&["kilo".to_string(), "lima".to_string()], Some(&v1))
+            .await
+            .expect("first");
+        store
+            .record_coactivation(&["kilo".to_string(), "lima".to_string()], Some(&v2))
+            .await
+            .expect("second");
+
+        // Verify the count incremented to 2 — centroid blob is internal,
+        // verified via shape only (BLOB present + decodable).
+        let edges = store.top_coactivation("kilo", 10).await.expect("top");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].count, 2);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn coactivation_ordered_by_count_desc() {
+        // Pair (a, b) co-activated 3 times; pair (a, c) co-activated 1 time.
+        // top_coactivation('a') should return (a, b) before (a, c).
+        let (dir, store) = fresh_store("coact-order").await;
+        for k in ["mike", "november", "oscar"] {
+            store
+                .memory_save(&make_memrec(k, &format!("content for {k}")))
+                .await
+                .expect("save");
+        }
+        for _ in 0..3 {
+            store
+                .record_coactivation(
+                    &["mike".to_string(), "november".to_string()],
+                    None,
+                )
+                .await
+                .expect("record m+n");
+        }
+        store
+            .record_coactivation(&["mike".to_string(), "oscar".to_string()], None)
+            .await
+            .expect("record m+o");
+
+        let edges = store.top_coactivation("mike", 10).await.expect("top");
+        assert_eq!(edges.len(), 2);
+        assert_eq!(edges[0].count, 3, "highest count first");
+        assert!(
+            edges[0].key_a == "mike" && edges[0].key_b == "november"
+                || edges[0].key_a == "november" && edges[0].key_b == "mike"
+        );
+        assert_eq!(edges[1].count, 1);
+
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }

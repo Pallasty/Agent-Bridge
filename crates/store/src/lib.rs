@@ -166,6 +166,20 @@ pub struct MemorySearchHit {
     pub score: f64,
 }
 
+/// One co-activation edge — Hebbian "fire together, wire together" trace
+/// between two memories that surfaced in the same `memory_search` result.
+///
+/// Vision: `docs/DESIGN-v21-synaptic-trace-and-dream.md`. This is the α
+/// data layer; β/γ consume it for seed self-mutation and predictive prime.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CoactivationEdge {
+    pub key_a: String,
+    pub key_b: String,
+    pub count: u64,
+    pub first_at: i64,
+    pub last_at: i64,
+}
+
 /// Sort order for `list_memories`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -735,6 +749,35 @@ pub trait StateStore: Send + Sync {
         limit: u32,
         threshold: f32,
     ) -> Result<Vec<MemorySearchHit>>;
+
+    /// v21 α — Synaptic Trace: record co-activation between memories that
+    /// surfaced together in one `memory_search` result.
+    ///
+    /// `keys` is the ordered list of result keys (caller decides top-K cut).
+    /// All ordered pairs (i, j) with i < j (after lexicographic normalization
+    /// of keys) get UPSERTed: first time → insert with count=1; subsequent
+    /// → count++ and last_at=now. `ctx_centroid` is an optional rolling-mean
+    /// embedding (BLOB f32[N]); pass `None` if no embedding context (e.g.
+    /// fts/hybrid mode without semantic). Default impl is a no-op so
+    /// stores that don't implement this still compile.
+    async fn record_coactivation(
+        &self,
+        _keys: &[String],
+        _ctx_centroid: Option<&[f32]>,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// v21 α — Synaptic Trace: return the top-N co-activation edges for
+    /// a given memory key, ordered by count DESC. Default returns empty
+    /// so older stores keep compiling.
+    async fn top_coactivation(
+        &self,
+        _key: &str,
+        _limit: u32,
+    ) -> Result<Vec<CoactivationEdge>> {
+        Ok(Vec::new())
+    }
 
     // ─── v8: cloud-run lifecycle helpers (warp-oz) ──────────────────
 

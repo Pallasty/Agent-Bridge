@@ -3203,6 +3203,19 @@ impl McpTool for MemorySearchTool {
         // Fail-soft (no state file / disable env / empty hub_clusters → pass-through).
         let hits = apply_seed_boost(hits);
 
+        // v21 α — Synaptic Trace. Record co-activation pairs for top hits as
+        // fire-and-forget background work; never block search latency.
+        // ctx_centroid is None for now (mode-agnostic α); follow-up plumbs
+        // hit embeddings through for richer trace.
+        if hits.len() >= 2 {
+            let store_clone = store.clone();
+            let keys: Vec<String> =
+                hits.iter().take(10).map(|h| h.record.key.clone()).collect();
+            tokio::spawn(async move {
+                let _ = store_clone.record_coactivation(&keys, None).await;
+            });
+        }
+
         Ok(ToolResult::json_text(
             &serde_json::to_value(hits).unwrap_or(Value::Null),
         ))
@@ -3826,6 +3839,64 @@ impl McpTool for MemoryNeighborsTool {
                 &serde_json::to_value(out).unwrap_or(Value::Null),
             ))
         }
+    }
+}
+
+pub struct MemoryCoactivationTopTool {
+    hub: Hub,
+}
+impl MemoryCoactivationTopTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryCoactivationTopTool {
+    fn name(&self) -> &'static str {
+        "memory_coactivation_top"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "v21 α — Synaptic Trace introspection. Returns the top \
+                co-activation edges for a memory key, ordered by count DESC. \
+                Records are populated as a side effect of memory_search calls \
+                (Hebbian fire-together-wire-together). Each row: \
+                {key_a, key_b, count, first_at, last_at}. The peer key in each \
+                row is whichever of key_a/key_b is NOT the queried key. Empty \
+                result on cold DB or if α has not started recording yet."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key":   { "type": "string", "description": "Memory key to look up." },
+                    "limit": {
+                        "type": "integer", "minimum": 1, "maximum": 200, "default": 20,
+                        "description": "Max edges to return (highest count first)."
+                    }
+                },
+                "required": ["key"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing 'key'")),
+        };
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 200) as u32;
+        let edges = store.top_coactivation(&key, limit).await?;
+        Ok(ToolResult::json_text(
+            &serde_json::to_value(edges).unwrap_or(Value::Null),
+        ))
     }
 }
 
@@ -8098,6 +8169,145 @@ impl McpTool for CodebaseSearchTool {
 }
 
 // ===========================================================================
+//                       tailscale REST API — ACL editing
+// ===========================================================================
+
+pub struct TailscaleAclGetTool;
+impl Default for TailscaleAclGetTool {
+    fn default() -> Self {
+        Self
+    }
+}
+impl TailscaleAclGetTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for TailscaleAclGetTool {
+    fn name(&self) -> &'static str {
+        "tailscale_acl_get"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Fetch the current tailnet Access Control List as HuJSON \
+                 (HCL-flavored JSON with comments). Returns `body` plus the \
+                 `etag` you can pass to `tailscale_acl_set` for safe \
+                 optimistic-concurrency writes. Requires \
+                 `TAILSCALE_OAUTH_CLIENT_ID` + `TAILSCALE_OAUTH_CLIENT_SECRET` \
+                 env (OAuth client with `acl` scope; create one at \
+                 login.tailscale.com → Settings → OAuth clients)."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let client = match crate::tailscale_api::TailscaleClient::from_env() {
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.acl_get().await {
+            Ok(r) => Ok(ToolResult::json_text(&json!({
+                "etag": r.etag,
+                "body": r.body
+            }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+pub struct TailscaleAclSetTool;
+impl Default for TailscaleAclSetTool {
+    fn default() -> Self {
+        Self
+    }
+}
+impl TailscaleAclSetTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for TailscaleAclSetTool {
+    fn name(&self) -> &'static str {
+        "tailscale_acl_set"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Replace the tailnet ACL with `body` (HuJSON or strict JSON). \
+                 Set `validate_only: true` to dry-run via the validate endpoint \
+                 — recommended before any real write. Pass `etag` from a prior \
+                 `tailscale_acl_get` to enable optimistic concurrency (the API \
+                 returns 412 if the ACL changed since you read it). \
+                 IMPORTANT: a bad ACL can lock you and other tailnet members \
+                 out of SSH / services within seconds; ALWAYS validate first \
+                 unless you're rolling back a known-good config."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "body":          { "type": "string", "description": "Full ACL HuJSON/JSON content (REQUIRED)." },
+                    "validate_only": { "type": "boolean", "default": false, "description": "If true, hits /acl/validate instead of /acl. No write." },
+                    "etag":          { "type": "string", "description": "etag from tailscale_acl_get for safe overwrite (sent as If-Match)." }
+                },
+                "required": ["body"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let body = match args
+            .get("body")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing or empty 'body'")),
+        };
+        let validate_only = args
+            .get("validate_only")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let etag = args
+            .get("etag")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+
+        let client = match crate::tailscale_api::TailscaleClient::from_env() {
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        if validate_only {
+            match client.acl_validate(body).await {
+                Ok(resp) => Ok(ToolResult::json_text(&json!({
+                    "validate_only": true,
+                    "ok": true,
+                    "response": resp
+                }))),
+                Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+            }
+        } else {
+            match client.acl_set(body, etag).await {
+                Ok(resp) => Ok(ToolResult::json_text(&json!({
+                    "validate_only": false,
+                    "ok": true,
+                    "response": resp
+                }))),
+                Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+            }
+        }
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -8288,6 +8498,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryListTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryDeleteTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryNeighborsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCoactivationTopTool::new(hub.clone())));
     // Terminal: list + send + read + split + resize.
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalListTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalSendKeysTool::new(hub.clone())));
@@ -8332,6 +8543,9 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionIdentityTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentPresenceAnnounceTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentPresenceListTool::new(hub.clone())));
+    // Tailscale REST API: ACL editing without browser automation.
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(TailscaleAclGetTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(TailscaleAclSetTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
