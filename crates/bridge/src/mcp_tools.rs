@@ -8640,6 +8640,167 @@ impl McpTool for GithubPrListTool {
 }
 
 // ===========================================================================
+//                            gitlab_* — REST API v4
+// ===========================================================================
+
+pub struct GitlabIssueListTool;
+impl Default for GitlabIssueListTool {
+    fn default() -> Self { Self }
+}
+impl GitlabIssueListTool {
+    pub fn new() -> Self { Self }
+}
+#[async_trait]
+impl McpTool for GitlabIssueListTool {
+    fn name(&self) -> &'static str { "gitlab_issue_list" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "List GitLab issues for `project` (either numeric ID like `81993234` \
+                 or path with namespace like `pallasting/agent-bridge`). Requires \
+                 `GITLAB_TOKEN` env (fine-grained PAT with `read_api` scope, or \
+                 personal token with `api`). Defaults: state=opened, per_page=20."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "project":  { "type": "string", "description": "Project ID or `namespace/path`" },
+                    "state":    { "type": "string", "enum": ["opened","closed","all"], "default": "opened" },
+                    "per_page": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 },
+                    "labels":   { "type": "string", "description": "Comma-separated label names to filter (optional)" }
+                },
+                "required": ["project"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let project = match args.get("project").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'project'")),
+        };
+        let state = args.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
+        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 100) as u32;
+        let labels = args.get("labels").and_then(|v| v.as_str());
+        let client = match crate::gitlab_api::GitLabClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.issue_list(project, state, per_page, labels).await {
+            Ok(rows) => Ok(ToolResult::json_text(&json!({
+                "count": rows.len(),
+                "issues": rows
+            }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+pub struct GitlabIssueCreateTool;
+impl Default for GitlabIssueCreateTool {
+    fn default() -> Self { Self }
+}
+impl GitlabIssueCreateTool {
+    pub fn new() -> Self { Self }
+}
+#[async_trait]
+impl McpTool for GitlabIssueCreateTool {
+    fn name(&self) -> &'static str { "gitlab_issue_create" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Create a GitLab issue on `project`. Requires `GITLAB_TOKEN` with \
+                 issue write scope. Returns the new issue's iid, web_url, etc. Note: \
+                 GitLab uses `description` (not `body`) and labels go in as a comma-\
+                 separated string under the hood."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "project":     { "type": "string", "description": "Project ID or `namespace/path`" },
+                    "title":       { "type": "string", "description": "Issue title (REQUIRED)" },
+                    "description": { "type": "string", "description": "Issue description (Markdown). Empty allowed but discouraged." },
+                    "labels":      { "type": "array", "items": { "type": "string" }, "description": "Optional labels (created on-the-fly if not present)" }
+                },
+                "required": ["project","title"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let project = match args.get("project").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'project'")),
+        };
+        let title = match args.get("title").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'title'")),
+        };
+        let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
+        let labels = args.get("labels").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        });
+        let client = match crate::gitlab_api::GitLabClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.issue_create(project, title, description, labels).await {
+            Ok(issue) => Ok(ToolResult::json_text(&json!({ "issue": issue }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+pub struct GitlabMrListTool;
+impl Default for GitlabMrListTool {
+    fn default() -> Self { Self }
+}
+impl GitlabMrListTool {
+    pub fn new() -> Self { Self }
+}
+#[async_trait]
+impl McpTool for GitlabMrListTool {
+    fn name(&self) -> &'static str { "gitlab_mr_list" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "List GitLab merge requests for `project`. State values: opened / \
+                 closed / merged / all (default opened). Each MR includes \
+                 source_branch, target_branch, draft flag, author. Requires \
+                 `GITLAB_TOKEN` with MR read scope."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "project":  { "type": "string", "description": "Project ID or `namespace/path`" },
+                    "state":    { "type": "string", "enum": ["opened","closed","merged","all"], "default": "opened" },
+                    "per_page": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 }
+                },
+                "required": ["project"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let project = match args.get("project").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'project'")),
+        };
+        let state = args.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
+        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 100) as u32;
+        let client = match crate::gitlab_api::GitLabClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.mr_list(project, state, per_page).await {
+            Ok(rows) => Ok(ToolResult::json_text(&json!({
+                "count": rows.len(),
+                "merge_requests": rows
+            }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -8883,6 +9044,11 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(GithubIssueListTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(GithubIssueCreateTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(GithubPrListTool::new()));
+
+    // GitLab REST API v4: same pattern as github_*; primary forge for this project.
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GitlabIssueListTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GitlabIssueCreateTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GitlabMrListTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));

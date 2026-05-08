@@ -48,6 +48,9 @@ pub fn load_at_startup() {
     set_if_unset("GITHUB_TOKEN", || {
         extract_bare_token(&content, "Github PAT", &["github_pat_", "ghp_", "gho_"])
     });
+    set_if_unset("GITLAB_TOKEN", || {
+        extract_bare_token(&content, "GitLab PAT", &["glpat-"])
+    });
 }
 
 fn resolve_creds_path() -> Option<PathBuf> {
@@ -151,6 +154,9 @@ Client secret: ts-secret-xyz
 # Github PAT Token
 github_pat_11ABCDEF123
 
+# GitLab PAT token
+glpat-AbCdEf12345
+
 # Notion API
 NOTION_TOKEN=secret_xxx
 ";
@@ -172,6 +178,14 @@ NOTION_TOKEN=secret_xxx
         assert_eq!(
             extract_bare_token(SAMPLE, "Github PAT", &["github_pat_", "ghp_"]),
             Some("github_pat_11ABCDEF123".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_gitlab_bare_token() {
+        assert_eq!(
+            extract_bare_token(SAMPLE, "GitLab PAT", &["glpat-"]),
+            Some("glpat-AbCdEf12345".to_string())
         );
     }
 
