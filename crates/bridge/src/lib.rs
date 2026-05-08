@@ -14,6 +14,7 @@ pub mod security;
 pub mod server;
 pub mod session_handoff;
 pub mod socket_path;
+pub mod github_api;
 pub mod tailscale_api;
 pub mod warp_actions;
 

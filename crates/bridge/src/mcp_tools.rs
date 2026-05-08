@@ -8431,6 +8431,178 @@ impl McpTool for TailscaleAclSetTool {
 }
 
 // ===========================================================================
+//                            github_* — REST API
+// ===========================================================================
+
+pub struct GithubIssueListTool;
+impl Default for GithubIssueListTool {
+    fn default() -> Self { Self }
+}
+impl GithubIssueListTool {
+    pub fn new() -> Self { Self }
+}
+#[async_trait]
+impl McpTool for GithubIssueListTool {
+    fn name(&self) -> &'static str { "github_issue_list" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "List GitHub issues for `owner/repo`. Pull requests are filtered \
+                 out (use `github_pr_list` for those). Requires `GITHUB_TOKEN` env \
+                 (fine-grained PAT with Issues read scope, or classic PAT with \
+                 `repo`). Defaults: state=open, per_page=20."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "owner":    { "type": "string", "description": "Repo owner / user / org" },
+                    "repo":     { "type": "string", "description": "Repo name" },
+                    "state":    { "type": "string", "enum": ["open","closed","all"], "default": "open" },
+                    "per_page": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 },
+                    "labels":   { "type": "string", "description": "Comma-separated label names to filter (optional)" }
+                },
+                "required": ["owner","repo"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let owner = match args.get("owner").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'owner'")),
+        };
+        let repo = match args.get("repo").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'repo'")),
+        };
+        let state = args.get("state").and_then(|v| v.as_str()).unwrap_or("open");
+        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 100) as u32;
+        let labels = args.get("labels").and_then(|v| v.as_str());
+        let client = match crate::github_api::GitHubClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.issue_list(owner, repo, state, per_page, labels).await {
+            Ok(rows) => Ok(ToolResult::json_text(&json!({
+                "count": rows.len(),
+                "issues": rows
+            }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+pub struct GithubIssueCreateTool;
+impl Default for GithubIssueCreateTool {
+    fn default() -> Self { Self }
+}
+impl GithubIssueCreateTool {
+    pub fn new() -> Self { Self }
+}
+#[async_trait]
+impl McpTool for GithubIssueCreateTool {
+    fn name(&self) -> &'static str { "github_issue_create" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Create a GitHub issue on `owner/repo`. Requires `GITHUB_TOKEN` \
+                 with Issues write permission. Returns the new issue's number, \
+                 html_url, etc. Use sparingly — issues are public on public repos \
+                 and notify watchers."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "owner":  { "type": "string", "description": "Repo owner / user / org" },
+                    "repo":   { "type": "string", "description": "Repo name" },
+                    "title":  { "type": "string", "description": "Issue title (REQUIRED)" },
+                    "body":   { "type": "string", "description": "Issue body (Markdown). Empty allowed but discouraged." },
+                    "labels": { "type": "array", "items": { "type": "string" }, "description": "Optional labels to apply (must already exist on the repo)." }
+                },
+                "required": ["owner","repo","title"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let owner = match args.get("owner").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'owner'")),
+        };
+        let repo = match args.get("repo").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'repo'")),
+        };
+        let title = match args.get("title").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'title'")),
+        };
+        let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
+        let labels = args.get("labels").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        });
+        let client = match crate::github_api::GitHubClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.issue_create(owner, repo, title, body, labels).await {
+            Ok(issue) => Ok(ToolResult::json_text(&json!({ "issue": issue }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+pub struct GithubPrListTool;
+impl Default for GithubPrListTool {
+    fn default() -> Self { Self }
+}
+impl GithubPrListTool {
+    pub fn new() -> Self { Self }
+}
+#[async_trait]
+impl McpTool for GithubPrListTool {
+    fn name(&self) -> &'static str { "github_pr_list" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "List GitHub pull requests for `owner/repo`. Defaults: state=open, \
+                 per_page=20. Each PR includes head/base ref, draft flag, author. \
+                 Requires `GITHUB_TOKEN` with PR read scope."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "owner":    { "type": "string", "description": "Repo owner / user / org" },
+                    "repo":     { "type": "string", "description": "Repo name" },
+                    "state":    { "type": "string", "enum": ["open","closed","all"], "default": "open" },
+                    "per_page": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 }
+                },
+                "required": ["owner","repo"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let owner = match args.get("owner").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'owner'")),
+        };
+        let repo = match args.get("repo").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'repo'")),
+        };
+        let state = args.get("state").and_then(|v| v.as_str()).unwrap_or("open");
+        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 100) as u32;
+        let client = match crate::github_api::GitHubClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.pr_list(owner, repo, state, per_page).await {
+            Ok(rows) => Ok(ToolResult::json_text(&json!({
+                "count": rows.len(),
+                "pulls": rows
+            }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -8670,6 +8842,10 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     // Tailscale REST API: ACL editing without browser automation.
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(TailscaleAclGetTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(TailscaleAclSetTool::new()));
+    // GitHub REST API: issue/PR management without browser/gh-cli.
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GithubIssueListTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GithubIssueCreateTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GithubPrListTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
