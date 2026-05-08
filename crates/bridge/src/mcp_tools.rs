@@ -6115,6 +6115,269 @@ impl McpTool for MemoryStatsTool {
 }
 
 // ===========================================================================
+//                  memory_query_stats — Phase 0 telemetry readout
+// ===========================================================================
+
+pub struct MemoryQueryStatsTool {
+    hub: Hub,
+}
+impl MemoryQueryStatsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryQueryStatsTool {
+    fn name(&self) -> &'static str {
+        "memory_query_stats"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Phase 0 memory telemetry readout. Aggregates `memory_query_log` \
+                 over the last `window_secs` seconds: hit-rate, p50/p95 latency, average \
+                 top-hit age, per-mode counts, top miss queries. Used to drive Phase 1 \
+                 design decisions (decay scoring, coactivation in retrieval, dead-link \
+                 detection). Default window: 7 days."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31_536_000,
+                        "default": 604_800,
+                        "description": "Lookback window in seconds. Default 7 days. Capped to 1 year."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(604_800)
+            .clamp(60, 31_536_000);
+
+        let stats = store.memory_query_stats(window_secs).await?;
+
+        let by_kind_json: Vec<Value> = stats
+            .by_kind
+            .iter()
+            .map(|(k, n)| json!({ "kind": k, "count": n }))
+            .collect();
+        let top_misses_json: Vec<Value> = stats
+            .top_miss_queries
+            .iter()
+            .map(|(q, n)| json!({ "query": q, "count": n }))
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "window_start": stats.window_start,
+            "window_end": stats.window_end,
+            "window_secs": window_secs,
+            "total_queries": stats.total_queries,
+            "hits": stats.hits,
+            "misses": stats.misses,
+            "hit_rate": (stats.hit_rate * 1000.0).round() / 1000.0,
+            "avg_top_hit_age_days":
+                (stats.avg_top_hit_age_secs / 86_400.0 * 100.0).round() / 100.0,
+            "p50_duration_us": stats.p50_duration_us,
+            "p95_duration_us": stats.p95_duration_us,
+            "by_kind": by_kind_json,
+            "top_miss_queries": top_misses_json,
+            "note": "Empty / low total_queries means the MCP layer hasn't logged enough \
+                yet — exercise memory_search/get and re-run.",
+        })))
+    }
+}
+
+// ===========================================================================
+//             memory_link_audit — Phase 0 dead-link probe over bodies
+// ===========================================================================
+
+/// Scan a memory body for path-like tokens. We look for tokens that begin
+/// with one of the known prefixes (absolute roots and project-relative dirs)
+/// and run through path-legal characters until a whitespace/punctuation
+/// terminator. This is intentionally conservative: false negatives (a missed
+/// reference) are safer than false positives (flagging real prose as a path).
+fn scan_memory_paths(content: &str) -> Vec<String> {
+    const PREFIXES: &[&str] = &[
+        // Absolute roots that show up in our memories
+        "/Data/", "/home/", "/tmp/", "/var/", "/opt/", "/etc/", "/run/",
+        "/usr/",
+        // Repo-relative dirs we frequently reference in memory bodies
+        "crates/", "museum/", "docs/", "scripts/", "tests/", "examples/",
+        "assets/", ".claude/", "target/", "warp-adapter/", "workflows/",
+    ];
+    let mut out: Vec<String> = Vec::new();
+    let bytes = content.as_bytes();
+    for prefix in PREFIXES {
+        let mut start = 0usize;
+        while let Some(pos) = content[start..].find(prefix) {
+            let abs = start + pos;
+            let mut end = abs + prefix.len();
+            while end < bytes.len() {
+                let b = bytes[end];
+                let path_char = b.is_ascii_alphanumeric()
+                    || b == b'_' || b == b'-' || b == b'.' || b == b'/';
+                if path_char {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            // Trim trailing punctuation that isn't part of a real path.
+            let candidate = &content[abs..end];
+            let trimmed = candidate.trim_end_matches(|c: char| {
+                c == '.' || c == ',' || c == '/' || c == '-'
+            });
+            if trimmed.len() > prefix.len() {
+                out.push(trimmed.to_string());
+            }
+            start = end.max(abs + 1);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Resolve a candidate path: absolute → use as-is; relative → join with repo_root.
+fn resolve_audit_path(candidate: &str, repo_root: &std::path::Path) -> std::path::PathBuf {
+    if candidate.starts_with('/') {
+        std::path::PathBuf::from(candidate)
+    } else {
+        repo_root.join(candidate)
+    }
+}
+
+pub struct MemoryLinkAuditTool {
+    hub: Hub,
+}
+impl MemoryLinkAuditTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryLinkAuditTool {
+    fn name(&self) -> &'static str {
+        "memory_link_audit"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Phase 0 dead-link probe. Scan memory bodies for path-like tokens \
+                 (absolute paths and known repo-relative prefixes: crates/, museum/, docs/, \
+                 scripts/, tests/, .claude/, etc.), check filesystem existence, and report \
+                 dead references. Surfaces stale memories whose code/file pointers no longer \
+                 resolve — the input to per-memory STATUS banner work. Does NOT modify any \
+                 memory; this is read-only diagnostics."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "kind":       { "type": "string", "description": "Optional memory kind filter." },
+                    "limit":      { "type": "integer", "minimum": 1, "maximum": 1000, "default": 200 },
+                    "repo_root":  { "type": "string", "description": "Base for resolving relative paths. Default: current working dir." },
+                    "include_alive": { "type": "boolean", "default": false, "description": "If true, also include memories whose links all resolve (for coverage view)." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+
+        let kind = args.get("kind").and_then(|v| v.as_str()).map(str::to_string);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 1000) as u32;
+        let repo_root_arg = args.get("repo_root").and_then(|v| v.as_str());
+        let repo_root: std::path::PathBuf = match repo_root_arg {
+            Some(s) => std::path::PathBuf::from(s),
+            None => std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from(".")),
+        };
+        let include_alive = args
+            .get("include_alive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let memories = store
+            .list_memories(kind.as_deref(), MemoryListSort::Newest, limit)
+            .await?;
+
+        let mut audited = 0u64;
+        let mut with_links = 0u64;
+        let mut dead_total = 0u64;
+        let mut alive_total = 0u64;
+        let mut per_memory: Vec<Value> = Vec::new();
+
+        for rec in &memories {
+            audited += 1;
+            let candidates = scan_memory_paths(&rec.content);
+            if candidates.is_empty() {
+                continue;
+            }
+            with_links += 1;
+
+            let mut dead: Vec<String> = Vec::new();
+            let mut alive: Vec<String> = Vec::new();
+            for cand in &candidates {
+                let resolved = resolve_audit_path(cand, &repo_root);
+                if resolved.exists() {
+                    alive.push(cand.clone());
+                } else {
+                    dead.push(cand.clone());
+                }
+            }
+            dead_total += dead.len() as u64;
+            alive_total += alive.len() as u64;
+
+            if !dead.is_empty() || include_alive {
+                let mut row = json!({
+                    "key": rec.key,
+                    "kind": rec.kind,
+                    "dead": dead,
+                });
+                if include_alive {
+                    if let Some(obj) = row.as_object_mut() {
+                        obj.insert("alive".to_string(), json!(alive));
+                    }
+                }
+                per_memory.push(row);
+            }
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "audited": audited,
+            "with_links": with_links,
+            "dead_total": dead_total,
+            "alive_total": alive_total,
+            "per_memory": per_memory,
+            "repo_root": repo_root,
+            "kind_filter": kind,
+            "note": "Dead links don't auto-trigger banner edits — review and apply via memory_save \
+                with a STATUS prefix. Pattern: see project_warp_drop_to_museum.md.",
+        })))
+    }
+}
+
+// ===========================================================================
 //                             memory_suggest
 // ===========================================================================
 
@@ -9433,6 +9696,8 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryStatsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryQueryStatsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkAuditTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySuggestTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentKillTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentMessageTool::new(hub.clone())));
@@ -11255,5 +11520,55 @@ mod tests {
             _ => panic!("expected text block"),
         };
         serde_json::from_str(&txt).expect("parse json")
+    }
+
+    // ── Phase 0: scan_memory_paths heuristic + dead-link audit ──
+
+    #[test]
+    fn scan_memory_paths_picks_up_absolute_and_relative_path_tokens() {
+        let body = "see `crates/bridge/src/mcp_tools.rs` and \
+                    /Data/CascadeProjects/agent-bridge/README.md plus \
+                    docs/SHELL-INTEGRATION-OSC133.md and museum/warp-ipc-terminal/warp.rs. \
+                    Token like /etc/hostname is fine. Trailing punctuation: scripts/run.sh,";
+        let paths = scan_memory_paths(body);
+        assert!(paths.contains(&"crates/bridge/src/mcp_tools.rs".to_string()));
+        assert!(paths.contains(&"/Data/CascadeProjects/agent-bridge/README.md".to_string()));
+        assert!(paths.contains(&"docs/SHELL-INTEGRATION-OSC133.md".to_string()));
+        assert!(paths.contains(&"museum/warp-ipc-terminal/warp.rs".to_string()));
+        assert!(paths.contains(&"/etc/hostname".to_string()));
+        // Trailing comma should be stripped
+        assert!(paths.contains(&"scripts/run.sh".to_string()));
+    }
+
+    #[test]
+    fn scan_memory_paths_ignores_bare_prefixes_and_prose() {
+        let body = "Just talking about crates/ and docs/ in general. \
+                    Also random English: nothing here resolves to a path.";
+        let paths = scan_memory_paths(body);
+        // Bare "crates/" and "docs/" must not appear
+        assert!(paths.iter().all(|p| p.len() > 7),
+            "got bare prefix in {:?}", paths);
+    }
+
+    #[test]
+    fn scan_memory_paths_dedupes_and_sorts() {
+        let body = "Reference 1: crates/store/src/lib.rs. \
+                    Reference 2: crates/store/src/lib.rs again.";
+        let paths = scan_memory_paths(body);
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], "crates/store/src/lib.rs");
+    }
+
+    #[test]
+    fn resolve_audit_path_keeps_absolute_and_joins_relative() {
+        let root = std::path::Path::new("/repo");
+        assert_eq!(
+            resolve_audit_path("crates/store/src/lib.rs", root),
+            std::path::PathBuf::from("/repo/crates/store/src/lib.rs")
+        );
+        assert_eq!(
+            resolve_audit_path("/Data/abs/path", root),
+            std::path::PathBuf::from("/Data/abs/path")
+        );
     }
 }

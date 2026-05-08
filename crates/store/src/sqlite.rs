@@ -61,8 +61,9 @@ use crate::{
     ForumPostExport, ForumPostOutcome, ForumPostRecord, ForumThreadExport, ForumThreadRecord,
     IdentityWindow, ImportConflictPolicy, ImportReport, McpToolCallStats, McpToolErrorRecord,
     MemoryEdge, MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort,
-    MemoryRecord, MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep,
-    SessionFilter, StateStore, StoredSession, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
+    MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats,
+    NotificationRecord, PlanRecord, PlanStep, SessionFilter, StateStore, StoredSession,
+    MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP,
     STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
@@ -369,6 +370,27 @@ CREATE TABLE IF NOT EXISTS agent_presence (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_presence_active  ON agent_presence(last_heartbeat_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_presence_project ON agent_presence(project, role);
+"#;
+
+// v22 — Phase 0 memory telemetry (`memory_query_log`). One row per user-facing
+// memory_search / memory_get call; aggregated by `memory_query_stats`.
+// Capped to MEMORY_QUERY_LOG_RING_CAP rows; oldest pruned by `record_memory_query`.
+const SCHEMA_V21: &str = r#"
+CREATE TABLE IF NOT EXISTS memory_query_log (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind               TEXT    NOT NULL,
+    query              TEXT    NOT NULL,
+    tags_json          TEXT    NOT NULL DEFAULT '[]',
+    hit_count          INTEGER NOT NULL,
+    top_hit_age_secs   INTEGER,
+    top_hit_created_at INTEGER,
+    duration_us        INTEGER NOT NULL,
+    source             TEXT    NOT NULL DEFAULT '',
+    at                 INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memory_query_log_at   ON memory_query_log(at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_query_log_kind ON memory_query_log(kind, at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_query_log_miss ON memory_query_log(hit_count, at DESC);
 "#;
 
 // v21 — Synaptic Trace (Hebbian co-activation graph for memory_search hits)
@@ -766,6 +788,19 @@ impl SqliteStore {
                 c.execute_batch(SCHEMA_V20)?;
                 let _ = c.execute("UPDATE schema_meta SET value='20' WHERE key='version'", []);
             }
+
+            // ── v21: memory_query_log (Phase 0 memory telemetry) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "20".to_string());
+            if cur.as_str() == "20" {
+                c.execute_batch(SCHEMA_V21)?;
+                let _ = c.execute("UPDATE schema_meta SET value='21' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -1014,6 +1049,18 @@ fn plan_import_actions(
             },
         })
         .collect()
+}
+
+/// Picks the percentile element from a **sorted-ascending** slice. Returns
+/// 0 for empty input. `q` clamped to [0.0, 1.0]. Used by `memory_query_stats`
+/// for p50/p95 latency.
+fn pct_idx(sorted: &[i64], q: f64) -> i64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let q = q.clamp(0.0, 1.0);
+    let idx = ((sorted.len() as f64 - 1.0) * q).round() as usize;
+    sorted[idx.min(sorted.len() - 1)]
 }
 
 fn clamp(s: &str, max: usize) -> String {
@@ -2887,6 +2934,139 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("top_coactivation: {e}")))
+    }
+
+    /// **Phase 0 telemetry** — append one `memory_query_log` row and prune
+    /// the oldest if the table is over [`MEMORY_QUERY_LOG_RING_CAP`]. Both
+    /// in one transaction so concurrent writers can't slip past the cap.
+    async fn record_memory_query(&self, record: &MemoryQueryRecord) -> Result<()> {
+        let kind = clamp(&record.kind, 32);
+        let query = clamp(&record.query, 256);
+        let tags_json = clamp(&record.tags_json, 256);
+        let source = clamp(&record.source, 64);
+        let hit_count = i64::from(record.hit_count);
+        let duration_us = i64::from(record.duration_us);
+        let top_hit_age_secs = record.top_hit_age_secs;
+        let top_hit_created_at = record.top_hit_created_at;
+        let at = record.at;
+
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                let tx = c.unchecked_transaction()?;
+                tx.execute(
+                    "INSERT INTO memory_query_log
+                        (kind, query, tags_json, hit_count, top_hit_age_secs,
+                         top_hit_created_at, duration_us, source, at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    rusqlite::params![
+                        kind, query, tags_json, hit_count, top_hit_age_secs,
+                        top_hit_created_at, duration_us, source, at
+                    ],
+                )?;
+                // Ring-buffer prune: keep at most MEMORY_QUERY_LOG_RING_CAP rows.
+                tx.execute(
+                    "DELETE FROM memory_query_log
+                       WHERE id IN (
+                           SELECT id FROM memory_query_log
+                           ORDER BY id ASC
+                           LIMIT MAX(0, (SELECT COUNT(*) FROM memory_query_log) - ?1)
+                       )",
+                    rusqlite::params![MEMORY_QUERY_LOG_RING_CAP],
+                )?;
+                tx.commit()
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("record_memory_query: {e}")))
+    }
+
+    /// **Phase 0 telemetry** — aggregate `memory_query_log` over the last
+    /// `window_secs` seconds. Returns hit-rate, p50/p95 latency, avg top-hit
+    /// age, per-kind counts, and top miss queries.
+    async fn memory_query_stats(&self, window_secs: i64) -> Result<MemoryQueryStats> {
+        let now = now_secs();
+        let window_start = now - window_secs.max(0);
+
+        self.conn
+            .call(move |c| -> RusqliteResult<MemoryQueryStats> {
+                // Pull all (hit_count, duration_us, top_hit_age_secs) rows in window.
+                // Window is small (≤ ring cap), so vector is bounded.
+                let mut stmt = c.prepare(
+                    "SELECT hit_count, duration_us, top_hit_age_secs, kind
+                       FROM memory_query_log
+                      WHERE at >= ?1",
+                )?;
+                let rows: Vec<(i64, i64, Option<i64>, String)> = stmt
+                    .query_map(rusqlite::params![window_start], |r| {
+                        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                if rows.is_empty() {
+                    return Ok(MemoryQueryStats {
+                        window_start,
+                        window_end: now,
+                        ..Default::default()
+                    });
+                }
+
+                let total = rows.len() as u64;
+                let hits = rows.iter().filter(|(h, _, _, _)| *h > 0).count() as u64;
+                let misses = total - hits;
+                let hit_rate = if total > 0 {
+                    hits as f64 / total as f64
+                } else {
+                    0.0
+                };
+
+                let age_sum: i64 = rows.iter().filter_map(|(_, _, a, _)| *a).sum();
+                let age_n = rows.iter().filter(|(_, _, a, _)| a.is_some()).count() as f64;
+                let avg_top_hit_age_secs = if age_n > 0.0 { age_sum as f64 / age_n } else { 0.0 };
+
+                let mut durations: Vec<i64> =
+                    rows.iter().map(|(_, d, _, _)| *d).collect();
+                durations.sort_unstable();
+                let p50 = pct_idx(&durations, 0.50);
+                let p95 = pct_idx(&durations, 0.95);
+
+                // Per-kind counts via SQL (cheap, lets SQLite handle group by).
+                let mut by_kind_stmt = c.prepare(
+                    "SELECT kind, COUNT(*) FROM memory_query_log
+                      WHERE at >= ?1
+                   GROUP BY kind ORDER BY COUNT(*) DESC",
+                )?;
+                let by_kind: Vec<(String, u64)> = by_kind_stmt
+                    .query_map(rusqlite::params![window_start], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                let mut miss_stmt = c.prepare(
+                    "SELECT query, COUNT(*) FROM memory_query_log
+                      WHERE at >= ?1 AND hit_count = 0 AND query <> ''
+                   GROUP BY query ORDER BY COUNT(*) DESC LIMIT 10",
+                )?;
+                let top_miss_queries: Vec<(String, u64)> = miss_stmt
+                    .query_map(rusqlite::params![window_start], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                Ok(MemoryQueryStats {
+                    window_start,
+                    window_end: now,
+                    total_queries: total,
+                    hits,
+                    misses,
+                    hit_rate,
+                    avg_top_hit_age_secs,
+                    p50_duration_us: p50.try_into().unwrap_or(u32::MAX),
+                    p95_duration_us: p95.try_into().unwrap_or(u32::MAX),
+                    by_kind,
+                    top_miss_queries,
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_query_stats: {e}")))
     }
 
     /// v21 α — Aggregate stats for the synaptic trace graph. Powers the
@@ -6338,6 +6518,147 @@ mod tests {
             !hits.is_empty(),
             "semantic search should return rows once embeddings are filled"
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // ── Phase 0 memory telemetry: record_memory_query / memory_query_stats ──
+
+    fn mk_query_record(kind: &str, q: &str, hits: u32, age: Option<i64>, dur_us: u32, at: i64)
+        -> MemoryQueryRecord
+    {
+        MemoryQueryRecord {
+            kind: kind.to_string(),
+            query: q.to_string(),
+            tags_json: "[]".to_string(),
+            hit_count: hits,
+            top_hit_age_secs: age,
+            top_hit_created_at: age.map(|a| at - a),
+            duration_us: dur_us,
+            source: "test".to_string(),
+            at,
+        }
+    }
+
+    #[tokio::test]
+    async fn record_memory_query_persists_and_aggregates() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-mem-query-log-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open");
+
+        let now = now_secs();
+        // 4 hits + 2 misses, mixed kinds, varying durations
+        store.record_memory_query(&mk_query_record("search_fts", "rust", 3, Some(86_400), 1500, now - 60))
+            .await.expect("rec 1");
+        store.record_memory_query(&mk_query_record("search_fts", "rust", 1, Some(7200), 800, now - 50))
+            .await.expect("rec 2");
+        store.record_memory_query(&mk_query_record("search_hybrid", "warp ipc", 2, Some(3600), 2200, now - 40))
+            .await.expect("rec 3");
+        store.record_memory_query(&mk_query_record("search_semantic", "neural net", 1, Some(43_200), 4500, now - 30))
+            .await.expect("rec 4");
+        store.record_memory_query(&mk_query_record("search_fts", "nonsense_xyz", 0, None, 600, now - 20))
+            .await.expect("rec 5 (miss)");
+        store.record_memory_query(&mk_query_record("get", "unknown_key", 0, None, 200, now - 10))
+            .await.expect("rec 6 (miss)");
+
+        let stats = store.memory_query_stats(3600).await.expect("stats");
+        assert_eq!(stats.total_queries, 6);
+        assert_eq!(stats.hits, 4);
+        assert_eq!(stats.misses, 2);
+        assert!((stats.hit_rate - (4.0 / 6.0)).abs() < 1e-9);
+        // avg age over hit rows: (86400 + 7200 + 3600 + 43200) / 4 = 35100
+        assert!((stats.avg_top_hit_age_secs - 35_100.0).abs() < 1.0);
+        // p50/p95 sorted: 200, 600, 800, 1500, 2200, 4500 (6 values, last idx=5)
+        // p50 idx = round(5 * 0.50) = round(2.5) = 3 → 1500
+        // p95 idx = round(5 * 0.95) = round(4.75) = 5 → 4500
+        assert_eq!(stats.p50_duration_us, 1500);
+        assert_eq!(stats.p95_duration_us, 4500);
+
+        // by_kind: search_fts=3, search_hybrid=1, search_semantic=1, get=1
+        let m: std::collections::HashMap<_, _> = stats.by_kind.iter().cloned().collect();
+        assert_eq!(m.get("search_fts").copied(), Some(3));
+        assert_eq!(m.get("search_hybrid").copied(), Some(1));
+        assert_eq!(m.get("search_semantic").copied(), Some(1));
+        assert_eq!(m.get("get").copied(), Some(1));
+
+        // top miss queries: nonsense_xyz once, unknown_key once
+        assert_eq!(stats.top_miss_queries.len(), 2);
+        let miss_keys: std::collections::HashSet<_> =
+            stats.top_miss_queries.iter().map(|(k, _)| k.clone()).collect();
+        assert!(miss_keys.contains("nonsense_xyz"));
+        assert!(miss_keys.contains("unknown_key"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_query_stats_window_excludes_old_rows() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-mem-query-window-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open");
+
+        let now = now_secs();
+        store.record_memory_query(&mk_query_record("search_fts", "old", 1, Some(60), 500, now - 7200))
+            .await.expect("old"); // 2h ago
+        store.record_memory_query(&mk_query_record("search_fts", "new", 1, Some(60), 500, now - 60))
+            .await.expect("new"); // 60s ago
+
+        // 1-hour window: only "new" should count
+        let stats = store.memory_query_stats(3600).await.expect("stats");
+        assert_eq!(stats.total_queries, 1);
+
+        // 3-hour window: both
+        let stats = store.memory_query_stats(10_800).await.expect("stats");
+        assert_eq!(stats.total_queries, 2);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_query_log_ring_caps_at_max() {
+        // Insert MEMORY_QUERY_LOG_RING_CAP + 5 rows; expect exactly cap rows present.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-mem-query-ring-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open");
+
+        let cap = MEMORY_QUERY_LOG_RING_CAP;
+        let overshoot = cap + 5;
+        let now = now_secs();
+        for i in 0..overshoot {
+            store.record_memory_query(
+                &mk_query_record("search_fts", &format!("q{i}"), 1, Some(60), 500, now)
+            ).await.expect("rec");
+        }
+
+        let count: i64 = store
+            .conn
+            .call(|c| -> RusqliteResult<i64> {
+                c.query_row("SELECT COUNT(*) FROM memory_query_log", [], |r| r.get(0))
+            })
+            .await
+            .expect("count");
+        assert_eq!(count, cap);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

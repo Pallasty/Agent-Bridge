@@ -78,6 +78,11 @@ pub struct McpToolCallStats {
 /// Max rows retained in `mcp_tool_errors` after each insert (oldest pruned).
 pub const MCP_TOOL_ERROR_RING_CAP: u32 = 100;
 
+/// Cap on `memory_query_log` rows (Phase 0 memory telemetry). Older rows are
+/// pruned each `record_memory_query` call, FIFO. ~7 days of moderate use at
+/// 5k rows; tune via design review when telemetry exposes traffic shape.
+pub const MEMORY_QUERY_LOG_RING_CAP: i64 = 5_000;
+
 /// Hard cap on stdout/stderr we persist per agent session, to keep the DB
 /// file from growing unbounded if a sub-agent goes haywire.
 pub const STDIO_CAP: usize = 64 * 1024;
@@ -216,6 +221,71 @@ pub struct IdentityWindow {
     pub forum_kinds: Vec<(String, u64)>,
     pub forum_avg_body_len: f64,
     pub memory_saves: u64,
+}
+
+/// One persisted query against the memory subsystem — a single row written
+/// by `memory_search` / `memory_get` for **Phase 0 telemetry**. The point is
+/// not "audit log" but "what fraction of recalls actually find anything",
+/// "how stale are the hits we return", "where are we slow".
+///
+/// One row per user-facing query at the MCP layer; internal calls (e.g.
+/// `session_curate` walking the store) MUST NOT log here, otherwise
+/// hit-rate is inflated by self-traffic.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemoryQueryRecord {
+    /// Operation: `"search_fts"` | `"search_hybrid"` | `"search_semantic"` | `"get"`.
+    pub kind: String,
+    /// The query string (search) or the looked-up key (`get`). Trimmed to
+    /// 256 bytes by the impl — we don't need full-text logs.
+    pub query: String,
+    /// Optional tag filter as JSON array text (`"[]"` if none). Same 256 cap.
+    pub tags_json: String,
+    /// How many results came back. `0` for misses (the most useful row).
+    pub hit_count: u32,
+    /// `last_accessed_at` of the top hit at the time the row is logged —
+    /// `None` for misses or `get(missing_key)`. Useful for "are we mostly
+    /// surfacing stale memories" diagnostics.
+    pub top_hit_age_secs: Option<i64>,
+    /// `created_at` of the top hit at the time the row is logged — `None`
+    /// for misses. Pairs with `top_hit_age_secs` to spot "we keep returning
+    /// 30-day-old hits even for new queries" patterns.
+    pub top_hit_created_at: Option<i64>,
+    /// Wall-clock latency in microseconds (Instant::now() pre/post).
+    pub duration_us: u32,
+    /// Caller hint, e.g. `"mcp:memory_search"` / `"mcp:memory_get"`. Free-form.
+    pub source: String,
+    /// When the row was written (unix epoch secs).
+    pub at: i64,
+}
+
+/// Aggregate statistics over a window of `memory_query_log` rows. Output of
+/// [`StateStore::memory_query_stats`]. The numbers we actually need to drive
+/// Phase 1 design decisions:
+///
+/// * `hit_rate` → are most queries finding nothing? then ranking is broken
+/// * `avg_top_hit_age_days` → are we surfacing stale memories?
+/// * `p95_duration_us` → is recall fast enough for chains?
+/// * `top_miss_queries` → what to fix in next ranker iteration
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct MemoryQueryStats {
+    /// Window start (unix epoch secs) — the earliest row counted.
+    pub window_start: i64,
+    /// Window end (unix epoch secs) — the latest row counted.
+    pub window_end: i64,
+    pub total_queries: u64,
+    pub hits: u64,
+    pub misses: u64,
+    /// `hits / total_queries` (0.0 if total=0).
+    pub hit_rate: f64,
+    /// Mean age in seconds of top hit at recall time, across hit rows only.
+    pub avg_top_hit_age_secs: f64,
+    /// p50 / p95 latency across all rows (microseconds).
+    pub p50_duration_us: u32,
+    pub p95_duration_us: u32,
+    /// Per-kind counts (`search_fts`, `search_hybrid`, `search_semantic`, `get`).
+    pub by_kind: Vec<(String, u64)>,
+    /// Top miss queries (hit_count = 0), most-recurring first, capped to 10.
+    pub top_miss_queries: Vec<(String, u64)>,
 }
 
 /// Sort order for `list_memories`.
@@ -815,6 +885,25 @@ pub trait StateStore: Send + Sync {
         _limit: u32,
     ) -> Result<Vec<CoactivationEdge>> {
         Ok(Vec::new())
+    }
+
+    /// **Phase 0 telemetry** — append one row to `memory_query_log`. Called
+    /// by the MCP layer immediately after `memory_search` / `memory_get` so
+    /// hit-rate / latency / top-hit-age can be aggregated. Default impl is
+    /// a no-op so non-SQLite backends and unit tests degrade silently.
+    ///
+    /// The store is responsible for retention pruning (cap rows, drop oldest)
+    /// — the caller does NOT need to think about table size.
+    async fn record_memory_query(&self, _record: &MemoryQueryRecord) -> Result<()> {
+        Ok(())
+    }
+
+    /// **Phase 0 telemetry** — aggregate the `memory_query_log` over the
+    /// last `window_secs` seconds. Default returns an empty
+    /// [`MemoryQueryStats`].
+    async fn memory_query_stats(&self, window_secs: i64) -> Result<MemoryQueryStats> {
+        let _ = window_secs;
+        Ok(MemoryQueryStats::default())
     }
 
     /// v21 α — Aggregate health snapshot for the synaptic trace graph,
