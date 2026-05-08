@@ -3210,7 +3210,9 @@ impl StateStore for SqliteStore {
                     count += 1;
                 }
             }
-            // Embeddings computed lazily on first codebase_search(mode=semantic).
+            // Embeddings are filled by `codebase_reindex_embeddings` (call
+            // it after this returns); rows ship with embedding=NULL so the
+            // walk stays fast and embed cost is opt-in.
             (symbols, count)
         })
         .await

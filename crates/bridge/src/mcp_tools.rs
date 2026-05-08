@@ -8123,7 +8123,9 @@ impl McpTool for CodebaseIndexTool {
             description: "Build a SQLite symbol index (functions, structs, classes, \
                  traits, enums) for a directory. codebase_search queries this without \
                  re-reading the filesystem. Re-indexing replaces. Languages: rust, \
-                 python, typescript, javascript, go."
+                 python, typescript, javascript, go. Rows ship with embedding=NULL — \
+                 call codebase_reindex afterward if you plan to use \
+                 codebase_search(mode=\"semantic\")."
                 .into(),
             input_schema: json!({
                 "type": "object",
