@@ -19,6 +19,7 @@ pub mod github_api;
 pub mod gitlab_api;
 pub mod tailscale_api;
 pub mod warp_actions;
+pub mod warp_scheme;
 
 pub use hub::Hub;
 pub use mcp_tools::build_registry;

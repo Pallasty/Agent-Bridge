@@ -126,7 +126,6 @@ impl TerminalBackend for KittyBackend {
             can_read_output: true,
             can_send_keys: true,
             can_split: true,
-            warp_ipc_socket_ready: None,
         }
     }
 

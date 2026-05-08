@@ -6,7 +6,8 @@ use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
 use ab_store::{default_db_path, SqliteStore, StateStore};
-use ab_terminal::{auto_backend, TerminalBackend, WarpBackend};
+use ab_bridge::warp_scheme;
+use ab_terminal::{auto_backend, TerminalBackend};
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::json;
@@ -314,7 +315,7 @@ impl SetupFrontend {
             Self::Auto => {
                 if detect_claude_code_wired() {
                     setup::Frontend::ClaudeCode
-                } else if WarpBackend::detect() {
+                } else if warp_scheme::detect() {
                     setup::Frontend::Warp
                 } else if detect_codex() {
                     setup::Frontend::Codex

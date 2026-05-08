@@ -1,13 +1,18 @@
 //! Terminal multiplexer abstraction + OSC parsing.
 //!
 //! - [`TerminalBackend`] trait — generic mux operations plus sync [`TerminalCapabilities`].
+//! - [`PtyBackend`]    — owns its own PTYs via vt100 + OSC 133 prompt
+//!   markers (the default since 2f14d84).
 //! - [`WezTermBackend`] — wraps `wezterm cli`.
 //! - [`KittyBackend`]  — wraps `kitten @` (kitty remote control).
 //! - [`ZellijBackend`] — wraps `zellij action` (session-granularity only).
-//! - [`WarpBackend`]   — wraps Warp's `warp://` URL scheme (limited IPC).
 //! - [`auto_backend`]  — pick a backend from `AGENT_BRIDGE_TERMINAL` or env detection.
-//! - [`osc`] — pure-Rust streaming parser for OSC 9 / 99 / 777 notification
+//! - [`osc`] — pure-Rust streaming parser for OSC 9 / 99 / 133 / 777
 //!   sequences, used by both the bridge daemon and integration glue.
+//!
+//! The retired Warp IPC backend lives at `museum/warp-ipc-terminal/` —
+//! `crates/bridge/src/warp_scheme.rs` carries the URL-scheme launchers
+//! that the `warp_open_*` MCP tools still need.
 
 use ab_core::{PaneId, Result};
 use async_trait::async_trait;
@@ -19,17 +24,12 @@ use std::sync::Arc;
 pub mod kitty;
 pub mod osc;
 pub mod pty;
-pub mod warp;
 pub mod wezterm;
 pub mod zellij;
 
 pub use kitty::KittyBackend;
 pub use osc::{OscEvent, OscParser};
 pub use pty::PtyBackend;
-pub use warp::{
-    dispatch_warp_scheme_uri, warp_scheme_launch_configuration, warp_scheme_new_tab,
-    warp_scheme_new_window, warp_scheme_open_settings_page, WarpBackend,
-};
 pub use wezterm::WezTermBackend;
 pub use zellij::ZellijBackend;
 
@@ -72,18 +72,14 @@ pub struct TerminalCapabilities {
     pub can_read_output: bool,
     pub can_send_keys: bool,
     pub can_split: bool,
-    /// Warp-only: whether the in-process bridge Unix socket path exists and is a socket.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub warp_ipc_socket_ready: Option<bool>,
 }
 
 /// A single structured terminal block (command + output + metadata).
 ///
-/// Sourced two ways: Warp IPC delivers blocks straight from Warp's UI
-/// model; the PTY backend reconstructs blocks from OSC 133
-/// (FinalTerm / iTerm2 prompt protocol) markers emitted by the user's
-/// shell integration. Backends with neither path return
-/// `Error::Backend("not supported")` from `read_blocks`.
+/// Reconstructed by `PtyBackend` from OSC 133 (FinalTerm / iTerm2
+/// prompt protocol) markers emitted by the user's shell integration.
+/// Backends without that signal return `Error::Backend("not supported")`
+/// from `read_blocks`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalBlock {
     pub block_id: String,
@@ -130,10 +126,10 @@ pub trait TerminalBackend: Send + Sync {
 
     /// Return structured blocks for a session.
     ///
-    /// Implemented by `WarpBackend` (via Warp IPC) and `PtyBackend` (via
-    /// OSC 133 prompt markers — the user's shell must emit them; see
-    /// `docs/SHELL-INTEGRATION-OSC133.md` for one-line snippets). Other
-    /// backends inherit this default which returns `Error::Backend`.
+    /// Implemented by `PtyBackend` via OSC 133 prompt markers — the
+    /// user's shell must emit them; see `docs/SHELL-INTEGRATION-OSC133.md`
+    /// for one-line snippets. Other backends inherit this default which
+    /// returns `Error::Backend`.
     ///
     /// `limit` caps the number of most-recent blocks returned.
     /// `since_block` is an optional 1-based id floor (skip blocks with
@@ -171,8 +167,7 @@ pub trait TerminalBackend: Send + Sync {
     /// `TIOCSWINSZ` (so the child receives `SIGWINCH` and full-screen apps
     /// like vim/less re-flow) and the backend's render state where it has
     /// one. Default impl returns `Error::Backend("not supported")` —
-    /// backends that don't own the PTY (e.g. WarpBackend in URL-scheme
-    /// mode) fall through to this.
+    /// backends that don't own the PTY fall through to this.
     async fn resize(&self, _pane: &PaneId, _rows: u16, _cols: u16) -> Result<()> {
         Err(ab_core::Error::Backend(
             "resize is not supported by this backend".into(),
@@ -205,17 +200,17 @@ pub fn auto_backend() -> Arc<dyn TerminalBackend> {
         .ok()
         .map(|s| s.trim().to_lowercase());
 
-    // Auto-detect no longer prefers Warp: the PTY backend now provides
-    // the same `read_blocks` capability via OSC 133 prompt markers
-    // (`docs/SHELL-INTEGRATION-OSC133.md`), with no fork or 22 min build.
-    // Users still on the Warp IPC path can opt in explicitly with
-    // `AGENT_BRIDGE_TERMINAL=warp`.
+    // The Warp IPC backend was retired on 2026-05-08 (see
+    // `museum/warp-ipc-terminal/`). PtyBackend now provides the same
+    // `read_blocks` capability via OSC 133 prompt markers (see
+    // `docs/SHELL-INTEGRATION-OSC133.md`), with no fork to maintain.
+    // `AGENT_BRIDGE_TERMINAL=warp` is accepted as input for backward
+    // compatibility but transparently falls through to PTY.
     let chosen = match explicit.as_deref() {
-        Some("pty") => "pty",
+        Some("pty") | Some("warp") => "pty",
         Some("kitty") => "kitty",
         Some("zellij") => "zellij",
         Some("wezterm") => "wezterm",
-        Some("warp") => "warp",
         _ => {
             if std::env::var_os("ZELLIJ").is_some() {
                 "zellij"
@@ -230,7 +225,6 @@ pub fn auto_backend() -> Arc<dyn TerminalBackend> {
     match chosen {
         "kitty" => Arc::new(KittyBackend::new()),
         "zellij" => Arc::new(ZellijBackend::new()),
-        "warp" => Arc::new(WarpBackend::new()),
         "wezterm" => Arc::new(WezTermBackend::new()),
         _ => Arc::new(PtyBackend::new()),
     }

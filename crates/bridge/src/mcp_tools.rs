@@ -18,10 +18,12 @@ use ab_store::{
     SessionFilter,
     StateStore,
 };
-use ab_terminal::{
-    dispatch_warp_scheme_uri, warp_scheme_launch_configuration, warp_scheme_new_tab,
-    warp_scheme_new_window, warp_scheme_open_settings_page, OscEvent, OscParser, SpawnOptions,
-    SplitDir, TerminalBlock,
+use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
+use crate::warp_scheme::{
+    dispatch_url as dispatch_warp_scheme_uri,
+    scheme_launch_configuration as warp_scheme_launch_configuration,
+    scheme_new_tab as warp_scheme_new_tab, scheme_new_window as warp_scheme_new_window,
+    scheme_open_settings_page as warp_scheme_open_settings_page,
 };
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
