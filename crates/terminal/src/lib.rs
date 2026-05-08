@@ -205,6 +205,11 @@ pub fn auto_backend() -> Arc<dyn TerminalBackend> {
         .ok()
         .map(|s| s.trim().to_lowercase());
 
+    // Auto-detect no longer prefers Warp: the PTY backend now provides
+    // the same `read_blocks` capability via OSC 133 prompt markers
+    // (`docs/SHELL-INTEGRATION-OSC133.md`), with no fork or 22 min build.
+    // Users still on the Warp IPC path can opt in explicitly with
+    // `AGENT_BRIDGE_TERMINAL=warp`.
     let chosen = match explicit.as_deref() {
         Some("pty") => "pty",
         Some("kitty") => "kitty",
@@ -216,8 +221,6 @@ pub fn auto_backend() -> Arc<dyn TerminalBackend> {
                 "zellij"
             } else if std::env::var_os("KITTY_WINDOW_ID").is_some() {
                 "kitty"
-            } else if WarpBackend::detect() {
-                "warp"
             } else {
                 "pty"
             }
