@@ -37,9 +37,10 @@ walkdir.workspace = true
 # v20: HTTP daemon for cross-machine forum + presence over Tailscale
 axum = "0.7"
 # v20 Stage 2: HTTP client for `peer:` arg routing.
-# default-features=false drops the native-tls dep; we only talk to peers
-# over HTTP on the tailnet (tailscale handles encryption between nodes).
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# default-features=false drops the native-tls dep; rustls-tls is needed
+# for the Tailscale REST API (api.tailscale.com over HTTPS — see
+# tailscale_api.rs); peer-to-peer tailnet calls themselves are plain HTTP.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [[bin]]
 name = "agent-bridge"

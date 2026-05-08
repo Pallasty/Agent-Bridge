@@ -14,6 +14,7 @@ pub mod security;
 pub mod server;
 pub mod session_handoff;
 pub mod socket_path;
+pub mod tailscale_api;
 pub mod warp_actions;
 
 pub use hub::Hub;
