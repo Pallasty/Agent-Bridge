@@ -180,6 +180,25 @@ pub struct CoactivationEdge {
     pub last_at: i64,
 }
 
+/// Aggregate health snapshot of the synaptic trace graph (v21 α). Output of
+/// [`StateStore::coactivation_stats`] — the data behind the β trigger
+/// decision (per design doc §5: "non-trivial cluster structure if top 10
+/// pairs' count is ≥ 5× median count").
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CoactivationStats {
+    pub total_pairs: u64,
+    pub total_unique_keys: u64,
+    pub max_count: u64,
+    pub median_count: f64,
+    pub top10_avg_count: f64,
+    /// β trigger metric. Values ≥ 5.0 indicate non-uniform cluster structure
+    /// has emerged — at that point β (seed self-mutation) design lock is
+    /// justified by data.
+    pub top10_to_median_ratio: f64,
+    pub pairs_last_24h: u64,
+    pub top_5_edges: Vec<CoactivationEdge>,
+}
+
 /// Sort order for `list_memories`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -779,6 +798,23 @@ pub trait StateStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// v21 α — Aggregate health snapshot for the synaptic trace graph,
+    /// powering the `agent-bridge dream stats` subcommand and the β
+    /// trigger decision (top10/median ratio ≥ 5 indicates clusters).
+    /// Default returns an empty snapshot so older stores keep compiling.
+    async fn coactivation_stats(&self) -> Result<CoactivationStats> {
+        Ok(CoactivationStats {
+            total_pairs: 0,
+            total_unique_keys: 0,
+            max_count: 0,
+            median_count: 0.0,
+            top10_avg_count: 0.0,
+            top10_to_median_ratio: 0.0,
+            pairs_last_24h: 0,
+            top_5_edges: Vec::new(),
+        })
+    }
+
     // ─── v8: cloud-run lifecycle helpers (warp-oz) ──────────────────
 
     /// Persist the Warp cloud run id for a session after spawn.
@@ -984,6 +1020,18 @@ pub trait StateStore: Send + Sync {
         Err(ab_core::Error::Backend(
             "agent_presence_list not implemented".into(),
         ))
+    }
+
+    /// Look up a single presence row by `session_id`. Used by
+    /// `session_identity` to auto-tag when a fresh sibling already holds
+    /// the proposed canonical id. Default impl returns `Ok(None)` so
+    /// non-SQLite backends fall back to the pure-helper behavior.
+    async fn agent_presence_get(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<AgentPresenceRecord>> {
+        let _ = session_id;
+        Ok(None)
     }
 
     /// D2.3: load all active memories with embeddings into an in-process cache.

@@ -95,6 +95,26 @@ enum Cmd {
         #[arg(long, env = "AGENT_BRIDGE_HTTP_LISTEN")]
         listen: Option<String>,
     },
+    /// v21 — Synaptic Dream introspection (the "thermometer" for the
+    /// memory_coactivation graph that α populates).
+    ///
+    /// `dream stats` shows total pairs, top10/median ratio (β trigger
+    /// metric: ≥ 5.0 means cluster structure has emerged), top-5 edges,
+    /// and 24h activity. See `docs/DESIGN-v21-synaptic-trace-and-dream.md` §9.
+    Dream {
+        #[command(subcommand)]
+        op: DreamOp,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DreamOp {
+    /// Print synaptic-trace health snapshot (text, or JSON via `--json`).
+    Stats {
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -393,6 +413,13 @@ async fn main() -> Result<()> {
         };
     }
 
+    // Dream subcommand: short-lived read-only introspection over state.db.
+    if let Cmd::Dream { op } = &cmd {
+        return match op {
+            DreamOp::Stats { json } => run_dream_stats(*json).await,
+        };
+    }
+
     let log_layer = match cmd {
         Cmd::Mcp => tracing_subscriber::fmt::layer()
             .with_writer(std::io::stderr)
@@ -445,7 +472,71 @@ async fn main() -> Result<()> {
             );
             ab_bridge::daemon_http::run(store, &listen).await
         }
-        Cmd::Setup { .. } | Cmd::Sync { .. } | Cmd::Skills { .. } => unreachable!(),
+        Cmd::Setup { .. }
+        | Cmd::Sync { .. }
+        | Cmd::Skills { .. }
+        | Cmd::Dream { .. } => unreachable!(),
+    }
+}
+
+/// v21 — `agent-bridge dream stats`. Open a read-only handle to state.db,
+/// pull `coactivation_stats`, and print a human-readable health snapshot
+/// (or raw JSON with `--json`). The β trigger metric (top10/median ratio)
+/// is annotated inline so the user / future-Claude can read it at a glance.
+async fn run_dream_stats(as_json: bool) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let stats = store
+        .coactivation_stats()
+        .await
+        .map_err(|e| anyhow::anyhow!("coactivation_stats: {e}"))?;
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&stats)?);
+        return Ok(());
+    }
+
+    println!("# v21 Synaptic Trace — health snapshot");
+    println!("DB: {}", path.display());
+    println!();
+    if stats.total_pairs == 0 {
+        println!("(no co-activation data yet — α records on next memory_search call)");
+        return Ok(());
+    }
+    println!("total pairs        : {}", stats.total_pairs);
+    println!("unique keys        : {}", stats.total_unique_keys);
+    println!("max count (1 pair) : {}", stats.max_count);
+    println!("median count       : {:.2}", stats.median_count);
+    println!("top-10 avg count   : {:.2}", stats.top10_avg_count);
+    println!(
+        "top10/median ratio : {:.2}   (β trigger ≥ 5.0 means clusters emerged)",
+        stats.top10_to_median_ratio
+    );
+    println!("pairs touched 24h  : {}", stats.pairs_last_24h);
+    println!();
+    println!("top 5 edges:");
+    for (i, e) in stats.top_5_edges.iter().enumerate() {
+        println!(
+            "  {}. ({}) {} ↔ {}",
+            i + 1,
+            e.count,
+            short_key(&e.key_a, 38),
+            short_key(&e.key_b, 38)
+        );
+    }
+    Ok(())
+}
+
+fn short_key(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max - 1).collect();
+        format!("{truncated}…")
     }
 }
 

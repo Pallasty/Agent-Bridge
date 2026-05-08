@@ -57,7 +57,7 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 
 use crate::{
     AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
-    CodebaseIndexStats, CodebaseSymbol, CompactPolicy, ForumExportResult, ForumImportReport,
+    CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, ForumExportResult, ForumImportReport,
     ForumPostExport, ForumPostOutcome, ForumPostRecord, ForumThreadExport, ForumThreadRecord,
     ImportConflictPolicy, ImportReport, McpToolCallStats, McpToolErrorRecord, MemoryEdge,
     MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryRecord,
@@ -2886,6 +2886,102 @@ impl StateStore for SqliteStore {
             .map_err(|e| Error::Backend(format!("top_coactivation: {e}")))
     }
 
+    /// v21 α — Aggregate stats for the synaptic trace graph. Powers the
+    /// `agent-bridge dream stats` subcommand. The β trigger metric
+    /// (top10/median ratio) reads here (≥ 5.0 means clusters emerged).
+    async fn coactivation_stats(&self) -> Result<CoactivationStats> {
+        let now = now_secs();
+        self.conn
+            .call(move |c| -> RusqliteResult<CoactivationStats> {
+                let (total_pairs, max_count, pairs_last_24h): (i64, Option<i64>, i64) = c
+                    .query_row(
+                        "SELECT COUNT(*), MAX(count),
+                                COALESCE(SUM(CASE WHEN last_at >= ?1 THEN 1 ELSE 0 END), 0)
+                           FROM memory_coactivation",
+                        rusqlite::params![now - 86400],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )?;
+
+                if total_pairs == 0 {
+                    return Ok(CoactivationStats {
+                        total_pairs: 0,
+                        total_unique_keys: 0,
+                        max_count: 0,
+                        median_count: 0.0,
+                        top10_avg_count: 0.0,
+                        top10_to_median_ratio: 0.0,
+                        pairs_last_24h: 0,
+                        top_5_edges: Vec::new(),
+                    });
+                }
+
+                let total_unique_keys: i64 = c.query_row(
+                    "SELECT COUNT(DISTINCT k) FROM (
+                       SELECT key_a AS k FROM memory_coactivation
+                       UNION ALL
+                       SELECT key_b AS k FROM memory_coactivation
+                     )",
+                    [],
+                    |row| row.get(0),
+                )?;
+
+                let mut stmt_counts = c.prepare(
+                    "SELECT count FROM memory_coactivation ORDER BY count DESC",
+                )?;
+                let all_counts: Vec<i64> = stmt_counts
+                    .query_map([], |row| row.get::<_, i64>(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                drop(stmt_counts);
+
+                let n = all_counts.len();
+                let median = if n % 2 == 1 {
+                    all_counts[n / 2] as f64
+                } else {
+                    (all_counts[n / 2 - 1] as f64 + all_counts[n / 2] as f64) / 2.0
+                };
+                let top10_n = n.min(10);
+                let top10_sum: i64 = all_counts.iter().take(top10_n).sum();
+                let top10_avg = if top10_n > 0 {
+                    top10_sum as f64 / top10_n as f64
+                } else {
+                    0.0
+                };
+                let ratio = if median > 0.0 { top10_avg / median } else { 0.0 };
+
+                let mut stmt_top = c.prepare(
+                    "SELECT key_a, key_b, count, first_at, last_at
+                       FROM memory_coactivation
+                   ORDER BY count DESC, last_at DESC
+                      LIMIT 5",
+                )?;
+                let top_5_edges: Vec<CoactivationEdge> = stmt_top
+                    .query_map([], |row| {
+                        Ok(CoactivationEdge {
+                            key_a: row.get(0)?,
+                            key_b: row.get(1)?,
+                            count: row.get::<_, i64>(2)? as u64,
+                            first_at: row.get(3)?,
+                            last_at: row.get(4)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                drop(stmt_top);
+
+                Ok(CoactivationStats {
+                    total_pairs: total_pairs as u64,
+                    total_unique_keys: total_unique_keys as u64,
+                    max_count: max_count.unwrap_or(0) as u64,
+                    median_count: median,
+                    top10_avg_count: top10_avg,
+                    top10_to_median_ratio: ratio,
+                    pairs_last_24h: pairs_last_24h as u64,
+                    top_5_edges,
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("coactivation_stats: {e}")))
+    }
+
     async fn memory_load_embeddings(&self) -> Result<Vec<(MemoryRecord, Vec<f32>)>> {
         let rows = self
             .conn
@@ -4414,6 +4510,74 @@ impl StateStore for SqliteStore {
         }
         Ok(out)
     }
+
+    async fn agent_presence_get(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<AgentPresenceRecord>> {
+        let session_id = session_id.to_string();
+        let row = self
+            .conn
+            .call(move |c| -> RusqliteResult<Option<_>> {
+                c.query_row(
+                    "SELECT session_id, name, description, version, url,
+                            node, project, role, tag, cwd, pid,
+                            capabilities_json, skills_json,
+                            started_at, last_heartbeat_at
+                     FROM agent_presence
+                     WHERE session_id = ?1",
+                    params![session_id],
+                    |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, Option<String>>(2)?,
+                            r.get::<_, Option<String>>(3)?,
+                            r.get::<_, Option<String>>(4)?,
+                            r.get::<_, String>(5)?,
+                            r.get::<_, String>(6)?,
+                            r.get::<_, String>(7)?,
+                            r.get::<_, Option<String>>(8)?,
+                            r.get::<_, Option<String>>(9)?,
+                            r.get::<_, Option<i64>>(10)?,
+                            r.get::<_, Option<String>>(11)?,
+                            r.get::<_, Option<String>>(12)?,
+                            r.get::<_, i64>(13)?,
+                            r.get::<_, i64>(14)?,
+                        ))
+                    },
+                )
+                .optional()
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("agent_presence_get: {e}")))?;
+
+        Ok(row.map(
+            |(sid, nm, desc, ver, url, nd, proj, rl, tg, cd, p, cap_s, sk_s, st, hb)| {
+                let capabilities = cap_s
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str(s).ok());
+                let skills = sk_s.as_deref().and_then(|s| serde_json::from_str(s).ok());
+                AgentPresenceRecord {
+                    session_id: sid,
+                    name: nm,
+                    description: desc,
+                    version: ver,
+                    url,
+                    capabilities,
+                    skills,
+                    node: nd,
+                    project: proj,
+                    role: rl,
+                    tag: tg,
+                    cwd: cd,
+                    pid: p,
+                    started_at: st,
+                    last_heartbeat_at: hb,
+                }
+            },
+        ))
+    }
 }
 
 impl SqliteStore {
@@ -5754,6 +5918,131 @@ mod tests {
         let edges = store.top_coactivation("kilo", 10).await.expect("top");
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].count, 2);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn coactivation_stats_empty_db() {
+        // Fresh store → all-zeros stats, no panic on empty.
+        let (dir, store) = fresh_store("coact-stats-empty").await;
+        let stats = store.coactivation_stats().await.expect("stats");
+        assert_eq!(stats.total_pairs, 0);
+        assert_eq!(stats.total_unique_keys, 0);
+        assert_eq!(stats.max_count, 0);
+        assert_eq!(stats.median_count, 0.0);
+        assert_eq!(stats.top10_to_median_ratio, 0.0);
+        assert!(stats.top_5_edges.is_empty());
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn coactivation_stats_basic_aggregates() {
+        // Build a graph with known shape:
+        //   pair (a, b) co-activated 3 times → count=3
+        //   pair (a, c) co-activated 1 time  → count=1
+        //   pair (b, c) co-activated 1 time  → count=1
+        // total_pairs=3, max=3, median=1, top10_avg = (3+1+1)/3 = 1.667,
+        // ratio = 1.667 / 1 = 1.667 (well below β trigger 5.0).
+        let (dir, store) = fresh_store("coact-stats-basic").await;
+        for k in ["papa", "quebec", "romeo"] {
+            store
+                .memory_save(&make_memrec(k, &format!("content for {k}")))
+                .await
+                .expect("save");
+        }
+        for _ in 0..3 {
+            store
+                .record_coactivation(
+                    &["papa".to_string(), "quebec".to_string()],
+                    None,
+                )
+                .await
+                .expect("record p+q");
+        }
+        store
+            .record_coactivation(&["papa".to_string(), "romeo".to_string()], None)
+            .await
+            .expect("record p+r");
+        store
+            .record_coactivation(&["quebec".to_string(), "romeo".to_string()], None)
+            .await
+            .expect("record q+r");
+
+        let stats = store.coactivation_stats().await.expect("stats");
+        assert_eq!(stats.total_pairs, 3);
+        assert_eq!(stats.total_unique_keys, 3);
+        assert_eq!(stats.max_count, 3);
+        assert_eq!(stats.median_count, 1.0, "median of (3,1,1) sorted is 1");
+        let top10_avg = (3.0 + 1.0 + 1.0) / 3.0;
+        assert!(
+            (stats.top10_avg_count - top10_avg).abs() < 1e-6,
+            "top10_avg expected {top10_avg}, got {}",
+            stats.top10_avg_count
+        );
+        assert!(
+            (stats.top10_to_median_ratio - top10_avg).abs() < 1e-6,
+            "ratio = top10_avg / median(=1) = {top10_avg}, got {}",
+            stats.top10_to_median_ratio
+        );
+        assert!(
+            stats.top10_to_median_ratio < 5.0,
+            "uniform graph should NOT trigger β"
+        );
+        assert_eq!(stats.top_5_edges.len(), 3);
+        assert_eq!(stats.top_5_edges[0].count, 3, "highest count first");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn coactivation_stats_β_trigger_threshold() {
+        // 1 pair with count=10, 9 pairs with count=1 each.
+        // median=1, top10_avg=(10+9*1)/10=1.9 → ratio=1.9 (still below 5)
+        // Then push 5 more activations on the hot pair to count=15.
+        // top10_avg=(15+9*1)/10=2.4 → still below 5.
+        // To clear β=5: need top10 avg ≥ 5×median. With median=1 and 1
+        // dominant pair carrying 50+ count, top10_avg would be ≥5.
+        // We construct exactly that.
+        let (dir, store) = fresh_store("coact-stats-trigger").await;
+        // 11 keys → enough to make 10 minor pairs + 1 hot pair.
+        let keys: Vec<String> = (0..11).map(|i| format!("node{i}")).collect();
+        for k in &keys {
+            store
+                .memory_save(&make_memrec(k, &format!("content for {k}")))
+                .await
+                .expect("save");
+        }
+        // Hot pair (node0, node1) → count=50.
+        for _ in 0..50 {
+            store
+                .record_coactivation(&[keys[0].clone(), keys[1].clone()], None)
+                .await
+                .expect("hot");
+        }
+        // 9 minor pairs each count=1.
+        for i in 2..11 {
+            store
+                .record_coactivation(&[keys[0].clone(), keys[i].clone()], None)
+                .await
+                .expect("minor");
+        }
+
+        let stats = store.coactivation_stats().await.expect("stats");
+        assert_eq!(stats.total_pairs, 10);
+        assert_eq!(stats.max_count, 50);
+        assert_eq!(stats.median_count, 1.0);
+        // top10_avg = (50 + 9*1) / 10 = 5.9
+        assert!(
+            (stats.top10_avg_count - 5.9).abs() < 1e-6,
+            "expected top10_avg=5.9, got {}",
+            stats.top10_avg_count
+        );
+        assert!(
+            stats.top10_to_median_ratio >= 5.0,
+            "this graph SHOULD clear β trigger 5.0×, got {}",
+            stats.top10_to_median_ratio
+        );
+
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
