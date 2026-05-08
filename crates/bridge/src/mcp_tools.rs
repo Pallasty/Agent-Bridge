@@ -3176,6 +3176,13 @@ impl McpTool for MemorySearchTool {
                     "threshold":  {
                         "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.3,
                         "description": "[semantic only] Minimum cosine similarity to include. 0.3 = broad, 0.7 = tight."
+                    },
+                    "exclude_kinds": {
+                        "type": "array", "items": { "type": "string" }, "default": [],
+                        "description": "Drop hits whose `kind` matches any of these from the OUTPUT. \
+                            Useful for keeping bulky `skill` records (~88% of store) out of generic queries. \
+                            Inner search auto-overfetches 5× to compensate. α coactivation still learns \
+                            from the full pre-filter hit set, so cross-kind edges keep forming."
                     }
                 },
                 "required": ["query"]
@@ -3208,6 +3215,24 @@ impl McpTool for MemorySearchTool {
             .min(200) as u32;
         let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("fts");
 
+        let exclude_kinds: Vec<String> = args
+            .get("exclude_kinds")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // When exclusions are active, overfetch so the post-filter result can
+        // still hit `limit`. 5× covers up to ~80% saturation; cap at 200 (the
+        // schema's hard upper bound) to avoid pathological queries.
+        let inner_limit = if exclude_kinds.is_empty() {
+            limit
+        } else {
+            (limit.saturating_mul(5)).min(200)
+        };
+
         let hits = if mode == "hybrid" {
             let expand_top = args
                 .get("expand_top")
@@ -3220,7 +3245,7 @@ impl McpTool for MemorySearchTool {
                 .unwrap_or(60.0)
                 .clamp(1.0, 200.0);
             store
-                .memory_search_hybrid(&q, &tags, limit, rrf_k, expand_top)
+                .memory_search_hybrid(&q, &tags, inner_limit, rrf_k, expand_top)
                 .await?
         } else if mode == "semantic" {
             let threshold = args
@@ -3247,15 +3272,15 @@ impl McpTool for MemorySearchTool {
                 hits.sort_by(|a, b| {
                     b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
                 });
-                hits.truncate(limit as usize);
+                hits.truncate(inner_limit as usize);
                 drop(cache_guard);
                 hits
             } else {
                 drop(cache_guard);
-                store.memory_search_semantic(&q, limit, threshold).await?
+                store.memory_search_semantic(&q, inner_limit, threshold).await?
             }
         } else {
-            store.memory_search(&q, &tags, limit).await?
+            store.memory_search(&q, &tags, inner_limit).await?
         };
 
         // Path C actuator: rerank using perception_filter hub_clusters.
@@ -3266,6 +3291,8 @@ impl McpTool for MemorySearchTool {
         // fire-and-forget background work; never block search latency.
         // ctx_centroid is None for now (mode-agnostic α); follow-up plumbs
         // hit embeddings through for richer trace.
+        // Run on PRE-filter hits so cross-kind edges (e.g. skill ↔ memory)
+        // keep forming even when callers exclude_kinds the skill out of output.
         if hits.len() >= 2 {
             let store_clone = store.clone();
             let keys: Vec<String> =
@@ -3274,6 +3301,13 @@ impl McpTool for MemorySearchTool {
                 let _ = store_clone.record_coactivation(&keys, None).await;
             });
         }
+
+        // Apply caller's exclude_kinds and re-truncate to the requested limit.
+        let mut hits = hits;
+        if !exclude_kinds.is_empty() {
+            hits.retain(|h| !exclude_kinds.iter().any(|k| k == &h.record.kind));
+        }
+        hits.truncate(limit as usize);
 
         Ok(ToolResult::json_text(
             &serde_json::to_value(hits).unwrap_or(Value::Null),
