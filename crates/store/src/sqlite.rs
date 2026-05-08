@@ -3089,6 +3089,73 @@ impl StateStore for SqliteStore {
         Ok(updated)
     }
 
+    async fn codebase_reindex_embeddings(&self, batch_size: usize) -> Result<usize> {
+        let cap = batch_size.max(1).min(1000);
+        // Load rows needing fill (embedding IS NULL). codebase_index always
+        // writes NULL on insert and there is no other path that fills these,
+        // so this method is the only thing that makes semantic search usable.
+        let to_update: Vec<(i64, String, String)> = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<(i64, String, String)>> {
+                let mut stmt = c.prepare(
+                    "SELECT id, name, signature FROM codebase_symbols
+                     WHERE embedding IS NULL
+                     LIMIT ?1",
+                )?;
+                let rows = stmt
+                    .query_map([cap as i64], |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("codebase_reindex list: {e}")))?;
+
+        if to_update.is_empty() {
+            return Ok(0);
+        }
+
+        // Embed `name + signature` so user queries like "function that opens a
+        // browser tab" pick up both the identifier and the parameter list.
+        // signature is already capped at 200 chars in extract_symbols::make.
+        let pairs: Vec<(i64, Vec<u8>)> = to_update
+            .into_iter()
+            .map(|(id, name, signature)| {
+                let text = if signature.is_empty() {
+                    name
+                } else {
+                    format!("{name} {signature}")
+                };
+                let emb = crate::vector::embed_text(&text);
+                let bytes = crate::vector::encode_embedding(&emb);
+                (id, bytes)
+            })
+            .collect();
+
+        let updated = pairs.len();
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                let tx = c.unchecked_transaction()?;
+                let mut stmt =
+                    tx.prepare("UPDATE codebase_symbols SET embedding = ?2 WHERE id = ?1")?;
+                for (id, emb_bytes) in &pairs {
+                    stmt.execute(params![id, emb_bytes])?;
+                }
+                drop(stmt);
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("codebase_reindex update: {e}")))?;
+
+        Ok(updated)
+    }
+
     // ─── D3.2: codebase symbol index ────────────────────────────────────
 
     async fn codebase_index(
@@ -6081,5 +6148,105 @@ mod tests {
         assert_eq!(edges[1].count, 1);
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn codebase_reindex_fills_null_embeddings_and_unblocks_semantic_search() {
+        // codebase_index writes rows with embedding=NULL by design; without a
+        // fill path semantic search returns 0 results. This regression-locks
+        // codebase_reindex_embeddings as the only thing that turns those rows
+        // into searchable vectors, plus its idempotence (no-NULL → returns 0).
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-codebase-reindex-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        // Seed 3 symbol rows directly (codebase_index requires real files on
+        // disk; we only need rows in the table for this test).
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                let mut stmt = c.prepare(
+                    "INSERT INTO codebase_symbols
+                       (file_path, line, col, kind, name, signature, language, root_path,
+                        indexed_at, embedding)
+                     VALUES (?1, ?2, 0, ?3, ?4, ?5, 'rust', '/tmp/x', 1, NULL)",
+                )?;
+                stmt.execute(params![
+                    "src/lib.rs",
+                    1_i64,
+                    "fn",
+                    "open_browser_tab",
+                    "fn open_browser_tab(url: &str) -> Result<()>"
+                ])?;
+                stmt.execute(params![
+                    "src/lib.rs",
+                    20_i64,
+                    "fn",
+                    "embed_text",
+                    "fn embed_text(text: &str) -> Vec<f32>"
+                ])?;
+                stmt.execute(params![
+                    "src/lib.rs",
+                    50_i64,
+                    "struct",
+                    "ParseResult",
+                    "struct ParseResult { tokens: Vec<Token> }"
+                ])?;
+                Ok(())
+            })
+            .await
+            .expect("seed rows");
+
+        // Reindex — must fill all 3 NULL embeddings on the first call.
+        let updated = store
+            .codebase_reindex_embeddings(100)
+            .await
+            .expect("reindex");
+        assert_eq!(updated, 3);
+
+        // Each row now carries 1536 bytes (384-dim f32 LE).
+        let lengths: Vec<i64> = store
+            .conn
+            .call(|c| -> RusqliteResult<Vec<i64>> {
+                let mut stmt =
+                    c.prepare("SELECT length(embedding) FROM codebase_symbols ORDER BY id")?;
+                let rows = stmt
+                    .query_map([], |r| r.get::<_, i64>(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .expect("read lengths");
+        let expected = (crate::vector::VECTOR_DIM * 4) as i64;
+        for len in &lengths {
+            assert_eq!(*len, expected);
+        }
+
+        // Idempotent: with no NULL rows left, second call updates 0.
+        let updated2 = store
+            .codebase_reindex_embeddings(100)
+            .await
+            .expect("reindex 2");
+        assert_eq!(updated2, 0);
+
+        // Sanity: codebase_search(mode=semantic) now returns rows (was 0
+        // before because all embeddings were NULL).
+        let hits = store
+            .codebase_search("function that opens a browser", None, None, None, 10, "semantic")
+            .await
+            .expect("search");
+        assert!(
+            !hits.is_empty(),
+            "semantic search should return rows once embeddings are filled"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 }

@@ -1049,6 +1049,17 @@ pub trait StateStore: Send + Sync {
         Ok(0)
     }
 
+    /// Compute and persist embeddings for `codebase_symbols` rows whose
+    /// `embedding IS NULL`. Without this, `codebase_search(mode="semantic")`
+    /// has nothing to score against — `codebase_index` writes rows with a
+    /// NULL embedding column intentionally so this fill can be deferred to
+    /// an explicit reindex call. Returns the number of rows updated.
+    /// Default impl returns 0 (no-op for non-SQLite backends).
+    async fn codebase_reindex_embeddings(&self, batch_size: usize) -> Result<usize> {
+        let _ = batch_size;
+        Ok(0)
+    }
+
     // ── D3.2: codebase symbol index ──────────────────────────────────────────
 
     /// Scan `root_path`, extract symbols from files matching `languages`

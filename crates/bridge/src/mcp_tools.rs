@@ -3547,6 +3547,71 @@ impl McpTool for MemoryReindexTool {
 }
 
 // ===========================================================================
+//                       codebase_reindex (fill NULL embeddings)
+// ===========================================================================
+
+pub struct CodebaseReindexTool {
+    hub: Hub,
+}
+impl CodebaseReindexTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for CodebaseReindexTool {
+    fn name(&self) -> &'static str {
+        "codebase_reindex"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Fill in embeddings for codebase_symbols rows that have none. \
+                 codebase_index writes rows with NULL embedding by design — \
+                 this tool computes them in batches so codebase_search(mode=\"semantic\") \
+                 has vectors to score against. Processes batch_size rows per call \
+                 (default 100, max 1000); call repeatedly until updated=0."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "batch_size": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 100,
+                        "description": "Number of rows to embed per call."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let batch_size = args
+            .get("batch_size")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100) as usize;
+
+        let updated = store.codebase_reindex_embeddings(batch_size).await?;
+
+        Ok(ToolResult::json_text(&json!({
+            "updated": updated,
+            "batch_size": batch_size,
+            "hint": if updated == batch_size {
+                format!("Batch full — call codebase_reindex again to continue ({batch_size} rows/call).")
+            } else {
+                format!("Done. {updated} symbols embedded this call.")
+            }
+        })))
+    }
+}
+
+// ===========================================================================
 //                       memory portability (v0.6)
 // ===========================================================================
 
@@ -8583,6 +8648,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryStatsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySuggestTool::new(hub.clone())));
