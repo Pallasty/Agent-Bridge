@@ -51,6 +51,9 @@ pub fn load_at_startup() {
     set_if_unset("GITLAB_TOKEN", || {
         extract_bare_token(&content, "GitLab PAT", &["glpat-"])
     });
+    set_if_unset("NOTION_TOKEN", || {
+        extract_bare_token(&content, "Notion API", &["ntn_", "secret_"])
+    });
 }
 
 fn resolve_creds_path() -> Option<PathBuf> {
@@ -158,7 +161,7 @@ github_pat_11ABCDEF123
 glpat-AbCdEf12345
 
 # Notion API
-NOTION_TOKEN=secret_xxx
+ntn_NotionTokenABC
 ";
 
     #[test]
@@ -186,6 +189,14 @@ NOTION_TOKEN=secret_xxx
         assert_eq!(
             extract_bare_token(SAMPLE, "GitLab PAT", &["glpat-"]),
             Some("glpat-AbCdEf12345".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_notion_bare_token() {
+        assert_eq!(
+            extract_bare_token(SAMPLE, "Notion API", &["ntn_", "secret_"]),
+            Some("ntn_NotionTokenABC".to_string())
         );
     }
 

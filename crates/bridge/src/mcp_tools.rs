@@ -8803,6 +8803,151 @@ impl McpTool for GitlabMrListTool {
 }
 
 // ===========================================================================
+//                            notion_* — REST API
+// ===========================================================================
+
+pub struct NotionSearchTool;
+impl Default for NotionSearchTool {
+    fn default() -> Self { Self }
+}
+impl NotionSearchTool {
+    pub fn new() -> Self { Self }
+}
+#[async_trait]
+impl McpTool for NotionSearchTool {
+    fn name(&self) -> &'static str { "notion_search" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Search pages and databases in the Notion workspace. The bot only \
+                 sees pages explicitly shared with it via the Notion UI's 'Add \
+                 connections' menu — empty results with HTTP 200 typically means \
+                 the bot wasn't granted access. Returns id/url/title/timestamps. \
+                 Pass empty `query` to list all accessible top-level pages."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query":     { "type": "string", "description": "Search text. Empty = list everything accessible." },
+                    "filter":    { "type": "string", "enum": ["page","database"], "description": "Restrict to pages or databases (optional)" },
+                    "page_size": { "type": "integer", "default": 10, "minimum": 1, "maximum": 100 }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+        let filter = args.get("filter").and_then(|v| v.as_str());
+        let page_size = args.get("page_size").and_then(|v| v.as_u64()).unwrap_or(10).clamp(1, 100) as u32;
+        let client = match crate::notion_api::NotionClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.search(query, filter, page_size).await {
+            Ok(rows) => Ok(ToolResult::json_text(&json!({
+                "count": rows.len(),
+                "results": rows
+            }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+pub struct NotionPageGetTool;
+impl Default for NotionPageGetTool {
+    fn default() -> Self { Self }
+}
+impl NotionPageGetTool {
+    pub fn new() -> Self { Self }
+}
+#[async_trait]
+impl McpTool for NotionPageGetTool {
+    fn name(&self) -> &'static str { "notion_page_get" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Fetch metadata for a single Notion page by id. Returns id/url/\
+                 title/parent kind+id/archived flag/timestamps. Page id can be \
+                 dashed-uuid form or hyphen-stripped (Notion accepts both)."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page_id": { "type": "string", "description": "Notion page UUID" }
+                },
+                "required": ["page_id"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let page_id = match args.get("page_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'page_id'")),
+        };
+        let client = match crate::notion_api::NotionClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.page_get(page_id).await {
+            Ok(p) => Ok(ToolResult::json_text(&json!({ "page": p }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+pub struct NotionPageCreateTool;
+impl Default for NotionPageCreateTool {
+    fn default() -> Self { Self }
+}
+impl NotionPageCreateTool {
+    pub fn new() -> Self { Self }
+}
+#[async_trait]
+impl McpTool for NotionPageCreateTool {
+    fn name(&self) -> &'static str { "notion_page_create" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Create a child page under `parent_page_id`. `content` becomes a \
+                 single paragraph block (plain text). For richer block content \
+                 use a follow-up edit in the Notion UI or extend with a \
+                 block_append tool later. The bot must be invited to the parent \
+                 page via 'Add connections' beforehand or this returns 404."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "parent_page_id": { "type": "string", "description": "UUID of the parent Notion page" },
+                    "title":          { "type": "string", "description": "Title of the new page (REQUIRED, plain text)" },
+                    "content":        { "type": "string", "description": "Body text — becomes a single paragraph block. Empty allowed." }
+                },
+                "required": ["parent_page_id","title"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let parent = match args.get("parent_page_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'parent_page_id'")),
+        };
+        let title = match args.get("title").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s, None => return Ok(ToolResult::error("missing 'title'")),
+        };
+        let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        let client = match crate::notion_api::NotionClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.page_create(parent, title, content).await {
+            Ok(p) => Ok(ToolResult::json_text(&json!({ "page": p }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                                  registry
 // ===========================================================================
 
@@ -9051,6 +9196,11 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(GitlabIssueListTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(GitlabIssueCreateTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(GitlabMrListTool::new()));
+
+    // Notion REST API: integration-token Bearer; complements memory system.
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotionSearchTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotionPageGetTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotionPageCreateTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
