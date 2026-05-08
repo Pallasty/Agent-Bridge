@@ -105,6 +105,29 @@ enum Cmd {
         #[command(subcommand)]
         op: DreamOp,
     },
+    /// Print an OSC 133 shell-integration snippet for the chosen shell to
+    /// stdout. Pipe into the matching rc file:
+    ///
+    ///     agent-bridge shell-init bash >> ~/.bashrc
+    ///     agent-bridge shell-init zsh  >> ~/.zshrc
+    ///     agent-bridge shell-init fish >  ~/.config/fish/conf.d/agent-bridge-osc133.fish
+    ///
+    /// After re-sourcing the rc file (or starting a fresh shell), the
+    /// PtyBackend's `terminal_read_blocks` will return structured
+    /// (command, output, exit_code, start_ms, end_ms) tuples for every
+    /// command run in agent-bridge-spawned panes. See
+    /// `docs/SHELL-INTEGRATION-OSC133.md` for protocol details.
+    ShellInit {
+        /// Which shell flavour to emit a snippet for.
+        shell: ShellKind,
+    },
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum ShellKind {
+    Bash,
+    Zsh,
+    Fish,
 }
 
 #[derive(Subcommand, Debug)]
@@ -439,6 +462,12 @@ async fn main() -> Result<()> {
         };
     }
 
+    // ShellInit: print snippet to stdout. Pure function, no daemon, no state.
+    if let Cmd::ShellInit { shell } = &cmd {
+        print!("{}", shell_init_snippet(*shell));
+        return Ok(());
+    }
+
     let log_layer = match cmd {
         Cmd::Mcp => tracing_subscriber::fmt::layer()
             .with_writer(std::io::stderr)
@@ -494,7 +523,62 @@ async fn main() -> Result<()> {
         Cmd::Setup { .. }
         | Cmd::Sync { .. }
         | Cmd::Skills { .. }
-        | Cmd::Dream { .. } => unreachable!(),
+        | Cmd::Dream { .. }
+        | Cmd::ShellInit { .. } => unreachable!(),
+    }
+}
+
+/// OSC 133 shell-integration snippets. Source-of-truth lives here; the
+/// human-readable copy in `docs/SHELL-INTEGRATION-OSC133.md` is intended
+/// to track this verbatim. If you edit one, mirror the change in the doc
+/// (or vice-versa) so the install instructions stay consistent.
+fn shell_init_snippet(shell: ShellKind) -> &'static str {
+    match shell {
+        ShellKind::Bash => "\
+# agent-bridge — OSC 133 shell integration (bash)
+# See: docs/SHELL-INTEGRATION-OSC133.md
+__ab_osc133_preexec() { printf '\\e]133;C\\a'; }
+__ab_osc133_precmd() {
+    local exit=$?
+    printf '\\e]133;D;%s\\a\\e]133;A\\a' \"$exit\"
+    PS1='\\[\\e]133;B\\a\\]'\"${PS1_ORIG:-$PS1}\"
+    PS1_ORIG=\"${PS1_ORIG:-$PS1}\"
+}
+trap '__ab_osc133_preexec' DEBUG
+PROMPT_COMMAND=\"__ab_osc133_precmd${PROMPT_COMMAND:+; $PROMPT_COMMAND}\"
+",
+        ShellKind::Zsh => "\
+# agent-bridge — OSC 133 shell integration (zsh)
+# See: docs/SHELL-INTEGRATION-OSC133.md
+__ab_osc133_preexec() { print -nP '\\e]133;C\\a'; }
+__ab_osc133_precmd() {
+    local exit=$?
+    print -nP \"\\e]133;D;${exit}\\a\\e]133;A\\a\"
+}
+__ab_osc133_prompt_b() { print -nP '\\e]133;B\\a'; }
+PS1='%{$(__ab_osc133_prompt_b)%}'\"$PS1\"
+autoload -Uz add-zsh-hook
+add-zsh-hook preexec __ab_osc133_preexec
+add-zsh-hook precmd __ab_osc133_precmd
+",
+        ShellKind::Fish => "\
+# agent-bridge — OSC 133 shell integration (fish)
+# See: docs/SHELL-INTEGRATION-OSC133.md
+function __ab_osc133_preexec --on-event fish_preexec
+    printf '\\e]133;C\\a'
+end
+function __ab_osc133_postexec --on-event fish_postexec
+    printf '\\e]133;D;%s\\a\\e]133;A\\a' $status
+end
+function fish_prompt_osc133 --description 'wrap fish_prompt with OSC 133 B marker'
+    functions -c fish_prompt __ab_orig_fish_prompt 2>/dev/null
+    function fish_prompt
+        __ab_orig_fish_prompt
+        printf '\\e]133;B\\a'
+    end
+end
+fish_prompt_osc133
+",
     }
 }
 
@@ -844,5 +928,37 @@ mod tests {
     fn empty_settings_is_not_wired() {
         assert!(!settings_references_ab_hook("{}"));
         assert!(!settings_references_ab_hook(""));
+    }
+
+    // ── shell-init snippet sanity ─────────────────────────────────────────
+
+    #[test]
+    fn shell_init_snippet_covers_all_four_osc133_letters() {
+        // Each emitted snippet must wire up A/B/C/D markers — a missing
+        // letter would give silently-broken read_blocks output (e.g. no
+        // exit code if D is absent).
+        for shell in [ShellKind::Bash, ShellKind::Zsh, ShellKind::Fish] {
+            let s = shell_init_snippet(shell);
+            for letter in ["133;A", "133;B", "133;C", "133;D"] {
+                assert!(
+                    s.contains(letter),
+                    "{shell:?} snippet missing OSC marker {letter}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shell_init_snippet_references_the_doc() {
+        // The user's first instinct on seeing the snippet should be
+        // "where do I read more?" — make sure the doc path is right
+        // there in the comment.
+        for shell in [ShellKind::Bash, ShellKind::Zsh, ShellKind::Fish] {
+            let s = shell_init_snippet(shell);
+            assert!(
+                s.contains("docs/SHELL-INTEGRATION-OSC133.md"),
+                "{shell:?} snippet missing doc reference"
+            );
+        }
     }
 }
