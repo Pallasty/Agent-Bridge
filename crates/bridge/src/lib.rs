@@ -3,6 +3,7 @@
 //! Routes incoming RPC calls to backend traits (Notifier, AgentRuntime, ...).
 
 pub mod context_budget;
+pub mod creds;
 pub mod curate;
 pub mod daemon_http;
 pub mod hub;

@@ -389,6 +389,11 @@ fn which_in_path(bin: &str) -> bool {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load API tokens from the user's plaintext creds notebook before any
+    // worker thread can read env. Self-heals after a `cargo install` that
+    // overwrites the shell wrapper. See `creds.rs` for resolution order.
+    ab_bridge::creds::load_at_startup();
+
     let cli = Cli::parse();
     let cmd = cli.cmd.unwrap_or(Cmd::Daemon);
 
