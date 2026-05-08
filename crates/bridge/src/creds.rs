@@ -57,6 +57,15 @@ pub fn load_at_startup() {
     set_if_unset("BRAVE_SEARCH_TOKEN", || {
         extract_bare_token(&content, "Brave Search API", &["BSA"])
     });
+    set_if_unset("CLOUDFLARE_API_TOKEN", || {
+        extract_first_token_in_subsection(&content, "Cloudflare Workers API")
+    });
+    set_if_unset("CLOUDFLARE_ACCOUNT_ID", || {
+        // Note: full-width colon U+FF1A is intentional — matches the literal
+        // line "ID：<32-hex>" in the credentials file.
+        extract_inline_after(&content, "Cloudflare endpoint", "ID：")
+            .or_else(|| extract_inline_after(&content, "Cloudflare endpoint", "ID:"))
+    });
 }
 
 fn resolve_creds_path() -> Option<PathBuf> {
@@ -123,13 +132,14 @@ fn extract_kv(content: &str, section_marker: &str, keys: &[&str]) -> Option<Stri
 }
 
 /// Extract bare-token line (e.g. `github_pat_…`) following a `# <Section>`
-/// header. Skips blank lines; first matching prefix wins.
+/// header. Skips blank lines; first matching prefix wins. Supports `##`
+/// (multi-#) markdown-style sub-section headers as well.
 fn extract_bare_token(content: &str, section_marker: &str, prefixes: &[&str]) -> Option<String> {
     let mut in_section = false;
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some(rest) = line.trim_start().strip_prefix('#') {
-            let rest = rest.trim_start();
+            let rest = rest.trim_start_matches(|c: char| c == '#' || c.is_whitespace());
             in_section = rest.starts_with(section_marker);
             continue;
         }
@@ -139,6 +149,63 @@ fn extract_bare_token(content: &str, section_marker: &str, prefixes: &[&str]) ->
         for p in prefixes {
             if trimmed.starts_with(p) {
                 return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extract the first whitespace-separated token (≥16 chars) of the first
+/// non-blank line following a markdown `## <subsection>` (or any-depth `#`)
+/// header. Useful when the token has no recognizable prefix.
+fn extract_first_token_in_subsection(content: &str, marker: &str) -> Option<String> {
+    let mut in_section = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix('#') {
+            let rest_clean = rest.trim_start_matches(|c: char| c == '#' || c.is_whitespace());
+            in_section = rest_clean.starts_with(marker);
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        let line_trimmed = line.trim();
+        if line_trimmed.is_empty() {
+            continue;
+        }
+        let token = line_trimmed.split_whitespace().next()?;
+        if token.len() >= 16 {
+            return Some(token.to_string());
+        }
+    }
+    None
+}
+
+/// Extract the first whitespace-bounded value following an inline marker
+/// (e.g. `ID：<value>` somewhere on a line) inside a `# <Section>` block.
+/// Skips leading `:`, `=`, and whitespace after the marker.
+fn extract_inline_after(content: &str, section_marker: &str, marker: &str) -> Option<String> {
+    let mut in_section = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix('#') {
+            let rest_clean = rest.trim_start_matches(|c: char| c == '#' || c.is_whitespace());
+            in_section = rest_clean.starts_with(section_marker);
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if let Some(idx) = line.find(marker) {
+            let after = &line[idx + marker.len()..];
+            let val: String = after
+                .trim_start_matches(|c: char| c == ':' || c == '=' || c.is_whitespace())
+                .chars()
+                .take_while(|c: &char| !c.is_whitespace())
+                .collect();
+            if !val.is_empty() {
+                return Some(val);
             }
         }
     }
@@ -168,6 +235,13 @@ ntn_NotionTokenABC
 
 # Brave Search API
 BSAFakeBraveTokenXYZ
+
+# Cloudflare endpoint
+ID：FakeAccountID32CharsLongDeadbeef Key: GIH-FakeAIGatewayKey0123456789abcd
+## Cloudflare Workers API
+fakeWorkersTokenAlphanum40CharsLong0001
+### 令牌测试
+curl ...
 ";
 
     #[test]
@@ -211,6 +285,34 @@ BSAFakeBraveTokenXYZ
         assert_eq!(
             extract_bare_token(SAMPLE, "Brave Search API", &["BSA"]),
             Some("BSAFakeBraveTokenXYZ".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_cloudflare_workers_token_subsection() {
+        // Token line follows `## Cloudflare Workers API` with no recognizable prefix.
+        assert_eq!(
+            extract_first_token_in_subsection(SAMPLE, "Cloudflare Workers API"),
+            Some("fakeWorkersTokenAlphanum40CharsLong0001".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_cloudflare_account_id_inline() {
+        // Account ID lives mid-line: `ID：<value> Key: <other>`.
+        assert_eq!(
+            extract_inline_after(SAMPLE, "Cloudflare endpoint", "ID："),
+            Some("FakeAccountID32CharsLongDeadbeef".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_inline_after_skips_token_below_16_chars() {
+        // Sanity: short token still extracted by inline_after (no min-length gate).
+        let s = "# X\nFoo: ab\n";
+        assert_eq!(
+            extract_inline_after(s, "X", "Foo"),
+            Some("ab".to_string())
         );
     }
 

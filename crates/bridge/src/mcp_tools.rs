@@ -11,6 +11,7 @@ use ab_store::{
     ImportConflictPolicy,
     MemoryExportFilter,
     MemoryListSort,
+    MemoryQueryRecord,
     MemoryRecord,
     MemorySearchHit,
     PlanRecord,
@@ -3081,6 +3082,41 @@ impl McpTool for MemorySaveTool {
     }
 }
 
+/// Phase 0 telemetry helper. Build a `MemoryQueryRecord` with the common
+/// fields and dispatch a fire-and-forget log write so the MCP request path
+/// stays sub-ms even when the store is contended. We pass the store as `Arc`
+/// because `tokio::spawn` needs an owned value.
+fn log_memory_query(
+    store: Arc<dyn StateStore>,
+    kind: &'static str,
+    query: String,
+    tags_json: String,
+    hit_count: u32,
+    top_hit_age_secs: Option<i64>,
+    top_hit_created_at: Option<i64>,
+    duration: Duration,
+    source: &'static str,
+) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let rec = MemoryQueryRecord {
+        kind: kind.to_string(),
+        query,
+        tags_json,
+        hit_count,
+        top_hit_age_secs,
+        top_hit_created_at,
+        duration_us: duration.as_micros().min(u32::MAX as u128) as u32,
+        source: source.to_string(),
+        at: now,
+    };
+    tokio::spawn(async move {
+        let _ = store.record_memory_query(&rec).await;
+    });
+}
+
 pub struct MemoryGetTool {
     hub: Hub,
 }
@@ -3118,7 +3154,32 @@ impl McpTool for MemoryGetTool {
             Some(s) => s.to_string(),
             None => return Ok(ToolResult::error("missing 'key'")),
         };
+        let started = Instant::now();
         let row = store.memory_get(&key).await?;
+        let elapsed = started.elapsed();
+
+        // Phase 0 telemetry: log hit/miss + age. last_accessed_at was just
+        // bumped by memory_get so we use created_at as the recency anchor.
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let (hit_count, age, created) = match &row {
+            Some(rec) => (1u32, Some(now_secs - rec.created_at), Some(rec.created_at)),
+            None => (0u32, None, None),
+        };
+        log_memory_query(
+            store.clone(),
+            "get",
+            key.clone(),
+            "[]".to_string(),
+            hit_count,
+            age,
+            created,
+            elapsed,
+            "mcp:memory_get",
+        );
+
         match row {
             None => Ok(ToolResult::json_text(&Value::Null)),
             Some(rec) => {
@@ -3235,6 +3296,7 @@ impl McpTool for MemorySearchTool {
             (limit.saturating_mul(5)).min(200)
         };
 
+        let started = Instant::now();
         let hits = if mode == "hybrid" {
             let expand_top = args
                 .get("expand_top")
@@ -3310,6 +3372,37 @@ impl McpTool for MemorySearchTool {
             hits.retain(|h| !exclude_kinds.iter().any(|k| k == &h.record.kind));
         }
         hits.truncate(limit as usize);
+        let elapsed = started.elapsed();
+
+        // Phase 0 telemetry: log hit count + top-hit age (post-filter, what the
+        // user actually sees). Top-hit age uses created_at as the recency anchor;
+        // we deliberately don't use last_accessed_at because memory_search itself
+        // bumps it on read in some backends and would self-zero this signal.
+        let kind_label = match mode {
+            "hybrid" => "search_hybrid",
+            "semantic" => "search_semantic",
+            _ => "search_fts",
+        };
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let (top_age, top_created) = hits
+            .first()
+            .map(|h| (Some(now_secs - h.record.created_at), Some(h.record.created_at)))
+            .unwrap_or((None, None));
+        let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string());
+        log_memory_query(
+            store.clone(),
+            kind_label,
+            q.clone(),
+            tags_json,
+            hits.len() as u32,
+            top_age,
+            top_created,
+            elapsed,
+            "mcp:memory_search",
+        );
 
         Ok(ToolResult::json_text(
             &serde_json::to_value(hits).unwrap_or(Value::Null),
@@ -8948,6 +9041,119 @@ impl McpTool for NotionPageCreateTool {
 }
 
 // ===========================================================================
+//                            cloudflare_* — REST API
+// ===========================================================================
+
+pub struct CloudflareZoneListTool;
+impl Default for CloudflareZoneListTool { fn default() -> Self { Self } }
+impl CloudflareZoneListTool { pub fn new() -> Self { Self } }
+#[async_trait]
+impl McpTool for CloudflareZoneListTool {
+    fn name(&self) -> &'static str { "cloudflare_zone_list" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "List Cloudflare zones (apex domains) the configured token has \
+                 read access to. Returns id/name/status/paused/type/name_servers/\
+                 created_on/modified_on per zone. The `id` is the zone-id you'd \
+                 plug into other zone-scoped endpoints (DNS, SSL, etc.). Token \
+                 must have Zone:Read scope."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "per_page": { "type": "integer", "default": 20, "minimum": 1, "maximum": 50 }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 50) as u32;
+        let client = match crate::cloudflare_api::CloudflareClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.zone_list(per_page).await {
+            Ok(rows) => Ok(ToolResult::json_text(&json!({ "count": rows.len(), "zones": rows }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+pub struct CloudflareWorkerListTool;
+impl Default for CloudflareWorkerListTool { fn default() -> Self { Self } }
+impl CloudflareWorkerListTool { pub fn new() -> Self { Self } }
+#[async_trait]
+impl McpTool for CloudflareWorkerListTool {
+    fn name(&self) -> &'static str { "cloudflare_worker_list" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "List Workers scripts under the configured Cloudflare account. \
+                 Returns id/created_on/modified_on/etag/handlers/usage_model and \
+                 routes (pattern strings). Token must have Workers Scripts:Read \
+                 scope and CLOUDFLARE_ACCOUNT_ID env must be set."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "per_page": { "type": "integer", "default": 20, "minimum": 1, "maximum": 50 }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 50) as u32;
+        let client = match crate::cloudflare_api::CloudflareClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.worker_list(per_page).await {
+            Ok(rows) => Ok(ToolResult::json_text(&json!({ "count": rows.len(), "workers": rows }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+pub struct CloudflareR2BucketListTool;
+impl Default for CloudflareR2BucketListTool { fn default() -> Self { Self } }
+impl CloudflareR2BucketListTool { pub fn new() -> Self { Self } }
+#[async_trait]
+impl McpTool for CloudflareR2BucketListTool {
+    fn name(&self) -> &'static str { "cloudflare_r2_bucket_list" }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "List R2 (object-storage) buckets under the configured Cloudflare \
+                 account. Returns name/creation_date/location/storage_class. Note \
+                 the response is wrapped in result.buckets, not result directly. \
+                 Token must have Workers R2 Storage:Read scope."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let client = match crate::cloudflare_api::CloudflareClient::from_env() {
+            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+        };
+        match client.r2_bucket_list().await {
+            Ok(rows) => Ok(ToolResult::json_text(&json!({ "count": rows.len(), "buckets": rows }))),
+            Err(e) => Ok(ToolResult::error(&format!("{e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                            brave_search_* — REST API
 // ===========================================================================
 
@@ -9261,6 +9467,11 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
 
     // Brave Search REST API: independent web search, fallback / fresh-results channel.
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(BraveWebSearchTool::new()));
+
+    // Cloudflare REST API: zones / workers / R2 read scopes (others 403 with current token).
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(CloudflareZoneListTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(CloudflareWorkerListTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(CloudflareR2BucketListTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
