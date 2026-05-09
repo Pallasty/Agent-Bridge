@@ -98,6 +98,30 @@ R2 sign-up surface: ✅ 4 of 4 done.
 Target: 90% of pure-web sign-up forms reach the "API key shown" screen
 without manual intervention.
 
+### Round 2.5 — fallout from R1+R2 live testing (2026-05-09)
+
+Two issues surfaced when smoke-testing the R2 surface end-to-end:
+
+- [ ] **#5b SingletonLock self-heal** — R1.1's persistent profile makes
+  the chrome process outlive the agent-bridge daemon (intentionally,
+  for cookie persistence). When the daemon reconnects and tries to
+  launch a new chrome on the same profile, Chrome aborts with
+  `Failed to create SingletonLock`. Fix options: (a) detect lock,
+  check holder PID liveness, kill if it's an orphan from a known-dead
+  daemon; (b) read `<profile>/DevToolsActivePort` and
+  `Browser::connect(ws_url)` instead of launching; (b) is correct
+  long-term. Critical — silently breaks every reconnect right now.
+
+- [ ] **#4b cross-origin OOPIF support** — R2.4's eval_in_frame works
+  on same-origin / about:srcdoc iframes (verified 2026-05-09) but
+  **does NOT enumerate cross-origin iframes** because modern Chrome
+  runs them as out-of-process iframes (OOPIFs) with independent
+  targets. `Page.getFrameTree` per-target only sees same-process
+  frames. Fix: `Target.getTargets` (filter type=iframe) +
+  `Target.attachToTarget(flatten=true)` → get sessionId → send
+  `Runtime.evaluate` against that session. Significant — Stripe
+  Elements / reCAPTCHA / OAuth widgets all hit this path.
+
 ### Round 3 — the hard cases
 
 - [ ] #3 CAPTCHA pause/resume — issues a `notify`, blocks until
