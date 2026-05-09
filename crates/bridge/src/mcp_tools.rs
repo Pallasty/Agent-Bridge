@@ -1511,6 +1511,114 @@ impl McpTool for BrowserFindByTextTool {
     }
 }
 
+pub struct BrowserListFramesTool {
+    hub: Hub,
+}
+impl BrowserListFramesTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserListFramesTool {
+    fn name(&self) -> &'static str {
+        "browser_list_frames"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Enumerate the frame tree of `page`. Returns `[{frame_id, url, name, \
+                 parent_id}]` covering the main document and every iframe regardless of \
+                 cross-origin status. Use the `frame_id` (or a URL substring) with \
+                 `browser_eval_in_frame` to drive code inside Stripe Elements / reCAPTCHA \
+                 / Auth0 / any other embedded widget the parent JS cannot reach."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page": { "type": "string", "description": "Page id from browser_navigate." }
+                },
+                "required": ["page"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        match b.list_frames(&page).await {
+            Ok(v) => Ok(ToolResult::json_text(&v)),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
+pub struct BrowserEvalInFrameTool {
+    hub: Hub,
+}
+impl BrowserEvalInFrameTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserEvalInFrameTool {
+    fn name(&self) -> &'static str {
+        "browser_eval_in_frame"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Evaluate JavaScript inside a specific frame's isolated world. Pass \
+                 either `frame_id` (from browser_list_frames) or `frame_url_substring` \
+                 (matched against each frame's URL — first hit wins). Crosses cross-origin \
+                 iframe boundaries that the parent's own JS cannot touch (Stripe Elements, \
+                 reCAPTCHA, Auth0). The expression's last value is returned (wrap multi-\
+                 statement code in `(() => { ... })()`). Exception details are surfaced \
+                 with `text @ url:line:col`."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":                { "type": "string", "description": "Page id from browser_navigate." },
+                    "frame_id":            { "type": "string", "description": "Frame id from browser_list_frames (preferred — exact)." },
+                    "frame_url_substring": { "type": "string", "description": "Substring matched against each frame's URL — first hit wins." },
+                    "js":                  { "type": "string", "description": "JavaScript expression." }
+                },
+                "required": ["page", "js"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let js = args.get("js").and_then(|v| v.as_str()).unwrap_or("");
+        if js.is_empty() {
+            return Ok(ToolResult::error("missing 'js'"));
+        }
+        let fid = args.get("frame_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        let furl = args
+            .get("frame_url_substring")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        match b.eval_in_frame(&page, fid, furl, js).await {
+            Ok(v) => Ok(ToolResult::json_text(&v)),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
 pub struct AgentMessageTool {
     hub: Hub,
 }
@@ -3375,46 +3483,85 @@ impl McpTool for MemorySaveTool {
         match store.memory_save(&mem).await {
             Ok(()) => {
                 // Keep embedding cache coherent AND auto-evolve the graph:
-                // 1) upsert the new record into the cache
+                // 1) upsert the new record into the cache (best-effort)
                 // 2) **Phase 1 P4 structural** — pick top-k cosine neighbors
-                //    from the cache and write `evolved` edges. Future hybrid
-                //    searches expand on these edges, so the graph densifies
-                //    organically as memories are saved (the deterministic
-                //    half of A-MEM evolution; LLM-driven tag/context
-                //    rewriting deferred to P4b once an LLM client lands).
+                //    and write `evolved` edges. The graph densifies organically
+                //    as memories are saved (deterministic half of A-MEM
+                //    evolution; LLM-driven tag/X rewrite deferred to P4b).
+                //
+                // **Cache fallback fix**: the embedding cache is `None` until
+                // `session_bootstrap` or `memory_reindex` populates it. Pre-fix
+                // version silently exited if cache was empty — meaning P4
+                // never fired in cold sessions. Now: prefer cache when warm,
+                // fall back to `store.memory_search_semantic` when cold so
+                // edges always get written. The semantic-search call costs
+                // ~11ms per save (one embed + small cosine sweep), which is
+                // acceptable for a background spawn.
                 {
                     let cache = self.hub.memory_embed_cache.clone();
                     let store_for_evolve = store.clone();
                     let new_key_for_evolve = key.clone();
+                    let new_content_for_evolve = mem.content.clone();
                     let rec = mem.clone();
                     let emb = embed_text(&rec.content);
                     let emb_for_evolve = emb.clone();
                     tokio::spawn(async move {
-                        // Step 1: cache upsert (existing behavior).
-                        let mut guard = cache.lock().await;
-                        if let Some(ref mut cached) = *guard {
-                            cached.retain(|(r, _)| r.key != rec.key);
-                            cached.push((rec, emb));
-                            // Step 2: pick neighbors with cache still locked
-                            // (snapshot, then drop guard before slow IO).
-                            let neighbors = pick_evolution_neighbors(
-                                cached,
-                                &new_key_for_evolve,
-                                &emb_for_evolve,
-                                /* threshold */ 0.65,
-                                /* top_k */ 5,
-                            );
-                            drop(guard);
-                            for (neighbor_key, score) in neighbors {
-                                let _ = store_for_evolve
-                                    .memory_link(
-                                        &new_key_for_evolve,
-                                        &neighbor_key,
-                                        "evolved",
-                                        score,
+                        // Step 1: best-effort cache upsert. If the cache is
+                        // None we skip it — `memory_reindex` / `session_bootstrap`
+                        // will rebuild from DB later, and the new row's
+                        // embedding is already in the DB via memory_save.
+                        let neighbors: Vec<(String, f64)> = {
+                            let mut guard = cache.lock().await;
+                            if let Some(ref mut cached) = *guard {
+                                cached.retain(|(r, _)| r.key != rec.key);
+                                cached.push((rec, emb));
+                                let n = pick_evolution_neighbors(
+                                    cached,
+                                    &new_key_for_evolve,
+                                    &emb_for_evolve,
+                                    /* threshold */ 0.65,
+                                    /* top_k */ 5,
+                                );
+                                drop(guard);
+                                n
+                            } else {
+                                drop(guard);
+                                // Cold path: ask the store directly. Same
+                                // threshold / top_k semantics. Skill kind is
+                                // filtered post-hoc since the store call has
+                                // no kind-filter parameter.
+                                match store_for_evolve
+                                    .memory_search_semantic(
+                                        &new_content_for_evolve,
+                                        /* limit */ 15,
+                                        /* threshold */ 0.65,
                                     )
-                                    .await;
+                                    .await
+                                {
+                                    Ok(hits) => hits
+                                        .into_iter()
+                                        .filter(|h| {
+                                            h.record.key != new_key_for_evolve
+                                                && h.record.kind != "skill"
+                                        })
+                                        .take(5)
+                                        .map(|h| (h.record.key, h.score))
+                                        .collect(),
+                                    Err(_) => Vec::new(),
+                                }
                             }
+                        };
+
+                        // Step 2: write the evolution edges.
+                        for (neighbor_key, score) in neighbors {
+                            let _ = store_for_evolve
+                                .memory_link(
+                                    &new_key_for_evolve,
+                                    &neighbor_key,
+                                    "evolved",
+                                    score,
+                                )
+                                .await;
                         }
                     });
                 }
@@ -10219,6 +10366,8 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserPressKeyTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserSelectOptionTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserFindByTextTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserListFramesTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserEvalInFrameTool::new(hub.clone())));
     // Warp URL-scheme + status.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));
