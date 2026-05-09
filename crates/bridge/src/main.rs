@@ -202,6 +202,31 @@ enum DreamOp {
         #[arg(long)]
         dry_run: bool,
     },
+    /// 呼吸式画布 / Hebbian feedback — Promote strong co-activation pairs
+    /// (`memory_coactivation` rows with count ≥ `--min-count`) into explicit
+    /// `cofires` edges in `memory_edges`. Pairs that already have any
+    /// explicit edge are skipped — the structural edge always wins.
+    ///
+    /// This is the "fire together, **wire** together" half of Hebbian: α
+    /// records co-firings; this command crystallises the persistent ones
+    /// as real graph relations so they survive coactivation table pruning,
+    /// participate in `memory_neighbors` BFS, and stop showing as the
+    /// cyan-dotted underlay in Palace (they "graduate" to structural).
+    ///
+    /// `--dry-run` prints what would be promoted without writing.
+    Promote {
+        /// Minimum co-activation count to promote. Default 5 matches the
+        /// β-trigger "clusters emerged" threshold (top10/median ratio ≥ 5).
+        #[arg(long, default_value_t = 5)]
+        min_count: u64,
+        /// Maximum number of pairs to promote in one run. Caps blast radius
+        /// of accidental settings.
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        /// Inspect-only: print decisions, no writes.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -515,6 +540,11 @@ async fn main() -> Result<()> {
                 min_cluster_size,
                 dry_run,
             } => ab_bridge::dream_replay::run(*top_n, *min_cluster_size, *dry_run).await,
+            DreamOp::Promote {
+                min_count,
+                limit,
+                dry_run,
+            } => run_dream_promote(*min_count, *limit, *dry_run).await,
         };
     }
 
@@ -788,6 +818,137 @@ async fn run_dream_identity(days: u32, as_json: bool) -> Result<()> {
     println!();
 
     print_identity_section(&cur, &prior);
+    Ok(())
+}
+
+/// 呼吸式 / Hebbian — `agent-bridge dream promote`. Pull strong co-activation
+/// pairs and crystallise each as a `cofires` edge in `memory_edges`. Pairs
+/// already wired by an explicit edge (any type) are skipped — structural
+/// always wins. Idempotent: repeated runs only refresh the weight on
+/// already-promoted pairs (memory_link does INSERT … ON CONFLICT UPDATE).
+///
+/// Effect on Palace viewer (C3.6+):
+///   - before promote: pair shown as cyan dotted bezier underlay
+///   - after  promote: pair shown as neutral solid edge in main skeleton
+///                     (coact dedup hides the underlay since explicit wins)
+async fn run_dream_promote(min_count: u64, limit: u32, dry_run: bool) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use std::collections::HashSet;
+
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+
+    let pairs = store
+        .top_coactivation_edges(min_count, limit)
+        .await
+        .map_err(|e| anyhow::anyhow!("top_coactivation_edges: {e}"))?;
+    if pairs.is_empty() {
+        println!("(no coactivation pairs with count ≥ {min_count})");
+        println!("DB: {}", path.display());
+        return Ok(());
+    }
+
+    // Build the existing-edge set by querying memory_neighbors for every key
+    // referenced in the candidate pairs. Single pass per key (cached).
+    let mut existing: HashSet<(String, String)> = HashSet::new();
+    let mut probed: HashSet<String> = HashSet::new();
+    for c in &pairs {
+        for k in [&c.key_a, &c.key_b] {
+            if !probed.insert(k.clone()) {
+                continue;
+            }
+            let nbrs = store.memory_neighbors(k).await.unwrap_or_default();
+            for e in nbrs {
+                let p = if e.from_key < e.to_key {
+                    (e.from_key, e.to_key)
+                } else {
+                    (e.to_key, e.from_key)
+                };
+                existing.insert(p);
+            }
+        }
+    }
+
+    println!("# Hebbian promote — coact ≥ {min_count} → `cofires` edge");
+    println!("DB: {}", path.display());
+    println!("candidates: {} pair(s)", pairs.len());
+    println!();
+
+    let mut promoted = 0usize;
+    let mut skipped = 0usize;
+    let mut errors = 0usize;
+    for c in &pairs {
+        let pair = if c.key_a < c.key_b {
+            (c.key_a.clone(), c.key_b.clone())
+        } else {
+            (c.key_b.clone(), c.key_a.clone())
+        };
+        if existing.contains(&pair) {
+            skipped += 1;
+            if dry_run {
+                println!(
+                    "  SKIP    ({:>2} fires)  {}  ↔  {}    [already linked]",
+                    c.count,
+                    short_key(&pair.0, 38),
+                    short_key(&pair.1, 38),
+                );
+            }
+            continue;
+        }
+        // Map count → weight in [0.5, 0.95]. Stay strictly below 1.0 so
+        // memory_link doesn't auto-substitute the canonical type weight
+        // (its 1.0-sentinel branch). Lower bound ensures even a min-count
+        // pair has a measurable weight.
+        let weight = ((c.count as f64) / 10.0).clamp(0.5, 0.95);
+        if dry_run {
+            println!(
+                "  PROMOTE ({:>2} fires, w={:.2})  {}  ↔  {}",
+                c.count,
+                weight,
+                short_key(&pair.0, 38),
+                short_key(&pair.1, 38),
+            );
+            promoted += 1;
+        } else {
+            match store
+                .memory_link(&pair.0, &pair.1, "cofires", weight)
+                .await
+            {
+                Ok(()) => {
+                    promoted += 1;
+                    println!(
+                        "  ✓ ({:>2} fires, w={:.2})  {}  ↔  {}",
+                        c.count,
+                        weight,
+                        short_key(&pair.0, 38),
+                        short_key(&pair.1, 38),
+                    );
+                }
+                Err(e) => {
+                    errors += 1;
+                    eprintln!(
+                        "  ✗ ({} fires)  {} ↔ {}    [{e}]",
+                        c.count, pair.0, pair.1
+                    );
+                }
+            }
+        }
+    }
+
+    println!();
+    if dry_run {
+        println!(
+            "(dry run — no writes)  would promote {promoted}, skip {skipped}"
+        );
+    } else if errors == 0 {
+        println!("✓ promoted {promoted} pairs as `cofires`, skipped {skipped} (already linked)");
+    } else {
+        println!(
+            "promoted {promoted}, skipped {skipped}, FAILED {errors} — see stderr"
+        );
+    }
     Ok(())
 }
 
