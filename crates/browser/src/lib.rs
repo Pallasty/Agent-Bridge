@@ -124,5 +124,26 @@ pub trait BrowserBackend: Send + Sync {
         tag_filter: Option<&str>,
     ) -> Result<serde_json::Value>;
 
+    /// Enumerate the frame tree of `page`. Returns a flattened list of
+    /// `{frame_id, url, name, parent_id}` covering the main document and
+    /// every iframe, regardless of cross-origin status. Use this to
+    /// discover the frame_id for `eval_in_frame` (Stripe Elements,
+    /// reCAPTCHA, embedded Auth0 widgets all live in their own frame
+    /// with a distinguishing URL).
+    async fn list_frames(&self, page: &PageId) -> Result<serde_json::Value>;
+
+    /// Evaluate `js` inside a specific frame's isolated world. Pass either
+    /// `frame_id` (from list_frames) or `frame_url_substring` (matched
+    /// against each frame's URL — first hit wins). Crosses cross-origin
+    /// iframe boundaries that the parent's own JS cannot. Surfaces JS
+    /// exceptions with `text @ url:line:col` like the main-frame eval.
+    async fn eval_in_frame(
+        &self,
+        page: &PageId,
+        frame_id: Option<&str>,
+        frame_url_substring: Option<&str>,
+        js: &str,
+    ) -> Result<serde_json::Value>;
+
     async fn close(&self, page: &PageId) -> Result<()>;
 }

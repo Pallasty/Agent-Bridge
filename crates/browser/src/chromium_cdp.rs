@@ -25,7 +25,9 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use chromiumoxide::cdp::browser_protocol::accessibility::GetFullAxTreeParams;
 use chromiumoxide::cdp::browser_protocol::input::{DispatchKeyEventParams, DispatchKeyEventType};
-use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
+use chromiumoxide::cdp::browser_protocol::page::{
+    CaptureScreenshotFormat, CreateIsolatedWorldParams, FrameId, FrameTree, GetFrameTreeParams,
+};
 use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
 use chromiumoxide::keys::{KeyDefinition, USKEYBOARD_LAYOUT};
 use chromiumoxide::page::ScreenshotParams;
@@ -539,6 +541,104 @@ impl BrowserBackend for ChromiumCdpBackend {
         eval_with_exception_details(&p, &js).await
     }
 
+    async fn list_frames(&self, page: &PageId) -> Result<serde_json::Value> {
+        let p = self.page_handle(page)?;
+        let resp = p
+            .execute(GetFrameTreeParams::default())
+            .await
+            .map_err(|e| Error::Backend(format!("getFrameTree: {e}")))?;
+        let mut flat = Vec::new();
+        flatten_frame_tree(&resp.result.frame_tree, None, &mut flat);
+        Ok(serde_json::json!({ "count": flat.len(), "frames": flat }))
+    }
+
+    async fn eval_in_frame(
+        &self,
+        page: &PageId,
+        frame_id: Option<&str>,
+        frame_url_substring: Option<&str>,
+        js: &str,
+    ) -> Result<serde_json::Value> {
+        let p = self.page_handle(page)?;
+        // Resolve the target FrameId. Direct id wins; otherwise scan tree by url.
+        let target_fid = if let Some(fid) = frame_id.filter(|s| !s.is_empty()) {
+            FrameId::new(fid.to_string())
+        } else if let Some(sub) = frame_url_substring.filter(|s| !s.is_empty()) {
+            let resp = p
+                .execute(GetFrameTreeParams::default())
+                .await
+                .map_err(|e| Error::Backend(format!("getFrameTree: {e}")))?;
+            let mut found = None;
+            find_frame_by_url(&resp.result.frame_tree, sub, &mut found);
+            match found {
+                Some(fid) => fid,
+                None => {
+                    return Err(Error::Backend(format!(
+                        "eval_in_frame: no frame URL contains '{sub}' — list_frames to inspect"
+                    )));
+                }
+            }
+        } else {
+            return Err(Error::Backend(
+                "eval_in_frame: pass either frame_id or frame_url_substring".into(),
+            ));
+        };
+
+        // Mint an isolated world in the target frame and grab its execution
+        // context id; this works across origin boundaries that parent JS cannot.
+        let iw = p
+            .execute(
+                CreateIsolatedWorldParams::builder()
+                    .frame_id(target_fid)
+                    .world_name("agent-bridge-iso")
+                    .build()
+                    .map_err(|e| {
+                        Error::Backend(format!("createIsolatedWorld build: {e}"))
+                    })?,
+            )
+            .await
+            .map_err(|e| Error::Backend(format!("createIsolatedWorld: {e}")))?;
+        let ctx_id = iw.result.execution_context_id.clone();
+
+        // Evaluate with the isolated-world contextId.
+        let params = EvaluateParams::builder()
+            .expression(js.to_string())
+            .return_by_value(true)
+            .await_promise(true)
+            .context_id(ctx_id)
+            .build()
+            .map_err(|e| Error::Backend(format!("evaluate (frame) build: {e}")))?;
+        let resp = p
+            .execute(params)
+            .await
+            .map_err(|e| Error::Backend(format!("evaluate (frame) execute: {e}")))?;
+        let result = &resp.result;
+        if let Some(ex) = &result.exception_details {
+            let url = ex.url.as_deref().unwrap_or("(inline)");
+            let line = ex.line_number;
+            let col = ex.column_number;
+            let head = &ex.text;
+            let detail = ex
+                .exception
+                .as_ref()
+                .and_then(|e| e.description.as_deref())
+                .unwrap_or("");
+            let where_part = if !detail.is_empty() {
+                format!("{head}: {detail}")
+            } else {
+                head.clone()
+            };
+            return Err(Error::Backend(format!(
+                "evaluate (frame) exception @ {url}:{line}:{col}: {where_part}"
+            )));
+        }
+        Ok(result
+            .result
+            .value
+            .clone()
+            .unwrap_or(serde_json::Value::Null))
+    }
+
     async fn close(&self, page: &PageId) -> Result<()> {
         if let Some((_, p)) = self.pages.remove(page.as_str()) {
             // `Arc<Page>` may have outstanding references; if we're the last
@@ -548,6 +648,48 @@ impl BrowserBackend for ChromiumCdpBackend {
             }
         }
         Ok(())
+    }
+}
+
+/// Walk a [`FrameTree`] (root + child_frames) into a flat `Vec` of
+/// JSON `{frame_id, url, name, parent_id}` rows. Invoked by `list_frames`.
+fn flatten_frame_tree(
+    tree: &FrameTree,
+    parent_id: Option<&str>,
+    out: &mut Vec<serde_json::Value>,
+) {
+    let frame = &tree.frame;
+    out.push(serde_json::json!({
+        "frame_id": frame.id.inner(),
+        "url": frame.url,
+        "name": frame.name,
+        "parent_id": parent_id,
+    }));
+    if let Some(children) = &tree.child_frames {
+        let me = frame.id.inner().clone();
+        for child in children {
+            flatten_frame_tree(child, Some(me.as_str()), out);
+        }
+    }
+}
+
+/// Walk a [`FrameTree`] looking for the first frame whose URL contains
+/// `substring`. On hit, sets `out` and short-circuits further traversal.
+fn find_frame_by_url(tree: &FrameTree, substring: &str, out: &mut Option<FrameId>) {
+    if out.is_some() {
+        return;
+    }
+    if tree.frame.url.contains(substring) {
+        *out = Some(tree.frame.id.clone());
+        return;
+    }
+    if let Some(children) = &tree.child_frames {
+        for child in children {
+            find_frame_by_url(child, substring, out);
+            if out.is_some() {
+                return;
+            }
+        }
     }
 }
 
