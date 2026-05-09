@@ -45,11 +45,17 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Size of the rolling click window used to feed the co-activation table.
+/// 5 = "last 5 nodes you looked at" → the system records that these were
+/// in your attention together. Small enough that a fresh palace visit
+/// quickly self-prunes; large enough to capture multi-step exploration.
+const CLICK_WINDOW: usize = 5;
 
 const VIEWER_NODE_CAP: usize = 500;
 const STORE_FETCH_LIMIT: u32 = 2000;
@@ -60,6 +66,11 @@ const PALACE_HTML: &str = include_str!("../assets/palace.html");
 struct AppState {
     store: Arc<dyn StateStore>,
     markdown_root: Option<PathBuf>,
+    /// Rolling window of recently-clicked node keys. When full, each new
+    /// click triggers a `record_coactivation` call so the Hebbian system
+    /// learns that "these nodes were in the user's attention together".
+    /// `Mutex<VecDeque<…>>` (not async) — held only across cheap ops.
+    recent_clicks: Arc<Mutex<VecDeque<String>>>,
 }
 
 /// Run the Palace viewer HTTP server. Blocks until the listener is dropped.
@@ -80,6 +91,7 @@ pub async fn run(
     let state = AppState {
         store,
         markdown_root,
+        recent_clicks: Arc::new(Mutex::new(VecDeque::with_capacity(CLICK_WINDOW))),
     };
     let app = Router::new()
         .route("/", get(index))
@@ -423,25 +435,43 @@ async fn api_graph(
 
 /// Fetch a single memory record by key.
 ///
-/// Tries sqlite first; falls back to markdown if the key matches a `.md`
-/// file in the markdown root. Errors only if neither source has it.
+/// Tries sqlite first via `memory_get` (which atomically bumps
+/// `access_count` and `last_accessed_at` — this is **C2 click-as-trace**:
+/// every Palace click leaves a real cognitive imprint). Falls back to
+/// markdown if the key matches a `.md` file. After a successful sqlite
+/// hit, the key joins a rolling click window; once the window has 2+
+/// entries we call `record_coactivation` so the Hebbian system learns
+/// "these nodes were in the user's attention together".
 async fn api_memory(
     State(s): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    // sqlite lookup (list+filter is fine at <500 rows post-skill-filter).
-    let all = s
+    // sqlite lookup — auto-bumps access_count + last_accessed_at.
+    if let Some(m) = s
         .store
-        .list_memories(None, MemoryListSort::Recent, STORE_FETCH_LIMIT)
+        .memory_get(&key)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("list_memories: {e}"),
-            )
-        })?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_get: {e}")))?
+    {
+        // Feed the rolling click window → co-activation. Best-effort: any
+        // failure here just skips the recording, never blocks the read.
+        let coact_keys = {
+            let mut buf = s.recent_clicks.lock().expect("click window poisoned");
+            // Don't double-record consecutive clicks on the same node
+            // (user re-opening a panel shouldn't inflate the bond).
+            if buf.back().map(String::as_str) != Some(key.as_str()) {
+                if buf.len() >= CLICK_WINDOW {
+                    buf.pop_front();
+                }
+                buf.push_back(key.clone());
+            }
+            // Snapshot for the await call below — drop the lock first.
+            buf.iter().cloned().collect::<Vec<_>>()
+        };
+        if coact_keys.len() >= 2 {
+            let _ = s.store.record_coactivation(&coact_keys, None).await;
+        }
 
-    if let Some(m) = all.into_iter().find(|m| m.key == key) {
         return Ok(Json(json!({
             "key":          m.key,
             "kind":         m.kind,
@@ -457,7 +487,8 @@ async fn api_memory(
         })));
     }
 
-    // Markdown fallback.
+    // Markdown fallback. No access tracking yet — would need a separate
+    // file-watcher schema to attribute clicks to markdown nodes.
     if let Some(root) = &s.markdown_root {
         let path = root.join(format!("{key}.md"));
         if let Ok(body) = fs::read_to_string(&path) {

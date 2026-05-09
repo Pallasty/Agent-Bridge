@@ -169,9 +169,16 @@
     #panel .meta {
       color: #6a6a78;
       font-size: 10px;
-      margin-bottom: 14px;
+      margin-bottom: 6px;
       letter-spacing: 0.08em;
       text-transform: uppercase;
+    }
+    #panel .meta-time {
+      color: #4a4a55;
+      font-size: 10px;
+      margin-bottom: 14px;
+      letter-spacing: 0.04em;
+      font-variant-numeric: tabular-nums;
     }
     #panel .desc {
       color: #d8d8e2;
@@ -333,6 +340,21 @@ function colorForKind(k) { return KIND_COLORS[k] || DEFAULT_COLOR; }
 function escapeHTML(s) {
   if (s == null) return "";
   return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+}
+
+// Unix epoch seconds → "3d ago" / "5h ago" / "just now". Returns "" for
+// missing/zero timestamps so the meta line stays clean for markdown nodes
+// (which don't have a stored created_at).
+function relTime(epochSecs) {
+  if (!epochSecs) return "";
+  const diff = Math.floor(Date.now() / 1000) - epochSecs;
+  if (diff < 60)        return "just now";
+  if (diff < 3600)      return Math.floor(diff / 60) + "m ago";
+  if (diff < 86400)     return Math.floor(diff / 3600) + "h ago";
+  if (diff < 86400 * 7) return Math.floor(diff / 86400) + "d ago";
+  if (diff < 86400 * 30) return Math.floor(diff / (86400 * 7)) + "w ago";
+  if (diff < 86400 * 365) return Math.floor(diff / (86400 * 30)) + "mo ago";
+  return Math.floor(diff / (86400 * 365)) + "y ago";
 }
 
 // ── Global state ────────────────────────────────────────────────
@@ -644,11 +666,20 @@ async function showSidePanel(id) {
     const sourceLabel = m.source === "markdown" ? "markdown" : "sqlite";
     const descBlock = m.description
       ? `<div class="desc">${escapeHTML(m.description)}</div>` : "";
+    const created = relTime(m.created_at);
+    const updated = relTime(m.updated_at);
+    const timeBlock = created || updated
+      ? `<div class="meta-time">
+          ${created ? `created ${created}` : ""}
+          ${updated && updated !== created ? ` · updated ${updated}` : ""}
+        </div>`
+      : "";
     panel.innerHTML = `
       <h2>${escapeHTML(m.key)}</h2>
       <div class="meta">
         ${escapeHTML(m.kind)} · ${sourceLabel} · importance ${(m.importance || 0).toFixed(2)} · access ${m.access_count || 0}
       </div>
+      ${timeBlock}
       ${descBlock}
       <div class="tags">
         ${(m.tags || []).map(t => `<span class="tag">${escapeHTML(t)}</span>`).join("")}
