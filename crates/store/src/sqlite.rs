@@ -372,6 +372,26 @@ CREATE INDEX IF NOT EXISTS idx_agent_presence_active  ON agent_presence(last_hea
 CREATE INDEX IF NOT EXISTS idx_agent_presence_project ON agent_presence(project, role);
 "#;
 
+// v24 — Phase 2.x #7: indexed `dedupe_key` column on memories.
+// Phase 2 #2 (commit deafdc7) introduced caller-supplied `dedupe:<id>` tags
+// that group near-duplicate writes; the original lookup scanned the JSON
+// `tags` column with `LIKE '%"<tag>"%'` (full table scan + needle quoting
+// to dodge substring collisions). Promoting the canonical dedupe tag to its
+// own indexed TEXT column turns the lookup into a B-tree equality probe
+// and removes the substring-collision class entirely.
+//
+// Storage rule: dedupe_key = the FIRST `dedupe:*` element of `tags` (or NULL
+// if none). The tags array remains the source of truth for cross-machine
+// sync (no schema change needed at the wire) — dedupe_key is a derived
+// index. The migration backfills it for existing rows in pure Rust to
+// avoid a json1 dependency.
+const SCHEMA_V23: &str = r#"
+ALTER TABLE memories ADD COLUMN dedupe_key TEXT;
+CREATE INDEX IF NOT EXISTS idx_memories_dedupe_key
+    ON memories(dedupe_key)
+    WHERE dedupe_key IS NOT NULL;
+"#;
+
 // v23 — Phase 1 P2 reconsolidation: `superseded_by` foreign key on memories.
 // Lets memory_save auto-detect when a new save semantically supersedes an
 // existing record (cosine ≥ threshold) and mark the old row → status='superseded'
@@ -827,6 +847,44 @@ impl SqliteStore {
             if cur.as_str() == "21" {
                 c.execute_batch(SCHEMA_V22)?;
                 let _ = c.execute("UPDATE schema_meta SET value='22' WHERE key='version'", []);
+            }
+
+            // ── v23: indexed dedupe_key column (Phase 2.x #7) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "22".to_string());
+            if cur.as_str() == "22" {
+                c.execute_batch(SCHEMA_V23)?;
+                // Backfill from existing tags in pure Rust (no json1 dep).
+                // Only rows whose JSON-encoded tags array contains a
+                // `"dedupe:` substring need parsing; everything else stays
+                // NULL and skips the partial index.
+                let mut sel = c.prepare(
+                    "SELECT key, tags FROM memories
+                     WHERE dedupe_key IS NULL AND tags LIKE '%\"dedupe:%'",
+                )?;
+                let candidates: Vec<(String, String)> = sel
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                drop(sel);
+                let mut upd =
+                    c.prepare("UPDATE memories SET dedupe_key = ?1 WHERE key = ?2")?;
+                for (row_key, tags_json) in candidates {
+                    if let Ok(tags) = serde_json::from_str::<Vec<String>>(&tags_json) {
+                        if let Some(t) = tags.iter().find(|t| t.starts_with("dedupe:")) {
+                            upd.execute(params![t, row_key])?;
+                        }
+                    }
+                }
+                drop(upd);
+                let _ = c.execute("UPDATE schema_meta SET value='23' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -1613,6 +1671,10 @@ impl StateStore for SqliteStore {
             .filter(|t| t.starts_with("dedupe:"))
             .cloned()
             .collect();
+        // Phase 2.x #7: the canonical dedupe key (first dedupe:* tag) is
+        // promoted to its own indexed column. The full `tags` array stays
+        // as the wire-level source of truth; the column is a derived index.
+        let dedupe_key_storage: Option<String> = dedupe_tags.first().cloned();
 
         self.conn
             .call(move |c| -> RusqliteResult<()> {
@@ -1620,8 +1682,8 @@ impl StateStore for SqliteStore {
                     "INSERT INTO memories
                        (key, kind, content, tags, related_keys, scope,
                         created_at, updated_at, last_accessed_at, access_count,
-                        importance, status, trigger_pattern, embedding)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11)
+                        importance, status, trigger_pattern, embedding, dedupe_key)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11, ?12)
                      ON CONFLICT(key) DO UPDATE SET
                         kind          = excluded.kind,
                         content       = excluded.content,
@@ -1636,7 +1698,8 @@ impl StateStore for SqliteStore {
                             ELSE excluded.status
                         END,
                         trigger_pattern = excluded.trigger_pattern,
-                        embedding     = excluded.embedding",
+                        embedding     = excluded.embedding,
+                        dedupe_key    = excluded.dedupe_key",
                     params![
                         key,
                         kind_clone,
@@ -1648,29 +1711,36 @@ impl StateStore for SqliteStore {
                         importance,
                         status,
                         trigger_pattern,
-                        embedding_bytes
+                        embedding_bytes,
+                        dedupe_key_storage
                     ],
                 )?;
 
-                // ── dedupe-tag pass (Phase 2 #2) ─────────────────────────────
+                // ── dedupe-tag pass (Phase 2 #2 + Phase 2.x #7) ───────────────
                 // Caller-supplied `dedupe:<id>` tags explicitly group records
                 // that should collapse to the most recent write. Newer save
                 // (this one) wins; matching active records get superseded.
-                // Tag-based (not column-based) so cross-machine sync works
-                // without a schema migration — tags already serialize through
-                // memory_export / memory_import.
+                //
+                // The lookup uses the indexed `dedupe_key` column populated
+                // above (and backfilled by the v23 migration for legacy rows).
+                // The earlier LIKE %"<tag>"% scan needed quoting to dodge
+                // substring collisions like `dedupe:cluster:abc12345` matching
+                // `dedupe:cluster:abc123`; equality on dedupe_key removes that
+                // class of bug entirely.
+                //
+                // We loop over every dedupe_tag the caller passed (only the
+                // first one is stored in dedupe_key — multi-tag callers would
+                // only find peers via their first tag, which is the natural
+                // "canonical group" semantic).
                 for dedupe_tag in &dedupe_tags {
                     let mut cand_stmt = c.prepare(
                         "SELECT key FROM memories
                          WHERE key != ?1
                            AND status = 'active'
-                           AND tags LIKE ?2",
+                           AND dedupe_key = ?2",
                     )?;
-                    // The `\"<tag>\"` quoting matches a JSON-array string
-                    // element exactly, not a substring of another tag.
-                    let json_needle = format!("%\"{}\"%", dedupe_tag);
                     let dups: Vec<String> = cand_stmt
-                        .query_map(params![key, json_needle], |row| row.get::<_, String>(0))?
+                        .query_map(params![key, dedupe_tag], |row| row.get::<_, String>(0))?
                         .filter_map(|r| r.ok())
                         .collect();
                     for cand_key in dups {
@@ -5960,6 +6030,205 @@ mod tests {
         assert_eq!(
             v3_still.status, "active",
             "tag substring of another tag must not falsely supersede"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn dedupe_key_column_populated_and_used_for_indexed_lookup() {
+        // Phase 2.x #7: confirm the canonical dedupe tag lands in the
+        // indexed `dedupe_key` column (not just the JSON tags array), and
+        // that supersede still fires when looked up by exact column equality.
+        use crate::MemoryRecord;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-dedupe-col-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        // First save: dedupe tag at index 0.
+        let rec_a = MemoryRecord {
+            key: "rec_a".to_string(),
+            kind: "lesson".to_string(),
+            content: "alpha".to_string(),
+            tags: vec![
+                "dedupe:cluster:k7".to_string(),
+                "p5_replay".to_string(),
+            ],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec_a).await.expect("save rec_a");
+
+        // Second save with the same dedupe tag: should supersede rec_a via
+        // the indexed column lookup.
+        let rec_b = MemoryRecord {
+            key: "rec_b".to_string(),
+            content: "beta".to_string(),
+            ..rec_a.clone()
+        };
+        store.memory_save(&rec_b).await.expect("save rec_b");
+
+        // Probe the column directly to confirm it carries the canonical key.
+        let dedupe_keys: Vec<(String, Option<String>)> = store
+            .conn
+            .call(|c| -> RusqliteResult<Vec<(String, Option<String>)>> {
+                let mut stmt = c.prepare(
+                    "SELECT key, dedupe_key FROM memories ORDER BY key",
+                )?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                    })?
+                    .collect::<RusqliteResult<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .expect("probe dedupe_key column");
+        assert_eq!(
+            dedupe_keys,
+            vec![
+                ("rec_a".to_string(), Some("dedupe:cluster:k7".to_string())),
+                ("rec_b".to_string(), Some("dedupe:cluster:k7".to_string())),
+            ],
+            "dedupe_key column must be populated with the first dedupe:* tag",
+        );
+
+        // Behavioral check: rec_a was superseded by rec_b via the indexed
+        // lookup (mirrors the existing supersede test, scoped to this case).
+        let rec_a_after = store.memory_get("rec_a").await.expect("get").expect("exists");
+        assert_eq!(rec_a_after.status, "superseded");
+        assert_eq!(rec_a_after.superseded_by.as_deref(), Some("rec_b"));
+
+        // A row with NO dedupe tag must store NULL (so the partial index
+        // stays small).
+        let rec_c = MemoryRecord {
+            key: "rec_c".to_string(),
+            content: "gamma".to_string(),
+            tags: vec!["just_a_normal_tag".to_string()],
+            ..rec_a.clone()
+        };
+        store.memory_save(&rec_c).await.expect("save rec_c");
+        let rec_c_dk: Option<String> = store
+            .conn
+            .call(|c| -> RusqliteResult<Option<String>> {
+                c.query_row(
+                    "SELECT dedupe_key FROM memories WHERE key = 'rec_c'",
+                    [],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+            })
+            .await
+            .expect("probe rec_c");
+        assert_eq!(rec_c_dk, None, "no dedupe:* tag → NULL dedupe_key");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn dedupe_key_v23_migration_backfills_legacy_rows() {
+        // Phase 2.x #7 migration: rows written by pre-v23 binaries have
+        // `dedupe:*` tags but a NULL dedupe_key column. Re-running the
+        // migration must populate dedupe_key from the first dedupe:* tag
+        // in the JSON tags array.
+        use crate::MemoryRecord;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-dedupe-backfill-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+
+        // Step 1: open at current schema, write a row with a dedupe tag
+        // (current binary fills dedupe_key).
+        {
+            let store = SqliteStore::open(&db_path).await.expect("open v23");
+            store
+                .memory_save(&MemoryRecord {
+                    key: "legacy_row".to_string(),
+                    kind: "lesson".to_string(),
+                    content: "written before v23".to_string(),
+                    tags: vec![
+                        "dedupe:cluster:legacyk".to_string(),
+                        "p5".to_string(),
+                    ],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: String::new(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save legacy_row");
+        } // store dropped → conn released
+
+        // Step 2: faithfully reproduce a pre-v23 DB by dropping the
+        // dedupe_key column entirely and rolling schema_version back to
+        // "22" via raw rusqlite. Dropping the column auto-drops the
+        // partial index. (SQLite ≥3.35 supports DROP COLUMN.)
+        {
+            let raw = rusqlite::Connection::open(&db_path).expect("raw open");
+            // Partial index references the column → must drop it first.
+            raw.execute("DROP INDEX IF EXISTS idx_memories_dedupe_key", [])
+                .expect("drop dedupe_key index");
+            raw.execute("ALTER TABLE memories DROP COLUMN dedupe_key", [])
+                .expect("drop dedupe_key column");
+            raw.execute(
+                "UPDATE schema_meta SET value = '22' WHERE key = 'version'",
+                [],
+            )
+            .expect("reset version");
+            // Confirm the simulation: column is gone.
+            let probe: rusqlite::Result<i64> = raw.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name='dedupe_key'",
+                [],
+                |row| row.get::<_, i64>(0),
+            );
+            assert_eq!(probe.expect("pragma"), 0, "dedupe_key column must be gone");
+        }
+
+        // Step 3: re-open via SqliteStore — v22→v23 migration fires the
+        // backfill path.
+        let store = SqliteStore::open(&db_path).await.expect("re-open");
+        let dk_after: Option<String> = store
+            .conn
+            .call(|c| -> RusqliteResult<Option<String>> {
+                c.query_row(
+                    "SELECT dedupe_key FROM memories WHERE key = 'legacy_row'",
+                    [],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+            })
+            .await
+            .expect("probe after migration");
+        assert_eq!(
+            dk_after.as_deref(),
+            Some("dedupe:cluster:legacyk"),
+            "v23 backfill must extract the first dedupe:* tag",
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
