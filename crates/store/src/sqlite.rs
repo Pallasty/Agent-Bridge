@@ -372,6 +372,20 @@ CREATE INDEX IF NOT EXISTS idx_agent_presence_active  ON agent_presence(last_hea
 CREATE INDEX IF NOT EXISTS idx_agent_presence_project ON agent_presence(project, role);
 "#;
 
+// v23 — Phase 1 P2 reconsolidation: `superseded_by` foreign key on memories.
+// Lets memory_save auto-detect when a new save semantically supersedes an
+// existing record (cosine ≥ threshold) and mark the old row → status='superseded'
+// with a pointer to the replacement key. memory_search already filters
+// `status='active'` so superseded rows auto-drop from search.
+//
+// FK is intentionally NOT enforced: ON DELETE constraint would cascade if a
+// new memory got deleted, orphaning the supersede pointer. Soft pointer is
+// the museum-pattern equivalent for memory rows.
+const SCHEMA_V22: &str = r#"
+ALTER TABLE memories ADD COLUMN superseded_by TEXT;
+CREATE INDEX IF NOT EXISTS idx_memories_superseded_by ON memories(superseded_by);
+"#;
+
 // v22 — Phase 0 memory telemetry (`memory_query_log`). One row per user-facing
 // memory_search / memory_get call; aggregated by `memory_query_stats`.
 // Capped to MEMORY_QUERY_LOG_RING_CAP rows; oldest pruned by `record_memory_query`.
@@ -800,6 +814,19 @@ impl SqliteStore {
             if cur.as_str() == "20" {
                 c.execute_batch(SCHEMA_V21)?;
                 let _ = c.execute("UPDATE schema_meta SET value='21' WHERE key='version'", []);
+            }
+
+            // ── v22: superseded_by FK (Phase 1 P2 reconsolidation) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "21".to_string());
+            if cur.as_str() == "21" {
+                c.execute_batch(SCHEMA_V22)?;
+                let _ = c.execute("UPDATE schema_meta SET value='22' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -1627,10 +1654,17 @@ impl StateStore for SqliteStore {
                                  DO UPDATE SET weight = excluded.weight",
                                 params![key, cand_key, now],
                             )?;
+                            // **Phase 1 P2** — record the supersede pointer
+                            // alongside flipping status. Lets memory_get
+                            // expose `superseded_by` so callers can see
+                            // *what* replaced this row, not just that it
+                            // was retired. Older rows superseded before v22
+                            // stay with NULL pointer; new ones get linked.
                             c.execute(
-                                "UPDATE memories SET status = 'superseded'
+                                "UPDATE memories
+                                 SET status = 'superseded', superseded_by = ?2
                                  WHERE key = ?1 AND status = 'active'",
-                                params![cand_key],
+                                params![cand_key, key],
                             )?;
                         }
                     }
@@ -1653,7 +1687,7 @@ impl StateStore for SqliteStore {
                 let mut stmt = c.prepare(
                     "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count,
-                            importance, status, trigger_pattern
+                            importance, status, trigger_pattern, superseded_by
                      FROM memories WHERE key = ?1",
                 )?;
                 let r = stmt
@@ -1676,6 +1710,7 @@ impl StateStore for SqliteStore {
                                 .get::<_, String>(11)
                                 .unwrap_or_else(|_| "active".to_string()),
                             trigger_pattern: row.get::<_, Option<String>>(12)?,
+                            superseded_by: row.get::<_, Option<String>>(13)?,
                         })
                     })
                     .ok();
@@ -1729,7 +1764,7 @@ impl StateStore for SqliteStore {
                     "SELECT m.key, m.kind, m.content, m.tags, m.related_keys, m.scope,
                             m.created_at, m.updated_at, m.last_accessed_at, m.access_count,
                             bm25(memories_fts) AS bm25_score,
-                            m.importance, m.status, m.trigger_pattern
+                            m.importance, m.status, m.trigger_pattern, m.superseded_by
                      FROM memories_fts
                      JOIN memories m ON m.rowid = memories_fts.rowid
                      WHERE memories_fts MATCH ?1
@@ -1757,6 +1792,7 @@ impl StateStore for SqliteStore {
                                 .get::<_, String>(12)
                                 .unwrap_or_else(|_| "active".to_string()),
                             trigger_pattern: row.get::<_, Option<String>>(13)?,
+                            superseded_by: row.get::<_, Option<String>>(14)?,
                         };
                         let bm25: f64 = row.get(10)?;
                         Ok((rec, bm25))
@@ -1784,7 +1820,7 @@ impl StateStore for SqliteStore {
                     let mut exact_stmt = c.prepare(
                         "SELECT key, kind, content, tags, related_keys, scope,
                                 created_at, updated_at, last_accessed_at, access_count,
-                                importance, status, trigger_pattern
+                                importance, status, trigger_pattern, superseded_by
                          FROM memories
                          WHERE key = ?1 COLLATE NOCASE
                            AND status = 'active'
@@ -1810,6 +1846,7 @@ impl StateStore for SqliteStore {
                                     .get::<_, String>(11)
                                     .unwrap_or_else(|_| "active".to_string()),
                                 trigger_pattern: row.get::<_, Option<String>>(12)?,
+                                superseded_by: row.get::<_, Option<String>>(13)?,
                             })
                         })
                         .ok()
@@ -2004,7 +2041,7 @@ impl StateStore for SqliteStore {
                 let sql = format!(
                     "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count,
-                            importance, status, trigger_pattern
+                            importance, status, trigger_pattern, superseded_by
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
                        AND (?3 IS NULL
@@ -2037,6 +2074,7 @@ impl StateStore for SqliteStore {
                                 .get::<_, String>(11)
                                 .unwrap_or_else(|_| "active".to_string()),
                             trigger_pattern: row.get::<_, Option<String>>(12)?,
+                            superseded_by: row.get::<_, Option<String>>(13)?,
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -2336,7 +2374,7 @@ impl StateStore for SqliteStore {
                 let mut stmt = c.prepare(
                     "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count,
-                            importance, status, trigger_pattern
+                            importance, status, trigger_pattern, superseded_by
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
                        AND (?2 IS NULL OR updated_at >= ?2)
@@ -2362,6 +2400,7 @@ impl StateStore for SqliteStore {
                                 .get::<_, String>(11)
                                 .unwrap_or_else(|_| "active".to_string()),
                             trigger_pattern: row.get::<_, Option<String>>(12)?,
+                            superseded_by: row.get::<_, Option<String>>(13)?,
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -2736,7 +2775,7 @@ impl StateStore for SqliteStore {
                 let mut stmt = c.prepare(
                     "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count,
-                            importance, status, trigger_pattern, embedding
+                            importance, status, trigger_pattern, superseded_by, embedding
                      FROM memories
                      WHERE status = 'active' AND embedding IS NOT NULL",
                 )?;
@@ -2760,8 +2799,9 @@ impl StateStore for SqliteStore {
                                 .get::<_, String>(11)
                                 .unwrap_or_else(|_| "active".to_string()),
                             trigger_pattern: row.get::<_, Option<String>>(12)?,
+                            superseded_by: row.get::<_, Option<String>>(13)?,
                         };
-                        let emb_bytes: Vec<u8> = row.get(13)?;
+                        let emb_bytes: Vec<u8> = row.get(14)?;
                         Ok((rec, emb_bytes))
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -3301,7 +3341,7 @@ impl StateStore for SqliteStore {
                 let mut stmt = c.prepare(
                     "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count,
-                            importance, status, trigger_pattern, embedding
+                            importance, status, trigger_pattern, superseded_by, embedding
                      FROM memories
                      WHERE status = 'active' AND embedding IS NOT NULL",
                 )?;
@@ -3325,8 +3365,9 @@ impl StateStore for SqliteStore {
                                 .get::<_, String>(11)
                                 .unwrap_or_else(|_| "active".to_string()),
                             trigger_pattern: row.get::<_, Option<String>>(12)?,
+                            superseded_by: row.get::<_, Option<String>>(13)?,
                         };
-                        let emb_bytes: Vec<u8> = row.get(13)?;
+                        let emb_bytes: Vec<u8> = row.get(14)?;
                         Ok((rec, emb_bytes))
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -5054,6 +5095,7 @@ mod tests {
             importance: 0.5,
             status: "active".into(),
             trigger_pattern: None,
+            superseded_by: None,
         }
     }
 
@@ -5368,6 +5410,7 @@ mod tests {
             importance: 0.5,
             status: "active".to_string(),
             trigger_pattern: None,
+            superseded_by: None,
         };
         store.memory_save(&rec).await.expect("memory_save");
 
@@ -5416,6 +5459,7 @@ mod tests {
             importance: 0.5,
             status: "active".to_string(),
             trigger_pattern: Some("SIGKILL".to_string()),
+            superseded_by: None,
         };
         store.memory_save(&rec).await.expect("memory_save");
         let loaded = store
@@ -5516,6 +5560,7 @@ mod tests {
             importance: 0.5,
             status: "active".to_string(),
             trigger_pattern: None,
+            superseded_by: None,
         };
         store.memory_save(&mk("edge_rt_a")).await.expect("save a");
         store.memory_save(&mk("edge_rt_b")).await.expect("save b");
@@ -6115,6 +6160,7 @@ mod tests {
             importance: 0.5,
             status: "active".to_string(),
             trigger_pattern: None,
+            superseded_by: None,
         }
     }
 
@@ -6152,6 +6198,64 @@ mod tests {
 
         let edges_b = store.top_coactivation("bravo", 10).await.expect("top");
         assert_eq!(edges_b.len(), 2);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_save_supersede_sets_pointer_back_to_new_key() {
+        // **Phase 1 P2** — when memory_save's auto-supersede path fires
+        // (token overlap > 0.5), the OLD row should get
+        // `superseded_by = <new_key>` in addition to status='superseded'.
+        // Without the pointer, callers had to traverse memory_edges to
+        // discover what replaced a retired record.
+        let (dir, store) = fresh_store("supersede-pointer").await;
+
+        // Save the original. Distinct kind to make supersede candidate
+        // discovery deterministic (kind filter in supersede SQL).
+        let mut old = make_memrec(
+            "lesson_path_c_v01",
+            "Path C actuator v01 design rationale build at /tmp/agent-bridge-pathc \
+             with SEED_BOOST_FACTOR 1.20 and Mac-targeted deploy recipe",
+        );
+        old.kind = "lesson".into();
+        store.memory_save(&old).await.expect("save old");
+
+        // Save a near-superset memory with same kind + same scope. Token
+        // overlap is high (sharing all the path-c-actuator vocabulary)
+        // so token_overlap_ratio > 0.5 should fire the supersede path.
+        let mut new = make_memrec(
+            "lesson_path_c_v02",
+            "Path C actuator v02 design rationale build at /tmp/agent-bridge-pathc-v02 \
+             with SEED_BOOST_FACTOR 1.20 and Mac-targeted deploy recipe \
+             plus revised hub_clusters consumer wiring",
+        );
+        new.kind = "lesson".into();
+        store.memory_save(&new).await.expect("save new");
+
+        // The OLD record must now be superseded with pointer to NEW.
+        let retired = store
+            .memory_get("lesson_path_c_v01")
+            .await
+            .expect("get old");
+        // Even superseded records are returned by memory_get — only
+        // memory_search filters them out via status='active'.
+        let retired = retired.expect("old still readable");
+        assert_eq!(retired.status, "superseded");
+        assert_eq!(
+            retired.superseded_by.as_deref(),
+            Some("lesson_path_c_v02"),
+            "supersede pointer must name the replacement key"
+        );
+
+        // The NEW record must remain active and have NULL pointer.
+        let live = store
+            .memory_get("lesson_path_c_v02")
+            .await
+            .expect("get new")
+            .expect("new exists");
+        assert_eq!(live.status, "active");
+        assert!(live.superseded_by.is_none());
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

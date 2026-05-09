@@ -437,6 +437,7 @@ pub(crate) fn push_curated(
         importance: 0.5,
         status: "active".to_string(),
         trigger_pattern: None,
+        superseded_by: None,
     });
 }
 
@@ -590,6 +591,7 @@ fn curate_implicit(
             importance,
             status: "active".to_string(),
             trigger_pattern: None,
+            superseded_by: None,
         });
     }
     results

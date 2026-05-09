@@ -1329,6 +1329,71 @@ impl McpTool for BrowserListPagesTool {
     }
 }
 
+pub struct BrowserPressKeyTool {
+    hub: Hub,
+}
+impl BrowserPressKeyTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserPressKeyTool {
+    fn name(&self) -> &'static str {
+        "browser_press_key"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Dispatch a key-down + key-up sequence to whatever element is \
+                 currently focused on `page`. `key` is a single character (\"a\", \"0\") \
+                 or a named key (\"Enter\", \"Tab\", \"Escape\", \"ArrowDown\", \"Backspace\", \
+                 etc.; full set: chromiumoxide::keys::USKEYBOARD_LAYOUT). \
+                 `modifiers` is a CDP modifier bitmask: 1=Alt, 2=Ctrl, 4=Meta/Cmd, \
+                 8=Shift; combine by OR-ing (e.g. 8|2 = 10 for Shift+Ctrl). \
+                 Default 0 = no modifiers."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":      { "type": "string", "description": "Page id from browser_navigate." },
+                    "key":       { "type": "string", "description": "Key name or single character." },
+                    "modifiers": { "type": "integer", "default": 0, "minimum": 0, "maximum": 15 }
+                },
+                "required": ["page", "key"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let key = match args.get("key").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing 'key'")),
+        };
+        let modifiers = args
+            .get("modifiers")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            .clamp(0, 15) as u32;
+        match b.press_key(&page, &key, modifiers).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({
+                "page": page.as_str(),
+                "key": key,
+                "modifiers": modifiers,
+                "status": "ok"
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
 pub struct AgentMessageTool {
     hub: Hub,
 }
@@ -3158,6 +3223,7 @@ impl McpTool for MemorySaveTool {
             importance,
             status: "active".to_string(),
             trigger_pattern,
+            superseded_by: None,
         };
         match store.memory_save(&mem).await {
             Ok(()) => {
@@ -3497,14 +3563,25 @@ impl McpTool for MemorySearchTool {
         // fire-and-forget background work; never block search latency.
         // ctx_centroid is None for now (mode-agnostic α); follow-up plumbs
         // hit embeddings through for richer trace.
-        // Run on PRE-filter hits so cross-kind edges (e.g. skill ↔ memory)
-        // keep forming even when callers exclude_kinds the skill out of output.
-        if hits.len() >= 2 {
+        //
+        // **Phase 1 P1.5 — skill filter.** Exclude `kind=skill` records
+        // from coactivation writes. Skills are *procedures*, not knowledge
+        // facts; they show up in result pages by FTS overlap and would ride
+        // the P1 boost loop unfairly (Phase 1 P1 demo confirmed: a Java
+        // skill record rode +22% on a Path C query). Same intent as
+        // memory_link_audit defaulting to `include_skills=false`. The
+        // filter applies pre-record, so the graph stays clean at write
+        // time rather than needing a downstream cleanup.
+        let coact_keys: Vec<String> = hits
+            .iter()
+            .filter(|h| h.record.kind != "skill")
+            .take(10)
+            .map(|h| h.record.key.clone())
+            .collect();
+        if coact_keys.len() >= 2 {
             let store_clone = store.clone();
-            let keys: Vec<String> =
-                hits.iter().take(10).map(|h| h.record.key.clone()).collect();
             tokio::spawn(async move {
-                let _ = store_clone.record_coactivation(&keys, None).await;
+                let _ = store_clone.record_coactivation(&coact_keys, None).await;
             });
         }
 
@@ -9961,6 +10038,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserFillFormTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserWaitForTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserListPagesTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserPressKeyTool::new(hub.clone())));
     // Warp URL-scheme + status.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));
@@ -10884,6 +10962,7 @@ mod tests {
             importance,
             status: "active".into(),
             trigger_pattern: None,
+            superseded_by: None,
         }
     }
 
@@ -11054,6 +11133,7 @@ mod tests {
                 importance: 0.5,
                 status: "active".into(),
                 trigger_pattern: None,
+                superseded_by: None,
             },
             score,
         }

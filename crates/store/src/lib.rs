@@ -127,6 +127,12 @@ pub struct MemoryRecord {
     /// `session_bootstrap`'s `error_hint` (case-insensitive).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trigger_pattern: Option<String>,
+    /// **Phase 1 P2** — When this row was auto-marked `status='superseded'`
+    /// by `memory_save` (see `auto_supersede_threshold`), this points at the
+    /// replacement row's key. `None` for active records and for records that
+    /// were superseded manually without going through the auto-detect path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<String>,
 }
 
 fn default_importance() -> f64 {
@@ -1260,6 +1266,7 @@ mod session_handoff_order_tests {
             importance: 0.5,
             status: "active".into(),
             trigger_pattern: None,
+            superseded_by: None,
         }
     }
 
