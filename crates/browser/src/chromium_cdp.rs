@@ -24,6 +24,7 @@ use ab_core::{Error, PageId, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use chromiumoxide::cdp::browser_protocol::accessibility::GetFullAxTreeParams;
+use chromiumoxide::cdp::browser_protocol::dom::SetFileInputFilesParams;
 use chromiumoxide::cdp::browser_protocol::emulation::{
     SetDeviceMetricsOverrideParams, SetUserAgentOverrideParams,
 };
@@ -353,6 +354,31 @@ impl BrowserBackend for ChromiumCdpBackend {
             .await
             .map_err(|e| Error::Backend(format!("screenshot: {e}")))?;
         Ok(Bytes::from(png))
+    }
+
+    async fn upload_file(
+        &self,
+        page: &PageId,
+        selector: &str,
+        files: Vec<String>,
+    ) -> Result<()> {
+        if files.is_empty() {
+            return Err(Error::InvalidArgument("files is empty".into()));
+        }
+        let p = self.page_handle(page)?;
+        let el = p
+            .find_element(selector.to_string())
+            .await
+            .map_err(|e| Error::Backend(format!("find_element {selector}: {e}")))?;
+        let params = SetFileInputFilesParams::builder()
+            .files(files)
+            .backend_node_id(el.backend_node_id.clone())
+            .build()
+            .map_err(|e| Error::Backend(format!("setFileInputFiles builder: {e}")))?;
+        p.execute(params)
+            .await
+            .map_err(|e| Error::Backend(format!("setFileInputFiles: {e}")))?;
+        Ok(())
     }
 
     async fn set_user_agent(

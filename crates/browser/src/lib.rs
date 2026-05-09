@@ -202,6 +202,19 @@ pub trait BrowserBackend: Send + Sync {
         max_results: usize,
     ) -> Result<Vec<CapturedResponse>>;
 
+    /// Set files for an `<input type="file">` element matching
+    /// `selector`. `files` is a list of absolute paths on the
+    /// machine running chrome (the daemon's host). Triggers `change`
+    /// events on the input. Errors with `not found` if the selector
+    /// matches nothing, or if the matched element isn't a file input
+    /// (chrome will reject it).
+    async fn upload_file(
+        &self,
+        page: &PageId,
+        selector: &str,
+        files: Vec<String>,
+    ) -> Result<()>;
+
     /// Override the User-Agent string and (optionally) the
     /// `Accept-Language` header for `page` (CDP
     /// `Emulation.setUserAgentOverride`). Persists for the lifetime

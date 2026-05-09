@@ -2214,6 +2214,78 @@ impl McpTool for BrowserScrollTool {
     }
 }
 
+pub struct BrowserUploadFileTool {
+    hub: Hub,
+}
+impl BrowserUploadFileTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserUploadFileTool {
+    fn name(&self) -> &'static str {
+        "browser_upload_file"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Set files for an `<input type=\"file\">` element via CDP \
+                 `DOM.setFileInputFiles`. Bypasses the OS file-picker dialog (which is \
+                 unscriptable). `files` is a list of absolute paths on the daemon host. \
+                 The input's `change` event fires automatically — no need to manually \
+                 dispatch. Useful for ID-document upload steps in KYC sign-ups, avatar \
+                 uploads, etc."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":     { "type": "string", "description": "Page id from browser_navigate." },
+                    "selector": { "type": "string", "description": "CSS selector for the file <input> element." },
+                    "files":    {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "minItems": 1,
+                        "description": "Absolute paths on the daemon host. Multi-file inputs accept multiple; single inputs use the first."
+                    }
+                },
+                "required": ["page", "selector", "files"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let selector = args.get("selector").and_then(|v| v.as_str()).unwrap_or("");
+        if selector.is_empty() {
+            return Ok(ToolResult::error("missing 'selector'"));
+        }
+        let files: Vec<String> = match args.get("files").and_then(|v| v.as_array()) {
+            Some(arr) => arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect(),
+            None => return Ok(ToolResult::error("missing 'files' array")),
+        };
+        if files.is_empty() {
+            return Ok(ToolResult::error("'files' is empty"));
+        }
+        match b.upload_file(&page, selector, files.clone()).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({
+                "status": "ok",
+                "uploaded": files.len(),
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
 pub struct BrowserSetEmulationTool {
     hub: Hub,
 }
@@ -11421,6 +11493,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserScrollTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserHoverTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserSetEmulationTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserUploadFileTool::new(hub.clone())));
     // Warp URL-scheme + status.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));
