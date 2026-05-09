@@ -808,6 +808,52 @@ impl BrowserBackend for ChromiumCdpBackend {
             .unwrap_or(serde_json::Value::Null))
     }
 
+    async fn scroll(
+        &self,
+        page: &PageId,
+        selector: Option<&str>,
+        dx: f64,
+        dy: f64,
+    ) -> Result<serde_json::Value> {
+        let p = match self.pages.get(page.as_str()) {
+            Some(p) => p.clone(),
+            None => return Err(Error::NotFound(format!("page not tracked: {}", page.as_str()))),
+        };
+        if let Some(sel) = selector {
+            let el = p
+                .find_element(sel.to_string())
+                .await
+                .map_err(|e| Error::Backend(format!("find_element {sel}: {e}")))?;
+            el.scroll_into_view()
+                .await
+                .map_err(|e| Error::Backend(format!("scroll_into_view: {e}")))?;
+        } else if dx != 0.0 || dy != 0.0 {
+            let js = format!("window.scrollBy({dx}, {dy})");
+            self.eval(page, &js).await?;
+        }
+        // Always report current scroll offset so the agent can verify.
+        self.eval(
+            page,
+            "({scrollX: window.scrollX, scrollY: window.scrollY, scrollHeight: document.documentElement.scrollHeight})",
+        )
+        .await
+    }
+
+    async fn hover(&self, page: &PageId, selector: &str) -> Result<()> {
+        let p = match self.pages.get(page.as_str()) {
+            Some(p) => p.clone(),
+            None => return Err(Error::NotFound(format!("page not tracked: {}", page.as_str()))),
+        };
+        let el = p
+            .find_element(selector.to_string())
+            .await
+            .map_err(|e| Error::Backend(format!("find_element {selector}: {e}")))?;
+        el.hover()
+            .await
+            .map_err(|e| Error::Backend(format!("hover: {e}")))?;
+        Ok(())
+    }
+
     async fn pause_for_human(&self, page: &PageId, timeout_ms: u64) -> Result<PauseOutcome> {
         let timeout_ms = timeout_ms.clamp(1_000, 1_800_000);
         let key = page.as_str().to_string();

@@ -202,6 +202,27 @@ pub trait BrowserBackend: Send + Sync {
         max_results: usize,
     ) -> Result<Vec<CapturedResponse>>;
 
+    /// Scroll `page`. If `selector` is `Some`, scroll the matching
+    /// element into view (centered). Otherwise dispatch a
+    /// `window.scrollBy(dx, dy)` with the supplied pixel deltas
+    /// (default 0). Returns the post-scroll
+    /// `{scrollX, scrollY, scrollHeight}` for inspection.
+    async fn scroll(
+        &self,
+        page: &PageId,
+        selector: Option<&str>,
+        dx: f64,
+        dy: f64,
+    ) -> Result<serde_json::Value>;
+
+    /// Move the mouse cursor over the first element matching `selector`
+    /// (auto-scrolls it into view first). Triggers `mouseenter` /
+    /// `mouseover` handlers, including CSS `:hover` styles. Useful for
+    /// drop-down menus that only render on hover and tooltip
+    /// activation. Errors with `not found` if the selector matches
+    /// nothing.
+    async fn hover(&self, page: &PageId, selector: &str) -> Result<()>;
+
     /// Reload `page` (CDP `Page.reload`) and wait for the load event.
     /// Equivalent to clicking the browser's reload button.
     async fn reload(&self, page: &PageId) -> Result<()>;

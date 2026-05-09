@@ -2078,6 +2078,114 @@ impl McpTool for BrowserClosePageTool {
     }
 }
 
+pub struct BrowserScrollTool {
+    hub: Hub,
+}
+impl BrowserScrollTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserScrollTool {
+    fn name(&self) -> &'static str {
+        "browser_scroll"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Scroll `page`. If `selector` is given, scroll the matching \
+                 element into view (centered) — useful for revealing buttons below the \
+                 fold before clicking. Otherwise dispatch `window.scrollBy(dx, dy)` with \
+                 the supplied pixel deltas. Returns post-scroll \
+                 `{scrollX, scrollY, scrollHeight}` so the agent can verify."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":     { "type": "string", "description": "Page id from browser_navigate." },
+                    "selector": { "type": "string", "description": "CSS selector to scrollIntoView. Mutually exclusive with dx/dy." },
+                    "dx":       { "type": "number", "default": 0, "description": "Horizontal pixels (used when selector is absent)." },
+                    "dy":       { "type": "number", "default": 0, "description": "Vertical pixels (used when selector is absent)." }
+                },
+                "required": ["page"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let selector = args
+            .get("selector")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let dx = args.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let dy = args.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        match b.scroll(&page, selector, dx, dy).await {
+            Ok(v) => Ok(ToolResult::json_text(&v)),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
+pub struct BrowserHoverTool {
+    hub: Hub,
+}
+impl BrowserHoverTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserHoverTool {
+    fn name(&self) -> &'static str {
+        "browser_hover"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Move the mouse cursor over the first element matching `selector` \
+                 (auto-scrolls into view first). Triggers `mouseenter` / `mouseover` \
+                 handlers and CSS `:hover` styles — useful for revealing drop-down menus, \
+                 tooltips, and 'show on hover' UI affordances before clicking the \
+                 newly-visible target."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":     { "type": "string", "description": "Page id from browser_navigate." },
+                    "selector": { "type": "string", "description": "CSS selector for the element to hover over." }
+                },
+                "required": ["page", "selector"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let selector = args.get("selector").and_then(|v| v.as_str()).unwrap_or("");
+        if selector.is_empty() {
+            return Ok(ToolResult::error("missing 'selector'"));
+        }
+        match b.hover(&page, selector).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({ "status": "ok" }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
 pub struct AgentMessageTool {
     hub: Hub,
 }
@@ -11097,6 +11205,8 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserBackTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserForwardTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserClosePageTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserScrollTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserHoverTool::new(hub.clone())));
     // Warp URL-scheme + status.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));
