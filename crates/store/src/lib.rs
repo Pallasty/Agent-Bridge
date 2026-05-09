@@ -903,6 +903,19 @@ pub trait StateStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// **Phase 1 P5** — return up to `limit` coactivation edges with
+    /// `count >= min_count`, ordered by count DESC. Powers the dream-replay
+    /// cluster picker (cluster building scans the heaviest edges first and
+    /// joins endpoints with union-find). Default no-op for non-SQLite stores.
+    async fn top_coactivation_edges(
+        &self,
+        min_count: u64,
+        limit: u32,
+    ) -> Result<Vec<CoactivationEdge>> {
+        let _ = (min_count, limit);
+        Ok(Vec::new())
+    }
+
     /// **Phase 0 telemetry** — append one row to `memory_query_log`. Called
     /// by the MCP layer immediately after `memory_search` / `memory_get` so
     /// hit-rate / latency / top-hit-age can be aggregated. Default impl is

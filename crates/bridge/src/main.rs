@@ -152,6 +152,25 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **Phase 1 P5** — Sleep replay: scan the coactivation graph for tight
+    /// clusters, ask the LLM to consolidate each into a higher-order summary
+    /// memory, and `summarizes`-link sources back to the summary. Designed
+    /// to run nightly via cron (`0 4 * * *`). `--dry-run` prints what would
+    /// be summarized without calling the LLM or writing anything.
+    ///
+    /// See `project_phase1_complete_p5_design_draft.md` for design rationale.
+    Replay {
+        /// Maximum number of clusters to summarize this round.
+        #[arg(long, default_value_t = 5)]
+        top_n: usize,
+        /// Minimum cluster size (memory keys) to consider summarizing.
+        /// Smaller clusters typically aren't worth a synthesis pass.
+        #[arg(long, default_value_t = 3)]
+        min_cluster_size: usize,
+        /// Inspect-only: print picked clusters but skip LLM + writes.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -460,6 +479,11 @@ async fn main() -> Result<()> {
         return match op {
             DreamOp::Stats { json } => run_dream_stats(*json).await,
             DreamOp::Identity { days, json } => run_dream_identity(*days, *json).await,
+            DreamOp::Replay {
+                top_n,
+                min_cluster_size,
+                dry_run,
+            } => ab_bridge::dream_replay::run(*top_n, *min_cluster_size, *dry_run).await,
         };
     }
 
