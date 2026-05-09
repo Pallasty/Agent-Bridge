@@ -76,12 +76,21 @@ After Round 1: every `browser_*` interaction can be properly observed
 and retried, login state survives daemon restarts, and OAuth pop-ups +
 "open in new tab" links are addressable.
 
-### Round 2 — sign-up main act
+### Round 2 — sign-up main act (started 2026-05-09)
 
-- [ ] #6 `browser_press_key`
-- [ ] #7 `browser_select_option`
-- [ ] #8 `browser_find_by_text` (a11y-tree match first, XPath fallback)
-- [ ] #4 iframe scope flag on existing tools (`frame_url` / `frame_index`)
+- [x] **#6 `browser_press_key`** (commits `baf217c` MCP wrapper, `86a666a`
+  trait/impl fixup) — CDP `Input.dispatchKeyEvent` with named keys from
+  `chromiumoxide::keys::USKEYBOARD_LAYOUT` + 4-bit modifier bitmask.
+- [x] **#7 `browser_select_option`** (commits `07ccb00` wrapper, `303df01`
+  trait/impl fixup) — eval-based `<select>` handler matching by value
+  OR text label; dispatches input+change events.
+- [x] **#8 `browser_find_by_text`** (commits `07ccb00` wrapper, `303df01`
+  trait/impl fixup) — DOM scan + deepest-match filter + auto-generated
+  CSS selector path; up to 5 candidates returned.
+- [ ] **#4 iframe scope** — needs `Page::frames()` + `executionContextId`
+  threading; defer to its own commit since it touches multiple tools.
+
+R2 sign-up surface: 3 of 4 done. Iframe is the last hold-out.
 
 Target: 90% of pure-web sign-up forms reach the "API key shown" screen
 without manual intervention.
