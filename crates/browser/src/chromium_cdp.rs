@@ -25,10 +25,12 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use chromiumoxide::cdp::browser_protocol::accessibility::GetFullAxTreeParams;
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
+use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
 use chromiumoxide::page::ScreenshotParams;
 use chromiumoxide::{Browser, BrowserConfig, Page};
 use dashmap::DashMap;
 use futures::StreamExt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -118,9 +120,16 @@ impl ChromiumCdpBackend {
     }
 
     /// Spawn chrome + the chromiumoxide event handler. Honours
-    /// `AGENT_BRIDGE_HEADLESS` and `AGENT_BRIDGE_CHROME`. Each launch picks a
-    /// per-PID user-data-dir to avoid Chrome's `SingletonLock` collisions
-    /// when multiple agent-bridge daemons coexist.
+    /// `AGENT_BRIDGE_HEADLESS` and `AGENT_BRIDGE_CHROME`.
+    ///
+    /// User-data-dir resolution (cookies / login state survive restart here):
+    /// 1. `AGENT_BRIDGE_BROWSER_PROFILE` env (explicit override)
+    /// 2. `$HOME/.cache/agent-bridge/chrome-profile` (default)
+    /// 3. `/tmp/agent-bridge-chrome-<pid>` (last-resort fallback if HOME unset)
+    ///
+    /// Chrome's `SingletonLock` may prevent two agent-bridge daemons sharing
+    /// the same profile concurrently. If you need parallel daemons, set
+    /// `AGENT_BRIDGE_BROWSER_PROFILE=/tmp/agent-bridge-<id>` per instance.
     async fn launch_chrome() -> Result<Browser> {
         let headless = std::env::var("AGENT_BRIDGE_HEADLESS")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -135,8 +144,11 @@ impl ChromiumCdpBackend {
         if let Ok(path) = std::env::var("AGENT_BRIDGE_CHROME") {
             cfg = cfg.chrome_executable(path);
         }
-        let user_data =
-            std::env::temp_dir().join(format!("agent-bridge-chrome-{}", std::process::id()));
+        let user_data = resolve_user_data_dir();
+        if let Err(e) = std::fs::create_dir_all(&user_data) {
+            warn!(path = %user_data.display(), error = %e, "create_dir_all on chrome profile failed; chrome may fall back to default");
+        }
+        info!(profile = %user_data.display(), "chrome user-data-dir");
         cfg = cfg.user_data_dir(user_data);
 
         let cfg = cfg
@@ -190,15 +202,7 @@ impl BrowserBackend for ChromiumCdpBackend {
 
     async fn eval(&self, page: &PageId, js: &str) -> Result<serde_json::Value> {
         let p = self.page_handle(page)?;
-        let val = p
-            .evaluate(js)
-            .await
-            .map_err(|e| Error::Backend(format!("evaluate: {e}")))?;
-        // `into_value` deserialises to anything; ask for raw JSON.
-        let v: serde_json::Value = val
-            .into_value()
-            .map_err(|e| Error::Backend(format!("into_value: {e}")))?;
-        Ok(v)
+        eval_with_exception_details(&p, js).await
     }
 
     async fn snapshot_a11y(&self, page: &PageId) -> Result<A11yNode> {
@@ -248,13 +252,7 @@ impl BrowserBackend for ChromiumCdpBackend {
                 return '';
             }
         })()"#;
-        let val = p
-            .evaluate(JS)
-            .await
-            .map_err(|e| Error::Backend(format!("extract_text evaluate: {e}")))?;
-        let v: serde_json::Value = val
-            .into_value()
-            .map_err(|e| Error::Backend(format!("extract_text into_value: {e}")))?;
+        let v = eval_with_exception_details(&p, JS).await?;
         Ok(json_eval_result_as_plain_text(&v))
     }
 
@@ -273,14 +271,7 @@ impl BrowserBackend for ChromiumCdpBackend {
              el.dispatchEvent(new Event('change', {{ bubbles: true }})); \
              return true; }})()"
         );
-        let val = p
-            .evaluate(js.as_str())
-            .await
-            .map_err(|e| Error::Backend(format!("fill_form evaluate: {e}")))?;
-        let _: serde_json::Value = val
-            .into_value()
-            .map_err(|e| Error::Backend(format!("fill_form into_value: {e}")))?;
-        Ok(())
+        eval_with_exception_details(&p, &js).await.map(|_| ())
     }
 
     async fn close(&self, page: &PageId) -> Result<()> {
@@ -293,6 +284,64 @@ impl BrowserBackend for ChromiumCdpBackend {
         }
         Ok(())
     }
+}
+
+/// Resolve the chrome user-data-dir (login/cookies persist here across daemon
+/// restarts). Honours `AGENT_BRIDGE_BROWSER_PROFILE`; defaults to
+/// `$HOME/.cache/agent-bridge/chrome-profile`.
+fn resolve_user_data_dir() -> PathBuf {
+    if let Ok(custom) = std::env::var("AGENT_BRIDGE_BROWSER_PROFILE") {
+        if !custom.trim().is_empty() {
+            return PathBuf::from(custom);
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.is_empty() {
+            return PathBuf::from(home).join(".cache/agent-bridge/chrome-profile");
+        }
+    }
+    std::env::temp_dir().join(format!("agent-bridge-chrome-{}", std::process::id()))
+}
+
+/// Run `js` via raw CDP `Runtime.evaluate` and surface JS exceptions with
+/// `text @ url:line:col` instead of the previous opaque chromiumoxide
+/// `Backend("evaluate: ...")` string. Used by all eval-driven backend methods.
+async fn eval_with_exception_details(p: &Page, js: &str) -> Result<serde_json::Value> {
+    let params = EvaluateParams::builder()
+        .expression(js.to_string())
+        .return_by_value(true)
+        .await_promise(true)
+        .build()
+        .map_err(|e| Error::Backend(format!("evaluate params build: {e}")))?;
+    let resp = p
+        .execute(params)
+        .await
+        .map_err(|e| Error::Backend(format!("evaluate execute: {e}")))?;
+    let result = &resp.result;
+    if let Some(ex) = &result.exception_details {
+        let url = ex.url.as_deref().unwrap_or("(inline)");
+        let line = ex.line_number;
+        let col = ex.column_number;
+        let head = &ex.text;
+        let detail = ex
+            .exception
+            .as_ref()
+            .and_then(|e| e.description.as_deref())
+            .unwrap_or("");
+        let where_part = if !detail.is_empty() {
+            format!("{head}: {detail}")
+        } else {
+            head.clone()
+        };
+        return Err(Error::Backend(format!(
+            "evaluate exception @ {url}:{line}:{col}: {where_part}"
+        )));
+    }
+    Ok(result
+        .result
+        .value
+        .clone()
+        .unwrap_or(serde_json::Value::Null))
 }
 
 fn json_eval_result_as_plain_text(v: &serde_json::Value) -> String {
