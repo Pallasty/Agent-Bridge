@@ -338,6 +338,28 @@ function escapeHTML(s) {
   return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
 }
 
+// ── C3.5: access-driven visual size + halo ────────────────────
+// Size = base + importance lift + log-scaled access lift.
+//   importance ∈ [0,1] → up to +22
+//   access (clamped log) → up to +18
+// Halo (overlay) only kicks in when access > 0; padding & opacity grow
+// with log(access) so frequently-visited nodes "glow" without making
+// rare ones invisible. Logarithmic so a 100-click hub doesn't dwarf a
+// 5-click warm node.
+function nodeSize(importance, access) {
+  const impLift = Math.min((importance || 0.5) * 22, 22);
+  const accLift = Math.min(Math.log1p(access || 0) * 4, 18);
+  return 16 + impLift + accLift;
+}
+function haloPad(access) {
+  if (!access || access <= 0) return 0;
+  return Math.min(Math.log1p(access) * 4, 16);
+}
+function haloOp(access) {
+  if (!access || access <= 0) return 0;
+  return Math.min(0.06 + Math.log1p(access) * 0.06, 0.38);
+}
+
 // Unix epoch seconds → "3d ago" / "5h ago" / "just now". Returns "" for
 // missing/zero timestamps so the meta line stays clean for markdown nodes
 // (which don't have a stored created_at).
@@ -402,22 +424,27 @@ function buildCy(data) {
   if (state.cy) state.cy.destroy();
 
   const elements = [
-    ...data.nodes.map(n => ({
-      data: {
-        id: n.id,
-        label: n.label || n.id,
-        kind: n.kind,
-        importance: n.importance,
-        access: n.access || 0,
-        color: colorForKind(n.kind),
-        size: 16 + Math.min((n.importance || 0.5) * 28, 28),
-        source: n.source || "sqlite",
-        searchHaystack: [
-          n.id, n.kind, ...(n.tags || []),
-          n.description || "",
-        ].join(" ").toLowerCase(),
-      }
-    })),
+    ...data.nodes.map(n => {
+      const access = n.access || 0;
+      return {
+        data: {
+          id: n.id,
+          label: n.label || n.id,
+          kind: n.kind,
+          importance: n.importance,
+          access,
+          color: colorForKind(n.kind),
+          size: nodeSize(n.importance, access),
+          haloPad: haloPad(access),
+          haloOp: haloOp(access),
+          source: n.source || "sqlite",
+          searchHaystack: [
+            n.id, n.kind, ...(n.tags || []),
+            n.description || "",
+          ].join(" ").toLowerCase(),
+        }
+      };
+    }),
     ...data.edges.map(e => ({
       data: {
         id: `${e.source}__${e.target}__${e.type}`,
@@ -439,6 +466,11 @@ function buildCy(data) {
         "text-margin-y": 5, "text-max-width": "140px", "text-wrap": "ellipsis",
         "border-width": 1, "border-color": "#0a0a0f", "border-opacity": 0.7,
         "opacity": 0.92,
+        // C3.5 access-driven halo. Overlay sits behind the node and tinted
+        // by its kind color, so attention pattern is visible at a glance.
+        "overlay-color": "data(color)",
+        "overlay-padding": "data(haloPad)",
+        "overlay-opacity": "data(haloOp)",
       }},
       { selector: "node[source='markdown']", style: {
         "shape": "round-rectangle",
@@ -664,6 +696,19 @@ async function showSidePanel(id) {
       return;
     }
     const m = await r.json();
+    // C3.5 live-update: api_memory just bumped access_count server-side.
+    // Reflect the new size/halo immediately on the clicked node so the user
+    // sees their attention land. cytoscape.data() updates without re-layout.
+    if (state.cy && m.source !== "markdown") {
+      const n = state.cy.getElementById(m.key);
+      if (n && n.length > 0) {
+        const access = m.access_count || 0;
+        n.data("access", access);
+        n.data("size", nodeSize(m.importance, access));
+        n.data("haloPad", haloPad(access));
+        n.data("haloOp", haloOp(access));
+      }
+    }
     const sourceLabel = m.source === "markdown" ? "markdown" : "sqlite";
     const descBlock = m.description
       ? `<div class="desc">${escapeHTML(m.description)}</div>` : "";
