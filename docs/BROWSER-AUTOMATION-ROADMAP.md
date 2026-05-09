@@ -2,7 +2,7 @@
 
 **Owner**: agent-bridge
 **Started**: 2026-05-09
-**Status**: Round 1 in progress
+**Status**: Round 1 complete (2026-05-09); Round 2 next
 
 ## Why this exists
 
@@ -51,23 +51,30 @@ Source-of-truth code:
 
 ## Attack rounds
 
-### Round 1 — foundation (started 2026-05-09)
+### Round 1 — foundation ✅ (2026-05-09)
 
 Goal: turn the surface from "race-driven" into "debuggable".
 
-- [ ] **#1 `browser_wait_for`** — selector / url / timeout_ms; built on
-  `Page::wait_for_navigation` + JS polling fallback.
-- [ ] **#5 stable `user_data_dir`** — read from `AGENT_BRIDGE_BROWSER_PROFILE`
-  env (default `$HOME/.cache/agent-bridge/chrome-profile`). Stays per-PID
-  only if the env var is unset *and* the dir is in use (Singleton lock check).
-- [ ] **#10 eval error details** — capture `EvaluateReturnObject.exceptionDetails`
-  and surface text + line/column + URL in the error message.
-- [ ] **#2 `browser_list_pages` + new-tab tracking** — subscribe to
-  `Target.targetCreated` and auto-insert into the `pages` map; new MCP
-  tool returns `[{page, url, title}]`.
+- [x] **#1 `browser_wait_for`** (commit `da7343c`) — selector / url /
+  timeout_ms; 100 ms poll via raw CDP `Runtime.evaluate`. Returns
+  `{matched, elapsed_ms, current_url}`.
+- [x] **#5 stable `user_data_dir`** (commit `0a80940`) — reads
+  `AGENT_BRIDGE_BROWSER_PROFILE` env, defaults to
+  `$HOME/.cache/agent-bridge/chrome-profile`. Login state survives daemon
+  restart.
+- [x] **#10 eval error details** (commit `0a80940`) — exceptions now
+  surface as `evaluate exception @ <url>:<line>:<col>: <text>: <desc>`
+  via a single `eval_with_exception_details` helper used by `eval`,
+  `extract_text`, and `fill_form`.
+- [x] **#2 `browser_list_pages` + new-tab discovery** (commit `506e9eb`)
+  — on-demand reconciliation via `browser.pages()`; mints fresh page_ids
+  for unknown targets and marks them `newly_tracked=true`. No event
+  subscription yet — agent calls list_pages() after any click that
+  might open a tab.
 
-After Round 1, every `browser_*` interaction can be properly observed and
-re-tried, and login state survives daemon restarts.
+After Round 1: every `browser_*` interaction can be properly observed
+and retried, login state survives daemon restarts, and OAuth pop-ups +
+"open in new tab" links are addressable.
 
 ### Round 2 — sign-up main act
 
