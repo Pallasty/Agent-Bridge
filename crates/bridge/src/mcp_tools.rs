@@ -1619,6 +1619,150 @@ impl McpTool for BrowserEvalInFrameTool {
     }
 }
 
+pub struct BrowserPauseForHumanTool {
+    hub: Hub,
+}
+impl BrowserPauseForHumanTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserPauseForHumanTool {
+    fn name(&self) -> &'static str {
+        "browser_pause_for_human"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Block this MCP request until a human releases the page via \
+                 `browser_resume`, or until `timeout_ms` elapses. Fires a desktop \
+                 notification (severity=attention) before pausing so the human is \
+                 actually pinged. Use this for CAPTCHA solves, OTP/2FA prompts, \
+                 \"are you sure?\" gates the agent shouldn't auto-click. Returns \
+                 `{outcome, elapsed_ms}` where outcome ∈ {resumed, timeout, \
+                 superseded}. `timeout_ms` clamped to [1_000, 1_800_000] (1 s … \
+                 30 min); default 600_000 (10 min)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":       { "type": "string", "description": "Page id from browser_navigate." },
+                    "reason":     { "type": "string", "description": "Short human-readable reason — appears in the notification body." },
+                    "hint":       { "type": "string", "description": "Optional follow-up instruction for the human (e.g. 'solve CAPTCHA then call browser_resume')." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 1800000, "default": 600000 }
+                },
+                "required": ["page", "reason"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let reason = args
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if reason.is_empty() {
+            return Ok(ToolResult::error("missing 'reason'"));
+        }
+        let hint = args
+            .get("hint")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(600_000);
+
+        // Fire the notification BEFORE blocking, so the human gets pinged
+        // even if all delivery channels are slow.
+        let body = if hint.is_empty() {
+            format!("page {}: {}", page.as_str(), reason)
+        } else {
+            format!("page {}: {} — {}", page.as_str(), reason, hint)
+        };
+        let evt = NotifyEvent {
+            source: NotifySource::Mcp,
+            severity: NotifySeverity::Attention,
+            title: "browser: human action required".into(),
+            body,
+            session_id: None,
+            context: json!({
+                "tool": "browser_pause_for_human",
+                "page": page.as_str(),
+                "reason": reason,
+                "hint": hint,
+                "timeout_ms": timeout_ms,
+            }),
+        };
+        let (delivered, _persisted) = self.hub.deliver(&evt).await;
+
+        match b.pause_for_human(&page, timeout_ms).await {
+            Ok(out) => Ok(ToolResult::json_text(&json!({
+                "outcome": out.outcome,
+                "elapsed_ms": out.elapsed_ms,
+                "notified": delivered,
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
+pub struct BrowserResumeTool {
+    hub: Hub,
+}
+impl BrowserResumeTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserResumeTool {
+    fn name(&self) -> &'static str {
+        "browser_resume"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Release a `browser_pause_for_human` waiter on `page`. \
+                 Returns `{released}` — true if a waiter existed and was woken \
+                 up, false if no pause was pending (the original call already \
+                 timed out, or page id is wrong)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page": { "type": "string", "description": "Page id passed to the original browser_pause_for_human." }
+                },
+                "required": ["page"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        match b.resume(&page).await {
+            Ok(released) => Ok(ToolResult::json_text(&json!({ "released": released }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
 pub struct AgentMessageTool {
     hub: Hub,
 }
@@ -4198,8 +4342,8 @@ impl McpTool for MemoryListTool {
             name: self.name().into(),
             description: "List memories, optionally filtered by `kind`, sorted by 'recent' \
                  (default, last_accessed_at desc), 'frequent' (access_count desc), or \
-                 'newest' (created_at desc). Use at session start with kind='lesson' to \
-                 surface what previous-you learned."
+                 'newest' (created_at desc). Excludes archived/superseded rows. Use at \
+                 session start with kind='lesson' to surface what previous-you learned."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -10594,6 +10738,8 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserFindByTextTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserListFramesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserEvalInFrameTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserPauseForHumanTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserResumeTool::new(hub.clone())));
     // Warp URL-scheme + status.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));

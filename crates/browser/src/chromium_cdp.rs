@@ -37,13 +37,14 @@ use chromiumoxide::page::ScreenshotParams;
 use chromiumoxide::{Browser, BrowserConfig, Page};
 use dashmap::DashMap;
 use futures::StreamExt;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::RwLock;
+use std::time::{Duration, Instant};
+use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::{debug, info, warn};
 
-use crate::{A11yNode, BrowserBackend, PageInfo, WaitOutcome};
+use crate::{A11yNode, BrowserBackend, PageInfo, PauseOutcome, WaitOutcome};
 
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -57,6 +58,19 @@ pub struct ChromiumCdpBackend {
     /// PageId → live Page handle. Cleared on relaunch since old pages are
     /// associated with the dead chrome's targets.
     pages: Arc<DashMap<String, Arc<Page>>>,
+    /// PageId → oneshot sender for an in-flight `pause_for_human` waiter.
+    /// `Mutex<HashMap>` instead of `DashMap` so we can take-and-replace
+    /// atomically when a second pause supersedes the first.
+    pause_waiters: Arc<Mutex<HashMap<String, oneshot::Sender<PauseSignal>>>>,
+}
+
+/// Signal sent through the oneshot channel that a pause waiter is awaiting on.
+/// `Resumed` = `resume()` released the wait. `Superseded` = a newer pause
+/// replaced the wait (the new caller takes ownership of waiting for resume).
+#[derive(Debug, Clone, Copy)]
+enum PauseSignal {
+    Resumed,
+    Superseded,
 }
 
 impl Default for ChromiumCdpBackend {
@@ -70,6 +84,7 @@ impl ChromiumCdpBackend {
         Self {
             inner: Arc::new(RwLock::new(None)),
             pages: Arc::new(DashMap::new()),
+            pause_waiters: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -756,7 +771,66 @@ impl BrowserBackend for ChromiumCdpBackend {
             .unwrap_or(serde_json::Value::Null))
     }
 
+    async fn pause_for_human(&self, page: &PageId, timeout_ms: u64) -> Result<PauseOutcome> {
+        let timeout_ms = timeout_ms.clamp(1_000, 1_800_000);
+        let key = page.as_str().to_string();
+        let (tx, rx) = oneshot::channel::<PauseSignal>();
+        // Insert atomically. If a previous waiter exists, it's superseded —
+        // notify it so it doesn't hang forever.
+        {
+            let mut waiters = self.pause_waiters.lock().await;
+            if let Some(prev) = waiters.insert(key.clone(), tx) {
+                let _ = prev.send(PauseSignal::Superseded);
+            }
+        }
+        let started = Instant::now();
+        let outcome = match tokio::time::timeout(Duration::from_millis(timeout_ms), rx).await {
+            Ok(Ok(PauseSignal::Resumed)) => "resumed",
+            Ok(Ok(PauseSignal::Superseded)) => "superseded",
+            Ok(Err(_)) => "resumed", // sender dropped — treat as resume
+            Err(_) => {
+                // Timed out — clean ourselves out of the map. Only remove if
+                // we're still the registered waiter (a superseder may have
+                // already replaced us, in which case leave their entry alone).
+                let mut waiters = self.pause_waiters.lock().await;
+                if let Some(entry) = waiters.get(&key) {
+                    if entry.is_closed() {
+                        waiters.remove(&key);
+                    }
+                }
+                "timeout"
+            }
+        };
+        Ok(PauseOutcome {
+            outcome: outcome.into(),
+            elapsed_ms: started.elapsed().as_millis() as u64,
+        })
+    }
+
+    async fn resume(&self, page: &PageId) -> Result<bool> {
+        let key = page.as_str().to_string();
+        let tx = {
+            let mut waiters = self.pause_waiters.lock().await;
+            waiters.remove(&key)
+        };
+        match tx {
+            Some(tx) => {
+                let _ = tx.send(PauseSignal::Resumed);
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
     async fn close(&self, page: &PageId) -> Result<()> {
+        // Release any pending pause waiter on this page so resume-less
+        // close() doesn't strand a request.
+        {
+            let mut waiters = self.pause_waiters.lock().await;
+            if let Some(tx) = waiters.remove(page.as_str()) {
+                let _ = tx.send(PauseSignal::Resumed);
+            }
+        }
         if let Some((_, p)) = self.pages.remove(page.as_str()) {
             // `Arc<Page>` may have outstanding references; if we're the last
             // we close cleanly. Either way, ignore close errors on shutdown.

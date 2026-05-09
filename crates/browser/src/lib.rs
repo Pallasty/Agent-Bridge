@@ -34,6 +34,17 @@ pub struct WaitOutcome {
     pub current_url: String,
 }
 
+/// Result of a [`BrowserBackend::pause_for_human`] call. `outcome` is one
+/// of `"resumed"` (caller of `resume` released the wait), `"timeout"` (the
+/// timeout elapsed before resume), or `"superseded"` (a second pause on
+/// the same page replaced the prior waiter; the older call returns this
+/// instead of hanging forever).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PauseOutcome {
+    pub outcome: String,
+    pub elapsed_ms: u64,
+}
+
 /// Snapshot of one page returned from [`BrowserBackend::list_pages`].
 /// Pages discovered for the first time during a list_pages call are
 /// auto-registered with a fresh `page_id` so subsequent tool calls can
@@ -144,6 +155,22 @@ pub trait BrowserBackend: Send + Sync {
         frame_url_substring: Option<&str>,
         js: &str,
     ) -> Result<serde_json::Value>;
+
+    /// Block the current request until [`Self::resume`] is called for
+    /// `page`, or until `timeout_ms` elapses. Returns a [`PauseOutcome`]
+    /// describing which condition fired. Used to hand control to a human
+    /// for CAPTCHA solves, OTP entry, manual confirmation, etc. The
+    /// MCP wrapper layer is expected to fire a `notify` *before* calling
+    /// this so the human gets pinged. `timeout_ms` is clamped to
+    /// [1_000, 1_800_000] (1 s … 30 min). If a previous pause is still
+    /// pending on the same `page`, the new pause supersedes it: the
+    /// older call returns with `outcome="superseded"`.
+    async fn pause_for_human(&self, page: &PageId, timeout_ms: u64) -> Result<PauseOutcome>;
+
+    /// Release a [`Self::pause_for_human`] waiter on `page`. Returns
+    /// `true` if a waiter existed and was released, `false` if no
+    /// pause was pending (caller likely already timed out).
+    async fn resume(&self, page: &PageId) -> Result<bool>;
 
     async fn close(&self, page: &PageId) -> Result<()>;
 }
