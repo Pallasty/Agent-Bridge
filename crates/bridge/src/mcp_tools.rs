@@ -6251,12 +6251,24 @@ fn scan_memory_paths(content: &str) -> Vec<String> {
 }
 
 /// Resolve a candidate path: absolute → use as-is; relative → join with repo_root.
+/// Single-root variant kept for tests + simple callers.
 fn resolve_audit_path(candidate: &str, repo_root: &std::path::Path) -> std::path::PathBuf {
     if candidate.starts_with('/') {
         std::path::PathBuf::from(candidate)
     } else {
         repo_root.join(candidate)
     }
+}
+
+/// Multi-root existence probe. Absolute paths are checked once; relative
+/// paths are tried against each root in order. Returns true on the first
+/// hit. Used by the audit to handle `~/.claude/projects/...` references
+/// that don't live under the agent-bridge repo.
+fn path_exists_in_any_root(candidate: &str, roots: &[std::path::PathBuf]) -> bool {
+    if candidate.starts_with('/') {
+        return std::path::Path::new(candidate).exists();
+    }
+    roots.iter().any(|r| r.join(candidate).exists())
 }
 
 pub struct MemoryLinkAuditTool {
@@ -6278,17 +6290,27 @@ impl McpTool for MemoryLinkAuditTool {
             name: self.name().into(),
             description: "Phase 0 dead-link probe. Scan memory bodies for path-like tokens \
                  (absolute paths and known repo-relative prefixes: crates/, museum/, docs/, \
-                 scripts/, tests/, .claude/, etc.), check filesystem existence, and report \
-                 dead references. Surfaces stale memories whose code/file pointers no longer \
-                 resolve — the input to per-memory STATUS banner work. Does NOT modify any \
-                 memory; this is read-only diagnostics."
+                 scripts/, tests/, .claude/, etc.), check filesystem existence across one or \
+                 more search roots, and report dead references. Surfaces stale memories whose \
+                 code/file pointers no longer resolve — the input to per-memory STATUS banner \
+                 work. Does NOT modify any memory; this is read-only diagnostics. \
+                 Defaults exclude `kind=skill` records because skill manifests reference \
+                 paths inside their own bundle, not the repo (overwhelms signal otherwise)."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "kind":       { "type": "string", "description": "Optional memory kind filter." },
+                    "kind":       { "type": "string", "description": "Optional memory kind filter (e.g. 'lesson', 'todo'). When set, the include_skills default is overridden." },
                     "limit":      { "type": "integer", "minimum": 1, "maximum": 1000, "default": 200 },
-                    "repo_root":  { "type": "string", "description": "Base for resolving relative paths. Default: current working dir." },
+                    "repo_root":  { "type": "string", "description": "Primary base for resolving relative paths. Default: current working dir." },
+                    "extra_search_roots": {
+                        "type": "array", "items": { "type": "string" }, "default": [],
+                        "description": "Additional roots to try for relative paths (any-match wins). Useful for memory bodies that reference ~/.claude/projects/... or other out-of-repo locations."
+                    },
+                    "include_skills": {
+                        "type": "boolean", "default": false,
+                        "description": "Include kind=skill records (off by default; skills reference intra-bundle paths the repo audit can't resolve)."
+                    },
                     "include_alive": { "type": "boolean", "default": false, "description": "If true, also include memories whose links all resolve (for coverage view)." }
                 }
             }),
@@ -6312,16 +6334,37 @@ impl McpTool for MemoryLinkAuditTool {
             None => std::env::current_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from(".")),
         };
+        let mut roots: Vec<std::path::PathBuf> = vec![repo_root.clone()];
+        if let Some(extras) = args.get("extra_search_roots").and_then(|v| v.as_array()) {
+            for v in extras {
+                if let Some(s) = v.as_str() {
+                    roots.push(std::path::PathBuf::from(s));
+                }
+            }
+        }
+        // Default-exclude skills unless the caller flips it explicitly OR
+        // explicitly asks for kind=skill (their intent is then to audit skills).
+        let include_skills = args
+            .get("include_skills")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+            || kind.as_deref() == Some("skill");
         let include_alive = args
             .get("include_alive")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let memories = store
+        let raw_memories = store
             .list_memories(kind.as_deref(), MemoryListSort::Newest, limit)
             .await?;
+        let memories: Vec<_> = if include_skills {
+            raw_memories
+        } else {
+            raw_memories.into_iter().filter(|m| m.kind != "skill").collect()
+        };
 
         let mut audited = 0u64;
+        let mut skipped_skills = 0u64;
         let mut with_links = 0u64;
         let mut dead_total = 0u64;
         let mut alive_total = 0u64;
@@ -6338,8 +6381,7 @@ impl McpTool for MemoryLinkAuditTool {
             let mut dead: Vec<String> = Vec::new();
             let mut alive: Vec<String> = Vec::new();
             for cand in &candidates {
-                let resolved = resolve_audit_path(cand, &repo_root);
-                if resolved.exists() {
+                if path_exists_in_any_root(cand, &roots) {
                     alive.push(cand.clone());
                 } else {
                     dead.push(cand.clone());
@@ -6362,17 +6404,34 @@ impl McpTool for MemoryLinkAuditTool {
                 per_memory.push(row);
             }
         }
+        if !include_skills {
+            // Estimate how many skill rows we suppressed for the user's coverage view.
+            // (Cheap: just re-count from a kind="skill" pull capped to the same limit.)
+            if let Ok(skill_only) = store
+                .list_memories(Some("skill"), MemoryListSort::Newest, limit)
+                .await
+            {
+                skipped_skills = skill_only.len() as u64;
+            }
+        }
+
+        let roots_display: Vec<String> =
+            roots.iter().map(|p| p.display().to_string()).collect();
 
         Ok(ToolResult::json_text(&json!({
             "audited": audited,
+            "skipped_skill_rows": skipped_skills,
             "with_links": with_links,
             "dead_total": dead_total,
             "alive_total": alive_total,
             "per_memory": per_memory,
-            "repo_root": repo_root,
+            "search_roots": roots_display,
             "kind_filter": kind,
+            "include_skills": include_skills,
             "note": "Dead links don't auto-trigger banner edits — review and apply via memory_save \
-                with a STATUS prefix. Pattern: see project_warp_drop_to_museum.md.",
+                with a STATUS prefix. Pattern: see project_warp_drop_to_museum.md. \
+                Pass `include_skills=true` to also audit skill records (their paths are usually \
+                intra-bundle and produce false positives without that intent).",
         })))
     }
 }
@@ -11570,5 +11629,35 @@ mod tests {
             resolve_audit_path("/Data/abs/path", root),
             std::path::PathBuf::from("/Data/abs/path")
         );
+    }
+
+    #[test]
+    fn path_exists_in_any_root_tries_each_root_for_relative_paths() {
+        // Use a real temp dir to build a known-existing relative path.
+        let tmp = std::env::temp_dir().join(format!(
+            "ab-link-audit-multiroot-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(tmp.join("nested/dir")).expect("mkdir");
+        let f = tmp.join("nested/dir/leaf.txt");
+        std::fs::write(&f, b"x").expect("write");
+
+        let bogus_root = std::path::PathBuf::from("/no/such/place");
+        let real_root = tmp.clone();
+        let roots = vec![bogus_root, real_root];
+
+        // Relative path resolves against second root only.
+        assert!(path_exists_in_any_root("nested/dir/leaf.txt", &roots));
+        // Missing relative path stays missing.
+        assert!(!path_exists_in_any_root("nested/dir/missing.txt", &roots));
+        // Absolute path checked once, ignoring roots.
+        assert!(path_exists_in_any_root(f.to_string_lossy().as_ref(), &roots));
+        assert!(!path_exists_in_any_root("/definitely/not/here.zzz", &roots));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
