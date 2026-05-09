@@ -3506,6 +3506,11 @@ impl McpTool for MemorySaveTool {
                     let emb = embed_text(&rec.content);
                     let emb_for_evolve = emb.clone();
                     tokio::spawn(async move {
+                        tracing::debug!(
+                            target: "p4_evolve",
+                            key = %new_key_for_evolve,
+                            "P4 evolve spawn entry"
+                        );
                         // Step 1: best-effort cache upsert. If the cache is
                         // None we skip it — `memory_reindex` / `session_bootstrap`
                         // will rebuild from DB later, and the new row's
@@ -3523,13 +3528,17 @@ impl McpTool for MemorySaveTool {
                                     /* top_k */ 5,
                                 );
                                 drop(guard);
+                                tracing::debug!(
+                                    target: "p4_evolve",
+                                    key = %new_key_for_evolve,
+                                    branch = "warm",
+                                    neighbors = n.len(),
+                                    "P4 evolve neighbors picked"
+                                );
                                 n
                             } else {
                                 drop(guard);
-                                // Cold path: ask the store directly. Same
-                                // threshold / top_k semantics. Skill kind is
-                                // filtered post-hoc since the store call has
-                                // no kind-filter parameter.
+                                // Cold path: ask the store directly.
                                 match store_for_evolve
                                     .memory_search_semantic(
                                         &new_content_for_evolve,
@@ -3538,30 +3547,67 @@ impl McpTool for MemorySaveTool {
                                     )
                                     .await
                                 {
-                                    Ok(hits) => hits
-                                        .into_iter()
-                                        .filter(|h| {
-                                            h.record.key != new_key_for_evolve
-                                                && h.record.kind != "skill"
-                                        })
-                                        .take(5)
-                                        .map(|h| (h.record.key, h.score))
-                                        .collect(),
-                                    Err(_) => Vec::new(),
+                                    Ok(hits) => {
+                                        let n: Vec<(String, f64)> = hits
+                                            .into_iter()
+                                            .filter(|h| {
+                                                h.record.key != new_key_for_evolve
+                                                    && h.record.kind != "skill"
+                                            })
+                                            .take(5)
+                                            .map(|h| (h.record.key, h.score))
+                                            .collect();
+                                        tracing::debug!(
+                                            target: "p4_evolve",
+                                            key = %new_key_for_evolve,
+                                            branch = "cold",
+                                            neighbors = n.len(),
+                                            "P4 evolve neighbors picked (cold)"
+                                        );
+                                        n
+                                    }
+                                    Err(e) => {
+                                        // Keep at warn — a failure here means
+                                        // memory_search_semantic broke, which we
+                                        // want loud even in production.
+                                        tracing::warn!(
+                                            target: "p4_evolve",
+                                            key = %new_key_for_evolve,
+                                            error = %e,
+                                            "P4 evolve cold path memory_search_semantic FAILED"
+                                        );
+                                        Vec::new()
+                                    }
                                 }
                             }
                         };
 
                         // Step 2: write the evolution edges.
                         for (neighbor_key, score) in neighbors {
-                            let _ = store_for_evolve
+                            match store_for_evolve
                                 .memory_link(
                                     &new_key_for_evolve,
                                     &neighbor_key,
                                     "evolved",
                                     score,
                                 )
-                                .await;
+                                .await
+                            {
+                                Ok(()) => tracing::debug!(
+                                    target: "p4_evolve",
+                                    from = %new_key_for_evolve,
+                                    to = %neighbor_key,
+                                    score = score,
+                                    "P4 evolve edge written"
+                                ),
+                                Err(e) => tracing::warn!(
+                                    target: "p4_evolve",
+                                    from = %new_key_for_evolve,
+                                    to = %neighbor_key,
+                                    error = %e,
+                                    "P4 evolve memory_link FAILED"
+                                ),
+                            }
                         }
                     });
                 }
