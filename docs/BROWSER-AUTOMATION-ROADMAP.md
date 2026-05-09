@@ -2,7 +2,7 @@
 
 **Owner**: agent-bridge
 **Started**: 2026-05-09
-**Status**: Round 1 complete (2026-05-09); Round 2 next
+**Status**: Rounds 1 + 2 complete (2026-05-09); Round 3 next
 
 ## Why this exists
 
@@ -87,10 +87,13 @@ and retried, login state survives daemon restarts, and OAuth pop-ups +
 - [x] **#8 `browser_find_by_text`** (commits `07ccb00` wrapper, `303df01`
   trait/impl fixup) — DOM scan + deepest-match filter + auto-generated
   CSS selector path; up to 5 candidates returned.
-- [ ] **#4 iframe scope** — needs `Page::frames()` + `executionContextId`
-  threading; defer to its own commit since it touches multiple tools.
+- [x] **#4 iframe scope** (commits `0f681fb` wrappers, `2335752`
+  trait/impl fixup) — `browser_list_frames` (Page.getFrameTree
+  flattened) + `browser_eval_in_frame` (Page.createIsolatedWorld →
+  Runtime.evaluate with contextId). Crosses cross-origin boundaries;
+  unblocks Stripe Elements / reCAPTCHA / Auth0 widgets.
 
-R2 sign-up surface: 3 of 4 done. Iframe is the last hold-out.
+R2 sign-up surface: ✅ 4 of 4 done.
 
 Target: 90% of pure-web sign-up forms reach the "API key shown" screen
 without manual intervention.
