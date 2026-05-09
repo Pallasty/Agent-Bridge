@@ -98,9 +98,53 @@ impl ChromiumCdpBackend {
             self.pages.clear();
         }
 
-        let browser = Arc::new(Self::launch_chrome().await?);
+        // R2.5 #5b — try to adopt an existing chrome holding the persistent
+        // profile before launching a new one. This handles the common case
+        // where a previous agent-bridge daemon's chrome outlived the daemon
+        // itself (chrome doesn't auto-quit when its parent disconnects), and
+        // the new daemon would otherwise crash with "Failed to create
+        // SingletonLock" on launch.
+        let user_data = resolve_user_data_dir();
+        if let Some(adopted) = Self::try_adopt_existing(&user_data).await {
+            *guard = Some(adopted.clone());
+            return Ok(adopted);
+        }
+
+        let browser = Arc::new(Self::launch_chrome_with_profile(&user_data).await?);
         *guard = Some(browser.clone());
         Ok(browser)
+    }
+
+    /// If a previous chrome is still running on the configured profile and
+    /// has a live DevTools endpoint, attach to it via `Browser::connect`
+    /// instead of launching a new chrome. Returns `None` for any failure
+    /// path — the caller falls through to launch.
+    async fn try_adopt_existing(profile: &PathBuf) -> Option<Arc<Browser>> {
+        let port_file = profile.join("DevToolsActivePort");
+        let raw = std::fs::read_to_string(&port_file).ok()?;
+        let port: u16 = raw.lines().next()?.trim().parse().ok()?;
+        let http_url = format!("http://127.0.0.1:{port}");
+        match Browser::connect(http_url.clone()).await {
+            Ok((browser, mut handler)) => {
+                tokio::spawn(async move {
+                    while let Some(item) = handler.next().await {
+                        if let Err(e) = item {
+                            warn!(error = %e, "chromiumoxide handler error (adopted)");
+                        }
+                    }
+                });
+                if !Self::is_alive(&browser).await {
+                    debug!(http_url, "adopted browser failed health probe");
+                    return None;
+                }
+                info!(http_url, "adopted existing chrome on persistent profile");
+                Some(Arc::new(browser))
+            }
+            Err(e) => {
+                debug!(http_url, error = %e, "could not adopt existing chrome");
+                None
+            }
+        }
     }
 
     /// 500 ms timeout-wrapped probe via the CDP `Browser.getVersion` command.
@@ -124,17 +168,14 @@ impl ChromiumCdpBackend {
     }
 
     /// Spawn chrome + the chromiumoxide event handler. Honours
-    /// `AGENT_BRIDGE_HEADLESS` and `AGENT_BRIDGE_CHROME`.
+    /// `AGENT_BRIDGE_HEADLESS` and `AGENT_BRIDGE_CHROME`. The caller passes
+    /// the resolved user-data-dir.
     ///
-    /// User-data-dir resolution (cookies / login state survive restart here):
-    /// 1. `AGENT_BRIDGE_BROWSER_PROFILE` env (explicit override)
-    /// 2. `$HOME/.cache/agent-bridge/chrome-profile` (default)
-    /// 3. `/tmp/agent-bridge-chrome-<pid>` (last-resort fallback if HOME unset)
-    ///
-    /// Chrome's `SingletonLock` may prevent two agent-bridge daemons sharing
-    /// the same profile concurrently. If you need parallel daemons, set
-    /// `AGENT_BRIDGE_BROWSER_PROFILE=/tmp/agent-bridge-<id>` per instance.
-    async fn launch_chrome() -> Result<Browser> {
+    /// Before launching, stale `Singleton{Lock,Cookie,Socket}` artifacts in
+    /// the profile dir are removed — by the time we reach this code the
+    /// adopt path has failed (no live DevTools endpoint), so any leftover
+    /// lock is from a dead chrome and would only block the new launch.
+    async fn launch_chrome_with_profile(user_data: &PathBuf) -> Result<Browser> {
         let headless = std::env::var("AGENT_BRIDGE_HEADLESS")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
@@ -148,12 +189,21 @@ impl ChromiumCdpBackend {
         if let Ok(path) = std::env::var("AGENT_BRIDGE_CHROME") {
             cfg = cfg.chrome_executable(path);
         }
-        let user_data = resolve_user_data_dir();
-        if let Err(e) = std::fs::create_dir_all(&user_data) {
+        if let Err(e) = std::fs::create_dir_all(user_data) {
             warn!(path = %user_data.display(), error = %e, "create_dir_all on chrome profile failed; chrome may fall back to default");
         }
+        for stale in ["SingletonLock", "SingletonCookie", "SingletonSocket"] {
+            let p = user_data.join(stale);
+            if p.exists() {
+                if let Err(e) = std::fs::remove_file(&p) {
+                    warn!(path = %p.display(), error = %e, "could not remove stale Singleton artifact");
+                } else {
+                    debug!(path = %p.display(), "removed stale Singleton artifact");
+                }
+            }
+        }
         info!(profile = %user_data.display(), "chrome user-data-dir");
-        cfg = cfg.user_data_dir(user_data);
+        cfg = cfg.user_data_dir(user_data.clone());
 
         let cfg = cfg
             .build()
