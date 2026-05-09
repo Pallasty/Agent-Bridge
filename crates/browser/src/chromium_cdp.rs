@@ -28,7 +28,9 @@ use chromiumoxide::cdp::browser_protocol::input::{DispatchKeyEventParams, Dispat
 use chromiumoxide::cdp::browser_protocol::page::{
     CaptureScreenshotFormat, CreateIsolatedWorldParams, FrameId, FrameTree, GetFrameTreeParams,
 };
-use chromiumoxide::cdp::browser_protocol::target::{GetTargetsParams, TargetInfo};
+use chromiumoxide::cdp::browser_protocol::target::{
+    AttachToTargetParams, GetTargetsParams, TargetInfo,
+};
 use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
 use chromiumoxide::keys::{KeyDefinition, USKEYBOARD_LAYOUT};
 use chromiumoxide::page::ScreenshotParams;
@@ -653,6 +655,19 @@ impl BrowserBackend for ChromiumCdpBackend {
                 .iter()
                 .find(|ti| ti.r#type == "iframe" && oopif_matches(ti, frame_id, frame_url_substring));
             if let Some(ti) = oopif {
+                // chromiumoxide's per-page setAutoAttach doesn't auto-attach
+                // foreign-page OOPIFs, so the target is in pin.targets but
+                // has no session_id and get_page returns NotFound. Force the
+                // attach (flatten=true so chromiumoxide's existing
+                // on_attached_to_target stores the session) before fetching.
+                let attach = AttachToTargetParams::builder()
+                    .target_id(ti.target_id.clone())
+                    .flatten(true)
+                    .build()
+                    .map_err(|e| Error::Backend(format!("attachToTarget build: {e}")))?;
+                let _ = browser.execute(attach).await.map_err(|e| {
+                    Error::Backend(format!("attachToTarget (oopif {}): {e}", ti.url))
+                })?;
                 let oopif_page = browser
                     .get_page(ti.target_id.clone())
                     .await
