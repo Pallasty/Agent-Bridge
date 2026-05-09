@@ -124,11 +124,26 @@ fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
 
 fn extract_python(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
     let mut out = Vec::new();
+    // Stack of (indent_cols, qualified_class_name) for enclosing class scopes.
+    let mut class_stack: Vec<(usize, String)> = Vec::new();
+
     for (i, raw) in content.lines().enumerate() {
+        // Count leading whitespace cols (tabs count as 1 — close enough for
+        // scope detection; Python forbids mixing in real code).
+        let indent = raw.chars().take_while(|c| *c == ' ' || *c == '\t').count();
         let t = raw.trim();
-        if t.starts_with('#') {
+        if t.is_empty() || t.starts_with('#') {
             continue;
         }
+        // Pop class scopes whose body has ended (current line dedented to <= scope indent).
+        while let Some(&(ind, _)) = class_stack.last() {
+            if indent <= ind {
+                class_stack.pop();
+            } else {
+                break;
+            }
+        }
+
         // `def` / `async def`
         let def_rest = t
             .strip_prefix("async def ")
@@ -139,7 +154,12 @@ fn extract_python(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
                 .take_while(|c| c.is_alphanumeric() || *c == '_')
                 .collect();
             if !name.is_empty() {
-                out.push(make(file_path, (i + 1) as u32, "def", name, t, "python"));
+                let (kind, emit_name) = if let Some((_, cls)) = class_stack.last() {
+                    ("method", format!("{cls}.{name}"))
+                } else {
+                    ("def", name)
+                };
+                out.push(make(file_path, (i + 1) as u32, kind, emit_name, t, "python"));
             }
             continue;
         }
@@ -150,7 +170,20 @@ fn extract_python(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
                 .take_while(|c| c.is_alphanumeric() || *c == '_')
                 .collect();
             if !name.is_empty() {
-                out.push(make(file_path, (i + 1) as u32, "class", name, t, "python"));
+                let qualified = if let Some((_, parent)) = class_stack.last() {
+                    format!("{parent}.{name}")
+                } else {
+                    name.clone()
+                };
+                out.push(make(
+                    file_path,
+                    (i + 1) as u32,
+                    "class",
+                    qualified.clone(),
+                    t,
+                    "python",
+                ));
+                class_stack.push((indent, qualified));
             }
         }
     }
@@ -296,5 +329,73 @@ mod tests {
         assert_eq!(syms[0].name, "foo");
         assert_eq!(syms[1].kind, "class");
         assert_eq!(syms[1].name, "Bar");
+    }
+
+    #[test]
+    fn python_class_methods() {
+        let src = "\
+class Greeter:
+    def __init__(self, name):
+        self.name = name
+
+    async def greet(self):
+        return f'hi {self.name}'
+
+def top_level():
+    pass
+";
+        let syms = extract_python(src, "g.py");
+        // class + 2 methods + top-level def = 4
+        assert_eq!(syms.len(), 4, "got {syms:#?}");
+        assert_eq!(syms[0].kind, "class");
+        assert_eq!(syms[0].name, "Greeter");
+        assert_eq!(syms[1].kind, "method");
+        assert_eq!(syms[1].name, "Greeter.__init__");
+        assert_eq!(syms[2].kind, "method");
+        assert_eq!(syms[2].name, "Greeter.greet");
+        assert_eq!(syms[3].kind, "def");
+        assert_eq!(syms[3].name, "top_level");
+    }
+
+    #[test]
+    fn python_nested_class_qualifies_methods() {
+        let src = "\
+class Outer:
+    class Inner:
+        def deep(self):
+            pass
+
+    def outer_method(self):
+        pass
+";
+        let syms = extract_python(src, "n.py");
+        assert_eq!(syms.len(), 4, "got {syms:#?}");
+        assert_eq!(syms[0].name, "Outer");
+        assert_eq!(syms[1].kind, "class");
+        assert_eq!(syms[1].name, "Outer.Inner");
+        assert_eq!(syms[2].kind, "method");
+        assert_eq!(syms[2].name, "Outer.Inner.deep");
+        assert_eq!(syms[3].kind, "method");
+        assert_eq!(syms[3].name, "Outer.outer_method");
+    }
+
+    #[test]
+    fn python_dedent_pops_class_scope() {
+        // Sibling classes at the same indent — second class's methods must
+        // not be qualified by the first class.
+        let src = "\
+class A:
+    def a_m(self):
+        pass
+
+class B:
+    def b_m(self):
+        pass
+";
+        let syms = extract_python(src, "ab.py");
+        assert_eq!(syms.len(), 4, "got {syms:#?}");
+        assert_eq!(syms[1].name, "A.a_m");
+        assert_eq!(syms[2].name, "B");
+        assert_eq!(syms[3].name, "B.b_m");
     }
 }
