@@ -1621,7 +1621,8 @@ impl StateStore for SqliteStore {
                         updated_at    = excluded.updated_at,
                         importance    = excluded.importance,
                         status        = CASE
-                            WHEN memories.status = 'superseded' THEN 'active'
+                            WHEN memories.status IN ('superseded', 'tombstoned')
+                                THEN 'active'
                             ELSE excluded.status
                         END,
                         trigger_pattern = excluded.trigger_pattern,
@@ -1705,7 +1706,7 @@ impl StateStore for SqliteStore {
                     "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count,
                             importance, status, trigger_pattern, superseded_by
-                     FROM memories WHERE key = ?1",
+                     FROM memories WHERE key = ?1 AND status != 'tombstoned'",
                 )?;
                 let r = stmt
                     .query_row(params![key], |row| {
@@ -2260,10 +2261,40 @@ impl StateStore for SqliteStore {
 
     async fn memory_delete(&self, key: &str) -> Result<bool> {
         let key = key.to_string();
+        let now = now_secs();
         let n = self
             .conn
             .call(move |c| -> RusqliteResult<usize> {
-                Ok(c.execute("DELETE FROM memories WHERE key = ?1", params![key])?)
+                let tx = c.unchecked_transaction()?;
+                // Soft delete (tombstone): keep the row with status='tombstoned'
+                // and bump updated_at so the deletion propagates across
+                // `agent-bridge sync`. NewerWins import on the remote side sees
+                // the bumped timestamp and refuses to revive from stale jsonl,
+                // which used to be the bug — hard DELETE here meant the row
+                // re-imported on the next sync round and "undeleted" itself.
+                // Read-side filters in memory_get/search/list already exclude
+                // status != 'active', so tombstoned rows are invisible to users.
+                // Tombstone GC (true row removal after a quiet period) is a
+                // future Phase 2 task — for now tombstones accumulate. Manual
+                // purge: `DELETE FROM memories WHERE status='tombstoned' AND
+                // updated_at < ?` via sqlite3 CLI.
+                let n = tx.execute(
+                    "UPDATE memories
+                        SET status = 'tombstoned',
+                            updated_at = ?2
+                      WHERE key = ?1
+                        AND status != 'tombstoned'",
+                    params![key, now],
+                )?;
+                // Mirror the previous ON DELETE CASCADE on memory_coactivation:
+                // a tombstoned node shouldn't keep pulling in synaptic neighbors.
+                tx.execute(
+                    "DELETE FROM memory_coactivation
+                       WHERE key_a = ?1 OR key_b = ?1",
+                    params![key],
+                )?;
+                tx.commit()?;
+                Ok(n)
             })
             .await
             .map_err(|e| Error::Backend(format!("memory_delete: {e}")))?;
@@ -5655,6 +5686,161 @@ mod tests {
                 .any(|e| e.to_key == "edge_rt_b" && e.edge_type == "relates"),
             "expected relates edge; got {n:?}"
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn tombstone_propagates_through_export_import_and_resists_revival() {
+        // Regression: before this change, memory_delete hard-DELETE'd the row,
+        // so on the next sync round the remote node's jsonl re-imported the
+        // record and "undeleted" it. Tombstone semantics: delete flips status
+        // to 'tombstoned' + bumps updated_at; export carries the tombstone;
+        // remote import respects NewerWins and refuses to revive.
+        use crate::{ImportConflictPolicy, MemoryExportFilter, MemoryRecord};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-tomb-rt-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+
+        // Node A: save a memory then delete it.
+        let db_a = temp_dir.join("a.db");
+        let store_a = SqliteStore::open(&db_a).await.expect("open a");
+        store_a
+            .memory_save(&MemoryRecord {
+                key: "tomb_x".to_string(),
+                kind: "fact".to_string(),
+                content: "to be deleted".to_string(),
+                tags: vec!["t".to_string()],
+                related_keys: vec![],
+                scope: None,
+                created_at: 1700000010,
+                updated_at: 1700000010,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save");
+        // Verify get returns it pre-delete.
+        assert!(store_a.memory_get("tomb_x").await.expect("get").is_some());
+
+        let deleted = store_a.memory_delete("tomb_x").await.expect("delete");
+        assert!(deleted, "delete should report row was tombstoned");
+
+        // get after delete: invisible to user.
+        assert!(
+            store_a.memory_get("tomb_x").await.expect("get").is_none(),
+            "tombstoned key must not appear in memory_get"
+        );
+        // Idempotent: second delete is a no-op (status already tombstoned).
+        let again = store_a.memory_delete("tomb_x").await.expect("delete2");
+        assert!(!again, "second delete should report no change");
+
+        // Export carries the tombstone.
+        let mem_out = temp_dir.join("a.jsonl");
+        let filter = MemoryExportFilter::default();
+        let res = store_a
+            .memory_export(&filter, &mem_out)
+            .await
+            .expect("export");
+        assert_eq!(
+            res.memories_written, 1,
+            "tombstoned row must export so the deletion propagates"
+        );
+        let exported = tokio::fs::read_to_string(&mem_out).await.expect("read");
+        assert!(
+            exported.contains("\"status\":\"tombstoned\""),
+            "exported jsonl should carry status=tombstoned, got: {exported}"
+        );
+
+        // Node B: import the jsonl, then verify the key is invisible.
+        let db_b = temp_dir.join("b.db");
+        let store_b = SqliteStore::open(&db_b).await.expect("open b");
+        let report = store_b
+            .memory_import(&mem_out, ImportConflictPolicy::NewerWins, None)
+            .await
+            .expect("import");
+        assert_eq!(report.inserted, 1);
+        assert!(
+            store_b.memory_get("tomb_x").await.expect("get b").is_none(),
+            "imported tombstone must not surface via memory_get"
+        );
+
+        // Now simulate a stale jsonl from before the delete (older
+        // updated_at). Re-importing it under NewerWins must NOT revive
+        // the tombstone — that was the original bug.
+        let stale = temp_dir.join("stale.jsonl");
+        let stale_record = MemoryRecord {
+            key: "tomb_x".to_string(),
+            kind: "fact".to_string(),
+            content: "to be deleted".to_string(),
+            tags: vec!["t".to_string()],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000010,
+            updated_at: 1700000010, // older than the tombstone bump
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        tokio::fs::write(
+            &stale,
+            format!("{}\n", serde_json::to_string(&stale_record).unwrap()),
+        )
+        .await
+        .expect("write stale");
+        let report2 = store_b
+            .memory_import(&stale, ImportConflictPolicy::NewerWins, None)
+            .await
+            .expect("reimport stale");
+        assert_eq!(
+            report2.skipped, 1,
+            "stale active record must be skipped — not revive the tombstone"
+        );
+        assert!(
+            store_b.memory_get("tomb_x").await.expect("get b2").is_none(),
+            "tombstone must survive a stale-jsonl reimport (regression guard)"
+        );
+
+        // Resurrect path: memory_save with the same key flips status back to
+        // 'active' (parallel to the existing 'superseded' resurrect logic).
+        store_b
+            .memory_save(&MemoryRecord {
+                key: "tomb_x".to_string(),
+                kind: "fact".to_string(),
+                content: "back from the dead".to_string(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 1700000010,
+                updated_at: 1700001000, // newer than tombstone bump
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: "active".to_string(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("resurrect save");
+        let resurrected = store_b
+            .memory_get("tomb_x")
+            .await
+            .expect("get post-resurrect");
+        assert!(resurrected.is_some(), "save with same key resurrects");
+        assert_eq!(resurrected.unwrap().status, "active");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
