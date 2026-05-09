@@ -38,12 +38,14 @@ use chromiumoxide::cdp::browser_protocol::page::{
     Viewport,
 };
 use chromiumoxide::cdp::browser_protocol::target::{
-    AttachToTargetParams, GetTargetsParams, TargetInfo,
+    GetTargetsParams, TargetInfo,
 };
 use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
+use chromiumoxide::cdp::CdpEventMessage;
 use chromiumoxide::keys::{KeyDefinition, USKEYBOARD_LAYOUT};
 use chromiumoxide::page::ScreenshotParams;
-use chromiumoxide::{Browser, BrowserConfig, Page};
+use chromiumoxide::types::Message;
+use chromiumoxide::{Browser, BrowserConfig, Connection, Page};
 use dashmap::DashMap;
 use futures::StreamExt;
 use std::collections::{HashMap, VecDeque};
@@ -818,24 +820,25 @@ impl BrowserBackend for ChromiumCdpBackend {
                 .iter()
                 .find(|ti| ti.r#type == "iframe" && oopif_matches(ti, frame_id, frame_url_substring));
             if let Some(ti) = oopif {
-                // chromiumoxide's per-page setAutoAttach doesn't auto-attach
-                // foreign-page OOPIFs, so the target is in pin.targets but
-                // has no session_id and get_page returns NotFound. Force the
-                // attach (flatten=true so chromiumoxide's existing
-                // on_attached_to_target stores the session) before fetching.
-                let attach = AttachToTargetParams::builder()
-                    .target_id(ti.target_id.clone())
-                    .flatten(true)
-                    .build()
-                    .map_err(|e| Error::Backend(format!("attachToTarget build: {e}")))?;
-                let _ = browser.execute(attach).await.map_err(|e| {
-                    Error::Backend(format!("attachToTarget (oopif {}): {e}", ti.url))
-                })?;
-                let oopif_page = browser
-                    .get_page(ti.target_id.clone())
-                    .await
-                    .map_err(|e| Error::Backend(format!("get_page (oopif): {e}")))?;
-                return eval_with_exception_details(&oopif_page, js).await;
+                // chromiumoxide 0.9.1's flatten-session response routing has
+                // a known issue: even after `attachToTarget(flatten=true)` and
+                // a successful `browser.get_page(target_id)`, calling
+                // `Runtime.evaluate` on the resulting Page times out — the
+                // CDP response either never reaches the awaiting future or
+                // is dropped by the handler's session/target lookup.
+                //
+                // Workaround: open a fresh per-target websocket directly to
+                // the OOPIF's `/devtools/page/<target_id>` endpoint and submit
+                // `Runtime.evaluate` over that 1:1 connection. Avoids
+                // chromiumoxide's session multiplexing entirely. The
+                // connection lives only for the duration of this one call.
+                let browser_ws = browser.websocket_address().clone();
+                return eval_in_oopif_via_raw_cdp(
+                    &browser_ws,
+                    ti.target_id.inner(),
+                    js,
+                )
+                .await;
             }
         }
 
@@ -1367,6 +1370,101 @@ async fn eval_with_exception_details(p: &Page, js: &str) -> Result<serde_json::V
         .value
         .clone()
         .unwrap_or(serde_json::Value::Null))
+}
+
+/// Open a one-shot websocket to chrome's per-target CDP endpoint
+/// (`/devtools/page/<target_id>`) and run `Runtime.evaluate` directly. Used
+/// for cross-origin OOPIFs where chromiumoxide's flatten-session routing
+/// times out (R2.5 #4b workaround). 15 s overall deadline; events are
+/// drained-and-ignored while we wait for the response with the matching id.
+async fn eval_in_oopif_via_raw_cdp(
+    browser_ws: &str,
+    target_id: &str,
+    js: &str,
+) -> Result<serde_json::Value> {
+    // browser_ws looks like "ws://127.0.0.1:38149/devtools/browser/<browser-id>".
+    // Strip everything from "/devtools/" onward to get the prefix, then
+    // re-append the per-target path.
+    let prefix = browser_ws.rsplit_once("/devtools/").map(|(p, _)| p).ok_or_else(|| {
+        Error::Backend(format!(
+            "browser websocket address has no /devtools/ segment: {browser_ws}"
+        ))
+    })?;
+    let target_ws = format!("{prefix}/devtools/page/{target_id}");
+
+    let mut conn = Connection::<CdpEventMessage>::connect(target_ws.as_str())
+        .await
+        .map_err(|e| Error::Backend(format!("OOPIF Connection::connect ({target_ws}): {e}")))?;
+
+    let params = EvaluateParams::builder()
+        .expression(js.to_string())
+        .return_by_value(true)
+        .await_promise(true)
+        .build()
+        .map_err(|e| Error::Backend(format!("OOPIF evaluate params build: {e}")))?;
+    let params_json = serde_json::to_value(&params)
+        .map_err(|e| Error::Backend(format!("OOPIF evaluate serialize: {e}")))?;
+
+    let call_id = conn
+        .submit_command("Runtime.evaluate".into(), None, params_json)
+        .map_err(|e| Error::Backend(format!("OOPIF submit_command: {e}")))?;
+
+    let overall_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let remaining = overall_deadline
+            .checked_duration_since(tokio::time::Instant::now())
+            .ok_or_else(|| Error::Backend("OOPIF eval: 15s deadline exceeded".into()))?;
+        let next = tokio::time::timeout(remaining, conn.next())
+            .await
+            .map_err(|_| Error::Backend("OOPIF eval: deadline waiting for response".into()))?;
+        let Some(item) = next else {
+            return Err(Error::Backend(
+                "OOPIF connection closed before response".into(),
+            ));
+        };
+        let msg =
+            item.map_err(|e| Error::Backend(format!("OOPIF connection error: {e}")))?;
+        match msg {
+            Message::Response(resp) if resp.id == call_id => {
+                if let Some(err) = resp.error {
+                    return Err(Error::Backend(format!(
+                        "OOPIF Runtime.evaluate error {}: {}",
+                        err.code, err.message
+                    )));
+                }
+                let result = resp.result.unwrap_or(serde_json::Value::Null);
+                if let Some(ex) = result.get("exceptionDetails") {
+                    let url = ex.get("url").and_then(|v| v.as_str()).unwrap_or("(inline)");
+                    let line = ex.get("lineNumber").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let col =
+                        ex.get("columnNumber").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let head =
+                        ex.get("text").and_then(|v| v.as_str()).unwrap_or("(no text)");
+                    let detail = ex
+                        .get("exception")
+                        .and_then(|e| e.get("description"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let where_part = if detail.is_empty() {
+                        head.to_string()
+                    } else {
+                        format!("{head}: {detail}")
+                    };
+                    return Err(Error::Backend(format!(
+                        "evaluate exception @ {url}:{line}:{col}: {where_part}"
+                    )));
+                }
+                return Ok(result
+                    .get("result")
+                    .and_then(|r| r.get("value"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null));
+            }
+            // Drain any other responses or events that arrive on this
+            // dedicated socket before our reply lands.
+            _ => continue,
+        }
+    }
 }
 
 fn json_eval_result_as_plain_text(v: &serde_json::Value) -> String {

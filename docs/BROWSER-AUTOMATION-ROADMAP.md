@@ -2,7 +2,7 @@
 
 **Owner**: agent-bridge
 **Started**: 2026-05-09
-**Status**: Rounds 1 + 2 + 2.5 + 3 + 4 complete (2026-05-09). All 16 originally-catalogued gaps closed except R2.5 #4b OOPIF `eval_in_frame` (chromiumoxide flatten-session limit, documented PARTIAL).
+**Status**: Rounds 1 + 2 + 2.5 + 3 + 4 complete (2026-05-09). **All 16 originally-catalogued gaps closed.** R2.5 #4b OOPIF `eval_in_frame` shipped via raw-CDP per-target connection workaround (chromiumoxide 0.9.1's flatten-session timeout sidestepped).
 
 ## Why this exists
 
@@ -119,17 +119,21 @@ landed same day:
   with `data:` parent + `https://example.com` iframe: count=3 (parent
   + example.com OOPIF + chrome new-tab OOPIF), parent_id linkage
   correct.
-- [ ] **#4b cross-origin OOPIF — eval_in_frame** (PARTIAL, blocked) —
-  `Target.attachToTarget(flatten=true)` succeeds and `browser.get_page`
-  resolves a Page bound to the OOPIF, but `Runtime.evaluate` over the
-  flatten session times out: chromiumoxide 0.9.1's `Page::execute`
-  doesn't appear to route OOPIF responses back to awaiting futures
-  even after explicit attach. Three fix paths: (a) fork chromiumoxide
-  + upstream PR, (b) `Browser::connect` to the per-target
-  webSocketDebuggerUrl as a separate Browser instance, (c) raw
-  websocket CDP bypassing chromiumoxide. None feasible in one
-  session. Same-origin / about:srcdoc iframes work via the
-  `Page.createIsolatedWorld` path (verified earlier R2.4).
+- [x] **#4b cross-origin OOPIF — eval_in_frame** (shipped 2026-05-09 via
+  path c: raw-CDP per-target connection). When `eval_in_frame` finds an
+  OOPIF target, instead of `attachToTarget+get_page+Page::execute` (which
+  hangs in chromiumoxide 0.9.1's flatten-session router), we open a
+  one-shot `chromiumoxide::Connection` to the OOPIF's per-target endpoint
+  `ws://127.0.0.1:<port>/devtools/page/<target_id>` and submit
+  `Runtime.evaluate` directly with no session_id (the page-level CDP
+  endpoint is already 1:1 scoped). 15s overall deadline; events drained
+  while we wait for the response with the matching call_id. Exception
+  details surfaced with `text @ url:line:col` shape (same as same-origin
+  path). Verified end-to-end against `data:` parent + `https://example.com`
+  child: `document.title`, `location.href`, `navigator.userAgent`,
+  link/meta enumeration, thrown-Error surface — all clean. No new deps;
+  same-origin path (`createIsolatedWorld + Runtime.evaluate via Page`)
+  unchanged for non-OOPIF iframes.
 
 ### Round 3 — the hard cases
 
