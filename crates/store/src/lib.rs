@@ -828,6 +828,17 @@ pub trait StateStore: Send + Sync {
     /// removed. Honours `dry_run`.
     async fn memory_compact(&self, policy: CompactPolicy) -> Result<Vec<String>>;
 
+    /// Hard-DELETE rows that have been tombstoned for at least `older_than_days`.
+    /// Tombstone soft-delete (Phase 2 #1) keeps deleted rows so the deletion
+    /// propagates across `agent-bridge sync`; this GC pass cleans them up
+    /// once the sync window is safely past. Returns the keys removed (or that
+    /// would be removed if `dry_run`).
+    async fn memory_purge_tombstones(
+        &self,
+        older_than_days: i64,
+        dry_run: bool,
+    ) -> Result<Vec<String>>;
+
     /// Export memories matching `filter` to a newline-delimited JSON file
     /// (one [`MemoryRecord`] per line). Optionally writes a sibling edge file
     /// when [`MemoryExportFilter::edges_out_path`] is set.

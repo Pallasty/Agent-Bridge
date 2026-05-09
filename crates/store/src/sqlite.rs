@@ -2350,6 +2350,56 @@ impl StateStore for SqliteStore {
         Ok(n > 0)
     }
 
+    async fn memory_purge_tombstones(
+        &self,
+        older_than_days: i64,
+        dry_run: bool,
+    ) -> Result<Vec<String>> {
+        // Cutoff is inclusive: rows whose tombstone is at least
+        // `older_than_days` old qualify. older_than_days=0 → purge all
+        // current tombstones (used in tests; in production callers should
+        // pass at least the sync round-trip window, default 7+).
+        let days = older_than_days.max(0);
+        let cutoff = now_secs() - days.saturating_mul(86_400);
+        let removed = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<String>> {
+                let tx = c.unchecked_transaction()?;
+                let mut stmt = tx.prepare(
+                    "SELECT key FROM memories
+                      WHERE status = 'tombstoned' AND updated_at <= ?1
+                      ORDER BY updated_at ASC",
+                )?;
+                let keys: Vec<String> = stmt
+                    .query_map(params![cutoff], |row| row.get::<_, String>(0))?
+                    .collect::<RusqliteResult<Vec<_>>>()?;
+                drop(stmt);
+                if !dry_run {
+                    for k in &keys {
+                        // memory_coactivation rows were already cleared at
+                        // tombstone time (memory_delete mirrors the FK
+                        // CASCADE explicitly), but be defensive — a row
+                        // tombstoned by a pre-2026-05-09 binary won't have
+                        // had that mirror run, so clean here too.
+                        tx.execute(
+                            "DELETE FROM memory_coactivation
+                              WHERE key_a = ?1 OR key_b = ?1",
+                            params![k],
+                        )?;
+                        tx.execute(
+                            "DELETE FROM memories WHERE key = ?1 AND status = 'tombstoned'",
+                            params![k],
+                        )?;
+                    }
+                }
+                tx.commit()?;
+                Ok(keys)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_purge_tombstones: {e}")))?;
+        Ok(removed)
+    }
+
     async fn memory_decay_importance(
         &self,
         half_life_days: f64,
@@ -6066,6 +6116,130 @@ mod tests {
             .expect("get post-resurrect");
         assert!(resurrected.is_some(), "save with same key resurrects");
         assert_eq!(resurrected.unwrap().status, "active");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn purge_tombstones_only_touches_aged_tombstoned_rows() {
+        // memory_purge_tombstones GC pass (Phase 2.x #6): hard-DELETE rows
+        // that have been tombstoned for at least older_than_days. Must not
+        // touch active or superseded rows, must respect the cutoff, and
+        // must remove memory_coactivation rows defensively.
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-tomb-gc-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+
+        let mk = |key: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: "fact".into(),
+            content: format!("body-{key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000000,
+            updated_at: 1700000000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        for k in ["alive", "old_tomb", "fresh_tomb"] {
+            store.memory_save(&mk(k)).await.expect("save");
+        }
+        // Tombstone two rows; we'll backdate one of them past the cutoff.
+        store.memory_delete("old_tomb").await.expect("delete old");
+        store
+            .memory_delete("fresh_tomb")
+            .await
+            .expect("delete fresh");
+
+        // Backdate old_tomb's updated_at to ~30 days ago so it's strictly
+        // older than the 7-day default cutoff. fresh_tomb keeps its
+        // just-now updated_at and must survive.
+        let backdate = now_secs() - 30 * 86_400;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET updated_at = ?1 WHERE key = 'old_tomb'",
+                    params![backdate],
+                )
+            })
+            .await
+            .expect("backdate");
+
+        // dry_run preview must report old_tomb without removing it.
+        let preview = store
+            .memory_purge_tombstones(7, true)
+            .await
+            .expect("dry_run");
+        assert_eq!(preview, vec!["old_tomb".to_string()]);
+        // Row still exists with status='tombstoned' after dry_run.
+        let row_count: i64 = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM memories WHERE key = 'old_tomb'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+            })
+            .await
+            .expect("count after dry_run");
+        assert_eq!(row_count, 1, "dry_run must not delete");
+
+        // Real purge.
+        let purged = store
+            .memory_purge_tombstones(7, false)
+            .await
+            .expect("purge");
+        assert_eq!(purged, vec!["old_tomb".to_string()]);
+
+        // alive intact; fresh_tomb still tombstoned (within cutoff);
+        // old_tomb gone.
+        let states: std::collections::HashMap<String, String> = store
+            .conn
+            .call(|c| {
+                let mut stmt = c.prepare(
+                    "SELECT key, status FROM memories WHERE key IN ('alive','old_tomb','fresh_tomb')",
+                )?;
+                let rows: RusqliteResult<Vec<(String, String)>> = stmt
+                    .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                    .collect();
+                rows
+            })
+            .await
+            .expect("query states")
+            .into_iter()
+            .collect();
+        assert_eq!(states.get("alive").map(String::as_str), Some("active"));
+        assert_eq!(
+            states.get("fresh_tomb").map(String::as_str),
+            Some("tombstoned")
+        );
+        assert!(
+            !states.contains_key("old_tomb"),
+            "old tombstone must be hard-deleted"
+        );
+
+        // older_than_days=0 nukes all remaining tombstones (e.g. fresh_tomb).
+        let purged_all = store
+            .memory_purge_tombstones(0, false)
+            .await
+            .expect("purge all");
+        assert_eq!(purged_all, vec!["fresh_tomb".to_string()]);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

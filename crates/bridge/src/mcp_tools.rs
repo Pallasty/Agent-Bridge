@@ -5249,6 +5249,74 @@ impl McpTool for MemoryCompactTool {
 }
 
 // ===========================================================================
+//                  memory_purge_tombstones (Phase 2.x #6)
+// ===========================================================================
+
+pub struct MemoryPurgeTombstonesTool {
+    hub: Hub,
+}
+impl MemoryPurgeTombstonesTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryPurgeTombstonesTool {
+    fn name(&self) -> &'static str {
+        "memory_purge_tombstones"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Hard-DELETE memories that have been tombstoned for at least \
+                older_than_days. Tombstone soft-delete keeps deleted rows so the \
+                deletion propagates across `agent-bridge sync`; this GC pass cleans \
+                them once the sync window has safely passed. Default 7 days. \
+                dry_run=true previews."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "older_than_days": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 7,
+                        "description": "Only purge tombstones whose updated_at is strictly older than this. \
+                            Default 7 — long enough to outlive a typical multi-node sync round-trip. \
+                            0 means purge all tombstones regardless of age (use only on isolated nodes)."
+                    },
+                    "dry_run": { "type": "boolean", "default": false }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let older_than_days = args
+            .get("older_than_days")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(7)
+            .max(0);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let purged = store
+            .memory_purge_tombstones(older_than_days, dry_run)
+            .await?;
+        Ok(ToolResult::json_text(&json!({
+            "dry_run": dry_run,
+            "older_than_days": older_than_days,
+            "purged_count": purged.len(),
+            "purged_keys": purged,
+        })))
+    }
+}
+
+// ===========================================================================
 //                       memory_reindex (re-embed after dim migration)
 // ===========================================================================
 
@@ -11422,6 +11490,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
 
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPurgeTombstonesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkTool::new(hub.clone())));
