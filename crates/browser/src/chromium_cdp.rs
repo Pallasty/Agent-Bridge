@@ -24,6 +24,9 @@ use ab_core::{Error, PageId, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use chromiumoxide::cdp::browser_protocol::accessibility::GetFullAxTreeParams;
+use chromiumoxide::cdp::browser_protocol::emulation::{
+    SetDeviceMetricsOverrideParams, SetUserAgentOverrideParams,
+};
 use chromiumoxide::cdp::browser_protocol::input::{DispatchKeyEventParams, DispatchKeyEventType};
 use chromiumoxide::cdp::browser_protocol::network::{
     EnableParams as NetworkEnableParams, EventLoadingFinished, EventResponseReceived,
@@ -350,6 +353,48 @@ impl BrowserBackend for ChromiumCdpBackend {
             .await
             .map_err(|e| Error::Backend(format!("screenshot: {e}")))?;
         Ok(Bytes::from(png))
+    }
+
+    async fn set_user_agent(
+        &self,
+        page: &PageId,
+        user_agent: &str,
+        accept_language: Option<&str>,
+        platform: Option<&str>,
+    ) -> Result<()> {
+        let p = self.page_handle(page)?;
+        let params = SetUserAgentOverrideParams {
+            user_agent: user_agent.to_string(),
+            accept_language: accept_language.map(|s| s.to_string()),
+            platform: platform.map(|s| s.to_string()),
+            user_agent_metadata: None,
+        };
+        p.execute(params)
+            .await
+            .map_err(|e| Error::Backend(format!("setUserAgentOverride: {e}")))?;
+        Ok(())
+    }
+
+    async fn set_viewport(
+        &self,
+        page: &PageId,
+        width: i64,
+        height: i64,
+        device_scale_factor: f64,
+        mobile: bool,
+    ) -> Result<()> {
+        let p = self.page_handle(page)?;
+        let params = SetDeviceMetricsOverrideParams::builder()
+            .width(width)
+            .height(height)
+            .device_scale_factor(device_scale_factor)
+            .mobile(mobile)
+            .build()
+            .map_err(|e| Error::Backend(format!("setDeviceMetricsOverride builder: {e}")))?;
+        p.execute(params)
+            .await
+            .map_err(|e| Error::Backend(format!("setDeviceMetricsOverride: {e}")))?;
+        Ok(())
     }
 
     async fn screenshot_element(&self, page: &PageId, selector: &str) -> Result<Bytes> {

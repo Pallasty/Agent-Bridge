@@ -202,6 +202,34 @@ pub trait BrowserBackend: Send + Sync {
         max_results: usize,
     ) -> Result<Vec<CapturedResponse>>;
 
+    /// Override the User-Agent string and (optionally) the
+    /// `Accept-Language` header for `page` (CDP
+    /// `Emulation.setUserAgentOverride`). Persists for the lifetime
+    /// of the page; pass empty `user_agent` to disable. Pair with
+    /// [`Self::set_viewport`] to fully emulate a target device.
+    async fn set_user_agent(
+        &self,
+        page: &PageId,
+        user_agent: &str,
+        accept_language: Option<&str>,
+        platform: Option<&str>,
+    ) -> Result<()>;
+
+    /// Override the device viewport / DPR / mobile flag for `page`
+    /// (CDP `Emulation.setDeviceMetricsOverride`). Width/height in CSS
+    /// pixels; pass `0` to disable that dimension's override.
+    /// `device_scale_factor=0` disables DPR override (defaults to host
+    /// screen). Useful for capturing mobile-only sign-up flows that
+    /// gate behind `screen.width < 768`.
+    async fn set_viewport(
+        &self,
+        page: &PageId,
+        width: i64,
+        height: i64,
+        device_scale_factor: f64,
+        mobile: bool,
+    ) -> Result<()>;
+
     /// Capture a PNG screenshot of just the first element matching
     /// `selector` (auto-scrolls into view first; clip = element
     /// bounding box). Returns the raw PNG bytes — same format as

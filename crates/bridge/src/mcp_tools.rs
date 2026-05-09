@@ -2214,6 +2214,112 @@ impl McpTool for BrowserScrollTool {
     }
 }
 
+pub struct BrowserSetEmulationTool {
+    hub: Hub,
+}
+impl BrowserSetEmulationTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserSetEmulationTool {
+    fn name(&self) -> &'static str {
+        "browser_set_emulation"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Override device characteristics for `page`: User-Agent string, \
+                 Accept-Language header, viewport size, mobile flag, device pixel ratio. \
+                 Useful for sign-up flows gated behind 'mobile only' checks (most banking \
+                 / fintech) or for testing geo / locale-specific UI. All fields optional; \
+                 omitted ones are left untouched. Pass `width` or `height` = 0 to disable \
+                 the corresponding viewport override; pass empty `user_agent` to skip the \
+                 UA override entirely. Persists for the lifetime of the page."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":                { "type": "string", "description": "Page id from browser_navigate." },
+                    "user_agent":          { "type": "string", "description": "Full UA string. Empty / omitted = no UA override." },
+                    "accept_language":     { "type": "string", "description": "e.g. 'en-US,en;q=0.9' or 'fr-FR'." },
+                    "platform":            { "type": "string", "description": "Value navigator.platform should return (e.g. 'Linux x86_64')." },
+                    "viewport_width":      { "type": "integer", "minimum": 0, "description": "CSS pixels; 0 = no override." },
+                    "viewport_height":     { "type": "integer", "minimum": 0, "description": "CSS pixels; 0 = no override." },
+                    "device_scale_factor": { "type": "number", "default": 1.0, "description": "DPR (1.0 = standard, 2.0 = retina). 0 = host default." },
+                    "mobile":              { "type": "boolean", "default": false, "description": "Emulate mobile (overlay scrollbars, viewport meta, text autosizing)." }
+                },
+                "required": ["page"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let user_agent = args
+            .get("user_agent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let accept_language = args
+            .get("accept_language")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let platform = args
+            .get("platform")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let vw = args
+            .get("viewport_width")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let vh = args
+            .get("viewport_height")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let dpr = args
+            .get("device_scale_factor")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+        let mobile = args
+            .get("mobile")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let mut applied: Vec<&str> = Vec::new();
+        if !user_agent.is_empty() {
+            if let Err(e) = b
+                .set_user_agent(&page, user_agent, accept_language, platform)
+                .await
+            {
+                return Ok(ToolResult::error(format!("browser: {e}")));
+            }
+            applied.push("user_agent");
+        }
+        if vw > 0 || vh > 0 {
+            if let Err(e) = b.set_viewport(&page, vw, vh, dpr, mobile).await {
+                return Ok(ToolResult::error(format!("browser: {e}")));
+            }
+            applied.push("viewport");
+        }
+        if applied.is_empty() {
+            return Ok(ToolResult::error(
+                "no override applied — pass user_agent or viewport_width/height",
+            ));
+        }
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "applied": applied,
+        })))
+    }
+}
+
 pub struct BrowserHoverTool {
     hub: Hub,
 }
@@ -11314,6 +11420,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserClosePageTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserScrollTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserHoverTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserSetEmulationTool::new(hub.clone())));
     // Warp URL-scheme + status.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));
