@@ -202,6 +202,13 @@ pub trait BrowserBackend: Send + Sync {
         max_results: usize,
     ) -> Result<Vec<CapturedResponse>>;
 
+    /// Capture a PNG screenshot of just the first element matching
+    /// `selector` (auto-scrolls into view first; clip = element
+    /// bounding box). Returns the raw PNG bytes — same format as
+    /// [`Self::screenshot`] but tighter. Errors with `not found` if
+    /// the selector matches nothing.
+    async fn screenshot_element(&self, page: &PageId, selector: &str) -> Result<Bytes>;
+
     /// Scroll `page`. If `selector` is `Some`, scroll the matching
     /// element into view (centered). Otherwise dispatch a
     /// `window.scrollBy(dx, dy)` with the supplied pixel deltas

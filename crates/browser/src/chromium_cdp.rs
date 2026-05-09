@@ -31,6 +31,7 @@ use chromiumoxide::cdp::browser_protocol::network::{
 };
 use chromiumoxide::cdp::browser_protocol::page::{
     CaptureScreenshotFormat, CreateIsolatedWorldParams, FrameId, FrameTree, GetFrameTreeParams,
+    Viewport,
 };
 use chromiumoxide::cdp::browser_protocol::target::{
     AttachToTargetParams, GetTargetsParams, TargetInfo,
@@ -348,6 +349,45 @@ impl BrowserBackend for ChromiumCdpBackend {
             .screenshot(params)
             .await
             .map_err(|e| Error::Backend(format!("screenshot: {e}")))?;
+        Ok(Bytes::from(png))
+    }
+
+    async fn screenshot_element(&self, page: &PageId, selector: &str) -> Result<Bytes> {
+        let p = self.page_handle(page)?;
+        let el = p
+            .find_element(selector.to_string())
+            .await
+            .map_err(|e| Error::Backend(format!("find_element {selector}: {e}")))?;
+        // Auto-scroll so the element is in-frame for capture; otherwise
+        // CDP captures whatever scroll offset happens to be active.
+        el.scroll_into_view()
+            .await
+            .map_err(|e| Error::Backend(format!("scroll_into_view: {e}")))?;
+        let bb = el
+            .bounding_box()
+            .await
+            .map_err(|e| Error::Backend(format!("bounding_box: {e}")))?;
+        if bb.width <= 0.0 || bb.height <= 0.0 {
+            return Err(Error::Backend(format!(
+                "element has zero area: {}x{}",
+                bb.width, bb.height
+            )));
+        }
+        let clip = Viewport {
+            x: bb.x,
+            y: bb.y,
+            width: bb.width,
+            height: bb.height,
+            scale: 1.0,
+        };
+        let params = ScreenshotParams::builder()
+            .format(CaptureScreenshotFormat::Png)
+            .clip(clip)
+            .build();
+        let png = p
+            .screenshot(params)
+            .await
+            .map_err(|e| Error::Backend(format!("screenshot_element: {e}")))?;
         Ok(Bytes::from(png))
     }
 

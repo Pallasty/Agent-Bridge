@@ -1123,6 +1123,86 @@ impl McpTool for BrowserScreenshotTool {
     }
 }
 
+pub struct BrowserScreenshotElementTool {
+    hub: Hub,
+}
+impl BrowserScreenshotElementTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserScreenshotElementTool {
+    fn name(&self) -> &'static str {
+        "browser_screenshot_element"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Capture a tight PNG screenshot of just the first element matching \
+                 `selector` (auto-scrolls into view; clip = element bounding box). Same \
+                 file/inline options as `browser_screenshot`. Use this instead of a full-\
+                 page shot when you only need to verify one widget rendered correctly \
+                 (e.g. the API key value displayed in a code block)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":     { "type": "string" },
+                    "selector": { "type": "string", "description": "CSS selector for the element to capture." },
+                    "path":     { "type": "string", "description": "Optional output path (file mode only)." },
+                    "inline":   { "type": "boolean", "default": false, "description": "If true, return the PNG as an MCP image block instead of writing a file." }
+                },
+                "required": ["page", "selector"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let selector = args.get("selector").and_then(|v| v.as_str()).unwrap_or("");
+        if selector.is_empty() {
+            return Ok(ToolResult::error("missing 'selector'"));
+        }
+        let png = match b.screenshot_element(&page, selector).await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolResult::error(format!("browser: {e}"))),
+        };
+        let inline = args
+            .get("inline")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if inline {
+            let b64 = general_purpose::STANDARD.encode(&png);
+            let caption = format!("inline element screenshot — {} bytes, image/png", png.len());
+            return Ok(ToolResult::image_with_caption(b64, "image/png", caption));
+        }
+        let path = args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                std::env::temp_dir()
+                    .join(format!("agent-bridge-{page}-element.png"))
+                    .to_string_lossy()
+                    .into_owned()
+            });
+        if let Err(e) = tokio::fs::write(&path, &png).await {
+            return Ok(ToolResult::error(format!("write {path}: {e}")));
+        }
+        Ok(ToolResult::text(format!(
+            "wrote {} bytes → {path}",
+            png.len()
+        )))
+    }
+}
+
 pub struct BrowserExtractTextTool {
     hub: Hub,
 }
@@ -10996,11 +11076,12 @@ impl McpTool for SkillsRecommendTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Recommend relevant indexed Claude Code skills for a task. Searches \
-                 the local skill index (built via `agent-bridge skills index|seed`) and returns \
-                 top-K matches with source repo, lint status, and install command. Use this \
-                 before reaching for ad-hoc instructions when the user describes a coding/ops \
-                 task that might already have a skill written for it."
+            description: "Recommend relevant indexed Claude Code skills for a task. Ranks by \
+                 cosine similarity over local embeddings (NL queries like 'edit pdf forms' \
+                 work as intended), with FTS5 fallback for cold-cache or rare-token queries. \
+                 Returns top-K matches with source repo, lint status, and install command. \
+                 Use this before reaching for ad-hoc instructions when the user describes a \
+                 coding/ops task that might already have a skill written for it."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -11031,8 +11112,33 @@ impl McpTool for SkillsRecommendTool {
             .unwrap_or(5)
             .clamp(1, 50) as u32;
 
+        // Semantic-first: NL task descriptions ("edit pdf forms") are
+        // semantic queries, not keyword queries. FTS5/BM25 over multi-token
+        // NL fights us — IDF favours rare common-English tokens (e.g. "edit"
+        // beats "pdf"), and long skill bodies get doc-length-penalised, so
+        // "edit pdf forms" returned `wiki-schema` (one stray "papers/*.pdf"
+        // in YAML) over `anthropics/skills/pdf` (whose first sentence is
+        // literally "Use this skill ... filling PDF forms"). Cosine over
+        // local embeddings doesn't have this pathology.
+        //
+        // Fall back to fts if semantic produces zero skill hits — covers
+        // cold-cache state and rare-token queries where exact match wins.
         let tag_filter = vec!["skill".to_string()];
-        let hits = store.memory_search(&q, &tag_filter, limit).await?;
+        let overfetch = (limit.saturating_mul(5)).min(100);
+        let semantic_hits = store
+            .memory_search_semantic(&q, overfetch, 0.25_f32)
+            .await
+            .unwrap_or_default();
+        let semantic_skill_hits: Vec<_> = semantic_hits
+            .into_iter()
+            .filter(|h| h.record.tags.iter().any(|t| t == "skill"))
+            .take(limit as usize)
+            .collect();
+        let hits = if semantic_skill_hits.is_empty() {
+            store.memory_search(&q, &tag_filter, limit).await?
+        } else {
+            semantic_skill_hits
+        };
         let recs: Vec<Value> = hits
             .into_iter()
             .map(|h| {
@@ -11188,6 +11294,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserSnapshotTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserClickTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserScreenshotTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserScreenshotElementTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserExtractTextTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserFillFormTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserWaitForTool::new(hub.clone())));
