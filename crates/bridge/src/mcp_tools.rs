@@ -3350,27 +3350,165 @@ async fn build_proactive_hint(
 /// surfaces them together. Skill records are excluded from candidates
 /// (same intent as P1.5 coactivation filter).
 ///
-/// Pure / synchronous so it's easy to unit-test. Returns
-/// `(neighbor_key, cosine_score)` pairs sorted descending by score.
+/// Pure / synchronous so it's easy to unit-test. Returns full records
+/// (cloned from the cache) so callers — notably the P4b LLM filter step —
+/// have the body / tags / kind they need without a second round-trip.
 fn pick_evolution_neighbors(
     cached: &[(MemoryRecord, Vec<f32>)],
     new_key: &str,
     new_embedding: &[f32],
     threshold: f32,
     top_k: usize,
-) -> Vec<(String, f64)> {
-    let mut sims: Vec<(String, f64)> = cached
+) -> Vec<(MemoryRecord, f64)> {
+    let mut sims: Vec<(MemoryRecord, f64)> = cached
         .iter()
         .filter(|(rec, _)| rec.key != new_key && rec.kind != "skill")
         .map(|(rec, emb)| {
             let c = cosine_similarity(new_embedding, emb);
-            (rec.key.clone(), c as f64)
+            (rec.clone(), c as f64)
         })
         .filter(|(_, c)| (*c as f32) >= threshold)
         .collect();
     sims.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     sims.truncate(top_k);
     sims
+}
+
+/// **Phase 1 P4b — LLM-driven evolution filter (A-MEM step 3).**
+///
+/// Cosine similarity (Phase 1 P4) is necessary but not sufficient: two
+/// memories sharing a lot of vocabulary about "Rust async" can still be
+/// about completely different problems. A-MEM uses an LLM to make the
+/// final "are these conceptually linked?" call. This is the same idea,
+/// but conservative: we only ASK the LLM to filter the cosine candidate
+/// set down to the truly-related subset. Tags and content of the source
+/// memory are never modified (we still defer that to a future P4b.2).
+///
+/// Returns the indices (0-based) into `candidates` that the LLM kept.
+/// On any LLM failure (no API key, parse error, network err) returns the
+/// full set unchanged — graceful degradation back to pure cosine.
+async fn llm_filter_evolution_neighbors(
+    client: &crate::anthropic_api::AnthropicClient,
+    new_key: &str,
+    new_kind: &str,
+    new_tags: &[String],
+    new_content: &str,
+    candidates: &[(MemoryRecord, f64)],
+) -> Vec<usize> {
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+    let pass_through: Vec<usize> = (0..candidates.len()).collect();
+
+    // Build a compact prompt. We truncate bodies aggressively because the
+    // LLM only needs a topical hint, not full prose; this keeps token cost
+    // ~1-2k input per save (sub-cent at Haiku rates).
+    fn truncate(s: &str, max: usize) -> String {
+        let chars: Vec<char> = s.chars().collect();
+        if chars.len() <= max {
+            s.to_string()
+        } else {
+            let mut out: String = chars[..max].iter().collect();
+            out.push_str(" …");
+            out
+        }
+    }
+    let mut prompt = String::new();
+    prompt.push_str("You filter memory-graph cluster candidates. Given a NEW memory \
+and several cosine-similar candidates, identify which candidates are CONCEPTUALLY \
+linked to the NEW memory (about the same problem, decision, or system), not just \
+sharing vocabulary. Be strict — when unsure, exclude.\n\n");
+    prompt.push_str(&format!(
+        "NEW MEMORY\nkey: {new_key}\nkind: {new_kind}\ntags: {tags}\nbody: {body}\n\n",
+        new_key = new_key,
+        new_kind = new_kind,
+        tags = new_tags.join(", "),
+        body = truncate(new_content, 500),
+    ));
+    prompt.push_str("CANDIDATES\n");
+    for (i, (rec, _score)) in candidates.iter().enumerate() {
+        prompt.push_str(&format!(
+            "[{n}] key: {k}\n    kind: {kind}, tags: {tags}\n    body: {body}\n\n",
+            n = i + 1,
+            k = rec.key,
+            kind = rec.kind,
+            tags = rec.tags.join(", "),
+            body = truncate(&rec.content, 300),
+        ));
+    }
+    prompt.push_str(
+        "Return ONLY this JSON, no commentary, no markdown, no prose:\n\
+         {\"linked_indices\": [1, 3]}\n\
+         Use 1-based indices into CANDIDATES. Empty array means none link.",
+    );
+
+    let messages = vec![crate::anthropic_api::Message {
+        role: "user".to_string(),
+        content: prompt,
+    }];
+
+    let resp = match client
+        .messages_create(crate::anthropic_api::DEFAULT_MODEL, None, &messages, 256)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                target: "p4b_evolve",
+                key = %new_key,
+                error = %e,
+                "P4b LLM filter failed; falling back to cosine-only"
+            );
+            return pass_through;
+        }
+    };
+
+    parse_llm_filter_response(&resp.text, candidates.len()).unwrap_or_else(|reason| {
+        tracing::warn!(
+            target: "p4b_evolve",
+            key = %new_key,
+            reason = reason,
+            text_preview = %resp.text.chars().take(200).collect::<String>(),
+            "P4b LLM filter parse failed; falling back to cosine-only"
+        );
+        pass_through
+    })
+}
+
+/// Parse `{"linked_indices": [1, 3]}` from LLM output. Tolerates leading/trailing
+/// markdown fences (` ```json ... ``` `) by extracting the first JSON object.
+/// Returns 0-based indices clamped to `[0, candidate_count)`.
+fn parse_llm_filter_response(
+    text: &str,
+    candidate_count: usize,
+) -> std::result::Result<Vec<usize>, &'static str> {
+    let trimmed = text.trim();
+    // Strip ```json ... ``` fences if present.
+    let inner = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"))
+        .unwrap_or(trimmed);
+    let inner = inner.strip_suffix("```").unwrap_or(inner);
+    // Extract first {...} JSON object — robustness against accidental prose.
+    let start = inner.find('{').ok_or("no JSON object")?;
+    let end = inner.rfind('}').ok_or("no JSON object close")?;
+    if end <= start {
+        return Err("JSON braces in wrong order");
+    }
+    let json_slice = &inner[start..=end];
+
+    let v: serde_json::Value =
+        serde_json::from_str(json_slice).map_err(|_| "JSON parse failed")?;
+    let arr = v
+        .get("linked_indices")
+        .and_then(|x| x.as_array())
+        .ok_or("missing linked_indices array")?;
+    Ok(arr
+        .iter()
+        .filter_map(|n| n.as_u64())
+        .map(|n| n.saturating_sub(1) as usize) // 1-based → 0-based
+        .filter(|&i| i < candidate_count)
+        .collect())
 }
 
 pub struct MemorySaveTool {
@@ -3505,17 +3643,17 @@ impl McpTool for MemorySaveTool {
                     let rec = mem.clone();
                     let emb = embed_text(&rec.content);
                     let emb_for_evolve = emb.clone();
+                    let new_kind_for_evolve = mem.kind.clone();
+                    let new_tags_for_evolve = mem.tags.clone();
                     tokio::spawn(async move {
                         tracing::debug!(
                             target: "p4_evolve",
                             key = %new_key_for_evolve,
                             "P4 evolve spawn entry"
                         );
-                        // Step 1: best-effort cache upsert. If the cache is
-                        // None we skip it — `memory_reindex` / `session_bootstrap`
-                        // will rebuild from DB later, and the new row's
-                        // embedding is already in the DB via memory_save.
-                        let neighbors: Vec<(String, f64)> = {
+                        // Step 1: cosine candidates (warm cache → in-memory;
+                        //   cold cache → store fallback).
+                        let candidates: Vec<(MemoryRecord, f64)> = {
                             let mut guard = cache.lock().await;
                             if let Some(ref mut cached) = *guard {
                                 cached.retain(|(r, _)| r.key != rec.key);
@@ -3532,13 +3670,12 @@ impl McpTool for MemorySaveTool {
                                     target: "p4_evolve",
                                     key = %new_key_for_evolve,
                                     branch = "warm",
-                                    neighbors = n.len(),
-                                    "P4 evolve neighbors picked"
+                                    candidates = n.len(),
+                                    "P4 evolve cosine candidates picked"
                                 );
                                 n
                             } else {
                                 drop(guard);
-                                // Cold path: ask the store directly.
                                 match store_for_evolve
                                     .memory_search_semantic(
                                         &new_content_for_evolve,
@@ -3548,28 +3685,25 @@ impl McpTool for MemorySaveTool {
                                     .await
                                 {
                                     Ok(hits) => {
-                                        let n: Vec<(String, f64)> = hits
+                                        let n: Vec<(MemoryRecord, f64)> = hits
                                             .into_iter()
                                             .filter(|h| {
                                                 h.record.key != new_key_for_evolve
                                                     && h.record.kind != "skill"
                                             })
                                             .take(5)
-                                            .map(|h| (h.record.key, h.score))
+                                            .map(|h| (h.record, h.score))
                                             .collect();
                                         tracing::debug!(
                                             target: "p4_evolve",
                                             key = %new_key_for_evolve,
                                             branch = "cold",
-                                            neighbors = n.len(),
-                                            "P4 evolve neighbors picked (cold)"
+                                            candidates = n.len(),
+                                            "P4 evolve cosine candidates picked (cold)"
                                         );
                                         n
                                     }
                                     Err(e) => {
-                                        // Keep at warn — a failure here means
-                                        // memory_search_semantic broke, which we
-                                        // want loud even in production.
                                         tracing::warn!(
                                             target: "p4_evolve",
                                             key = %new_key_for_evolve,
@@ -3582,28 +3716,74 @@ impl McpTool for MemorySaveTool {
                             }
                         };
 
-                        // Step 2: write the evolution edges.
-                        for (neighbor_key, score) in neighbors {
+                        // Step 2: P4b — optional LLM filter. If ANTHROPIC_API_KEY
+                        // is set, ask the LLM which candidates are conceptually
+                        // linked (vs just sharing vocabulary). On any failure
+                        // (no key / parse / network), pass everything through —
+                        // structural P4 still works without LLM.
+                        let kept_indices: Vec<usize> = if candidates.is_empty() {
+                            Vec::new()
+                        } else {
+                            match crate::anthropic_api::AnthropicClient::from_env() {
+                                Ok(client) => {
+                                    let kept = llm_filter_evolution_neighbors(
+                                        &client,
+                                        &new_key_for_evolve,
+                                        &new_kind_for_evolve,
+                                        &new_tags_for_evolve,
+                                        &new_content_for_evolve,
+                                        &candidates,
+                                    )
+                                    .await;
+                                    tracing::debug!(
+                                        target: "p4b_evolve",
+                                        key = %new_key_for_evolve,
+                                        candidates = candidates.len(),
+                                        kept = kept.len(),
+                                        "P4b LLM filter applied"
+                                    );
+                                    kept
+                                }
+                                Err(_) => {
+                                    // No API key configured — degrade to cosine-only.
+                                    // Logged at debug because this is the expected
+                                    // path for users who haven't set up Anthropic.
+                                    tracing::debug!(
+                                        target: "p4b_evolve",
+                                        key = %new_key_for_evolve,
+                                        "P4b LLM unavailable (no API key); using all cosine candidates"
+                                    );
+                                    (0..candidates.len()).collect()
+                                }
+                            }
+                        };
+
+                        // Step 3: write evolution edges for the kept set.
+                        for idx in kept_indices {
+                            let (neighbor, score) = match candidates.get(idx) {
+                                Some(c) => c,
+                                None => continue,
+                            };
                             match store_for_evolve
                                 .memory_link(
                                     &new_key_for_evolve,
-                                    &neighbor_key,
+                                    &neighbor.key,
                                     "evolved",
-                                    score,
+                                    *score,
                                 )
                                 .await
                             {
                                 Ok(()) => tracing::debug!(
                                     target: "p4_evolve",
                                     from = %new_key_for_evolve,
-                                    to = %neighbor_key,
+                                    to = %neighbor.key,
                                     score = score,
                                     "P4 evolve edge written"
                                 ),
                                 Err(e) => tracing::warn!(
                                     target: "p4_evolve",
                                     from = %new_key_for_evolve,
-                                    to = %neighbor_key,
+                                    to = %neighbor.key,
                                     error = %e,
                                     "P4 evolve memory_link FAILED"
                                 ),
@@ -12267,7 +12447,7 @@ mod tests {
             mk_cached("skill_match", "skill", vec![0.99, 0.14, 0.0]),
         ];
         let picks = pick_evolution_neighbors(&cache, "self_dup", &new, 0.65, 5);
-        let keys: Vec<&str> = picks.iter().map(|(k, _)| k.as_str()).collect();
+        let keys: Vec<&str> = picks.iter().map(|(rec, _)| rec.key.as_str()).collect();
 
         assert!(!keys.contains(&"self_dup"), "must exclude self by key");
         assert!(!keys.contains(&"skill_match"), "must exclude kind=skill");
@@ -12277,7 +12457,51 @@ mod tests {
         // Top-K cap: even if many would qualify, only k returned.
         let picks_top1 = pick_evolution_neighbors(&cache, "self_dup", &new, 0.65, 1);
         assert_eq!(picks_top1.len(), 1);
-        assert_eq!(picks_top1[0].0, "hot_kin");
+        assert_eq!(picks_top1[0].0.key, "hot_kin");
+    }
+
+    #[test]
+    fn p4b_parse_llm_filter_response_handles_clean_json() {
+        let txt = r#"{"linked_indices": [1, 3]}"#;
+        let result = parse_llm_filter_response(txt, 5).expect("parse");
+        // 1-based → 0-based
+        assert_eq!(result, vec![0_usize, 2]);
+    }
+
+    #[test]
+    fn p4b_parse_llm_filter_response_strips_markdown_fences() {
+        let txt = "```json\n{\"linked_indices\": [2]}\n```";
+        let result = parse_llm_filter_response(txt, 5).expect("parse");
+        assert_eq!(result, vec![1_usize]);
+    }
+
+    #[test]
+    fn p4b_parse_llm_filter_response_clamps_out_of_range() {
+        let txt = r#"{"linked_indices": [1, 99, 3]}"#;
+        let result = parse_llm_filter_response(txt, 3).expect("parse");
+        // 1-based 1,99,3 → 0-based 0,98,2; only 0 and 2 are < 3
+        assert_eq!(result, vec![0_usize, 2]);
+    }
+
+    #[test]
+    fn p4b_parse_llm_filter_response_empty_array_means_no_links() {
+        let txt = r#"{"linked_indices": []}"#;
+        let result = parse_llm_filter_response(txt, 5).expect("parse");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn p4b_parse_llm_filter_response_rejects_no_object() {
+        let r = parse_llm_filter_response("nonsense without json", 5);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn p4b_parse_llm_filter_response_handles_leading_prose() {
+        // LLM sometimes wraps the JSON in a courtesy sentence — extract anyway.
+        let txt = "Sure, here's my answer: {\"linked_indices\":[2,4]} hope this helps.";
+        let result = parse_llm_filter_response(txt, 5).expect("parse");
+        assert_eq!(result, vec![1_usize, 3]);
     }
 
     #[test]

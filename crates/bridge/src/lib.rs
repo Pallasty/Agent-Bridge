@@ -15,6 +15,7 @@ pub mod security;
 pub mod server;
 pub mod session_handoff;
 pub mod socket_path;
+pub mod anthropic_api;
 pub mod brave_api;
 pub mod cloudflare_api;
 pub mod github_api;
