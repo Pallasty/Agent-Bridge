@@ -952,6 +952,29 @@ impl BrowserBackend for ChromiumCdpBackend {
         }
     }
 
+    async fn reload(&self, page: &PageId) -> Result<()> {
+        let p = match self.pages.get(page.as_str()) {
+            Some(p) => p.clone(),
+            None => return Err(Error::NotFound(format!("page not tracked: {}", page.as_str()))),
+        };
+        p.reload()
+            .await
+            .map_err(|e| Error::Backend(format!("reload: {e}")))?;
+        Ok(())
+    }
+
+    async fn go_back(&self, page: &PageId) -> Result<()> {
+        // history.back() is async; eval returns before navigation
+        // commits. Caller is expected to chase with wait_for if needed.
+        self.eval(page, "window.history.back();").await?;
+        Ok(())
+    }
+
+    async fn go_forward(&self, page: &PageId) -> Result<()> {
+        self.eval(page, "window.history.forward();").await?;
+        Ok(())
+    }
+
     async fn close(&self, page: &PageId) -> Result<()> {
         // Release any pending pause waiter on this page so resume-less
         // close() doesn't strand a request.

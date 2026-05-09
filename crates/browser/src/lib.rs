@@ -202,6 +202,19 @@ pub trait BrowserBackend: Send + Sync {
         max_results: usize,
     ) -> Result<Vec<CapturedResponse>>;
 
+    /// Reload `page` (CDP `Page.reload`) and wait for the load event.
+    /// Equivalent to clicking the browser's reload button.
+    async fn reload(&self, page: &PageId) -> Result<()>;
+
+    /// Step `page` one entry back in its session history (equivalent
+    /// to `window.history.back()`). Best-effort: returns immediately
+    /// after dispatching the navigation; use `wait_for` afterwards if
+    /// you need to block until the new URL settles.
+    async fn go_back(&self, page: &PageId) -> Result<()>;
+
+    /// Step `page` one entry forward in its session history.
+    async fn go_forward(&self, page: &PageId) -> Result<()>;
+
     /// Block the current request until [`Self::resume`] is called for
     /// `page`, or until `timeout_ms` elapses. Returns a [`PauseOutcome`]
     /// describing which condition fired. Used to hand control to a human

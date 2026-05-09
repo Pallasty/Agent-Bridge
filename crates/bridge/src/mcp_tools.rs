@@ -1895,6 +1895,189 @@ impl McpTool for BrowserCaptureResponseDrainTool {
     }
 }
 
+pub struct BrowserReloadTool {
+    hub: Hub,
+}
+impl BrowserReloadTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserReloadTool {
+    fn name(&self) -> &'static str {
+        "browser_reload"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Reload `page` (CDP `Page.reload`) and wait for the load event. \
+                 Equivalent to clicking the browser's reload button. Use after a network \
+                 hiccup or when an SPA gets stuck in an inconsistent state."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page": { "type": "string", "description": "Page id from browser_navigate." }
+                },
+                "required": ["page"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        match b.reload(&page).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({ "status": "ok" }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
+pub struct BrowserBackTool {
+    hub: Hub,
+}
+impl BrowserBackTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserBackTool {
+    fn name(&self) -> &'static str {
+        "browser_back"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Step `page` one entry back in its session history (equivalent to \
+                 clicking the browser's back button / `history.back()`). Returns immediately \
+                 after dispatching; use `browser_wait_for` afterwards if you need to block \
+                 until the URL settles."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page": { "type": "string", "description": "Page id from browser_navigate." }
+                },
+                "required": ["page"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        match b.go_back(&page).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({ "status": "ok" }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
+pub struct BrowserForwardTool {
+    hub: Hub,
+}
+impl BrowserForwardTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserForwardTool {
+    fn name(&self) -> &'static str {
+        "browser_forward"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Step `page` one entry forward in its session history (equivalent \
+                 to clicking the browser's forward button / `history.forward()`). Returns \
+                 immediately after dispatching; chase with `browser_wait_for` if needed."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page": { "type": "string", "description": "Page id from browser_navigate." }
+                },
+                "required": ["page"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        match b.go_forward(&page).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({ "status": "ok" }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
+pub struct BrowserClosePageTool {
+    hub: Hub,
+}
+impl BrowserClosePageTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserClosePageTool {
+    fn name(&self) -> &'static str {
+        "browser_close_page"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Close `page` and drop its tracker entry. Also releases any \
+                 in-flight `browser_pause_for_human` waiter and aborts any active \
+                 `browser_capture_response_*` pump on this page so they don't strand. \
+                 Use after a flow finishes (e.g. signup confirmation grabbed) to free \
+                 the tab and the daemon-side state."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page": { "type": "string", "description": "Page id from browser_navigate." }
+                },
+                "required": ["page"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        match b.close(&page).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({ "status": "ok" }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
 pub struct AgentMessageTool {
     hub: Hub,
 }
@@ -4474,7 +4657,10 @@ impl McpTool for MemoryListTool {
             name: self.name().into(),
             description: "List memories, optionally filtered by `kind`, sorted by 'recent' \
                  (default, last_accessed_at desc), 'frequent' (access_count desc), or \
-                 'newest' (created_at desc). Excludes archived/superseded rows. Use at \
+                 'newest' (created_at desc). Excludes archived/superseded rows. Long \
+                 contents are truncated to `content_max_chars` (default 280) so an \
+                 overview list never blows past the MCP token cap; use `memory_get` for \
+                 full bodies, or set `content_max_chars=0` to disable truncation. Use at \
                  session start with kind='lesson' to surface what previous-you learned."
                 .into(),
             input_schema: json!({
@@ -4482,7 +4668,11 @@ impl McpTool for MemoryListTool {
                 "properties": {
                     "kind":  { "type": "string", "description": "Optional kind filter." },
                     "sort":  { "type": "string", "enum": ["recent","frequent","newest"], "default": "recent" },
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 }
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 },
+                    "content_max_chars": {
+                        "type": "integer", "minimum": 0, "default": 280,
+                        "description": "Per-row content truncation (chars, not bytes — CJK safe). 0 disables."
+                    }
                 }
             }),
         }
@@ -4510,10 +4700,39 @@ impl McpTool for MemoryListTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(20)
             .min(200) as u32;
+        let max_chars = args
+            .get("content_max_chars")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize)
+            .unwrap_or(280);
         let rows = store.list_memories(kind.as_deref(), sort, limit).await?;
-        Ok(ToolResult::json_text(
-            &serde_json::to_value(rows).unwrap_or(Value::Null),
-        ))
+        let mut json_rows = serde_json::to_value(rows).unwrap_or(Value::Null);
+        if max_chars > 0 {
+            if let Some(arr) = json_rows.as_array_mut() {
+                for item in arr {
+                    if let Some(obj) = item.as_object_mut() {
+                        let owned_content = obj
+                            .get("content")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        if let Some(content) = owned_content {
+                            let total = content.chars().count();
+                            if total > max_chars {
+                                let head: String =
+                                    content.chars().take(max_chars).collect();
+                                obj.insert(
+                                    "content".to_string(),
+                                    Value::String(format!(
+                                        "{head}…(truncated; total {total} chars — use memory_get for full)"
+                                    )),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(ToolResult::json_text(&json_rows))
     }
 }
 
@@ -10874,6 +11093,10 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserResumeTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserCaptureResponseStartTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserCaptureResponseDrainTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserReloadTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserBackTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserForwardTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserClosePageTool::new(hub.clone())));
     // Warp URL-scheme + status.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));
