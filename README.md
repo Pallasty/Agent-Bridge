@@ -166,6 +166,36 @@ to agents in-loop — when an agent describes a task ("audit a Helm chart",
 matching pre-written skills with their lint status and install command,
 instead of writing instructions from scratch.
 
+### Wrapper for env injection (optional)
+
+Some MCP clients (Antigravity Claude, certain IDE integrations) silently
+drop the `.claude.json` `env` block when launching stdio MCP servers. Without
+that env, the daemon starts with no API tokens and tool calls (Anthropic,
+GitHub, Tailscale, …) fail. The fix is a thin shell wrapper at
+`~/.local/bin/agent-bridge` that reads a credentials file and injects the
+tokens before exec'ing the real binary at `~/.local/bin/agent-bridge.real`.
+
+```bash
+# Install (or upgrade) the wrapper. Idempotent; moves the existing binary
+# to .real on first run, replaces the wrapper template on subsequent runs.
+scripts/wrapper/install.sh
+
+# First-time setup also needs a credentials file.
+cp scripts/wrapper/creds.example ~/Documents/ClaudeCode.txt
+$EDITOR ~/Documents/ClaudeCode.txt   # replace REPLACE_ME placeholders
+
+# To remove and restore the plain binary:
+scripts/wrapper/install.sh --uninstall
+```
+
+The credentials file is plain text with `# <SECTION>` markers. The
+`# Agent-Bridge Primary` section pins the active Anthropic proxy (token +
+base URL) without requiring a script edit; switch proxies by changing those
+two lines. See `scripts/wrapper/creds.example` for the full layout.
+
+Override paths via env: `AGENT_BRIDGE_CREDS_FILE`, `AGENT_BRIDGE_REAL_BIN`,
+`AGENT_BRIDGE_INSTALL_DIR`.
+
 ---
 
 ## Quick start (Codex)
