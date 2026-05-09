@@ -19,6 +19,7 @@
     }
     #cy {
       flex: 1;
+      min-width: 0;       /* allow flex shrink below cytoscape's internal canvas size */
       height: 100vh;
       background: radial-gradient(ellipse at center, #0e0e16 0%, #06060b 75%);
     }
@@ -145,19 +146,14 @@
     #filter-panel .actions button:hover { color: #e4e4e8; border-color: #4a4a60; }
     /* ── Sidebar ──────────────────────────────────────────── */
     #panel {
-      width: 380px;
+      flex: 0 0 380px;
       background: #131319;
       border-left: 1px solid #2a2a35;
       padding: 20px 22px;
       overflow-y: auto;
-      transition: transform 250ms ease-out, width 250ms ease-out;
+      max-height: 100vh;
     }
-    #panel.hidden {
-      transform: translateX(100%);
-      width: 0;
-      padding: 0;
-      border: 0;
-    }
+    #panel.hidden { display: none; }
     #panel h2 {
       margin: 0 0 6px 0;
       font-size: 14px;
@@ -505,6 +501,8 @@ function buildCy(data) {
     if (evt.target === state.cy) {
       clearFocus();
       document.getElementById("panel").classList.add("hidden");
+      // Reclaim the space — cy fills the viewport again.
+      state.cy.resize();
     }
   });
 
@@ -655,6 +653,9 @@ function clearFocus() {
 async function showSidePanel(id) {
   const panel = document.getElementById("panel");
   panel.classList.remove("hidden");
+  // cytoscape's canvases were sized for the pre-panel viewport. Tell it
+  // to re-measure so the new (narrower) cy area fits properly.
+  if (state.cy) state.cy.resize();
   panel.innerHTML = `<div class="placeholder">loading…</div>`;
   try {
     const r = await fetch(`/api/memory/${encodeURIComponent(id)}`);
