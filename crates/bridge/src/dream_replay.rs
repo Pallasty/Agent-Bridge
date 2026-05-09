@@ -156,12 +156,17 @@ pub async fn run(top_n: usize, min_cluster_size: usize, dry_run: bool) -> Result
         );
         match summarize_cluster(&client, members).await {
             Ok(summary) => {
-                if let Err(e) = apply_summary(store.as_ref(), &summary, members, &today_tag).await
-                {
-                    eprintln!("  apply failed: {e}");
-                } else {
-                    println!("  → wrote summary `{}` ({} src edges)", summary.key, members.len());
-                    written += 1;
+                match apply_summary(store.as_ref(), &summary, members, &today_tag).await {
+                    Err(e) => eprintln!("  apply failed: {e}"),
+                    Ok(canonical_key) => {
+                        println!(
+                            "  → wrote summary `{}` (llm_topic: `{}`, {} src edges)",
+                            canonical_key,
+                            summary.key,
+                            members.len()
+                        );
+                        written += 1;
+                    }
                 }
             }
             Err(e) => {
@@ -473,7 +478,7 @@ async fn apply_summary(
     summary: &ClusterSummary,
     members: &[MemoryRecord],
     today_tag: &str,
-) -> Result<()> {
+) -> Result<String> {
     let mut summary_tags = summary.tags.clone();
     if !summary_tags.iter().any(|t| t == "p5_replay") {
         summary_tags.push("p5_replay".to_string());
@@ -487,18 +492,28 @@ async fn apply_summary(
         .fold(0.5_f64, f64::max);
     let related_keys: Vec<String> = members.iter().map(|m| m.key.clone()).collect();
 
-    // Phase 2 #2 dedupe tag: if a different LLM run summarizes the same
-    // cluster on a different day or via a different model, the resulting
-    // summaries will share this tag and `memory_save` will collapse them.
-    // The hash is over the sorted member keys, so member-set identity
-    // (not member-set order) drives the dedupe.
-    let dedupe_tag = format!("dedupe:cluster:{}", member_keys_hash(&related_keys));
+    // Phase 2 #2 dedupe: derive the summary key deterministically from the
+    // sorted member-key set. Same cluster (same member identity, regardless
+    // of order) → same key → memory_save's key-based idempotence collapses
+    // re-runs. The LLM's suggested key becomes a `llm_topic:<...>` tag so
+    // human-readable topic info survives. This also handles the realistic
+    // failure mode where `cluster_already_summarized` mis-fires (member tag
+    // not yet propagated through FTS / re-clustering with shifted membership).
+    let cluster_hash = member_keys_hash(&related_keys);
+    let canonical_key = format!("summary_p5_cluster_{}", cluster_hash);
+    let dedupe_tag = format!("dedupe:cluster:{}", cluster_hash);
     if !summary_tags.iter().any(|t| t == &dedupe_tag) {
         summary_tags.push(dedupe_tag);
     }
+    if !summary.key.is_empty()
+        && summary.key != canonical_key
+        && !summary_tags.iter().any(|t| t.starts_with("llm_topic:"))
+    {
+        summary_tags.push(format!("llm_topic:{}", summary.key));
+    }
 
     let mem = MemoryRecord {
-        key: summary.key.clone(),
+        key: canonical_key.clone(),
         kind: summary.kind.clone(),
         content: summary.body.clone(),
         tags: summary_tags,
@@ -517,14 +532,14 @@ async fn apply_summary(
     store
         .memory_save(&mem)
         .await
-        .map_err(|e| anyhow::anyhow!("memory_save({}): {e}", summary.key))?;
+        .map_err(|e| anyhow::anyhow!("memory_save({}): {e}", canonical_key))?;
 
     for src in members {
         if let Err(e) = store
-            .memory_link(&summary.key, &src.key, "summarizes", 1.0)
+            .memory_link(&canonical_key, &src.key, "summarizes", 1.0)
             .await
         {
-            eprintln!("  memory_link {}↔{}: {e}", summary.key, src.key);
+            eprintln!("  memory_link {}↔{}: {e}", canonical_key, src.key);
         }
         // Tag-update by re-saving the source with the new tag appended.
         if src.tags.iter().any(|t| t == today_tag) {
@@ -540,7 +555,7 @@ async fn apply_summary(
             eprintln!("  tag-update {}: {e}", src.key);
         }
     }
-    Ok(())
+    Ok(canonical_key)
 }
 
 fn short(s: &str, max: usize) -> String {
