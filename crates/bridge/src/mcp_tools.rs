@@ -3456,6 +3456,43 @@ impl McpTool for MemorySearchTool {
         // Fail-soft (no state file / disable env / empty hub_clusters → pass-through).
         let hits = apply_seed_boost(hits);
 
+        // Phase 1 P1 — coactivation rerank. For each hit, sum the count of
+        // edges connecting it to OTHER hits in the same page. Boost score by
+        // `1 + 0.2 * ln(1 + sum)`. Pure no-op when graph is empty (zero
+        // edges → boost = 1.0 → score unchanged). Single SQL round-trip.
+        let hits = if hits.len() >= 2 {
+            let keys: Vec<String> = hits.iter().map(|h| h.record.key.clone()).collect();
+            match store.coactivation_among(&keys).await {
+                Ok(edges) if !edges.is_empty() => {
+                    let mut per_key: HashMap<String, u64> = HashMap::new();
+                    for e in &edges {
+                        // Each edge contributes count to BOTH endpoints since
+                        // an edge means "these two co-fire". A key with N
+                        // edges in this page is in a tight cluster.
+                        *per_key.entry(e.key_a.clone()).or_insert(0) += e.count;
+                        *per_key.entry(e.key_b.clone()).or_insert(0) += e.count;
+                    }
+                    let boosted: Vec<MemorySearchHit> = hits
+                        .into_iter()
+                        .map(|mut h| {
+                            let c = per_key.get(&h.record.key).copied().unwrap_or(0);
+                            let boost = 1.0 + 0.2 * (1.0 + c as f64).ln();
+                            h.score *= boost;
+                            h
+                        })
+                        .collect();
+                    let mut sorted = boosted;
+                    sorted.sort_by(|a, b| {
+                        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    sorted
+                }
+                _ => hits,
+            }
+        } else {
+            hits
+        };
+
         // v21 α — Synaptic Trace. Record co-activation pairs for top hits as
         // fire-and-forget background work; never block search latency.
         // ctx_centroid is None for now (mode-agnostic α); follow-up plumbs

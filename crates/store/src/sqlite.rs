@@ -2936,6 +2936,48 @@ impl StateStore for SqliteStore {
             .map_err(|e| Error::Backend(format!("top_coactivation: {e}")))
     }
 
+    /// **Phase 1 P1** — coactivation edges where both endpoints are in `keys`.
+    /// Single SQL round-trip with an `IN (?,?,...)` clause built from `keys`.
+    /// Empty / single-key inputs short-circuit. Cap on `keys.len()` is the
+    /// SQLite parameter limit (~999); the MCP layer caps result pages well
+    /// below that, so no extra guard is needed here.
+    async fn coactivation_among(&self, keys: &[String]) -> Result<Vec<CoactivationEdge>> {
+        if keys.len() < 2 {
+            return Ok(Vec::new());
+        }
+        let owned: Vec<String> = keys.to_vec();
+        self.conn
+            .call(move |c| -> RusqliteResult<Vec<CoactivationEdge>> {
+                let placeholders = (1..=owned.len())
+                    .map(|i| format!("?{i}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql = format!(
+                    "SELECT key_a, key_b, count, first_at, last_at
+                       FROM memory_coactivation
+                      WHERE key_a IN ({phs}) AND key_b IN ({phs})",
+                    phs = placeholders,
+                );
+                let mut stmt = c.prepare(&sql)?;
+                let params_vec: Vec<&dyn rusqlite::ToSql> =
+                    owned.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+                let rows = stmt
+                    .query_map(params_vec.as_slice(), |row| {
+                        Ok(CoactivationEdge {
+                            key_a: row.get(0)?,
+                            key_b: row.get(1)?,
+                            count: row.get::<_, i64>(2)? as u64,
+                            first_at: row.get(3)?,
+                            last_at: row.get(4)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("coactivation_among: {e}")))
+    }
+
     /// **Phase 0 telemetry** — append one `memory_query_log` row and prune
     /// the oldest if the table is over [`MEMORY_QUERY_LOG_RING_CAP`]. Both
     /// in one transaction so concurrent writers can't slip past the cap.
@@ -6110,6 +6152,72 @@ mod tests {
 
         let edges_b = store.top_coactivation("bravo", 10).await.expect("top");
         assert_eq!(edges_b.len(), 2);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn coactivation_among_returns_pairs_with_both_endpoints_in_set() {
+        // Setup: 4 memories alpha/bravo/charlie/delta. Record activations
+        // [alpha, bravo, charlie] (3 pairs) and separately [bravo, delta]
+        // (1 pair). Query coactivation_among({alpha, bravo, charlie}) →
+        // must return only the 3 pairs whose BOTH endpoints are in the
+        // input set. The bravo↔delta pair is filtered out because delta
+        // is not in the query set.
+        let (dir, store) = fresh_store("coact-among").await;
+        for k in ["alpha", "bravo", "charlie", "delta"] {
+            store.memory_save(&make_memrec(k, k)).await.expect("save");
+        }
+
+        store
+            .record_coactivation(
+                &["alpha".to_string(), "bravo".to_string(), "charlie".to_string()],
+                None,
+            )
+            .await
+            .expect("rec 1");
+        store
+            .record_coactivation(
+                &["bravo".to_string(), "delta".to_string()],
+                None,
+            )
+            .await
+            .expect("rec 2");
+
+        let edges = store
+            .coactivation_among(&[
+                "alpha".to_string(),
+                "bravo".to_string(),
+                "charlie".to_string(),
+            ])
+            .await
+            .expect("among");
+        assert_eq!(edges.len(), 3, "alpha-bravo, alpha-charlie, bravo-charlie");
+        for e in &edges {
+            assert!(
+                e.key_a == "alpha" || e.key_a == "bravo" || e.key_a == "charlie",
+                "key_a {} not in input set", e.key_a
+            );
+            assert!(
+                e.key_b == "alpha" || e.key_b == "bravo" || e.key_b == "charlie",
+                "key_b {} not in input set", e.key_b
+            );
+            assert_ne!(e.key_a, "delta");
+            assert_ne!(e.key_b, "delta");
+            assert_eq!(e.count, 1);
+        }
+
+        // Single-key set short-circuits to empty (need at least 2 keys
+        // for any edge to qualify).
+        let none = store
+            .coactivation_among(&["alpha".to_string()])
+            .await
+            .expect("among 1");
+        assert!(none.is_empty());
+
+        // Empty input must not crash and returns empty.
+        let none = store.coactivation_among(&[]).await.expect("among 0");
+        assert!(none.is_empty());
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

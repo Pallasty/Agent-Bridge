@@ -887,6 +887,16 @@ pub trait StateStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// **Phase 1 P1** — return all coactivation edges where BOTH endpoints
+    /// fall in `keys`. Lets `memory_search` rerank a result page by
+    /// "this hit is in the same cluster as many other hits in the same
+    /// page". Empty input → empty output. Default impl is a no-op so
+    /// non-SQLite backends and unit tests degrade silently.
+    async fn coactivation_among(&self, keys: &[String]) -> Result<Vec<CoactivationEdge>> {
+        let _ = keys;
+        Ok(Vec::new())
+    }
+
     /// **Phase 0 telemetry** — append one row to `memory_query_log`. Called
     /// by the MCP layer immediately after `memory_search` / `memory_get` so
     /// hit-rate / latency / top-hit-age can be aggregated. Default impl is
