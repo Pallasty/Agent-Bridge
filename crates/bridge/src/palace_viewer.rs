@@ -25,7 +25,9 @@
 //! ## Endpoints
 //!   - `GET /`                  → embedded HTML viewer
 //!   - `GET /healthz`           → liveness probe
-//!   - `GET /api/graph`         → merged `{ nodes, edges }` from both sources
+//!   - `GET /api/graph`         → merged `{ nodes, edges }` from both sources;
+//!     edges include explicit (memory_edges) AND co-activation (Hebbian) —
+//!     the latter dedup'd against explicit so a structural edge always wins
 //!   - `GET /api/memory/:key`   → single record (sqlite first, markdown fallback)
 //!   - `POST /api/annotate`     → C1: write a new sqlite memory linked to a node
 //!     (closes the 呼吸 loop — Palace exploration → annotation → memory)
@@ -369,6 +371,55 @@ async fn api_graph(
         }
     }
 
+    // ── co-activation edges ─ Hebbian "fire together, wire together" ────
+    // Pairs are seen via record_coactivation as side-effect of memory_search
+    // and (since C2) Palace clicks. We render them as a soft underlay so
+    // attention-clusters become visible *beneath* the structural skeleton.
+    //
+    // Dedup: an explicit (sqlite or markdown) edge between a pair always wins
+    // — coact between the same nodes would be redundant signal. min_count=2
+    // filters out single-encounter noise; limit=300 caps render cost.
+    let coact_top = s
+        .store
+        .top_coactivation_edges(2, 300)
+        .await
+        .unwrap_or_default();
+    let mut explicit_pairs: HashSet<(String, String)> = HashSet::new();
+    for e in &sqlite_edges {
+        let p = if e.from_key < e.to_key {
+            (e.from_key.clone(), e.to_key.clone())
+        } else {
+            (e.to_key.clone(), e.from_key.clone())
+        };
+        explicit_pairs.insert(p);
+    }
+    for (a, b) in &md_edges {
+        let p = if a < b {
+            (a.clone(), b.clone())
+        } else {
+            (b.clone(), a.clone())
+        };
+        explicit_pairs.insert(p);
+    }
+    let mut coact_edges = Vec::new();
+    let mut coact_seen: HashSet<(String, String)> = HashSet::new();
+    for c in coact_top {
+        if !is_node(&c.key_a) || !is_node(&c.key_b) {
+            continue;
+        }
+        let p = if c.key_a < c.key_b {
+            (c.key_a.clone(), c.key_b.clone())
+        } else {
+            (c.key_b.clone(), c.key_a.clone())
+        };
+        if explicit_pairs.contains(&p) {
+            continue;
+        }
+        if coact_seen.insert(p) {
+            coact_edges.push(c);
+        }
+    }
+
     // ── serialize ───────────────────────────────────────────────────────
     let mut nodes_json: Vec<Value> = active
         .iter()
@@ -419,6 +470,19 @@ async fn api_graph(
         }));
     }
 
+    for c in &coact_edges {
+        // Normalize raw count → 0..1 for cytoscape mapData; keep raw count
+        // alongside so the side panel / hover tip can show "fired N times".
+        let weight = (c.count as f64 / 10.0).min(1.0);
+        edges_json.push(json!({
+            "source": c.key_a,
+            "target": c.key_b,
+            "type":   "coactivation",
+            "weight": (weight * 1000.0).round() / 1000.0,
+            "count":  c.count,
+        }));
+    }
+
     Ok(Json(json!({
         "nodes": nodes_json,
         "edges": edges_json,
@@ -427,6 +491,7 @@ async fn api_graph(
             "markdown_nodes": md_only.len(),
             "sqlite_edges":   sqlite_edges.len(),
             "markdown_edges": md_edges.len(),
+            "coact_edges":    coact_edges.len(),
         }
     })))
 }

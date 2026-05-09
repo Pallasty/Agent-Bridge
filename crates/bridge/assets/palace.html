@@ -308,7 +308,7 @@
     <div class="placeholder">click a node to read</div>
   </div>
   <div id="footer">
-    <span>circles = sqlite · rounded squares = markdown</span>
+    <span>circles = sqlite · rounded squares = markdown · cyan dotted = co-activation</span>
     <span class="hint" id="focus-hint"></span>
   </div>
 
@@ -401,10 +401,15 @@ async function loadGraph() {
 
   const sqliteCount = data.nodes.filter(n => n.source === "sqlite").length;
   const markdownCount = data.nodes.filter(n => n.source === "markdown").length;
+  const coactCount = data.edges.filter(e => e.type === "coactivation").length;
+  const explicitCount = data.edges.length - coactCount;
+  const edgesLabel = coactCount > 0
+    ? `${explicitCount}+${coactCount}↔ edges`
+    : `${data.edges.length} edges`;
   document.getElementById("stats").textContent =
     markdownCount > 0
-      ? `${sqliteCount} sqlite · ${markdownCount} markdown · ${data.edges.length} edges`
-      : `${data.nodes.length} memories · ${data.edges.length} edges`;
+      ? `${sqliteCount} sqlite · ${markdownCount} markdown · ${edgesLabel}`
+      : `${data.nodes.length} memories · ${edgesLabel}`;
 
   // Populate filter panel from kinds present.
   const kindCounts = {};
@@ -449,6 +454,8 @@ function buildCy(data) {
       data: {
         id: `${e.source}__${e.target}__${e.type}`,
         source: e.source, target: e.target, type: e.type, weight: e.weight,
+        // C3.6: coact edges carry raw fire-count; explicit edges leave undefined
+        count: e.count,
       }
     })),
   ];
@@ -507,6 +514,18 @@ function buildCy(data) {
       }},
       { selector: "edge[type='annotates']", style: {
         "line-color": "#ffe070", "opacity": 0.85, "width": 1.6,
+      }},
+      // C3.6 co-activation: Hebbian "fire together" pairs, NO explicit edge
+      // between them. Cyan curved underlay so the structural skeleton
+      // (straight, neutral-toned) stays visually dominant; opacity & width
+      // ramp with count so a 9-fire pair is noticeably brighter than a
+      // 2-fire one.
+      { selector: "edge[type='coactivation']", style: {
+        "line-color": "#5cc8c8",
+        "line-style": "dotted",
+        "curve-style": "bezier",
+        "opacity": "mapData(weight, 0.2, 0.9, 0.18, 0.55)",
+        "width":   "mapData(weight, 0.2, 0.9, 0.5, 1.6)",
       }},
       { selector: "edge.faded", style: { "opacity": 0.04 }},
       { selector: "edge.focus-edge", style: {
