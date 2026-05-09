@@ -28,6 +28,7 @@ use chromiumoxide::cdp::browser_protocol::input::{DispatchKeyEventParams, Dispat
 use chromiumoxide::cdp::browser_protocol::page::{
     CaptureScreenshotFormat, CreateIsolatedWorldParams, FrameId, FrameTree, GetFrameTreeParams,
 };
+use chromiumoxide::cdp::browser_protocol::target::{GetTargetsParams, TargetInfo};
 use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
 use chromiumoxide::keys::{KeyDefinition, USKEYBOARD_LAYOUT};
 use chromiumoxide::page::ScreenshotParams;
@@ -593,12 +594,42 @@ impl BrowserBackend for ChromiumCdpBackend {
 
     async fn list_frames(&self, page: &PageId) -> Result<serde_json::Value> {
         let p = self.page_handle(page)?;
+        // Same-process frames via Page.getFrameTree (visible to this page's
+        // own session). Each entry is tagged kind="main" (root) or "frame".
         let resp = p
             .execute(GetFrameTreeParams::default())
             .await
             .map_err(|e| Error::Backend(format!("getFrameTree: {e}")))?;
         let mut flat = Vec::new();
         flatten_frame_tree(&resp.result.frame_tree, None, &mut flat);
+        for (idx, entry) in flat.iter_mut().enumerate() {
+            if let Some(obj) = entry.as_object_mut() {
+                obj.insert(
+                    "kind".into(),
+                    serde_json::Value::String(
+                        if idx == 0 { "main" } else { "frame" }.into(),
+                    ),
+                );
+            }
+        }
+        // Cross-origin iframes (OOPIFs) live in their own targets — invisible
+        // to per-page getFrameTree. Pull them via Target.getTargets at the
+        // browser level and append with kind="oopif". Stripe Elements,
+        // reCAPTCHA, Auth0, and most modern OAuth widgets land here.
+        let browser = self.ensure_browser().await?;
+        if let Ok(resp) = browser.execute(GetTargetsParams::default()).await {
+            for ti in &resp.result.target_infos {
+                if ti.r#type == "iframe" {
+                    flat.push(serde_json::json!({
+                        "frame_id": ti.target_id.inner(),
+                        "url": ti.url,
+                        "name": serde_json::Value::Null,
+                        "parent_id": ti.parent_frame_id.as_ref().map(|f| f.inner().clone()),
+                        "kind": "oopif",
+                    }));
+                }
+            }
+        }
         Ok(serde_json::json!({ "count": flat.len(), "frames": flat }))
     }
 
@@ -610,7 +641,28 @@ impl BrowserBackend for ChromiumCdpBackend {
         js: &str,
     ) -> Result<serde_json::Value> {
         let p = self.page_handle(page)?;
-        // Resolve the target FrameId. Direct id wins; otherwise scan tree by url.
+        let browser = self.ensure_browser().await?;
+
+        // OOPIF dispatch first: cross-origin iframes have their own target
+        // and don't appear in Page.getFrameTree. Match by exact target_id
+        // OR by URL substring.
+        if let Ok(targets_resp) = browser.execute(GetTargetsParams::default()).await {
+            let oopif: Option<&TargetInfo> = targets_resp
+                .result
+                .target_infos
+                .iter()
+                .find(|ti| ti.r#type == "iframe" && oopif_matches(ti, frame_id, frame_url_substring));
+            if let Some(ti) = oopif {
+                let oopif_page = browser
+                    .get_page(ti.target_id.clone())
+                    .await
+                    .map_err(|e| Error::Backend(format!("get_page (oopif): {e}")))?;
+                return eval_with_exception_details(&oopif_page, js).await;
+            }
+        }
+
+        // Same-process path: resolve FrameId from same-process tree, then
+        // Page.createIsolatedWorld + Runtime.evaluate(contextId).
         let target_fid = if let Some(fid) = frame_id.filter(|s| !s.is_empty()) {
             FrameId::new(fid.to_string())
         } else if let Some(sub) = frame_url_substring.filter(|s| !s.is_empty()) {
@@ -721,6 +773,22 @@ fn flatten_frame_tree(
             flatten_frame_tree(child, Some(me.as_str()), out);
         }
     }
+}
+
+/// Predicate for matching an OOPIF [`TargetInfo`] against caller's
+/// `frame_id` (exact target_id match) or `frame_url_substring`.
+fn oopif_matches(
+    ti: &TargetInfo,
+    frame_id: Option<&str>,
+    frame_url_substring: Option<&str>,
+) -> bool {
+    if let Some(fid) = frame_id.filter(|s| !s.is_empty()) {
+        return ti.target_id.inner() == fid;
+    }
+    if let Some(sub) = frame_url_substring.filter(|s| !s.is_empty()) {
+        return ti.url.contains(sub);
+    }
+    false
 }
 
 /// Walk a [`FrameTree`] looking for the first frame whose URL contains
