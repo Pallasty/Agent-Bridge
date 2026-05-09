@@ -988,13 +988,30 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// **Phase 1 P3** — kind-aware decay constant. Faster decay for ephemeral
+/// kinds (observation, todo) because they age out fast in real workflows;
+/// slower for long-lived knowledge (decision, architecture). The current
+/// 30-day-everywhere default was a placeholder until usage data confirmed
+/// that observations rot in days while decisions stay relevant for months.
+fn decay_tau_days(kind: &str) -> f64 {
+    match kind {
+        "observation" | "note" => 7.0,
+        "todo" | "action" => 14.0,
+        "lesson" | "bug" | "fix" | "pitfall" | "error_pattern" => 60.0,
+        "decision" | "architecture" | "design" => 90.0,
+        // fact / context / session_handoff / preference / unknown
+        _ => 30.0,
+    }
+}
+
 /// Composite score for memory_search results.
-/// Each hit starts with a base of 1.0; recency multiplies by exp(-age_days/30),
-/// so a memory used today scores ~1.0×, one used 30d ago ~0.37×, 90d ago ~0.05×.
-/// Then +log(1+access_count) bumps frequently-touched memories.
-fn memory_score(last_accessed_at: i64, access_count: u64, now: i64) -> f64 {
+/// Each hit starts with a base of 1.0; recency multiplies by `exp(-age_days/τ)`
+/// where τ is kind-aware (see [`decay_tau_days`]). For τ=30 (default), a
+/// memory used today scores ~1.0×, one used 30d ago ~0.37×, 90d ago ~0.05×.
+/// Then `+0.3*ln(1+access_count)` bumps frequently-touched memories.
+fn memory_score(last_accessed_at: i64, access_count: u64, now: i64, kind: &str) -> f64 {
     let age_days = ((now - last_accessed_at).max(0) as f64) / 86_400.0;
-    let recency = (-age_days / 30.0).exp();
+    let recency = (-age_days / decay_tau_days(kind)).exp();
     let frequency = (1.0 + access_count as f64).ln();
     recency + 0.3 * frequency
 }
@@ -1808,7 +1825,7 @@ impl StateStore for SqliteStore {
                         // existing recency+frequency score.
                         let match_strength = (-bm25).max(0.0);
                         let score =
-                            match_strength + memory_score(r.last_accessed_at, r.access_count, now);
+                            match_strength + memory_score(r.last_accessed_at, r.access_count, now, &r.kind);
                         MemorySearchHit { record: r, score }
                     })
                     .collect();
@@ -1857,7 +1874,7 @@ impl StateStore for SqliteStore {
                     if tags_match && !exists {
                         // Keep exact-key hits above fuzzy matches.
                         let score =
-                            1_000_000.0 + memory_score(rec.last_accessed_at, rec.access_count, now);
+                            1_000_000.0 + memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind);
                         hits.push(MemorySearchHit { record: rec, score });
                     }
                 }
@@ -2824,7 +2841,7 @@ impl StateStore for SqliteStore {
                 // Blend cosine similarity with recency / importance bonus.
                 let score = cosine as f64
                     + 0.2 * rec.importance
-                    + 0.1 * memory_score(rec.last_accessed_at, rec.access_count, now);
+                    + 0.1 * memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind);
                 Some(MemorySearchHit { record: rec, score })
             })
             .collect();
@@ -6200,6 +6217,47 @@ mod tests {
         assert_eq!(edges_b.len(), 2);
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[test]
+    fn p3_kind_aware_decay_observation_falls_faster_than_decision() {
+        // Same age (30 days) — observation (τ=7) should be heavily decayed,
+        // decision (τ=90) barely. Demonstrates the kind-aware τ behavior.
+        let now = 1_000_000_000_i64;
+        let thirty_days_ago = now - 30 * 86_400;
+        let obs = memory_score(thirty_days_ago, 0, now, "observation");
+        let dec = memory_score(thirty_days_ago, 0, now, "decision");
+        let fact = memory_score(thirty_days_ago, 0, now, "fact");
+
+        // observation: exp(-30/7) ≈ 0.0136
+        // fact:        exp(-30/30) = 0.3679
+        // decision:    exp(-30/90) ≈ 0.7165
+        assert!(obs < 0.05, "observation 30d old should be heavily decayed: {obs}");
+        assert!(dec > 0.7, "decision 30d old should still rank high: {dec}");
+        assert!(obs < fact && fact < dec, "ordering observation < fact < decision");
+
+        // Sanity: same kind, recent vs old. Today's observation > 30d-old observation.
+        let obs_now = memory_score(now, 0, now, "observation");
+        assert!(obs_now > obs);
+    }
+
+    #[test]
+    fn p3_decay_tau_days_known_kinds_have_expected_constants() {
+        // Lock the table so future-me doesn't accidentally rebalance it
+        // without thinking about which kinds get faster/slower decay.
+        assert_eq!(decay_tau_days("observation"), 7.0);
+        assert_eq!(decay_tau_days("note"), 7.0);
+        assert_eq!(decay_tau_days("todo"), 14.0);
+        assert_eq!(decay_tau_days("action"), 14.0);
+        assert_eq!(decay_tau_days("fact"), 30.0);
+        assert_eq!(decay_tau_days("context"), 30.0);
+        assert_eq!(decay_tau_days("session_handoff"), 30.0);
+        assert_eq!(decay_tau_days("lesson"), 60.0);
+        assert_eq!(decay_tau_days("error_pattern"), 60.0);
+        assert_eq!(decay_tau_days("decision"), 90.0);
+        assert_eq!(decay_tau_days("architecture"), 90.0);
+        // Unknown kind falls back to 30d (same as fact/context).
+        assert_eq!(decay_tau_days("xyz_unknown"), 30.0);
     }
 
     #[tokio::test]

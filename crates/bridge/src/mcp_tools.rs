@@ -1394,6 +1394,123 @@ impl McpTool for BrowserPressKeyTool {
     }
 }
 
+pub struct BrowserSelectOptionTool {
+    hub: Hub,
+}
+impl BrowserSelectOptionTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserSelectOptionTool {
+    fn name(&self) -> &'static str {
+        "browser_select_option"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Set the selected option of a `<select>` element. `value` matches \
+                 against `option.value` first, then `option.text` (the visible label) — \
+                 handles both `<option value=\"us\">United States</option>` and country \
+                 pickers indexed by visible name. Dispatches `input` + `change` events. \
+                 Returns `{selectedIndex, selectedValue, selectedText}`. Errors out with \
+                 the available value/label list if no option matches."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":     { "type": "string", "description": "Page id from browser_navigate." },
+                    "selector": { "type": "string", "description": "CSS selector for the <select> element." },
+                    "value":    { "type": "string", "description": "option.value or option.text to select." }
+                },
+                "required": ["page", "selector", "value"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let sel = args.get("selector").and_then(|v| v.as_str()).unwrap_or("");
+        if sel.is_empty() {
+            return Ok(ToolResult::error("missing 'selector'"));
+        }
+        let val = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
+        if val.is_empty() {
+            return Ok(ToolResult::error("missing 'value'"));
+        }
+        match b.select_option(&page, sel, val).await {
+            Ok(v) => Ok(ToolResult::json_text(&v)),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
+pub struct BrowserFindByTextTool {
+    hub: Hub,
+}
+impl BrowserFindByTextTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserFindByTextTool {
+    fn name(&self) -> &'static str {
+        "browser_find_by_text"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Find DOM elements whose visible text contains `text`, returning a \
+                 generated CSS selector for each that you can hand to browser_click or \
+                 browser_fill_form. Optional `tag_filter` (\"button\", \"a\", \"input\", etc.) \
+                 narrows the search; default \"*\" scans all elements. Returns up to 5 \
+                 deepest-match candidates (parent containers are excluded if a child also \
+                 matches). Empty `matches` array = no element found — try fewer characters \
+                 or drop the tag filter."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":       { "type": "string", "description": "Page id from browser_navigate." },
+                    "text":       { "type": "string", "description": "Substring to find in visible text." },
+                    "tag_filter": { "type": "string", "description": "Optional tag name (default '*' scans all)." }
+                },
+                "required": ["page", "text"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        if text.is_empty() {
+            return Ok(ToolResult::error("missing 'text'"));
+        }
+        let tag = args
+            .get("tag_filter")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        match b.find_by_text(&page, text, tag).await {
+            Ok(v) => Ok(ToolResult::json_text(&v)),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
 pub struct AgentMessageTool {
     hub: Hub,
 }
@@ -3118,6 +3235,36 @@ async fn build_proactive_hint(
     Some(format!("{edge_note} | consider memory_link: {suggestions}"))
 }
 
+/// **Phase 1 P4 (structural)** — Pick top-k cosine neighbors of a freshly
+/// saved memory from the in-process embedding cache. The graph-side of
+/// A-MEM evolution: insert `evolved` edges from the new memory to its
+/// nearest-existing kin, so future `memory_search_hybrid` (graph fusion)
+/// surfaces them together. Skill records are excluded from candidates
+/// (same intent as P1.5 coactivation filter).
+///
+/// Pure / synchronous so it's easy to unit-test. Returns
+/// `(neighbor_key, cosine_score)` pairs sorted descending by score.
+fn pick_evolution_neighbors(
+    cached: &[(MemoryRecord, Vec<f32>)],
+    new_key: &str,
+    new_embedding: &[f32],
+    threshold: f32,
+    top_k: usize,
+) -> Vec<(String, f64)> {
+    let mut sims: Vec<(String, f64)> = cached
+        .iter()
+        .filter(|(rec, _)| rec.key != new_key && rec.kind != "skill")
+        .map(|(rec, emb)| {
+            let c = cosine_similarity(new_embedding, emb);
+            (rec.key.clone(), c as f64)
+        })
+        .filter(|(_, c)| (*c as f32) >= threshold)
+        .collect();
+    sims.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    sims.truncate(top_k);
+    sims
+}
+
 pub struct MemorySaveTool {
     hub: Hub,
 }
@@ -3227,16 +3374,47 @@ impl McpTool for MemorySaveTool {
         };
         match store.memory_save(&mem).await {
             Ok(()) => {
-                // Keep embedding cache coherent: upsert the new/updated record.
+                // Keep embedding cache coherent AND auto-evolve the graph:
+                // 1) upsert the new record into the cache
+                // 2) **Phase 1 P4 structural** — pick top-k cosine neighbors
+                //    from the cache and write `evolved` edges. Future hybrid
+                //    searches expand on these edges, so the graph densifies
+                //    organically as memories are saved (the deterministic
+                //    half of A-MEM evolution; LLM-driven tag/context
+                //    rewriting deferred to P4b once an LLM client lands).
                 {
                     let cache = self.hub.memory_embed_cache.clone();
+                    let store_for_evolve = store.clone();
+                    let new_key_for_evolve = key.clone();
                     let rec = mem.clone();
                     let emb = embed_text(&rec.content);
+                    let emb_for_evolve = emb.clone();
                     tokio::spawn(async move {
+                        // Step 1: cache upsert (existing behavior).
                         let mut guard = cache.lock().await;
                         if let Some(ref mut cached) = *guard {
                             cached.retain(|(r, _)| r.key != rec.key);
                             cached.push((rec, emb));
+                            // Step 2: pick neighbors with cache still locked
+                            // (snapshot, then drop guard before slow IO).
+                            let neighbors = pick_evolution_neighbors(
+                                cached,
+                                &new_key_for_evolve,
+                                &emb_for_evolve,
+                                /* threshold */ 0.65,
+                                /* top_k */ 5,
+                            );
+                            drop(guard);
+                            for (neighbor_key, score) in neighbors {
+                                let _ = store_for_evolve
+                                    .memory_link(
+                                        &new_key_for_evolve,
+                                        &neighbor_key,
+                                        "evolved",
+                                        score,
+                                    )
+                                    .await;
+                            }
                         }
                     });
                 }
@@ -10039,6 +10217,8 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserWaitForTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserListPagesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserPressKeyTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserSelectOptionTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserFindByTextTool::new(hub.clone())));
     // Warp URL-scheme + status.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));
@@ -11853,6 +12033,56 @@ mod tests {
             resolve_audit_path("/Data/abs/path", root),
             std::path::PathBuf::from("/Data/abs/path")
         );
+    }
+
+    fn mk_cached(key: &str, kind: &str, emb: Vec<f32>) -> (MemoryRecord, Vec<f32>) {
+        (
+            MemoryRecord {
+                key: key.to_string(),
+                kind: kind.to_string(),
+                content: format!("body of {key}"),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            },
+            emb,
+        )
+    }
+
+    #[test]
+    fn p4_pick_evolution_neighbors_skips_self_and_skill_and_below_threshold() {
+        // Self: same key, perfect cosine — must be excluded.
+        // Skill: passes threshold, must be excluded.
+        // Below threshold: cosine ≈ 0.5, must be excluded.
+        // Above threshold + non-skill + different key: must appear, sorted desc.
+        let new = vec![1.0_f32, 0.0, 0.0];
+        let cache = vec![
+            mk_cached("self_dup", "lesson", vec![1.0, 0.0, 0.0]), // self by key
+            mk_cached("hot_kin",  "lesson", vec![0.95, 0.31, 0.0]),
+            mk_cached("warm_kin", "decision", vec![0.80, 0.60, 0.0]),
+            mk_cached("cool_kin", "context",  vec![0.50, 0.87, 0.0]),
+            mk_cached("skill_match", "skill", vec![0.99, 0.14, 0.0]),
+        ];
+        let picks = pick_evolution_neighbors(&cache, "self_dup", &new, 0.65, 5);
+        let keys: Vec<&str> = picks.iter().map(|(k, _)| k.as_str()).collect();
+
+        assert!(!keys.contains(&"self_dup"), "must exclude self by key");
+        assert!(!keys.contains(&"skill_match"), "must exclude kind=skill");
+        assert!(!keys.contains(&"cool_kin"), "must exclude below-threshold");
+        assert_eq!(keys, vec!["hot_kin", "warm_kin"], "sorted desc by cosine");
+
+        // Top-K cap: even if many would qualify, only k returned.
+        let picks_top1 = pick_evolution_neighbors(&cache, "self_dup", &new, 0.65, 1);
+        assert_eq!(picks_top1.len(), 1);
+        assert_eq!(picks_top1[0].0, "hot_kin");
     }
 
     #[test]
