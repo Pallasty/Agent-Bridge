@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Palace · agent-bridge memory viewer</title>
+  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      background: #0a0a0f;
+      color: #e4e4e8;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+    }
+    #cy {
+      flex: 1;
+      height: 100vh;
+      background: radial-gradient(ellipse at center, #0e0e16 0%, #06060b 75%);
+    }
+    /* ── Top bar ──────────────────────────────────────────── */
+    #topbar {
+      position: absolute;
+      top: 14px;
+      left: 22px;
+      right: 22px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      z-index: 20;
+      pointer-events: none;
+    }
+    #topbar > * { pointer-events: auto; }
+    #title {
+      color: #5a5a68;
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+    #title .count { color: #8a8a9c; }
+    #search {
+      flex: 1;
+      max-width: 360px;
+      background: rgba(20, 20, 28, 0.85);
+      border: 1px solid #2a2a35;
+      color: #e4e4e8;
+      padding: 7px 12px;
+      font-size: 12px;
+      border-radius: 4px;
+      outline: none;
+      font-family: inherit;
+      backdrop-filter: blur(6px);
+    }
+    #search:focus { border-color: #4a4a60; }
+    #search::placeholder { color: #5a5a68; }
+    #filter-btn {
+      background: rgba(20, 20, 28, 0.85);
+      border: 1px solid #2a2a35;
+      color: #9a9aa8;
+      padding: 7px 12px;
+      font-size: 11px;
+      border-radius: 4px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      backdrop-filter: blur(6px);
+      transition: color 120ms;
+    }
+    #filter-btn:hover { color: #e4e4e8; border-color: #4a4a60; }
+    #filter-btn.active { color: #e4e4e8; border-color: #5a5a72; background: #1c1c26; }
+    /* ── Filter panel ─────────────────────────────────────── */
+    #filter-panel {
+      position: absolute;
+      top: 56px;
+      right: 22px;
+      width: 240px;
+      background: rgba(19, 19, 25, 0.96);
+      border: 1px solid #2a2a35;
+      border-radius: 6px;
+      padding: 14px 16px;
+      z-index: 25;
+      backdrop-filter: blur(10px);
+      max-height: calc(100vh - 100px);
+      overflow-y: auto;
+    }
+    #filter-panel.hidden { display: none; }
+    #filter-panel h3 {
+      margin: 0 0 6px 0;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #6a6a78;
+      font-weight: 600;
+    }
+    #filter-panel .section + .section { margin-top: 14px; padding-top: 14px; border-top: 1px solid #1f1f2a; }
+    #filter-panel label {
+      display: flex;
+      align-items: center;
+      padding: 3px 0;
+      font-size: 12px;
+      cursor: pointer;
+      color: #b8b8c2;
+      gap: 6px;
+    }
+    #filter-panel label:hover { color: #e4e4e8; }
+    #filter-panel input[type="checkbox"] {
+      accent-color: #6a8eff;
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+    }
+    #filter-panel .swatch {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    #filter-panel .count {
+      margin-left: auto;
+      color: #5a5a68;
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    #filter-panel .actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    #filter-panel .actions button {
+      background: transparent;
+      border: 1px solid #2a2a35;
+      color: #8a8a9c;
+      padding: 3px 8px;
+      font-size: 10px;
+      border-radius: 3px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+    }
+    #filter-panel .actions button:hover { color: #e4e4e8; border-color: #4a4a60; }
+    /* ── Sidebar ──────────────────────────────────────────── */
+    #panel {
+      width: 380px;
+      background: #131319;
+      border-left: 1px solid #2a2a35;
+      padding: 20px 22px;
+      overflow-y: auto;
+      transition: transform 250ms ease-out, width 250ms ease-out;
+    }
+    #panel.hidden {
+      transform: translateX(100%);
+      width: 0;
+      padding: 0;
+      border: 0;
+    }
+    #panel h2 {
+      margin: 0 0 6px 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: #f0f0f4;
+      word-break: break-word;
+      line-height: 1.4;
+    }
+    #panel .meta {
+      color: #6a6a78;
+      font-size: 10px;
+      margin-bottom: 14px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    #panel .desc {
+      color: #d8d8e2;
+      font-size: 12px;
+      line-height: 1.55;
+      font-style: italic;
+      margin: 4px 0 12px 0;
+      padding: 8px 10px;
+      background: #1a1a24;
+      border-left: 2px solid #4a4a5a;
+      border-radius: 2px;
+    }
+    #panel .tags { margin: 6px 0 16px 0; }
+    #panel .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      margin: 2px 4px 2px 0;
+      background: #1c1c26;
+      color: #9a9aa8;
+      border-radius: 10px;
+      font-size: 10px;
+      letter-spacing: 0.02em;
+    }
+    #panel .content {
+      white-space: pre-wrap;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #b8b8c2;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      border-top: 1px solid #1f1f2a;
+      padding-top: 14px;
+    }
+    #panel .placeholder {
+      color: #4a4a55;
+      font-size: 11px;
+      font-style: italic;
+      margin-top: 50%;
+      text-align: center;
+      letter-spacing: 0.05em;
+    }
+    /* ── Footer ──────────────────────────────────────────── */
+    #footer {
+      position: absolute;
+      bottom: 14px;
+      left: 22px;
+      right: 22px;
+      color: #3a3a45;
+      font-size: 10px;
+      pointer-events: none;
+      z-index: 10;
+      letter-spacing: 0.05em;
+      display: flex;
+      gap: 16px;
+    }
+    #footer .hint { color: #4a4a55; }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <div id="title">Palace · <span class="count" id="stats">loading…</span></div>
+    <input id="search" type="text" placeholder="search key / kind / tag …" autocomplete="off">
+    <button id="filter-btn" type="button">filter</button>
+  </div>
+  <div id="filter-panel" class="hidden"></div>
+  <div id="cy"></div>
+  <div id="panel" class="hidden">
+    <div class="placeholder">click a node to read</div>
+  </div>
+  <div id="footer">
+    <span>circles = sqlite · rounded squares = markdown</span>
+    <span class="hint" id="focus-hint"></span>
+  </div>
+
+<script>
+const KIND_COLORS = {
+  project:     "#5b8def",
+  feedback:    "#e25c5c",
+  reference:   "#7a7d8a",
+  decision:    "#a06bdb",
+  lesson:      "#5cc89a",
+  vision:      "#e8c170",
+  context:     "#5c9bc8",
+  research:    "#c870a0",
+  inventory:   "#7090a0",
+  skill:       "#5cb6c8",
+  fact:        "#809088",
+  observation: "#a08070",
+  todo:        "#d09060",
+  concept:     "#9070d0",
+  session_handoff: "#708090",
+};
+const DEFAULT_COLOR = "#7a7d8a";
+function colorForKind(k) { return KIND_COLORS[k] || DEFAULT_COLOR; }
+
+function escapeHTML(s) {
+  if (s == null) return "";
+  return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+}
+
+// ── Global state ────────────────────────────────────────────────
+const state = {
+  cy: null,
+  data: null,
+  search: "",
+  enabledSources: new Set(["sqlite", "markdown"]),
+  enabledKinds: new Set(),
+  includeSkills: false,
+  focused: null,        // currently-focused node id (or null)
+};
+
+// ── Load graph from server ──────────────────────────────────────
+async function loadGraph() {
+  const url = state.includeSkills ? "/api/graph?all=1" : "/api/graph";
+  let data;
+  try {
+    const r = await fetch(url);
+    data = await r.json();
+  } catch (e) {
+    document.getElementById("stats").textContent = "fetch failed";
+    return;
+  }
+  state.data = data;
+
+  const sqliteCount = data.nodes.filter(n => n.source === "sqlite").length;
+  const markdownCount = data.nodes.filter(n => n.source === "markdown").length;
+  document.getElementById("stats").textContent =
+    markdownCount > 0
+      ? `${sqliteCount} sqlite · ${markdownCount} markdown · ${data.edges.length} edges`
+      : `${data.nodes.length} memories · ${data.edges.length} edges`;
+
+  // Populate filter panel from kinds present.
+  const kindCounts = {};
+  data.nodes.forEach(n => { kindCounts[n.kind] = (kindCounts[n.kind] || 0) + 1; });
+  const kinds = Object.keys(kindCounts).sort();
+  if (state.enabledKinds.size === 0) {
+    // First load — enable all.
+    kinds.forEach(k => state.enabledKinds.add(k));
+  }
+  renderFilterPanel(kindCounts);
+
+  buildCy(data);
+}
+
+// ── Build cytoscape ─────────────────────────────────────────────
+function buildCy(data) {
+  if (state.cy) state.cy.destroy();
+
+  const elements = [
+    ...data.nodes.map(n => ({
+      data: {
+        id: n.id,
+        label: n.label || n.id,
+        kind: n.kind,
+        importance: n.importance,
+        access: n.access || 0,
+        color: colorForKind(n.kind),
+        size: 16 + Math.min((n.importance || 0.5) * 28, 28),
+        source: n.source || "sqlite",
+        searchHaystack: [
+          n.id, n.kind, ...(n.tags || []),
+          n.description || "",
+        ].join(" ").toLowerCase(),
+      }
+    })),
+    ...data.edges.map(e => ({
+      data: {
+        id: `${e.source}__${e.target}__${e.type}`,
+        source: e.source, target: e.target, type: e.type, weight: e.weight,
+      }
+    })),
+  ];
+
+  state.cy = cytoscape({
+    container: document.getElementById("cy"),
+    elements,
+    style: [
+      { selector: "node", style: {
+        "background-color": "data(color)",
+        "width": "data(size)", "height": "data(size)",
+        "label": "data(label)",
+        "color": "#9a9aa8", "font-size": "9px", "font-family": "system-ui, sans-serif",
+        "text-valign": "bottom", "text-halign": "center",
+        "text-margin-y": 5, "text-max-width": "140px", "text-wrap": "ellipsis",
+        "border-width": 1, "border-color": "#0a0a0f", "border-opacity": 0.7,
+        "opacity": 0.92,
+      }},
+      { selector: "node[source='markdown']", style: {
+        "shape": "round-rectangle",
+        "border-width": 2, "border-color": "#e0e0ec", "border-opacity": 0.55,
+        "opacity": 0.96,
+      }},
+      { selector: "node.faded", style: {
+        "opacity": 0.08, "text-opacity": 0,
+      }},
+      { selector: "node.match", style: {
+        "border-width": 3, "border-color": "#ffe070", "border-opacity": 1,
+        "color": "#ffe070", "z-index": 999,
+      }},
+      { selector: "node.focus-center", style: {
+        "border-width": 3, "border-color": "#ffffff", "border-opacity": 1,
+        "color": "#ffffff", "font-size": "11px", "z-index": 999, "opacity": 1,
+      }},
+      { selector: "node.focus-neighbor", style: {
+        "color": "#e0e0ec", "z-index": 998, "opacity": 1,
+      }},
+      { selector: "node:selected", style: {
+        "border-width": 2.5, "border-color": "#ffffff", "border-opacity": 1,
+      }},
+      { selector: "edge", style: {
+        "width": "mapData(weight, 0, 1, 0.4, 2.5)",
+        "line-color": "#2a2a38", "target-arrow-shape": "none",
+        "curve-style": "straight", "opacity": 0.55,
+      }},
+      { selector: "edge[type='supersedes']", style: { "line-color": "#7a4ba8", "opacity": 0.8 }},
+      { selector: "edge[type='summarizes']", style: { "line-color": "#a8895a", "opacity": 0.75, "line-style": "dashed" }},
+      { selector: "edge[type='contradicts']", style: { "line-color": "#a85050", "opacity": 0.75, "line-style": "dashed" }},
+      { selector: "edge[type='references']", style: {
+        "line-color": "#5a5a72", "line-style": "dotted", "opacity": 0.7, "width": 1,
+      }},
+      { selector: "edge.faded", style: { "opacity": 0.04 }},
+      { selector: "edge.focus-edge", style: {
+        "line-color": "#9a9aa8", "opacity": 0.85, "width": 2,
+      }},
+    ],
+    layout: {
+      name: "cose",
+      idealEdgeLength: 100, nodeOverlap: 20, refresh: 20, fit: true, padding: 40,
+      randomize: false, componentSpacing: 80, nodeRepulsion: 400000,
+      edgeElasticity: 100, nestingFactor: 5, gravity: 80,
+      numIter: 1000, initialTemp: 200, coolingFactor: 0.95, minTemp: 1.0,
+    },
+    minZoom: 0.15, maxZoom: 4.0, wheelSensitivity: 0.2,
+  });
+
+  // Bind interactions
+  state.cy.on("tap", "node", (evt) => {
+    const id = evt.target.id();
+    focusOnNode(id);
+    showSidePanel(id);
+  });
+  state.cy.on("tap", (evt) => {
+    if (evt.target === state.cy) {
+      clearFocus();
+      document.getElementById("panel").classList.add("hidden");
+    }
+  });
+
+  applyVisualState();
+}
+
+// ── Filter panel rendering ──────────────────────────────────────
+function renderFilterPanel(kindCounts) {
+  const kinds = Object.keys(kindCounts).sort();
+  const html = `
+    <div class="section">
+      <h3>Source</h3>
+      <label><input type="checkbox" data-source="sqlite" ${state.enabledSources.has("sqlite") ? "checked" : ""}> circle · sqlite</label>
+      <label><input type="checkbox" data-source="markdown" ${state.enabledSources.has("markdown") ? "checked" : ""}> square · markdown</label>
+    </div>
+    <div class="section">
+      <h3>Kind</h3>
+      <div class="actions">
+        <button id="kind-all">all</button>
+        <button id="kind-none">none</button>
+      </div>
+      ${kinds.map(k => `
+        <label>
+          <input type="checkbox" data-kind="${escapeHTML(k)}" ${state.enabledKinds.has(k) ? "checked" : ""}>
+          <span class="swatch" style="background:${colorForKind(k)}"></span>
+          ${escapeHTML(k)}
+          <span class="count">${kindCounts[k]}</span>
+        </label>
+      `).join("")}
+    </div>
+    <div class="section">
+      <label>
+        <input type="checkbox" id="include-skills" ${state.includeSkills ? "checked" : ""}>
+        include indexed skills
+      </label>
+    </div>
+  `;
+  const panel = document.getElementById("filter-panel");
+  panel.innerHTML = html;
+
+  panel.querySelectorAll("input[data-source]").forEach(el => {
+    el.addEventListener("change", () => {
+      if (el.checked) state.enabledSources.add(el.dataset.source);
+      else state.enabledSources.delete(el.dataset.source);
+      applyVisualState();
+    });
+  });
+  panel.querySelectorAll("input[data-kind]").forEach(el => {
+    el.addEventListener("change", () => {
+      if (el.checked) state.enabledKinds.add(el.dataset.kind);
+      else state.enabledKinds.delete(el.dataset.kind);
+      applyVisualState();
+    });
+  });
+  panel.querySelector("#kind-all").addEventListener("click", () => {
+    kinds.forEach(k => state.enabledKinds.add(k));
+    panel.querySelectorAll("input[data-kind]").forEach(el => el.checked = true);
+    applyVisualState();
+  });
+  panel.querySelector("#kind-none").addEventListener("click", () => {
+    state.enabledKinds.clear();
+    panel.querySelectorAll("input[data-kind]").forEach(el => el.checked = false);
+    applyVisualState();
+  });
+  panel.querySelector("#include-skills").addEventListener("change", (e) => {
+    state.includeSkills = e.target.checked;
+    loadGraph();  // re-fetch (server returns different node set)
+  });
+}
+
+// ── Visual state machine ────────────────────────────────────────
+// Combines: source filter + kind filter + search highlight + focus highlight.
+// Order matters: filters hide nodes (faded), search marks (match), focus
+// overrides (focus-center / focus-neighbor / focus-edge / faded).
+function applyVisualState() {
+  if (!state.cy) return;
+  const cy = state.cy;
+  const term = state.search.trim().toLowerCase();
+
+  // Reset classes.
+  cy.elements().removeClass("faded match focus-center focus-neighbor focus-edge");
+
+  // Filter-fade: nodes failing source/kind get .faded.
+  cy.nodes().forEach(n => {
+    const d = n.data();
+    const sourceOk = state.enabledSources.has(d.source);
+    const kindOk = state.enabledKinds.has(d.kind);
+    if (!sourceOk || !kindOk) n.addClass("faded");
+  });
+
+  // Edge-fade: edges whose either endpoint is faded → faded.
+  cy.edges().forEach(e => {
+    if (e.source().hasClass("faded") || e.target().hasClass("faded")) {
+      e.addClass("faded");
+    }
+  });
+
+  // Search-mark: visible nodes matching term get .match.
+  if (term) {
+    cy.nodes().not(".faded").forEach(n => {
+      const hay = n.data("searchHaystack") || "";
+      if (hay.includes(term)) n.addClass("match");
+      else n.addClass("faded");  // dim non-matches
+    });
+    // Re-fade edges since some nodes are now faded.
+    cy.edges().not(".faded").forEach(e => {
+      if (e.source().hasClass("faded") || e.target().hasClass("faded")) {
+        e.addClass("faded");
+      }
+    });
+  }
+
+  // Focus overlay: ego network of focused node.
+  if (state.focused) {
+    const node = cy.getElementById(state.focused);
+    if (node && node.length > 0) {
+      const ego = node.closedNeighborhood();
+      // Everything outside ego is faded.
+      cy.elements().not(ego).addClass("faded");
+      ego.removeClass("faded");
+      // Mark the center + neighbors + edges.
+      node.addClass("focus-center");
+      ego.nodes().not(node).addClass("focus-neighbor");
+      ego.edges().addClass("focus-edge");
+    }
+  }
+}
+
+function focusOnNode(id) {
+  state.focused = id;
+  document.getElementById("focus-hint").textContent =
+    "focus: " + id + " · click background to release";
+  applyVisualState();
+  // Smooth pan to the node.
+  const n = state.cy.getElementById(id);
+  if (n && n.length > 0) {
+    state.cy.animate({ center: { eles: n }, duration: 300, easing: "ease-out" });
+  }
+}
+
+function clearFocus() {
+  state.focused = null;
+  document.getElementById("focus-hint").textContent = "";
+  applyVisualState();
+}
+
+// ── Side panel ──────────────────────────────────────────────────
+async function showSidePanel(id) {
+  const panel = document.getElementById("panel");
+  panel.classList.remove("hidden");
+  panel.innerHTML = `<div class="placeholder">loading…</div>`;
+  try {
+    const r = await fetch(`/api/memory/${encodeURIComponent(id)}`);
+    if (!r.ok) {
+      panel.innerHTML = `<div class="placeholder">${r.status} · ${escapeHTML(r.statusText)}</div>`;
+      return;
+    }
+    const m = await r.json();
+    const sourceLabel = m.source === "markdown" ? "markdown" : "sqlite";
+    const descBlock = m.description
+      ? `<div class="desc">${escapeHTML(m.description)}</div>` : "";
+    panel.innerHTML = `
+      <h2>${escapeHTML(m.key)}</h2>
+      <div class="meta">
+        ${escapeHTML(m.kind)} · ${sourceLabel} · importance ${(m.importance || 0).toFixed(2)} · access ${m.access_count || 0}
+      </div>
+      ${descBlock}
+      <div class="tags">
+        ${(m.tags || []).map(t => `<span class="tag">${escapeHTML(t)}</span>`).join("")}
+      </div>
+      <div class="content">${escapeHTML(m.content || "")}</div>
+    `;
+  } catch (e) {
+    panel.innerHTML = `<div class="placeholder">error: ${escapeHTML(String(e))}</div>`;
+  }
+}
+
+// ── Top-bar bindings ────────────────────────────────────────────
+document.getElementById("search").addEventListener("input", (e) => {
+  state.search = e.target.value;
+  applyVisualState();
+});
+
+document.getElementById("filter-btn").addEventListener("click", () => {
+  const p = document.getElementById("filter-panel");
+  const btn = document.getElementById("filter-btn");
+  if (p.classList.contains("hidden")) {
+    p.classList.remove("hidden");
+    btn.classList.add("active");
+  } else {
+    p.classList.add("hidden");
+    btn.classList.remove("active");
+  }
+});
+
+// Keyboard: `/` focuses the search box; Esc clears search + focus.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "/" && document.activeElement !== document.getElementById("search")) {
+    e.preventDefault();
+    document.getElementById("search").focus();
+  } else if (e.key === "Escape") {
+    document.getElementById("search").value = "";
+    state.search = "";
+    clearFocus();
+  }
+});
+
+// Boot.
+loadGraph();
+</script>
+</body>
+</html>

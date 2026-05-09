@@ -106,6 +106,19 @@ enum Cmd {
         #[command(subcommand)]
         op: DreamOp,
     },
+    /// **呼吸式画布 P1** — Static Palace viewer.
+    ///
+    /// Renders the active memory graph as a force-directed network in your
+    /// browser using cytoscape.js. Read-only — no editing, no creation; that
+    /// belongs to P2+ on the Palace evolution path. Defaults to
+    /// `127.0.0.1:7979` so it stays local-only; pass `--host 0.0.0.0` if you
+    /// really want tailnet access.
+    ///
+    /// See `vision_breathing_canvas.md` (memory) for the broader design.
+    Palace {
+        #[command(subcommand)]
+        op: PalaceOp,
+    },
     /// Print an OSC 133 shell-integration snippet for the chosen shell to
     /// stdout. Pipe into the matching rc file:
     ///
@@ -129,6 +142,24 @@ enum ShellKind {
     Bash,
     Zsh,
     Fish,
+}
+
+#[derive(Subcommand, Debug)]
+enum PalaceOp {
+    /// Start the Palace viewer HTTP server. Default `127.0.0.1:7979`.
+    Serve {
+        #[arg(long, default_value_t = 7979)]
+        port: u16,
+        /// Bind address. Default `127.0.0.1` (local-only). Pass `0.0.0.0`
+        /// for tailnet access — but understand the viewer has no auth.
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Path to Claude Code's markdown auto-memory directory. Defaults
+        /// to `~/.claude/projects/<cwd-encoded>/memory/` if it exists.
+        /// Pass `none` to disable the markdown layer entirely.
+        #[arg(long)]
+        memory_dir: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -493,6 +524,31 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Palace viewer: short-lived HTTP server, opens store directly (no Hub).
+    if let Cmd::Palace { op } = &cmd {
+        return match op {
+            PalaceOp::Serve {
+                port,
+                host,
+                memory_dir,
+            } => {
+                tracing_subscriber::registry()
+                    .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+                    .with(tracing_subscriber::fmt::layer())
+                    .init();
+                let path = default_db_path();
+                let store: Arc<dyn StateStore> = Arc::new(SqliteStore::open(&path).await?);
+                let listen = format!("{host}:{port}");
+                let markdown_root: Option<PathBuf> = match memory_dir.as_deref() {
+                    Some("none") => None,
+                    Some(p) => Some(PathBuf::from(p)),
+                    None => ab_bridge::palace_viewer::default_markdown_dir(),
+                };
+                ab_bridge::palace_viewer::run(store, &listen, markdown_root).await
+            }
+        };
+    }
+
     let log_layer = match cmd {
         Cmd::Mcp => tracing_subscriber::fmt::layer()
             .with_writer(std::io::stderr)
@@ -549,6 +605,7 @@ async fn main() -> Result<()> {
         | Cmd::Sync { .. }
         | Cmd::Skills { .. }
         | Cmd::Dream { .. }
+        | Cmd::Palace { .. }
         | Cmd::ShellInit { .. } => unreachable!(),
     }
 }

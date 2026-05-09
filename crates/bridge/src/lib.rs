@@ -10,6 +10,7 @@ pub mod dream_replay;
 pub mod hub;
 pub mod peer_client;
 pub mod mcp_tools;
+pub mod palace_viewer;
 pub mod project;
 pub mod router;
 pub mod security;
