@@ -2,7 +2,7 @@
 
 **Owner**: agent-bridge
 **Started**: 2026-05-09
-**Status**: Rounds 1 + 2 + 2.5 complete (2026-05-09); Round 3 #3 done; Round 3 #9 next
+**Status**: Rounds 1 + 2 + 2.5 + 3 complete (2026-05-09); Round 4 (P2 cleanup) next
 
 ## Why this exists
 
@@ -143,9 +143,20 @@ landed same day:
   waiter (no zombie hangs). `close()` also releases the waiter so a
   stranded request can't outlive its page. `timeout_ms` clamped to
   [1_000, 1_800_000].
-- [ ] #9 `browser_capture_response(page, url_pattern, until_ms)` — start a
-  CDP `Network.responseReceived` recorder; return all matching response
-  bodies after a timeout or after `wait_for` resolves.
+- [x] **#9 XHR/Fetch response capture** (commit `2d63fe0`, 2026-05-09) —
+  shipped as a 2-tool pair: `browser_capture_response_start(page,
+  url_substring, max_buffer?)` and `browser_capture_response_drain(page,
+  until_ms?, max_results?)`. Backend subscribes to BOTH
+  `Network.responseReceived` (for URL/status/headers/mime) and
+  `Network.loadingFinished` (for body-ready signal), carrying pending
+  metadata across the gap so `Network.getResponseBody` is only called
+  once the body is guaranteed-loaded — no flaky "No data found"
+  races. Per-page ring buffer (clamped [1, 200]); second start aborts
+  the prior pump; `close(page)` aborts any active capture. Drain has
+  a fast path (returns immediately if buffered) and a slow path
+  (`Notify`-based wait up to `until_ms`). Each row carries
+  `{request_id, url, status, resource_type, mime_type, body,
+  base64_encoded, headers, ts_ms}`.
 
 ### Round 4 — completeness
 
