@@ -1283,6 +1283,52 @@ impl McpTool for BrowserWaitForTool {
     }
 }
 
+pub struct BrowserListPagesTool {
+    hub: Hub,
+}
+impl BrowserListPagesTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserListPagesTool {
+    fn name(&self) -> &'static str {
+        "browser_list_pages"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "List every page (tab/window) the underlying browser has open. \
+                 Auto-discovers tabs that were opened by clicks, window.open, or \
+                 target=_blank links and assigns fresh page_ids for them. The \
+                 `newly_tracked` flag is true for tabs the daemon hadn't seen before \
+                 this call — those are typically OAuth pop-ups or 'Open in new tab' \
+                 results. Use this after any click that might have opened a new tab."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        match b.list_pages().await {
+            Ok(rows) => Ok(ToolResult::json_text(&json!({
+                "count": rows.len(),
+                "pages": rows
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
 pub struct AgentMessageTool {
     hub: Hub,
 }
@@ -9877,6 +9923,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserExtractTextTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserFillFormTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserWaitForTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserListPagesTool::new(hub.clone())));
     // Warp URL-scheme + status.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));

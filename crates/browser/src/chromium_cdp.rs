@@ -36,7 +36,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use crate::{A11yNode, BrowserBackend, WaitOutcome};
+use crate::{A11yNode, BrowserBackend, PageInfo, WaitOutcome};
 
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -342,6 +342,45 @@ impl BrowserBackend for ChromiumCdpBackend {
             }
             tokio::time::sleep(poll).await;
         }
+    }
+
+    async fn list_pages(&self) -> Result<Vec<PageInfo>> {
+        let browser = self.ensure_browser().await?;
+        let live = browser
+            .pages()
+            .await
+            .map_err(|e| Error::Backend(format!("browser.pages: {e}")))?;
+
+        // Build target_id → existing PageId.as_str() reverse lookup from the
+        // currently tracked map (typically <10 entries, so O(n) is fine).
+        let mut existing: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for entry in self.pages.iter() {
+            existing.insert(entry.value().target_id().as_ref().to_string(), entry.key().clone());
+        }
+
+        let mut out = Vec::with_capacity(live.len());
+        for page in live {
+            let tid = page.target_id().as_ref().to_string();
+            let (page_id, newly) = if let Some(pid) = existing.get(&tid) {
+                (pid.clone(), false)
+            } else {
+                let pid = PageId::new();
+                let key = pid.as_str().to_string();
+                self.pages.insert(key.clone(), Arc::new(page.clone()));
+                (key, true)
+            };
+            let url = page.url().await.ok().flatten().unwrap_or_default();
+            let title = page.get_title().await.ok().flatten().unwrap_or_default();
+            out.push(PageInfo {
+                page_id,
+                target_id: tid,
+                url,
+                title,
+                newly_tracked: newly,
+            });
+        }
+        Ok(out)
     }
 
     async fn close(&self, page: &PageId) -> Result<()> {

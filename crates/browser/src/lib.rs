@@ -34,6 +34,22 @@ pub struct WaitOutcome {
     pub current_url: String,
 }
 
+/// Snapshot of one page returned from [`BrowserBackend::list_pages`].
+/// Pages discovered for the first time during a list_pages call are
+/// auto-registered with a fresh `page_id` so subsequent tool calls can
+/// address them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageInfo {
+    pub page_id: String,
+    pub target_id: String,
+    pub url: String,
+    pub title: String,
+    /// `true` if `list_pages` minted a fresh page_id for this target on this
+    /// call (i.e. it was a tab the daemon hadn't seen yet — typically an
+    /// OAuth pop-up or a click-opened window).
+    pub newly_tracked: bool,
+}
+
 #[async_trait]
 pub trait BrowserBackend: Send + Sync {
     fn id(&self) -> &str;
@@ -68,6 +84,13 @@ pub trait BrowserBackend: Send + Sync {
         url_substring: Option<&str>,
         timeout_ms: u64,
     ) -> Result<WaitOutcome>;
+
+    /// List every page the underlying browser has open. Auto-discovers tabs
+    /// opened by clicks or window.open / target=_blank links and registers
+    /// fresh `page_id`s for them so the agent can address them via the
+    /// other browser_* tools. The `newly_tracked` field marks tabs that
+    /// were not in the daemon's tracker before this call.
+    async fn list_pages(&self) -> Result<Vec<PageInfo>>;
 
     async fn close(&self, page: &PageId) -> Result<()>;
 }
