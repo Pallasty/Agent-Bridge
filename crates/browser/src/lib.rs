@@ -24,6 +24,16 @@ pub struct A11yNode {
     pub children: Vec<A11yNode>,
 }
 
+/// Result of a [`BrowserBackend::wait_for`] call. `matched` is one of
+/// `"selector"`, `"url"`, or `"timeout"` depending on which condition
+/// resolved (or whether the deadline expired).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaitOutcome {
+    pub matched: String,
+    pub elapsed_ms: u64,
+    pub current_url: String,
+}
+
 #[async_trait]
 pub trait BrowserBackend: Send + Sync {
     fn id(&self) -> &str;
@@ -44,6 +54,20 @@ pub trait BrowserBackend: Send + Sync {
     /// Set the value of the first element matching `selector` (input/textarea or
     /// `textContent` fallback) and dispatch `input` + `change` events.
     async fn fill_form(&self, page: &PageId, selector: &str, value: &str) -> Result<()>;
+
+    /// Block until either:
+    ///   * `selector` matches a DOM element (polled @ 100 ms), or
+    ///   * `location.href` contains `url_substring` (polled @ 100 ms), or
+    ///   * `timeout_ms` elapses (always returns Ok with `matched="timeout"`).
+    /// Either or both predicates may be passed; if neither, this becomes a
+    /// pure sleep. `timeout_ms` is clamped to [50, 60_000].
+    async fn wait_for(
+        &self,
+        page: &PageId,
+        selector: Option<&str>,
+        url_substring: Option<&str>,
+        timeout_ms: u64,
+    ) -> Result<WaitOutcome>;
 
     async fn close(&self, page: &PageId) -> Result<()>;
 }

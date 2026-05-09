@@ -1224,6 +1224,65 @@ impl McpTool for BrowserFillFormTool {
     }
 }
 
+pub struct BrowserWaitForTool {
+    hub: Hub,
+}
+impl BrowserWaitForTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserWaitForTool {
+    fn name(&self) -> &'static str {
+        "browser_wait_for"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Block until a CSS selector becomes present in the DOM, OR the page \
+                 URL contains a substring, OR a timeout expires. Polls every 100 ms. Returns \
+                 `{matched: \"selector\"|\"url\"|\"timeout\", elapsed_ms, current_url}`. Either \
+                 or both predicates may be passed; `matched=\"timeout\"` is NOT an error — \
+                 inspect the field to decide what to do next."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":          { "type": "string", "description": "Page id from browser_navigate." },
+                    "selector":      { "type": "string", "description": "CSS selector to wait for (optional)." },
+                    "url_substring": { "type": "string", "description": "Wait until location.href contains this (optional)." },
+                    "timeout_ms":    { "type": "integer", "default": 10000, "minimum": 50, "maximum": 60000 }
+                },
+                "required": ["page"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let sel = args.get("selector").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        let url_sub = args.get("url_substring").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10_000)
+            .clamp(50, 60_000);
+        match b.wait_for(&page, sel, url_sub, timeout_ms).await {
+            Ok(out) => Ok(ToolResult::json_text(
+                &serde_json::to_value(out).unwrap_or(Value::Null),
+            )),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
 pub struct AgentMessageTool {
     hub: Hub,
 }
@@ -9817,6 +9876,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserScreenshotTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserExtractTextTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserFillFormTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserWaitForTool::new(hub.clone())));
     // Warp URL-scheme + status.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));

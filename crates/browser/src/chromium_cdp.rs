@@ -36,7 +36,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use crate::{A11yNode, BrowserBackend};
+use crate::{A11yNode, BrowserBackend, WaitOutcome};
 
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -272,6 +272,76 @@ impl BrowserBackend for ChromiumCdpBackend {
              return true; }})()"
         );
         eval_with_exception_details(&p, &js).await.map(|_| ())
+    }
+
+    async fn wait_for(
+        &self,
+        page: &PageId,
+        selector: Option<&str>,
+        url_substring: Option<&str>,
+        timeout_ms: u64,
+    ) -> Result<WaitOutcome> {
+        let p = self.page_handle(page)?;
+        let timeout = Duration::from_millis(timeout_ms.clamp(50, 60_000));
+        let poll = Duration::from_millis(100);
+        let start = std::time::Instant::now();
+
+        // Pre-build polling expressions once.
+        let selector_expr = selector.map(|s| {
+            let lit = serde_json::to_string(s).unwrap_or_else(|_| "\"\"".into());
+            format!("(() => document.querySelector({lit}) != null)()")
+        });
+        let url_expr = url_substring.map(|s| {
+            let lit = serde_json::to_string(s).unwrap_or_else(|_| "\"\"".into());
+            format!("(() => location.href.includes({lit}))()")
+        });
+        const URL_EXPR: &str = "(() => location.href)()";
+
+        loop {
+            if let Some(ref js) = selector_expr {
+                let v = eval_with_exception_details(&p, js).await?;
+                if v.as_bool().unwrap_or(false) {
+                    let cur = eval_with_exception_details(&p, URL_EXPR)
+                        .await
+                        .ok()
+                        .and_then(|x| x.as_str().map(String::from))
+                        .unwrap_or_default();
+                    return Ok(WaitOutcome {
+                        matched: "selector".into(),
+                        elapsed_ms: start.elapsed().as_millis() as u64,
+                        current_url: cur,
+                    });
+                }
+            }
+            if let Some(ref js) = url_expr {
+                let v = eval_with_exception_details(&p, js).await?;
+                if v.as_bool().unwrap_or(false) {
+                    let cur = eval_with_exception_details(&p, URL_EXPR)
+                        .await
+                        .ok()
+                        .and_then(|x| x.as_str().map(String::from))
+                        .unwrap_or_default();
+                    return Ok(WaitOutcome {
+                        matched: "url".into(),
+                        elapsed_ms: start.elapsed().as_millis() as u64,
+                        current_url: cur,
+                    });
+                }
+            }
+            if start.elapsed() >= timeout {
+                let cur = eval_with_exception_details(&p, URL_EXPR)
+                    .await
+                    .ok()
+                    .and_then(|x| x.as_str().map(String::from))
+                    .unwrap_or_default();
+                return Ok(WaitOutcome {
+                    matched: "timeout".into(),
+                    elapsed_ms: start.elapsed().as_millis() as u64,
+                    current_url: cur,
+                });
+            }
+            tokio::time::sleep(poll).await;
+        }
     }
 
     async fn close(&self, page: &PageId) -> Result<()> {
