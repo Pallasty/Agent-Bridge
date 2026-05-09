@@ -4185,9 +4185,18 @@ fn pick_evolution_neighbors(
     threshold: f32,
     top_k: usize,
 ) -> Vec<(MemoryRecord, f64)> {
+    // Status filter is defense-in-depth against a race in MemoryDeleteTool /
+    // MemoryCompactTool: those spawn fire-and-forget cache-cleanup tasks, so
+    // a tombstoned/superseded record can still appear in `cached` for a few
+    // milliseconds after the SQL row was flipped. Without this filter, the
+    // P4 evolve spawn would happily form an `evolved` edge to a record that
+    // memory_get already returns null for. SQL semantic-search path already
+    // filters status='active'; this brings the cache path to parity.
     let mut sims: Vec<(MemoryRecord, f64)> = cached
         .iter()
-        .filter(|(rec, _)| rec.key != new_key && rec.kind != "skill")
+        .filter(|(rec, _)| {
+            rec.key != new_key && rec.kind != "skill" && rec.status == "active"
+        })
         .map(|(rec, emb)| {
             let c = cosine_similarity(new_embedding, emb);
             (rec.clone(), c as f64)
@@ -4870,6 +4879,10 @@ impl McpTool for MemorySearchTool {
                 let query_vec = embed_text(&q);
                 let mut hits: Vec<MemorySearchHit> = cached
                     .iter()
+                    // Tombstone/supersede tolerance: cache cleanup is racy
+                    // (fire-and-forget spawn), so filter status here to
+                    // match the SQL fallback's `WHERE status='active'`.
+                    .filter(|(rec, _)| rec.status == "active")
                     .filter_map(|(rec, emb)| {
                         let cosine = cosine_similarity(&query_vec, emb);
                         if cosine < threshold {
@@ -13312,6 +13325,15 @@ mod tests {
     }
 
     fn mk_cached(key: &str, kind: &str, emb: Vec<f32>) -> (MemoryRecord, Vec<f32>) {
+        mk_cached_with_status(key, kind, emb, "active")
+    }
+
+    fn mk_cached_with_status(
+        key: &str,
+        kind: &str,
+        emb: Vec<f32>,
+        status: &str,
+    ) -> (MemoryRecord, Vec<f32>) {
         (
             MemoryRecord {
                 key: key.to_string(),
@@ -13325,7 +13347,7 @@ mod tests {
                 last_accessed_at: 0,
                 access_count: 0,
                 importance: 0.5,
-                status: "active".into(),
+                status: status.into(),
                 trigger_pattern: None,
                 superseded_by: None,
             },
@@ -13359,6 +13381,25 @@ mod tests {
         let picks_top1 = pick_evolution_neighbors(&cache, "self_dup", &new, 0.65, 1);
         assert_eq!(picks_top1.len(), 1);
         assert_eq!(picks_top1[0].0.key, "hot_kin");
+    }
+
+    #[test]
+    fn p4_pick_evolution_neighbors_skips_tombstoned_and_superseded() {
+        // Phase 2 #1 tombstone-sync regression. memory_delete soft-deletes
+        // via status='tombstoned'; cache cleanup is a fire-and-forget
+        // tokio::spawn so a tombstoned/superseded record can linger in
+        // `cached` after the SQL row was flipped. This test pins the
+        // defensive status filter in pick_evolution_neighbors.
+        let new = vec![1.0_f32, 0.0, 0.0];
+        let cache = vec![
+            mk_cached_with_status("active_kin",     "lesson", vec![0.95, 0.31, 0.0], "active"),
+            mk_cached_with_status("tombstone_kin",  "lesson", vec![0.92, 0.39, 0.0], "tombstoned"),
+            mk_cached_with_status("superseded_kin", "lesson", vec![0.88, 0.47, 0.0], "superseded"),
+        ];
+        let picks = pick_evolution_neighbors(&cache, "probe", &new, 0.65, 5);
+        let keys: Vec<&str> = picks.iter().map(|(rec, _)| rec.key.as_str()).collect();
+
+        assert_eq!(keys, vec!["active_kin"], "only active records evolve");
     }
 
     #[test]
