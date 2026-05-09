@@ -16,26 +16,31 @@
 //!   files written by the user and the assistant during conversation.
 //!   Edges come from `(other.md)` references inside the body.
 //!
-//! Cross-source edges are NOT inferred (would generate false positives).
-//! That's a P3 job once we have semantic similarity wired in.
+//! Cross-source edges are NOT inferred from semantic similarity (would
+//! generate false positives — that's a P3 job). But **explicit** cross-
+//! source edges written via `memory_link` (e.g. C1 `annotates` edges from
+//! a sqlite annotation back to a markdown vision file) DO render — those
+//! are user-authored intent, not noise.
 //!
 //! ## Endpoints
-//!   - `GET /`                → embedded HTML viewer
-//!   - `GET /healthz`         → liveness probe
-//!   - `GET /api/graph`       → merged `{ nodes, edges }` from both sources
-//!   - `GET /api/memory/:key` → single record (sqlite first, markdown fallback)
+//!   - `GET /`                  → embedded HTML viewer
+//!   - `GET /healthz`           → liveness probe
+//!   - `GET /api/graph`         → merged `{ nodes, edges }` from both sources
+//!   - `GET /api/memory/:key`   → single record (sqlite first, markdown fallback)
+//!   - `POST /api/annotate`     → C1: write a new sqlite memory linked to a node
+//!     (closes the 呼吸 loop — Palace exploration → annotation → memory)
 //!
 //! Bind defaults to `127.0.0.1` (single-user local view).
 //!
 //! See `vision_breathing_canvas.md` for the broader 呼吸式画布 design.
 
-use ab_store::{MemoryListSort, StateStore};
+use ab_store::{MemoryListSort, MemoryRecord, StateStore};
 use anyhow::{Context, Result};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use serde::Deserialize;
@@ -44,6 +49,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const VIEWER_NODE_CAP: usize = 500;
 const STORE_FETCH_LIMIT: u32 = 2000;
@@ -80,6 +86,7 @@ pub async fn run(
         .route("/healthz", get(healthz))
         .route("/api/graph", get(api_graph))
         .route("/api/memory/:key", get(api_memory))
+        .route("/api/annotate", post(api_annotate))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen)
@@ -290,27 +297,10 @@ async fn api_graph(
         .collect();
     let sqlite_keys: HashSet<String> = active.iter().map(|m| m.key.clone()).collect();
 
-    // ── sqlite edges ────────────────────────────────────────────────────
-    let mut seen: HashSet<(String, String, String)> = HashSet::new();
-    let mut sqlite_edges = Vec::new();
-    for m in &active {
-        let nbrs = s.store.memory_neighbors(&m.key).await.unwrap_or_default();
-        for e in nbrs {
-            let key = if e.from_key < e.to_key {
-                (e.from_key.clone(), e.to_key.clone(), e.edge_type.clone())
-            } else {
-                (e.to_key.clone(), e.from_key.clone(), e.edge_type.clone())
-            };
-            if seen.insert(key)
-                && sqlite_keys.contains(&e.from_key)
-                && sqlite_keys.contains(&e.to_key)
-            {
-                sqlite_edges.push(e);
-            }
-        }
-    }
-
     // ── markdown layer ──────────────────────────────────────────────────
+    // Read markdown first so that the sqlite edge loop knows which keys
+    // resolve as markdown nodes (used to render explicit cross-source
+    // edges like `annotates` written via POST /api/annotate).
     let mds = if let Some(root) = &s.markdown_root {
         read_markdown_dir(root)
     } else {
@@ -323,6 +313,30 @@ async fn api_graph(
         .filter(|m| !sqlite_keys.contains(&m.key))
         .collect();
     let md_keys: HashSet<String> = md_only.iter().map(|m| m.key.clone()).collect();
+
+    // Helper: is this key renderable as a node in the merged graph?
+    let is_node = |k: &str| sqlite_keys.contains(k) || md_keys.contains(k);
+
+    // ── sqlite edges ────────────────────────────────────────────────────
+    // Includes intra-sqlite edges and explicit cross-source edges (e.g.
+    // `annotates` from a sqlite annotation to a markdown vision node).
+    // Cross-source edges are only rendered when **both endpoints exist as
+    // nodes** — we don't render dangling refs.
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
+    let mut sqlite_edges = Vec::new();
+    for m in &active {
+        let nbrs = s.store.memory_neighbors(&m.key).await.unwrap_or_default();
+        for e in nbrs {
+            let key = if e.from_key < e.to_key {
+                (e.from_key.clone(), e.to_key.clone(), e.edge_type.clone())
+            } else {
+                (e.to_key.clone(), e.from_key.clone(), e.edge_type.clone())
+            };
+            if seen.insert(key) && is_node(&e.from_key) && is_node(&e.to_key) {
+                sqlite_edges.push(e);
+            }
+        }
+    }
 
     // ── markdown edges ─ within markdown only (no cross-source). ────────
     let mut md_edges = Vec::new();
@@ -465,6 +479,78 @@ async fn api_memory(
     }
 
     Err((StatusCode::NOT_FOUND, format!("memory not found: {key}")))
+}
+
+// ── Annotate endpoint (C1: closes the 呼吸 loop) ─────────────────────────
+
+#[derive(Deserialize)]
+struct AnnotatePayload {
+    /// The node the user is annotating from. Becomes the `to_key` of an
+    /// `annotates` edge.
+    target_key: String,
+    /// User-authored body. Becomes the `content` of the new sqlite memory.
+    content: String,
+}
+
+/// Create a new sqlite memory authored from the Palace, linked back to
+/// `target_key` via an `annotates` edge.
+///
+/// The new memory is `kind=annotation`, importance 0.6, scope-less (global
+/// — visible from any project's Palace). The key is timestamp-prefixed so
+/// multiple annotations stay sortable and unique.
+///
+/// Returns `{ ok: true, key: <new key> }` on success. The frontend should
+/// re-fetch `/api/graph` to see the new node + edge.
+async fn api_annotate(
+    State(s): State<AppState>,
+    Json(p): Json<AnnotatePayload>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let target = p.target_key.trim();
+    let body = p.content.trim();
+    if target.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "target_key required".into()));
+    }
+    if body.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "content required".into()));
+    }
+
+    let now_millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let key = format!("palace_annotation_{now_millis:013}");
+
+    let mem = MemoryRecord {
+        key: key.clone(),
+        kind: "annotation".to_string(),
+        content: body.to_string(),
+        tags: vec!["palace".to_string(), "annotation".to_string()],
+        related_keys: vec![target.to_string()],
+        scope: None,
+        created_at: 0,
+        updated_at: 0,
+        last_accessed_at: 0,
+        access_count: 0,
+        importance: 0.6,
+        status: "active".to_string(),
+        trigger_pattern: None,
+        superseded_by: None,
+    };
+
+    s.store
+        .memory_save(&mem)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_save: {e}")))?;
+
+    s.store
+        .memory_link(&key, target, "annotates", 1.0)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_link: {e}")))?;
+
+    Ok(Json(json!({
+        "ok":  true,
+        "key": key,
+    })))
 }
 
 #[cfg(test)]

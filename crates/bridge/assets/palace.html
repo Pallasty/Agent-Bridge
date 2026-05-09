@@ -212,6 +212,70 @@
       text-align: center;
       letter-spacing: 0.05em;
     }
+    #panel .annotate-section {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid #1f1f2a;
+    }
+    #panel .annotate-toggle {
+      background: transparent;
+      border: 1px dashed #3a3a48;
+      color: #8a8a9c;
+      padding: 6px 12px;
+      font-size: 11px;
+      border-radius: 4px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      width: 100%;
+      transition: color 120ms, border-color 120ms;
+      font-family: inherit;
+    }
+    #panel .annotate-toggle:hover { color: #e4e4e8; border-color: #5a5a72; }
+    #panel .annotate-form { display: none; }
+    #panel .annotate-form.open { display: block; }
+    #panel .annotate-form textarea {
+      width: 100%;
+      min-height: 90px;
+      background: #0c0c12;
+      border: 1px solid #2a2a35;
+      color: #e4e4e8;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      line-height: 1.55;
+      border-radius: 4px;
+      outline: none;
+      resize: vertical;
+    }
+    #panel .annotate-form textarea:focus { border-color: #4a4a60; }
+    #panel .annotate-form .row {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      align-items: center;
+    }
+    #panel .annotate-form button {
+      background: transparent;
+      border: 1px solid #2a2a35;
+      color: #b8b8c2;
+      padding: 5px 12px;
+      font-size: 11px;
+      border-radius: 3px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      font-family: inherit;
+    }
+    #panel .annotate-form button.save { color: #ffe070; border-color: #5a4a30; }
+    #panel .annotate-form button:hover:not(:disabled) { color: #fff; border-color: #5a5a72; }
+    #panel .annotate-form button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #panel .annotate-form .hint {
+      color: #4a4a55;
+      font-size: 10px;
+      flex: 1;
+      letter-spacing: 0.04em;
+    }
+    #panel .annotate-form .hint.error { color: #e25c5c; }
+    #panel .annotate-form .hint.ok { color: #5cc89a; }
     /* ── Footer ──────────────────────────────────────────── */
     #footer {
       position: absolute;
@@ -390,6 +454,9 @@ function buildCy(data) {
       { selector: "edge[type='contradicts']", style: { "line-color": "#a85050", "opacity": 0.75, "line-style": "dashed" }},
       { selector: "edge[type='references']", style: {
         "line-color": "#5a5a72", "line-style": "dotted", "opacity": 0.7, "width": 1,
+      }},
+      { selector: "edge[type='annotates']", style: {
+        "line-color": "#ffe070", "opacity": 0.85, "width": 1.6,
       }},
       { selector: "edge.faded", style: { "opacity": 0.04 }},
       { selector: "edge.focus-edge", style: {
@@ -587,10 +654,99 @@ async function showSidePanel(id) {
         ${(m.tags || []).map(t => `<span class="tag">${escapeHTML(t)}</span>`).join("")}
       </div>
       <div class="content">${escapeHTML(m.content || "")}</div>
+      <div class="annotate-section">
+        <button class="annotate-toggle" type="button">✍ annotate this node</button>
+        <div class="annotate-form">
+          <textarea placeholder="your thought… (cmd/ctrl+enter to save)"></textarea>
+          <div class="row">
+            <span class="hint">→ writes a new sqlite memory linked here</span>
+            <button class="cancel" type="button">cancel</button>
+            <button class="save" type="button">save</button>
+          </div>
+        </div>
+      </div>
     `;
+    bindAnnotate(panel, m.key);
   } catch (e) {
     panel.innerHTML = `<div class="placeholder">error: ${escapeHTML(String(e))}</div>`;
   }
+}
+
+// ── Annotate form (C1: closes the 呼吸 loop) ────────────────────
+function bindAnnotate(panel, targetKey) {
+  const toggle = panel.querySelector(".annotate-toggle");
+  const form = panel.querySelector(".annotate-form");
+  const textarea = panel.querySelector(".annotate-form textarea");
+  const cancelBtn = panel.querySelector(".annotate-form .cancel");
+  const saveBtn = panel.querySelector(".annotate-form .save");
+  const hint = panel.querySelector(".annotate-form .hint");
+  const defaultHintText = hint.textContent;
+  if (!toggle || !form) return;
+
+  toggle.addEventListener("click", () => {
+    form.classList.add("open");
+    toggle.style.display = "none";
+    textarea.focus();
+  });
+  cancelBtn.addEventListener("click", () => {
+    form.classList.remove("open");
+    toggle.style.display = "";
+    textarea.value = "";
+    hint.textContent = defaultHintText;
+    hint.className = "hint";
+  });
+  const submit = async () => {
+    const body = textarea.value.trim();
+    if (!body) {
+      hint.textContent = "empty annotation — write something first";
+      hint.className = "hint error";
+      return;
+    }
+    saveBtn.disabled = true;
+    cancelBtn.disabled = true;
+    hint.textContent = "saving…";
+    hint.className = "hint";
+    try {
+      const r = await fetch("/api/annotate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_key: targetKey, content: body }),
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        hint.textContent = `error · ${r.status} · ${txt.slice(0, 80)}`;
+        hint.className = "hint error";
+        saveBtn.disabled = false;
+        cancelBtn.disabled = false;
+        return;
+      }
+      const out = await r.json();
+      hint.textContent = `✓ saved as ${out.key}`;
+      hint.className = "hint ok";
+      textarea.value = "";
+      // Reload the graph so the new node + edge appear. Keep focus on
+      // the target so the user sees the new annotation pop in next to it.
+      await loadGraph();
+      const focusedKey = targetKey;
+      setTimeout(() => {
+        if (state.cy && state.cy.getElementById(focusedKey).length > 0) {
+          focusOnNode(focusedKey);
+        }
+      }, 50);
+    } catch (e) {
+      hint.textContent = "error · " + String(e).slice(0, 80);
+      hint.className = "hint error";
+      saveBtn.disabled = false;
+      cancelBtn.disabled = false;
+    }
+  };
+  saveBtn.addEventListener("click", submit);
+  textarea.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      submit();
+    }
+  });
 }
 
 // ── Top-bar bindings ────────────────────────────────────────────
