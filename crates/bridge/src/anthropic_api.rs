@@ -15,7 +15,7 @@ use ab_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-const API_BASE: &str = "https://api.anthropic.com/v1";
+const DEFAULT_API_BASE: &str = "https://api.anthropic.com/v1";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const USER_AGENT: &str = "agent-bridge-mcp";
 
@@ -23,9 +23,20 @@ const USER_AGENT: &str = "agent-bridge-mcp";
 /// via [`AnthropicClient::messages_create`] if you need a smarter model.
 pub const DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";
 
+/// Auth scheme — either Anthropic's official `x-api-key` header (used with
+/// keys starting with `sk-ant-…`) or `Authorization: Bearer …` (used by
+/// proxies like anyrouter that follow the OpenAI / OAuth-style pattern).
+#[derive(Debug, Clone)]
+enum AuthMode {
+    XApiKey,
+    Bearer,
+}
+
 #[derive(Debug)]
 pub struct AnthropicClient {
     api_key: String,
+    base_url: String,
+    auth_mode: AuthMode,
     http: reqwest::Client,
 }
 
@@ -47,24 +58,55 @@ pub struct MessagesResponse {
 }
 
 impl AnthropicClient {
-    /// Build a client from `ANTHROPIC_API_KEY`. The key file convention used
-    /// for other API clients (`/Media/Ubuntu/Documents/ClaudeCode.txt` under
-    /// the `# Anthropic API` heading) is the recommended on-disk place.
+    /// Build a client from env. Honors three vars (in order of precedence):
+    ///   * `ANTHROPIC_API_KEY` — official Anthropic auth (`x-api-key` header)
+    ///   * `ANTHROPIC_AUTH_TOKEN` — proxy/OAuth-style Bearer auth (used by
+    ///     anyrouter, openrouter, and Claude Code itself when paired with
+    ///     a relay endpoint). Only consulted if `ANTHROPIC_API_KEY` is unset.
+    ///   * `ANTHROPIC_BASE_URL` — overrides the default endpoint. Strip a
+    ///     trailing `/v1` if present (we re-append it ourselves) so that
+    ///     either `https://anyrouter.top` or `https://anyrouter.top/v1`
+    ///     work without surprises.
     pub fn from_env() -> Result<Self> {
-        let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-            Error::Backend(
-                "ANTHROPIC_API_KEY env not set; place a `sk-ant-…` key in \
-                 /Media/Ubuntu/Documents/ClaudeCode.txt under '# Anthropic API' \
-                 and reconnect MCP."
+        let (api_key, auth_mode) = if let Ok(k) = std::env::var("ANTHROPIC_API_KEY") {
+            if k.is_empty() {
+                return Err(Error::Backend("ANTHROPIC_API_KEY is set but empty".into()));
+            }
+            (k, AuthMode::XApiKey)
+        } else if let Ok(t) = std::env::var("ANTHROPIC_AUTH_TOKEN") {
+            if t.is_empty() {
+                return Err(Error::Backend("ANTHROPIC_AUTH_TOKEN is set but empty".into()));
+            }
+            (t, AuthMode::Bearer)
+        } else {
+            return Err(Error::Backend(
+                "neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN is set; \
+                 place credentials in /Media/Ubuntu/Documents/ClaudeCode.txt \
+                 (under '# Anthropic API') and reconnect MCP."
                     .into(),
-            )
-        })?;
+            ));
+        };
+
+        // Resolve base URL. Strip trailing /v1 so we can always append it once.
+        let raw_base = std::env::var("ANTHROPIC_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| DEFAULT_API_BASE.trim_end_matches("/v1").to_string());
+        let trimmed = raw_base.trim_end_matches('/');
+        let trimmed = trimmed.trim_end_matches("/v1");
+        let base_url = format!("{trimmed}/v1");
+
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
             .user_agent(USER_AGENT)
             .build()
             .map_err(|e| Error::Backend(format!("anthropic http client init: {e}")))?;
-        Ok(Self { api_key, http })
+        Ok(Self {
+            api_key,
+            base_url,
+            auth_mode,
+            http,
+        })
     }
 
     /// One `/v1/messages` round-trip. The full conversation is `messages`;
@@ -79,7 +121,7 @@ impl AnthropicClient {
         max_tokens: u32,
     ) -> Result<MessagesResponse> {
         let max_tokens = max_tokens.clamp(1, 8192);
-        let url = format!("{API_BASE}/messages");
+        let url = format!("{}/messages", self.base_url);
 
         let mut body = serde_json::json!({
             "model": model,
@@ -90,13 +132,18 @@ impl AnthropicClient {
             body["system"] = serde_json::Value::String(s.to_string());
         }
 
-        let resp = self
+        let req = self
             .http
             .post(&url)
-            .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
             .header("content-type", "application/json")
-            .json(&body)
+            .json(&body);
+        let req = match self.auth_mode {
+            AuthMode::XApiKey => req.header("x-api-key", &self.api_key),
+            AuthMode::Bearer => req.header("Authorization", format!("Bearer {}", self.api_key)),
+        };
+
+        let resp = req
             .send()
             .await
             .map_err(|e| Error::Backend(format!("anthropic messages_create send: {e}")))?;
