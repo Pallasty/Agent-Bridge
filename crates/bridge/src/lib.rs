@@ -17,6 +17,8 @@ pub mod server;
 pub mod session_handoff;
 pub mod socket_path;
 pub mod anthropic_api;
+pub mod openai_api;
+pub mod llm_client;
 pub mod brave_api;
 pub mod cloudflare_api;
 pub mod github_api;

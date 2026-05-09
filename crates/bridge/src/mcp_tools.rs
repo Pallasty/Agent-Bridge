@@ -4213,7 +4213,7 @@ fn pick_evolution_neighbors(
 /// On any LLM failure (no API key, parse error, network err) returns the
 /// full set unchanged — graceful degradation back to pure cosine.
 async fn llm_filter_evolution_neighbors(
-    client: &crate::anthropic_api::AnthropicClient,
+    client: &crate::llm_client::LlmClient,
     new_key: &str,
     new_kind: &str,
     new_tags: &[String],
@@ -4267,13 +4267,14 @@ sharing vocabulary. Be strict — when unsure, exclude.\n\n");
          Use 1-based indices into CANDIDATES. Empty array means none link.",
     );
 
-    let messages = vec![crate::anthropic_api::Message {
+    let messages = vec![crate::llm_client::Message {
         role: "user".to_string(),
         content: prompt,
     }];
 
+    let model = client.default_model();
     let resp = match client
-        .messages_create(crate::anthropic_api::DEFAULT_MODEL, None, &messages, 256)
+        .messages_create(&model, None, &messages, 256)
         .await
     {
         Ok(r) => r,
@@ -4549,7 +4550,7 @@ impl McpTool for MemorySaveTool {
                         let kept_indices: Vec<usize> = if candidates.is_empty() {
                             Vec::new()
                         } else {
-                            match crate::anthropic_api::AnthropicClient::from_env() {
+                            match crate::llm_client::LlmClient::from_env() {
                                 Ok(client) => {
                                     let kept = llm_filter_evolution_neighbors(
                                         &client,

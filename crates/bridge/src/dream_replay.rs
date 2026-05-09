@@ -20,18 +20,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::anthropic_api::{AnthropicClient, Message, DEFAULT_MODEL};
+use crate::llm_client::{LlmClient, Message};
 
-/// Pick the LLM model — `AGENT_BRIDGE_LLM_MODEL` env var overrides
-/// [`DEFAULT_MODEL`]. Useful for routing to a free model on
-/// alternate proxies (e.g. opencode-zen exposes `minimax-m2.5-free`)
-/// when the user's primary Anthropic credit is unavailable.
-fn pick_model() -> String {
-    std::env::var("AGENT_BRIDGE_LLM_MODEL")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| DEFAULT_MODEL.to_string())
-}
 
 /// Cap on edges fetched from `top_coactivation_edges` per round. With ~5
 /// avg cluster size this covers ~600 keys — plenty of room before the
@@ -149,9 +139,10 @@ pub async fn run(top_n: usize, min_cluster_size: usize, dry_run: bool) -> Result
         return Ok(());
     }
 
-    // Wet run: needs the Anthropic client.
-    let client = AnthropicClient::from_env()
-        .map_err(|e| anyhow::anyhow!("Anthropic client (P5 needs LLM): {e}"))?;
+    // Wet run: needs an LLM client (Anthropic or OpenAI-compat).
+    let client = LlmClient::from_env()
+        .map_err(|e| anyhow::anyhow!("LLM client (P5 needs LLM): {e}"))?;
+    println!("(LLM provider: {})", client.provider());
 
     let mut written = 0usize;
     for (i, (cluster, members)) in accepted.iter().enumerate() {
@@ -333,9 +324,9 @@ fn ymd_from_unix(secs: i64) -> (i32, u32, u32) {
     (y, m, d)
 }
 
-/// Build the LLM prompt and call Anthropic. Returns the parsed summary.
+/// Build the LLM prompt and call the chosen provider. Returns the parsed summary.
 async fn summarize_cluster(
-    client: &AnthropicClient,
+    client: &LlmClient,
     members: &[MemoryRecord],
 ) -> Result<ClusterSummary> {
     let prompt = build_consolidation_prompt(members);
@@ -343,14 +334,14 @@ async fn summarize_cluster(
         role: "user".to_string(),
         content: prompt,
     }];
-    let model = pick_model();
+    let model = client.default_model();
     // 4096 leaves room for "thinking" models (minimax, deepseek-r1) that
     // burn budget before emitting the JSON. Anthropic Claude models
     // typically need <500.
     let resp = client
         .messages_create(&model, None, &messages, 4096)
         .await
-        .map_err(|e| anyhow::anyhow!("anthropic messages_create ({model}): {e}"))?;
+        .map_err(|e| anyhow::anyhow!("llm messages_create ({} / {model}): {e}", client.provider()))?;
     parse_summary_response(&resp.text)
         .map_err(|reason| anyhow::anyhow!("parse summary: {reason} (raw: {})", short(&resp.text, 200)))
 }
