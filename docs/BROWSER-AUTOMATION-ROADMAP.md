@@ -2,7 +2,7 @@
 
 **Owner**: agent-bridge
 **Started**: 2026-05-09
-**Status**: Rounds 1 + 2 + 2.5 complete (2026-05-09); Round 3 next
+**Status**: Rounds 1 + 2 + 2.5 complete (2026-05-09); Round 3 #3 done; Round 3 #9 next
 
 ## Why this exists
 
@@ -133,8 +133,16 @@ landed same day:
 
 ### Round 3 — the hard cases
 
-- [ ] #3 CAPTCHA pause/resume — issues a `notify`, blocks until
-  `browser_resume(page)` is called.
+- [x] **#3 CAPTCHA pause/resume** (commit `28d2798`, 2026-05-09) —
+  `browser_pause_for_human(page, reason, hint?, timeout_ms?)` fires a
+  `NotifyEvent` (severity=Attention, source=Mcp) via `Hub.deliver`
+  *before* blocking, then awaits a `tokio::sync::oneshot` keyed by
+  `page` in `ChromiumCdpBackend.pause_waiters`. `browser_resume(page)`
+  removes the entry and sends `Resumed`. Outcome ∈ {resumed, timeout,
+  superseded}; second pause on the same page supersedes the older
+  waiter (no zombie hangs). `close()` also releases the waiter so a
+  stranded request can't outlive its page. `timeout_ms` clamped to
+  [1_000, 1_800_000].
 - [ ] #9 `browser_capture_response(page, url_pattern, until_ms)` — start a
   CDP `Network.responseReceived` recorder; return all matching response
   bodies after a timeout or after `wait_for` resolves.
