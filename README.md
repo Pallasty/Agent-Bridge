@@ -188,10 +188,18 @@ $EDITOR ~/Documents/ClaudeCode.txt   # replace REPLACE_ME placeholders
 scripts/wrapper/install.sh --uninstall
 ```
 
-The credentials file is plain text with `# <SECTION>` markers. The
-`# Agent-Bridge Primary` section pins the active Anthropic proxy (token +
-base URL) without requiring a script edit; switch proxies by changing those
-two lines. See `scripts/wrapper/creds.example` for the full layout.
+The credentials file is plain text with `# <SECTION>` markers. Two sections
+are wired into the memory-layer LLM path:
+
+- `# Agent-Bridge Primary` — Anthropic proxy (token + base URL). Active for
+  P4b filter / P5 dream replay / dogfood loops.
+- `# Agent-Bridge Fallback` — OpenAI-protocol secondary (token + base URL +
+  fallback model). When the primary fails (network blip, quota, outage),
+  the in-process `LlmClient` retries once via this provider. Optional —
+  omit if you want strict single-provider semantics.
+
+Switch proxies by editing those `export` lines, no script edit needed. See
+`scripts/wrapper/creds.example` for the full layout.
 
 Override paths via env: `AGENT_BRIDGE_CREDS_FILE`, `AGENT_BRIDGE_REAL_BIN`,
 `AGENT_BRIDGE_INSTALL_DIR`.
