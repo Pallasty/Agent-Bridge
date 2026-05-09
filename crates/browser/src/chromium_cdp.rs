@@ -24,8 +24,10 @@ use ab_core::{Error, PageId, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use chromiumoxide::cdp::browser_protocol::accessibility::GetFullAxTreeParams;
+use chromiumoxide::cdp::browser_protocol::input::{DispatchKeyEventParams, DispatchKeyEventType};
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
 use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
+use chromiumoxide::keys::{KeyDefinition, USKEYBOARD_LAYOUT};
 use chromiumoxide::page::ScreenshotParams;
 use chromiumoxide::{Browser, BrowserConfig, Page};
 use dashmap::DashMap;
@@ -383,6 +385,62 @@ impl BrowserBackend for ChromiumCdpBackend {
         Ok(out)
     }
 
+    async fn press_key(&self, page: &PageId, key: &str, modifiers: u32) -> Result<()> {
+        let p = self.page_handle(page)?;
+        let kd = lookup_key(key).ok_or_else(|| {
+            Error::Backend(format!(
+                "press_key: unknown key '{key}' (try 'Enter', 'Tab', 'Escape', 'ArrowDown', \
+                 'Backspace', 'a', '0', etc. — see chromiumoxide::keys::USKEYBOARD_LAYOUT)"
+            ))
+        })?;
+        // Mirror chromiumoxide's PageInner::press_key text-decoration logic so
+        // single-char keys actually insert characters into focused inputs.
+        let key_text: Option<&'static str> = if let Some(t) = kd.text {
+            Some(t)
+        } else if kd.key.len() == 1 {
+            Some(kd.key)
+        } else {
+            None
+        };
+        let down_type = if key_text.is_some() {
+            DispatchKeyEventType::KeyDown
+        } else {
+            DispatchKeyEventType::RawKeyDown
+        };
+        let modifiers_i = modifiers as i64;
+
+        let mut down = DispatchKeyEventParams::builder()
+            .r#type(down_type)
+            .key(kd.key)
+            .code(kd.code)
+            .windows_virtual_key_code(kd.key_code)
+            .native_virtual_key_code(kd.key_code)
+            .modifiers(modifiers_i);
+        if let Some(t) = key_text {
+            down = down.text(t);
+        }
+        let down_cmd = down
+            .build()
+            .map_err(|e| Error::Backend(format!("press_key down build: {e}")))?;
+        p.execute(down_cmd)
+            .await
+            .map_err(|e| Error::Backend(format!("press_key down send: {e}")))?;
+
+        let up_cmd = DispatchKeyEventParams::builder()
+            .r#type(DispatchKeyEventType::KeyUp)
+            .key(kd.key)
+            .code(kd.code)
+            .windows_virtual_key_code(kd.key_code)
+            .native_virtual_key_code(kd.key_code)
+            .modifiers(modifiers_i)
+            .build()
+            .map_err(|e| Error::Backend(format!("press_key up build: {e}")))?;
+        p.execute(up_cmd)
+            .await
+            .map_err(|e| Error::Backend(format!("press_key up send: {e}")))?;
+        Ok(())
+    }
+
     async fn close(&self, page: &PageId) -> Result<()> {
         if let Some((_, p)) = self.pages.remove(page.as_str()) {
             // `Arc<Page>` may have outstanding references; if we're the last
@@ -393,6 +451,15 @@ impl BrowserBackend for ChromiumCdpBackend {
         }
         Ok(())
     }
+}
+
+/// Look up a [`KeyDefinition`] from US keyboard layout, matching either the
+/// human-readable key (`"Enter"`, `"a"`) or the DOM `code` (`"KeyA"`,
+/// `"Enter"`).
+fn lookup_key(key: &str) -> Option<&'static KeyDefinition> {
+    USKEYBOARD_LAYOUT
+        .iter()
+        .find(|k| k.key == key || k.code == key)
 }
 
 /// Resolve the chrome user-data-dir (login/cookies persist here across daemon

@@ -92,5 +92,12 @@ pub trait BrowserBackend: Send + Sync {
     /// were not in the daemon's tracker before this call.
     async fn list_pages(&self) -> Result<Vec<PageInfo>>;
 
+    /// Dispatch a key-down + key-up sequence to whatever element is
+    /// currently focused on `page`. `key` is a single character ("a", "0")
+    /// or a named key from US keyboard layout ("Enter", "Tab", "Escape",
+    /// "ArrowDown", "Backspace", etc.). `modifiers` is a CDP modifier
+    /// bitmask: 1=Alt, 2=Ctrl, 4=Meta/Cmd, 8=Shift.
+    async fn press_key(&self, page: &PageId, key: &str, modifiers: u32) -> Result<()>;
+
     async fn close(&self, page: &PageId) -> Result<()>;
 }
