@@ -99,5 +99,30 @@ pub trait BrowserBackend: Send + Sync {
     /// bitmask: 1=Alt, 2=Ctrl, 4=Meta/Cmd, 8=Shift.
     async fn press_key(&self, page: &PageId, key: &str, modifiers: u32) -> Result<()>;
 
+    /// Set the selected option of a `<select>` element. `value` matches
+    /// against `option.value` first, then `option.text` (the visible
+    /// label) — handles both `<option value="us">United States</option>`
+    /// and country pickers indexed by visible name. Dispatches `input`
+    /// + `change` events. Returns `{selectedIndex, selectedValue,
+    /// selectedText}` for the agent to verify.
+    async fn select_option(
+        &self,
+        page: &PageId,
+        selector: &str,
+        value: &str,
+    ) -> Result<serde_json::Value>;
+
+    /// Search the DOM for elements whose visible text contains `text`.
+    /// Optional `tag_filter` (e.g. "button", "a") narrows the search.
+    /// Returns up to 5 deepest-match candidates, each with a generated
+    /// CSS `selector` you can hand to browser_click / browser_fill_form.
+    /// Empty result = no match found.
+    async fn find_by_text(
+        &self,
+        page: &PageId,
+        text: &str,
+        tag_filter: Option<&str>,
+    ) -> Result<serde_json::Value>;
+
     async fn close(&self, page: &PageId) -> Result<()>;
 }

@@ -441,6 +441,104 @@ impl BrowserBackend for ChromiumCdpBackend {
         Ok(())
     }
 
+    async fn select_option(
+        &self,
+        page: &PageId,
+        selector: &str,
+        value: &str,
+    ) -> Result<serde_json::Value> {
+        let p = self.page_handle(page)?;
+        let sel_lit = serde_json::to_string(selector).map_err(Error::Serde)?;
+        let val_lit = serde_json::to_string(value).map_err(Error::Serde)?;
+        let js = format!(
+            "(() => {{
+                const sel = {sel_lit}; const val = {val_lit};
+                const el = document.querySelector(sel);
+                if (!el) throw new Error('select_option: no element for selector');
+                if (el.tagName !== 'SELECT') {{
+                    throw new Error('select_option: element is <' + el.tagName + '>, not <SELECT>');
+                }}
+                let matched = -1;
+                for (let i = 0; i < el.options.length; i++) {{
+                    const opt = el.options[i];
+                    if (opt.value === val || opt.text === val) {{
+                        opt.selected = true; el.selectedIndex = i; matched = i; break;
+                    }}
+                }}
+                if (matched < 0) {{
+                    const labels = Array.from(el.options).map(o => o.value + '|' + o.text).join(', ');
+                    throw new Error('select_option: no option matches; available = ' + labels);
+                }}
+                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                return {{
+                    selectedIndex: el.selectedIndex,
+                    selectedValue: el.options[matched].value,
+                    selectedText: el.options[matched].text
+                }};
+            }})()"
+        );
+        eval_with_exception_details(&p, &js).await
+    }
+
+    async fn find_by_text(
+        &self,
+        page: &PageId,
+        text: &str,
+        tag_filter: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let p = self.page_handle(page)?;
+        let text_lit = serde_json::to_string(text).map_err(Error::Serde)?;
+        let tag_lit = serde_json::to_string(tag_filter.unwrap_or("*")).map_err(Error::Serde)?;
+        // Deepest-match strategy: collect all elements containing `text`,
+        // then keep only those with no descendant also containing the text.
+        // Build a CSS selector path for each (id-anchored when possible,
+        // nth-of-type otherwise). Cap output at 5 hits.
+        let js = format!(
+            "(() => {{
+                const text = {text_lit};
+                const tag = {tag_lit};
+                const all = Array.from(document.querySelectorAll(tag));
+                const hits = all.filter(el => {{
+                    const t = (el.innerText || el.textContent || '').toString();
+                    return t.includes(text);
+                }});
+                const deepest = hits.filter(el =>
+                    !hits.some(other => other !== el && el.contains(other))
+                );
+                const buildSelector = (el) => {{
+                    const path = [];
+                    let cur = el;
+                    while (cur && cur.tagName && cur !== document) {{
+                        let s = cur.tagName.toLowerCase();
+                        if (cur.id && /^[a-zA-Z][\\w-]*$/.test(cur.id)) {{
+                            s += '#' + cur.id;
+                            path.unshift(s); break;
+                        }}
+                        if (cur.parentNode) {{
+                            const sib = Array.from(cur.parentNode.children).filter(c => c.tagName === cur.tagName);
+                            if (sib.length > 1) {{
+                                s += ':nth-of-type(' + (sib.indexOf(cur) + 1) + ')';
+                            }}
+                        }}
+                        path.unshift(s);
+                        cur = cur.parentNode;
+                    }}
+                    return path.join(' > ');
+                }};
+                const out = deepest.slice(0, 5).map(el => ({{
+                    tag: el.tagName.toLowerCase(),
+                    text: ((el.innerText || el.textContent || '') + '').trim().slice(0, 200),
+                    selector: buildSelector(el),
+                    role: el.getAttribute('role'),
+                    aria_label: el.getAttribute('aria-label')
+                }}));
+                return {{ count: out.length, matches: out }};
+            }})()"
+        );
+        eval_with_exception_details(&p, &js).await
+    }
+
     async fn close(&self, page: &PageId) -> Result<()> {
         if let Some((_, p)) = self.pages.remove(page.as_str()) {
             // `Arc<Page>` may have outstanding references; if we're the last
