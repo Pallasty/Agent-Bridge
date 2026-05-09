@@ -2,7 +2,7 @@
 
 **Owner**: agent-bridge
 **Started**: 2026-05-09
-**Status**: Rounds 1 + 2 complete (2026-05-09); Round 3 next
+**Status**: Rounds 1 + 2 + 2.5 complete (2026-05-09); Round 3 next
 
 ## Why this exists
 
@@ -98,29 +98,29 @@ R2 sign-up surface: ✅ 4 of 4 done.
 Target: 90% of pure-web sign-up forms reach the "API key shown" screen
 without manual intervention.
 
-### Round 2.5 — fallout from R1+R2 live testing (2026-05-09)
+### Round 2.5 — fallout from R1+R2 live testing ✅ (2026-05-09)
 
-Two issues surfaced when smoke-testing the R2 surface end-to-end:
+Two issues surfaced when smoke-testing the R2 surface end-to-end. Both
+landed same day:
 
-- [ ] **#5b SingletonLock self-heal** — R1.1's persistent profile makes
-  the chrome process outlive the agent-bridge daemon (intentionally,
-  for cookie persistence). When the daemon reconnects and tries to
-  launch a new chrome on the same profile, Chrome aborts with
-  `Failed to create SingletonLock`. Fix options: (a) detect lock,
-  check holder PID liveness, kill if it's an orphan from a known-dead
-  daemon; (b) read `<profile>/DevToolsActivePort` and
-  `Browser::connect(ws_url)` instead of launching; (b) is correct
-  long-term. Critical — silently breaks every reconnect right now.
+- [x] **#5b SingletonLock self-heal** (commit `df30a39`) — `ensure_browser`
+  now reads `<profile>/DevToolsActivePort` and tries
+  `Browser::connect("http://127.0.0.1:<port>")` before launching. On
+  successful connect + 500ms version probe, the new daemon adopts the
+  orphan chrome from the previous daemon's session. If adoption fails
+  (no port file / dead port / probe timeout), stale Singleton{Lock,
+  Cookie,Socket} files are removed before launching fresh. Verified
+  end-to-end after /mcp reconnect on 2026-05-09: navigate succeeds
+  immediately, no manual kill+rm required.
 
-- [ ] **#4b cross-origin OOPIF support** — R2.4's eval_in_frame works
-  on same-origin / about:srcdoc iframes (verified 2026-05-09) but
-  **does NOT enumerate cross-origin iframes** because modern Chrome
-  runs them as out-of-process iframes (OOPIFs) with independent
-  targets. `Page.getFrameTree` per-target only sees same-process
-  frames. Fix: `Target.getTargets` (filter type=iframe) +
-  `Target.attachToTarget(flatten=true)` → get sessionId → send
-  `Runtime.evaluate` against that session. Significant — Stripe
-  Elements / reCAPTCHA / OAuth widgets all hit this path.
+- [x] **#4b cross-origin OOPIF support** (commit `7fa7f7a`) —
+  `list_frames` now calls browser-level `Target.getTargets`, filters
+  `type=="iframe"`, and appends each OOPIF with `kind:"oopif"`.
+  `eval_in_frame` dispatches OOPIF first via `browser.get_page(target_id)`
+  → eval against the iframe's bound Page (no isolated-world dance
+  needed). Falls through to the same-process `Page.createIsolatedWorld`
+  path otherwise. Stripe Elements / reCAPTCHA / Auth0 / OAuth widgets
+  all addressable now.
 
 ### Round 3 — the hard cases
 
