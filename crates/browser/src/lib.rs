@@ -45,6 +45,24 @@ pub struct PauseOutcome {
     pub elapsed_ms: u64,
 }
 
+/// One captured XHR/Fetch response from
+/// [`BrowserBackend::capture_response_drain`]. `body` is decoded UTF-8 if
+/// the upstream returned `base64Encoded=false`, otherwise it's the
+/// original base64 string and `base64_encoded` is set so the caller can
+/// decode it for binary payloads (images, fonts).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapturedResponse {
+    pub request_id: String,
+    pub url: String,
+    pub status: i64,
+    pub resource_type: String,
+    pub mime_type: String,
+    pub body: String,
+    pub base64_encoded: bool,
+    pub headers: serde_json::Value,
+    pub ts_ms: u64,
+}
+
 /// Snapshot of one page returned from [`BrowserBackend::list_pages`].
 /// Pages discovered for the first time during a list_pages call are
 /// auto-registered with a fresh `page_id` so subsequent tool calls can
@@ -155,6 +173,34 @@ pub trait BrowserBackend: Send + Sync {
         frame_url_substring: Option<&str>,
         js: &str,
     ) -> Result<serde_json::Value>;
+
+    /// Begin recording XHR / Fetch / document responses on `page` whose
+    /// URL contains `url_substring`. Idempotent per page: a second start
+    /// replaces the first (existing buffer dropped). The recorder fetches
+    /// the response body via `Network.getResponseBody` *after*
+    /// `Network.loadingFinished` fires, so bodies are guaranteed-loaded.
+    /// `max_buffer` clamped to [1, 200] (default 50); ring-buffer drops
+    /// oldest entries when full. Cleared automatically on
+    /// [`Self::close`] for the same page.
+    async fn capture_response_start(
+        &self,
+        page: &PageId,
+        url_substring: &str,
+        max_buffer: usize,
+    ) -> Result<()>;
+
+    /// Drain (and clear) all matching responses captured since the last
+    /// drain or since [`Self::capture_response_start`] was called. If the
+    /// buffer is empty, blocks up to `until_ms` (clamped to [0, 60_000])
+    /// for at least one match to arrive. Returns at most `max_results`
+    /// (clamped to [1, 200], default 20) entries, oldest-first. Caller
+    /// receives an error if no capture is currently active for `page`.
+    async fn capture_response_drain(
+        &self,
+        page: &PageId,
+        until_ms: u64,
+        max_results: usize,
+    ) -> Result<Vec<CapturedResponse>>;
 
     /// Block the current request until [`Self::resume`] is called for
     /// `page`, or until `timeout_ms` elapses. Returns a [`PauseOutcome`]

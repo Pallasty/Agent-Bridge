@@ -1763,6 +1763,138 @@ impl McpTool for BrowserResumeTool {
     }
 }
 
+pub struct BrowserCaptureResponseStartTool {
+    hub: Hub,
+}
+impl BrowserCaptureResponseStartTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserCaptureResponseStartTool {
+    fn name(&self) -> &'static str {
+        "browser_capture_response_start"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Begin recording XHR / Fetch / document responses on `page` whose URL \
+                 contains `url_substring`. The recorder fetches the response body via \
+                 `Network.getResponseBody` *after* `Network.loadingFinished` fires, so \
+                 bodies are guaranteed-loaded (no flaky 'No data found' races). Idempotent \
+                 per page: a second start replaces the first (existing buffer dropped). \
+                 Pair with `browser_capture_response_drain` to read matches. Typical use: \
+                 start capture before clicking 'Generate API Key', drain after to grab the \
+                 freshly-issued key from the JSON response. `max_buffer` clamped to [1, 200] \
+                 (default 50); ring-buffer drops oldest when full."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":          { "type": "string", "description": "Page id from browser_navigate." },
+                    "url_substring": { "type": "string", "description": "Substring matched against full response URL — first hit per request_id wins. Pass a path fragment like '/api/v1/keys' or a host like 'api.openai.com'." },
+                    "max_buffer":    { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 }
+                },
+                "required": ["page", "url_substring"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let url_substring = args
+            .get("url_substring")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if url_substring.is_empty() {
+            return Ok(ToolResult::error("missing 'url_substring'"));
+        }
+        let max_buffer = args
+            .get("max_buffer")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as usize;
+        match b.capture_response_start(&page, url_substring, max_buffer).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({
+                "status": "ok",
+                "page": page.as_str(),
+                "url_substring": url_substring,
+                "max_buffer": max_buffer.clamp(1, 200),
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
+pub struct BrowserCaptureResponseDrainTool {
+    hub: Hub,
+}
+impl BrowserCaptureResponseDrainTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for BrowserCaptureResponseDrainTool {
+    fn name(&self) -> &'static str {
+        "browser_capture_response_drain"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Drain (and clear) responses captured since the last drain or since \
+                 `browser_capture_response_start` began recording. If the buffer is empty, \
+                 blocks up to `until_ms` for at least one match to arrive — useful for \
+                 'wait for the API key XHR after I click submit'. Returns oldest-first; at \
+                 most `max_results` entries. Each row: `{request_id, url, status, \
+                 resource_type, mime_type, body, base64_encoded, headers, ts_ms}`. Errors \
+                 if no capture is currently active for `page`. `until_ms` clamped to \
+                 [0, 60_000]; `max_results` clamped to [1, 200] (default 20)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "page":        { "type": "string", "description": "Page id passed to capture_response_start." },
+                    "until_ms":    { "type": "integer", "minimum": 0, "maximum": 60000, "default": 5000 },
+                    "max_results": { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 }
+                },
+                "required": ["page"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let b = match &self.hub.browser {
+            Some(b) => b.clone(),
+            None => return Ok(ToolResult::error("no browser backend configured")),
+        };
+        let page = match args.get("page").and_then(|v| v.as_str()) {
+            Some(s) => PageId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'page'")),
+        };
+        let until_ms = args
+            .get("until_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5000);
+        let max_results = args
+            .get("max_results")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20) as usize;
+        match b.capture_response_drain(&page, until_ms, max_results).await {
+            Ok(rows) => Ok(ToolResult::json_text(&json!({
+                "count": rows.len(),
+                "rows": rows,
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+        }
+    }
+}
+
 pub struct AgentMessageTool {
     hub: Hub,
 }
@@ -10740,6 +10872,8 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserEvalInFrameTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserPauseForHumanTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserResumeTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserCaptureResponseStartTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserCaptureResponseDrainTool::new(hub.clone())));
     // Warp URL-scheme + status.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));

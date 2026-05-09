@@ -25,6 +25,10 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use chromiumoxide::cdp::browser_protocol::accessibility::GetFullAxTreeParams;
 use chromiumoxide::cdp::browser_protocol::input::{DispatchKeyEventParams, DispatchKeyEventType};
+use chromiumoxide::cdp::browser_protocol::network::{
+    EnableParams as NetworkEnableParams, EventLoadingFinished, EventResponseReceived,
+    GetResponseBodyParams,
+};
 use chromiumoxide::cdp::browser_protocol::page::{
     CaptureScreenshotFormat, CreateIsolatedWorldParams, FrameId, FrameTree, GetFrameTreeParams,
 };
@@ -37,14 +41,14 @@ use chromiumoxide::page::ScreenshotParams;
 use chromiumoxide::{Browser, BrowserConfig, Page};
 use dashmap::DashMap;
 use futures::StreamExt;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex, Notify, RwLock};
 use tracing::{debug, info, warn};
 
-use crate::{A11yNode, BrowserBackend, PageInfo, PauseOutcome, WaitOutcome};
+use crate::{A11yNode, BrowserBackend, CapturedResponse, PageInfo, PauseOutcome, WaitOutcome};
 
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -62,6 +66,38 @@ pub struct ChromiumCdpBackend {
     /// `Mutex<HashMap>` instead of `DashMap` so we can take-and-replace
     /// atomically when a second pause supersedes the first.
     pause_waiters: Arc<Mutex<HashMap<String, oneshot::Sender<PauseSignal>>>>,
+    /// PageId → (in-flight capture state, pump abort handle). One capture
+    /// per page max; a second `capture_response_start` aborts the prior
+    /// pump and replaces the entry.
+    captures: Arc<Mutex<HashMap<String, (Arc<CaptureState>, tokio::task::AbortHandle)>>>,
+}
+
+/// Per-page capture state for `capture_response_start` /
+/// `capture_response_drain`. The pump task runs until aborted via
+/// the [`tokio::task::AbortHandle`] held in
+/// [`ChromiumCdpBackend::captures`] alongside this state; the page-side
+/// `Network.disable` is sent best-effort on stop.
+struct CaptureState {
+    url_substring: String,
+    buffer: Mutex<VecDeque<CapturedResponse>>,
+    max_buffer: usize,
+    /// Notified by the pump every time a new entry lands so blocking
+    /// drain calls can wake without polling.
+    arrival: Notify,
+}
+
+impl CaptureState {
+    /// Push a new entry, dropping the oldest if the ring is full.
+    /// Notifies any drainers blocked in `arrival.notified()`.
+    async fn push(&self, entry: CapturedResponse) {
+        let mut buf = self.buffer.lock().await;
+        if buf.len() >= self.max_buffer {
+            buf.pop_front();
+        }
+        buf.push_back(entry);
+        drop(buf);
+        self.arrival.notify_waiters();
+    }
 }
 
 /// Signal sent through the oneshot channel that a pause waiter is awaiting on.
@@ -85,6 +121,7 @@ impl ChromiumCdpBackend {
             inner: Arc::new(RwLock::new(None)),
             pages: Arc::new(DashMap::new()),
             pause_waiters: Arc::new(Mutex::new(HashMap::new())),
+            captures: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -807,6 +844,99 @@ impl BrowserBackend for ChromiumCdpBackend {
         })
     }
 
+    async fn capture_response_start(
+        &self,
+        page: &PageId,
+        url_substring: &str,
+        max_buffer: usize,
+    ) -> Result<()> {
+        if url_substring.is_empty() {
+            return Err(Error::InvalidArgument("url_substring is empty".into()));
+        }
+        let max_buffer = max_buffer.clamp(1, 200);
+        let key = page.as_str().to_string();
+        let p = match self.pages.get(&key) {
+            Some(p) => p.clone(),
+            None => return Err(Error::NotFound(format!("page not tracked: {key}"))),
+        };
+        // Enable Network domain (idempotent server-side).
+        p.execute(NetworkEnableParams::default())
+            .await
+            .map_err(|e| Error::Backend(format!("Network.enable: {e}")))?;
+        // Subscribe to both events before spawning the pump so no
+        // in-flight responses are dropped between subscribe and pump-start.
+        let resp_listener = p
+            .event_listener::<EventResponseReceived>()
+            .await
+            .map_err(|e| Error::Backend(format!("event_listener(ResponseReceived): {e}")))?;
+        let done_listener = p
+            .event_listener::<EventLoadingFinished>()
+            .await
+            .map_err(|e| Error::Backend(format!("event_listener(LoadingFinished): {e}")))?;
+
+        let state = Arc::new(CaptureState {
+            url_substring: url_substring.to_string(),
+            buffer: Mutex::new(VecDeque::with_capacity(max_buffer)),
+            max_buffer,
+            arrival: Notify::new(),
+        });
+        let pump = tokio::spawn(run_capture_pump(
+            p.clone(),
+            state.clone(),
+            resp_listener,
+            done_listener,
+        ));
+        let abort = pump.abort_handle();
+        // Detach JoinHandle: we never join, only abort.
+        drop(pump);
+
+        let mut captures = self.captures.lock().await;
+        if let Some((_prior_state, prior_abort)) = captures.remove(&key) {
+            prior_abort.abort();
+        }
+        captures.insert(key, (state, abort));
+        Ok(())
+    }
+
+    async fn capture_response_drain(
+        &self,
+        page: &PageId,
+        until_ms: u64,
+        max_results: usize,
+    ) -> Result<Vec<CapturedResponse>> {
+        let key = page.as_str().to_string();
+        let max_results = max_results.clamp(1, 200);
+        let until_ms = until_ms.min(60_000);
+        let state = {
+            let captures = self.captures.lock().await;
+            match captures.get(&key) {
+                Some((s, _abort)) => s.clone(),
+                None => {
+                    return Err(Error::NotFound(format!(
+                        "no active capture on page: {key}"
+                    )));
+                }
+            }
+        };
+        // Fast path: already have something buffered.
+        {
+            let buf = state.buffer.lock().await;
+            if !buf.is_empty() {
+                drop(buf);
+                return Ok(drain_buffer(&state, max_results).await);
+            }
+        }
+        // Slow path: wait up to until_ms for first arrival.
+        if until_ms > 0 {
+            let _ = tokio::time::timeout(
+                Duration::from_millis(until_ms),
+                state.arrival.notified(),
+            )
+            .await;
+        }
+        Ok(drain_buffer(&state, max_results).await)
+    }
+
     async fn resume(&self, page: &PageId) -> Result<bool> {
         let key = page.as_str().to_string();
         let tx = {
@@ -831,6 +961,13 @@ impl BrowserBackend for ChromiumCdpBackend {
                 let _ = tx.send(PauseSignal::Resumed);
             }
         }
+        // Abort any active capture pump so it doesn't outlive the page.
+        {
+            let mut captures = self.captures.lock().await;
+            if let Some((_state, abort)) = captures.remove(page.as_str()) {
+                abort.abort();
+            }
+        }
         if let Some((_, p)) = self.pages.remove(page.as_str()) {
             // `Arc<Page>` may have outstanding references; if we're the last
             // we close cleanly. Either way, ignore close errors on shutdown.
@@ -839,6 +976,91 @@ impl BrowserBackend for ChromiumCdpBackend {
             }
         }
         Ok(())
+    }
+}
+
+/// Pull up to `max_results` entries off the front of `state.buffer`,
+/// preserving FIFO order. Used by `capture_response_drain`.
+async fn drain_buffer(state: &CaptureState, max_results: usize) -> Vec<CapturedResponse> {
+    let mut buf = state.buffer.lock().await;
+    let n = buf.len().min(max_results);
+    buf.drain(..n).collect()
+}
+
+/// Two-stream pump for `capture_response_start`. Subscribes to
+/// `Network.responseReceived` (header arrival, with URL + status +
+/// headers) and `Network.loadingFinished` (body fully loaded). On
+/// matching ResponseReceived, stash metadata in `pending`. On
+/// LoadingFinished, look up by request_id; if matched, fetch body via
+/// `Network.getResponseBody` and push to the ring buffer.
+///
+/// Aborts cleanly when the parent's `AbortHandle::abort()` is called —
+/// `select!` polls the futures directly, so an `abort()` immediately
+/// drops the in-flight `getResponseBody` call.
+async fn run_capture_pump(
+    page: Arc<Page>,
+    state: Arc<CaptureState>,
+    mut resp_listener: chromiumoxide::listeners::EventStream<EventResponseReceived>,
+    mut done_listener: chromiumoxide::listeners::EventStream<EventLoadingFinished>,
+) {
+    use std::collections::HashMap as StdHashMap;
+    struct Pending {
+        url: String,
+        status: i64,
+        resource_type: String,
+        mime_type: String,
+        headers: serde_json::Value,
+    }
+    let mut pending: StdHashMap<String, Pending> = StdHashMap::new();
+    loop {
+        tokio::select! {
+            ev = resp_listener.next() => {
+                let Some(ev) = ev else { return; };
+                let url = ev.response.url.clone();
+                if !url.contains(&state.url_substring) { continue; }
+                let req_id = ev.request_id.inner().clone();
+                let headers = ev.response.headers.inner().clone();
+                pending.insert(req_id, Pending {
+                    url,
+                    status: ev.response.status,
+                    resource_type: format!("{:?}", ev.r#type),
+                    mime_type: ev.response.mime_type.clone(),
+                    headers,
+                });
+            }
+            ev = done_listener.next() => {
+                let Some(ev) = ev else { return; };
+                let req_id = ev.request_id.inner().clone();
+                let Some(meta) = pending.remove(&req_id) else { continue; };
+                let body_res = page
+                    .execute(GetResponseBodyParams {
+                        request_id: ev.request_id.clone(),
+                    })
+                    .await;
+                let (body, base64_encoded) = match body_res {
+                    Ok(r) => (r.result.body.clone(), r.result.base64_encoded),
+                    Err(e) => {
+                        debug!(req_id, error = %e, "getResponseBody failed; skipping");
+                        continue;
+                    }
+                };
+                let ts_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                state.push(CapturedResponse {
+                    request_id: req_id,
+                    url: meta.url,
+                    status: meta.status,
+                    resource_type: meta.resource_type,
+                    mime_type: meta.mime_type,
+                    body,
+                    base64_encoded,
+                    headers: meta.headers,
+                    ts_ms,
+                }).await;
+            }
+        }
     }
 }
 
