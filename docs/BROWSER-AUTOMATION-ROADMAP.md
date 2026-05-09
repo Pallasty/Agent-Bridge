@@ -113,14 +113,23 @@ landed same day:
   end-to-end after /mcp reconnect on 2026-05-09: navigate succeeds
   immediately, no manual kill+rm required.
 
-- [x] **#4b cross-origin OOPIF support** (commit `7fa7f7a`) —
-  `list_frames` now calls browser-level `Target.getTargets`, filters
-  `type=="iframe"`, and appends each OOPIF with `kind:"oopif"`.
-  `eval_in_frame` dispatches OOPIF first via `browser.get_page(target_id)`
-  → eval against the iframe's bound Page (no isolated-world dance
-  needed). Falls through to the same-process `Page.createIsolatedWorld`
-  path otherwise. Stripe Elements / reCAPTCHA / Auth0 / OAuth widgets
-  all addressable now.
+- [x] **#4b cross-origin OOPIF — list_frames** (commits `7fa7f7a`,
+  `6855eb1`) — browser-level `Target.getTargets` filtered to
+  `type=="iframe"` appended with `kind:"oopif"`. Verified on 2026-05-09
+  with `data:` parent + `https://example.com` iframe: count=3 (parent
+  + example.com OOPIF + chrome new-tab OOPIF), parent_id linkage
+  correct.
+- [ ] **#4b cross-origin OOPIF — eval_in_frame** (PARTIAL, blocked) —
+  `Target.attachToTarget(flatten=true)` succeeds and `browser.get_page`
+  resolves a Page bound to the OOPIF, but `Runtime.evaluate` over the
+  flatten session times out: chromiumoxide 0.9.1's `Page::execute`
+  doesn't appear to route OOPIF responses back to awaiting futures
+  even after explicit attach. Three fix paths: (a) fork chromiumoxide
+  + upstream PR, (b) `Browser::connect` to the per-target
+  webSocketDebuggerUrl as a separate Browser instance, (c) raw
+  websocket CDP bypassing chromiumoxide. None feasible in one
+  session. Same-origin / about:srcdoc iframes work via the
+  `Page.createIsolatedWorld` path (verified earlier R2.4).
 
 ### Round 3 — the hard cases
 
