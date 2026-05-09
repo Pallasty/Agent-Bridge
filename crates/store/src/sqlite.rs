@@ -2061,6 +2061,7 @@ impl StateStore for SqliteStore {
                             importance, status, trigger_pattern, superseded_by
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
+                       AND status = 'active'
                        AND (?3 IS NULL
                             OR scope IS NULL
                             OR scope = 'global'
@@ -3033,6 +3034,43 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("coactivation_among: {e}")))
+    }
+
+    /// **Phase 1 P5** — bulk version of [`top_coactivation`] over the whole
+    /// graph: edges with `count >= min_count`, ordered by count DESC. Used
+    /// by `agent-bridge dream replay` to seed cluster discovery (weight-first
+    /// union-find).
+    async fn top_coactivation_edges(
+        &self,
+        min_count: u64,
+        limit: u32,
+    ) -> Result<Vec<CoactivationEdge>> {
+        let min_c = min_count as i64;
+        let lim = limit as i64;
+        self.conn
+            .call(move |c| -> RusqliteResult<Vec<CoactivationEdge>> {
+                let mut stmt = c.prepare(
+                    "SELECT key_a, key_b, count, first_at, last_at
+                       FROM memory_coactivation
+                      WHERE count >= ?1
+                   ORDER BY count DESC, last_at DESC
+                      LIMIT ?2",
+                )?;
+                let rows = stmt
+                    .query_map(rusqlite::params![min_c, lim], |row| {
+                        Ok(CoactivationEdge {
+                            key_a: row.get(0)?,
+                            key_b: row.get(1)?,
+                            count: row.get::<_, i64>(2)? as u64,
+                            first_at: row.get(3)?,
+                            last_at: row.get(4)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("top_coactivation_edges: {e}")))
     }
 
     /// **Phase 0 telemetry** — append one `memory_query_log` row and prune
