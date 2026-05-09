@@ -2,7 +2,7 @@
 
 **Owner**: agent-bridge
 **Started**: 2026-05-09
-**Status**: Rounds 1 + 2 + 2.5 + 3 complete (2026-05-09); Round 4 (P2 cleanup) next
+**Status**: Rounds 1 + 2 + 2.5 + 3 + 4 complete (2026-05-09). All 16 originally-catalogued gaps closed except R2.5 #4b OOPIF `eval_in_frame` (chromiumoxide flatten-session limit, documented PARTIAL).
 
 ## Why this exists
 
@@ -158,9 +158,37 @@ landed same day:
   `{request_id, url, status, resource_type, mime_type, body,
   base64_encoded, headers, ts_ms}`.
 
-### Round 4 — completeness
+### Round 4 — completeness ✅ (2026-05-09)
 
-- All P2 items.
+Five small batches, each its own commit so the surface grew incrementally.
+
+- [x] **R4-a #15 + #16** (commit `c13b7ab`) — `browser_reload` (wraps
+  chromiumoxide `Page::reload`), `browser_back` / `browser_forward`
+  (eval `history.back()` / `.forward()`; chase with `wait_for` for
+  blocking semantics), and `browser_close_page` (exposes existing
+  trait `close()` which already releases pause-for-human waiters and
+  aborts capture pumps).
+- [x] **R4-b #12** (commit `59e164a`) — `browser_scroll` (selector →
+  `Element::scroll_into_view` centered; else `window.scrollBy(dx, dy)`;
+  always returns post-scroll `{scrollX, scrollY, scrollHeight}`) and
+  `browser_hover` (chromiumoxide `Element::hover`, auto-scrolls and
+  dispatches `Input.dispatchMouseEvent` `mouseMoved` at the clickable
+  point — triggers CSS `:hover` and `mouseenter`).
+- [x] **R4-c #13** (commit `99d8965`) — `browser_screenshot_element`:
+  CDP screenshot with `clip` = element bounding box. Mirrors the
+  existing `browser_screenshot` (file vs inline mode); ~10× smaller
+  than full-page when you only need to verify one widget.
+- [x] **R4-d #14** (commit `7a608f0`) — `browser_set_emulation`:
+  single combined tool calling `Emulation.setUserAgentOverride` and
+  `Emulation.setDeviceMetricsOverride`. UA / accept-language /
+  platform / viewport size / DPR / mobile flag — useful for sign-up
+  flows gated by mobile-only checks (banking, fintech) or
+  locale-specific UI.
+- [x] **R4-e #11** (commit `6a37c42`) — `browser_upload_file`: CDP
+  `DOM.setFileInputFiles` keyed by `backend_node_id` of the matched
+  `<input type=file>` element. Bypasses the unscriptable OS file-
+  picker; `change` event fires automatically. Closes the last KYC /
+  doc-upload gap.
 
 ## Cross-device sync
 
