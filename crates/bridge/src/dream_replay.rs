@@ -297,6 +297,25 @@ pub fn cluster_already_summarized(members: &[MemoryRecord]) -> bool {
     n_summarized * 2 >= members.len()
 }
 
+/// Stable short hash of a member-key set, used for the `dedupe:cluster:<hash>`
+/// summary tag. Keys are sorted first so set-equal inputs hash identically
+/// regardless of insertion order. djb2 — fast, small, no extra deps; the
+/// dedupe tag is collision-tolerant (false collisions just collapse one
+/// extra cluster pair, observable as a `supersedes` edge in the graph).
+fn member_keys_hash(keys: &[String]) -> String {
+    let mut sorted: Vec<&String> = keys.iter().collect();
+    sorted.sort();
+    let mut h: u64 = 5381;
+    for k in &sorted {
+        for b in k.as_bytes() {
+            h = h.wrapping_mul(33).wrapping_add(*b as u64);
+        }
+        // Length-delimit so ["ab","c"] != ["a","bc"].
+        h = h.wrapping_mul(33).wrapping_add(0xff);
+    }
+    format!("{h:016x}")
+}
+
 /// Today as `YYYY-MM-DD` UTC. Used for the `summarized_at:<date>` tag.
 /// Inline date math (no chrono dep) — algorithm = Howard Hinnant's
 /// civil_from_days, public domain.
@@ -467,6 +486,16 @@ async fn apply_summary(
         .map(|m| m.importance)
         .fold(0.5_f64, f64::max);
     let related_keys: Vec<String> = members.iter().map(|m| m.key.clone()).collect();
+
+    // Phase 2 #2 dedupe tag: if a different LLM run summarizes the same
+    // cluster on a different day or via a different model, the resulting
+    // summaries will share this tag and `memory_save` will collapse them.
+    // The hash is over the sorted member keys, so member-set identity
+    // (not member-set order) drives the dedupe.
+    let dedupe_tag = format!("dedupe:cluster:{}", member_keys_hash(&related_keys));
+    if !summary_tags.iter().any(|t| t == &dedupe_tag) {
+        summary_tags.push(dedupe_tag);
+    }
 
     let mem = MemoryRecord {
         key: summary.key.clone(),
@@ -690,5 +719,28 @@ mod tests {
         let raw = "{\"key\":\"x\",\"kind\":\"\",\"tags\":[],\"body\":\"y\"}";
         let err = parse_summary_response(raw).expect_err("should reject empty kind");
         assert!(err.contains("kind"));
+    }
+
+    #[test]
+    fn member_keys_hash_is_order_invariant() {
+        let a = vec!["alpha".into(), "bravo".into(), "charlie".into()];
+        let b = vec!["charlie".into(), "alpha".into(), "bravo".into()];
+        assert_eq!(member_keys_hash(&a), member_keys_hash(&b));
+    }
+
+    #[test]
+    fn member_keys_hash_distinguishes_different_sets() {
+        let a = vec!["alpha".into(), "bravo".into()];
+        let b = vec!["alpha".into(), "bravo".into(), "charlie".into()];
+        assert_ne!(member_keys_hash(&a), member_keys_hash(&b));
+    }
+
+    #[test]
+    fn member_keys_hash_length_delimits_concat_collisions() {
+        // Without length delimiting, ["ab","c"] and ["a","bc"] would
+        // hash identically under a naive byte-stream hash.
+        let a = vec!["ab".into(), "c".into()];
+        let b = vec!["a".into(), "bc".into()];
+        assert_ne!(member_keys_hash(&a), member_keys_hash(&b));
     }
 }

@@ -1603,6 +1603,16 @@ impl StateStore for SqliteStore {
         // Pre-compute overlap tokens for contradiction detection (outside closure).
         let new_tokens = overlap_tokens(&content);
         let kind_clone = kind.clone();
+        // Caller-supplied `dedupe:<id>` tags collapse near-duplicate writes
+        // to a single active row (Phase 2 #2). E.g. P5 dream replay sets
+        // `dedupe:cluster:<hash>` so different LLMs summarizing the same
+        // source cluster supersede each other instead of accumulating.
+        let dedupe_tags: Vec<String> = mem
+            .tags
+            .iter()
+            .filter(|t| t.starts_with("dedupe:"))
+            .cloned()
+            .collect();
 
         self.conn
             .call(move |c| -> RusqliteResult<()> {
@@ -1641,6 +1651,45 @@ impl StateStore for SqliteStore {
                         embedding_bytes
                     ],
                 )?;
+
+                // ── dedupe-tag pass (Phase 2 #2) ─────────────────────────────
+                // Caller-supplied `dedupe:<id>` tags explicitly group records
+                // that should collapse to the most recent write. Newer save
+                // (this one) wins; matching active records get superseded.
+                // Tag-based (not column-based) so cross-machine sync works
+                // without a schema migration — tags already serialize through
+                // memory_export / memory_import.
+                for dedupe_tag in &dedupe_tags {
+                    let mut cand_stmt = c.prepare(
+                        "SELECT key FROM memories
+                         WHERE key != ?1
+                           AND status = 'active'
+                           AND tags LIKE ?2",
+                    )?;
+                    // The `\"<tag>\"` quoting matches a JSON-array string
+                    // element exactly, not a substring of another tag.
+                    let json_needle = format!("%\"{}\"%", dedupe_tag);
+                    let dups: Vec<String> = cand_stmt
+                        .query_map(params![key, json_needle], |row| row.get::<_, String>(0))?
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    for cand_key in dups {
+                        c.execute(
+                            "INSERT INTO memory_edges
+                               (from_key, to_key, edge_type, weight, created_at)
+                             VALUES (?1, ?2, 'supersedes', 1.5, ?3)
+                             ON CONFLICT(from_key, to_key, edge_type)
+                             DO UPDATE SET weight = excluded.weight",
+                            params![key, cand_key, now],
+                        )?;
+                        c.execute(
+                            "UPDATE memories
+                                SET status = 'superseded', superseded_by = ?2
+                              WHERE key = ?1 AND status = 'active'",
+                            params![cand_key, key],
+                        )?;
+                    }
+                }
 
                 // ── Contradiction detection ──────────────────────────────────
                 // Only run if we have enough tokens to compare meaningfully.
@@ -5685,6 +5734,182 @@ mod tests {
             n.iter()
                 .any(|e| e.to_key == "edge_rt_b" && e.edge_type == "relates"),
             "expected relates edge; got {n:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn dedupe_tag_collapses_duplicate_summaries_via_supersede() {
+        // Phase 2 #2: when two records carry the same `dedupe:<id>` tag,
+        // the newer save supersedes the older one (and back-links via
+        // memory_edges 'supersedes' for traceability). Use case: P5 dream
+        // replay where different LLMs summarize the same source cluster
+        // on different runs and we want them to collapse to the latest.
+        use crate::MemoryRecord;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-dedupe-tag-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        let mk = |key: &str, content: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: "lesson".to_string(),
+            content: content.to_string(),
+            tags: vec!["dedupe:cluster:abc123".to_string(), "p5_replay".to_string()],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.7,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+
+        // Three different LLM-suggested keys for the same source cluster.
+        store
+            .memory_save(&mk("summary_v1_minimax", "minimax phrasing of the lesson"))
+            .await
+            .expect("save v1");
+        store
+            .memory_save(&mk("summary_v2_haiku", "haiku phrasing of the same lesson"))
+            .await
+            .expect("save v2");
+        store
+            .memory_save(&mk("summary_v3_qwen", "qwen phrasing of the same lesson"))
+            .await
+            .expect("save v3");
+
+        // The latest save wins; the prior two are superseded with a
+        // back-pointer to the winner.
+        let v1 = store
+            .memory_get("summary_v1_minimax")
+            .await
+            .expect("get v1")
+            .expect("v1 exists");
+        let v2 = store
+            .memory_get("summary_v2_haiku")
+            .await
+            .expect("get v2")
+            .expect("v2 exists");
+        let v3 = store
+            .memory_get("summary_v3_qwen")
+            .await
+            .expect("get v3")
+            .expect("v3 exists");
+
+        // Chain semantics: each save supersedes only currently-active
+        // duplicates, so the supersede pointer forms a chain v1→v2→v3
+        // rather than all losers pointing at the final winner. Following
+        // the chain (v1.superseded_by → v2; v2.superseded_by → v3) leads
+        // to the active record. memory_search filters status='active' so
+        // the user only sees v3 either way — the chain is observable
+        // only via memory_neighbors / direct memory_get.
+        assert_eq!(v3.status, "active", "latest save stays active");
+        assert_eq!(v1.status, "superseded", "v1 superseded in the chain");
+        assert_eq!(v2.status, "superseded", "v2 superseded in the chain");
+        assert_eq!(v1.superseded_by.as_deref(), Some("summary_v2_haiku"));
+        assert_eq!(v2.superseded_by.as_deref(), Some("summary_v3_qwen"));
+
+        // Edges record the chain (v1↔v2 and v2↔v3, not v1↔v3 directly).
+        let v3_neighbors = store
+            .memory_neighbors("summary_v3_qwen")
+            .await
+            .expect("neighbors v3");
+        assert!(
+            v3_neighbors
+                .iter()
+                .any(|e| e.edge_type == "supersedes" && e.to_key == "summary_v2_haiku"),
+            "v3 must record supersedes->v2; got {:?}",
+            v3_neighbors
+        );
+        let v2_neighbors = store
+            .memory_neighbors("summary_v2_haiku")
+            .await
+            .expect("neighbors v2");
+        assert!(
+            v2_neighbors
+                .iter()
+                .any(|e| e.edge_type == "supersedes" && e.to_key == "summary_v1_minimax"),
+            "v2 must record supersedes->v1; got {:?}",
+            v2_neighbors
+        );
+
+        // A different dedupe tag is unaffected by the same-tag group.
+        let other = MemoryRecord {
+            key: "summary_other_cluster".to_string(),
+            kind: "lesson".to_string(),
+            content: "unrelated cluster summary".to_string(),
+            tags: vec!["dedupe:cluster:xyz999".to_string()],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.7,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&other).await.expect("save other");
+        let other_after = store
+            .memory_get("summary_other_cluster")
+            .await
+            .expect("get other")
+            .expect("other exists");
+        assert_eq!(
+            other_after.status, "active",
+            "different dedupe tag must not be pulled into the group"
+        );
+        let v3_after = store
+            .memory_get("summary_v3_qwen")
+            .await
+            .expect("get v3 again")
+            .expect("v3 still there");
+        assert_eq!(
+            v3_after.status, "active",
+            "winner of a different dedupe group stays active"
+        );
+
+        // Substring safety: a tag like `dedupe:cluster:abc12345` (proper
+        // superset of our `dedupe:cluster:abc123`) must NOT match the
+        // group via the LIKE %"<tag>"% needle.
+        let confusable = MemoryRecord {
+            key: "summary_confusable_superstring".to_string(),
+            kind: "lesson".to_string(),
+            content: "should not collapse with the abc123 group".to_string(),
+            tags: vec!["dedupe:cluster:abc12345".to_string()],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.7,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&confusable).await.expect("save confusable");
+        let v3_still = store
+            .memory_get("summary_v3_qwen")
+            .await
+            .expect("get v3 third time")
+            .expect("v3 still there");
+        assert_eq!(
+            v3_still.status, "active",
+            "tag substring of another tag must not falsely supersede"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
