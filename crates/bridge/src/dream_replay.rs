@@ -173,6 +173,48 @@ pub async fn run(top_n: usize, min_cluster_size: usize, dry_run: bool) -> Result
     Ok(())
 }
 
+/// **Phase 1 P5 — dogfood metric.** Count clusters that would actually
+/// be picked up by `dream replay` right now: union-find groups of size
+/// ≥ `min_size`, after dropping `kind=skill` members and clusters where
+/// majority are already summarized. This is the single number that tells
+/// the user "is the coactivation graph dense enough yet for nightly
+/// replay to do useful work?" — surfaced via `dream stats`.
+///
+/// Cheap when the graph is sparse (≤ a few cluster-member memory_get
+/// calls). Bumps `access_count` as a side-effect of memory_get just like
+/// dream_replay::run does.
+pub async fn count_p5_ready_clusters(
+    store: &dyn StateStore,
+    min_size: usize,
+) -> Result<usize> {
+    if min_size < 2 {
+        return Ok(0);
+    }
+    let edges = store
+        .top_coactivation_edges(MIN_EDGE_COUNT, MAX_EDGES_FETCHED)
+        .await
+        .map_err(|e| anyhow::anyhow!("top_coactivation_edges: {e}"))?;
+    if edges.is_empty() {
+        return Ok(0);
+    }
+    let clusters = build_clusters(&edges, min_size);
+    let mut ready = 0usize;
+    for cluster in clusters.iter() {
+        if cluster.keys.len() > MAX_CLUSTER_SIZE {
+            continue;
+        }
+        let members = load_members(store, &cluster.keys).await;
+        if members.len() < min_size {
+            continue;
+        }
+        if cluster_already_summarized(&members) {
+            continue;
+        }
+        ready += 1;
+    }
+    Ok(ready)
+}
+
 /// Build clusters via union-find over edges. Keeps total edge weight
 /// per cluster (sum of `count`) so we can rank clusters by importance
 /// before the `top_n` cutoff.

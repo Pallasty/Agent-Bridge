@@ -622,9 +622,18 @@ async fn run_dream_stats(as_json: bool) -> Result<()> {
         .coactivation_stats()
         .await
         .map_err(|e| anyhow::anyhow!("coactivation_stats: {e}"))?;
+    // P5 dogfood metric — how many clusters dream replay would pick up
+    // right now (non-skill, size ≥ 3, not majority-summarized).
+    let p5_ready = ab_bridge::dream_replay::count_p5_ready_clusters(&store, 3)
+        .await
+        .unwrap_or(0);
 
     if as_json {
-        println!("{}", serde_json::to_string_pretty(&stats)?);
+        let payload = serde_json::json!({
+            "coactivation": stats,
+            "p5_ready_clusters": p5_ready,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(());
     }
 
@@ -645,6 +654,10 @@ async fn run_dream_stats(as_json: bool) -> Result<()> {
         stats.top10_to_median_ratio
     );
     println!("pairs touched 24h  : {}", stats.pairs_last_24h);
+    println!(
+        "P5 ready clusters  : {}    (non-skill, size ≥ 3 — `dream replay` will write {} summary memories on next run)",
+        p5_ready, p5_ready
+    );
     println!();
     println!("top 5 edges:");
     for (i, e) in stats.top_5_edges.iter().enumerate() {
