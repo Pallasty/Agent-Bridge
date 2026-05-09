@@ -22,6 +22,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::anthropic_api::{AnthropicClient, Message, DEFAULT_MODEL};
 
+/// Pick the LLM model — `AGENT_BRIDGE_LLM_MODEL` env var overrides
+/// [`DEFAULT_MODEL`]. Useful for routing to a free model on
+/// alternate proxies (e.g. opencode-zen exposes `minimax-m2.5-free`)
+/// when the user's primary Anthropic credit is unavailable.
+fn pick_model() -> String {
+    std::env::var("AGENT_BRIDGE_LLM_MODEL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_MODEL.to_string())
+}
+
 /// Cap on edges fetched from `top_coactivation_edges` per round. With ~5
 /// avg cluster size this covers ~600 keys — plenty of room before the
 /// `top_n` cutoff thins the candidate list.
@@ -332,10 +343,14 @@ async fn summarize_cluster(
         role: "user".to_string(),
         content: prompt,
     }];
+    let model = pick_model();
+    // 4096 leaves room for "thinking" models (minimax, deepseek-r1) that
+    // burn budget before emitting the JSON. Anthropic Claude models
+    // typically need <500.
     let resp = client
-        .messages_create(DEFAULT_MODEL, None, &messages, 768)
+        .messages_create(&model, None, &messages, 4096)
         .await
-        .map_err(|e| anyhow::anyhow!("anthropic messages_create: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("anthropic messages_create ({model}): {e}"))?;
     parse_summary_response(&resp.text)
         .map_err(|reason| anyhow::anyhow!("parse summary: {reason} (raw: {})", short(&resp.text, 200)))
 }
