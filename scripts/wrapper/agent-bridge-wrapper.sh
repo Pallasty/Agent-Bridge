@@ -155,6 +155,49 @@ if [ -f "$creds" ]; then
     ' "$creds" 2>/dev/null || true)
     [ -z "${ANTHROPIC_BASE_URL:-}" ] && [ -n "$anthropic_base" ] && \
         export ANTHROPIC_BASE_URL="$anthropic_base"
+
+    # ----- OpenAI-protocol fallback (Section: # Agent-Bridge Fallback) -----
+    # When LlmClient (commit 16c463b) primary fails, it auto-retries via the
+    # secondary built from these OPENAI_* vars. Honor pre-existing env so
+    # callers can override per-call.
+    openai_token=$(awk '
+        /^[[:space:]]*#[[:space:]]*Agent-Bridge[[:space:]]+Fallback/ { in_f=1; next }
+        in_f && /^[[:space:]]*$/ { in_f=0 }
+        in_f && /^[[:space:]]*export[[:space:]]+OPENAI_API_KEY[[:space:]]*=/ {
+            sub(/^[^=]*=[[:space:]]*/, "");
+            gsub(/["'"'"']/, "");
+            if (length($1) >= 16) { print $1; exit }
+        }
+    ' "$creds" 2>/dev/null || true)
+    [ -z "${OPENAI_API_KEY:-}" ] && [ -n "$openai_token" ] && \
+        export OPENAI_API_KEY="$openai_token"
+
+    openai_base=$(awk '
+        /^[[:space:]]*#[[:space:]]*Agent-Bridge[[:space:]]+Fallback/ { in_f=1; next }
+        in_f && /^[[:space:]]*$/ { in_f=0 }
+        in_f && /^[[:space:]]*export[[:space:]]+OPENAI_BASE_URL[[:space:]]*=[[:space:]]*https/ {
+            sub(/^[^=]*=[[:space:]]*/, "");
+            gsub(/["'"'"']/, "");
+            print $1; exit
+        }
+    ' "$creds" 2>/dev/null || true)
+    [ -z "${OPENAI_BASE_URL:-}" ] && [ -n "$openai_base" ] && \
+        export OPENAI_BASE_URL="$openai_base"
+
+    # Fallback model is distinct from primary model: claude-haiku → 404 on
+    # OpenAI protocol; gpt-4o-mini → 400 on modelscope. LlmClient reads
+    # AGENT_BRIDGE_LLM_FALLBACK_MODEL only on the secondary path.
+    fallback_model=$(awk '
+        /^[[:space:]]*#[[:space:]]*Agent-Bridge[[:space:]]+Fallback/ { in_f=1; next }
+        in_f && /^[[:space:]]*$/ { in_f=0 }
+        in_f && /^[[:space:]]*export[[:space:]]+AGENT_BRIDGE_LLM_FALLBACK_MODEL[[:space:]]*=/ {
+            sub(/^[^=]*=[[:space:]]*/, "");
+            gsub(/["'"'"']/, "");
+            print $1; exit
+        }
+    ' "$creds" 2>/dev/null || true)
+    [ -z "${AGENT_BRIDGE_LLM_FALLBACK_MODEL:-}" ] && [ -n "$fallback_model" ] && \
+        export AGENT_BRIDGE_LLM_FALLBACK_MODEL="$fallback_model"
 fi
 
 # Always-on flags

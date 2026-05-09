@@ -22,6 +22,18 @@ export ANTHROPIC_AUTH_TOKEN=REPLACE_ME_sk_your_anthropic_proxy_token
 export ANTHROPIC_BASE_URL=https://api.anthropic.com
 
 
+# Agent-Bridge Fallback
+# OpenAI-protocol secondary used when Primary fails (network blip, quota,
+# outage). LlmClient (commit 16c463b) auto-retries here once. Optional —
+# omit if you want strict single-provider semantics. Fallback model is
+# read separately because model names aren't portable across protocols.
+# Example uses modelscope (free Qwen3-235B); swap for Groq / OpenRouter /
+# Gemini openai-compat / OpenAI direct as needed.
+export OPENAI_API_KEY=REPLACE_ME_openai_or_modelscope_or_groq_token
+export OPENAI_BASE_URL=https://api-inference.modelscope.cn/v1
+export AGENT_BRIDGE_LLM_FALLBACK_MODEL=Qwen/Qwen3-235B-A22B-Instruct-2507
+
+
 # Tailscale API
 Client ID: REPLACE_ME_tskey_oauth_client_id
 Client secret: REPLACE_ME_tskey_oauth_client_secret
