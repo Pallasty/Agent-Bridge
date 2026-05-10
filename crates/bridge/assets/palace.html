@@ -750,6 +750,21 @@
       margin: 8px 0 14px;
     }
     .canvas-preview pre code { background: transparent; padding: 0; color: #c8c8d0; }
+    /* Past-discussion view — shown when canvas focus is a chat_session
+       memory and the editor is empty. Subtle purple-bordered banner so
+       the user knows preview is showing read-only past content, not
+       their live draft. */
+    .canvas-preview .canvas-past-banner {
+      border: 1px solid #4a3a72;
+      border-left: 2px solid #a87cff;
+      background: #1a1626;
+      color: #a87cff;
+      padding: 4px 10px;
+      margin: 0 0 12px;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      border-radius: 3px;
+    }
     .canvas-preview a { color: #5cc8c8; text-decoration: none; border-bottom: 1px dotted #4a8b9c; }
     .canvas-preview a:hover { color: #aef0f0; border-bottom-color: #5cc8c8; }
     .canvas-preview strong { color: #f0f0f4; }
@@ -2284,8 +2299,31 @@ function inlineMd(s) {
   return safe;
 }
 
+// Render the canvas preview pane.
+//
+// Default: live-render the editor content. But when the focus is a
+// chat_session AND the editor is empty, show the past discussion's
+// content instead of the empty-state placeholder — that's why the
+// user clicked into it. As soon as they start typing, the editor
+// preview takes over (input handler calls this with editor.value).
+// Clear the editor → past-discussion view returns.
 function renderMarkdownPreview(src) {
-  document.getElementById("canvas-preview").innerHTML = renderMarkdown(src);
+  const previewEl = document.getElementById("canvas-preview");
+  if (!previewEl) return;
+  const focus = canvasState.current;
+  const showPastDiscussion =
+    (!src || !src.trim()) &&
+    focus &&
+    focus.kind === "chat_session" &&
+    typeof focus.content === "string" &&
+    focus.content.trim();
+  if (showPastDiscussion) {
+    previewEl.innerHTML =
+      `<div class="canvas-past-banner">📖 past discussion · type in the editor to draft a riff</div>` +
+      renderMarkdown(focus.content);
+    return;
+  }
+  previewEl.innerHTML = renderMarkdown(src);
 }
 
 // Populate the right rail with three sections of context. Cofires
