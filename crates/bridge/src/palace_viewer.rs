@@ -116,6 +116,7 @@ pub async fn run(
         .route("/api/reports", get(api_reports))
         .route("/reports/:filename", get(serve_report))
         .route("/api/canvas-chat", post(api_canvas_chat))
+        .route("/api/memory/:key/tombstone", post(api_memory_tombstone))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen)
@@ -598,6 +599,24 @@ async fn api_memory(
     }
 
     Err((StatusCode::NOT_FOUND, format!("memory not found: {key}")))
+}
+
+// ── Tombstone endpoint (C8: act on stale memories) ──────────────────────
+
+/// Soft-delete (tombstone) a memory by key. Idempotent: tombstoning an
+/// already-tombstoned key returns `deleted: false` without error. Used
+/// by the C8 stale-review panel so the user can sweep cold memories
+/// without leaving Palace.
+async fn api_memory_tombstone(
+    State(s): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let deleted = s
+        .store
+        .memory_delete(&key)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_delete: {e}")))?;
+    Ok(Json(json!({ "ok": true, "key": key, "deleted": deleted })))
 }
 
 // ── Annotate endpoint (C1: closes the 呼吸 loop) ─────────────────────────
