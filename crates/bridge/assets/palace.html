@@ -249,6 +249,254 @@
     }
     #panel .reports-list a:hover { color: #5cc8c8; border-color: #5cc8c8; }
     #panel .reports-list .report-meta { color: #6a6a78; margin-left: auto; font-size: 10px; }
+    #panel .canvas-expand-btn {
+      background: transparent;
+      border: 1px solid #4a8b9c;
+      color: #5cc8c8;
+      padding: 7px 12px;
+      font-size: 11px;
+      border-radius: 4px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      width: 100%;
+      margin-top: 6px;
+      transition: color 120ms, border-color 120ms, background 120ms;
+      font-family: inherit;
+    }
+    #panel .canvas-expand-btn:hover {
+      color: #aef0f0;
+      border-color: #5cc8c8;
+      background: #16242a;
+    }
+
+    /* ── B M0 canvas overlay (interaction blueprint layer) ────────
+       width is driven by `--canvas-width` so M1 can narrow to e.g.
+       60vw without rewriting layout (Palace stays visible behind). */
+    :root {
+      --canvas-width: 100vw;
+      --canvas-fade: 320ms;
+    }
+    #canvas-overlay {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: var(--canvas-width);
+      height: 100vh;
+      background: linear-gradient(180deg, #0d0d14 0%, #0a0a10 100%);
+      z-index: 80;
+      display: flex;
+      flex-direction: column;
+      transform: translateY(0);
+      opacity: 1;
+      transition: opacity var(--canvas-fade) ease,
+                  transform var(--canvas-fade) ease;
+    }
+    #canvas-overlay.hidden { display: none; }
+    #canvas-overlay.entering { opacity: 0; transform: translateY(8px); }
+    #canvas-overlay.leaving  { opacity: 0; transform: translateY(8px); pointer-events: none; }
+    #canvas-overlay.freezing { /* "fade-to-ice" on save: dim editor, freeze rail */
+      opacity: 0.75;
+      filter: saturate(0.55) brightness(0.85);
+      pointer-events: none;
+    }
+
+    .canvas-focus {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 24px;
+      border-bottom: 1px solid #1f1f2a;
+      flex-shrink: 0;
+      background: rgba(15, 15, 22, 0.85);
+    }
+    .canvas-close {
+      background: transparent;
+      border: 1px solid #2a2a35;
+      color: #8a8a9c;
+      padding: 5px 12px;
+      font-size: 11px;
+      border-radius: 4px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms;
+    }
+    .canvas-close:hover { color: #e4e4e8; border-color: #5a5a72; }
+    .canvas-focus-card { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .canvas-focus-key {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f0f0f4;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .canvas-focus-meta {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #6a6a78;
+    }
+
+    .canvas-body {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr 260px;
+      gap: 1px;
+      background: #1f1f2a;
+      overflow: hidden;
+    }
+    .canvas-pane {
+      background: #0e0e16;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .canvas-pane-label {
+      padding: 8px 18px;
+      font-size: 9px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #5a5a68;
+      font-weight: 600;
+      border-bottom: 1px solid #1f1f2a;
+      background: #0a0a12;
+    }
+    #canvas-editor {
+      flex: 1;
+      width: 100%;
+      background: #0a0a10;
+      border: none;
+      color: #d8d8e2;
+      padding: 18px 22px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.65;
+      resize: none;
+      outline: none;
+    }
+    #canvas-editor::placeholder { color: #4a4a55; font-style: italic; }
+    .canvas-preview {
+      flex: 1;
+      padding: 18px 24px;
+      overflow-y: auto;
+      color: #d0d0d8;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+    .canvas-preview h1 { font-size: 18px; margin: 4px 0 12px; color: #f0f0f4; }
+    .canvas-preview h2 { font-size: 15px; margin: 16px 0 8px; color: #e8e8ec; }
+    .canvas-preview h3 { font-size: 13px; margin: 12px 0 6px; color: #d8d8e2;
+                          letter-spacing: 0.04em; text-transform: uppercase; }
+    .canvas-preview p { margin: 0 0 10px; }
+    .canvas-preview ul, .canvas-preview ol { padding-left: 22px; margin: 4px 0 12px; }
+    .canvas-preview li { margin: 2px 0; }
+    .canvas-preview code {
+      background: #1c1c26;
+      padding: 1px 5px;
+      border-radius: 2px;
+      font-size: 12px;
+      color: #aef0f0;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    .canvas-preview pre {
+      background: #1a1a24;
+      padding: 10px 14px;
+      border-radius: 4px;
+      border-left: 2px solid #3a3a48;
+      overflow-x: auto;
+      margin: 8px 0 14px;
+    }
+    .canvas-preview pre code { background: transparent; padding: 0; color: #c8c8d0; }
+    .canvas-preview a { color: #5cc8c8; text-decoration: none; border-bottom: 1px dotted #4a8b9c; }
+    .canvas-preview a:hover { color: #aef0f0; border-bottom-color: #5cc8c8; }
+    .canvas-preview strong { color: #f0f0f4; }
+    .canvas-preview em { color: #d8d8e2; font-style: italic; }
+    .canvas-preview blockquote {
+      margin: 8px 0;
+      padding: 4px 12px;
+      border-left: 2px solid #4a4a5a;
+      color: #a8a8b2;
+      font-style: italic;
+    }
+    .canvas-preview .placeholder {
+      color: #4a4a55;
+      font-style: italic;
+      font-size: 11px;
+    }
+
+    .canvas-rail {
+      background: #0c0c14;
+      padding: 14px 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .canvas-rail-section { display: flex; flex-direction: column; gap: 5px; }
+    .canvas-rail-title {
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #5a5a68;
+      font-weight: 600;
+    }
+    .canvas-rail a {
+      display: block;
+      padding: 4px 8px;
+      border: 1px solid #1f1f2a;
+      border-radius: 3px;
+      color: #b0b0bc;
+      text-decoration: none;
+      font-size: 10px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: color 120ms, border-color 120ms;
+    }
+    .canvas-rail a:hover { color: #5cc8c8; border-color: #4a8b9c; }
+    .canvas-rail-empty {
+      color: #3a3a48;
+      font-size: 10px;
+      font-style: italic;
+    }
+    .canvas-rail-cofires a    { border-left: 2px solid #6dd4bd; }
+    .canvas-rail-annotations a { border-left: 2px solid #ffe070; }
+    .canvas-rail-reports a    { border-left: 2px solid #5cc8c8; }
+
+    .canvas-foot {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 24px;
+      border-top: 1px solid #1f1f2a;
+      flex-shrink: 0;
+      background: rgba(10, 10, 16, 0.85);
+    }
+    .canvas-hint {
+      flex: 1;
+      color: #5a5a68;
+      font-size: 10px;
+      letter-spacing: 0.05em;
+    }
+    .canvas-hint.error { color: #c8505c; }
+    .canvas-hint.ok    { color: #5cc88a; }
+    #canvas-save {
+      background: #16242a;
+      border: 1px solid #5cc8c8;
+      color: #aef0f0;
+      padding: 7px 18px;
+      font-size: 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      font-family: inherit;
+      transition: background 120ms, color 120ms;
+    }
+    #canvas-save:hover { background: #1e3037; color: #ffffff; }
+    #canvas-save:disabled { background: #1c1c26; color: #4a4a55; border-color: #2a2a35; cursor: wait; }
     #panel .annotate-toggle {
       background: transparent;
       border: 1px dashed #3a3a48;
@@ -336,6 +584,53 @@
   <div id="panel" class="hidden">
     <div class="placeholder">click a node to read</div>
   </div>
+
+  <!-- B M0 canvas overlay (呼吸式画布 / interaction blueprint layer).
+       Width is driven by `--canvas-width`; M0 = 100vw, M1 will narrow
+       it to leave Palace partially visible (40vw uncovered). -->
+  <div id="canvas-overlay" class="hidden">
+    <div class="canvas-focus">
+      <button class="canvas-close" type="button">← back to Palace</button>
+      <div class="canvas-focus-card">
+        <div class="canvas-focus-key" id="canvas-focus-key"></div>
+        <div class="canvas-focus-meta" id="canvas-focus-meta"></div>
+      </div>
+    </div>
+    <div class="canvas-body">
+      <div class="canvas-pane canvas-pane-editor">
+        <div class="canvas-pane-label">EDITOR · markdown</div>
+        <textarea id="canvas-editor" spellcheck="false"
+                  placeholder="# 标题
+**多模态工坊** —— 写下你的想法，markdown 实时预览。
+[link to existing memory](some_memory_key)
+- list item
+- another"></textarea>
+      </div>
+      <div class="canvas-pane canvas-pane-preview">
+        <div class="canvas-pane-label">PREVIEW</div>
+        <div id="canvas-preview" class="canvas-preview"></div>
+      </div>
+      <div class="canvas-rail">
+        <div class="canvas-rail-section">
+          <div class="canvas-rail-title">cofires neighbors</div>
+          <div id="canvas-rail-cofires"><div class="canvas-rail-empty">none</div></div>
+        </div>
+        <div class="canvas-rail-section">
+          <div class="canvas-rail-title">recent annotations</div>
+          <div id="canvas-rail-annotations"><div class="canvas-rail-empty">none</div></div>
+        </div>
+        <div class="canvas-rail-section">
+          <div class="canvas-rail-title">related reports</div>
+          <div id="canvas-rail-reports"><div class="canvas-rail-empty">none</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="canvas-foot">
+      <span class="canvas-hint" id="canvas-hint">cmd/ctrl+enter to save · esc to close</span>
+      <button id="canvas-save" type="button">沉淀 (save as working_doc)</button>
+    </div>
+  </div>
+
   <div id="footer">
     <span>circles = sqlite · rounded squares = markdown · cyan dotted = co-activation</span>
     <span class="hint" id="focus-hint"></span>
@@ -873,6 +1168,7 @@ async function showSidePanel(id) {
       </div>
       <div class="annotate-section">
         <button class="annotate-toggle" type="button">✍ annotate this node</button>
+        <button class="canvas-expand-btn" type="button">📐 expand canvas</button>
         <div class="annotate-form">
           <textarea placeholder="your thought… (cmd/ctrl+enter to save)"></textarea>
           <div class="row">
@@ -884,6 +1180,7 @@ async function showSidePanel(id) {
       </div>
     `;
     bindAnnotate(panel, m.key);
+    bindCanvasExpand(panel, m);
     loadRelatedReports(m.key);
   } catch (e) {
     panel.innerHTML = `<div class="placeholder">error: ${escapeHTML(String(e))}</div>`;
@@ -1023,6 +1320,318 @@ async function loadRelatedReports(key) {
   }
 }
 
+// ── B M0 canvas overlay (呼吸式画布) ────────────────────────────
+//
+// "画布是交互蓝图，palace 是结果呈现" — vision_breathing_canvas.md.
+// The overlay is a fullscreen workshop bound to a single Palace node.
+// Save sediments a `kind=working_doc` memory + `expanded_from` edge,
+// playing a brief fade-to-ice animation before the new node lands in
+// the graph. Width is driven by `--canvas-width` (M0 = 100vw); M1 will
+// shrink it to leave Palace partially visible.
+const canvasState = { current: null }; // current memory being expanded
+
+function bindCanvasExpand(panel, memory) {
+  const btn = panel.querySelector(".canvas-expand-btn");
+  if (!btn) return;
+  btn.addEventListener("click", () => openCanvas(memory));
+}
+
+function openCanvas(memory) {
+  canvasState.current = memory;
+  const overlay = document.getElementById("canvas-overlay");
+  if (!overlay) return;
+  document.getElementById("canvas-focus-key").textContent = memory.key;
+  document.getElementById("canvas-focus-meta").textContent =
+    `${memory.kind || "memory"} · ${memory.source || "sqlite"} · importance ${(memory.importance || 0).toFixed(2)}`;
+  const editor = document.getElementById("canvas-editor");
+  editor.value = "";
+  renderMarkdownPreview(""); // empty placeholder
+  resetCanvasHint();
+  loadCanvasRail(memory);
+  overlay.classList.remove("hidden", "leaving", "freezing");
+  overlay.classList.add("entering");
+  // Force reflow so the entering→base transition runs.
+  // Reading `offsetHeight` flushes the previous frame's layout.
+  // eslint-disable-next-line no-unused-expressions
+  overlay.offsetHeight;
+  overlay.classList.remove("entering");
+  setTimeout(() => editor.focus(), 60);
+}
+
+function closeCanvas() {
+  const overlay = document.getElementById("canvas-overlay");
+  if (!overlay || overlay.classList.contains("hidden")) return;
+  overlay.classList.add("leaving");
+  setTimeout(() => {
+    overlay.classList.add("hidden");
+    overlay.classList.remove("leaving", "freezing");
+    canvasState.current = null;
+  }, 320); // matches --canvas-fade
+}
+
+function resetCanvasHint() {
+  const hint = document.getElementById("canvas-hint");
+  hint.textContent = "cmd/ctrl+enter to save · esc to close";
+  hint.className = "canvas-hint";
+}
+
+// Mini markdown renderer — self-contained, no external deps. Handles
+// the subset agent-authored notes actually use: headings, bold/italic,
+// inline + fenced code, lists, links, blockquotes, paragraphs. Anything
+// not recognized passes through as escaped text.
+function renderMarkdown(src) {
+  if (!src || !src.trim()) {
+    return `<div class="placeholder">live preview · type in the editor</div>`;
+  }
+  const lines = src.replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  let i = 0;
+  let inCode = false;
+  let codeBuf = [];
+  let listOpen = null; // "ul" | "ol" | null
+  let paraBuf = [];
+  const closePara = () => {
+    if (paraBuf.length) {
+      out.push(`<p>${inlineMd(paraBuf.join(" "))}</p>`);
+      paraBuf = [];
+    }
+  };
+  const closeList = () => {
+    if (listOpen) {
+      out.push(`</${listOpen}>`);
+      listOpen = null;
+    }
+  };
+  while (i < lines.length) {
+    const ln = lines[i];
+    if (ln.startsWith("```")) {
+      closePara(); closeList();
+      if (inCode) {
+        out.push(`<pre><code>${escapeHTML(codeBuf.join("\n"))}</code></pre>`);
+        codeBuf = [];
+        inCode = false;
+      } else {
+        inCode = true;
+      }
+      i++;
+      continue;
+    }
+    if (inCode) { codeBuf.push(ln); i++; continue; }
+    const h = ln.match(/^(#{1,3})\s+(.+)/);
+    if (h) {
+      closePara(); closeList();
+      const level = h[1].length;
+      out.push(`<h${level}>${inlineMd(h[2])}</h${level}>`);
+      i++; continue;
+    }
+    const bq = ln.match(/^>\s?(.*)/);
+    if (bq) {
+      closePara(); closeList();
+      const buf = [bq[1]];
+      while (i + 1 < lines.length && /^>\s?/.test(lines[i+1])) {
+        buf.push(lines[++i].replace(/^>\s?/, ""));
+      }
+      out.push(`<blockquote>${inlineMd(buf.join(" "))}</blockquote>`);
+      i++; continue;
+    }
+    const ul = ln.match(/^[-*]\s+(.+)/);
+    if (ul) {
+      closePara();
+      if (listOpen !== "ul") { closeList(); out.push("<ul>"); listOpen = "ul"; }
+      out.push(`<li>${inlineMd(ul[1])}</li>`);
+      i++; continue;
+    }
+    const ol = ln.match(/^(\d+)\.\s+(.+)/);
+    if (ol) {
+      closePara();
+      if (listOpen !== "ol") { closeList(); out.push("<ol>"); listOpen = "ol"; }
+      out.push(`<li>${inlineMd(ol[2])}</li>`);
+      i++; continue;
+    }
+    if (!ln.trim()) {
+      closePara(); closeList();
+      i++; continue;
+    }
+    paraBuf.push(ln);
+    i++;
+  }
+  if (inCode) {
+    // Unclosed fence — render what we have so the user sees their typing.
+    out.push(`<pre><code>${escapeHTML(codeBuf.join("\n"))}</code></pre>`);
+  }
+  closePara(); closeList();
+  return out.join("\n");
+}
+
+// Inline markdown (within a paragraph/heading/list item):
+// **bold** *italic* `code` [text](url). Order matters: code first
+// (so its contents aren't re-processed), then links, then bold, italic.
+function inlineMd(s) {
+  // Tokenize code spans first to protect them from other rules.
+  const codeTokens = [];
+  let safe = s.replace(/`([^`]+)`/g, (_m, p1) => {
+    codeTokens.push(p1);
+    return ` C${codeTokens.length - 1} `;
+  });
+  safe = escapeHTML(safe);
+  // [text](url) — basic, no nested brackets.
+  safe = safe.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, t, u) => {
+    return `<a href="${escapeHTML(u)}" target="_blank" rel="noopener">${t}</a>`;
+  });
+  safe = safe.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  safe = safe.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  safe = safe.replace(/ C(\d+) /g, (_m, idx) => {
+    return `<code>${escapeHTML(codeTokens[parseInt(idx, 10)])}</code>`;
+  });
+  return safe;
+}
+
+function renderMarkdownPreview(src) {
+  document.getElementById("canvas-preview").innerHTML = renderMarkdown(src);
+}
+
+// Populate the right rail with three sections of context. Cofires
+// neighbors come from the cytoscape graph (already loaded). Recent
+// annotations + related reports re-use existing endpoints.
+async function loadCanvasRail(memory) {
+  // 1. cofires neighbors — derive from the loaded graph data.
+  const cofiresEl = document.getElementById("canvas-rail-cofires");
+  cofiresEl.parentElement.classList.remove("canvas-rail-cofires"); // ensure parent gets the class
+  cofiresEl.parentElement.classList.add("canvas-rail-cofires");
+  const cofiresList = neighborsOfType(memory.key, "cofires").slice(0, 8);
+  if (cofiresList.length) {
+    cofiresEl.innerHTML = cofiresList.map(k =>
+      `<a href="/?focus=${encodeURIComponent(k)}" title="${escapeHTML(k)}">${escapeHTML(k)}</a>`
+    ).join("");
+  } else {
+    cofiresEl.innerHTML = `<div class="canvas-rail-empty">none yet</div>`;
+  }
+
+  // 2. recent annotations — sqlite memories with `palace` tag, sorted by mtime.
+  const annosEl = document.getElementById("canvas-rail-annotations");
+  annosEl.parentElement.classList.add("canvas-rail-annotations");
+  const annoNeighbors = neighborsOfType(memory.key, "annotates").slice(0, 6);
+  if (annoNeighbors.length) {
+    annosEl.innerHTML = annoNeighbors.map(k =>
+      `<a href="/?focus=${encodeURIComponent(k)}" title="${escapeHTML(k)}">${escapeHTML(k)}</a>`
+    ).join("");
+  } else {
+    annosEl.innerHTML = `<div class="canvas-rail-empty">none yet</div>`;
+  }
+
+  // 3. related reports — same /api/reports endpoint the side panel uses.
+  const reportsEl = document.getElementById("canvas-rail-reports");
+  reportsEl.parentElement.classList.add("canvas-rail-reports");
+  try {
+    const r = await fetch(`/api/reports?key=${encodeURIComponent(memory.key)}`);
+    const j = await r.json();
+    const items = (j.items || []).slice(0, 6);
+    if (items.length) {
+      reportsEl.innerHTML = items.map(it =>
+        `<a href="/reports/${encodeURIComponent(it.filename)}" target="_blank" rel="noopener" title="${escapeHTML(it.filename)}">${escapeHTML(it.label)} · ${it.mentions}×</a>`
+      ).join("");
+    } else {
+      reportsEl.innerHTML = `<div class="canvas-rail-empty">none yet</div>`;
+    }
+  } catch (e) {
+    reportsEl.innerHTML = `<div class="canvas-rail-empty">error</div>`;
+  }
+}
+
+function neighborsOfType(key, edgeType) {
+  if (!state.cy) return [];
+  const node = state.cy.getElementById(key);
+  if (!node || node.length === 0) return [];
+  const edges = node.connectedEdges().filter(e => e.data("type") === edgeType);
+  const keys = new Set();
+  edges.forEach(e => {
+    const src = e.source().id();
+    const tgt = e.target().id();
+    if (src !== key) keys.add(src);
+    if (tgt !== key) keys.add(tgt);
+  });
+  return Array.from(keys);
+}
+
+async function saveCanvas() {
+  if (!canvasState.current) return;
+  const editor = document.getElementById("canvas-editor");
+  const saveBtn = document.getElementById("canvas-save");
+  const hint = document.getElementById("canvas-hint");
+  const body = editor.value.trim();
+  if (!body) {
+    hint.textContent = "editor is empty — nothing to sediment";
+    hint.className = "canvas-hint error";
+    return;
+  }
+  saveBtn.disabled = true;
+  hint.textContent = "saving…";
+  hint.className = "canvas-hint";
+  const target = canvasState.current.key;
+  try {
+    const r = await fetch("/api/annotate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_key: target,
+        content: body,
+        kind: "working_doc",
+        edge_type: "expanded_from",
+        weight: 0.7,
+        importance: 0.65,
+      }),
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      throw new Error(`${r.status} · ${txt.slice(0, 120)}`);
+    }
+    const j = await r.json();
+    // Fade-to-ice: dim + saturate-down for ~900ms before closing.
+    document.getElementById("canvas-overlay").classList.add("freezing");
+    hint.textContent = `沉淀 · ${j.key} (${j.edge})`;
+    hint.className = "canvas-hint ok";
+    setTimeout(async () => {
+      closeCanvas();
+      await loadGraph();
+      // Land focus on the new working_doc so the user sees the sediment.
+      setTimeout(() => {
+        if (state.cy && state.cy.getElementById(j.key).length > 0) {
+          focusOnNode(j.key);
+          showSidePanel(j.key);
+        }
+      }, 60);
+    }, 900);
+  } catch (e) {
+    hint.textContent = "error · " + String(e).slice(0, 100);
+    hint.className = "canvas-hint error";
+    saveBtn.disabled = false;
+  }
+}
+
+// Wire static handlers once at boot.
+function bindCanvasGlobals() {
+  document.querySelector("#canvas-overlay .canvas-close")
+    .addEventListener("click", closeCanvas);
+  const editor = document.getElementById("canvas-editor");
+  editor.addEventListener("input", () => renderMarkdownPreview(editor.value));
+  editor.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      saveCanvas();
+    }
+  });
+  document.getElementById("canvas-save").addEventListener("click", saveCanvas);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      const overlay = document.getElementById("canvas-overlay");
+      if (overlay && !overlay.classList.contains("hidden")) {
+        e.preventDefault();
+        closeCanvas();
+      }
+    }
+  });
+}
+
 // Boot. After the graph loads, honor a `?focus=KEY` URL parameter so
 // inbound deep-links from `dream promote --html` reports land directly
 // on the referenced node (focus + side panel) instead of the empty
@@ -1030,6 +1639,7 @@ async function loadRelatedReports(key) {
 // panel via /api/memory — the focus highlight is best-effort.
 (async () => {
   await loadGraph();
+  bindCanvasGlobals();
   const focus = new URLSearchParams(location.search).get("focus");
   if (!focus) return;
   if (state.cy && state.cy.getElementById(focus).length > 0) {
