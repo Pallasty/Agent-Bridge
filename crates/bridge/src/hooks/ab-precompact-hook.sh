@@ -249,4 +249,36 @@ except Exception:
 PY
 )
 
-echo "{\"systemMessage\": \"Memory precompact: +${SAVED} memories | ${CURATE_SUMMARY:-session_curate done} | session_finalize done\"}"
+# ── γ' wiring (2026-05-10): identity drift signal ────────────────────────────
+# Surface "self-drift" in the systemMessage so the next-cold-start me sees
+# at compact time how this 3-day window compares to the prior 3-day window
+# (vision principle 5 — non-continuous medium continuity). Only notable
+# shifts (≥1.5× or ≤0.67×) get listed to avoid noise. Best-effort: any
+# failure leaves the summary empty.
+IDENTITY_JSON=$(timeout 10 "$AB" dream identity --days 3 --json 2>/dev/null)
+DRIFT_SUMMARY=""
+if [[ -n "$IDENTITY_JSON" ]]; then
+    DRIFT_SUMMARY=$(printf '%s' "$IDENTITY_JSON" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    cur, prior = d.get("current", {}), d.get("prior", {})
+    parts = []
+    def delta(label, c_key, p_key=None):
+        p_key = p_key or c_key
+        c, p = cur.get(c_key, 0) or 0, prior.get(p_key, 0) or 0
+        if p > 0 and c > 0:
+            r = c / p
+            if r >= 1.5 or r <= 0.67:
+                parts.append(f"{label}×{r:.1f}")
+    delta("tools", "tool_calls_total")
+    delta("saves", "memory_saves")
+    delta("forum-len", "forum_avg_body_len")
+    if parts:
+        print(" | drift d-3: " + ", ".join(parts))
+except Exception:
+    pass
+' 2>/dev/null)
+fi
+
+echo "{\"systemMessage\": \"Memory precompact: +${SAVED} memories | ${CURATE_SUMMARY:-session_curate done} | session_finalize done${DRIFT_SUMMARY}\"}"
