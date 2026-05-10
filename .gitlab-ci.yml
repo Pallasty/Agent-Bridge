@@ -35,7 +35,7 @@ variables:
 # ── Reusable scaffolding ────────────────────────────────────────────────────
 
 .rust-base:
-  image: rust:bookworm
+  image: rust:trixie
   cache:
     key:
       files:
@@ -58,10 +58,10 @@ test:linux:
     - if: $CI_COMMIT_BRANCH == "master"
   timeout: 25m
   script:
-    - cargo build --workspace --all-targets --no-default-features
-    - cargo test --workspace --no-fail-fast --no-default-features
+    - cargo build --workspace --all-targets
+    - cargo test --workspace --no-fail-fast
     # Clippy emits warnings only — do not gate the pipeline.
-    - cargo clippy --workspace --all-targets --no-default-features -- -W clippy::all || true
+    - cargo clippy --workspace --all-targets -- -W clippy::all || true
 
 # ── Release: tag-driven prebuilt + GitLab Release ──────────────────────────
 
