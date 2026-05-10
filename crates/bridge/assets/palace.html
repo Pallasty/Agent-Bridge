@@ -191,6 +191,38 @@
       color: #d88080;
       border-color: #6a3a3a;
     }
+    /* C9 bulk action — sits at the bottom of the panel, larger and
+       redder than per-row to signal "this hits everything visible". */
+    #stale-panel .bulk-bar {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid #2a2a35;
+      display: flex;
+      justify-content: flex-end;
+    }
+    #stale-panel .bulk-bar button {
+      background: transparent;
+      border: 1px solid #6a3a3a;
+      color: #d88080;
+      padding: 5px 12px;
+      font-size: 11px;
+      border-radius: 3px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    #stale-panel .bulk-bar button:hover {
+      color: #ffe0e0;
+      border-color: #a04040;
+      background: #2a1818;
+    }
+    #stale-panel .bulk-bar button:disabled {
+      color: #4a4a55;
+      border-color: #2a2a35;
+      cursor: default;
+      background: transparent;
+    }
     /* ── Filter panel ─────────────────────────────────────── */
     #filter-panel {
       position: absolute;
@@ -1849,7 +1881,67 @@ function renderStalePanel() {
       <div class="meta">${escapeHTML(s.kind)} · ${ageLabel} ago</div>
     </div>`;
   }).join("");
-  panel.innerHTML = header + rows;
+  // C9 bulk-action bar: scoped to whatever's currently rendered, so future
+  // filters (per-kind chips, age cutoff slider) compose with it without
+  // changing the bar's logic.
+  const bulkBar = `<div class="bulk-bar">
+    <button type="button" id="stale-bulk-tombstone"
+            title="tombstone every row currently shown">🪦 tombstone all visible (${stale.length})</button>
+  </div>`;
+  panel.innerHTML = header + rows + bulkBar;
+}
+
+async function staleBulkTombstone() {
+  const rows = Array.from(document.querySelectorAll("#stale-panel .stale-row:not(.gone)"));
+  if (rows.length === 0) return;
+  const keys = rows.map(r => r.dataset.key).filter(Boolean);
+  // Strong confirm — the count is in both the question and the dialog body
+  // so the user can't miss it. Mention recoverability so the warning isn't
+  // overdramatic (tombstones survive until the next purge GC).
+  const ok = confirm(
+    `Tombstone ${keys.length} memories?\n\n` +
+    `Each row becomes invisible to memory_search/get. The rows stay in ` +
+    `sqlite until the next memory_purge_tombstones run (default 7d) — ` +
+    `recoverable up to that point via supersede with the same key.\n\n` +
+    `Proceeding will hit /api/memory/:key/tombstone ${keys.length} times ` +
+    `in sequence.`
+  );
+  if (!ok) return;
+  const bulkBtn = document.getElementById("stale-bulk-tombstone");
+  if (bulkBtn) {
+    bulkBtn.disabled = true;
+    bulkBtn.textContent = `tombstoning 0/${keys.length}…`;
+  }
+  // Sequential to keep server load predictable + give the user feedback
+  // mid-flight (counter ticks). For ~hundreds of rows this is the right
+  // floor; if it grows past that, switch to a server-side bulk endpoint.
+  let done = 0;
+  let failed = 0;
+  for (const row of rows) {
+    const key = row.dataset.key;
+    try {
+      const r = await fetch(`/api/memory/${encodeURIComponent(key)}/tombstone`, {
+        method: "POST",
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const node = state.cy.$id(key);
+      if (node && node.length > 0) state.cy.remove(node);
+      row.classList.add("gone");
+    } catch (e) {
+      console.error(`bulk tombstone ${key} failed:`, e);
+      row.style.borderColor = "#6a3a3a";
+      failed += 1;
+    }
+    done += 1;
+    if (bulkBtn) bulkBtn.textContent = `tombstoning ${done}/${keys.length}…`;
+  }
+  if (bulkBtn) {
+    bulkBtn.textContent = failed > 0
+      ? `done — ${done - failed} ok / ${failed} failed`
+      : `done — ${done} tombstoned`;
+  }
+  // Re-fetch graph so title badge + remaining stale set match server truth.
+  setTimeout(() => loadGraph(), 600);
 }
 
 async function staleAction(key, act, rowEl) {
@@ -1907,9 +1999,15 @@ document.getElementById("stale-btn").addEventListener("click", () => {
   }
 });
 
-// Delegated click handler for keep / tombstone. We use delegation so
-// re-rendering the panel doesn't need to re-bind per-button listeners.
+// Delegated click handler for keep / tombstone (per-row) and the C9 bulk
+// button. Delegation lets re-rendering replace the panel content without
+// re-binding listeners.
 document.getElementById("stale-panel").addEventListener("click", (e) => {
+  // C9 bulk action — own dispatch path, no row context.
+  if (e.target.closest("#stale-bulk-tombstone")) {
+    staleBulkTombstone();
+    return;
+  }
   const btn = e.target.closest("button[data-act]");
   if (!btn) return;
   const row = e.target.closest(".stale-row");
