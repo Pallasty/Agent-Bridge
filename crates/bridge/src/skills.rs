@@ -1301,6 +1301,7 @@ mod tests {
             importance: 0.5,
             status: "active".to_string(),
             trigger_pattern: None,
+            superseded_by: None,
         }
     }
 

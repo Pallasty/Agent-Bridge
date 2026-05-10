@@ -830,7 +830,7 @@ fn short_key(s: &str, max: usize) -> String {
 /// This is vision principle 5's literal landing: a measurable anchor for
 /// "today-self vs last-week-self" across the non-continuous medium.
 async fn run_dream_identity(days: u32, as_json: bool) -> Result<()> {
-    use ab_store::{default_db_path, IdentityWindow, SqliteStore, StateStore};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     if days == 0 {
