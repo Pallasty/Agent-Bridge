@@ -57,14 +57,14 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 
 use crate::{
     AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
-    CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, ForumExportResult, ForumImportReport,
-    ForumPostExport, ForumPostOutcome, ForumPostRecord, ForumThreadExport, ForumThreadRecord,
-    IdentityWindow, ImportConflictPolicy, ImportReport, McpToolCallStats, McpToolErrorRecord,
-    MemoryEdge, MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort,
-    MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats,
-    NotificationRecord, PlanRecord, PlanStep, SessionFilter, StateStore, StoredSession,
-    MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP,
-    STDIO_CAP,
+    CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, DecayUnusedStats,
+    ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
+    ForumThreadExport, ForumThreadRecord, IdentityWindow, ImportConflictPolicy, ImportReport,
+    McpToolCallStats, McpToolErrorRecord, MemoryEdge, MemoryEdgeExport, MemoryExportFilter,
+    MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats, MemoryRecord,
+    MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep, SessionFilter,
+    StateStore, StoredSession, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
+    MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -2556,6 +2556,58 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("memory_decay_importance: {e}")))?;
         Ok(archived)
+    }
+
+    async fn memory_decay_unused_importance(
+        &self,
+        window_secs: i64,
+        step: f64,
+        floor: f64,
+    ) -> Result<DecayUnusedStats> {
+        let cutoff = now_secs().saturating_sub(window_secs.max(0));
+        let step = step.max(0.0);
+        let floor = floor.clamp(0.0, 1.0);
+        let stats = self
+            .conn
+            .call(move |c| -> RusqliteResult<DecayUnusedStats> {
+                let tx = c.unchecked_transaction()?;
+                // Count candidates that matched the "unused" window. We
+                // count separately from the UPDATE so we can distinguish
+                // "decayed this pass" from "already at floor — skipped".
+                let candidates: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM memories
+                      WHERE status = 'active'
+                        AND last_accessed_at > 0
+                        AND last_accessed_at < ?1",
+                    params![cutoff],
+                    |r| r.get::<_, i64>(0),
+                )?;
+                // Apply the decay only to rows still above the floor. CASE
+                // is used over MAX(a,b) for portability — older bundled
+                // sqlite versions don't have the n-ary scalar form.
+                let decayed = tx.execute(
+                    "UPDATE memories
+                        SET importance = CASE
+                              WHEN importance - ?2 < ?3 THEN ?3
+                              ELSE importance - ?2
+                            END
+                      WHERE status = 'active'
+                        AND last_accessed_at > 0
+                        AND last_accessed_at < ?1
+                        AND importance > ?3",
+                    params![cutoff, step, floor],
+                )? as u64;
+                tx.commit()?;
+                let candidates = candidates.max(0) as u64;
+                Ok(DecayUnusedStats {
+                    candidates,
+                    decayed,
+                    skipped_at_floor: candidates.saturating_sub(decayed),
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_decay_unused_importance: {e}")))?;
+        Ok(stats)
     }
 
     async fn memory_compact(&self, policy: CompactPolicy) -> Result<Vec<String>> {
@@ -8046,6 +8098,243 @@ mod tests {
             .expect("imports query");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].target, "std::collections::BTreeSet");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // Phase 2.x #8: read-recency decay (memory_decay_unused_importance).
+    // Sets up rows via memory_import so last_accessed_at can be backdated
+    // — memory_save would force it to `now`. The tests cover the four
+    // distinct WHERE-clause branches of the decay query: stale → decay,
+    // fresh → skip, never-accessed → skip, at-floor → counted-but-skipped,
+    // tombstoned → skip.
+
+    async fn import_decay_fixture(
+        store: &SqliteStore,
+        temp_dir: &std::path::Path,
+        rows: &[(&str, i64, f64, &str)], // (key, last_accessed_at, importance, status)
+    ) {
+        let jsonl = temp_dir.join("decay-fixture.jsonl");
+        let mut buf = String::new();
+        for (key, last_accessed_at, importance, status) in rows {
+            let line = serde_json::json!({
+                "key": key,
+                "kind": "fact",
+                "content": format!("decay-fixture:{key}"),
+                "tags": [],
+                "related_keys": [],
+                "scope": null,
+                "created_at": 1_700_000_000_i64,
+                "updated_at": 1_700_000_000_i64,
+                "last_accessed_at": last_accessed_at,
+                "access_count": 0_u64,
+                "importance": importance,
+                "status": status,
+                "trigger_pattern": null,
+            });
+            buf.push_str(&line.to_string());
+            buf.push('\n');
+        }
+        tokio::fs::write(&jsonl, buf).await.expect("write jsonl");
+        store
+            .memory_import(&jsonl, ImportConflictPolicy::Overwrite, None)
+            .await
+            .expect("import");
+    }
+
+    async fn read_importance(store: &SqliteStore, key: &str) -> f64 {
+        store
+            .memory_get(key)
+            .await
+            .expect("memory_get")
+            .map(|m| m.importance)
+            .unwrap_or(f64::NAN)
+    }
+
+    fn decay_temp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "ab-decay-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    #[tokio::test]
+    async fn decay_unused_drops_importance_for_stale_active_rows() {
+        let temp_dir = decay_temp_dir("stale");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let now = now_secs();
+        let day = 86_400_i64;
+        // Last-accessed 60 days ago — well past the 30-day window.
+        import_decay_fixture(
+            &store,
+            &temp_dir,
+            &[("stale_x", now - 60 * day, 0.8, "active")],
+        )
+        .await;
+
+        let stats = store
+            .memory_decay_unused_importance(30 * day, 0.05, 0.1)
+            .await
+            .expect("decay");
+        assert_eq!(stats.candidates, 1);
+        assert_eq!(stats.decayed, 1);
+        assert_eq!(stats.skipped_at_floor, 0);
+        // memory_get bumps last_accessed_at, but we read via direct query
+        // here — we want the stored importance, not a re-bumped row.
+        // Importance check: 0.8 - 0.05 = 0.75
+        let imp = read_importance(&store, "stale_x").await;
+        assert!((imp - 0.75).abs() < 1e-9, "imp={imp}");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_unused_skips_recently_accessed_rows() {
+        let temp_dir = decay_temp_dir("recent");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let now = now_secs();
+        let day = 86_400_i64;
+        // 2 days old — well within a 30-day window. Should NOT decay.
+        import_decay_fixture(
+            &store,
+            &temp_dir,
+            &[("fresh_y", now - 2 * day, 0.8, "active")],
+        )
+        .await;
+
+        let stats = store
+            .memory_decay_unused_importance(30 * day, 0.05, 0.1)
+            .await
+            .expect("decay");
+        assert_eq!(stats.candidates, 0);
+        assert_eq!(stats.decayed, 0);
+        let imp = read_importance(&store, "fresh_y").await;
+        assert!((imp - 0.8).abs() < 1e-9, "imp={imp}");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_unused_skips_never_accessed_rows() {
+        let temp_dir = decay_temp_dir("never");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        // last_accessed_at = 0 means "never accessed via memory_get". Treating
+        // this as "30 days stale" would unfairly punish fresh imports and
+        // markdown rows that don't go through the access-tracking path.
+        import_decay_fixture(&store, &temp_dir, &[("ghost_z", 0, 0.8, "active")]).await;
+
+        let stats = store
+            .memory_decay_unused_importance(30 * 86_400, 0.05, 0.1)
+            .await
+            .expect("decay");
+        assert_eq!(stats.candidates, 0);
+        assert_eq!(stats.decayed, 0);
+        let imp = read_importance(&store, "ghost_z").await;
+        assert!((imp - 0.8).abs() < 1e-9, "imp={imp}");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_unused_counts_at_floor_as_skipped() {
+        let temp_dir = decay_temp_dir("floor");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let now = now_secs();
+        let day = 86_400_i64;
+        // Already at floor (0.1) — qualifies as a candidate (stale window
+        // matched) but the SET clause's `importance > floor` filter skips it.
+        import_decay_fixture(
+            &store,
+            &temp_dir,
+            &[("floored_a", now - 60 * day, 0.1, "active")],
+        )
+        .await;
+
+        let stats = store
+            .memory_decay_unused_importance(30 * day, 0.05, 0.1)
+            .await
+            .expect("decay");
+        assert_eq!(stats.candidates, 1);
+        assert_eq!(stats.decayed, 0);
+        assert_eq!(stats.skipped_at_floor, 1);
+        let imp = read_importance(&store, "floored_a").await;
+        assert!((imp - 0.1).abs() < 1e-9, "imp={imp}");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_unused_skips_tombstoned_rows() {
+        let temp_dir = decay_temp_dir("tomb");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let now = now_secs();
+        let day = 86_400_i64;
+        // Tombstoned and stale — must be ignored entirely (status filter).
+        import_decay_fixture(
+            &store,
+            &temp_dir,
+            &[("tomb_b", now - 60 * day, 0.8, "tombstoned")],
+        )
+        .await;
+
+        let stats = store
+            .memory_decay_unused_importance(30 * day, 0.05, 0.1)
+            .await
+            .expect("decay");
+        assert_eq!(stats.candidates, 0);
+        assert_eq!(stats.decayed, 0);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_unused_floor_clamps_partial_step() {
+        let temp_dir = decay_temp_dir("clamp");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let now = now_secs();
+        let day = 86_400_i64;
+        // 0.12 - 0.05 = 0.07 < floor 0.1 → CASE clamps to 0.1, not 0.07.
+        import_decay_fixture(
+            &store,
+            &temp_dir,
+            &[("near_floor_c", now - 60 * day, 0.12, "active")],
+        )
+        .await;
+
+        let stats = store
+            .memory_decay_unused_importance(30 * day, 0.05, 0.1)
+            .await
+            .expect("decay");
+        assert_eq!(stats.decayed, 1);
+        let imp = read_importance(&store, "near_floor_c").await;
+        assert!((imp - 0.1).abs() < 1e-9, "imp={imp} (expected clamp to floor)");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

@@ -566,6 +566,23 @@ pub fn prioritize_session_handoff(rows: Vec<MemoryRecord>) -> Vec<MemoryRecord> 
     head
 }
 
+/// Result of `memory_decay_unused_importance` — read-recency-based decay.
+/// Distinct from `memory_decay_importance` (which decays by `updated_at`,
+/// i.e. "hasn't evolved"); this one captures "hasn't been useful" via
+/// `last_accessed_at`. Together they cover both edges of memory hygiene:
+/// stale-write (compact target) and stale-read (Palace C7/C8 target).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct DecayUnusedStats {
+    /// Active rows whose `last_accessed_at > 0` and is older than the
+    /// window cutoff (i.e. "matched the unused predicate").
+    pub candidates: u64,
+    /// Rows whose `importance` was actually reduced this pass (above floor
+    /// and the SQL UPDATE touched them).
+    pub decayed: u64,
+    /// Candidates already at or below the floor — counted but not decayed.
+    pub skipped_at_floor: u64,
+}
+
 /// Compaction policy for `memory_compact`. After v0.7.1, both thresholds
 /// must agree (AND) before a row is considered stale, AND the row must be
 /// older than the implementation-defined grace period (1 h on `created_at`).
@@ -848,6 +865,23 @@ pub trait StateStore: Send + Sync {
         half_life_days: f64,
         archive_threshold: f64,
     ) -> Result<u64>;
+
+    /// Read-recency decay: shave `step` off `importance` for every active
+    /// row whose `last_accessed_at > 0` and is older than the window cutoff,
+    /// floored at `floor`. Mirrors the C7 / C8 staleness model — what
+    /// hasn't been *read* loses its rank in retrieval, even if it was
+    /// recently written. Skips rows with `last_accessed_at = 0` (markdown
+    /// imports / never-accessed rows) so first-time saves don't take a hit
+    /// before they've had a chance to surface.
+    ///
+    /// Typical call: `memory_decay_unused_importance(30 * 86400, 0.05, 0.1)`
+    /// (30-day window, 5% step, 0.1 floor).
+    async fn memory_decay_unused_importance(
+        &self,
+        window_secs: i64,
+        step: f64,
+        floor: f64,
+    ) -> Result<DecayUnusedStats>;
 
     /// Apply [`CompactPolicy`]; returns the keys that were (or would be)
     /// removed. Honours `dry_run`.

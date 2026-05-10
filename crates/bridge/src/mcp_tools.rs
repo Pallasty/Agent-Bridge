@@ -5322,6 +5322,96 @@ impl McpTool for MemoryPurgeTombstonesTool {
 }
 
 // ===========================================================================
+//                  memory_decay_unused (Phase 2.x #8 — read-recency decay)
+// ===========================================================================
+
+pub struct MemoryDecayUnusedTool {
+    hub: Hub,
+}
+impl MemoryDecayUnusedTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryDecayUnusedTool {
+    fn name(&self) -> &'static str {
+        "memory_decay_unused"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-recency importance decay: shave `step` off the importance of \
+                every active memory whose last_accessed_at is older than window_days, floored \
+                at `floor`. Mirrors the Palace C7/C8 staleness model — what hasn't been read \
+                loses retrieval rank, even if it was recently written. Distinct from the \
+                memory_compact phase that decays by updated_at (write recency). Returns \
+                {candidates, decayed, skipped_at_floor}. Defaults: 30d / 0.05 / 0.1."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_days": {
+                        "type": "number",
+                        "minimum": 0,
+                        "default": 30,
+                        "description": "Only decay rows whose last_accessed_at is older than \
+                            this many days. Default 30."
+                    },
+                    "step": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "default": 0.05,
+                        "description": "How much to shave off importance per pass. Default 0.05."
+                    },
+                    "floor": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "default": 0.1,
+                        "description": "Importance never drops below this. Default 0.1."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_days = args
+            .get("window_days")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(30.0)
+            .max(0.0);
+        let step = args
+            .get("step")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.05)
+            .clamp(0.0, 1.0);
+        let floor = args
+            .get("floor")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.1)
+            .clamp(0.0, 1.0);
+        let window_secs = (window_days * 86_400.0) as i64;
+        let stats = store
+            .memory_decay_unused_importance(window_secs, step, floor)
+            .await?;
+        Ok(ToolResult::json_text(&json!({
+            "window_days": window_days,
+            "step": step,
+            "floor": floor,
+            "candidates": stats.candidates,
+            "decayed": stats.decayed,
+            "skipped_at_floor": stats.skipped_at_floor,
+        })))
+    }
+}
+
+// ===========================================================================
 //                       memory_reindex (re-embed after dim migration)
 // ===========================================================================
 
@@ -11600,6 +11690,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPurgeTombstonesTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryDecayUnusedTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkTool::new(hub.clone())));
