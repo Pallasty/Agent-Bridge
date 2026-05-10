@@ -115,6 +115,7 @@ pub async fn run(
         .route("/api/annotate", post(api_annotate))
         .route("/api/reports", get(api_reports))
         .route("/reports/:filename", get(serve_report))
+        .route("/api/canvas-chat", post(api_canvas_chat))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen)
@@ -862,6 +863,284 @@ fn is_safe_report_filename(name: &str) -> bool {
             || c == '_'
             || c == '.'
     })
+}
+
+// ── Canvas chat endpoint (B-mode discussion with spawned Claude Code) ────
+//
+// Each chat round trip spawns a fresh `claude -p "<full prompt>"` process,
+// captures stdout, returns it. Stateless on the server: full conversation
+// history is rebuilt into the prompt every call (Anthropic chat history
+// is the cheapest way to carry continuity without managing a persistent
+// PTY session — that's P2/B M2 territory).
+//
+// Context auto-attached:
+//   - Focused node's full content
+//   - Top-N neighbors with snippets (cofires + annotates + supersedes +
+//     summarizes + references — structural and attention edges, not
+//     ephemeral coactivation)
+//
+// The spawned claude has full access to whatever MCP servers are configured
+// in the user's `~/.claude/mcp.json` — meaning it can call memory_save /
+// memory_link / dream_* directly when the user explicitly asks. We don't
+// inject those tools here; the spawned session has them via Claude Code's
+// own config.
+
+#[derive(Deserialize)]
+struct ChatMessage {
+    role: String,    // "user" | "assistant"
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct CanvasChatPayload {
+    focus_key: String,
+    /// Conversation so far (excluding the new message). Frontend keeps
+    /// this in canvasState and resends each round so we can be stateless.
+    #[serde(default)]
+    history: Vec<ChatMessage>,
+    /// New user message.
+    message: String,
+    /// Per-spawn timeout in seconds. Default 90s — long enough for
+    /// thinking + tool use, short enough that a stuck spawn doesn't
+    /// block the canvas indefinitely.
+    #[serde(default)]
+    timeout_secs: Option<u64>,
+}
+
+const CANVAS_CHAT_NEIGHBOR_LIMIT: usize = 6;
+const CANVAS_CHAT_SNIPPET_CHARS: usize = 280;
+const CANVAS_CHAT_DEFAULT_TIMEOUT_SECS: u64 = 90;
+const CANVAS_CHAT_MAX_TIMEOUT_SECS: u64 = 600;
+
+async fn api_canvas_chat(
+    State(s): State<AppState>,
+    Json(p): Json<CanvasChatPayload>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let focus = p.focus_key.trim();
+    let user_msg = p.message.trim();
+    if focus.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "focus_key required".into()));
+    }
+    if user_msg.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "message required".into()));
+    }
+
+    // Build the context block (focus node + neighbors). Best-effort: a
+    // missing focus node still produces a usable prompt — the agent can
+    // ask the user for context.
+    let focus_block = build_focus_block(&s, focus).await;
+    let neighbor_block = build_neighbor_block(&s, focus).await;
+    let history_block = format_history(&p.history);
+
+    let prompt = format!(
+        "你正在 Palace 画布的 chat panel 里和用户讨论 memory 节点 `{focus}`。\n\
+         你的目标是帮用户思考、提出连接、起草 working_doc 内容。\n\
+         回复用中文，简洁直接，避免空泛。\n\
+         如果用户想沉淀某段为 working_doc，提示他可以点 [→ copy to editor]。\n\n\
+         ## 当前焦点节点\n{focus_block}\n\n\
+         ## 邻居节点（top {n} by edge weight）\n{neighbor_block}\n\n\
+         ## 对话历史\n{history_block}\n\n\
+         ## 用户最新消息\n{user_msg}\n",
+        focus = focus,
+        n = CANVAS_CHAT_NEIGHBOR_LIMIT,
+        focus_block = focus_block,
+        neighbor_block = neighbor_block,
+        history_block = history_block,
+        user_msg = user_msg,
+    );
+
+    let timeout = p
+        .timeout_secs
+        .unwrap_or(CANVAS_CHAT_DEFAULT_TIMEOUT_SECS)
+        .min(CANVAS_CHAT_MAX_TIMEOUT_SECS);
+
+    // Spawn `claude -p` with the prompt. Inherits palace's env so the
+    // wrapper-injected ANTHROPIC_API_KEY (or whichever provider) carries
+    // through. cwd = palace's cwd — Claude Code reads MCP config relative
+    // to that, so it gets the same agent-bridge tools the user sees.
+    let mut cmd = tokio::process::Command::new("claude");
+    cmd.arg("-p").arg(&prompt);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let started = SystemTime::now();
+    let child = cmd
+        .spawn()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("spawn claude: {e}")))?;
+
+    let output = match tokio::time::timeout(
+        std::time::Duration::from_secs(timeout),
+        child.wait_with_output(),
+    )
+    .await
+    {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("wait claude: {e}"),
+            ));
+        }
+        Err(_elapsed) => {
+            return Err((
+                StatusCode::GATEWAY_TIMEOUT,
+                format!("claude exceeded {timeout}s timeout"),
+            ));
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let elapsed_ms = started
+        .elapsed()
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    if !output.status.success() {
+        // Surface stderr but truncated — don't leak huge logs to the
+        // browser. Caller can repro via terminal if they want full output.
+        let trimmed: String = stderr.chars().take(800).collect();
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "claude exited {:?} after {elapsed_ms}ms: {}",
+                output.status.code(),
+                trimmed
+            ),
+        ));
+    }
+
+    Ok(Json(json!({
+        "ok":         true,
+        "assistant":  stdout.trim_end(),
+        "elapsed_ms": elapsed_ms,
+        "stderr":     if stderr.is_empty() { Value::Null } else { Value::String(stderr) },
+    })))
+}
+
+async fn build_focus_block(s: &AppState, key: &str) -> String {
+    // Try sqlite first.
+    if let Ok(Some(m)) = s.store.memory_get(key).await {
+        let tags = if m.tags.is_empty() {
+            String::new()
+        } else {
+            format!("\ntags: {}", m.tags.join(", "))
+        };
+        return format!(
+            "**{}** ({})  importance {:.2}{}\n\n{}",
+            m.key,
+            m.kind,
+            m.importance,
+            tags,
+            m.content,
+        );
+    }
+    // Markdown fallback — same lookup the side panel uses.
+    if let Some(root) = &s.markdown_root {
+        let path = root.join(format!("{key}.md"));
+        if let Ok(body) = fs::read_to_string(&path) {
+            let mm = parse_markdown_memory(key.to_string(), &body);
+            return format!(
+                "**{}** ({}, markdown)\n\n{}\n\n{}",
+                mm.key, mm.kind, mm.description, mm.content,
+            );
+        }
+    }
+    format!("**{key}** — not found in store")
+}
+
+async fn build_neighbor_block(s: &AppState, key: &str) -> String {
+    let nbrs = match s.store.memory_neighbors(key).await {
+        Ok(v) => v,
+        Err(_) => return "(no neighbors)".to_string(),
+    };
+    if nbrs.is_empty() {
+        return "(no neighbors)".to_string();
+    }
+    // Filter to structural edges (skip ephemeral coactivation), sort by
+    // weight desc, take top N.
+    let mut filtered: Vec<_> = nbrs
+        .into_iter()
+        .filter(|e| {
+            !matches!(
+                e.edge_type.as_str(),
+                "coactivation"
+            )
+        })
+        .collect();
+    filtered.sort_by(|a, b| {
+        b.weight
+            .partial_cmp(&a.weight)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    filtered.truncate(CANVAS_CHAT_NEIGHBOR_LIMIT);
+    if filtered.is_empty() {
+        return "(no structural neighbors)".to_string();
+    }
+
+    let mut out = String::new();
+    for e in filtered {
+        let other_key = if e.from_key == key {
+            &e.to_key
+        } else {
+            &e.from_key
+        };
+        let snippet = neighbor_snippet(s, other_key).await;
+        out.push_str(&format!(
+            "- **{}** [{}, w={:.2}]: {}\n",
+            other_key, e.edge_type, e.weight, snippet,
+        ));
+    }
+    out
+}
+
+async fn neighbor_snippet(s: &AppState, key: &str) -> String {
+    if let Ok(Some(m)) = s.store.memory_get(key).await {
+        let preview: String = m
+            .content
+            .chars()
+            .take(CANVAS_CHAT_SNIPPET_CHARS)
+            .collect::<String>()
+            .replace('\n', " ");
+        if m.content.chars().count() > CANVAS_CHAT_SNIPPET_CHARS {
+            return format!("{preview}…");
+        }
+        return preview;
+    }
+    if let Some(root) = &s.markdown_root {
+        let path = root.join(format!("{key}.md"));
+        if let Ok(body) = fs::read_to_string(&path) {
+            let mm = parse_markdown_memory(key.to_string(), &body);
+            let combined = if mm.description.is_empty() {
+                mm.content
+            } else {
+                format!("{} — {}", mm.description, mm.content)
+            };
+            let preview: String = combined
+                .chars()
+                .take(CANVAS_CHAT_SNIPPET_CHARS)
+                .collect::<String>()
+                .replace('\n', " ");
+            if combined.chars().count() > CANVAS_CHAT_SNIPPET_CHARS {
+                return format!("{preview}…");
+            }
+            return preview;
+        }
+    }
+    "(content unavailable)".to_string()
+}
+
+fn format_history(history: &[ChatMessage]) -> String {
+    if history.is_empty() {
+        return "(none — this is the first message)".to_string();
+    }
+    let mut out = String::new();
+    for m in history {
+        let label = if m.role == "user" { "USER" } else { "ASSISTANT" };
+        out.push_str(&format!("**{}**: {}\n\n", label, m.content));
+    }
+    out
 }
 
 #[cfg(test)]
