@@ -525,8 +525,33 @@ pub struct CodebaseSymbol {
 pub struct CodebaseIndexStats {
     pub indexed_files: u32,
     pub symbols: u32,
+    /// Phase 2 #3 second slice — imports/uses extracted alongside symbols.
+    /// Counted across all languages that have an importer (Rust as of v24).
+    #[serde(default)]
+    pub imports: u32,
     pub duration_ms: u64,
     pub root_path: String,
+}
+
+/// One `use` / `import` statement extracted from a source file. First slice
+/// of the cross-language reference graph (Phase 2 #3 second part) — the
+/// goal is to let `codebase_search` resolve "who imports X" and eventually
+/// "who calls X" without re-walking source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseImport {
+    pub file_path: String,
+    pub line: u32,
+    pub language: String,
+    /// Raw source text of the statement (first ~200 chars), e.g.
+    /// `use crate::store::SqliteStore;`.
+    pub raw: String,
+    /// Normalized import path, e.g. `crate::store::SqliteStore` for Rust
+    /// or `os.path` for Python. One row per imported item — group imports
+    /// like `use a::{b, c}` expand to two rows (`a::b`, `a::c`).
+    pub target: String,
+    /// `use foo as bar` → `Some("bar")`. None when no alias.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
 }
 
 /// Reorder memories so `kind == "session_handoff"` rows appear first.
@@ -1267,6 +1292,23 @@ pub trait StateStore: Send + Sync {
         let _ = (query, kind, file_filter, root_path, limit, mode);
         Err(ab_core::Error::Backend(
             "codebase_search not implemented".into(),
+        ))
+    }
+
+    /// Phase 2 #3 second slice — query the imports table by `target` substring
+    /// (LIKE), optionally narrowed to a file or root. Returns rows ordered by
+    /// `(file_path, line)` ascending. Use to answer "who imports X" without
+    /// re-walking source.
+    async fn codebase_imports_for(
+        &self,
+        target_substr: &str,
+        file_filter: Option<&str>,
+        root_path: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<CodebaseImport>> {
+        let _ = (target_substr, file_filter, root_path, limit);
+        Err(ab_core::Error::Backend(
+            "codebase_imports_for not implemented".into(),
         ))
     }
 }

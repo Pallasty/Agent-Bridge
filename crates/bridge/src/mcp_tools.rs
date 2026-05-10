@@ -6192,6 +6192,20 @@ impl McpTool for SessionBootstrapTool {
         lines.extend(format_bootstrap_memory_rows(&rows, snippet_len));
         lines.push("=== End Bootstrap ===".to_string());
         lines.push(String::new());
+
+        // γ' wiring (2026-05-10) — surface high-energy neighbors of recent
+        // high-importance seeds via memory_neighbors_bfs. Engine (α
+        // coactivation, β cofires, P4 evolved edges) is already built; this
+        // injects its output into cold-start payload. See
+        // `design_gamma_scope_revision_after_beta_dogfood_20260510` for why
+        // γ became wiring instead of a prediction engine. Best-effort —
+        // failures don't block bootstrap.
+        if let Ok(section) =
+            crate::bootstrap_bfs::compute_section(store.as_ref(), &cwd, is_compact).await
+        {
+            lines.extend(section);
+        }
+
         lines.push(session_lifecycle_hint());
 
         // D2.3: prime the embedding cache in the background so subsequent
@@ -10463,6 +10477,95 @@ impl McpTool for CodebaseSearchTool {
     }
 }
 
+pub struct CodebaseImportsTool {
+    hub: Hub,
+}
+impl CodebaseImportsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for CodebaseImportsTool {
+    fn name(&self) -> &'static str {
+        "codebase_imports"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Query the codebase imports table built by codebase_index. \
+                 Returns one row per `use`/`import` statement matching `target` \
+                 (substring LIKE). Use to answer 'who imports X' without re-walking \
+                 source. Currently Rust only — Python/TS/Go importers ship later. \
+                 Run codebase_index first if no results appear."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Substring matched against the imported path (e.g. 'SqliteStore' or 'serde::Deserialize')."
+                    },
+                    "file_filter": {
+                        "type": "string",
+                        "description": "Optional substring matched against file_path."
+                    },
+                    "root_path": {
+                        "type": "string",
+                        "description": "Optional root directory to restrict results to a specific index."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50
+                    }
+                },
+                "required": ["target"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let target = args
+            .get("target")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if target.is_empty() {
+            return Ok(ToolResult::error("'target' is required"));
+        }
+        let file_filter = args
+            .get("file_filter")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let root_path = args
+            .get("root_path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .min(500) as u32;
+
+        match store
+            .codebase_imports_for(&target, file_filter.as_deref(), root_path.as_deref(), limit)
+            .await
+        {
+            Ok(hits) => Ok(ToolResult::json_text(
+                &serde_json::to_value(hits).unwrap_or(Value::Null),
+            )),
+            Err(e) => Ok(ToolResult::error(&format!("codebase_imports failed: {e}"))),
+        }
+    }
+}
+
 // ===========================================================================
 //                       tailscale REST API — ACL editing
 // ===========================================================================
@@ -11492,6 +11595,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(PlanUpdateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(WorktreeCreateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseSearchTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseImportsTool::new(hub.clone())));
 
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));

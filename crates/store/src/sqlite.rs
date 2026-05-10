@@ -392,6 +392,28 @@ CREATE INDEX IF NOT EXISTS idx_memories_dedupe_key
     WHERE dedupe_key IS NOT NULL;
 "#;
 
+// v24 — Phase 2 #3 second slice — codebase_imports table.
+// One row per imported item (group `use a::{b, c}` expands to two rows).
+// Rebuilt from scratch each `codebase_index` call (DELETE WHERE root_path),
+// same lifecycle as `codebase_symbols`. Indexed by root + target so
+// "who imports X" queries are O(log n).
+const SCHEMA_V24: &str = r#"
+CREATE TABLE IF NOT EXISTS codebase_imports (
+    id         INTEGER PRIMARY KEY,
+    file_path  TEXT    NOT NULL,
+    line       INTEGER NOT NULL,
+    language   TEXT    NOT NULL,
+    raw        TEXT    NOT NULL,
+    target     TEXT    NOT NULL,
+    alias      TEXT,
+    root_path  TEXT    NOT NULL,
+    indexed_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cimp_root ON codebase_imports(root_path);
+CREATE INDEX IF NOT EXISTS idx_cimp_target ON codebase_imports(target COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_cimp_file ON codebase_imports(file_path);
+"#;
+
 // v23 — Phase 1 P2 reconsolidation: `superseded_by` foreign key on memories.
 // Lets memory_save auto-detect when a new save semantically supersedes an
 // existing record (cosine ≥ threshold) and mark the old row → status='superseded'
@@ -885,6 +907,19 @@ impl SqliteStore {
                 }
                 drop(upd);
                 let _ = c.execute("UPDATE schema_meta SET value='23' WHERE key='version'", []);
+            }
+
+            // ── v24: codebase_imports table (Phase 2 #3 second slice) ──
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "23".to_string());
+            if cur.as_str() == "23" {
+                c.execute_batch(SCHEMA_V24)?;
+                let _ = c.execute("UPDATE schema_meta SET value='24' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -3771,7 +3806,7 @@ impl StateStore for SqliteStore {
         root_path: &str,
         languages: &[String],
     ) -> Result<CodebaseIndexStats> {
-        use crate::codebase::{detect_language, extract_symbols};
+        use crate::codebase::{detect_language, extract_imports, extract_symbols};
         use walkdir::WalkDir;
 
         let start = std::time::Instant::now();
@@ -3780,9 +3815,10 @@ impl StateStore for SqliteStore {
 
         // File walking, symbol extraction, and embedding computation run in a blocking thread.
         let root_for_walk = root.clone();
-        let (all_symbols, indexed_files) = tokio::task::spawn_blocking(move || {
+        let (all_symbols, all_imports, indexed_files) = tokio::task::spawn_blocking(move || {
             // Walk source files; prune non-source trees at directory level.
             let mut symbols: Vec<CodebaseSymbol> = Vec::new();
+            let mut imports: Vec<crate::CodebaseImport> = Vec::new();
             let mut count = 0u32;
             for entry in WalkDir::new(&root_for_walk)
                 .follow_links(false)
@@ -3815,18 +3851,20 @@ impl StateStore for SqliteStore {
                 let file_path_str = path.to_string_lossy().to_string();
                 if let Ok(content) = std::fs::read_to_string(path) {
                     symbols.extend(extract_symbols(&content, &file_path_str, lang));
+                    imports.extend(extract_imports(&content, &file_path_str, lang));
                     count += 1;
                 }
             }
             // Embeddings are filled by `codebase_reindex_embeddings` (call
             // it after this returns); rows ship with embedding=NULL so the
             // walk stays fast and embed cost is opt-in.
-            (symbols, count)
+            (symbols, imports, count)
         })
         .await
         .map_err(|e| Error::Backend(format!("codebase_index blocking: {e}")))?;
 
         let symbol_count = all_symbols.len() as u32;
+        let import_count = all_imports.len() as u32;
         let root_for_return = root_path.to_string();
         let now = now_secs();
 
@@ -3836,6 +3874,10 @@ impl StateStore for SqliteStore {
                 let tx = c.savepoint()?;
                 tx.execute(
                     "DELETE FROM codebase_symbols WHERE root_path = ?1",
+                    params![root],
+                )?;
+                tx.execute(
+                    "DELETE FROM codebase_imports WHERE root_path = ?1",
                     params![root],
                 )?;
                 let mut stmt = tx.prepare(
@@ -3858,6 +3900,24 @@ impl StateStore for SqliteStore {
                     ])?;
                 }
                 drop(stmt);
+                let mut imp_stmt = tx.prepare(
+                    "INSERT INTO codebase_imports
+                     (file_path, line, language, raw, target, alias, root_path, indexed_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                )?;
+                for imp in &all_imports {
+                    imp_stmt.execute(params![
+                        imp.file_path,
+                        imp.line,
+                        imp.language,
+                        imp.raw,
+                        imp.target,
+                        imp.alias,
+                        root,
+                        now
+                    ])?;
+                }
+                drop(imp_stmt);
                 tx.commit()?;
                 Ok(())
             })
@@ -3867,6 +3927,7 @@ impl StateStore for SqliteStore {
         Ok(CodebaseIndexStats {
             indexed_files,
             symbols: symbol_count,
+            imports: import_count,
             duration_ms: start.elapsed().as_millis() as u64,
             root_path: root_for_return,
         })
@@ -3924,6 +3985,47 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("codebase_search: {e}")))
+    }
+
+    async fn codebase_imports_for(
+        &self,
+        target_substr: &str,
+        file_filter: Option<&str>,
+        root_path: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<crate::CodebaseImport>> {
+        let pattern = format!("%{}%", target_substr);
+        let file_f = file_filter.map(|s| format!("%{}%", s));
+        let root_f = root_path.map(|s| s.to_string());
+        let lim = limit.min(500) as i64;
+
+        self.conn
+            .call(move |c| -> RusqliteResult<Vec<crate::CodebaseImport>> {
+                let mut stmt = c.prepare(
+                    "SELECT file_path, line, language, raw, target, alias
+                     FROM codebase_imports
+                     WHERE target LIKE ?1
+                       AND (?2 IS NULL OR root_path = ?2)
+                       AND (?3 IS NULL OR file_path LIKE ?3)
+                     ORDER BY file_path, line
+                     LIMIT ?4",
+                )?;
+                let rows = stmt
+                    .query_map(params![pattern, root_f, file_f, lim], |row| {
+                        Ok(crate::CodebaseImport {
+                            file_path: row.get(0)?,
+                            line: row.get::<_, i64>(1)? as u32,
+                            language: row.get(2)?,
+                            raw: row.get(3)?,
+                            target: row.get(4)?,
+                            alias: row.get(5)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("codebase_imports_for: {e}")))
     }
 
 
@@ -7821,6 +7923,129 @@ mod tests {
             .await
             .expect("count");
         assert_eq!(count, cap);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // Phase 2 #3 second slice — verify the v24 codebase_imports table migrates,
+    // accepts seeded rows, and `codebase_imports_for` returns matches with
+    // root + file filters working as expected.
+    #[tokio::test]
+    async fn codebase_imports_v24_round_trip() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-codebase-imports-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        // Seed three import rows across two roots. codebase_imports_for filters
+        // by target substring + optional root + optional file.
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                let mut stmt = c.prepare(
+                    "INSERT INTO codebase_imports
+                       (file_path, line, language, raw, target, alias, root_path, indexed_at)
+                     VALUES (?1, ?2, 'rust', ?3, ?4, ?5, ?6, 1)",
+                )?;
+                stmt.execute(params![
+                    "/repoA/src/main.rs",
+                    7_i64,
+                    "use crate::store::SqliteStore;",
+                    "crate::store::SqliteStore",
+                    Option::<String>::None,
+                    "/repoA",
+                ])?;
+                stmt.execute(params![
+                    "/repoA/src/lib.rs",
+                    1_i64,
+                    "use std::collections::HashMap as Map;",
+                    "std::collections::HashMap",
+                    Some("Map"),
+                    "/repoA",
+                ])?;
+                stmt.execute(params![
+                    "/repoB/src/main.rs",
+                    3_i64,
+                    "use crate::store::SqliteStore;",
+                    "crate::store::SqliteStore",
+                    Option::<String>::None,
+                    "/repoB",
+                ])?;
+                Ok(())
+            })
+            .await
+            .expect("seed rows");
+
+        // Substring match — `SqliteStore` should hit both repoA and repoB.
+        let hits = store
+            .codebase_imports_for("SqliteStore", None, None, 50)
+            .await
+            .expect("imports_for unfiltered");
+        assert_eq!(hits.len(), 2, "got {hits:#?}");
+        assert!(hits.iter().all(|h| h.target == "crate::store::SqliteStore"));
+
+        // Restrict to /repoA — drops the repoB row.
+        let hits_a = store
+            .codebase_imports_for("SqliteStore", None, Some("/repoA"), 50)
+            .await
+            .expect("imports_for repoA");
+        assert_eq!(hits_a.len(), 1);
+        assert_eq!(hits_a[0].file_path, "/repoA/src/main.rs");
+
+        // file_filter substring match — picks the lib.rs row.
+        let hits_lib = store
+            .codebase_imports_for("HashMap", Some("lib.rs"), None, 50)
+            .await
+            .expect("imports_for lib filter");
+        assert_eq!(hits_lib.len(), 1);
+        assert_eq!(hits_lib[0].alias.as_deref(), Some("Map"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // Verify `codebase_index` writes both symbols and imports for a real file.
+    // Mirrors the pattern of the reindex test but creates a tiny rust file
+    // on disk so the walker has something to extract from.
+    #[tokio::test]
+    async fn codebase_index_persists_imports_alongside_symbols() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-codebase-index-imports-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        std::fs::create_dir_all(&temp_dir).expect("mkdir");
+        let src_path = temp_dir.join("seed.rs");
+        std::fs::write(
+            &src_path,
+            "use crate::store::SqliteStore;\nuse std::collections::{HashMap, BTreeSet};\n\npub fn boot() {}\n",
+        )
+        .expect("write seed");
+
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+        let stats = store
+            .codebase_index(temp_dir.to_str().unwrap(), &["rust".to_string()])
+            .await
+            .expect("codebase_index");
+        // 1 symbol (the `boot` fn) + 3 imports (SqliteStore + HashMap + BTreeSet).
+        assert!(stats.symbols >= 1, "got stats={stats:?}");
+        assert_eq!(stats.imports, 3, "got stats={stats:?}");
+
+        let hits = store
+            .codebase_imports_for("BTreeSet", None, None, 10)
+            .await
+            .expect("imports query");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].target, "std::collections::BTreeSet");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

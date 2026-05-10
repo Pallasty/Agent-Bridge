@@ -4,7 +4,7 @@
 //! pattern matching. Accurate enough for agent codebase navigation; a
 //! tree-sitter backend can be swapped in later if precision is needed.
 
-use crate::CodebaseSymbol;
+use crate::{CodebaseImport, CodebaseSymbol};
 use std::path::Path;
 
 /// Map a file extension to a canonical language name.
@@ -26,6 +26,16 @@ pub fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Co
         "python" => extract_python(content, file_path),
         "typescript" | "javascript" => extract_ts_js(content, file_path, language),
         "go" => extract_go(content, file_path),
+        _ => vec![],
+    }
+}
+
+/// Extract `use`/`import` statements from `content` for the given language.
+/// First slice ships Rust only (Phase 2 #3 second part); other languages
+/// return an empty vec until their importer lands.
+pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<CodebaseImport> {
+    match language {
+        "rust" => extract_rust_imports(content, file_path),
         _ => vec![],
     }
 }
@@ -322,6 +332,239 @@ fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
                 break;
             }
         }
+    }
+    out
+}
+
+// ── Rust imports (Phase 2 #3 second slice) ───────────────────────────────────
+
+/// Strip `pub`, `pub(crate)`, `pub(super)`, `pub(in path)` from the start.
+fn strip_pub_for_use(s: &str) -> &str {
+    let s = s.trim_start();
+    if let Some(rest) = s.strip_prefix("pub(") {
+        // Find the matching `)`.
+        if let Some(close) = rest.find(')') {
+            return rest[close + 1..].trim_start();
+        }
+    }
+    s.strip_prefix("pub").map(str::trim_start).unwrap_or(s)
+}
+
+/// Drop a trailing line comment (`// …`) if present. String-aware so a
+/// `//` inside a string literal isn't mistaken for a comment opener.
+fn strip_line_comment(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    let mut in_str = false;
+    let mut prev_bs = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            if c == b'\\' && !prev_bs {
+                prev_bs = true;
+                i += 1;
+                continue;
+            }
+            if c == b'"' && !prev_bs {
+                in_str = false;
+            }
+            prev_bs = false;
+        } else if c == b'"' {
+            in_str = true;
+        } else if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            return &s[..i];
+        }
+        i += 1;
+    }
+    s
+}
+
+/// Split `s` on top-level commas (depth-0 with respect to nested `{ }`).
+/// Used to break `Bar, baz::{Q, R}, Other` into three items.
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth: i32 = 0;
+    let mut start = 0usize;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '{' | '(' | '<' => depth += 1,
+            '}' | ')' | '>' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(s[start..i].trim());
+                start = i + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    out.push(s[start..].trim());
+    out.into_iter().filter(|p| !p.is_empty()).collect()
+}
+
+/// Parse one `as alias` suffix from `item`. Returns `(path_part, Some(alias))`
+/// when present, or `(item, None)` otherwise. Recognizes the suffix only at
+/// top-level brace depth so `{ a as b }` inside a group isn't matched out of
+/// context (callers pass items that have already been split).
+fn split_as_alias(item: &str) -> (String, Option<String>) {
+    let trimmed = item.trim();
+    // Search for ` as ` from the right; need the alias portion to be a
+    // simple identifier (no `::` etc.).
+    if let Some(idx) = trimmed.rfind(" as ") {
+        let path = trimmed[..idx].trim();
+        let alias = trimmed[idx + 4..].trim();
+        if !alias.is_empty()
+            && alias
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return (path.to_string(), Some(alias.to_string()));
+        }
+    }
+    (trimmed.to_string(), None)
+}
+
+/// Expand the body of a `use`-statement (everything between `use ` and the
+/// terminating `;`) into one (target, alias) per imported item. Handles
+/// single paths, group `{…}` (one level recursion), wildcards, and aliases.
+fn expand_use_body(body: &str) -> Vec<(String, Option<String>)> {
+    let body = body.trim();
+    if body.is_empty() {
+        return vec![];
+    }
+    // Locate a top-level `{`.
+    let mut depth = 0i32;
+    let mut brace_start: Option<usize> = None;
+    for (i, ch) in body.char_indices() {
+        match ch {
+            '{' if depth == 0 => {
+                brace_start = Some(i);
+                break;
+            }
+            '<' | '(' => depth += 1,
+            '>' | ')' => depth -= 1,
+            _ => {}
+        }
+    }
+    let Some(bstart) = brace_start else {
+        // No group — single path, possibly with `as alias`.
+        let (path, alias) = split_as_alias(body);
+        return vec![(path, alias)];
+    };
+    // Find matching `}`.
+    let mut depth = 0i32;
+    let mut bend: Option<usize> = None;
+    for (i, ch) in body[bstart..].char_indices() {
+        let abs = bstart + i;
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    bend = Some(abs);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(bend) = bend else {
+        // Unbalanced — emit raw as a single fallback item.
+        let (path, alias) = split_as_alias(body);
+        return vec![(path, alias)];
+    };
+    let prefix = body[..bstart].trim_end_matches(':').trim();
+    let inner = &body[bstart + 1..bend];
+    let mut out = Vec::new();
+    for item in split_top_level_commas(inner) {
+        // `self` inside a group means the prefix itself.
+        if item == "self" {
+            out.push((prefix.to_string(), None));
+            continue;
+        }
+        // Recurse into nested groups so `bar::{Baz, Qux}` inside the outer
+        // brace expands properly.
+        let sub = expand_use_body(item);
+        for (sub_path, sub_alias) in sub {
+            let combined = if prefix.is_empty() {
+                sub_path
+            } else if sub_path.is_empty() {
+                prefix.to_string()
+            } else {
+                format!("{prefix}::{sub_path}")
+            };
+            out.push((combined, sub_alias));
+        }
+    }
+    out
+}
+
+/// Extract Rust `use` statements as one [`CodebaseImport`] per imported item.
+/// Handles single-line and multi-line statements, groups (one level of
+/// nesting), wildcards, and `as alias`. `extern crate` is recorded as a
+/// single import with `target = "<crate-name>"`.
+pub fn extract_rust_imports(content: &str, file_path: &str) -> Vec<CodebaseImport> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0usize;
+    while i < lines.len() {
+        let raw = lines[i];
+        let no_cmt = strip_line_comment(raw);
+        let stripped = strip_pub_for_use(no_cmt.trim());
+        let line_no = (i as u32) + 1;
+        // `extern crate foo;` / `extern crate foo as bar;`
+        if let Some(rest) = stripped.strip_prefix("extern crate ") {
+            if let Some(end) = rest.find(';') {
+                let body = &rest[..end];
+                let (target, alias) = split_as_alias(body.trim());
+                out.push(CodebaseImport {
+                    file_path: file_path.to_string(),
+                    line: line_no,
+                    language: "rust".to_string(),
+                    raw: raw.chars().take(200).collect(),
+                    target,
+                    alias,
+                });
+            }
+            i += 1;
+            continue;
+        }
+        if let Some(after_use) = stripped.strip_prefix("use ") {
+            // Aggregate until we hit a `;` at top level (multi-line group).
+            let mut buf = after_use.to_string();
+            let mut end_line_idx = i;
+            while !buf.contains(';') {
+                end_line_idx += 1;
+                if end_line_idx >= lines.len() {
+                    break;
+                }
+                buf.push(' ');
+                buf.push_str(strip_line_comment(lines[end_line_idx]).trim());
+            }
+            // Trim everything from the first top-level `;` onwards.
+            if let Some(semi) = buf.find(';') {
+                buf.truncate(semi);
+            }
+            let raw_full = if end_line_idx == i {
+                raw.to_string()
+            } else {
+                lines[i..=end_line_idx.min(lines.len() - 1)].join(" ")
+            };
+            for (target, alias) in expand_use_body(&buf) {
+                if target.is_empty() {
+                    continue;
+                }
+                out.push(CodebaseImport {
+                    file_path: file_path.to_string(),
+                    line: line_no,
+                    language: "rust".to_string(),
+                    raw: raw_full.chars().take(200).collect(),
+                    target,
+                    alias,
+                });
+            }
+            i = end_line_idx + 1;
+            continue;
+        }
+        i += 1;
     }
     out
 }
@@ -731,5 +974,127 @@ class B:
         assert_eq!(syms[1].name, "A.a_m");
         assert_eq!(syms[2].name, "B");
         assert_eq!(syms[3].name, "B.b_m");
+    }
+
+    // ── Phase 2 #3 second slice — Rust import extractor ─────────────────────
+
+    #[test]
+    fn rust_import_single_path() {
+        let src = "use crate::store::SqliteStore;";
+        let imps = extract_rust_imports(src, "f.rs");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "crate::store::SqliteStore");
+        assert!(imps[0].alias.is_none());
+        assert_eq!(imps[0].language, "rust");
+    }
+
+    #[test]
+    fn rust_import_with_alias() {
+        let src = "use std::collections::HashMap as Map;";
+        let imps = extract_rust_imports(src, "f.rs");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "std::collections::HashMap");
+        assert_eq!(imps[0].alias.as_deref(), Some("Map"));
+    }
+
+    #[test]
+    fn rust_import_group_expands_to_one_per_item() {
+        let src = "use crate::{CodebaseImport, CodebaseSymbol};";
+        let imps = extract_rust_imports(src, "f.rs");
+        assert_eq!(imps.len(), 2);
+        assert_eq!(imps[0].target, "crate::CodebaseImport");
+        assert_eq!(imps[1].target, "crate::CodebaseSymbol");
+    }
+
+    #[test]
+    fn rust_import_group_with_per_item_alias() {
+        let src = "use foo::{Bar, Baz as Z};";
+        let imps = extract_rust_imports(src, "f.rs");
+        assert_eq!(imps.len(), 2);
+        assert_eq!(imps[0].target, "foo::Bar");
+        assert!(imps[0].alias.is_none());
+        assert_eq!(imps[1].target, "foo::Baz");
+        assert_eq!(imps[1].alias.as_deref(), Some("Z"));
+    }
+
+    #[test]
+    fn rust_import_wildcard() {
+        let src = "use foo::bar::*;";
+        let imps = extract_rust_imports(src, "f.rs");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "foo::bar::*");
+    }
+
+    #[test]
+    fn rust_import_pub_use_stripped() {
+        let src = "pub use crate::api::Endpoint;";
+        let imps = extract_rust_imports(src, "f.rs");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "crate::api::Endpoint");
+        // pub(crate) form
+        let src2 = "pub(crate) use crate::api::Internal;";
+        let imps2 = extract_rust_imports(src2, "f.rs");
+        assert_eq!(imps2.len(), 1);
+        assert_eq!(imps2[0].target, "crate::api::Internal");
+    }
+
+    #[test]
+    fn rust_import_multi_line_group() {
+        // Real codebase pattern: long import lists wrapped across lines.
+        let src = "\
+use crate::{
+    CoactivationStats, CodebaseIndexStats, CodebaseSymbol,
+    ForumExportResult,
+};
+";
+        let imps = extract_rust_imports(src, "f.rs");
+        assert_eq!(imps.len(), 4, "got {imps:#?}");
+        assert_eq!(imps[0].target, "crate::CoactivationStats");
+        assert_eq!(imps[1].target, "crate::CodebaseIndexStats");
+        assert_eq!(imps[2].target, "crate::CodebaseSymbol");
+        assert_eq!(imps[3].target, "crate::ForumExportResult");
+        // All four should report the line where `use` started.
+        assert!(imps.iter().all(|i| i.line == 1));
+    }
+
+    #[test]
+    fn rust_import_nested_group_recurses() {
+        let src = "use foo::{bar::{Baz, Qux}, Other};";
+        let imps = extract_rust_imports(src, "f.rs");
+        assert_eq!(imps.len(), 3, "got {imps:#?}");
+        let targets: Vec<&str> = imps.iter().map(|i| i.target.as_str()).collect();
+        assert!(targets.contains(&"foo::bar::Baz"));
+        assert!(targets.contains(&"foo::bar::Qux"));
+        assert!(targets.contains(&"foo::Other"));
+    }
+
+    #[test]
+    fn rust_import_self_inside_group_means_prefix() {
+        // `use foo::bar::{self, Baz};` imports both `foo::bar` and `foo::bar::Baz`.
+        let src = "use foo::bar::{self, Baz};";
+        let imps = extract_rust_imports(src, "f.rs");
+        assert_eq!(imps.len(), 2);
+        let targets: Vec<&str> = imps.iter().map(|i| i.target.as_str()).collect();
+        assert!(targets.contains(&"foo::bar"));
+        assert!(targets.contains(&"foo::bar::Baz"));
+    }
+
+    #[test]
+    fn rust_extern_crate_recorded_as_import() {
+        let src = "extern crate serde;\nextern crate serde_json as sj;";
+        let imps = extract_rust_imports(src, "f.rs");
+        assert_eq!(imps.len(), 2);
+        assert_eq!(imps[0].target, "serde");
+        assert!(imps[0].alias.is_none());
+        assert_eq!(imps[1].target, "serde_json");
+        assert_eq!(imps[1].alias.as_deref(), Some("sj"));
+    }
+
+    #[test]
+    fn rust_import_skips_lines_not_starting_with_use() {
+        // The word "use" appears inside an identifier; must not match.
+        let src = "fn use_this() {}\nstruct UseFoo;\n// use foo;\n";
+        let imps = extract_rust_imports(src, "f.rs");
+        assert!(imps.is_empty(), "spurious matches: {imps:#?}");
     }
 }
