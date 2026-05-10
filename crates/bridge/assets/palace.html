@@ -22,7 +22,13 @@
       min-width: 0;       /* allow flex shrink below cytoscape's internal canvas size */
       height: 100vh;
       background: radial-gradient(ellipse at center, #0e0e16 0%, #06060b 75%);
+      transition: transform 320ms ease, filter 320ms ease;
+      transform-origin: center center;
     }
+    /* B-mode visual rebalance: when canvas is open, the Palace recedes
+       (vision principle "Palace 微缩 0.95→1.0 替代瞬切"). Subtle scale
+       + filter so it reads as "background context" without disappearing. */
+    body.canvas-open #cy { transform: scale(0.97); filter: brightness(0.78); }
     /* ── Top bar ──────────────────────────────────────────── */
     #topbar {
       position: absolute;
@@ -276,6 +282,29 @@
       --canvas-width: 100vw;
       --canvas-fade: 320ms;
     }
+    /* B M1 — narrow mode: canvas takes 60vw on the right, Palace stays
+       visible behind the remaining 40vw. The toggle button in the focus
+       bar flips this class on <body>. Transition shares the canvas-fade
+       timing so the slide is one motion. */
+    body.canvas-narrow { --canvas-width: 60vw; }
+    /* In narrow mode Palace stays brighter — the user is co-piloting
+       with the graph still in view. */
+    body.canvas-narrow.canvas-open #cy { transform: scale(0.99); filter: brightness(0.92); }
+    .canvas-narrow-toggle {
+      background: transparent;
+      border: 1px solid #2a2a35;
+      color: #6a6a78;
+      padding: 5px 10px;
+      font-size: 11px;
+      border-radius: 4px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      font-family: inherit;
+      margin-left: auto;
+      transition: color 120ms, border-color 120ms;
+    }
+    .canvas-narrow-toggle:hover { color: #5cc8c8; border-color: #4a8b9c; }
+    body.canvas-narrow .canvas-narrow-toggle { color: #5cc8c8; border-color: #5cc8c8; }
     #canvas-overlay {
       position: fixed;
       top: 0;
@@ -595,6 +624,8 @@
         <div class="canvas-focus-key" id="canvas-focus-key"></div>
         <div class="canvas-focus-meta" id="canvas-focus-meta"></div>
       </div>
+      <button class="canvas-narrow-toggle" id="canvas-narrow-toggle" type="button"
+              title="toggle narrow mode (Palace stays visible) — cmd/ctrl+\\">⊟ narrow</button>
     </div>
     <div class="canvas-body">
       <div class="canvas-pane canvas-pane-editor">
@@ -653,6 +684,11 @@ const KIND_COLORS = {
   todo:        "#d09060",
   concept:     "#9070d0",
   session_handoff: "#708090",
+  // B-mode canvas product. Cyan paired with `expanded_from` edge — both
+  // share the C3.6 attention-cyan family so working_docs visually thread
+  // back to their originating node.
+  working_doc: "#5cc8c8",
+  annotation:  "#ffe070",
 };
 const DEFAULT_COLOR = "#7a7d8a";
 function colorForKind(k) { return KIND_COLORS[k] || DEFAULT_COLOR; }
@@ -667,6 +703,9 @@ const EDGE_COLORS = {
   annotates:    "#ffe070",
   coactivation: "#5cc8c8",
   cofires:      "#6dd4bd",
+  // B-mode canvas-save edge. Solid cyan bezier — distinct from cofires
+  // (also cyan, but dotted underlay) and references (cool gray straight).
+  expanded_from: "#5cc8c8",
 };
 const DEFAULT_EDGE_COLOR = "#3a3a48";
 function colorForEdgeType(t) { return EDGE_COLORS[t] || DEFAULT_EDGE_COLOR; }
@@ -882,6 +921,15 @@ function buildCy(data) {
       { selector: "edge[type='annotates']", style: {
         "line-color": "#ffe070", "opacity": 0.85, "width": 1.6,
       }},
+      // B-mode canvas-save edge. Solid cyan bezier — paired by color
+      // with `working_doc` node fill. Bezier (vs straight) lets it
+      // visually breathe inside dense Hebbian clusters.
+      { selector: "edge[type='expanded_from']", style: {
+        "line-color": "#5cc8c8",
+        "curve-style": "bezier",
+        "opacity": 0.78,
+        "width": 1.5,
+      }},
       // C3.6 co-activation: Hebbian "fire together" pairs, NO explicit edge
       // between them. Cyan curved underlay so the structural skeleton
       // (straight, neutral-toned) stays visually dominant; opacity & width
@@ -897,6 +945,14 @@ function buildCy(data) {
       { selector: "edge.faded", style: { "opacity": 0.04 }},
       { selector: "edge.focus-edge", style: {
         "line-color": "#9a9aa8", "opacity": 0.85, "width": 2,
+      }},
+      // Freshly-sedimented node: cytoscape's overlay-* gives a soft
+      // cyan ring that telegraphs "this is where your canvas-save
+      // landed". Removed after ~1.5s by the saveCanvas flow.
+      { selector: "node.new-sediment", style: {
+        "overlay-color": "#5cc8c8",
+        "overlay-padding": 16,
+        "overlay-opacity": 0.42,
       }},
     ],
     layout: {
@@ -1350,6 +1406,8 @@ function openCanvas(memory) {
   loadCanvasRail(memory);
   overlay.classList.remove("hidden", "leaving", "freezing");
   overlay.classList.add("entering");
+  // Tell the body Palace should recede (CSS handles the scale + dim).
+  document.body.classList.add("canvas-open");
   // Force reflow so the entering→base transition runs.
   // Reading `offsetHeight` flushes the previous frame's layout.
   // eslint-disable-next-line no-unused-expressions
@@ -1362,11 +1420,24 @@ function closeCanvas() {
   const overlay = document.getElementById("canvas-overlay");
   if (!overlay || overlay.classList.contains("hidden")) return;
   overlay.classList.add("leaving");
+  // Drop canvas-open immediately so Palace begins scaling back to 1.0
+  // in parallel with the overlay slide-out (one motion, not sequential).
+  document.body.classList.remove("canvas-open");
   setTimeout(() => {
     overlay.classList.add("hidden");
     overlay.classList.remove("leaving", "freezing");
     canvasState.current = null;
   }, 320); // matches --canvas-fade
+}
+
+function toggleCanvasNarrow() {
+  const narrow = document.body.classList.toggle("canvas-narrow");
+  const btn = document.getElementById("canvas-narrow-toggle");
+  if (btn) btn.textContent = narrow ? "⊞ fullscreen" : "⊟ narrow";
+  // Cytoscape needs a resize when the visible width swings — otherwise
+  // its internal canvas keeps the old metrics and node positions look
+  // off-center until the next layout pass.
+  if (state.cy) state.cy.resize();
 }
 
 function resetCanvasHint() {
@@ -1594,10 +1665,16 @@ async function saveCanvas() {
       closeCanvas();
       await loadGraph();
       // Land focus on the new working_doc so the user sees the sediment.
+      // Add `.new-sediment` class for ~1.5s — cytoscape's overlay-* gives
+      // a soft cyan ring telegraphing "this is the node you just made".
+      // The vision calls this the "结冰" moment of the breathing cycle.
       setTimeout(() => {
         if (state.cy && state.cy.getElementById(j.key).length > 0) {
           focusOnNode(j.key);
           showSidePanel(j.key);
+          const newNode = state.cy.getElementById(j.key);
+          newNode.addClass("new-sediment");
+          setTimeout(() => newNode.removeClass("new-sediment"), 1500);
         }
       }, 60);
     }, 900);
@@ -1612,6 +1689,8 @@ async function saveCanvas() {
 function bindCanvasGlobals() {
   document.querySelector("#canvas-overlay .canvas-close")
     .addEventListener("click", closeCanvas);
+  document.getElementById("canvas-narrow-toggle")
+    .addEventListener("click", toggleCanvasNarrow);
   const editor = document.getElementById("canvas-editor");
   editor.addEventListener("input", () => renderMarkdownPreview(editor.value));
   editor.addEventListener("keydown", (e) => {
@@ -1627,6 +1706,15 @@ function bindCanvasGlobals() {
       if (overlay && !overlay.classList.contains("hidden")) {
         e.preventDefault();
         closeCanvas();
+      }
+    } else if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
+      // cmd/ctrl+\ — toggle narrow mode while canvas is open. No-op if
+      // canvas isn't open so the shortcut doesn't surprise users on
+      // the regular Palace view.
+      const overlay = document.getElementById("canvas-overlay");
+      if (overlay && !overlay.classList.contains("hidden")) {
+        e.preventDefault();
+        toggleCanvasNarrow();
       }
     }
   });
