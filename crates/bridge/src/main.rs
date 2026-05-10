@@ -226,6 +226,12 @@ enum DreamOp {
         /// Inspect-only: print decisions, no writes.
         #[arg(long)]
         dry_run: bool,
+        /// Also write a self-contained HTML audit report to PATH. Useful for
+        /// cron-driven auto-runs where terminal output is invisible — the
+        /// HTML preserves Strength Map + per-pair cards for later review,
+        /// and links each key to the running Palace viewer (?focus=KEY).
+        #[arg(long)]
+        html: Option<PathBuf>,
     },
 }
 
@@ -544,7 +550,8 @@ async fn main() -> Result<()> {
                 min_count,
                 limit,
                 dry_run,
-            } => run_dream_promote(*min_count, *limit, *dry_run).await,
+                html,
+            } => run_dream_promote(*min_count, *limit, *dry_run, html.as_deref()).await,
         };
     }
 
@@ -831,7 +838,36 @@ async fn run_dream_identity(days: u32, as_json: bool) -> Result<()> {
 ///   - before promote: pair shown as cyan dotted bezier underlay
 ///   - after  promote: pair shown as neutral solid edge in main skeleton
 ///                     (coact dedup hides the underlay since explicit wins)
-async fn run_dream_promote(min_count: u64, limit: u32, dry_run: bool) -> Result<()> {
+/// Per-pair audit row captured during promote. Drives both terminal output
+/// and `--html` rendering. Status is the immutable record of what happened
+/// (or, in dry-run, what would happen) for that pair this run.
+#[derive(Debug, Clone)]
+struct PromoteDecision {
+    key_a: String,
+    key_b: String,
+    count: u64,
+    weight: f64,
+    status: PromoteStatus,
+}
+
+#[derive(Debug, Clone)]
+enum PromoteStatus {
+    /// Live-run wrote a new `cofires` edge.
+    Promoted,
+    /// Dry-run would promote (no write).
+    WouldPromote,
+    /// Pair already has an explicit edge of any type — structural wins.
+    Skipped,
+    /// Live-run memory_link returned an error (key tombstoned, etc.).
+    Failed(String),
+}
+
+async fn run_dream_promote(
+    min_count: u64,
+    limit: u32,
+    dry_run: bool,
+    html_path: Option<&std::path::Path>,
+) -> Result<()> {
     use ab_store::{default_db_path, SqliteStore, StateStore};
     use std::collections::HashSet;
 
@@ -847,6 +883,12 @@ async fn run_dream_promote(min_count: u64, limit: u32, dry_run: bool) -> Result<
     if pairs.is_empty() {
         println!("(no coactivation pairs with count ≥ {min_count})");
         println!("DB: {}", path.display());
+        if let Some(p) = html_path {
+            let html = render_promote_html(min_count, limit, dry_run, &path, &[]);
+            std::fs::write(p, html)
+                .map_err(|e| anyhow::anyhow!("write html report to {p:?}: {e}"))?;
+            println!("html report: {}", p.display());
+        }
         return Ok(());
     }
 
@@ -876,17 +918,20 @@ async fn run_dream_promote(min_count: u64, limit: u32, dry_run: bool) -> Result<
     println!("candidates: {} pair(s)", pairs.len());
     println!();
 
-    let mut promoted = 0usize;
-    let mut skipped = 0usize;
-    let mut errors = 0usize;
+    let mut decisions: Vec<PromoteDecision> = Vec::with_capacity(pairs.len());
     for c in &pairs {
         let pair = if c.key_a < c.key_b {
             (c.key_a.clone(), c.key_b.clone())
         } else {
             (c.key_b.clone(), c.key_a.clone())
         };
+        // Map count → weight in [0.5, 0.95]. Stay strictly below 1.0 so
+        // memory_link doesn't auto-substitute the canonical type weight
+        // (its 1.0-sentinel branch). Lower bound ensures even a min-count
+        // pair has a measurable weight.
+        let weight = ((c.count as f64) / 10.0).clamp(0.5, 0.95);
+
         if existing.contains(&pair) {
-            skipped += 1;
             if dry_run {
                 println!(
                     "  SKIP    ({:>2} fires)  {}  ↔  {}    [already linked]",
@@ -895,13 +940,16 @@ async fn run_dream_promote(min_count: u64, limit: u32, dry_run: bool) -> Result<
                     short_key(&pair.1, 38),
                 );
             }
+            decisions.push(PromoteDecision {
+                key_a: pair.0,
+                key_b: pair.1,
+                count: c.count,
+                weight,
+                status: PromoteStatus::Skipped,
+            });
             continue;
         }
-        // Map count → weight in [0.5, 0.95]. Stay strictly below 1.0 so
-        // memory_link doesn't auto-substitute the canonical type weight
-        // (its 1.0-sentinel branch). Lower bound ensures even a min-count
-        // pair has a measurable weight.
-        let weight = ((c.count as f64) / 10.0).clamp(0.5, 0.95);
+
         if dry_run {
             println!(
                 "  PROMOTE ({:>2} fires, w={:.2})  {}  ↔  {}",
@@ -910,14 +958,19 @@ async fn run_dream_promote(min_count: u64, limit: u32, dry_run: bool) -> Result<
                 short_key(&pair.0, 38),
                 short_key(&pair.1, 38),
             );
-            promoted += 1;
+            decisions.push(PromoteDecision {
+                key_a: pair.0,
+                key_b: pair.1,
+                count: c.count,
+                weight,
+                status: PromoteStatus::WouldPromote,
+            });
         } else {
             match store
                 .memory_link(&pair.0, &pair.1, "cofires", weight)
                 .await
             {
                 Ok(()) => {
-                    promoted += 1;
                     println!(
                         "  ✓ ({:>2} fires, w={:.2})  {}  ↔  {}",
                         c.count,
@@ -925,17 +978,43 @@ async fn run_dream_promote(min_count: u64, limit: u32, dry_run: bool) -> Result<
                         short_key(&pair.0, 38),
                         short_key(&pair.1, 38),
                     );
+                    decisions.push(PromoteDecision {
+                        key_a: pair.0,
+                        key_b: pair.1,
+                        count: c.count,
+                        weight,
+                        status: PromoteStatus::Promoted,
+                    });
                 }
                 Err(e) => {
-                    errors += 1;
                     eprintln!(
                         "  ✗ ({} fires)  {} ↔ {}    [{e}]",
                         c.count, pair.0, pair.1
                     );
+                    decisions.push(PromoteDecision {
+                        key_a: pair.0,
+                        key_b: pair.1,
+                        count: c.count,
+                        weight,
+                        status: PromoteStatus::Failed(e.to_string()),
+                    });
                 }
             }
         }
     }
+
+    let promoted = decisions
+        .iter()
+        .filter(|d| matches!(d.status, PromoteStatus::Promoted | PromoteStatus::WouldPromote))
+        .count();
+    let skipped = decisions
+        .iter()
+        .filter(|d| matches!(d.status, PromoteStatus::Skipped))
+        .count();
+    let errors = decisions
+        .iter()
+        .filter(|d| matches!(d.status, PromoteStatus::Failed(_)))
+        .count();
 
     println!();
     if dry_run {
@@ -949,7 +1028,361 @@ async fn run_dream_promote(min_count: u64, limit: u32, dry_run: bool) -> Result<
             "promoted {promoted}, skipped {skipped}, FAILED {errors} — see stderr"
         );
     }
+
+    if let Some(p) = html_path {
+        let html = render_promote_html(min_count, limit, dry_run, &path, &decisions);
+        std::fs::write(p, html)
+            .map_err(|e| anyhow::anyhow!("write html report to {p:?}: {e}"))?;
+        println!("html report: {}", p.display());
+    }
     Ok(())
+}
+
+/// Render a self-contained HTML audit report for a `dream promote` run.
+///
+/// Layout (top → bottom):
+///   1. Header banner — title, timestamp, dry-run badge, summary stats
+///   2. Strength Map — chips colored by status × weight bin (jump anchors)
+///   3. Per-pair cards — full keys (linked to Palace ?focus=KEY), count,
+///      weight bar, status badge, error text if Failed
+///   4. Footer — DB path, CLI invocation, generation timestamp
+///
+/// Design lifted from thariqs/html-effectiveness Risk Map pattern: a
+/// horizontal colored-tag row replaces a TOC for spatial-information
+/// navigation. Color motif matches Palace C3.6 (cyan = co-activation
+/// strength, purple = structural, red = error).
+fn render_promote_html(
+    min_count: u64,
+    limit: u32,
+    dry_run: bool,
+    db_path: &std::path::Path,
+    decisions: &[PromoteDecision],
+) -> String {
+    let now = chrono_now_utc_string();
+    let total = decisions.len();
+    let promoted = decisions
+        .iter()
+        .filter(|d| matches!(d.status, PromoteStatus::Promoted | PromoteStatus::WouldPromote))
+        .count();
+    let skipped = decisions
+        .iter()
+        .filter(|d| matches!(d.status, PromoteStatus::Skipped))
+        .count();
+    let errors = decisions
+        .iter()
+        .filter(|d| matches!(d.status, PromoteStatus::Failed(_)))
+        .count();
+
+    let dry_badge = if dry_run {
+        r#"<span class="badge badge-dry">DRY RUN — NO WRITES</span>"#
+    } else {
+        r#"<span class="badge badge-live">LIVE RUN</span>"#
+    };
+
+    // Strength Map: one chip per decision. Chip CSS class encodes status +
+    // weight bin so coloring is purely declarative.
+    let mut strength_map = String::new();
+    for (i, d) in decisions.iter().enumerate() {
+        let cls = chip_class(&d.status, d.weight);
+        let label = format!(
+            "{} ↔ {}",
+            short_key(&d.key_a, 24),
+            short_key(&d.key_b, 24)
+        );
+        let title = format!(
+            "{} ↔ {} — {} fires, w={:.2}",
+            d.key_a, d.key_b, d.count, d.weight
+        );
+        strength_map.push_str(&format!(
+            r##"<a class="chip {cls}" href="#pair-{i}" title="{title}">{label} <span class="chip-count">{count}</span></a>"##,
+            cls = cls,
+            i = i,
+            title = html_escape(&title),
+            label = html_escape(&label),
+            count = d.count,
+        ));
+    }
+
+    // Per-pair cards.
+    let mut cards = String::new();
+    for (i, d) in decisions.iter().enumerate() {
+        let (status_text, status_cls) = match &d.status {
+            PromoteStatus::Promoted => ("PROMOTED", "status-promoted"),
+            PromoteStatus::WouldPromote => ("WOULD PROMOTE", "status-would"),
+            PromoteStatus::Skipped => ("SKIPPED — already linked", "status-skipped"),
+            PromoteStatus::Failed(_) => ("FAILED", "status-failed"),
+        };
+        let err_block = match &d.status {
+            PromoteStatus::Failed(msg) => format!(
+                r#"<div class="error-msg">{}</div>"#,
+                html_escape(msg)
+            ),
+            _ => String::new(),
+        };
+        let weight_pct = (d.weight * 100.0).round() as u32;
+        cards.push_str(&format!(
+            r##"<div id="pair-{i}" class="card">
+  <div class="card-head">
+    <span class="card-num">#{n}</span>
+    <span class="badge {status_cls}">{status_text}</span>
+    <span class="card-meta">{count} fires · w={weight:.2}</span>
+  </div>
+  <div class="card-pair">
+    <a class="key" href="http://localhost:7878/?focus={key_a_url}" title="{key_a_full}">{key_a_disp}</a>
+    <span class="sep">↔</span>
+    <a class="key" href="http://localhost:7878/?focus={key_b_url}" title="{key_b_full}">{key_b_disp}</a>
+  </div>
+  <div class="weight-bar"><div class="weight-fill" style="width:{weight_pct}%"></div></div>
+  {err_block}
+</div>
+"##,
+            i = i,
+            n = i + 1,
+            status_text = status_text,
+            status_cls = status_cls,
+            count = d.count,
+            weight = d.weight,
+            weight_pct = weight_pct,
+            key_a_url = url_escape(&d.key_a),
+            key_b_url = url_escape(&d.key_b),
+            key_a_full = html_escape(&d.key_a),
+            key_b_full = html_escape(&d.key_b),
+            key_a_disp = html_escape(&d.key_a),
+            key_b_disp = html_escape(&d.key_b),
+            err_block = err_block,
+        ));
+    }
+
+    let empty_msg = if decisions.is_empty() {
+        r#"<p class="empty">No co-activation pairs at or above the threshold. Either the system is quiet (try lowering <code>--min-count</code>) or all strong pairs are already structurally wired.</p>"#
+    } else {
+        ""
+    };
+
+    format!(
+        r##"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dream promote — {timestamp}</title>
+<style>
+  :root {{
+    --bg: #0f0f14;
+    --panel: #1a1a22;
+    --border: #2a2a38;
+    --text: #e0e0e8;
+    --dim: #8a8a96;
+    --cyan-strong: #5cc8c8;
+    --cyan-mid: #4a8b9c;
+    --amber: #d4a64a;
+    --purple: #7a4ba8;
+    --red: #c8505c;
+    --green: #5cc88a;
+  }}
+  * {{ box-sizing: border-box; }}
+  html, body {{ margin: 0; padding: 0; }}
+  body {{
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif;
+    padding: 28px 36px 60px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }}
+  h1 {{ margin: 0 0 8px; font-size: 22px; font-weight: 600; }}
+  h2 {{ margin: 32px 0 12px; font-size: 14px; font-weight: 600; color: var(--dim);
+        text-transform: uppercase; letter-spacing: 0.08em; }}
+  code, .key, .weight-bar {{ font-family: "JetBrains Mono", "SF Mono", Menlo, monospace; }}
+  a {{ color: inherit; text-decoration: none; }}
+  .header {{ display: flex; flex-direction: column; gap: 6px; padding-bottom: 18px;
+            border-bottom: 1px solid var(--border); }}
+  .meta-row {{ display: flex; gap: 14px; flex-wrap: wrap; color: var(--dim); font-size: 12px; }}
+  .meta-row code {{ color: var(--text); }}
+  .stats {{ display: flex; gap: 18px; margin-top: 6px; }}
+  .stat {{ font-size: 13px; }}
+  .stat .num {{ font-size: 18px; font-weight: 600; margin-right: 4px; }}
+  .stat-promoted .num {{ color: var(--cyan-strong); }}
+  .stat-skipped  .num {{ color: var(--purple); }}
+  .stat-failed   .num {{ color: var(--red); }}
+
+  .badge {{ display: inline-block; padding: 2px 8px; border-radius: 3px;
+           font-size: 11px; font-weight: 600; letter-spacing: 0.05em; }}
+  .badge-dry  {{ background: #2a2316; color: var(--amber); border: 1px solid var(--amber); }}
+  .badge-live {{ background: #16241e; color: var(--green);  border: 1px solid var(--green);  }}
+  .status-promoted {{ background: #16242a; color: var(--cyan-strong); border: 1px solid var(--cyan-strong); }}
+  .status-would    {{ background: #16242a; color: var(--cyan-mid);    border: 1px solid var(--cyan-mid); }}
+  .status-skipped  {{ background: #1f1830; color: var(--purple);      border: 1px solid var(--purple); }}
+  .status-failed   {{ background: #2a161a; color: var(--red);         border: 1px solid var(--red); }}
+
+  .strength-map {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }}
+  .chip {{ display: inline-flex; align-items: center; gap: 6px;
+          padding: 4px 9px; border-radius: 3px; font-size: 12px;
+          border: 1px solid var(--border); background: var(--panel);
+          font-family: "JetBrains Mono", "SF Mono", Menlo, monospace; }}
+  .chip:hover {{ filter: brightness(1.25); }}
+  .chip-count {{ font-size: 10px; padding: 1px 5px; border-radius: 2px;
+                background: rgba(255,255,255,0.08); color: var(--dim); }}
+  .chip-strong  {{ border-color: var(--cyan-strong); color: var(--cyan-strong); }}
+  .chip-mid     {{ border-color: var(--cyan-mid);    color: var(--cyan-mid); }}
+  .chip-weak    {{ border-color: var(--amber);       color: var(--amber); }}
+  .chip-skipped {{ border-color: var(--purple);      color: var(--purple); }}
+  .chip-failed  {{ border-color: var(--red);         color: var(--red); }}
+
+  .card {{ background: var(--panel); border: 1px solid var(--border);
+          border-radius: 4px; padding: 14px 16px; margin: 10px 0; }}
+  .card-head {{ display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }}
+  .card-num {{ color: var(--dim); font-size: 12px; }}
+  .card-meta {{ color: var(--dim); font-size: 12px; margin-left: auto; }}
+  .card-pair {{ display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+               font-size: 13px; padding: 4px 0; }}
+  .card-pair .key {{ color: var(--text); border-bottom: 1px dotted var(--dim);
+                     padding: 1px 2px; }}
+  .card-pair .key:hover {{ color: var(--cyan-strong); border-bottom-color: var(--cyan-strong); }}
+  .card-pair .sep {{ color: var(--dim); }}
+  .weight-bar {{ height: 4px; background: rgba(255,255,255,0.04);
+                border-radius: 2px; overflow: hidden; margin-top: 8px; }}
+  .weight-fill {{ height: 100%; background: linear-gradient(90deg, var(--amber), var(--cyan-strong)); }}
+  .error-msg {{ margin-top: 8px; padding: 6px 10px; background: #2a161a;
+               border-left: 3px solid var(--red); border-radius: 2px;
+               font-family: monospace; font-size: 12px; color: var(--red); }}
+
+  .footer {{ margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border);
+            color: var(--dim); font-size: 12px; }}
+  .empty {{ color: var(--dim); padding: 16px; background: var(--panel);
+           border-radius: 4px; border: 1px dashed var(--border); }}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>dream promote — Hebbian crystallization</h1>
+  <div class="meta-row">
+    {dry_badge}
+    <span>min_count <code>{min_count}</code></span>
+    <span>limit <code>{limit}</code></span>
+    <span>generated <code>{timestamp}</code></span>
+  </div>
+  <div class="stats">
+    <span class="stat stat-promoted"><span class="num">{promoted}</span>{promoted_label}</span>
+    <span class="stat stat-skipped"><span class="num">{skipped}</span>skipped</span>
+    {errors_stat}
+    <span class="stat" style="color: var(--dim);"><span class="num">{total}</span>candidates</span>
+  </div>
+</div>
+
+<h2>Strength Map</h2>
+<div class="strength-map">{strength_map}</div>
+
+<h2>Decisions</h2>
+{empty_msg}
+{cards}
+
+<div class="footer">
+  DB: <code>{db_display}</code><br>
+  Pairs link to Palace at <code>http://localhost:7878/?focus=KEY</code> — start with <code>agent-bridge palace serve</code> if not running.<br>
+  Generated by <code>agent-bridge dream promote</code> · cyan = co-activation strength · purple = structural · red = error
+</div>
+
+</body>
+</html>
+"##,
+        timestamp = html_escape(&now),
+        dry_badge = dry_badge,
+        min_count = min_count,
+        limit = limit,
+        total = total,
+        promoted = promoted,
+        skipped = skipped,
+        promoted_label = if dry_run { "would promote" } else { "promoted" },
+        errors_stat = if errors > 0 {
+            format!(
+                r#"<span class="stat stat-failed"><span class="num">{}</span>failed</span>"#,
+                errors
+            )
+        } else {
+            String::new()
+        },
+        strength_map = strength_map,
+        empty_msg = empty_msg,
+        cards = cards,
+        db_display = html_escape(&db_path.display().to_string()),
+    )
+}
+
+fn chip_class(status: &PromoteStatus, weight: f64) -> &'static str {
+    match status {
+        PromoteStatus::Skipped => "chip-skipped",
+        PromoteStatus::Failed(_) => "chip-failed",
+        PromoteStatus::Promoted | PromoteStatus::WouldPromote => {
+            if weight >= 0.8 { "chip-strong" }
+            else if weight >= 0.65 { "chip-mid" }
+            else { "chip-weak" }
+        }
+    }
+}
+
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+fn url_escape(s: &str) -> String {
+    // Minimal percent-encode for URL query values: encode bytes outside the
+    // unreserved set per RFC 3986. Memory keys are usually plain ASCII
+    // identifiers but be defensive about spaces/&/=/#.
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        let safe = b.is_ascii_alphanumeric()
+            || matches!(b, b'-' | b'_' | b'.' | b'~' | b':' | b'/');
+        if safe {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
+    }
+    out
+}
+
+fn chrono_now_utc_string() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0) as i64;
+    // Render as ISO-8601 UTC without dragging chrono in: do it by hand.
+    // Days since 1970-01-01.
+    let days = secs.div_euclid(86_400);
+    let secs_of_day = secs.rem_euclid(86_400) as u32;
+    let h = secs_of_day / 3600;
+    let m = (secs_of_day % 3600) / 60;
+    let s = secs_of_day % 60;
+    let (y, mo, d) = days_to_ymd(days);
+    format!("{y:04}-{mo:02}-{d:02} {h:02}:{m:02}:{s:02}Z")
+}
+
+fn days_to_ymd(days_since_epoch: i64) -> (i32, u32, u32) {
+    // Civil-from-days (Howard Hinnant). Handles negative days too, though
+    // we'll never see those in practice. Returns (year, month, day).
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = y + if m <= 2 { 1 } else { 0 };
+    (year as i32, m, d)
 }
 
 fn pct_delta(cur: u64, prior: u64) -> String {
