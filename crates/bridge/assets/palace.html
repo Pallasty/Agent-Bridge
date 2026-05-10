@@ -220,6 +220,35 @@
       padding-top: 14px;
       border-top: 1px solid #1f1f2a;
     }
+    #panel .reports-section {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid #1f1f2a;
+    }
+    #panel .reports-title {
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #6a6a78;
+      margin-bottom: 6px;
+    }
+    #panel .reports-list { display: flex; flex-direction: column; gap: 4px; }
+    #panel .reports-list a {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 9px;
+      border: 1px solid #2a2a38;
+      border-left: 2px solid #5cc8c8;
+      border-radius: 3px;
+      color: #c0c0cc;
+      text-decoration: none;
+      font-size: 11px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      transition: border-color 120ms, color 120ms;
+    }
+    #panel .reports-list a:hover { color: #5cc8c8; border-color: #5cc8c8; }
+    #panel .reports-list .report-meta { color: #6a6a78; margin-left: auto; font-size: 10px; }
     #panel .annotate-toggle {
       background: transparent;
       border: 1px dashed #3a3a48;
@@ -816,6 +845,10 @@ async function showSidePanel(id) {
         ${(m.tags || []).map(t => `<span class="tag">${escapeHTML(t)}</span>`).join("")}
       </div>
       <div class="content">${escapeHTML(m.content || "")}</div>
+      <div class="reports-section" id="reports-section" style="display:none">
+        <div class="reports-title">related reports</div>
+        <div class="reports-list" id="reports-list"></div>
+      </div>
       <div class="annotate-section">
         <button class="annotate-toggle" type="button">✍ annotate this node</button>
         <div class="annotate-form">
@@ -829,6 +862,7 @@ async function showSidePanel(id) {
       </div>
     `;
     bindAnnotate(panel, m.key);
+    loadRelatedReports(m.key);
   } catch (e) {
     panel.innerHTML = `<div class="placeholder">error: ${escapeHTML(String(e))}</div>`;
   }
@@ -941,8 +975,46 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// Boot.
-loadGraph();
+// Fetch reports that mention `key` and inject links into the side panel.
+// Hidden when zero matches so the panel stays clean for nodes that
+// haven't been promoted/audited.
+async function loadRelatedReports(key) {
+  try {
+    const r = await fetch(`/api/reports?key=${encodeURIComponent(key)}`);
+    if (!r.ok) return;
+    const j = await r.json();
+    const items = j.items || [];
+    if (items.length === 0) return;
+    const section = document.getElementById("reports-section");
+    const list = document.getElementById("reports-list");
+    if (!section || !list) return;
+    list.innerHTML = items.map(it => {
+      const rel = relTime(it.mtime) || "";
+      return `<a href="/reports/${encodeURIComponent(it.filename)}" target="_blank" rel="noopener">
+        <span>${escapeHTML(it.label)}</span>
+        <span class="report-meta">${rel} · ${it.mentions}×</span>
+      </a>`;
+    }).join("");
+    section.style.display = "block";
+  } catch (e) {
+    // Best-effort — leave the section hidden on any error.
+  }
+}
+
+// Boot. After the graph loads, honor a `?focus=KEY` URL parameter so
+// inbound deep-links from `dream promote --html` reports land directly
+// on the referenced node (focus + side panel) instead of the empty
+// overview. Keys that aren't in the current graph still get a side
+// panel via /api/memory — the focus highlight is best-effort.
+(async () => {
+  await loadGraph();
+  const focus = new URLSearchParams(location.search).get("focus");
+  if (!focus) return;
+  if (state.cy && state.cy.getElementById(focus).length > 0) {
+    focusOnNode(focus);
+  }
+  showSidePanel(focus);
+})();
 </script>
 </body>
 </html>

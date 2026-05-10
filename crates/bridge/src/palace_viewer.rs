@@ -68,6 +68,13 @@ const PALACE_HTML: &str = include_str!("../assets/palace.html");
 struct AppState {
     store: Arc<dyn StateStore>,
     markdown_root: Option<PathBuf>,
+    /// Directory holding `dream promote --html` reports (and any other
+    /// future agent-generated HTML artifacts). When set, Palace serves
+    /// `/reports/:filename` for direct viewing and exposes
+    /// `/api/reports?key=KEY` so the side panel can surface related
+    /// reports — closing the loop from "report → Palace ?focus=KEY"
+    /// back to "Palace node → reports that mention it".
+    reports_dir: Option<PathBuf>,
     /// Rolling window of recently-clicked node keys. When full, each new
     /// click triggers a `record_coactivation` call so the Hebbian system
     /// learns that "these nodes were in the user's attention together".
@@ -83,16 +90,21 @@ pub async fn run(
     store: Arc<dyn StateStore>,
     listen: &str,
     markdown_root: Option<PathBuf>,
+    reports_dir: Option<PathBuf>,
 ) -> Result<()> {
     if let Some(p) = &markdown_root {
         tracing::info!(path = %p.display(), "Palace markdown layer enabled");
     } else {
         tracing::info!("Palace markdown layer disabled (sqlite-only)");
     }
+    if let Some(p) = &reports_dir {
+        tracing::info!(path = %p.display(), "Palace reports layer enabled");
+    }
 
     let state = AppState {
         store,
         markdown_root,
+        reports_dir,
         recent_clicks: Arc::new(Mutex::new(VecDeque::with_capacity(CLICK_WINDOW))),
     };
     let app = Router::new()
@@ -101,6 +113,8 @@ pub async fn run(
         .route("/api/graph", get(api_graph))
         .route("/api/memory/:key", get(api_memory))
         .route("/api/annotate", post(api_annotate))
+        .route("/api/reports", get(api_reports))
+        .route("/reports/:filename", get(serve_report))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen)
@@ -647,6 +661,143 @@ async fn api_annotate(
         "ok":  true,
         "key": key,
     })))
+}
+
+// ── Reports layer (C/A6 ↔ HTML reports back-link) ────────────────────────
+//
+// `dream promote --html` writes audit reports keyed to memory keys; the
+// reports link forward to Palace via `?focus=KEY`. These endpoints close
+// the loop the other way: Palace's side panel can list reports that
+// mention the focused key, and a path-traversal-safe handler serves the
+// HTML files directly so the back-link doesn't rely on file:// URLs.
+
+#[derive(Deserialize)]
+struct ReportsQuery {
+    key: String,
+}
+
+/// Maximum number of bytes scanned per report when checking for key
+/// occurrences. Reports stay well under this in practice (~40KB), but
+/// the cap protects against accidentally pointing `--reports-dir` at a
+/// folder of arbitrary HTML.
+const REPORT_SCAN_BYTES: u64 = 1_048_576; // 1 MiB
+
+/// Maximum number of recent reports to enumerate per request. Keeps the
+/// side-panel list short and bounds the I/O cost of each call.
+const REPORTS_PER_KEY_LIMIT: usize = 8;
+
+/// `GET /api/reports?key=KEY` — list reports in `reports_dir` that
+/// mention the given memory key, sorted newest first. Returns
+/// `{ items: [{ filename, mtime, mentions, label }] }`.
+async fn api_reports(
+    State(s): State<AppState>,
+    Query(q): Query<ReportsQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let dir = match &s.reports_dir {
+        Some(p) => p,
+        None => return Ok(Json(json!({"items": []}))),
+    };
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(Json(json!({"items": []}))),
+    };
+
+    let mut hits: Vec<(String, u64, usize)> = Vec::new();
+    for entry in entries.flatten() {
+        let name = match entry.file_name().into_string() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        if !name.ends_with(".html") {
+            continue;
+        }
+        let path = entry.path();
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !meta.is_file() || meta.len() > REPORT_SCAN_BYTES {
+            continue;
+        }
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let mentions = content.matches(q.key.as_str()).count();
+        if mentions == 0 {
+            continue;
+        }
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        hits.push((name, mtime, mentions));
+    }
+    // Newest first; truncate to the per-key limit.
+    hits.sort_by(|a, b| b.1.cmp(&a.1));
+    hits.truncate(REPORTS_PER_KEY_LIMIT);
+
+    let items: Vec<Value> = hits
+        .into_iter()
+        .map(|(filename, mtime, mentions)| {
+            // Strip extension and the standard `promote-` prefix to make
+            // a compact label like "2026-05-10". Other filenames pass
+            // through with just the extension dropped.
+            let stem = filename.strip_suffix(".html").unwrap_or(&filename);
+            let label = stem.strip_prefix("promote-").unwrap_or(stem).to_string();
+            json!({
+                "filename": filename,
+                "mtime":    mtime,
+                "mentions": mentions,
+                "label":    label,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({"items": items})))
+}
+
+/// `GET /reports/:filename` — serve a single HTML report by filename.
+/// Path-traversal safe: rejects any name containing `/`, `\`, `..`, or
+/// not ending in `.html`.
+async fn serve_report(
+    State(s): State<AppState>,
+    Path(filename): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let dir = s
+        .reports_dir
+        .as_ref()
+        .ok_or((StatusCode::NOT_FOUND, "reports layer disabled".to_string()))?;
+    if !is_safe_report_filename(&filename) {
+        return Err((StatusCode::BAD_REQUEST, "invalid filename".to_string()));
+    }
+    let path = dir.join(&filename);
+    let body = fs::read(&path)
+        .map_err(|_| (StatusCode::NOT_FOUND, format!("report not found: {filename}")))?;
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        body,
+    ))
+}
+
+fn is_safe_report_filename(name: &str) -> bool {
+    if !name.ends_with(".html") {
+        return false;
+    }
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return false;
+    }
+    // Restrict the rest of the alphabet to a sane subset — file names we
+    // generate are date-keyed (`promote-YYYY-MM-DD.html`) but allow tags
+    // and underscores for future report kinds.
+    name.chars().all(|c| {
+        c.is_ascii_alphanumeric()
+            || c == '-'
+            || c == '_'
+            || c == '.'
+    })
 }
 
 #[cfg(test)]
