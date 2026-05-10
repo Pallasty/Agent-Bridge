@@ -784,10 +784,21 @@ async function loadGraph() {
   const edgesLabel = coactCount > 0
     ? `${explicitCount}+${coactCount}↔ edges`
     : `${data.edges.length} edges`;
-  document.getElementById("stats").textContent =
-    markdownCount > 0
-      ? `${sqliteCount} sqlite · ${markdownCount} markdown · ${edgesLabel}`
-      : `${data.nodes.length} memories · ${edgesLabel}`;
+  // C6: live "breath" — how many memories are fresh right now. Uses the
+  // same FRESH_WINDOW + server now as the cyan ring so the badge and
+  // ring agree. Cyan span echoes the ring color.
+  const nowSecs = data.now || Math.floor(Date.now() / 1000);
+  const freshCount = data.nodes.filter(n => {
+    const la = n.last_accessed || 0;
+    return la > 0 && (nowSecs - la) < FRESH_WINDOW_SECS;
+  }).length;
+  const baseLabel = markdownCount > 0
+    ? `${sqliteCount} sqlite · ${markdownCount} markdown · ${edgesLabel}`
+    : `${data.nodes.length} memories · ${edgesLabel}`;
+  const freshBadge = freshCount > 0
+    ? ` · <span style="color:#5cc8c8">${freshCount} fresh</span>`
+    : "";
+  document.getElementById("stats").innerHTML = baseLabel + freshBadge;
 
   // Populate filter panel from kinds + edge types present.
   const kindCounts = {};
