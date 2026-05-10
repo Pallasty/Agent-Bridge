@@ -16,10 +16,20 @@
 
 # Agent-Bridge Primary
 # Used by the wrapper for memory-layer LLM calls (P4b filter, P5 dream replay).
-# Wrapper scans THIS section FIRST; falls back to first sk-* anywhere in file.
-# To switch active proxy, change these two lines (no script edits needed).
+# Wrapper reads ONLY this section — no "first sk-* anywhere" fallback (that
+# behaviour silently resurfaced dead historical keys like anyrouter and broke
+# the active proxy).  If this section is empty/missing, the wrapper leaves
+# ANTHROPIC_* unset and LlmClient skips straight to the OpenAI Fallback.
+# To switch active proxy, edit these two lines (no script changes needed).
+#
+# Confirmed-alive Anthropic-protocol proxies (2026-05-10 audit; rotate when dead):
+#   https://api.bltcy.ai           — claude-haiku-4-5-20251001 / sonnet-4-5
+#   https://api.bltcy.cn           — sister of bltcy.ai
+#   https://ai.comfly.chat         — same model surface
+#   https://code.wenwen-ai.com     — same model surface
+#   https://api.anthropic.com      — direct (use if you have sk-ant-*)
 export ANTHROPIC_AUTH_TOKEN=REPLACE_ME_sk_your_anthropic_proxy_token
-export ANTHROPIC_BASE_URL=https://api.anthropic.com
+export ANTHROPIC_BASE_URL=https://api.bltcy.ai
 
 
 # Agent-Bridge Fallback

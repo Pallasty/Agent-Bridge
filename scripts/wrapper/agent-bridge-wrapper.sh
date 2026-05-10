@@ -112,10 +112,17 @@ if [ -f "$creds" ]; then
     [ -n "$cf_acct" ] && export CLOUDFLARE_ACCOUNT_ID="$cf_acct"
 
     # ----- Anthropic API token + base URL -----
-    # Preferred: read from `# Agent-Bridge Primary` section in creds file
-    # (lets user switch active proxy without touching this script).
-    # Section terminator: blank line.
-    # Fallback: first `export ANTHROPIC_AUTH_TOKEN=sk-…` anywhere in file.
+    # ONLY read from `# Agent-Bridge Primary` section in creds file.
+    # Section terminator: blank line. Lets user switch active proxy without
+    # touching this script.
+    #
+    # No "first match anywhere in file" fallback: ClaudeCode.txt has many
+    # historical export ANTHROPIC_AUTH_TOKEN= lines (anyrouter, rainapp,
+    # openrouter, etc.) that are dead long-term but stay in the file for
+    # reference. A first-match fallback resurfaces them and breaks the
+    # primary endpoint silently. If the Primary section is missing we leave
+    # ANTHROPIC_* unset and let LlmClient go straight to the modelscope
+    # OpenAI-compat fallback (commit 16c463b).
     anthropic_token=$(awk '
         /^[[:space:]]*#[[:space:]]*Agent-Bridge[[:space:]]+Primary/ { in_p=1; next }
         in_p && /^[[:space:]]*$/ { in_p=0 }
@@ -125,15 +132,8 @@ if [ -f "$creds" ]; then
             if (length($1) >= 20) { print $1; exit }
         }
     ' "$creds" 2>/dev/null || true)
-    [ -z "$anthropic_token" ] && anthropic_token=$(awk '
-        /^[[:space:]]*export[[:space:]]+ANTHROPIC_AUTH_TOKEN[[:space:]]*=[[:space:]]*sk-/ {
-            sub(/^[^=]*=[[:space:]]*/, "");
-            gsub(/["'"'"']/, "");
-            if (length($1) >= 20) { print $1; exit }
-        }
-    ' "$creds" 2>/dev/null || true)
-    # Only fall back to creds-file value when caller hasn't set anything.
-    # Respects per-call overrides: `ANTHROPIC_BASE_URL=… agent-bridge dream replay`.
+    # Honor caller-set env (per-call overrides like
+    # `ANTHROPIC_BASE_URL=… agent-bridge dream replay`).
     [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -n "$anthropic_token" ] && \
         export ANTHROPIC_AUTH_TOKEN="$anthropic_token"
 
@@ -141,13 +141,6 @@ if [ -f "$creds" ]; then
         /^[[:space:]]*#[[:space:]]*Agent-Bridge[[:space:]]+Primary/ { in_p=1; next }
         in_p && /^[[:space:]]*$/ { in_p=0 }
         in_p && /^[[:space:]]*export[[:space:]]+ANTHROPIC_BASE_URL[[:space:]]*=[[:space:]]*https/ {
-            sub(/^[^=]*=[[:space:]]*/, "");
-            gsub(/["'"'"']/, "");
-            print $1; exit
-        }
-    ' "$creds" 2>/dev/null || true)
-    [ -z "$anthropic_base" ] && anthropic_base=$(awk '
-        /^[[:space:]]*export[[:space:]]+ANTHROPIC_BASE_URL[[:space:]]*=[[:space:]]*https/ {
             sub(/^[^=]*=[[:space:]]*/, "");
             gsub(/["'"'"']/, "");
             print $1; exit
