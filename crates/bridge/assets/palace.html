@@ -818,6 +818,19 @@
       font-size: 10px;
       font-style: italic;
     }
+    /* Focus-card link to the discussed-about node. Inline style — no
+       border-left (that's a rail-only affordance), just an underline-on-
+       hover + cyan color so it reads as "click to navigate" without
+       drawing too much attention. */
+    .focus-card-link {
+      color: #5cc8c8;
+      text-decoration: none;
+      border-bottom: 1px dotted #4a8b9c;
+    }
+    .focus-card-link:hover {
+      color: #a87cff;
+      border-bottom-color: #a87cff;
+    }
     .canvas-rail-cofires a     { border-left: 2px solid #6dd4bd; }
     .canvas-rail-annotations a { border-left: 2px solid #ffe070; }
     .canvas-rail-discussions a { border-left: 2px solid #a87cff; }
@@ -1999,13 +2012,34 @@ function bindCanvasExpand(panel, memory) {
   btn.addEventListener("click", () => openCanvas(memory));
 }
 
+// Render the canvas focus-card key + meta line. For chat_session focus,
+// append a "discussion of: <focus_key>" link back to the original node
+// so the user reading a past discussion knows what it was about and
+// can hop back with one click. The link uses the same `rail-switch`
+// class so the in-canvas focus-switch delegation (extended to the whole
+// overlay below) catches it.
+function setCanvasFocusCard(memory) {
+  document.getElementById("canvas-focus-key").textContent = memory.key;
+  const metaEl = document.getElementById("canvas-focus-meta");
+  const base = `${memory.kind || "memory"} · ${memory.source || "sqlite"} · importance ${(memory.importance || 0).toFixed(2)}`;
+  if (memory.kind === "chat_session") {
+    const about = neighborsOfType(memory.key, "discussed_at");
+    if (about.length > 0) {
+      const k = about[0];
+      metaEl.innerHTML =
+        `${escapeHTML(base)} · discussion of: ` +
+        `<a class="rail-switch focus-card-link" href="#" data-focus-key="${escapeHTML(k)}">${escapeHTML(k)}</a>`;
+      return;
+    }
+  }
+  metaEl.textContent = base;
+}
+
 function openCanvas(memory) {
   canvasState.current = memory;
   const overlay = document.getElementById("canvas-overlay");
   if (!overlay) return;
-  document.getElementById("canvas-focus-key").textContent = memory.key;
-  document.getElementById("canvas-focus-meta").textContent =
-    `${memory.kind || "memory"} · ${memory.source || "sqlite"} · importance ${(memory.importance || 0).toFixed(2)}`;
+  setCanvasFocusCard(memory);
   const editor = document.getElementById("canvas-editor");
   editor.value = "";
   renderMarkdownPreview(""); // empty placeholder
@@ -2070,9 +2104,7 @@ async function switchFocus(key) {
     return;
   }
   canvasState.current = memory;
-  document.getElementById("canvas-focus-key").textContent = memory.key;
-  document.getElementById("canvas-focus-meta").textContent =
-    `${memory.kind || "memory"} · ${memory.source || "sqlite"} · importance ${(memory.importance || 0).toFixed(2)}`;
+  setCanvasFocusCard(memory);
   if (editor) editor.value = "";
   renderMarkdownPreview("");
   resetCanvasHint();
@@ -2725,12 +2757,16 @@ function bindCanvasGlobals() {
   if (chatClear) chatClear.addEventListener("click", clearChatForCurrent);
   const chatSave = document.getElementById("chat-save-btn");
   if (chatSave) chatSave.addEventListener("click", saveChatAsMemory);
-  // Rail click delegation: cofires + annotations links carry
-  // `data-focus-key` and trigger in-canvas focus switch instead of a
-  // page reload. Reports rail keeps target=_blank (no rail-switch class).
-  const rail = document.querySelector("#canvas-overlay .canvas-rail");
-  if (rail) {
-    rail.addEventListener("click", (e) => {
+  // In-canvas focus-switch delegation. Any element inside the overlay
+  // with `class="rail-switch"` and `data-focus-key="..."` triggers
+  // switchFocus. Started as a rail-only handler (cofires/annotations);
+  // broadened to the whole overlay so the focus-card "discussion of"
+  // link works too without re-binding. Reports keep target=_blank
+  // and have no rail-switch class — they fall through to default
+  // browser behavior.
+  const overlayEl = document.getElementById("canvas-overlay");
+  if (overlayEl) {
+    overlayEl.addEventListener("click", (e) => {
       const a = e.target.closest("a.rail-switch");
       if (!a) return;
       e.preventDefault();
