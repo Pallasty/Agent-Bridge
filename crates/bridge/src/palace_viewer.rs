@@ -603,28 +603,59 @@ async fn api_memory(
 
 #[derive(Deserialize)]
 struct AnnotatePayload {
-    /// The node the user is annotating from. Becomes the `to_key` of an
-    /// `annotates` edge.
+    /// The node the user is annotating from. Becomes the `to_key` of the
+    /// outgoing edge (default `annotates`).
     target_key: String,
     /// User-authored body. Becomes the `content` of the new sqlite memory.
     content: String,
+    /// New-memory kind. Defaults to `annotation` for backwards-compat with
+    /// the C1 annotate flow. B-mode canvas-save passes `working_doc`.
+    #[serde(default)]
+    kind: Option<String>,
+    /// Edge type from the new memory back to `target_key`. Defaults to
+    /// `annotates`. Canvas-save uses `expanded_from` so the structural
+    /// distinction (一笔注解 vs 完整工坊产物) survives in the graph.
+    #[serde(default)]
+    edge_type: Option<String>,
+    /// Edge weight. Defaults to 1.0 (the historic annotate behavior).
+    /// Canvas-save passes 0.7: 用户主动行为，强但弱于 hand-authored 主结构。
+    #[serde(default)]
+    weight: Option<f64>,
+    /// Importance for the new memory record. Defaults to 0.6.
+    #[serde(default)]
+    importance: Option<f64>,
+}
+
+/// Sanitize a kind string into a key-friendly snake_case slug. Only
+/// `[a-z0-9_]` allowed; everything else becomes `_`. Empty → "memory".
+/// Caps at 24 chars so keys don't blow up.
+fn sanitize_kind_slug(raw: &str) -> String {
+    let lower: String = raw
+        .chars()
+        .map(|c| {
+            let c = c.to_ascii_lowercase();
+            if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }
+        })
+        .take(24)
+        .collect();
+    if lower.is_empty() { "memory".into() } else { lower }
 }
 
 /// Create a new sqlite memory authored from the Palace, linked back to
-/// `target_key` via an `annotates` edge.
+/// `target_key`. The default flow (no extra payload fields) writes a
+/// `kind=annotation` record with an `annotates` edge — the C1 path
+/// untouched. B-mode "expand canvas" passes `kind=working_doc` +
+/// `edge_type=expanded_from` + `weight=0.7` to make the structural
+/// distinction visible in the graph.
 ///
-/// The new memory is `kind=annotation`, importance 0.6, scope-less (global
-/// — visible from any project's Palace). The key is timestamp-prefixed so
-/// multiple annotations stay sortable and unique.
-///
-/// Returns `{ ok: true, key: <new key> }` on success. The frontend should
-/// re-fetch `/api/graph` to see the new node + edge.
+/// Returns `{ ok: true, key, kind, edge }` on success. The frontend
+/// should re-fetch `/api/graph` to see the new node + edge.
 async fn api_annotate(
     State(s): State<AppState>,
     Json(p): Json<AnnotatePayload>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    let target = p.target_key.trim();
-    let body = p.content.trim();
+    let target = p.target_key.trim().to_string();
+    let body = p.content.trim().to_string();
     if target.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "target_key required".into()));
     }
@@ -632,24 +663,47 @@ async fn api_annotate(
         return Err((StatusCode::BAD_REQUEST, "content required".into()));
     }
 
+    let kind = p
+        .kind
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("annotation")
+        .to_string();
+    let edge_type = p
+        .edge_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("annotates")
+        .to_string();
+    let weight = p.weight.unwrap_or(1.0);
+    let importance = p.importance.unwrap_or(0.6);
+
     let now_millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let key = format!("palace_annotation_{now_millis:013}");
+    let kind_slug = sanitize_kind_slug(&kind);
+    let key = format!("palace_{kind_slug}_{now_millis:013}");
+
+    let mut tags = vec!["palace".to_string(), kind.clone()];
+    if kind == "working_doc" {
+        tags.push("canvas".to_string());
+    }
 
     let mem = MemoryRecord {
         key: key.clone(),
-        kind: "annotation".to_string(),
-        content: body.to_string(),
-        tags: vec!["palace".to_string(), "annotation".to_string()],
-        related_keys: vec![target.to_string()],
+        kind: kind.clone(),
+        content: body,
+        tags,
+        related_keys: vec![target.clone()],
         scope: None,
         created_at: 0,
         updated_at: 0,
         last_accessed_at: 0,
         access_count: 0,
-        importance: 0.6,
+        importance,
         status: "active".to_string(),
         trigger_pattern: None,
         superseded_by: None,
@@ -661,13 +715,15 @@ async fn api_annotate(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_save: {e}")))?;
 
     s.store
-        .memory_link(&key, target, "annotates", 1.0)
+        .memory_link(&key, &target, &edge_type, weight)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_link: {e}")))?;
 
     Ok(Json(json!({
-        "ok":  true,
-        "key": key,
+        "ok":   true,
+        "key":  key,
+        "kind": kind,
+        "edge": edge_type,
     })))
 }
 
