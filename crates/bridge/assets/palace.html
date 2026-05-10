@@ -333,6 +333,20 @@ const KIND_COLORS = {
 const DEFAULT_COLOR = "#7a7d8a";
 function colorForKind(k) { return KIND_COLORS[k] || DEFAULT_COLOR; }
 
+// Edge-type swatch colors mirror the cytoscape line-color rules below so the
+// filter panel reads as a legend.
+const EDGE_COLORS = {
+  supersedes:   "#7a4ba8",
+  summarizes:   "#a8895a",
+  contradicts:  "#a85050",
+  references:   "#5a5a72",
+  annotates:    "#ffe070",
+  coactivation: "#5cc8c8",
+  cofires:      "#6dd4bd",
+};
+const DEFAULT_EDGE_COLOR = "#3a3a48";
+function colorForEdgeType(t) { return EDGE_COLORS[t] || DEFAULT_EDGE_COLOR; }
+
 function escapeHTML(s) {
   if (s == null) return "";
   return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
@@ -382,6 +396,7 @@ const state = {
   search: "",
   enabledSources: new Set(["sqlite", "markdown"]),
   enabledKinds: new Set(),
+  enabledEdgeTypes: new Set(),  // empty == not yet populated; set on first load
   includeSkills: false,
   focused: null,        // currently-focused node id (or null)
 };
@@ -411,7 +426,7 @@ async function loadGraph() {
       ? `${sqliteCount} sqlite · ${markdownCount} markdown · ${edgesLabel}`
       : `${data.nodes.length} memories · ${edgesLabel}`;
 
-  // Populate filter panel from kinds present.
+  // Populate filter panel from kinds + edge types present.
   const kindCounts = {};
   data.nodes.forEach(n => { kindCounts[n.kind] = (kindCounts[n.kind] || 0) + 1; });
   const kinds = Object.keys(kindCounts).sort();
@@ -419,7 +434,18 @@ async function loadGraph() {
     // First load — enable all.
     kinds.forEach(k => state.enabledKinds.add(k));
   }
-  renderFilterPanel(kindCounts);
+
+  const edgeTypeCounts = {};
+  data.edges.forEach(e => {
+    const t = e.type || "untyped";
+    edgeTypeCounts[t] = (edgeTypeCounts[t] || 0) + 1;
+  });
+  const edgeTypes = Object.keys(edgeTypeCounts).sort();
+  if (state.enabledEdgeTypes.size === 0) {
+    edgeTypes.forEach(t => state.enabledEdgeTypes.add(t));
+  }
+
+  renderFilterPanel(kindCounts, edgeTypeCounts);
 
   buildCy(data);
 }
@@ -561,8 +587,9 @@ function buildCy(data) {
 }
 
 // ── Filter panel rendering ──────────────────────────────────────
-function renderFilterPanel(kindCounts) {
+function renderFilterPanel(kindCounts, edgeTypeCounts) {
   const kinds = Object.keys(kindCounts).sort();
+  const edgeTypes = Object.keys(edgeTypeCounts).sort();
   const html = `
     <div class="section">
       <h3>Source</h3>
@@ -581,6 +608,21 @@ function renderFilterPanel(kindCounts) {
           <span class="swatch" style="background:${colorForKind(k)}"></span>
           ${escapeHTML(k)}
           <span class="count">${kindCounts[k]}</span>
+        </label>
+      `).join("")}
+    </div>
+    <div class="section">
+      <h3>Edge type</h3>
+      <div class="actions">
+        <button id="edge-all">all</button>
+        <button id="edge-none">none</button>
+      </div>
+      ${edgeTypes.map(t => `
+        <label>
+          <input type="checkbox" data-edge-type="${escapeHTML(t)}" ${state.enabledEdgeTypes.has(t) ? "checked" : ""}>
+          <span class="swatch" style="background:${colorForEdgeType(t)}"></span>
+          ${escapeHTML(t)}
+          <span class="count">${edgeTypeCounts[t]}</span>
         </label>
       `).join("")}
     </div>
@@ -618,6 +660,23 @@ function renderFilterPanel(kindCounts) {
     panel.querySelectorAll("input[data-kind]").forEach(el => el.checked = false);
     applyVisualState();
   });
+  panel.querySelectorAll("input[data-edge-type]").forEach(el => {
+    el.addEventListener("change", () => {
+      if (el.checked) state.enabledEdgeTypes.add(el.dataset.edgeType);
+      else state.enabledEdgeTypes.delete(el.dataset.edgeType);
+      applyVisualState();
+    });
+  });
+  panel.querySelector("#edge-all").addEventListener("click", () => {
+    edgeTypes.forEach(t => state.enabledEdgeTypes.add(t));
+    panel.querySelectorAll("input[data-edge-type]").forEach(el => el.checked = true);
+    applyVisualState();
+  });
+  panel.querySelector("#edge-none").addEventListener("click", () => {
+    state.enabledEdgeTypes.clear();
+    panel.querySelectorAll("input[data-edge-type]").forEach(el => el.checked = false);
+    applyVisualState();
+  });
   panel.querySelector("#include-skills").addEventListener("change", (e) => {
     state.includeSkills = e.target.checked;
     loadGraph();  // re-fetch (server returns different node set)
@@ -644,9 +703,16 @@ function applyVisualState() {
     if (!sourceOk || !kindOk) n.addClass("faded");
   });
 
-  // Edge-fade: edges whose either endpoint is faded → faded.
+  // Edge-fade: edges whose either endpoint is faded → faded. Also fade
+  // edges whose type is excluded from the edge-type filter, so users can
+  // hide e.g. the cyan coactivation underlay to read the structural
+  // skeleton clearly.
   cy.edges().forEach(e => {
-    if (e.source().hasClass("faded") || e.target().hasClass("faded")) {
+    const t = e.data("type") || "untyped";
+    const typeOk = state.enabledEdgeTypes.has(t);
+    if (!typeOk
+        || e.source().hasClass("faded")
+        || e.target().hasClass("faded")) {
       e.addClass("faded");
     }
   });
