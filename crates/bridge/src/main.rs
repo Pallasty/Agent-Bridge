@@ -199,8 +199,25 @@ enum DreamOp {
         #[arg(long, default_value_t = 3)]
         min_cluster_size: usize,
         /// Inspect-only: print picked clusters but skip LLM + writes.
+        /// Also makes the auto-promote step dry-run.
         #[arg(long)]
         dry_run: bool,
+        /// Skip the auto-trigger of `dream promote` after replay finishes.
+        /// Default behavior crystallises strong co-activation pairs as
+        /// `cofires` edges so a single cron pass closes the consolidation
+        /// loop (summary + structural). Use this flag when you want only
+        /// the summarization half (e.g. when promote ran separately).
+        #[arg(long)]
+        no_auto_promote: bool,
+        /// Min co-activation count threshold for the auto-promote step.
+        /// Defaults to 5 (matches `dream promote --min-count` default).
+        #[arg(long, default_value_t = 5)]
+        promote_min_count: u64,
+        /// Override the auto-promote HTML report path. Default writes
+        /// `<state-dir>/reports/promote-YYYY-MM-DD.html` (creates the
+        /// directory if missing). Pass an empty string to skip the report.
+        #[arg(long)]
+        promote_report: Option<PathBuf>,
     },
     /// 呼吸式画布 / Hebbian feedback — Promote strong co-activation pairs
     /// (`memory_coactivation` rows with count ≥ `--min-count`) into explicit
@@ -545,7 +562,32 @@ async fn main() -> Result<()> {
                 top_n,
                 min_cluster_size,
                 dry_run,
-            } => ab_bridge::dream_replay::run(*top_n, *min_cluster_size, *dry_run).await,
+                no_auto_promote,
+                promote_min_count,
+                promote_report,
+            } => {
+                ab_bridge::dream_replay::run(*top_n, *min_cluster_size, *dry_run).await?;
+                if !*no_auto_promote {
+                    // Resolve the report path: explicit flag wins; empty
+                    // string skips the report; default = `<state-dir>/reports/
+                    // promote-YYYY-MM-DD.html` (created if missing).
+                    let report_path = match promote_report {
+                        Some(p) if p.as_os_str().is_empty() => None,
+                        Some(p) => Some(p.clone()),
+                        None => Some(default_promote_report_path()?),
+                    };
+                    println!();
+                    println!("# auto-trigger: dream promote");
+                    run_dream_promote(
+                        *promote_min_count,
+                        50, // matches `dream promote --limit` default
+                        *dry_run,
+                        report_path.as_deref(),
+                    )
+                    .await?;
+                }
+                Ok(())
+            }
             DreamOp::Promote {
                 min_count,
                 limit,
@@ -1306,6 +1348,26 @@ fn render_promote_html(
         cards = cards,
         db_display = html_escape(&db_path.display().to_string()),
     )
+}
+
+/// Default HTML report destination for auto-triggered promote runs.
+/// Lives next to `state.db` under a `reports/` subdir so Palace (which
+/// already knows the state-dir) can scan it for cross-linking back to
+/// graph nodes. Created on-demand. Filename is date-keyed so a single
+/// day's runs append to the same path (cron repeats overwrite — fine,
+/// the latest decision is what matters).
+fn default_promote_report_path() -> Result<PathBuf> {
+    use ab_store::default_db_path;
+    let db_path = default_db_path();
+    let dir = db_path
+        .parent()
+        .map(|p| p.join("reports"))
+        .ok_or_else(|| anyhow::anyhow!("state.db has no parent dir: {db_path:?}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| anyhow::anyhow!("create reports dir {dir:?}: {e}"))?;
+    let ts = chrono_now_utc_string(); // e.g. "2026-05-10 02:40:20Z"
+    let date = ts.split_whitespace().next().unwrap_or(&ts);
+    Ok(dir.join(format!("promote-{date}.html")))
 }
 
 fn chip_class(status: &PromoteStatus, weight: f64) -> &'static str {
