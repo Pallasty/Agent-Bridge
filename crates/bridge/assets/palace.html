@@ -803,9 +803,10 @@
       font-size: 10px;
       font-style: italic;
     }
-    .canvas-rail-cofires a    { border-left: 2px solid #6dd4bd; }
+    .canvas-rail-cofires a     { border-left: 2px solid #6dd4bd; }
     .canvas-rail-annotations a { border-left: 2px solid #ffe070; }
-    .canvas-rail-reports a    { border-left: 2px solid #5cc8c8; }
+    .canvas-rail-discussions a { border-left: 2px solid #a87cff; }
+    .canvas-rail-reports a     { border-left: 2px solid #5cc8c8; }
 
     .canvas-foot {
       display: flex;
@@ -970,6 +971,10 @@
           <div class="canvas-rail-section">
             <div class="canvas-rail-title">recent annotations</div>
             <div id="canvas-rail-annotations"><div class="canvas-rail-empty">none</div></div>
+          </div>
+          <div class="canvas-rail-section">
+            <div class="canvas-rail-title">past discussions</div>
+            <div id="canvas-rail-discussions"><div class="canvas-rail-empty">none</div></div>
           </div>
           <div class="canvas-rail-section">
             <div class="canvas-rail-title">related reports</div>
@@ -2312,7 +2317,29 @@ async function loadCanvasRail(memory) {
     annosEl.innerHTML = `<div class="canvas-rail-empty">none yet</div>`;
   }
 
-  // 3. related reports — same /api/reports endpoint the side panel uses.
+  // 3. past discussions — chat_session memories saved against this node
+  // via the 💾 save chat button. The user's earlier thinking is the
+  // best context for picking up a node again.
+  const discsEl = document.getElementById("canvas-rail-discussions");
+  discsEl.parentElement.classList.add("canvas-rail-discussions");
+  const discNeighbors = neighborsOfType(memory.key, "discussed_at")
+    // Show newest first — chat keys are timestamp-suffixed, lex sort
+    // gives newest last; reverse so the freshest discussion is on top.
+    .sort()
+    .reverse()
+    .slice(0, 6);
+  if (discNeighbors.length) {
+    discsEl.innerHTML = discNeighbors.map(k => {
+      // Strip the `palace_chat_session_` prefix for readability — the
+      // visible label becomes a relative-ish timestamp slug.
+      const short = k.replace(/^palace_chat_session_/, "chat ");
+      return `<a class="rail-switch" href="#" data-focus-key="${escapeHTML(k)}" title="${escapeHTML(k)}">${escapeHTML(short)}</a>`;
+    }).join("");
+  } else {
+    discsEl.innerHTML = `<div class="canvas-rail-empty">none yet</div>`;
+  }
+
+  // 4. related reports — same /api/reports endpoint the side panel uses.
   const reportsEl = document.getElementById("canvas-rail-reports");
   reportsEl.parentElement.classList.add("canvas-rail-reports");
   try {
