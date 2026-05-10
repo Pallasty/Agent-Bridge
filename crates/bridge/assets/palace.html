@@ -413,6 +413,28 @@
       font-size: 9px;
       letter-spacing: 0.04em;
     }
+    .chat-banner .chat-restored-hint {
+      font-size: 10px;
+      letter-spacing: 0.04em;
+    }
+    .chat-banner .chat-clear-btn {
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid #2a2a35;
+      color: #6a6a78;
+      padding: 1px 7px;
+      font-size: 10px;
+      border-radius: 3px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms;
+    }
+    .chat-banner .chat-clear-btn:hover { color: #c8505c; border-color: #4a2030; }
+    .chat-banner .chat-meta-hint {
+      color: #3a3a48;
+      font-size: 10px;
+    }
     .chat-history {
       flex: 1 1 auto;
       overflow-y: auto;
@@ -818,7 +840,10 @@
         <div class="chat-banner">
           💬 chat with Claude · context auto-attached:
           <span class="ctx-pill" id="chat-ctx-pill">focus + neighbors</span>
-          <span style="margin-left:auto; color:#3a3a48;">spawned per message · ~5–30s</span>
+          <span class="chat-restored-hint" id="chat-restored-hint" style="display:none; color:#5cc8c8;"></span>
+          <button class="chat-clear-btn" id="chat-clear-btn" type="button"
+                  title="clear chat history for this node + wipe localStorage">🗑 clear</button>
+          <span class="chat-meta-hint">spawned per message · ~5–30s</span>
         </div>
         <div class="chat-history" id="chat-history">
           <div class="chat-empty">type below to discuss this node — Claude sees the node + key neighbors</div>
@@ -1570,8 +1595,39 @@ async function loadRelatedReports(key) {
 // the graph. Width is driven by `--canvas-width` (M0 = 100vw); M1 will
 // shrink it to leave Palace partially visible.
 // canvasState.current = memory being expanded
-// canvasState.chat   = { history: [{role, content}], pending: bool }
-const canvasState = { current: null, chat: { history: [], pending: false } };
+// canvasState.chat   = { focusKey, history: [{role, content}], pending: bool }
+const canvasState = { current: null, chat: { focusKey: null, history: [], pending: false } };
+
+// Chat history is persisted to localStorage under `CHAT_LS_PREFIX + focus_key`
+// so coming back to a node weeks later resurfaces the prior discussion. Stays
+// per-browser for now (cross-device sync via memory store is a later phase).
+const CHAT_LS_PREFIX = "palace.chat:v1:";
+
+function loadPersistedChat(focusKey) {
+  try {
+    const raw = localStorage.getItem(CHAT_LS_PREFIX + focusKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Defensive: drop any malformed entries.
+    return parsed.filter(m => m && typeof m.role === "string" && typeof m.content === "string");
+  } catch (e) {
+    return [];
+  }
+}
+
+function persistChat(focusKey, history) {
+  if (!focusKey) return;
+  try {
+    if (history.length === 0) {
+      localStorage.removeItem(CHAT_LS_PREFIX + focusKey);
+    } else {
+      localStorage.setItem(CHAT_LS_PREFIX + focusKey, JSON.stringify(history));
+    }
+  } catch (e) {
+    // Quota / private mode — best-effort, fail silently.
+  }
+}
 
 function bindCanvasExpand(panel, memory) {
   const btn = panel.querySelector(".canvas-expand-btn");
@@ -1882,13 +1938,37 @@ async function saveCanvas() {
 // passage flows into the working_doc draft above.
 
 function resetChat(memory) {
-  canvasState.chat = { history: [], pending: false };
+  const restored = loadPersistedChat(memory.key);
+  canvasState.chat = { focusKey: memory.key, history: restored, pending: false };
   // Update the context pill to reflect what the backend will attach.
   const pill = document.getElementById("chat-ctx-pill");
   if (pill) pill.textContent = `${memory.key} + neighbors`;
+  // Surface restored count so the user knows continuation happened.
+  const restoredHint = document.getElementById("chat-restored-hint");
+  if (restoredHint) {
+    if (restored.length > 0) {
+      restoredHint.textContent = `· restored ${restored.length} message${restored.length === 1 ? "" : "s"}`;
+      restoredHint.style.display = "inline";
+    } else {
+      restoredHint.textContent = "";
+      restoredHint.style.display = "none";
+    }
+  }
   renderChatHistory();
   const input = document.getElementById("chat-input");
   if (input) input.value = "";
+}
+
+function clearChatForCurrent() {
+  if (!canvasState.chat.focusKey) return;
+  if (canvasState.chat.history.length === 0) return;
+  const ok = confirm("Clear chat history for this node? This wipes the persisted localStorage entry too.");
+  if (!ok) return;
+  canvasState.chat.history = [];
+  persistChat(canvasState.chat.focusKey, []);
+  const restoredHint = document.getElementById("chat-restored-hint");
+  if (restoredHint) { restoredHint.textContent = ""; restoredHint.style.display = "none"; }
+  renderChatHistory();
 }
 
 function renderChatHistory() {
@@ -1981,6 +2061,9 @@ async function sendChatMessage() {
   } finally {
     canvasState.chat.pending = false;
     sendBtn.disabled = false;
+    // Persist after each completed turn (success OR error). We don't
+    // persist `pending=true` — that's session-only state.
+    persistChat(canvasState.chat.focusKey, canvasState.chat.history);
     renderChatHistory();
   }
 }
@@ -2012,6 +2095,8 @@ function bindCanvasGlobals() {
       }
     });
   }
+  const chatClear = document.getElementById("chat-clear-btn");
+  if (chatClear) chatClear.addEventListener("click", clearChatForCurrent);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       const overlay = document.getElementById("canvas-overlay");
