@@ -4142,6 +4142,11 @@ async fn build_proactive_hint(
         .await
         .unwrap_or_default();
 
+    // Path C v0.2: bias hint candidates toward records currently in the seed
+    // grid's hub_clusters near_keys. Same HashSet as memory_search rerank;
+    // structural co-occurrence prior over pure FTS+graph score.
+    let hits = apply_seed_boost(hits);
+
     // Filter: skip self and already-linked; no score threshold (BM25 isn't normalised)
     let candidates: Vec<_> = hits
         .into_iter()
