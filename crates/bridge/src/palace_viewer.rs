@@ -692,6 +692,12 @@ async fn api_annotate(
     if kind == "working_doc" {
         tags.push("canvas".to_string());
     }
+    if kind == "chat_session" {
+        // `chat` for filter UX; `canvas` because chat lives inside the
+        // canvas overlay and is part of B-mode by definition.
+        tags.push("chat".to_string());
+        tags.push("canvas".to_string());
+    }
 
     let mem = MemoryRecord {
         key: key.clone(),

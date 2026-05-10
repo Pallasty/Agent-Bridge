@@ -437,8 +437,8 @@
       font-size: 10px;
       letter-spacing: 0.04em;
     }
+    .chat-banner .chat-save-btn,
     .chat-banner .chat-clear-btn {
-      margin-left: auto;
       background: transparent;
       border: 1px solid #2a2a35;
       color: #6a6a78;
@@ -450,6 +450,10 @@
       font-family: inherit;
       transition: color 120ms, border-color 120ms;
     }
+    .chat-banner .chat-save-btn { margin-left: auto; }
+    .chat-banner .chat-save-btn:hover { color: #a87cff; border-color: #4a3a72; }
+    .chat-banner .chat-save-btn.ok { color: #a87cff; border-color: #4a3a72; }
+    .chat-banner .chat-save-btn:disabled { opacity: 0.4; cursor: default; }
     .chat-banner .chat-clear-btn:hover { color: #c8505c; border-color: #4a2030; }
     .chat-banner .chat-meta-hint {
       color: #3a3a48;
@@ -866,6 +870,8 @@
           💬 chat with Claude · context auto-attached:
           <span class="ctx-pill" id="chat-ctx-pill">focus + neighbors</span>
           <span class="chat-restored-hint" id="chat-restored-hint" style="display:none; color:#5cc8c8;"></span>
+          <button class="chat-save-btn" id="chat-save-btn" type="button"
+                  title="sediment whole chat as a chat_session memory linked to this focus">💾 save chat</button>
           <button class="chat-clear-btn" id="chat-clear-btn" type="button"
                   title="clear chat history for this node + wipe localStorage">🗑 clear</button>
           <span class="chat-meta-hint">spawned per message · ~5–30s</span>
@@ -913,6 +919,11 @@ const KIND_COLORS = {
   // back to their originating node.
   working_doc: "#5cc8c8",
   annotation:  "#ffe070",
+  // Chat sediment — purple to read as "discussion artifact", distinct
+  // from working_doc (cyan, "creative work") and annotation (yellow,
+  // "small marginal note"). Same family as `decision` but lighter so
+  // chat_session reads as "thinking out loud" rather than "verdict".
+  chat_session: "#a87cff",
 };
 const DEFAULT_COLOR = "#7a7d8a";
 function colorForKind(k) { return KIND_COLORS[k] || DEFAULT_COLOR; }
@@ -930,6 +941,10 @@ const EDGE_COLORS = {
   // B-mode canvas-save edge. Solid cyan bezier — distinct from cofires
   // (also cyan, but dotted underlay) and references (cool gray straight).
   expanded_from: "#5cc8c8",
+  // Chat sediment edge. Dashed purple bezier — visually paired with
+  // `chat_session` node fill; dashed conveys "soft / discussion-derived"
+  // vs the solid `expanded_from` (committed working_doc).
+  discussed_at: "#a87cff",
 };
 const DEFAULT_EDGE_COLOR = "#3a3a48";
 function colorForEdgeType(t) { return EDGE_COLORS[t] || DEFAULT_EDGE_COLOR; }
@@ -1191,6 +1206,16 @@ function buildCy(data) {
         "curve-style": "bezier",
         "opacity": 0.78,
         "width": 1.5,
+      }},
+      // Chat sediment edge. Dashed purple bezier — same family as
+      // `chat_session` fill; dashed conveys "discussion-derived" vs
+      // the solid `expanded_from` (full working_doc artifact).
+      { selector: "edge[type='discussed_at']", style: {
+        "line-color": "#a87cff",
+        "line-style": "dashed",
+        "curve-style": "bezier",
+        "opacity": 0.7,
+        "width": 1.4,
       }},
       // C3.6 co-activation: Hebbian "fire together" pairs, NO explicit edge
       // between them. Cyan curved underlay so the structural skeleton
@@ -2159,6 +2184,87 @@ function clearChatForCurrent() {
   renderChatHistory();
 }
 
+// Sediment the whole chat history as a `kind=chat_session` memory
+// entry, linked back to the focus key via a `discussed_at` edge. Re-uses
+// /api/annotate so we don't grow the API surface — kind/edge_type/weight
+// already pluggable since B M0. localStorage stays as the live working
+// copy; users can keep adding messages and re-save (creates a new
+// chat_session each time — versioning is implicit via timestamp keys).
+async function saveChatAsMemory() {
+  if (!canvasState.chat.focusKey) return;
+  if (canvasState.chat.history.length === 0) return;
+  const btn = document.getElementById("chat-save-btn");
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = "saving…";
+  try {
+    const transcript = formatChatTranscript(canvasState.chat.history);
+    const r = await fetch("/api/annotate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_key: canvasState.chat.focusKey,
+        content: transcript,
+        kind: "chat_session",
+        edge_type: "discussed_at",
+        // Lower than working_doc (0.7): chat is "thinking out loud",
+        // not curated artifact. Importance 0.5 keeps it visible without
+        // crowding the structural skeleton.
+        weight: 0.55,
+        importance: 0.5,
+      }),
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      throw new Error(`${r.status} · ${txt.slice(0, 120)}`);
+    }
+    const j = await r.json();
+    btn.textContent = "✓ saved";
+    btn.classList.add("ok");
+    // Refresh graph so the new chat_session node + edge appear
+    // immediately. State is otherwise lost on canvas close.
+    if (typeof loadGraph === "function") {
+      try { await loadGraph(); } catch (e) {}
+    }
+    // Revert button after a beat so the user sees the success cue.
+    setTimeout(() => {
+      btn.textContent = oldText;
+      btn.classList.remove("ok");
+      btn.disabled = false;
+    }, 1800);
+  } catch (e) {
+    btn.textContent = "× error";
+    setTimeout(() => {
+      btn.textContent = oldText;
+      btn.disabled = false;
+    }, 1800);
+  }
+}
+
+// Markdown transcript for the chat_session sediment. Each turn is
+// prefixed with **USER** / **ASSISTANT** / **ERROR** so the saved
+// memory reads cleanly when surfaced in side panel or HTML reports.
+// Header carries the focus key so cross-references survive even if
+// the edge is later pruned.
+function formatChatTranscript(history) {
+  const focusKey = canvasState.chat.focusKey || "(unknown)";
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  const lines = [
+    `# Chat session · ${focusKey}`,
+    ``,
+    `_saved ${ts}_`,
+    ``,
+  ];
+  for (const m of history) {
+    const role = m.role === "assistant" ? "ASSISTANT"
+      : m.role === "error" ? "ERROR"
+      : "USER";
+    lines.push(`**${role}**:`, "", m.content || "", "");
+  }
+  return lines.join("\n");
+}
+
 function renderChatHistory() {
   const root = document.getElementById("chat-history");
   if (!root) return;
@@ -2287,6 +2393,8 @@ function bindCanvasGlobals() {
   }
   const chatClear = document.getElementById("chat-clear-btn");
   if (chatClear) chatClear.addEventListener("click", clearChatForCurrent);
+  const chatSave = document.getElementById("chat-save-btn");
+  if (chatSave) chatSave.addEventListener("click", saveChatAsMemory);
   // Rail click delegation: cofires + annotations links carry
   // `data-focus-key` and trigger in-canvas focus switch instead of a
   // page reload. Reports rail keeps target=_blank (no rail-switch class).
