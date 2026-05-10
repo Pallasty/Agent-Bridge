@@ -84,13 +84,162 @@ fn try_kw<'k>(s: &str, patterns: &[(&str, &'k str)]) -> Option<(&'k str, String)
 
 // ── Rust ─────────────────────────────────────────────────────────────────────
 
-fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
-    let mut out = Vec::new();
-    for (i, raw) in content.lines().enumerate() {
-        let t = raw.trim();
-        if t.starts_with("//") || t.starts_with("/*") || t.starts_with('*') {
+/// Parse the type-name (and optional trait-name) from an `impl …` header line.
+///
+/// Strips a leading `<…>` generics block on `impl` itself, then splits on the
+/// first ` for ` to distinguish trait impls from inherent impls.  Within each
+/// side, generics inside `<…>`, `where` clauses, and the opening `{` are also
+/// stripped so the captured names are bare paths suitable for qualification.
+///
+/// Returns `None` when the line does not begin with `impl ` (after the caller's
+/// visibility/qualifier strip pass).
+fn parse_rust_impl_header(s: &str) -> Option<(String, Option<String>)> {
+    let rest = s.strip_prefix("impl")?;
+    // Must be followed by whitespace or '<'  — otherwise this is something
+    // like `impls`, not the keyword.
+    let first = rest.chars().next()?;
+    if !first.is_whitespace() && first != '<' {
+        return None;
+    }
+    // Strip an `impl<…>` generics block (balance angle brackets).
+    let after_generics = strip_leading_angle_block(rest.trim_start());
+    let body = after_generics.trim_start();
+
+    // Split on the first top-level ` for ` (trait impls).
+    let (head, tail) = split_top_level_for(body);
+    let type_str = clean_impl_path(tail.unwrap_or(head));
+    let trait_str = tail.map(|_| clean_impl_path(head));
+    if type_str.is_empty() {
+        return None;
+    }
+    Some((type_str, trait_str.filter(|s| !s.is_empty())))
+}
+
+/// Strip a leading `<…>` block, balancing angle brackets so generics like
+/// `<T: Trait<U>>` consume correctly.  Returns the substring after the closing
+/// `>`, or the original input if it doesn't start with `<`.
+fn strip_leading_angle_block(s: &str) -> &str {
+    if !s.starts_with('<') {
+        return s;
+    }
+    let mut depth = 0;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return s[i + 1..].trim_start();
+                }
+            }
+            _ => {}
+        }
+    }
+    s
+}
+
+/// Split on the first top-level ` for ` token (not inside `<…>`).  Returns
+/// `(left, Some(right))` if found, else `(input, None)`.
+fn split_top_level_for(s: &str) -> (&str, Option<&str>) {
+    let bytes = s.as_bytes();
+    let mut depth = 0;
+    let mut i = 0;
+    while i + 5 <= bytes.len() {
+        match bytes[i] {
+            b'<' => depth += 1,
+            b'>' => depth -= 1,
+            b' ' if depth == 0 && &bytes[i..i + 5] == b" for " => {
+                return (s[..i].trim(), Some(s[i + 5..].trim()));
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    (s.trim(), None)
+}
+
+/// Trim trailing generics, `where` clauses, and the opening `{` from an impl
+/// path component, leaving the bare path (e.g. `Foo`, `crate::Bar`).  Also
+/// trims trailing punctuation/whitespace.
+fn clean_impl_path(s: &str) -> String {
+    let mut end = s.len();
+    for (i, c) in s.char_indices() {
+        if c == '<' || c == '{' {
+            end = i;
+            break;
+        }
+        // ` where ` clause stops the path.
+        if c == ' ' && s[i..].trim_start().starts_with("where") {
+            end = i;
+            break;
+        }
+    }
+    s[..end].trim().trim_end_matches(',').trim().to_string()
+}
+
+/// Active impl scope tracked while line-scanning Rust source.
+#[derive(Debug)]
+struct RustImplScope {
+    type_name: String,
+    trait_name: Option<String>,
+    /// Brace depth that was active when this impl's `{` opened.  When the
+    /// running depth returns to this value, the impl block has closed and the
+    /// scope is popped.
+    open_depth: i32,
+}
+
+/// Count `{` and `}` outside of `//` line-comment regions and Rust string
+/// literals.  Imperfect for raw strings and block comments but correct for
+/// well-formed code; the goal is robust impl-scope detection, not a full
+/// parser.
+fn count_braces(line: &str) -> (i32, i32) {
+    let mut opens = 0i32;
+    let mut closes = 0i32;
+    let mut in_str = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_str {
+            if c == '\\' {
+                chars.next(); // skip escaped char
+            } else if c == '"' {
+                in_str = false;
+            }
             continue;
         }
+        match c {
+            '"' => in_str = true,
+            '/' => {
+                if let Some('/') = chars.peek() {
+                    break; // line comment
+                }
+            }
+            '{' => opens += 1,
+            '}' => closes += 1,
+            _ => {}
+        }
+    }
+    (opens, closes)
+}
+
+fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
+    let mut out = Vec::new();
+    let mut depth: i32 = 0;
+    let mut impl_stack: Vec<RustImplScope> = Vec::new();
+    // When an `impl …` header has been parsed but the opening `{` lives on
+    // a later line (typical with `where` clauses spanning multiple lines),
+    // the scope is held here until the brace arrives.
+    let mut pending_impl: Option<(String, Option<String>)> = None;
+
+    for (i, raw) in content.lines().enumerate() {
+        let t = raw.trim();
+        let is_comment = t.starts_with("//") || t.starts_with("/*") || t.starts_with('*');
+        if is_comment {
+            // Comments still count braces (they generally don't contain unmatched
+            // ones, but if they do the depth would skew indefinitely; the safer
+            // default is to skip brace counting on comment-only lines).
+            continue;
+        }
+
         let s = strip_vis(t);
         // Handle async/unsafe/const qualifiers
         let s2 = s
@@ -99,7 +248,41 @@ fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
             .trim_start_matches("const ");
         let s2 = strip_vis(s2); // second pass after qualifiers (e.g. `async pub fn`)
 
-        if let Some((kind, name)) = try_kw(
+        // ── impl …{ — push a scope that qualifies inner method names.
+        // Handle this BEFORE try_kw so we get the proper type/trait split
+        // (try_kw with `("impl ", "impl")` would just grab the first ident,
+        // which is wrong for `impl Trait for Type`).
+        if let Some((type_name, trait_name)) = parse_rust_impl_header(s2) {
+            // Emit the impl symbol itself.  Name carries the implementing
+            // type; signature retains the original line so the trait info
+            // (when present) is still searchable.
+            out.push(make(file_path, (i + 1) as u32, "impl", type_name.clone(), t, "rust"));
+            // Push scope only when the impl's body opens on this line.
+            // Otherwise hold it as `pending_impl` until we see the `{` on a
+            // subsequent line (multi-line `where` clauses).
+            if t.contains('{') {
+                impl_stack.push(RustImplScope {
+                    type_name,
+                    trait_name,
+                    open_depth: depth,
+                });
+            } else {
+                pending_impl = Some((type_name, trait_name));
+            }
+            // Fall through to brace counting below; the impl line's braces
+            // need to update `depth` so the scope closes correctly.
+        } else if pending_impl.is_some() && raw.contains('{') {
+            // The pending impl's body opens here (typical: a bare `{` line
+            // after a multi-line `where` clause).
+            let (type_name, trait_name) = pending_impl.take().unwrap();
+            impl_stack.push(RustImplScope {
+                type_name,
+                trait_name,
+                open_depth: depth,
+            });
+            // Don't `continue` — the line could also start a method symbol
+            // on the same row, though that's unusual after a `where` block.
+        } else if let Some((kind, name)) = try_kw(
             s2,
             &[
                 ("fn ", "fn"),
@@ -110,11 +293,34 @@ fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
                 ("const ", "const"),
                 ("static ", "static"),
                 ("mod ", "mod"),
-                ("impl ", "impl"),
                 ("macro_rules! ", "macro"),
             ],
         ) {
-            out.push(make(file_path, (i + 1) as u32, kind, name, t, "rust"));
+            // Methods inside an impl get qualified `Type::method` (inherent)
+            // or `<Type as Trait>::method` (trait impl).  Free functions and
+            // other top-level items keep their bare name.
+            let emit_name = if kind == "fn" && impl_stack.last().is_some() {
+                let scope = impl_stack.last().unwrap();
+                match &scope.trait_name {
+                    Some(tr) => format!("<{} as {}>::{}", scope.type_name, tr, name),
+                    None => format!("{}::{}", scope.type_name, name),
+                }
+            } else {
+                name
+            };
+            out.push(make(file_path, (i + 1) as u32, kind, emit_name, t, "rust"));
+        }
+
+        // Update brace depth from this line's `{` / `}` (string-aware,
+        // line-comment-aware).  Then pop any impl scopes whose body has closed.
+        let (opens, closes) = count_braces(raw);
+        depth += opens - closes;
+        while let Some(scope) = impl_stack.last() {
+            if depth <= scope.open_depth {
+                impl_stack.pop();
+            } else {
+                break;
+            }
         }
     }
     out
@@ -319,6 +525,134 @@ mod tests {
         assert_eq!(syms[0].kind, "struct");
         assert_eq!(syms[1].kind, "enum");
         assert_eq!(syms[2].kind, "trait");
+    }
+
+    // ── impl scope tracking (Phase 2 #3 deepening) ──
+
+    #[test]
+    fn rust_inherent_impl_qualifies_methods() {
+        let src = "\
+struct Foo;
+
+impl Foo {
+    pub fn bar(&self) -> i32 { 42 }
+    fn baz() {}
+}
+
+fn free_fn() {}
+";
+        let syms = extract_rust(src, "f.rs");
+        // struct + impl + 2 methods + free fn = 5
+        assert_eq!(syms.len(), 5, "got {syms:#?}");
+        assert_eq!(syms[1].kind, "impl");
+        assert_eq!(syms[1].name, "Foo");
+        assert_eq!(syms[2].kind, "fn");
+        assert_eq!(syms[2].name, "Foo::bar", "inherent impl method gets Type::method");
+        assert_eq!(syms[3].name, "Foo::baz");
+        // Free fn after the impl block closes must not be qualified.
+        assert_eq!(syms[4].name, "free_fn", "free fn after impl must not inherit scope");
+    }
+
+    #[test]
+    fn rust_trait_impl_qualifies_with_trait() {
+        let src = "\
+impl Display for Foo {
+    fn fmt(&self, f: &mut Formatter) -> Result {}
+}
+";
+        let syms = extract_rust(src, "f.rs");
+        assert_eq!(syms.len(), 2, "got {syms:#?}");
+        assert_eq!(syms[0].kind, "impl");
+        assert_eq!(syms[0].name, "Foo", "type goes in name (not the trait)");
+        assert_eq!(syms[1].kind, "fn");
+        assert_eq!(syms[1].name, "<Foo as Display>::fmt");
+    }
+
+    #[test]
+    fn rust_generic_impl_strips_brackets() {
+        let src = "\
+impl<T: Clone> Repository<T> for SqliteStore<T> {
+    fn store(&self, item: T) {}
+}
+";
+        let syms = extract_rust(src, "g.rs");
+        assert_eq!(syms.len(), 2);
+        assert_eq!(syms[0].name, "SqliteStore", "type generics stripped");
+        assert_eq!(syms[1].name, "<SqliteStore as Repository>::store");
+    }
+
+    #[test]
+    fn rust_impl_with_where_clause() {
+        let src = "\
+impl<T> MyTrait for Foo<T>
+where
+    T: Send + Sync,
+{
+    fn method(&self) {}
+}
+";
+        let syms = extract_rust(src, "w.rs");
+        // impl emits with type=Foo (where stripped), method qualified.
+        assert_eq!(syms.len(), 2, "got {syms:#?}");
+        assert_eq!(syms[0].name, "Foo");
+        assert_eq!(syms[1].name, "<Foo as MyTrait>::method");
+    }
+
+    #[test]
+    fn rust_impl_scope_pops_on_closing_brace() {
+        // Two consecutive impls — methods of the second must not carry the
+        // first's type name. Uses the realistic multi-line layout; single-
+        // line `impl A { fn a_method() {} }` is a known limitation of the
+        // line-based scanner (try_kw runs once per line; the impl branch
+        // wins, so the inline `fn` is missed).
+        let src = "\
+impl A {
+    fn a_method() {}
+}
+
+impl B {
+    fn b_method() {}
+}
+";
+        let syms = extract_rust(src, "ab.rs");
+        assert_eq!(syms.len(), 4, "got {syms:#?}");
+        assert_eq!(syms[0].name, "A");
+        assert_eq!(syms[1].name, "A::a_method");
+        assert_eq!(syms[2].name, "B");
+        assert_eq!(syms[3].name, "B::b_method", "second impl methods qualified by B, not A");
+    }
+
+    #[test]
+    fn rust_method_with_inner_brace_block_keeps_scope() {
+        // The method body has its own `{ }`, but we shouldn't pop the impl
+        // scope until the impl's own `}` arrives.
+        let src = "\
+impl Foo {
+    fn complicated(&self) {
+        let x = { 1 + 2 };
+        if x > 0 { println!(\"yes\"); }
+    }
+    fn simple() {}
+}
+";
+        let syms = extract_rust(src, "c.rs");
+        assert_eq!(syms.len(), 3, "got {syms:#?}");
+        assert_eq!(syms[1].name, "Foo::complicated");
+        assert_eq!(syms[2].name, "Foo::simple", "second method still qualified despite intervening braces");
+    }
+
+    #[test]
+    fn rust_string_with_brace_doesnt_break_scope() {
+        // Brace counter ignores `{` inside string literals.
+        let src = "\
+impl Foo {
+    fn render() { let s = \"{not a brace}\"; }
+    fn other() {}
+}
+";
+        let syms = extract_rust(src, "s.rs");
+        assert_eq!(syms[1].name, "Foo::render");
+        assert_eq!(syms[2].name, "Foo::other");
     }
 
     #[test]
