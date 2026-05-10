@@ -305,6 +305,26 @@
     }
     .canvas-narrow-toggle:hover { color: #5cc8c8; border-color: #4a8b9c; }
     body.canvas-narrow .canvas-narrow-toggle { color: #5cc8c8; border-color: #5cc8c8; }
+    /* B M1 — drag handle on the left edge of the overlay. Cursor +
+       hover affordance on a 6px strip; on grab we add `canvas-resizing`
+       to <body> which suppresses overlay/cy transitions so the drag is
+       1:1 instead of easing behind the cursor. */
+    .canvas-resize-handle {
+      position: absolute;
+      left: -3px;
+      top: 0;
+      width: 6px;
+      height: 100vh;
+      cursor: ew-resize;
+      z-index: 90;
+      background: transparent;
+      transition: background 120ms;
+    }
+    .canvas-resize-handle:hover,
+    .canvas-resize-handle.dragging { background: rgba(92, 200, 200, 0.35); }
+    body.canvas-resizing { cursor: ew-resize !important; user-select: none; }
+    body.canvas-resizing #canvas-overlay,
+    body.canvas-resizing #cy { transition: none !important; }
     #canvas-overlay {
       position: fixed;
       top: 0;
@@ -795,6 +815,11 @@
        Width is driven by `--canvas-width`; M0 = 100vw, M1 will narrow
        it to leave Palace partially visible (40vw uncovered). -->
   <div id="canvas-overlay" class="hidden">
+    <!-- B M1 drag handle: hangs off the left edge of the overlay so the
+         user can resize the workshop freely (30–100vw). Double-click to
+         reset to fullscreen. -->
+    <div class="canvas-resize-handle" id="canvas-resize-handle"
+         title="drag to resize · double-click to reset to fullscreen"></div>
     <div class="canvas-focus">
       <button class="canvas-close" type="button">← back to Palace</button>
       <div class="canvas-focus-card">
@@ -991,13 +1016,25 @@ async function loadGraph() {
     const la = n.last_accessed || 0;
     return la > 0 && (nowSecs - la) < FRESH_WINDOW_SECS;
   }).length;
+  // C7: count nodes the system has stopped breathing through (>7d
+  // untouched). Same `last_accessed > 0` guard as the per-node fade.
+  const staleCount = data.nodes.filter(n => {
+    const la = n.last_accessed || 0;
+    return la > 0 && (nowSecs - la) > STALE_WINDOW_SECS;
+  }).length;
   const baseLabel = markdownCount > 0
     ? `${sqliteCount} sqlite · ${markdownCount} markdown · ${edgesLabel}`
     : `${data.nodes.length} memories · ${edgesLabel}`;
   const freshBadge = freshCount > 0
     ? ` · <span style="color:#5cc8c8">${freshCount} fresh</span>`
     : "";
-  document.getElementById("stats").innerHTML = baseLabel + freshBadge;
+  // Muted gray (#5a5a68) — readable on the dark bar but quieter than
+  // the cyan fresh tail, matching the visual hierarchy "fresh = signal,
+  // stale = background".
+  const staleBadge = staleCount > 0
+    ? ` · <span style="color:#5a5a68">${staleCount} stale</span>`
+    : "";
+  document.getElementById("stats").innerHTML = baseLabel + freshBadge + staleBadge;
 
   // Populate filter panel from kinds + edge types present.
   const kindCounts = {};
@@ -1028,6 +1065,12 @@ async function loadGraph() {
 // cyan ring. Server-side `data.now` is used (instead of client clock)
 // so cross-machine drift doesn't fake-pulse stale nodes.
 const FRESH_WINDOW_SECS = 3600;
+// C7: stale window = nodes the system hasn't touched in >7d fade out.
+// Mirror of fresh — together they show the attention map's two extremes
+// (where breath is happening now vs where it has stopped). The
+// last_accessed > 0 guard keeps markdown / never-accessed nodes at full
+// opacity (those aren't "stale", they just aren't access-tracked).
+const STALE_WINDOW_SECS = 7 * 24 * 3600;
 function buildCy(data) {
   if (state.cy) state.cy.destroy();
   const nowSecs = data.now || Math.floor(Date.now() / 1000);
@@ -1038,6 +1081,7 @@ function buildCy(data) {
       const lastAccessed = n.last_accessed || 0;
       const ageSecs = lastAccessed > 0 ? (nowSecs - lastAccessed) : Number.MAX_SAFE_INTEGER;
       const fresh = ageSecs < FRESH_WINDOW_SECS ? 1 : 0;
+      const stale = lastAccessed > 0 && ageSecs > STALE_WINDOW_SECS ? 1 : 0;
       return {
         data: {
           id: n.id,
@@ -1051,6 +1095,7 @@ function buildCy(data) {
           haloOp: haloOp(access),
           source: n.source || "sqlite",
           fresh,
+          stale,
           ageSecs,
           searchHaystack: [
             n.id, n.kind, ...(n.tags || []),
@@ -1099,6 +1144,13 @@ function buildCy(data) {
       // attention edge it's about to create).
       { selector: "node[fresh = 1]", style: {
         "border-width": 2, "border-color": "#5cc8c8", "border-opacity": 0.85,
+      }},
+      // C7 staleness: nodes untouched for >STALE_WINDOW_SECS fade out so
+      // the attention map shows what the system has stopped breathing
+      // through. Placed before .focus-center / .match so an explicit
+      // focus or search hit still pops the node back to full opacity.
+      { selector: "node[stale = 1]", style: {
+        "opacity": 0.45,
       }},
       { selector: "node.faded", style: {
         "opacity": 0.08, "text-opacity": 0,
@@ -1401,8 +1453,10 @@ async function showSidePanel(id) {
         n.data("haloOp", haloOp(access));
         // C5: this click bumped last_accessed_at server-side, so the node
         // is fresh by definition. Light up the cyan ring without waiting
-        // for the next /api/graph refresh.
+        // for the next /api/graph refresh. C7: clear the stale flag too —
+        // a node we just touched can't simultaneously be stale.
         n.data("fresh", 1);
+        n.data("stale", 0);
         n.data("ageSecs", 0);
       }
     }
@@ -1674,14 +1728,148 @@ function closeCanvas() {
   }, 320); // matches --canvas-fade
 }
 
-function toggleCanvasNarrow() {
-  const narrow = document.body.classList.toggle("canvas-narrow");
+// In-canvas focus switch — clicking a rail neighbor swaps the canvas
+// to that node without closing the overlay. Chat history auto-restores
+// from per-key localStorage (resetChat handles it). The graph behind
+// also re-focuses so narrow-mode users see Palace track along.
+//
+// Why not just openCanvas(neighbor)? Because that's "open from scratch"
+// — entering animation, body class flip, etc. We want a quieter
+// transition that says "still in canvas, different focus."
+async function switchFocus(key) {
+  if (!canvasState.current) return;
+  if (key === canvasState.current.key) return;
+  const editor = document.getElementById("canvas-editor");
+  if (editor && editor.value.trim()) {
+    const ok = confirm("Editor has unsaved content. Switch focus and discard it?");
+    if (!ok) return;
+  }
+  let memory;
+  try {
+    const r = await fetch(`/api/memory/${encodeURIComponent(key)}`);
+    if (!r.ok) {
+      const hint = document.getElementById("canvas-hint");
+      if (hint) {
+        hint.textContent = `cannot switch — ${r.status}`;
+        hint.className = "canvas-hint error";
+      }
+      return;
+    }
+    memory = await r.json();
+  } catch (e) {
+    return;
+  }
+  canvasState.current = memory;
+  document.getElementById("canvas-focus-key").textContent = memory.key;
+  document.getElementById("canvas-focus-meta").textContent =
+    `${memory.kind || "memory"} · ${memory.source || "sqlite"} · importance ${(memory.importance || 0).toFixed(2)}`;
+  if (editor) editor.value = "";
+  renderMarkdownPreview("");
+  resetCanvasHint();
+  loadCanvasRail(memory);
+  resetChat(memory);
+  if (state.cy && state.cy.getElementById(memory.key).length > 0) {
+    focusOnNode(memory.key);
+  }
+  setTimeout(() => { if (editor) editor.focus(); }, 60);
+}
+
+// B M1 — runtime-adjustable canvas width.
+//
+// Width is a single source of truth: `body.style["--canvas-width"]`
+// inline. Drag handle writes here; the narrow toggle button snaps to
+// presets (60vw ↔ 100vw); cmd/ctrl+\ does the same. The class
+// `body.canvas-narrow` is kept in sync (width < threshold) so existing
+// rules that fade Palace behind the workshop still trigger.
+const CANVAS_WIDTH_LS_KEY = "palace.canvas-width:v1";
+const CANVAS_WIDTH_MIN = 30;
+const CANVAS_WIDTH_MAX = 100;
+const CANVAS_NARROW_THRESHOLD = 90; // < this = "narrow mode"
+const CANVAS_NARROW_PRESET = 60;    // snap target for narrow toggle
+
+function setCanvasWidth(pct, persist = true) {
+  const clamped = Math.max(CANVAS_WIDTH_MIN, Math.min(CANVAS_WIDTH_MAX, pct));
+  document.body.style.setProperty("--canvas-width", clamped.toFixed(1) + "vw");
+  const isNarrow = clamped < CANVAS_NARROW_THRESHOLD;
+  document.body.classList.toggle("canvas-narrow", isNarrow);
   const btn = document.getElementById("canvas-narrow-toggle");
-  if (btn) btn.textContent = narrow ? "⊞ fullscreen" : "⊟ narrow";
+  if (btn) btn.textContent = isNarrow ? "⊞ fullscreen" : "⊟ narrow";
+  if (persist) {
+    try { localStorage.setItem(CANVAS_WIDTH_LS_KEY, String(clamped)); } catch (e) {}
+  }
   // Cytoscape needs a resize when the visible width swings — otherwise
   // its internal canvas keeps the old metrics and node positions look
   // off-center until the next layout pass.
   if (state.cy) state.cy.resize();
+}
+
+function readCanvasWidth() {
+  // Inline first (drag-set), fall back to computed (CSS class default).
+  const inline = document.body.style.getPropertyValue("--canvas-width");
+  const src = inline && inline.trim()
+    ? inline
+    : getComputedStyle(document.body).getPropertyValue("--canvas-width");
+  const v = parseFloat(src);
+  return Number.isFinite(v) ? v : 100;
+}
+
+function loadCanvasWidthPref() {
+  try {
+    const raw = localStorage.getItem(CANVAS_WIDTH_LS_KEY);
+    if (!raw) return null;
+    const v = parseFloat(raw);
+    return Number.isFinite(v) ? v : null;
+  } catch (e) { return null; }
+}
+
+function toggleCanvasNarrow() {
+  const current = readCanvasWidth();
+  const next = current < CANVAS_NARROW_THRESHOLD ? 100 : CANVAS_NARROW_PRESET;
+  setCanvasWidth(next);
+}
+
+function bindCanvasResize() {
+  const handle = document.getElementById("canvas-resize-handle");
+  if (!handle) return;
+  let dragging = false;
+  let pendingPct = null;
+  let rafId = null;
+  function flush() {
+    rafId = null;
+    if (pendingPct != null) setCanvasWidth(pendingPct, false);
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    pendingPct = (window.innerWidth - e.clientX) / window.innerWidth * 100;
+    if (rafId == null) rafId = requestAnimationFrame(flush);
+  }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove("dragging");
+    document.body.classList.remove("canvas-resizing");
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+    if (pendingPct != null) setCanvasWidth(pendingPct, true); // persist final
+    pendingPct = null;
+  }
+  handle.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    dragging = true;
+    handle.classList.add("dragging");
+    document.body.classList.add("canvas-resizing");
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+  handle.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    setCanvasWidth(100);
+  });
+}
+
+function initCanvasWidth() {
+  const saved = loadCanvasWidthPref();
+  if (saved != null) setCanvasWidth(saved, false);
 }
 
 function resetCanvasHint() {
@@ -1816,7 +2004,7 @@ async function loadCanvasRail(memory) {
   const cofiresList = neighborsOfType(memory.key, "cofires").slice(0, 8);
   if (cofiresList.length) {
     cofiresEl.innerHTML = cofiresList.map(k =>
-      `<a href="/?focus=${encodeURIComponent(k)}" title="${escapeHTML(k)}">${escapeHTML(k)}</a>`
+      `<a class="rail-switch" href="#" data-focus-key="${escapeHTML(k)}" title="${escapeHTML(k)}">${escapeHTML(k)}</a>`
     ).join("");
   } else {
     cofiresEl.innerHTML = `<div class="canvas-rail-empty">none yet</div>`;
@@ -1828,7 +2016,7 @@ async function loadCanvasRail(memory) {
   const annoNeighbors = neighborsOfType(memory.key, "annotates").slice(0, 6);
   if (annoNeighbors.length) {
     annosEl.innerHTML = annoNeighbors.map(k =>
-      `<a href="/?focus=${encodeURIComponent(k)}" title="${escapeHTML(k)}">${escapeHTML(k)}</a>`
+      `<a class="rail-switch" href="#" data-focus-key="${escapeHTML(k)}" title="${escapeHTML(k)}">${escapeHTML(k)}</a>`
     ).join("");
   } else {
     annosEl.innerHTML = `<div class="canvas-rail-empty">none yet</div>`;
@@ -2074,6 +2262,8 @@ function bindCanvasGlobals() {
     .addEventListener("click", closeCanvas);
   document.getElementById("canvas-narrow-toggle")
     .addEventListener("click", toggleCanvasNarrow);
+  bindCanvasResize();
+  initCanvasWidth();
   const editor = document.getElementById("canvas-editor");
   editor.addEventListener("input", () => renderMarkdownPreview(editor.value));
   editor.addEventListener("keydown", (e) => {
@@ -2097,6 +2287,19 @@ function bindCanvasGlobals() {
   }
   const chatClear = document.getElementById("chat-clear-btn");
   if (chatClear) chatClear.addEventListener("click", clearChatForCurrent);
+  // Rail click delegation: cofires + annotations links carry
+  // `data-focus-key` and trigger in-canvas focus switch instead of a
+  // page reload. Reports rail keeps target=_blank (no rail-switch class).
+  const rail = document.querySelector("#canvas-overlay .canvas-rail");
+  if (rail) {
+    rail.addEventListener("click", (e) => {
+      const a = e.target.closest("a.rail-switch");
+      if (!a) return;
+      e.preventDefault();
+      const k = a.dataset.focusKey;
+      if (k) switchFocus(k);
+    });
+  }
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       const overlay = document.getElementById("canvas-overlay");
