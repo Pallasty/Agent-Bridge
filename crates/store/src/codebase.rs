@@ -31,11 +31,11 @@ pub fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Co
 }
 
 /// Extract `use`/`import` statements from `content` for the given language.
-/// First slice ships Rust only (Phase 2 #3 second part); other languages
-/// return an empty vec until their importer lands.
+/// Phase 2 #3 second slice ships Rust + Python; TS/JS/Go to follow.
 pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<CodebaseImport> {
     match language {
         "rust" => extract_rust_imports(content, file_path),
+        "python" => extract_python_imports(content, file_path),
         _ => vec![],
     }
 }
@@ -569,6 +569,171 @@ pub fn extract_rust_imports(content: &str, file_path: &str) -> Vec<CodebaseImpor
     out
 }
 
+// ── Python imports (Phase 2 #3 second slice — Python side) ───────────────────
+
+/// Drop a trailing `# …` line comment. String-aware for `'…'` and `"…"`
+/// so a `#` inside a string literal isn't mistaken for a comment opener.
+/// Triple-quoted / raw / byte string prefixes aren't handled — import
+/// lines almost never contain them.
+fn strip_python_line_comment(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    let mut in_str = false;
+    let mut quote: u8 = b' ';
+    let mut prev_bs = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            if c == b'\\' && !prev_bs {
+                prev_bs = true;
+                i += 1;
+                continue;
+            }
+            if c == quote && !prev_bs {
+                in_str = false;
+            }
+            prev_bs = false;
+        } else if c == b'"' || c == b'\'' {
+            in_str = true;
+            quote = c;
+        } else if c == b'#' {
+            return &s[..i];
+        }
+        i += 1;
+    }
+    s
+}
+
+/// Parse `path as alias` → `(path, Some(alias))` for one item already split
+/// out of a comma list. Mirror of [`split_as_alias`] but for Python's `as`.
+fn split_python_as(item: &str) -> (String, Option<String>) {
+    let trimmed = item.trim();
+    if let Some(idx) = trimmed.rfind(" as ") {
+        let path = trimmed[..idx].trim();
+        let alias = trimmed[idx + 4..].trim();
+        if !alias.is_empty()
+            && alias
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return (path.to_string(), Some(alias.to_string()));
+        }
+    }
+    (trimmed.to_string(), None)
+}
+
+/// Join a `from MODULE import NAME` pair into a single canonical target.
+/// Handles relative imports (`.foo`, `..bar`, `.pkg.mod`) without
+/// duplicating dots.
+fn join_python_import_path(module: &str, name: &str) -> String {
+    if name.is_empty() {
+        return module.to_string();
+    }
+    if module.is_empty() || module.ends_with('.') {
+        format!("{module}{name}")
+    } else {
+        format!("{module}.{name}")
+    }
+}
+
+/// Extract Python `import` and `from … import …` statements as one
+/// [`CodebaseImport`] per imported item. Multi-item forms (`import a, b`,
+/// `from x import y, z`, parenthesized multi-line imports) all expand to
+/// one row each. Wildcard `from x import *` records `target = "x.*"`.
+/// Convention for `from`: target is the canonical absolute path
+/// `MODULE.NAME` so the same query "who imports `os.path`" works whether
+/// the call site wrote `import os.path` or `from os import path`.
+pub fn extract_python_imports(content: &str, file_path: &str) -> Vec<CodebaseImport> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0usize;
+    while i < lines.len() {
+        let raw = lines[i];
+        let no_cmt = strip_python_line_comment(raw);
+        let stripped = no_cmt.trim();
+        let line_no = (i as u32) + 1;
+
+        // `import a` / `import a.b` / `import a as x` / `import a, b as y`
+        if let Some(rest) = stripped.strip_prefix("import ") {
+            let body = rest.trim_end_matches(';').trim();
+            for item in split_top_level_commas(body) {
+                let (target, alias) = split_python_as(item);
+                if target.is_empty() {
+                    continue;
+                }
+                out.push(CodebaseImport {
+                    file_path: file_path.to_string(),
+                    line: line_no,
+                    language: "python".to_string(),
+                    raw: raw.chars().take(200).collect(),
+                    target,
+                    alias,
+                });
+            }
+            i += 1;
+            continue;
+        }
+
+        // `from MODULE import a, b as x` (possibly multi-line with parens)
+        if let Some(rest) = stripped.strip_prefix("from ") {
+            if let Some(imp_idx) = rest.find(" import ") {
+                let module = rest[..imp_idx].trim().to_string();
+                let mut after = rest[imp_idx + " import ".len()..].to_string();
+                let mut end_line_idx = i;
+                // Multi-line: aggregate lines until the open paren closes.
+                if after.contains('(') && !after.contains(')') {
+                    while end_line_idx + 1 < lines.len() {
+                        end_line_idx += 1;
+                        let next = strip_python_line_comment(lines[end_line_idx]).trim();
+                        after.push(' ');
+                        after.push_str(next);
+                        if after.contains(')') {
+                            break;
+                        }
+                    }
+                }
+                let after = after
+                    .trim()
+                    .trim_end_matches(';')
+                    .trim()
+                    .trim_start_matches('(')
+                    .trim_end_matches(')')
+                    .trim();
+                for item in split_top_level_commas(after) {
+                    let item = item.trim();
+                    if item.is_empty() {
+                        continue;
+                    }
+                    if item == "*" {
+                        out.push(CodebaseImport {
+                            file_path: file_path.to_string(),
+                            line: line_no,
+                            language: "python".to_string(),
+                            raw: raw.chars().take(200).collect(),
+                            target: format!("{module}.*"),
+                            alias: None,
+                        });
+                        continue;
+                    }
+                    let (name, alias) = split_python_as(item);
+                    out.push(CodebaseImport {
+                        file_path: file_path.to_string(),
+                        line: line_no,
+                        language: "python".to_string(),
+                        raw: raw.chars().take(200).collect(),
+                        target: join_python_import_path(&module, &name),
+                        alias,
+                    });
+                }
+                i = end_line_idx + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
 // ── Python ───────────────────────────────────────────────────────────────────
 
 fn extract_python(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
@@ -1095,6 +1260,127 @@ use crate::{
         // The word "use" appears inside an identifier; must not match.
         let src = "fn use_this() {}\nstruct UseFoo;\n// use foo;\n";
         let imps = extract_rust_imports(src, "f.rs");
+        assert!(imps.is_empty(), "spurious matches: {imps:#?}");
+    }
+
+    // ── Phase 2 #3 second slice — Python import extractor ──────────────────
+
+    #[test]
+    fn py_import_simple_module() {
+        let imps = extract_python_imports("import os\n", "f.py");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "os");
+        assert!(imps[0].alias.is_none());
+        assert_eq!(imps[0].language, "python");
+    }
+
+    #[test]
+    fn py_import_dotted_path() {
+        let imps = extract_python_imports("import os.path\n", "f.py");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "os.path");
+    }
+
+    #[test]
+    fn py_import_with_alias() {
+        let imps = extract_python_imports("import numpy as np\n", "f.py");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "numpy");
+        assert_eq!(imps[0].alias.as_deref(), Some("np"));
+    }
+
+    #[test]
+    fn py_import_multiple_with_per_item_alias() {
+        let imps =
+            extract_python_imports("import a, b as x, c.d\n", "f.py");
+        assert_eq!(imps.len(), 3);
+        assert_eq!(imps[0].target, "a");
+        assert_eq!(imps[1].target, "b");
+        assert_eq!(imps[1].alias.as_deref(), Some("x"));
+        assert_eq!(imps[2].target, "c.d");
+    }
+
+    #[test]
+    fn py_from_module_import_name() {
+        let imps = extract_python_imports("from os import path\n", "f.py");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "os.path");
+    }
+
+    #[test]
+    fn py_from_module_import_multiple() {
+        let imps = extract_python_imports(
+            "from os import path, getcwd, mkdir\n",
+            "f.py",
+        );
+        assert_eq!(imps.len(), 3);
+        let targets: Vec<&str> = imps.iter().map(|i| i.target.as_str()).collect();
+        assert_eq!(targets, ["os.path", "os.getcwd", "os.mkdir"]);
+    }
+
+    #[test]
+    fn py_from_with_per_name_alias() {
+        let imps = extract_python_imports("from os import path as p\n", "f.py");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "os.path");
+        assert_eq!(imps[0].alias.as_deref(), Some("p"));
+    }
+
+    #[test]
+    fn py_from_relative_single_dot() {
+        let imps = extract_python_imports("from . import foo\n", "f.py");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, ".foo");
+    }
+
+    #[test]
+    fn py_from_relative_dotted_package() {
+        let imps =
+            extract_python_imports("from .pkg.sub import bar, baz\n", "f.py");
+        assert_eq!(imps.len(), 2);
+        assert_eq!(imps[0].target, ".pkg.sub.bar");
+        assert_eq!(imps[1].target, ".pkg.sub.baz");
+    }
+
+    #[test]
+    fn py_from_wildcard() {
+        let imps = extract_python_imports("from os import *\n", "f.py");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "os.*");
+    }
+
+    #[test]
+    fn py_from_paren_multiline() {
+        let src = "\
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional as Opt,
+)
+";
+        let imps = extract_python_imports(src, "f.py");
+        assert_eq!(imps.len(), 4, "got {imps:#?}");
+        let targets: Vec<&str> = imps.iter().map(|i| i.target.as_str()).collect();
+        assert_eq!(
+            targets,
+            ["typing.Any", "typing.Dict", "typing.List", "typing.Optional"]
+        );
+        assert_eq!(imps[3].alias.as_deref(), Some("Opt"));
+        // All four should report the line where `from` started.
+        assert!(imps.iter().all(|i| i.line == 1));
+    }
+
+    #[test]
+    fn py_import_skips_comments_and_lookalikes() {
+        // The word "import" appears inside identifiers / comments / strings.
+        let src = "\
+# import os
+def import_helper():
+    return import_lib  # not a real import
+x = 'from os import path'
+";
+        let imps = extract_python_imports(src, "f.py");
         assert!(imps.is_empty(), "spurious matches: {imps:#?}");
     }
 }
