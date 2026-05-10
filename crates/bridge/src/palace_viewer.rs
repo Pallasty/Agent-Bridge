@@ -439,27 +439,29 @@ async fn api_graph(
         .iter()
         .map(|m| {
             json!({
-                "id":         m.key,
-                "kind":       m.kind,
-                "importance": (m.importance * 1000.0).round() / 1000.0,
-                "tags":       m.tags,
-                "label":      m.key,
-                "access":     m.access_count,
-                "source":     "sqlite",
+                "id":            m.key,
+                "kind":          m.kind,
+                "importance":    (m.importance * 1000.0).round() / 1000.0,
+                "tags":          m.tags,
+                "label":         m.key,
+                "access":        m.access_count,
+                "last_accessed": m.last_accessed_at,
+                "source":        "sqlite",
             })
         })
         .collect();
 
     for m in &md_only {
         nodes_json.push(json!({
-            "id":         m.key,
-            "kind":       m.kind,
-            "importance": 0.7,    // markdown memories are user-curated → treat as high signal
-            "tags":       Vec::<String>::new(),
-            "label":      m.key,
-            "access":     0,
-            "source":     "markdown",
-            "description": m.description,
+            "id":            m.key,
+            "kind":          m.kind,
+            "importance":    0.7,    // markdown memories are user-curated → treat as high signal
+            "tags":          Vec::<String>::new(),
+            "label":         m.key,
+            "access":        0,
+            "last_accessed": 0,
+            "source":        "markdown",
+            "description":   m.description,
         }));
     }
 
@@ -497,9 +499,15 @@ async fn api_graph(
         }));
     }
 
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
     Ok(Json(json!({
         "nodes": nodes_json,
         "edges": edges_json,
+        "now":   now_secs,
         "stats": {
             "sqlite_nodes":   active.len(),
             "markdown_nodes": md_only.len(),

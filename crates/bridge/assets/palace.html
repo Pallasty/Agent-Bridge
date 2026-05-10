@@ -480,12 +480,20 @@ async function loadGraph() {
 }
 
 // ── Build cytoscape ─────────────────────────────────────────────
+// C5: freshness window = nodes accessed within the last hour wear a
+// cyan ring. Server-side `data.now` is used (instead of client clock)
+// so cross-machine drift doesn't fake-pulse stale nodes.
+const FRESH_WINDOW_SECS = 3600;
 function buildCy(data) {
   if (state.cy) state.cy.destroy();
+  const nowSecs = data.now || Math.floor(Date.now() / 1000);
 
   const elements = [
     ...data.nodes.map(n => {
       const access = n.access || 0;
+      const lastAccessed = n.last_accessed || 0;
+      const ageSecs = lastAccessed > 0 ? (nowSecs - lastAccessed) : Number.MAX_SAFE_INTEGER;
+      const fresh = ageSecs < FRESH_WINDOW_SECS ? 1 : 0;
       return {
         data: {
           id: n.id,
@@ -498,6 +506,8 @@ function buildCy(data) {
           haloPad: haloPad(access),
           haloOp: haloOp(access),
           source: n.source || "sqlite",
+          fresh,
+          ageSecs,
           searchHaystack: [
             n.id, n.kind, ...(n.tags || []),
             n.description || "",
@@ -538,6 +548,13 @@ function buildCy(data) {
         "shape": "round-rectangle",
         "border-width": 2, "border-color": "#e0e0ec", "border-opacity": 0.55,
         "opacity": 0.96,
+      }},
+      // C5 freshness: nodes accessed within FRESH_WINDOW_SECS get a cyan
+      // ring matching the coactivation color, so "the system is breathing
+      // here right now" reads as a single visual concept (recent click + the
+      // attention edge it's about to create).
+      { selector: "node[fresh = 1]", style: {
+        "border-width": 2, "border-color": "#5cc8c8", "border-opacity": 0.85,
       }},
       { selector: "node.faded", style: {
         "opacity": 0.08, "text-opacity": 0,
@@ -821,6 +838,11 @@ async function showSidePanel(id) {
         n.data("size", nodeSize(m.importance, access));
         n.data("haloPad", haloPad(access));
         n.data("haloOp", haloOp(access));
+        // C5: this click bumped last_accessed_at server-side, so the node
+        // is fresh by definition. Light up the cyan ring without waiting
+        // for the next /api/graph refresh.
+        n.data("fresh", 1);
+        n.data("ageSecs", 0);
       }
     }
     const sourceLabel = m.source === "markdown" ? "markdown" : "sqlite";
