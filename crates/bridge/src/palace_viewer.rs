@@ -36,7 +36,7 @@
 //!
 //! See `vision_breathing_canvas.md` for the broader 呼吸式画布 design.
 
-use ab_store::{MemoryListSort, MemoryRecord, StateStore};
+use ab_store::{MemoryListSort, MemoryQueryRecord, MemoryRecord, StateStore};
 use anyhow::{Context, Result};
 use axum::{
     extract::{Path, Query, State},
@@ -117,6 +117,7 @@ pub async fn run(
         .route("/reports/:filename", get(serve_report))
         .route("/api/canvas-chat", post(api_canvas_chat))
         .route("/api/memory/:key/tombstone", post(api_memory_tombstone))
+        .route("/api/lineage/:key", get(api_lineage))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen)
@@ -536,12 +537,42 @@ async fn api_memory(
     Path(key): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     // sqlite lookup — auto-bumps access_count + last_accessed_at.
+    let started = std::time::Instant::now();
     if let Some(m) = s
         .store
         .memory_get(&key)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_get: {e}")))?
     {
+        // Phase 0 telemetry: log the click into `memory_query_log` so
+        // `dream replay-audit` (and downstream attention analyses) can
+        // see Palace navigation, not just MCP tool calls. Without this
+        // the trace is biased toward Claude's programmatic retrievals —
+        // an audit on a Palace-heavy workflow ends up with 0–2 events
+        // per summary even when humans are actively clicking around.
+        // Source label distinguishes from MCP `memory_get` (`mcp:memory_get`).
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let elapsed_us = started.elapsed().as_micros().min(u32::MAX as u128) as u32;
+        let rec = MemoryQueryRecord {
+            kind: "get".into(),
+            query: key.clone(),
+            tags_json: "[]".into(),
+            hit_count: 1,
+            top_hit_age_secs: Some(now_secs - m.created_at),
+            top_hit_created_at: Some(m.created_at),
+            duration_us: elapsed_us,
+            source: "palace_viewer:click".into(),
+            at: now_secs,
+        };
+        let store_for_log = s.store.clone();
+        tokio::spawn(async move {
+            let _ = store_for_log.record_memory_query(&rec).await;
+        });
+
+
         // Feed the rolling click window → co-activation. Best-effort: any
         // failure here just skips the recording, never blocks the read.
         let coact_keys = {
@@ -617,6 +648,113 @@ async fn api_memory_tombstone(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_delete: {e}")))?;
     Ok(Json(json!({ "ok": true, "key": key, "deleted": deleted })))
+}
+
+// ── Lineage endpoint (P7: closes VIEWER_NODE_CAP visibility gap) ────────
+//
+// `/api/graph` truncates by importance, so chains of low-importance
+// chat_sessions (the typical fork-chain shape) become invisible in the
+// rendered subgraph. memory_edges still has them; this endpoint walks
+// them directly so the canvas rail can surface the chain.
+//
+// BFS from `key` along edges matching `type` (default `evolved_from`),
+// up to `depth` hops (default 10, capped at 50). Visited set guards
+// against cycles. Returns the chain in walk order with the edge type
+// that connected each hop.
+
+#[derive(Deserialize)]
+struct LineageQuery {
+    /// Edge type to follow. Default `evolved_from`. Use `discussed_at`
+    /// to walk chat_session → topic; `supersedes` for replacement chains;
+    /// `all` (literal string) walks any edge type — useful for general
+    /// "show me everything connected".
+    #[serde(default)]
+    r#type: Option<String>,
+    /// Max hops. Capped at 50 server-side to bound work.
+    #[serde(default)]
+    depth: Option<u32>,
+    /// Walk direction. `out` (default) follows from→to; `in` follows
+    /// to→from (i.e. "who evolved from me"); `both` is bidirectional.
+    #[serde(default)]
+    direction: Option<String>,
+}
+
+async fn api_lineage(
+    State(s): State<AppState>,
+    Path(key): Path<String>,
+    Query(q): Query<LineageQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let edge_filter = q.r#type.as_deref().unwrap_or("evolved_from").to_string();
+    let depth = q.depth.unwrap_or(10).min(50) as usize;
+    let direction = q.direction.as_deref().unwrap_or("out").to_string();
+    let walk_out = matches!(direction.as_str(), "out" | "both");
+    let walk_in = matches!(direction.as_str(), "in" | "both");
+    if !walk_out && !walk_in {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("direction must be one of out|in|both, got {direction}"),
+        ));
+    }
+
+    // BFS queue of (key, hop_count). visited prevents re-traversal so
+    // cycles in the edge graph don't loop forever.
+    use std::collections::{HashSet, VecDeque};
+    let mut visited: HashSet<String> = HashSet::new();
+    visited.insert(key.clone());
+    let mut queue: VecDeque<(String, u32)> = VecDeque::new();
+    queue.push_back((key.clone(), 0));
+
+    // Each chain entry records the step: who was added + how we got here.
+    let mut chain: Vec<Value> = Vec::new();
+    let mut truncated = false;
+
+    while let Some((cur, hop)) = queue.pop_front() {
+        if hop >= depth as u32 {
+            // Reached depth limit; any further would be cut off.
+            truncated = true;
+            continue;
+        }
+        let nbrs = s.store.memory_neighbors(&cur).await.unwrap_or_default();
+        for e in nbrs {
+            // Edge filter — "all" passes everything.
+            if edge_filter != "all" && e.edge_type != edge_filter {
+                continue;
+            }
+            // Direction filter — only follow edges in the requested direction.
+            // memory_neighbors returns both incoming and outgoing edges for
+            // `cur` (it's the union); we distinguish via from_key/to_key.
+            let next = if e.from_key == cur && walk_out {
+                e.to_key.clone()
+            } else if e.to_key == cur && walk_in {
+                e.from_key.clone()
+            } else {
+                continue;
+            };
+            if visited.contains(&next) {
+                continue;
+            }
+            visited.insert(next.clone());
+            chain.push(json!({
+                "from": cur,
+                "to": next,
+                "edge_type": e.edge_type,
+                "weight": e.weight,
+                "hop": hop + 1,
+            }));
+            queue.push_back((next, hop + 1));
+        }
+    }
+
+    Ok(Json(json!({
+        "ok": true,
+        "key": key,
+        "edge_filter": edge_filter,
+        "direction": direction,
+        "depth_limit": depth,
+        "chain": chain,
+        "chain_length": chain.len(),
+        "truncated": truncated,
+    })))
 }
 
 // ── Annotate endpoint (C1: closes the 呼吸 loop) ─────────────────────────

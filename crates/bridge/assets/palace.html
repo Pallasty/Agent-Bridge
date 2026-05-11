@@ -941,6 +941,18 @@
     .canvas-rail-annotations a { border-left: 2px solid #ffe070; }
     .canvas-rail-discussions a { border-left: 2px solid #a87cff; }
     .canvas-rail-reports a     { border-left: 2px solid #5cc8c8; }
+    /* Lineage chain — solid purple border-left echoes the evolved_from
+       edge style (solid purple bezier in graph). Visually pairs with
+       discussions (also purple family) but solid vs dashed signals
+       "structural chain" vs "soft discussion-of". */
+    .canvas-rail-lineage a { border-left: 2px solid #a87cff; }
+    .canvas-rail-lineage .hop {
+      color: #5cc8c8;
+      font-size: 9px;
+      letter-spacing: 0.04em;
+      margin-right: 6px;
+      font-weight: 500;
+    }
 
     /* A↔B intent labels — anchor the vision_breathing_canvas semantic
        layer (A = 殿堂 / palace = results; B = 工坊 / canvas = workshop)
@@ -1163,6 +1175,10 @@
           <div class="canvas-rail-section">
             <div class="canvas-rail-title">past discussions</div>
             <div id="canvas-rail-discussions"><div class="canvas-rail-empty">none</div></div>
+          </div>
+          <div class="canvas-rail-section" id="canvas-rail-lineage-section" style="display:none;">
+            <div class="canvas-rail-title">lineage chain (ancestors)</div>
+            <div id="canvas-rail-lineage"><div class="canvas-rail-empty">none</div></div>
           </div>
           <div class="canvas-rail-section">
             <div class="canvas-rail-title">related reports</div>
@@ -2693,6 +2709,41 @@ async function loadCanvasRail(memory) {
     }).join("");
   } else {
     discsEl.innerHTML = `<div class="canvas-rail-empty">none yet</div>`;
+  }
+
+  // 3.5 lineage chain — server-side BFS along evolved_from from this key.
+  //
+  // /api/graph truncates by importance, so chains of low-importance
+  // chat_sessions disappear from the rendered subgraph even though the
+  // edges live in memory_edges. This section bypasses the truncation
+  // by walking directly from the DB. Hidden when focus is not a
+  // chat_session (most other kinds have no evolved_from chain).
+  const lineageSection = document.getElementById("canvas-rail-lineage-section");
+  const lineageEl = document.getElementById("canvas-rail-lineage");
+  lineageEl.parentElement.classList.add("canvas-rail-lineage");
+  if (memory.kind === "chat_session") {
+    lineageSection.style.display = "";
+    try {
+      const r = await fetch(
+        `/api/lineage/${encodeURIComponent(memory.key)}?type=evolved_from&direction=out&depth=20`
+      );
+      const j = await r.json();
+      const hops = (j && j.chain) ? j.chain : [];
+      if (hops.length) {
+        lineageEl.innerHTML = hops.map(h => {
+          const short = h.to.replace(/^palace_chat_session_/, "chat ");
+          return `<a class="rail-switch" href="#" data-focus-key="${escapeHTML(h.to)}" title="hop ${h.hop} via ${escapeHTML(h.edge_type)} → ${escapeHTML(h.to)}">` +
+            `<span class="hop">↑${h.hop}</span>${escapeHTML(short)}</a>`;
+        }).join("") + (j.truncated ? `<div class="canvas-rail-empty" style="font-style:italic;">…chain truncated at depth ${j.depth_limit}</div>` : "");
+      } else {
+        lineageEl.innerHTML = `<div class="canvas-rail-empty">no ancestors</div>`;
+      }
+    } catch (e) {
+      lineageEl.innerHTML = `<div class="canvas-rail-empty">error</div>`;
+    }
+  } else {
+    lineageSection.style.display = "none";
+    lineageEl.innerHTML = `<div class="canvas-rail-empty">none</div>`;
   }
 
   // 4. related reports — same /api/reports endpoint the side panel uses.
