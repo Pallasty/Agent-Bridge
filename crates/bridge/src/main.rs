@@ -135,6 +135,24 @@ enum Cmd {
         /// Which shell flavour to emit a snippet for.
         shell: ShellKind,
     },
+    /// **ε-5 (2026-05-11)** — Session-scoped git worktree as sibling-sweep
+    /// root fix. Two Claude agents in one working tree + git index will
+    /// sweep each other's unstaged changes on `git add/commit` (Hebbian
+    /// top-pair `lesson_sibling_parallel_commits` ↔ `lesson_git_commit_by_path`
+    /// fired 9× on this insight alone). Create a per-session worktree to
+    /// physically isolate the index.
+    ///
+    /// Flow:
+    ///   1. `agent-bridge worktree-session new --name fix-foo`
+    ///      → creates `.worktrees/session-fix-foo-<ts>/` on a new branch
+    ///        `session/fix-foo-<ts>`. Prints the path.
+    ///   2. `cd` into the printed path. Continue work there.
+    ///   3. Commit + push when done; `git worktree remove <path>` after
+    ///      merging the branch back to master.
+    WorktreeSession {
+        #[command(subcommand)]
+        op: WorktreeSessionOp,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -142,6 +160,25 @@ enum ShellKind {
     Bash,
     Zsh,
     Fish,
+}
+
+#[derive(Subcommand, Debug)]
+enum WorktreeSessionOp {
+    /// Create a new session worktree on a fresh branch. Prints the path
+    /// to stdout (last line) so you can `cd "$(agent-bridge worktree-session new | tail -1)"`.
+    New {
+        /// Optional slug fragment baked into the branch + dir name. Letters,
+        /// digits, hyphens. Auto-paired with a timestamp suffix so reruns
+        /// don't collide.
+        #[arg(long)]
+        name: Option<String>,
+        /// Branch to fork from. Default: current HEAD.
+        #[arg(long)]
+        base: Option<String>,
+    },
+    /// List existing session worktrees (filters `git worktree list` to ones
+    /// under `.worktrees/session-`).
+    List,
 }
 
 #[derive(Subcommand, Debug)]
@@ -672,6 +709,17 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // ε-5: worktree-session subcommand. Doesn't need a Hub — pure git
+    // CLI wrapping, runs to completion.
+    if let Cmd::WorktreeSession { op } = &cmd {
+        return match op {
+            WorktreeSessionOp::New { name, base } => {
+                run_worktree_session_new(name.as_deref(), base.as_deref()).await
+            }
+            WorktreeSessionOp::List => run_worktree_session_list().await,
+        };
+    }
+
     // Palace viewer: short-lived HTTP server, opens store directly (no Hub).
     if let Cmd::Palace { op } = &cmd {
         return match op {
@@ -762,7 +810,8 @@ async fn main() -> Result<()> {
         | Cmd::Skills { .. }
         | Cmd::Dream { .. }
         | Cmd::Palace { .. }
-        | Cmd::ShellInit { .. } => unreachable!(),
+        | Cmd::ShellInit { .. }
+        | Cmd::WorktreeSession { .. } => unreachable!(),
     }
 }
 
@@ -920,6 +969,170 @@ fn short_key(s: &str, max: usize) -> String {
         let truncated: String = s.chars().take(max - 1).collect();
         format!("{truncated}…")
     }
+}
+
+/// ε-5 — `agent-bridge worktree-session new`. Wraps `git worktree add` with
+/// a sane convention: branch `session/<slug>`, dir `.worktrees/session-<slug>/`.
+/// Prints status to stderr; the final stdout line is the worktree path so
+/// callers can `cd "$(agent-bridge worktree-session new | tail -1)"`.
+async fn run_worktree_session_new(
+    name: Option<&str>,
+    base: Option<&str>,
+) -> Result<()> {
+    use std::process::Command;
+
+    // Resolve repo root from cwd. Fall back to env-overridden $AGENT_BRIDGE_REPO
+    // for tests.
+    let repo_root = if let Ok(r) = std::env::var("AGENT_BRIDGE_REPO") {
+        std::path::PathBuf::from(r)
+    } else {
+        let out = Command::new("git")
+            .args(["rev-parse", "--show-toplevel"])
+            .output()
+            .map_err(|e| anyhow::anyhow!("git rev-parse: {e}"))?;
+        if !out.status.success() {
+            anyhow::bail!(
+                "git rev-parse --show-toplevel failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+
+    // Build slug from --name + a unix-timestamp suffix so reruns don't collide.
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let name_part = name
+        .map(|s| {
+            s.chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>()
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "anon".to_string());
+    let slug = format!("{name_part}-{ts}");
+    let branch = format!("session/{slug}");
+    let dir_name = format!("session-{slug}");
+    let path = repo_root.join(".worktrees").join(&dir_name);
+
+    // Make sure parent dir exists; `git worktree add` won't create
+    // .worktrees/ itself.
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| anyhow::anyhow!("mkdir {parent:?}: {e}"))?;
+    }
+
+    let base_ref = base.unwrap_or("HEAD");
+    eprintln!("# ε-5 worktree-session new");
+    eprintln!("  repo   : {}", repo_root.display());
+    eprintln!("  branch : {branch}");
+    eprintln!("  base   : {base_ref}");
+    eprintln!("  path   : {}", path.display());
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["worktree", "add", "-b", &branch])
+        .arg(&path)
+        .arg(base_ref)
+        .output()
+        .map_err(|e| anyhow::anyhow!("git worktree add: {e}"))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git worktree add failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    if !out.stdout.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&out.stdout));
+    }
+    eprintln!("  ✓ worktree created");
+    eprintln!("  next: cd to the printed path; work + commit there; `git worktree remove` when merged");
+    eprintln!();
+    // Last stdout line = the path, so the shell idiom works:
+    //   cd "$(agent-bridge worktree-session new --name fix-foo | tail -1)"
+    println!("{}", path.display());
+    Ok(())
+}
+
+/// ε-5 — `agent-bridge worktree-session list`. Thin wrapper over
+/// `git worktree list --porcelain` that filters to session worktrees
+/// (path contains `/.worktrees/session-`) and prints a one-line summary
+/// per row: `path  branch  HEAD`.
+async fn run_worktree_session_list() -> Result<()> {
+    use std::process::Command;
+    let repo_root = if let Ok(r) = std::env::var("AGENT_BRIDGE_REPO") {
+        std::path::PathBuf::from(r)
+    } else {
+        let out = Command::new("git")
+            .args(["rev-parse", "--show-toplevel"])
+            .output()
+            .map_err(|e| anyhow::anyhow!("git rev-parse: {e}"))?;
+        if !out.status.success() {
+            anyhow::bail!(
+                "git rev-parse --show-toplevel failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .map_err(|e| anyhow::anyhow!("git worktree list: {e}"))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git worktree list failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+
+    // Porcelain blocks are separated by blank lines; each block has
+    // `worktree <path>`, optional `HEAD <sha>`, optional `branch <ref>`.
+    let mut shown = 0;
+    let mut path = String::new();
+    let mut head = String::new();
+    let mut branch = String::new();
+    for raw in String::from_utf8_lossy(&out.stdout).lines() {
+        if raw.is_empty() {
+            if path.contains("/.worktrees/session-") {
+                println!("{path}  {branch}  {head}");
+                shown += 1;
+            }
+            path.clear();
+            head.clear();
+            branch.clear();
+            continue;
+        }
+        if let Some(rest) = raw.strip_prefix("worktree ") {
+            path = rest.to_string();
+        } else if let Some(rest) = raw.strip_prefix("HEAD ") {
+            head = rest.chars().take(8).collect();
+        } else if let Some(rest) = raw.strip_prefix("branch ") {
+            branch = rest.to_string();
+        }
+    }
+    // Flush any trailing block (porcelain output may end without trailing
+    // blank line on some git versions).
+    if path.contains("/.worktrees/session-") {
+        println!("{path}  {branch}  {head}");
+        shown += 1;
+    }
+    if shown == 0 {
+        eprintln!("(no session worktrees under {})", repo_root.join(".worktrees").display());
+    }
+    Ok(())
 }
 
 /// v21 — `agent-bridge dream identity --days N`. Compares behavioral

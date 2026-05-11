@@ -6397,6 +6397,81 @@ impl McpTool for SessionBootstrapTool {
             lines.extend(section);
         }
 
+        // ε-5 (2026-05-11) — sibling-presence warning. Two agents in the
+        // same working tree + git index will sweep each other's unstaged
+        // changes (top-9 Hebbian pair: `lesson_sibling_parallel_commits` ↔
+        // `lesson_git_commit_by_path_overrides_apply_cached`). When another
+        // agent has heartbeat in this project within the last 5 minutes,
+        // emit a loud warning + the worktree-session recipe. Best-effort.
+        {
+            let project_slug = std::path::Path::new(&cwd)
+                .file_name()
+                .and_then(|n| n.to_str().map(|s| s.to_string()))
+                .unwrap_or_default();
+            if !project_slug.is_empty() {
+                if let Ok(live) = store
+                    .agent_presence_list(Some(&project_slug), None, 300, 50)
+                    .await
+                {
+                    let my_sid = std::env::var("CLAUDE_SESSION_ID")
+                        .ok()
+                        .or_else(|| std::env::var("AGENT_BRIDGE_SESSION_ID").ok());
+                    let peers: Vec<&ab_store::AgentPresenceRecord> = live
+                        .iter()
+                        .filter(|r| {
+                            my_sid
+                                .as_deref()
+                                .map(|m| r.session_id != m)
+                                .unwrap_or(true)
+                        })
+                        .collect();
+                    if !peers.is_empty() {
+                        let now_ts = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0);
+                        lines.push(if is_compact {
+                            format!(
+                                "=== ⚠ Sibling agents ({}) — risk of sweep ===",
+                                peers.len()
+                            )
+                        } else {
+                            format!(
+                                "=== ⚠ Sibling-Presence Warning ({} other agent{} in '{}') ===",
+                                peers.len(),
+                                if peers.len() == 1 { "" } else { "s" },
+                                project_slug
+                            )
+                        });
+                        lines.push(String::new());
+                        for p in peers.iter().take(5) {
+                            let age = (now_ts - p.last_heartbeat_at).max(0);
+                            lines.push(format!(
+                                "  • {} (heartbeat {}s ago)",
+                                p.session_id, age
+                            ));
+                        }
+                        lines.push(String::new());
+                        if !is_compact {
+                            lines.push(
+                                "  Sharing a working tree + git index → `git add/commit` may sweep"
+                                    .to_string(),
+                            );
+                            lines.push(
+                                "  the other agent's unstaged changes (see `lesson_sibling_parallel_commits`)."
+                                    .to_string(),
+                            );
+                        }
+                        lines.push(
+                            "  Isolate: `agent-bridge worktree-session new --name <slug>`"
+                                .to_string(),
+                        );
+                        lines.push(String::new());
+                    }
+                }
+            }
+        }
+
         lines.push(session_lifecycle_hint());
 
         // D2.3: prime the embedding cache in the background so subsequent
