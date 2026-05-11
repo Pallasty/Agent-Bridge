@@ -6,6 +6,8 @@
 //!   - `GET /forum/threads?board=...&status=...&limit=...`
 //!   - `GET /forum/posts?thread_id=...&board=...&since_post_id=...&limit=...`
 //!   - `GET /presence?project=...&role=...&max_idle_secs=...&limit=...`
+//!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
+//!                              (same shape as `dream identity --json`)
 //!
 //! Bind to a tailnet-reachable address (`0.0.0.0:7878` by default). The
 //! tailscale ACL handles peer auth — this daemon trusts whoever can reach
@@ -44,6 +46,7 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route("/forum/posts", get(forum_posts))
         .route("/forum/post", post(forum_post))
         .route("/presence", get(presence_list))
+        .route("/identity", get(identity_endpoint))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen)
@@ -244,6 +247,80 @@ async fn presence_list(
         .await
         .map_err(internal_error)?;
     Ok(Json(json!({ "count": rows.len(), "agents": rows })))
+}
+
+/// δ-1 (2026-05-11) — Expose this node's behavioural identity fingerprint
+/// over HTTP so peers can compare "you on aio2 vs you on Mac". Same JSON
+/// shape `dream identity --json` prints, plus a `node` field for
+/// disambiguation when several daemons' outputs are stitched together by
+/// a hook.
+#[derive(Deserialize, Debug)]
+struct IdentityQuery {
+    #[serde(default = "default_identity_days")]
+    days: u32,
+}
+
+async fn identity_endpoint(
+    State(s): State<AppState>,
+    Query(q): Query<IdentityQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let days = q.days.clamp(1, 90);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let window_secs = days as i64 * 86400;
+    let cur_start = now - window_secs;
+    let prior_start = cur_start - window_secs;
+    let cur = s
+        .store
+        .identity_window(cur_start, now)
+        .await
+        .map_err(internal_error)?;
+    let prior = s
+        .store
+        .identity_window(prior_start, cur_start)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(json!({
+        "node": node_short(),
+        "days": days,
+        "current": cur,
+        "prior": prior,
+    })))
+}
+
+fn default_identity_days() -> u32 {
+    3
+}
+
+/// Short hostname for cross-node disambiguation. Mirrors the resolution
+/// rule used by `agent_presence_announce` (env override → /etc/hostname →
+/// `hostname` command → "unknown"), so a single node identifies itself the
+/// same way everywhere.
+fn node_short() -> String {
+    if let Ok(v) = std::env::var("AGENT_BRIDGE_NODE") {
+        let v = v.trim().to_string();
+        if !v.is_empty() {
+            return v;
+        }
+    }
+    if let Ok(s) = std::fs::read_to_string("/etc/hostname") {
+        let s = s.trim().to_string();
+        if !s.is_empty() {
+            return s;
+        }
+    }
+    if let Ok(o) = std::process::Command::new("hostname").output() {
+        if let Ok(s) = String::from_utf8(o.stdout) {
+            let s = s.trim().to_string();
+            if !s.is_empty() {
+                return s;
+            }
+        }
+    }
+    "unknown".into()
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
