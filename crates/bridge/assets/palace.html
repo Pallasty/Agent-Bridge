@@ -1198,6 +1198,12 @@ const EDGE_COLORS = {
   // `chat_session` node fill; dashed conveys "soft / discussion-derived"
   // vs the solid `expanded_from` (committed working_doc).
   discussed_at: "#a87cff",
+  // Fork-chain lineage edge between chat_sessions: continue-this-discussion
+  // → save creates a new chat_session "evolved_from" the older one. Solid
+  // purple (same family as `discussed_at` dashed) so the lineage cluster
+  // reads as one color family — chat_session ↔ chat_session via solid
+  // purple line, while chat_session ↔ topic uses dashed purple.
+  evolved_from: "#a87cff",
 };
 const DEFAULT_EDGE_COLOR = "#3a3a48";
 function colorForEdgeType(t) { return EDGE_COLORS[t] || DEFAULT_EDGE_COLOR; }
@@ -1489,6 +1495,16 @@ function buildCy(data) {
         "curve-style": "bezier",
         "opacity": 0.7,
         "width": 1.4,
+      }},
+      // Fork-chain lineage between two chat_sessions. Solid purple bezier
+      // (same family as `discussed_at` dashed). Slightly heavier so the
+      // chain "spine" reads more structural than the discussion-of edge
+      // which can be many-per-topic.
+      { selector: "edge[type='evolved_from']", style: {
+        "line-color": "#a87cff",
+        "curve-style": "bezier",
+        "opacity": 0.85,
+        "width": 1.8,
       }},
       // C3.6 co-activation: Hebbian "fire together" pairs, NO explicit edge
       // between them. Cyan curved underlay so the structural skeleton
@@ -2832,6 +2848,9 @@ async function continueThisDiscussion() {
     );
     if (!ok) return;
   }
+  // Capture the source chat_session key before switchFocus rewrites
+  // canvasState — this is the lineage parent the next save should link to.
+  const sourceChatKey = canvasState.chat.focusKey;
   await switchFocus(origin);
   // Verify switch landed where we expected — if fetch failed switchFocus
   // returns silently and canvasState.current stays on the chat_session.
@@ -2839,6 +2858,10 @@ async function continueThisDiscussion() {
   // Overwrite history that switchFocus → resetChat just loaded from
   // origin's localStorage, write the transcript through, re-render.
   canvasState.chat.history = transcript;
+  // Stamp lineage: the next saveChatAsMemory will pass parent_key so the
+  // server adds an `evolved_from` edge new_chat_session → old_chat_session.
+  // Cleared if the user clears chat, switches focus away, or saves.
+  canvasState.chat.continuedFrom = sourceChatKey;
   persistChat(origin, transcript);
   const restoredHint = document.getElementById("chat-restored-hint");
   if (restoredHint) {
@@ -2871,6 +2894,8 @@ function resetChat(memory) {
       pending: false,
       viewMode: "past",
       viewerOrigin: about[0] || null,
+      // Viewer is read-only; no lineage flows from here.
+      continuedFrom: null,
     };
   } else {
     const restored = loadPersistedChat(memory.key);
@@ -2880,6 +2905,10 @@ function resetChat(memory) {
       pending: false,
       viewMode: null,
       viewerOrigin: null,
+      // Any prior fork-chain lineage tied to a different focus is
+      // discarded on focus switch — lineage tracks the *current* chat
+      // session being authored, not history that drifted away.
+      continuedFrom: null,
     };
   }
   applyChatViewerMode();
@@ -2920,6 +2949,7 @@ async function saveChatAsMemory() {
   btn.textContent = "saving…";
   try {
     const transcript = formatChatTranscript(canvasState.chat.history);
+    const lineageParent = canvasState.chat.continuedFrom || null;
     const r = await fetch("/api/annotate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2933,6 +2963,9 @@ async function saveChatAsMemory() {
         // crowding the structural skeleton.
         weight: 0.55,
         importance: 0.5,
+        // Fork chain: when present, server adds evolved_from edge
+        // new_chat_session → parent so lineage is queryable in the graph.
+        parent_key: lineageParent,
       }),
     });
     if (!r.ok) {
@@ -2940,7 +2973,11 @@ async function saveChatAsMemory() {
       throw new Error(`${r.status} · ${txt.slice(0, 120)}`);
     }
     const j = await r.json();
-    btn.textContent = "✓ saved";
+    // Clear lineage stamp — this save consumed it. Next save (on the same
+    // focus, continued chat) is a fresh chat_session unless the user
+    // re-enters viewer + continue from another origin.
+    canvasState.chat.continuedFrom = null;
+    btn.textContent = (j && j.lineage_edge) ? "✓ saved (lineage)" : "✓ saved";
     btn.classList.add("ok");
     // Refresh graph so the new chat_session node + edge appear
     // immediately. State is otherwise lost on canvas close.

@@ -644,6 +644,15 @@ struct AnnotatePayload {
     /// Importance for the new memory record. Defaults to 0.6.
     #[serde(default)]
     importance: Option<f64>,
+    /// Optional lineage parent — when set, the server adds a second
+    /// `evolved_from` edge from the new memory → `parent_key`. Used by
+    /// the canvas chat fork-chain flow: continue-this-discussion preloads
+    /// the prior chat_session onto an origin focus, the user keeps
+    /// chatting, then save records the new chat_session as evolved from
+    /// the old one — preserving lineage so the graph can surface
+    /// "this chat is descendant of <older chat>".
+    #[serde(default)]
+    parent_key: Option<String>,
 }
 
 /// Sanitize a kind string into a key-friendly snake_case slug. Only
@@ -745,11 +754,36 @@ async fn api_annotate(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_link: {e}")))?;
 
+    // Optional lineage edge (fork chain). Skip silently if parent_key is
+    // missing or empty, or points at this same memory (self-edge guard).
+    // Failure to add the lineage edge surfaces as `lineage_ok: false` in
+    // the response — non-fatal: the primary chat_session is already saved.
+    let mut lineage_ok = true;
+    let mut lineage_edge: Option<String> = None;
+    let parent = p
+        .parent_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != key);
+    if let Some(parent_key) = parent {
+        let et = "evolved_from";
+        match s.store.memory_link(&key, parent_key, et, 0.9).await {
+            Ok(_) => {
+                lineage_edge = Some(et.to_string());
+            }
+            Err(_) => {
+                lineage_ok = false;
+            }
+        }
+    }
+
     Ok(Json(json!({
         "ok":   true,
         "key":  key,
         "kind": kind,
         "edge": edge_type,
+        "lineage_ok": lineage_ok,
+        "lineage_edge": lineage_edge,
     })))
 }
 
