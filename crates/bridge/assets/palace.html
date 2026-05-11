@@ -137,6 +137,33 @@
       margin: 0 0 10px 0;
       line-height: 1.45;
     }
+    /* C10 kind chips — sit between help text and the row list.
+       Active chip narrows the visible rows; the C9 bulk bar count
+       inherits the filtered scope automatically. */
+    #stale-panel .kind-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin: 0 0 10px 0;
+    }
+    #stale-panel .kind-chip {
+      background: transparent;
+      border: 1px solid #2a2a35;
+      color: #8a8a9c;
+      padding: 2px 8px;
+      font-size: 10px;
+      border-radius: 3px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    #stale-panel .kind-chip:hover { color: #e4e4e8; border-color: #4a4a60; }
+    #stale-panel .kind-chip.active {
+      color: #e4e4e8;
+      border-color: #5a5a72;
+      background: #1c1c26;
+    }
     #stale-panel .empty-state {
       color: #5a5a68;
       font-size: 12px;
@@ -1180,6 +1207,7 @@ const state = {
   enabledEdgeTypes: new Set(),  // empty == not yet populated; set on first load
   includeSkills: false,
   focused: null,        // currently-focused node id (or null)
+  staleKindFilter: null, // C10: null = show all kinds, string = restrict stale panel rows
 };
 
 // ── Load graph from server ──────────────────────────────────────
@@ -1862,9 +1890,44 @@ function renderStalePanel() {
     return;
   }
 
+  // C10: per-kind chips. Computed from the *unfiltered* stale set so
+  // counts reflect "what's available", and the user can always see
+  // every kind even when one is active.
+  const kindCounts = new Map();
+  for (const s of stale) {
+    const k = s.kind || "(none)";
+    kindCounts.set(k, (kindCounts.get(k) || 0) + 1);
+  }
+  // If a previously-active filter no longer has any matching stale rows
+  // (e.g. user just bulk-tombstoned the whole kind), fall back to all so
+  // we don't render an empty list with no signal.
+  if (state.staleKindFilter && !kindCounts.has(state.staleKindFilter)) {
+    state.staleKindFilter = null;
+  }
+  // Chips only when there's more than one kind — single-kind sets don't
+  // need a filter UI.
+  let chipBar = "";
+  if (kindCounts.size > 1) {
+    const sortedKinds = Array.from(kindCounts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const allActive = state.staleKindFilter === null;
+    const allChip = `<button type="button" class="kind-chip${allActive ? " active" : ""}"
+      data-kind="" title="show every kind">all (${stale.length})</button>`;
+    const perKind = sortedKinds.map(([kind, count]) => {
+      const active = state.staleKindFilter === kind;
+      return `<button type="button" class="kind-chip${active ? " active" : ""}"
+        data-kind="${escapeHTML(kind)}" title="show only ${escapeHTML(kind)}">${escapeHTML(kind)} (${count})</button>`;
+    }).join("");
+    chipBar = `<div class="kind-chips">${allChip}${perKind}</div>`;
+  }
+
+  const visible = state.staleKindFilter
+    ? stale.filter(s => (s.kind || "(none)") === state.staleKindFilter)
+    : stale;
+
   // Render rows. data-key is the dispatch hook for the delegated
   // click handler below.
-  const rows = stale.map(s => {
+  const rows = visible.map(s => {
     const days = Math.floor(s.ageSecs / 86400);
     const ageLabel = days > 365
       ? Math.floor(days / 365) + "y"
@@ -1881,14 +1944,14 @@ function renderStalePanel() {
       <div class="meta">${escapeHTML(s.kind)} · ${ageLabel} ago</div>
     </div>`;
   }).join("");
-  // C9 bulk-action bar: scoped to whatever's currently rendered, so future
-  // filters (per-kind chips, age cutoff slider) compose with it without
-  // changing the bar's logic.
+  // C9 bulk-action bar: scoped to whatever's currently rendered, so the
+  // C10 kind chips compose with it for free — the count comes from
+  // `visible`, not the unfiltered stale set.
   const bulkBar = `<div class="bulk-bar">
     <button type="button" id="stale-bulk-tombstone"
-            title="tombstone every row currently shown">🪦 tombstone all visible (${stale.length})</button>
+            title="tombstone every row currently shown">🪦 tombstone all visible (${visible.length})</button>
   </div>`;
-  panel.innerHTML = header + rows + bulkBar;
+  panel.innerHTML = header + chipBar + rows + bulkBar;
 }
 
 async function staleBulkTombstone() {
@@ -2003,6 +2066,14 @@ document.getElementById("stale-btn").addEventListener("click", () => {
 // button. Delegation lets re-rendering replace the panel content without
 // re-binding listeners.
 document.getElementById("stale-panel").addEventListener("click", (e) => {
+  // C10 kind chip — flip filter, re-render. data-kind="" means "all".
+  const chip = e.target.closest(".kind-chip");
+  if (chip) {
+    const kind = chip.dataset.kind || "";
+    state.staleKindFilter = kind === "" ? null : kind;
+    renderStalePanel();
+    return;
+  }
   // C9 bulk action — own dispatch path, no row context.
   if (e.target.closest("#stale-bulk-tombstone")) {
     staleBulkTombstone();
