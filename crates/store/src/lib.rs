@@ -915,6 +915,14 @@ pub trait StateStore: Send + Sync {
         dry_run: bool,
     ) -> Result<u64>;
 
+    /// δ-4 (Butlin PP-1 lift) — return recent `memory_get` events as
+    /// `(key, at)` pairs ordered by `at` DESC, capped at `limit`. Drives the
+    /// bootstrap predicted-next-step section: by scanning recent get
+    /// transitions you can answer "after focus X, what gets touched next?".
+    /// Cheaper than a full coactivation walk because we only care about the
+    /// raw temporal trace, not the pair graph.
+    async fn recent_memory_get_keys(&self, limit: u32) -> Result<Vec<(String, i64)>>;
+
     /// Export memories matching `filter` to a newline-delimited JSON file
     /// (one [`MemoryRecord`] per line). Optionally writes a sibling edge file
     /// when [`MemoryExportFilter::edges_out_path`] is set.

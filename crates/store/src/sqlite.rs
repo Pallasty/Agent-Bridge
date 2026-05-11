@@ -2542,6 +2542,29 @@ impl StateStore for SqliteStore {
         Ok(pruned)
     }
 
+    async fn recent_memory_get_keys(&self, limit: u32) -> Result<Vec<(String, i64)>> {
+        let cap = limit.clamp(1, 5000) as i64;
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<(String, i64)>> {
+                let mut stmt = c.prepare(
+                    "SELECT query, at FROM memory_query_log
+                      WHERE kind = 'get'
+                      ORDER BY at DESC
+                      LIMIT ?1",
+                )?;
+                let rows: RusqliteResult<Vec<(String, i64)>> = stmt
+                    .query_map(params![cap], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+                    })?
+                    .collect();
+                rows
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("recent_memory_get_keys: {e}")))?;
+        Ok(rows)
+    }
+
     async fn memory_decay_importance(
         &self,
         half_life_days: f64,

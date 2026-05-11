@@ -6378,6 +6378,16 @@ impl McpTool for SessionBootstrapTool {
             lines.extend(section);
         }
 
+        // δ-4 PP-1 lift (2026-05-11) — surface repeated next-step transitions
+        // from recent memory_get events as a predicted-next signal. Bumps the
+        // Butlin PP-1 indicator from medium → strong by giving cold-start a
+        // temporal-asymmetric "after A, B usually follows" line. Best-effort.
+        if let Ok(section) =
+            crate::bootstrap_transitions::compute_section(store.as_ref(), is_compact).await
+        {
+            lines.extend(section);
+        }
+
         lines.push(session_lifecycle_hint());
 
         // D2.3: prime the embedding cache in the background so subsequent
