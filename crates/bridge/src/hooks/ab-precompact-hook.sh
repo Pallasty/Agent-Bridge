@@ -281,4 +281,66 @@ except Exception:
 ' 2>/dev/null)
 fi
 
-echo "{\"systemMessage\": \"Memory precompact: +${SAVED} memories | ${CURATE_SUMMARY:-session_curate done} | session_finalize done${DRIFT_SUMMARY}\"}"
+# ── δ-2 (2026-05-11): cross-node identity drift ───────────────────────────
+# Closes Butlin AE-2 cross-node gap: PreCompact hook also asks every peer's
+# `/identity` endpoint (daemon-http δ-1) for its current 3-day fingerprint
+# and surfaces ≥1.5× / ≤0.67× shifts of *this* node vs each peer. Lets the
+# next-cold-start-me see at a glance "you on aio2 vs you on mac diverged".
+# Best-effort: peers unreachable / unset → empty string, no noise.
+#
+# Configure via `AGENT_BRIDGE_PEERS` env var: comma-separated http URLs,
+# e.g. `http://aio2:7878,http://mac-pro:7878`. A peer reachable but with
+# `node == local_node` is skipped (don't compare aio2 to aio2).
+CROSS_DRIFT=""
+if [[ -n "${AGENT_BRIDGE_PEERS:-}" && -n "$IDENTITY_JSON" ]]; then
+    CROSS_DRIFT=$(printf '%s\n%s' "$IDENTITY_JSON" "$AGENT_BRIDGE_PEERS" | python3 -c '
+import sys, json, os, urllib.request
+
+raw = sys.stdin.read().split("\n", 1)
+if len(raw) < 2: sys.exit(0)
+try:
+    local = json.loads(raw[0])
+except Exception:
+    sys.exit(0)
+peers_csv = raw[1].strip()
+if not peers_csv: sys.exit(0)
+
+local_cur = local.get("current") or {}
+local_node = None  # local /identity also exposes node but `dream identity`
+# JSON does not, so we accept any peer.node that differs textually.
+
+def fetch(url):
+    try:
+        with urllib.request.urlopen(url + "/identity?days=3", timeout=3) as r:
+            return json.load(r)
+    except Exception:
+        return None
+
+bits = []
+for raw_url in peers_csv.split(","):
+    url = raw_url.strip().rstrip("/")
+    if not url:
+        continue
+    pj = fetch(url)
+    if not pj: continue
+    pnode = pj.get("node") or "peer"
+    if local_node and pnode == local_node:
+        continue
+    pcur = pj.get("current") or {}
+    parts = []
+    for label, key in (("tools","tool_calls_total"), ("saves","memory_saves"),
+                       ("forum-len","forum_avg_body_len")):
+        l = (local_cur.get(key) or 0) or 0
+        p = (pcur.get(key) or 0) or 0
+        if l > 0 and p > 0:
+            r = l / p
+            if r >= 1.5 or r <= 0.67:
+                parts.append(f"{label}×{r:.1f}")
+    if parts:
+        bits.append(f"{pnode}: " + ", ".join(parts))
+if bits:
+    print(" | cross-node d-3: " + " ; ".join(bits))
+' 2>/dev/null)
+fi
+
+echo "{\"systemMessage\": \"Memory precompact: +${SAVED} memories | ${CURATE_SUMMARY:-session_curate done} | session_finalize done${DRIFT_SUMMARY}${CROSS_DRIFT}\"}"
