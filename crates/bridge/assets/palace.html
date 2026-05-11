@@ -2810,6 +2810,50 @@ function applyChatViewerMode() {
   }
 }
 
+// Phase 2 continue — from chat_session viewer, hop back to the origin
+// node and preload the transcript into its chat panel so the user can
+// keep talking with full context. If origin already has a working chat
+// in localStorage, confirm before replacing (their in-progress thoughts
+// are not silently wiped). Failure modes: origin missing → no-op;
+// origin fetch fails inside switchFocus → restored-hint stays neutral.
+async function continueThisDiscussion() {
+  if (canvasState.chat.viewMode !== "past") return;
+  const origin = canvasState.chat.viewerOrigin;
+  if (!origin) return;
+  // Snapshot transcript before switchFocus rewrites canvasState.chat.
+  const transcript = canvasState.chat.history.slice();
+  if (transcript.length === 0) return;
+  // Peek origin's persisted chat. If non-empty, ask before clobbering.
+  const existing = loadPersistedChat(origin);
+  if (existing.length > 0) {
+    const ok = confirm(
+      `${origin} already has a chat with ${existing.length} message${existing.length === 1 ? "" : "s"}. ` +
+      `Replace with this saved discussion (${transcript.length} message${transcript.length === 1 ? "" : "s"})?`
+    );
+    if (!ok) return;
+  }
+  await switchFocus(origin);
+  // Verify switch landed where we expected — if fetch failed switchFocus
+  // returns silently and canvasState.current stays on the chat_session.
+  if (!canvasState.current || canvasState.current.key !== origin) return;
+  // Overwrite history that switchFocus → resetChat just loaded from
+  // origin's localStorage, write the transcript through, re-render.
+  canvasState.chat.history = transcript;
+  persistChat(origin, transcript);
+  const restoredHint = document.getElementById("chat-restored-hint");
+  if (restoredHint) {
+    restoredHint.textContent = `· loaded ${transcript.length} message${transcript.length === 1 ? "" : "s"} from past discussion`;
+    restoredHint.style.color = "#a87cff";
+    restoredHint.style.display = "inline";
+  }
+  renderChatHistory();
+  const input = document.getElementById("chat-input");
+  if (input) {
+    input.value = "";
+    input.focus();
+  }
+}
+
 function resetChat(memory) {
   // Viewer mode triggers when focus is itself a saved chat_session and
   // the content parses into at least one message. Origin = first
@@ -2957,7 +3001,7 @@ function renderChatHistory() {
     banner = `<div class="chat-past-banner">` +
       `<span>📖 ${originLabel} · ${n} message${n === 1 ? "" : "s"}</span>` +
       `<button class="chat-continue-btn" type="button" id="chat-continue-btn"` +
-      ` title="hop back to the original node and preload this transcript (Phase 2)">` +
+      ` title="hop back to the original node and preload this transcript into chat">` +
       `↪ continue this discussion</button>` +
       `</div>`;
   }
@@ -2989,19 +3033,20 @@ function renderChatHistory() {
       copyChatMsgToEditor(msg.content);
     });
   });
-  // Bind continue button (placeholder — Phase 2 wires the real hop).
+  // Bind continue button — hops to origin node + preloads transcript.
   const continueBtn = document.getElementById("chat-continue-btn");
   if (continueBtn) {
     continueBtn.addEventListener("click", () => {
-      const origin = canvasState.chat.viewerOrigin;
-      const hint = document.getElementById("canvas-hint");
-      if (hint) {
-        hint.textContent = origin
-          ? `↪ continue → ${origin} (Phase 2: will preload this chat there)`
-          : `↪ continue (Phase 2 — no origin node linked)`;
-        hint.className = "canvas-hint";
-        setTimeout(resetCanvasHint, 3500);
+      if (!canvasState.chat.viewerOrigin) {
+        const hint = document.getElementById("canvas-hint");
+        if (hint) {
+          hint.textContent = "↪ continue — no origin node linked";
+          hint.className = "canvas-hint";
+          setTimeout(resetCanvasHint, 2500);
+        }
+        return;
       }
+      continueThisDiscussion();
     });
   }
   // Auto-scroll to latest.
