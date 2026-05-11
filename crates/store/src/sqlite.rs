@@ -3614,6 +3614,9 @@ impl StateStore for SqliteStore {
                         top10_to_median_ratio: 0.0,
                         pairs_last_24h: 0,
                         top_5_edges: Vec::new(),
+                        pairs_burst_lt_1h: 0,
+                        pairs_persistent_ge_6h: 0,
+                        top_5_persistent_edges: Vec::new(),
                     });
                 }
 
@@ -3669,6 +3672,40 @@ impl StateStore for SqliteStore {
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 drop(stmt_top);
 
+                // ε-2 — temporal-distribution histogram + persistent-only top-5.
+                let (pairs_burst_lt_1h, pairs_persistent_ge_6h): (i64, i64) = c.query_row(
+                    "SELECT
+                        SUM(CASE WHEN (last_at - first_at) < 3600        THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN (last_at - first_at) >= 6 * 3600   THEN 1 ELSE 0 END)
+                       FROM memory_coactivation",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                            row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                        ))
+                    },
+                )?;
+                let mut stmt_persistent = c.prepare(
+                    "SELECT key_a, key_b, count, first_at, last_at
+                       FROM memory_coactivation
+                      WHERE (last_at - first_at) >= 6 * 3600
+                   ORDER BY count DESC, (last_at - first_at) DESC
+                      LIMIT 5",
+                )?;
+                let top_5_persistent_edges: Vec<CoactivationEdge> = stmt_persistent
+                    .query_map([], |row| {
+                        Ok(CoactivationEdge {
+                            key_a: row.get(0)?,
+                            key_b: row.get(1)?,
+                            count: row.get::<_, i64>(2)? as u64,
+                            first_at: row.get(3)?,
+                            last_at: row.get(4)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                drop(stmt_persistent);
+
                 Ok(CoactivationStats {
                     total_pairs: total_pairs as u64,
                     total_unique_keys: total_unique_keys as u64,
@@ -3678,6 +3715,9 @@ impl StateStore for SqliteStore {
                     top10_to_median_ratio: ratio,
                     pairs_last_24h: pairs_last_24h as u64,
                     top_5_edges,
+                    pairs_burst_lt_1h: pairs_burst_lt_1h as u64,
+                    pairs_persistent_ge_6h: pairs_persistent_ge_6h as u64,
+                    top_5_persistent_edges,
                 })
             })
             .await

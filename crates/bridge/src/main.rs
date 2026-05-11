@@ -872,15 +872,43 @@ async fn run_dream_stats(as_json: bool) -> Result<()> {
         p5_ready, p5_ready
     );
     println!();
-    println!("top 5 edges:");
+    println!(
+        "burst pairs <1h    : {}  ({:.0}%)   ← single-session co-fires",
+        stats.pairs_burst_lt_1h,
+        100.0 * stats.pairs_burst_lt_1h as f64 / stats.total_pairs as f64
+    );
+    println!(
+        "persistent ≥6h     : {}  ({:.0}%)   ← cross-session associations",
+        stats.pairs_persistent_ge_6h,
+        100.0 * stats.pairs_persistent_ge_6h as f64 / stats.total_pairs as f64
+    );
+    println!();
+    println!("top 5 edges (by count):");
     for (i, e) in stats.top_5_edges.iter().enumerate() {
+        let span_h = (e.last_at - e.first_at) / 3600;
         println!(
-            "  {}. ({}) {} ↔ {}",
+            "  {}. ({}, {}h span) {} ↔ {}",
             i + 1,
             e.count,
+            span_h,
             short_key(&e.key_a, 38),
             short_key(&e.key_b, 38)
         );
+    }
+    if !stats.top_5_persistent_edges.is_empty() {
+        println!();
+        println!("top 5 persistent edges (count + ≥6h span):");
+        for (i, e) in stats.top_5_persistent_edges.iter().enumerate() {
+            let span_h = (e.last_at - e.first_at) / 3600;
+            println!(
+                "  {}. ({}, {}h span) {} ↔ {}",
+                i + 1,
+                e.count,
+                span_h,
+                short_key(&e.key_a, 38),
+                short_key(&e.key_b, 38)
+            );
+        }
     }
     Ok(())
 }

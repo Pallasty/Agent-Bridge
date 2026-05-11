@@ -31,12 +31,13 @@ pub fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Co
 }
 
 /// Extract `use`/`import` statements from `content` for the given language.
-/// Phase 2 #3 second slice ships Rust + Python + TS/JS; Go to follow.
+/// Phase 2 #3 second slice covers Rust + Python + TS/JS + Go.
 pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<CodebaseImport> {
     match language {
         "rust" => extract_rust_imports(content, file_path),
         "python" => extract_python_imports(content, file_path),
         "typescript" | "javascript" => extract_ts_imports(content, file_path, language),
+        "go" => extract_go_imports(content, file_path),
         _ => vec![],
     }
 }
@@ -1164,6 +1165,171 @@ pub fn extract_ts_imports(
     out
 }
 
+// ── Go imports (Phase 2 #3 second slice — Go side) ───────────────────────────
+
+/// Parse one Go import spec: `[NAME] "PATH"` or `` [NAME] `PATH` ``.
+/// NAME may be an identifier, `_` (blank import), or `.` (dot import).
+/// Returns None when no string literal is found.
+fn parse_go_import_spec(s: &str) -> Option<(String, Option<String>)> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    let mut alias: Option<String> = None;
+    // Optional NAME prefix — not starting with a quote.
+    if bytes[0] != b'"' && bytes[0] != b'`' {
+        let mut j = 0;
+        while j < bytes.len()
+            && bytes[j] != b' '
+            && bytes[j] != b'\t'
+            && bytes[j] != b'"'
+            && bytes[j] != b'`'
+        {
+            j += 1;
+        }
+        let name = &s[..j];
+        if !name.is_empty() {
+            alias = Some(name.to_string());
+        }
+        i = j;
+        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+            i += 1;
+        }
+    }
+    if i >= bytes.len() {
+        return None;
+    }
+    let quote = bytes[i];
+    if quote != b'"' && quote != b'`' {
+        return None;
+    }
+    let start = i + 1;
+    let mut j = start;
+    let mut prev_bs = false;
+    while j < bytes.len() {
+        let c = bytes[j];
+        // Interpreted strings (") support escapes; raw strings (`) don't.
+        if quote == b'"' && c == b'\\' && !prev_bs {
+            prev_bs = true;
+            j += 1;
+            continue;
+        }
+        if c == quote && !prev_bs {
+            return Some((s[start..j].to_string(), alias));
+        }
+        prev_bs = false;
+        j += 1;
+    }
+    None
+}
+
+/// Extract Go `import "path"` (single, named, blank `_`, dot `.`) and
+/// `import ( … )` block forms. Aggregation is line-aware: each spec
+/// inside a block reports its own line. Reuses the TS comment
+/// strippers since Go uses the same `//` and `/* … */` syntax.
+pub fn extract_go_imports(content: &str, file_path: &str) -> Vec<CodebaseImport> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0usize;
+    while i < lines.len() {
+        let raw = lines[i];
+        let working = strip_ts_block_comments(raw);
+        let no_cmt = strip_ts_line_comment(&working);
+        let stripped = no_cmt.trim();
+        let line_no = (i as u32) + 1;
+
+        if let Some(rest) = stripped.strip_prefix("import") {
+            let rest_trim = rest.trim_start();
+            // Word boundary: `import` must be a standalone keyword (so
+            // identifiers like `important` don't match).
+            let next_byte = rest.as_bytes().first().copied().unwrap_or(b' ');
+            let is_keyword = matches!(next_byte, b' ' | b'\t' | b'(' | b'"' | b'`');
+            if !is_keyword {
+                i += 1;
+                continue;
+            }
+
+            // Block form: `import (` aggregates each interior line.
+            if let Some(after_paren) = rest_trim.strip_prefix('(') {
+                let leftover = after_paren.trim();
+                if !leftover.is_empty() && !leftover.starts_with(')') {
+                    // Same-line spec after `import (` — rare. Parse it.
+                    if let Some((path, alias)) = parse_go_import_spec(leftover) {
+                        out.push(CodebaseImport {
+                            file_path: file_path.to_string(),
+                            line: line_no,
+                            language: "go".to_string(),
+                            raw: raw.chars().take(200).collect(),
+                            target: path,
+                            alias,
+                        });
+                    }
+                }
+                let mut k = i + 1;
+                let mut closed = false;
+                while k < lines.len() {
+                    let inner_raw = lines[k];
+                    let inner_strip = strip_ts_line_comment(
+                        &strip_ts_block_comments(inner_raw),
+                    )
+                    .trim()
+                    .to_string();
+                    if inner_strip.starts_with(')') {
+                        closed = true;
+                        i = k + 1;
+                        break;
+                    }
+                    // Defensive: a `)` at end of line means this is the
+                    // last spec line. Parse everything before it.
+                    let spec = if let Some(idx) = inner_strip.find(')') {
+                        closed = true;
+                        inner_strip[..idx].trim().to_string()
+                    } else {
+                        inner_strip
+                    };
+                    if let Some((path, alias)) = parse_go_import_spec(&spec) {
+                        out.push(CodebaseImport {
+                            file_path: file_path.to_string(),
+                            line: (k as u32) + 1,
+                            language: "go".to_string(),
+                            raw: inner_raw.chars().take(200).collect(),
+                            target: path,
+                            alias,
+                        });
+                    }
+                    if closed {
+                        i = k + 1;
+                        break;
+                    }
+                    k += 1;
+                }
+                if !closed {
+                    i = k;
+                }
+                continue;
+            }
+
+            // Single-line form: `import "path"` or `import NAME "path"`.
+            if let Some((path, alias)) = parse_go_import_spec(rest_trim) {
+                out.push(CodebaseImport {
+                    file_path: file_path.to_string(),
+                    line: line_no,
+                    language: "go".to_string(),
+                    raw: raw.chars().take(200).collect(),
+                    target: path,
+                    alias,
+                });
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
 // ── Python ───────────────────────────────────────────────────────────────────
 
 fn extract_python(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
@@ -2043,5 +2209,147 @@ function isWSL(): boolean {
         assert_eq!(imps[0].alias.as_deref(), Some("foo"));
         assert_eq!(imps[1].target, "b");
         assert!(imps[1].alias.is_none());
+    }
+
+    // ── Phase 2 #3 second slice — Go import extractor ──────────────────────
+
+    #[test]
+    fn go_import_single() {
+        let imps = extract_go_imports("import \"fmt\"\n", "f.go");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "fmt");
+        assert!(imps[0].alias.is_none());
+        assert_eq!(imps[0].language, "go");
+    }
+
+    #[test]
+    fn go_import_with_alias() {
+        let imps = extract_go_imports("import logger \"log\"\n", "f.go");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "log");
+        assert_eq!(imps[0].alias.as_deref(), Some("logger"));
+    }
+
+    #[test]
+    fn go_import_blank_side_effect() {
+        let imps =
+            extract_go_imports("import _ \"github.com/lib/pq\"\n", "f.go");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "github.com/lib/pq");
+        assert_eq!(imps[0].alias.as_deref(), Some("_"));
+    }
+
+    #[test]
+    fn go_import_dot() {
+        let imps = extract_go_imports("import . \"math\"\n", "f.go");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "math");
+        assert_eq!(imps[0].alias.as_deref(), Some("."));
+    }
+
+    #[test]
+    fn go_import_raw_string() {
+        let imps = extract_go_imports("import `fmt`\n", "f.go");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "fmt");
+    }
+
+    #[test]
+    fn go_import_block_basic() {
+        let src = "\
+import (
+    \"fmt\"
+    \"os\"
+    \"path/filepath\"
+)
+";
+        let imps = extract_go_imports(src, "f.go");
+        assert_eq!(imps.len(), 3, "got {imps:#?}");
+        assert_eq!(imps[0].target, "fmt");
+        assert_eq!(imps[0].line, 2);
+        assert_eq!(imps[1].target, "os");
+        assert_eq!(imps[1].line, 3);
+        assert_eq!(imps[2].target, "path/filepath");
+        assert_eq!(imps[2].line, 4);
+    }
+
+    #[test]
+    fn go_import_block_mixed_forms() {
+        let src = "\
+import (
+    \"fmt\"
+    logger \"log\"
+    _ \"github.com/lib/pq\"
+    . \"math\"
+)
+";
+        let imps = extract_go_imports(src, "f.go");
+        assert_eq!(imps.len(), 4, "got {imps:#?}");
+        assert_eq!(imps[0].target, "fmt");
+        assert!(imps[0].alias.is_none());
+        assert_eq!(imps[1].target, "log");
+        assert_eq!(imps[1].alias.as_deref(), Some("logger"));
+        assert_eq!(imps[2].target, "github.com/lib/pq");
+        assert_eq!(imps[2].alias.as_deref(), Some("_"));
+        assert_eq!(imps[3].target, "math");
+        assert_eq!(imps[3].alias.as_deref(), Some("."));
+    }
+
+    #[test]
+    fn go_import_block_with_comments_and_blank_lines() {
+        let src = "\
+import (
+    // standard library
+    \"fmt\"
+
+    // external
+    \"github.com/spf13/cobra\"
+)
+";
+        let imps = extract_go_imports(src, "f.go");
+        assert_eq!(imps.len(), 2, "got {imps:#?}");
+        assert_eq!(imps[0].target, "fmt");
+        assert_eq!(imps[0].line, 3);
+        assert_eq!(imps[1].target, "github.com/spf13/cobra");
+        assert_eq!(imps[1].line, 6);
+    }
+
+    #[test]
+    fn go_import_block_trailing_comment_on_spec_line() {
+        // `// comment` after the spec should be stripped before parsing.
+        let src = "\
+import (
+    \"fmt\"        // formatter
+    \"os\"
+)
+";
+        let imps = extract_go_imports(src, "f.go");
+        assert_eq!(imps.len(), 2);
+        assert_eq!(imps[0].target, "fmt");
+        assert_eq!(imps[1].target, "os");
+    }
+
+    #[test]
+    fn go_import_skips_lookalikes() {
+        // The keyword `import` must stand alone; `important` etc. don't match.
+        let src = "\
+// import \"fake\"
+package main
+
+var important = 1
+func importHandler() {}
+";
+        let imps = extract_go_imports(src, "f.go");
+        assert!(imps.is_empty(), "spurious matches: {imps:#?}");
+    }
+
+    #[test]
+    fn go_import_url_with_path_segments() {
+        let imps = extract_go_imports(
+            "import \"github.com/user/repo/sub/pkg\"\n",
+            "f.go",
+        );
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "github.com/user/repo/sub/pkg");
     }
 }

@@ -208,6 +208,23 @@ pub struct CoactivationStats {
     pub top10_to_median_ratio: f64,
     pub pairs_last_24h: u64,
     pub top_5_edges: Vec<CoactivationEdge>,
+    /// **ε-2 (2026-05-11)** — pairs whose `last_at - first_at` is < 1 hour.
+    /// Self-archaeology found that 95% of pairs are "investigation bursts"
+    /// (co-occurred in a single tight session) rather than cross-session
+    /// repeated firings. Surfacing this distinguishes "wired through repeat
+    /// firing over days" from "co-appeared in one search burst".
+    #[serde(default)]
+    pub pairs_burst_lt_1h: u64,
+    /// **ε-2** — pairs whose `last_at - first_at` is ≥ 6 hours. These are
+    /// the persistent associations β-Hebbian was *originally meant* to
+    /// crystallise: edges that fire across investigation sessions.
+    #[serde(default)]
+    pub pairs_persistent_ge_6h: u64,
+    /// **ε-2** — top-5 pairs filtered to `last_at - first_at >= 6h`. Catches
+    /// cross-session attractors that the raw `top_5_edges` (sorted by
+    /// count) misses when burst-pairs dominate. Same shape as `top_5_edges`.
+    #[serde(default)]
+    pub top_5_persistent_edges: Vec<CoactivationEdge>,
 }
 
 /// One window of "what did self look like during these N days" — the
@@ -1058,6 +1075,9 @@ pub trait StateStore: Send + Sync {
             top10_to_median_ratio: 0.0,
             pairs_last_24h: 0,
             top_5_edges: Vec::new(),
+            pairs_burst_lt_1h: 0,
+            pairs_persistent_ge_6h: 0,
+            top_5_persistent_edges: Vec::new(),
         })
     }
 
