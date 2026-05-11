@@ -1,0 +1,40 @@
+# systemd user unit for `agent-bridge dream decay-unused` (Phase 2.x #8).
+#
+# Daily read-recency importance decay: every memory whose last_accessed_at
+# is older than --window-days gets `step` shaved off its importance.
+# Pairs with the Palace viewer C7/C8/C10 stale UI — retrieval rank
+# follows what the viewer surfaces as "cold".
+#
+# Install (see also `install.sh` next to this file):
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/systemd/agent-bridge-memory-decay-unused.service ~/.config/systemd/user/
+#   cp scripts/systemd/agent-bridge-memory-decay-unused.timer   ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agent-bridge-memory-decay-unused.timer
+#
+# One-shot manual run (don't wait for timer):
+#   systemctl --user start agent-bridge-memory-decay-unused.service
+#
+# Logs:
+#   tail -f ~/.cache/agent-bridge/memory-decay-unused.log
+#
+# Tuning (window_days, step, floor):
+#   systemctl --user edit agent-bridge-memory-decay-unused.service
+# add:
+#   [Service]
+#   ExecStart=
+#   ExecStart=%h/.local/bin/agent-bridge.real dream decay-unused \
+#       --window-days 14 --step 0.03 --floor 0.05
+
+[Unit]
+Description=agent-bridge daily read-recency importance decay (Phase 2.x #8)
+Documentation=file://%h/.claude/projects/-Data-CascadeProjects-agent-bridge/memory/project_memory_decay_unused_shipped.md
+
+[Service]
+Type=oneshot
+# `.real` bypasses the wrapper's ANTHROPIC_* injection — decay is pure SQL,
+# no LLM, so the wrapper's env scaffolding is dead weight here.
+ExecStart=%h/.local/bin/agent-bridge.real dream decay-unused --window-days 30 --step 0.05 --floor 0.1
+StandardOutput=append:%h/.cache/agent-bridge/memory-decay-unused.log
+StandardError=append:%h/.cache/agent-bridge/memory-decay-unused.log
+TimeoutStartSec=60

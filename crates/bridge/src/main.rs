@@ -250,6 +250,32 @@ enum DreamOp {
         #[arg(long)]
         html: Option<PathBuf>,
     },
+    /// **Phase 2.x #8** — Read-recency importance decay: shave
+    /// `importance` by `--step` on every active memory whose
+    /// `last_accessed_at` is older than `--window-days`. Pairs with the
+    /// Palace viewer C7/C8/C10 "stale" semantics so retrieval rank and
+    /// the viewer agree on what's gone cold.
+    ///
+    /// CLI mirror of the `memory_decay_unused` MCP tool. Designed for
+    /// daily cron via `agent-bridge-memory-decay-unused.timer`
+    /// (`scripts/systemd/`). See
+    /// `project_memory_decay_unused_shipped.md` (memory).
+    DecayUnused {
+        /// Only decay rows whose `last_accessed_at` is older than this
+        /// many days. Default 30.
+        #[arg(long, default_value_t = 30.0)]
+        window_days: f64,
+        /// How much to shave off `importance` per pass. Default 0.05.
+        #[arg(long, default_value_t = 0.05)]
+        step: f64,
+        /// Importance never drops below this floor. Default 0.1.
+        #[arg(long, default_value_t = 0.1)]
+        floor: f64,
+        /// Emit raw JSON instead of pretty text. Default text matches
+        /// `dream stats` / `dream identity` style for terminal use.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -594,6 +620,12 @@ async fn main() -> Result<()> {
                 dry_run,
                 html,
             } => run_dream_promote(*min_count, *limit, *dry_run, html.as_deref()).await,
+            DreamOp::DecayUnused {
+                window_days,
+                step,
+                floor,
+                json,
+            } => run_dream_decay_unused(*window_days, *step, *floor, *json).await,
         };
     }
 
@@ -1356,6 +1388,68 @@ fn render_promote_html(
         cards = cards,
         db_display = html_escape(&db_path.display().to_string()),
     )
+}
+
+/// Phase 2.x #8 — CLI mirror of the `memory_decay_unused` MCP tool.
+/// Pure SQL pass over `memories`: shaves `importance` by `step` for
+/// every active row whose `last_accessed_at` is older than
+/// `window_days`, never crossing below `floor`.
+///
+/// Designed to run daily via systemd (`scripts/systemd/
+/// agent-bridge-memory-decay-unused.timer`). Idempotent — re-running
+/// without state changes just produces an empty stats row.
+async fn run_dream_decay_unused(
+    window_days: f64,
+    step: f64,
+    floor: f64,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+
+    let window_days = window_days.max(0.0);
+    let step = step.clamp(0.0, 1.0);
+    let floor = floor.clamp(0.0, 1.0);
+    let window_secs = (window_days * 86_400.0) as i64;
+
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let stats = store
+        .memory_decay_unused_importance(window_secs, step, floor)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_decay_unused_importance: {e}"))?;
+
+    if as_json {
+        let payload = json!({
+            "window_days": window_days,
+            "step": step,
+            "floor": floor,
+            "candidates": stats.candidates,
+            "decayed": stats.decayed,
+            "skipped_at_floor": stats.skipped_at_floor,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# Phase 2.x #8 — read-recency importance decay");
+    println!("DB: {}", path.display());
+    println!(
+        "window: >{window_days:.1}d unused · step: {step:.3} · floor: {floor:.3}"
+    );
+    println!();
+    println!("candidates       : {}", stats.candidates);
+    println!("decayed          : {}", stats.decayed);
+    println!("skipped at floor : {}", stats.skipped_at_floor);
+    if stats.candidates == 0 {
+        println!();
+        println!("(nothing met the window predicate — try a smaller --window-days)");
+    } else if stats.decayed == 0 {
+        println!();
+        println!("(every candidate already at/below floor — nothing to shave)");
+    }
+    Ok(())
 }
 
 /// Default HTML report destination for auto-triggered promote runs.

@@ -1,0 +1,17 @@
+# systemd user timer for `agent-bridge dream decay-unused` (Phase 2.x #8).
+# Runs daily; see the .service file for install + log paths.
+
+[Unit]
+Description=Daily trigger for agent-bridge read-recency importance decay
+Requires=agent-bridge-memory-decay-unused.service
+
+[Timer]
+# Daily at 03:42 — off the top-of-hour cron herd, ahead of the next day's
+# work so retrieval ranks reflect overnight decay before morning use.
+# Persistent=true: if the machine was off at 03:42, run once on next boot.
+OnCalendar=*-*-* 03:42:00
+Persistent=true
+Unit=agent-bridge-memory-decay-unused.service
+
+[Install]
+WantedBy=timers.target
