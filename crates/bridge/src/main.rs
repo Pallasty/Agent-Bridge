@@ -221,8 +221,11 @@ enum DreamOp {
     },
     /// 呼吸式画布 / Hebbian feedback — Promote strong co-activation pairs
     /// (`memory_coactivation` rows with count ≥ `--min-count`) into explicit
-    /// `cofires` edges in `memory_edges`. Pairs that already have any
-    /// explicit edge are skipped — the structural edge always wins.
+    /// `cofires` edges in `memory_edges`. Pairs that already have a `cofires`
+    /// edge are skipped (idempotent); pairs with other edge types
+    /// (`evolved`, `summarizes`, `derived_from`, …) get cofires *stacked*
+    /// alongside — those encode "similar in content" or "summary-of", while
+    /// cofires encodes "fired together repeatedly" — orthogonal signals.
     ///
     /// This is the "fire together, **wire** together" half of Hebbian: α
     /// records co-firings; this command crystallises the persistent ones
@@ -938,7 +941,8 @@ enum PromoteStatus {
     Promoted,
     /// Dry-run would promote (no write).
     WouldPromote,
-    /// Pair already has an explicit edge of any type — structural wins.
+    /// Pair already has a `cofires` edge — promote is idempotent on cofires
+    /// itself (other edge types no longer block; see ε-1 2026-05-11).
     Skipped,
     /// Live-run memory_link returned an error (key tombstoned, etc.).
     Failed(String),
@@ -974,8 +978,18 @@ async fn run_dream_promote(
         return Ok(());
     }
 
-    // Build the existing-edge set by querying memory_neighbors for every key
-    // referenced in the candidate pairs. Single pass per key (cached).
+    // Build the existing-cofires set by querying memory_neighbors for every
+    // key referenced in the candidate pairs. Single pass per key (cached).
+    //
+    // ε-1 (2026-05-11): originally tracked *any* edge type, but
+    // self-archaeology found that 5 of the top-10 strongest coactivation
+    // pairs (including the all-time #1 at count=9) were already linked by
+    // P4 evolved / summarizes / derived_from edges — auto-engines, not
+    // human structure — and the old "structural wins" rule suppressed
+    // their cofires crystallisation. New rule: only skip if the pair
+    // already has a cofires edge. Cofires now stacks on top of other
+    // edge types. Idempotency on cofires itself is preserved (memory_link
+    // is INSERT … ON CONFLICT UPDATE weight).
     let mut existing: HashSet<(String, String)> = HashSet::new();
     let mut probed: HashSet<String> = HashSet::new();
     for c in &pairs {
@@ -985,6 +999,9 @@ async fn run_dream_promote(
             }
             let nbrs = store.memory_neighbors(k).await.unwrap_or_default();
             for e in nbrs {
+                if e.edge_type != "cofires" {
+                    continue;
+                }
                 let p = if e.from_key < e.to_key {
                     (e.from_key, e.to_key)
                 } else {
@@ -1016,7 +1033,7 @@ async fn run_dream_promote(
         if existing.contains(&pair) {
             if dry_run {
                 println!(
-                    "  SKIP    ({:>2} fires)  {}  ↔  {}    [already linked]",
+                    "  SKIP    ({:>2} fires)  {}  ↔  {}    [cofires already exists]",
                     c.count,
                     short_key(&pair.0, 38),
                     short_key(&pair.1, 38),
@@ -1104,7 +1121,7 @@ async fn run_dream_promote(
             "(dry run — no writes)  would promote {promoted}, skip {skipped}"
         );
     } else if errors == 0 {
-        println!("✓ promoted {promoted} pairs as `cofires`, skipped {skipped} (already linked)");
+        println!("✓ promoted {promoted} pairs as `cofires`, skipped {skipped} (cofires already exists)");
     } else {
         println!(
             "promoted {promoted}, skipped {skipped}, FAILED {errors} — see stderr"
@@ -1191,7 +1208,7 @@ fn render_promote_html(
         let (status_text, status_cls) = match &d.status {
             PromoteStatus::Promoted => ("PROMOTED", "status-promoted"),
             PromoteStatus::WouldPromote => ("WOULD PROMOTE", "status-would"),
-            PromoteStatus::Skipped => ("SKIPPED — already linked", "status-skipped"),
+            PromoteStatus::Skipped => ("SKIPPED — cofires already exists", "status-skipped"),
             PromoteStatus::Failed(_) => ("FAILED", "status-failed"),
         };
         let err_block = match &d.status {
