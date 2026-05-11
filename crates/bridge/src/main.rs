@@ -395,6 +395,26 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **ζ-3 (2026-05-11)** — Diff two `dream snapshot` memories. Reads
+    /// both `kind=snapshot` rows, parses content as JSON (schema_version=1),
+    /// detects which one is older, prints structured deltas for every
+    /// section: memory counts, coactivation distribution, top persistent,
+    /// top-10 access, identity tools/saves, transitions. Designed to make
+    /// "what did I change about myself between these two timestamps"
+    /// answerable in one command.
+    ///
+    /// Order-independent: caller can pass the two keys in any order; the
+    /// command swaps them so the diff is always "older → newer".
+    Diff {
+        /// First snapshot memory key.
+        key_a: String,
+        /// Second snapshot memory key.
+        key_b: String,
+        /// Emit raw JSON deltas instead of pretty text. Useful for
+        /// piping into other tools.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -762,6 +782,9 @@ async fn main() -> Result<()> {
                 print_only,
                 json,
             } => run_dream_snapshot(name.as_deref(), *days, *print_only, *json).await,
+            DreamOp::Diff { key_a, key_b, json } => {
+                run_dream_diff(key_a, key_b, *json).await
+            }
         };
     }
 
@@ -2382,6 +2405,341 @@ fn civil_from_days(z: i64) -> (i32, u32, u32) {
     let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
     let y = if m <= 2 { y + 1 } else { y };
     (y as i32, m, d)
+}
+
+/// ζ-3 (2026-05-11) — Diff two `dream snapshot` memories.
+///
+/// Reads both `kind=snapshot` rows, parses JSON content (schema v1),
+/// auto-orders older → newer by `captured_at`, computes structured deltas
+/// across all 6 sections (memory / coactivation / access / identity /
+/// transitions). Pretty-prints or emits JSON. Read-only.
+///
+/// Closes the `dream snapshot` time-series loop: ζ-1 wrote the artifact
+/// shape, ζ-3 makes it answer "what changed about me between t_a and t_b"
+/// in one command. Vision §5 身份元监控 reaches usable shape.
+async fn run_dream_diff(key_a: &str, key_b: &str, as_json: bool) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+
+    let rec_a = store
+        .memory_get(key_a)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_get({key_a}): {e}"))?
+        .ok_or_else(|| anyhow::anyhow!("no memory with key {key_a:?}"))?;
+    let rec_b = store
+        .memory_get(key_b)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_get({key_b}): {e}"))?
+        .ok_or_else(|| anyhow::anyhow!("no memory with key {key_b:?}"))?;
+
+    if rec_a.kind != "snapshot" || rec_b.kind != "snapshot" {
+        anyhow::bail!(
+            "both keys must be kind=snapshot (got {} and {})",
+            rec_a.kind,
+            rec_b.kind
+        );
+    }
+
+    let pa: serde_json::Value = serde_json::from_str(&rec_a.content)
+        .map_err(|e| anyhow::anyhow!("parse {key_a} content as JSON: {e}"))?;
+    let pb: serde_json::Value = serde_json::from_str(&rec_b.content)
+        .map_err(|e| anyhow::anyhow!("parse {key_b} content as JSON: {e}"))?;
+
+    let schema_a = pa.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(0);
+    let schema_b = pb.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(0);
+    if schema_a != schema_b {
+        anyhow::bail!(
+            "schema_version mismatch ({schema_a} vs {schema_b}); diff would be unreliable"
+        );
+    }
+
+    // Auto-order: smaller captured_at = older.
+    let ts_a = pa.get("captured_at").and_then(|v| v.as_i64()).unwrap_or(0);
+    let ts_b = pb.get("captured_at").and_then(|v| v.as_i64()).unwrap_or(0);
+    let ((older, k_old, ts_old), (newer, k_new, ts_new)) = if ts_a <= ts_b {
+        ((&pa, key_a, ts_a), (&pb, key_b, ts_b))
+    } else {
+        ((&pb, key_b, ts_b), (&pa, key_a, ts_a))
+    };
+    let dt_secs = (ts_new - ts_old).max(0);
+
+    // Helpers to extract numbers, with 0 fallback.
+    let gi64 = |v: &serde_json::Value, path: &[&str]| -> i64 {
+        let mut cur = v;
+        for p in path {
+            cur = match cur.get(*p) {
+                Some(x) => x,
+                None => return 0,
+            };
+        }
+        cur.as_i64().or_else(|| cur.as_u64().map(|u| u as i64)).unwrap_or(0)
+    };
+    let gf64 = |v: &serde_json::Value, path: &[&str]| -> f64 {
+        let mut cur = v;
+        for p in path {
+            cur = match cur.get(*p) {
+                Some(x) => x,
+                None => return 0.0,
+            };
+        }
+        cur.as_f64().unwrap_or(0.0)
+    };
+
+    // memory.* deltas
+    let active_d = gi64(newer, &["memory", "active_total"])
+        - gi64(older, &["memory", "active_total"]);
+    let archived_d = gi64(newer, &["memory", "archived_total"])
+        - gi64(older, &["memory", "archived_total"]);
+    let edges_d = gi64(newer, &["memory", "edge_count"])
+        - gi64(older, &["memory", "edge_count"]);
+    let avg_imp_d = gf64(newer, &["memory", "avg_importance_active"])
+        - gf64(older, &["memory", "avg_importance_active"]);
+
+    // by_kind deltas — diff per kind name. Use HashMap to align.
+    let by_kind_old: std::collections::HashMap<String, i64> =
+        kind_map(older.get("memory").and_then(|m| m.get("by_kind_non_skill")));
+    let by_kind_new: std::collections::HashMap<String, i64> =
+        kind_map(newer.get("memory").and_then(|m| m.get("by_kind_non_skill")));
+    let kinds_union: std::collections::BTreeSet<String> = by_kind_old
+        .keys()
+        .chain(by_kind_new.keys())
+        .cloned()
+        .collect();
+    let kind_deltas: Vec<(String, i64, i64)> = kinds_union
+        .iter()
+        .filter_map(|k| {
+            let o = by_kind_old.get(k).copied().unwrap_or(0);
+            let n = by_kind_new.get(k).copied().unwrap_or(0);
+            if o != n {
+                Some((k.clone(), o, n))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // coactivation.* deltas
+    let coact_total_d = gi64(newer, &["coactivation", "total_pairs"])
+        - gi64(older, &["coactivation", "total_pairs"]);
+    let coact_burst_d = gi64(newer, &["coactivation", "pairs_burst_lt_1h"])
+        - gi64(older, &["coactivation", "pairs_burst_lt_1h"]);
+    let coact_persist_d = gi64(newer, &["coactivation", "pairs_persistent_ge_6h"])
+        - gi64(older, &["coactivation", "pairs_persistent_ge_6h"]);
+
+    // access.top_10_keys deltas — which keys entered/left, and access_count changes
+    let access_old: std::collections::HashMap<String, i64> =
+        access_map(older.get("access").and_then(|a| a.get("top_10_keys")));
+    let access_new: std::collections::HashMap<String, i64> =
+        access_map(newer.get("access").and_then(|a| a.get("top_10_keys")));
+    let entered_top: Vec<(String, i64)> = access_new
+        .iter()
+        .filter(|(k, _)| !access_old.contains_key(*k))
+        .map(|(k, n)| (k.clone(), *n))
+        .collect();
+    let dropped_top: Vec<(String, i64)> = access_old
+        .iter()
+        .filter(|(k, _)| !access_new.contains_key(*k))
+        .map(|(k, n)| (k.clone(), *n))
+        .collect();
+    let access_changed: Vec<(String, i64, i64)> = access_new
+        .iter()
+        .filter_map(|(k, n)| {
+            access_old.get(k).and_then(|o| {
+                if o != n { Some((k.clone(), *o, *n)) } else { None }
+            })
+        })
+        .collect();
+
+    // identity.{current,prior}.tool_calls_total + memory_saves deltas
+    let tools_d = gi64(newer, &["identity", "current", "tool_calls_total"])
+        - gi64(older, &["identity", "current", "tool_calls_total"]);
+    let saves_d = gi64(newer, &["identity", "current", "memory_saves"])
+        - gi64(older, &["identity", "current", "memory_saves"]);
+
+    // transitions.top_5 — entered/left
+    let trans_old = trans_set(older.get("transitions").and_then(|t| t.get("top_5")));
+    let trans_new = trans_set(newer.get("transitions").and_then(|t| t.get("top_5")));
+    let trans_entered: Vec<(String, String, i64)> = trans_new
+        .iter()
+        .filter(|(a, b, _)| !trans_old.iter().any(|(x, y, _)| x == a && y == b))
+        .cloned()
+        .collect();
+    let trans_dropped: Vec<(String, String, i64)> = trans_old
+        .iter()
+        .filter(|(a, b, _)| !trans_new.iter().any(|(x, y, _)| x == a && y == b))
+        .cloned()
+        .collect();
+
+    if as_json {
+        let payload = serde_json::json!({
+            "older_key": k_old,
+            "newer_key": k_new,
+            "dt_secs": dt_secs,
+            "memory": {
+                "active_delta": active_d,
+                "archived_delta": archived_d,
+                "edges_delta": edges_d,
+                "avg_imp_delta": avg_imp_d,
+                "kind_deltas": kind_deltas.iter().map(|(k,o,n)| serde_json::json!({"kind":k,"old":o,"new":n,"delta":n-o})).collect::<Vec<_>>(),
+            },
+            "coactivation": {
+                "total_delta": coact_total_d,
+                "burst_lt_1h_delta": coact_burst_d,
+                "persistent_ge_6h_delta": coact_persist_d,
+            },
+            "access": {
+                "entered_top10": entered_top.iter().map(|(k,n)| serde_json::json!({"key":k,"access_count":n})).collect::<Vec<_>>(),
+                "dropped_top10": dropped_top.iter().map(|(k,n)| serde_json::json!({"key":k,"access_count":n})).collect::<Vec<_>>(),
+                "changed": access_changed.iter().map(|(k,o,n)| serde_json::json!({"key":k,"old":o,"new":n,"delta":n-o})).collect::<Vec<_>>(),
+            },
+            "identity": {
+                "tools_delta": tools_d,
+                "saves_delta": saves_d,
+            },
+            "transitions": {
+                "entered_top5": trans_entered.iter().map(|(a,b,n)| serde_json::json!({"from":a,"to":b,"count":n})).collect::<Vec<_>>(),
+                "dropped_top5": trans_dropped.iter().map(|(a,b,n)| serde_json::json!({"from":a,"to":b,"count":n})).collect::<Vec<_>>(),
+            },
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    // Pretty text.
+    let dt_human = if dt_secs >= 86_400 {
+        format!("{:.1}d", dt_secs as f64 / 86_400.0)
+    } else if dt_secs >= 3_600 {
+        format!("{:.1}h", dt_secs as f64 / 3_600.0)
+    } else {
+        format!("{}min", dt_secs / 60)
+    };
+    println!("# dream diff: {} → {} (Δt={dt_human})", k_old, k_new);
+    println!();
+    println!(
+        "memory       : active {:+} · archived {:+} · edges {:+} · avg_imp {:+.3}",
+        active_d, archived_d, edges_d, avg_imp_d
+    );
+    if !kind_deltas.is_empty() {
+        let s: Vec<String> = kind_deltas
+            .iter()
+            .map(|(k, o, n)| format!("{k} {:+}", n - o))
+            .collect();
+        println!("  kinds      : {}", s.join(", "));
+    }
+    println!(
+        "coactivation : pairs {:+} · burst<1h {:+} · persistent≥6h {:+}",
+        coact_total_d, coact_burst_d, coact_persist_d
+    );
+    if !entered_top.is_empty() {
+        println!("attention    : entered top-10");
+        for (k, n) in entered_top.iter().take(5) {
+            println!("  + a={n:>3}  {}", short_key(k, 60));
+        }
+    }
+    if !dropped_top.is_empty() {
+        println!("               dropped from top-10");
+        for (k, n) in dropped_top.iter().take(5) {
+            println!("  - a={n:>3}  {}", short_key(k, 60));
+        }
+    }
+    if !access_changed.is_empty() {
+        println!("               access changed (in both top-10)");
+        for (k, o, n) in access_changed.iter().take(5) {
+            println!("    a {:+} ({o}→{n})  {}", n - o, short_key(k, 56));
+        }
+    }
+    println!(
+        "identity     : tools {:+} · saves {:+}",
+        tools_d, saves_d
+    );
+    if !trans_entered.is_empty() {
+        println!("transitions  : entered top-5");
+        for (a, b, n) in trans_entered.iter().take(3) {
+            println!(
+                "  + [×{n}] {} → {}",
+                short_key(a, 30),
+                short_key(b, 30)
+            );
+        }
+    }
+    if !trans_dropped.is_empty() {
+        println!("               dropped from top-5");
+        for (a, b, n) in trans_dropped.iter().take(3) {
+            println!(
+                "  - [×{n}] {} → {}",
+                short_key(a, 30),
+                short_key(b, 30)
+            );
+        }
+    }
+    if entered_top.is_empty()
+        && dropped_top.is_empty()
+        && access_changed.is_empty()
+        && trans_entered.is_empty()
+        && trans_dropped.is_empty()
+        && coact_total_d == 0
+        && active_d == 0
+        && archived_d == 0
+        && edges_d == 0
+    {
+        println!();
+        println!("(no notable deltas — quiet window)");
+    }
+    Ok(())
+}
+
+/// Build a kind→count map from a JSON array of `{kind, count}` objects.
+/// Returns empty map on None / non-array / malformed entries.
+fn kind_map(v: Option<&serde_json::Value>) -> std::collections::HashMap<String, i64> {
+    let mut m = std::collections::HashMap::new();
+    if let Some(arr) = v.and_then(|x| x.as_array()) {
+        for item in arr {
+            if let (Some(k), Some(n)) = (
+                item.get("kind").and_then(|x| x.as_str()),
+                item.get("count").and_then(|x| x.as_i64()),
+            ) {
+                m.insert(k.to_string(), n);
+            }
+        }
+    }
+    m
+}
+
+/// Build a key→access_count map from a JSON array of `{key, access_count}`.
+fn access_map(v: Option<&serde_json::Value>) -> std::collections::HashMap<String, i64> {
+    let mut m = std::collections::HashMap::new();
+    if let Some(arr) = v.and_then(|x| x.as_array()) {
+        for item in arr {
+            if let (Some(k), Some(n)) = (
+                item.get("key").and_then(|x| x.as_str()),
+                item.get("access_count").and_then(|x| x.as_i64()),
+            ) {
+                m.insert(k.to_string(), n);
+            }
+        }
+    }
+    m
+}
+
+/// Build a vec of (from, to, count) triples from a transitions array.
+fn trans_set(v: Option<&serde_json::Value>) -> Vec<(String, String, i64)> {
+    let mut out = Vec::new();
+    if let Some(arr) = v.and_then(|x| x.as_array()) {
+        for item in arr {
+            if let (Some(a), Some(b), Some(n)) = (
+                item.get("from").and_then(|x| x.as_str()),
+                item.get("to").and_then(|x| x.as_str()),
+                item.get("count").and_then(|x| x.as_i64()),
+            ) {
+                out.push((a.to_string(), b.to_string(), n));
+            }
+        }
+    }
+    out
 }
 
 /// Default HTML report destination for auto-triggered promote runs.
