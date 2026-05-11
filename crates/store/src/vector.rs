@@ -21,31 +21,82 @@ pub const VECTOR_DIM: usize = 384;
 #[cfg(feature = "onnx-embed")]
 pub(crate) mod onnx {
     use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+    use std::sync::atomic::{AtomicU8, Ordering};
     use std::sync::{Mutex, OnceLock};
     use tracing::{info, warn};
 
-    // TextEmbedding::embed() requires &mut self, so we wrap in Mutex.
+    // Init state machine for the fastembed model.
+    //
+    // The naïve previous impl called `TextEmbedding::try_new` inside
+    // `OnceLock::get_or_init` — which blocked the *caller's* thread for
+    // however long the first-time model download took. On hosts with no
+    // model cached (e.g. fresh machines onboarded to cross-device sync),
+    // memory_import → memory_save → embed would silently hang the entire
+    // MCP request until the MCP timeout killed the process. No log line,
+    // no fall-through. See `feedback_onnx_backend_hangs_without_model`.
+    //
+    // New impl: init runs on a one-shot background thread kicked off
+    // lazily. Callers see `embed → None` until init completes (which
+    // makes the outer `OnnxBackend::embed` fall through to HashBackend),
+    // then once the model is ready they pick up the higher-quality
+    // path on the next call. Process exit kills the bg thread naturally.
+    //
+    // INIT_STATE: 0=not started, 1=in progress, 2=done (success xor failure).
     static EMBEDDER: OnceLock<Option<Mutex<TextEmbedding>>> = OnceLock::new();
+    static INIT_STARTED: OnceLock<()> = OnceLock::new();
+    static INIT_STATE: AtomicU8 = AtomicU8::new(0);
 
-    fn cell() -> &'static Option<Mutex<TextEmbedding>> {
-        EMBEDDER.get_or_init(|| {
-            let opts = InitOptions::new(EmbeddingModel::AllMiniLML6V2);
-            match TextEmbedding::try_new(opts) {
-                Ok(e) => {
-                    info!("fastembed: all-MiniLM-L6-v2 ready (384-dim)");
-                    Some(Mutex::new(e))
-                }
-                Err(e) => {
-                    warn!("fastembed init failed, falling back to hash embedding: {e}");
-                    None
-                }
-            }
-        })
+    fn kickoff_init() {
+        INIT_STARTED.get_or_init(|| {
+            INIT_STATE.store(1, Ordering::Release);
+            std::thread::Builder::new()
+                .name("fastembed-init".into())
+                .spawn(|| {
+                    let opts = InitOptions::new(EmbeddingModel::AllMiniLML6V2);
+                    let started = std::time::Instant::now();
+                    let result = TextEmbedding::try_new(opts);
+                    let elapsed = started.elapsed();
+                    let payload = match result {
+                        Ok(e) => {
+                            info!(
+                                "fastembed: all-MiniLM-L6-v2 ready (384-dim) — init {:.1}s",
+                                elapsed.as_secs_f32()
+                            );
+                            Some(Mutex::new(e))
+                        }
+                        Err(e) => {
+                            warn!(
+                                "fastembed init failed after {:.1}s, falling back to hash embedding permanently: {e}",
+                                elapsed.as_secs_f32()
+                            );
+                            None
+                        }
+                    };
+                    // EMBEDDER is OnceLock; ignore re-set error (can't happen
+                    // because INIT_STARTED gates this thread to one runner).
+                    let _ = EMBEDDER.set(payload);
+                    INIT_STATE.store(2, Ordering::Release);
+                })
+                .expect("fastembed init thread spawn");
+        });
     }
 
-    /// Embed a single text string; returns `None` when ONNX is unavailable.
+    /// Return the live ONNX embedder *if* init has completed successfully.
+    /// During the init window (state=1) returns `None`; callers must fall
+    /// back to hash. Once state=2, returns the cached embedder (or `None`
+    /// if init permanently failed). Never blocks the caller.
+    fn try_cell() -> Option<&'static Mutex<TextEmbedding>> {
+        kickoff_init();
+        if INIT_STATE.load(Ordering::Acquire) != 2 {
+            return None;
+        }
+        EMBEDDER.get()?.as_ref()
+    }
+
+    /// Embed a single text string; returns `None` when ONNX is unavailable
+    /// (model not cached, init still in progress, or permanent failure).
     pub fn embed(text: &str) -> Option<Vec<f32>> {
-        let mutex = cell().as_ref()?;
+        let mutex = try_cell()?;
         let mut guard = mutex.lock().ok()?;
         match guard.embed(vec![text], None) {
             Ok(mut vecs) if !vecs.is_empty() => Some(vecs.remove(0)),
@@ -66,7 +117,7 @@ pub(crate) mod onnx {
         if texts.is_empty() {
             return Some(Vec::new());
         }
-        let mutex = cell().as_ref()?;
+        let mutex = try_cell()?;
         let mut guard = mutex.lock().ok()?;
         let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
         match guard.embed(refs, None) {
