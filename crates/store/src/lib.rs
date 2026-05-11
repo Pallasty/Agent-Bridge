@@ -600,6 +600,60 @@ pub struct DecayUnusedStats {
     pub skipped_at_floor: u64,
 }
 
+/// One per-summary row in [`ReplayAuditStats::top_summaries`] /
+/// [`ReplayAuditStats::dead_weight_summaries`]. Captures the post-creation
+/// fate of a single replay-generated summary.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReplayAuditRow {
+    pub key: String,
+    pub created_at: i64,
+    pub last_accessed_at: i64,
+    pub access_count: u64,
+    /// `now - created_at` in seconds at audit time. Snapshotted into the
+    /// row so a JSON dump is self-contained.
+    pub age_secs: i64,
+}
+
+/// Aggregate health of `dream replay` output. Are LLM-consolidated summary
+/// memories actually being used after creation? This is the audit surface
+/// for that question — pairs with `dream replay-audit` CLI.
+///
+/// Identifies summaries by tag `p5_replay` (set unconditionally by
+/// `dream_replay::apply_summary`). Source comparison walks the
+/// `summarizes` edge type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReplayAuditStats {
+    /// Total active summaries (tag `p5_replay`, status='active').
+    pub total_summaries: u64,
+    /// `access_count = 0` — never touched after creation.
+    pub never_accessed: u64,
+    /// `access_count = 1` — likely just the post-creation auto-bump
+    /// (or one curious follow-up read).
+    pub accessed_once: u64,
+    /// `access_count >= 2` — repeated use, evidence of real value.
+    pub accessed_multi: u64,
+    /// `access_count = 0` AND `created_at` older than the audit's
+    /// `stale_days` threshold. The "dead weight" tally — LLM cost
+    /// paid, no recall ever happened.
+    pub stale_dead: u64,
+    /// Mean `access_count` across all summaries.
+    pub avg_access_count: f64,
+    /// Mean age (seconds) across all summaries.
+    pub avg_age_secs: f64,
+    /// Distinct source memories (`summarizes` edge endpoints, active).
+    pub source_count: u64,
+    /// Mean `access_count` across distinct source memories. Compare
+    /// against `avg_access_count` — if summaries clearly out-access
+    /// sources, replay is creating real abstractions; if not, users
+    /// are still going to the raw rows.
+    pub avg_source_access_count: f64,
+    /// Up to 5 summaries by descending `access_count` — the wins.
+    pub top_summaries: Vec<ReplayAuditRow>,
+    /// Up to 5 `access_count=0` summaries by ascending `created_at` —
+    /// the oldest unused (most likely dead weight).
+    pub dead_weight_summaries: Vec<ReplayAuditRow>,
+}
+
 /// Compaction policy for `memory_compact`. After v0.7.1, both thresholds
 /// must agree (AND) before a row is considered stale, AND the row must be
 /// older than the implementation-defined grace period (1 h on `created_at`).
@@ -945,6 +999,16 @@ pub trait StateStore: Send + Sync {
         older_than_days: i64,
         dry_run: bool,
     ) -> Result<u64>;
+
+    /// Audit `dream replay` output: are the LLM-consolidated summary
+    /// memories actually used after creation? `stale_days` controls the
+    /// "dead weight" cutoff — a `p5_replay`-tagged memory with
+    /// `access_count = 0` AND older than this many days is counted in
+    /// [`ReplayAuditStats::stale_dead`].
+    ///
+    /// Pure read pass — no writes. See [`ReplayAuditStats`] for fields
+    /// and [`ReplayAuditRow`] for the per-summary detail rows.
+    async fn replay_audit_stats(&self, stale_days: u32) -> Result<ReplayAuditStats>;
 
     /// δ-4 (Butlin PP-1 lift) — return recent `memory_get` events as
     /// `(key, at)` pairs ordered by `at` DESC, capped at `limit`. Drives the

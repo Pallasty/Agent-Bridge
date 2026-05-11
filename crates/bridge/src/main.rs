@@ -344,6 +344,23 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **Replay quality audit** — are the LLM-consolidated summaries that
+    /// `dream replay` writes actually being used? Pure read pass: counts
+    /// `p5_replay`-tagged active memories, bins access patterns, surfaces
+    /// the top wins and the oldest dead weight. Also reports source-memory
+    /// average access so callers can compare summary vs raw-row usage.
+    ///
+    /// No writes, no LLM. Cheap enough to run ad-hoc.
+    ReplayAudit {
+        /// `access_count = 0` AND age > this many days counts toward
+        /// `stale_dead` — the "LLM cost paid, no recall ever happened"
+        /// tally. Default 7.
+        #[arg(long, default_value_t = 7)]
+        stale_days: u32,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -700,6 +717,9 @@ async fn main() -> Result<()> {
                 dry_run,
                 json,
             } => run_dream_prune_coact_noise(*max_count, *older_than_days, *dry_run, *json).await,
+            DreamOp::ReplayAudit { stale_days, json } => {
+                run_dream_replay_audit(*stale_days, *json).await
+            }
         };
     }
 
@@ -1795,6 +1815,132 @@ async fn run_dream_prune_coact_noise(
             "(nothing met the predicate — raise --max-count or lower --older-than-days to find candidates)"
         );
     }
+    Ok(())
+}
+
+/// **Replay quality audit** — pure read pass, no writes, no LLM.
+/// Counts `p5_replay`-tagged active memories, bins access patterns
+/// (never / once / multi), flags `access_count = 0` + aged rows as
+/// stale dead weight, and surfaces the top wins + oldest unused for
+/// manual inspection. Pairs with `dream replay` to answer "are the
+/// LLM-consolidated summaries actually being used?"
+async fn run_dream_replay_audit(stale_days: u32, as_json: bool) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let stats = store
+        .replay_audit_stats(stale_days)
+        .await
+        .map_err(|e| anyhow::anyhow!("replay_audit_stats: {e}"))?;
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&stats)?);
+        return Ok(());
+    }
+
+    println!("# dream replay — quality audit");
+    println!("DB: {}", path.display());
+    println!("stale_days cutoff: {stale_days}");
+    println!();
+    if stats.total_summaries == 0 {
+        println!("(no p5_replay summaries yet — run `dream replay` first)");
+        return Ok(());
+    }
+
+    let useful_ratio = if stats.total_summaries > 0 {
+        (stats.accessed_multi as f64 / stats.total_summaries as f64) * 100.0
+    } else {
+        0.0
+    };
+    let dead_ratio = if stats.total_summaries > 0 {
+        (stats.stale_dead as f64 / stats.total_summaries as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    println!("total summaries     : {}", stats.total_summaries);
+    println!(
+        "  never accessed    : {}    ({:.0}% of total)",
+        stats.never_accessed,
+        100.0 * stats.never_accessed as f64 / stats.total_summaries as f64
+    );
+    println!(
+        "  accessed once     : {}    ({:.0}% — likely auto-bump only)",
+        stats.accessed_once,
+        100.0 * stats.accessed_once as f64 / stats.total_summaries as f64
+    );
+    println!(
+        "  accessed ≥2 times : {}    ({:.0}% — clear signs of real use)",
+        stats.accessed_multi, useful_ratio
+    );
+    println!(
+        "  stale dead (>{}d) : {}    ({:.0}% — LLM cost paid, no recall)",
+        stale_days, stats.stale_dead, dead_ratio
+    );
+    println!();
+    println!(
+        "avg access count    : {:.2}    (vs {:.2} on source memories)",
+        stats.avg_access_count, stats.avg_source_access_count
+    );
+    println!(
+        "avg age             : {:.1} days",
+        stats.avg_age_secs / 86_400.0
+    );
+    println!(
+        "distinct sources    : {}    (summarized by these summaries)",
+        stats.source_count
+    );
+
+    if !stats.top_summaries.is_empty() {
+        println!();
+        println!("top wins (by access_count):");
+        for s in &stats.top_summaries {
+            println!(
+                "  {:3} access · {:4}d old · {}",
+                s.access_count,
+                s.age_secs / 86_400,
+                short_key(&s.key, 56)
+            );
+        }
+    }
+
+    if !stats.dead_weight_summaries.is_empty() {
+        println!();
+        println!("dead weight (access_count=0, oldest first):");
+        for s in &stats.dead_weight_summaries {
+            println!(
+                "  {:4}d old · {}",
+                s.age_secs / 86_400,
+                short_key(&s.key, 56)
+            );
+        }
+    } else if stats.never_accessed == 0 {
+        println!();
+        println!("(no dead weight — every summary has been accessed at least once)");
+    }
+
+    // Interpretation hint — only when there's enough signal to interpret.
+    if stats.total_summaries >= 3 {
+        println!();
+        if useful_ratio >= 50.0 && stats.avg_access_count > stats.avg_source_access_count {
+            println!(
+                "verdict: replay is paying for itself — summaries out-access their sources."
+            );
+        } else if dead_ratio >= 30.0 {
+            println!(
+                "verdict: significant dead weight ({:.0}%) — consider raising replay's min_cluster_size or top_n.",
+                dead_ratio
+            );
+        } else {
+            println!(
+                "verdict: mixed signal — let it bake a few more days before judging."
+            );
+        }
+    }
+
     Ok(())
 }
 

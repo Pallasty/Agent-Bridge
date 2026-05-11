@@ -62,9 +62,9 @@ use crate::{
     ForumThreadExport, ForumThreadRecord, IdentityWindow, ImportConflictPolicy, ImportReport,
     McpToolCallStats, McpToolErrorRecord, MemoryEdge, MemoryEdgeExport, MemoryExportFilter,
     MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats, MemoryRecord,
-    MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep, SessionFilter,
-    StateStore, StoredSession, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
-    MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
+    MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep,
+    ReplayAuditRow, ReplayAuditStats, SessionFilter, StateStore, StoredSession,
+    MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -2573,6 +2573,158 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("memory_prune_coactivation_noise: {e}")))?;
         Ok(pruned)
+    }
+
+    async fn replay_audit_stats(&self, stale_days: u32) -> Result<ReplayAuditStats> {
+        let now = now_secs();
+        let stale_cutoff = now - (stale_days as i64).saturating_mul(86_400);
+        // Tag is JSON-encoded as `"p5_replay"` inside a JSON array — match
+        // quoted form so a hypothetical `p5_replay_v2` tag won't collide.
+        const TAG_LIKE: &str = "%\"p5_replay\"%";
+        const SUMMARIZES: &str = "summarizes";
+
+        let stats = self
+            .conn
+            .call(move |c| -> RusqliteResult<ReplayAuditStats> {
+                // Aggregate over active replay summaries.
+                let (
+                    total,
+                    never,
+                    once,
+                    multi,
+                    stale_dead,
+                    sum_ac,
+                    sum_age,
+                ): (i64, i64, i64, i64, i64, f64, f64) = c.query_row(
+                    "SELECT
+                        COUNT(*),
+                        SUM(CASE WHEN access_count = 0 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN access_count = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN access_count >= 2 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN access_count = 0 AND created_at < ?2 THEN 1 ELSE 0 END),
+                        COALESCE(SUM(access_count), 0),
+                        COALESCE(SUM(CAST(?1 - created_at AS REAL)), 0.0)
+                     FROM memories
+                     WHERE status = 'active'
+                       AND tags LIKE ?3",
+                    params![now, stale_cutoff, TAG_LIKE],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0).unwrap_or(0),
+                            row.get::<_, i64>(1).unwrap_or(0),
+                            row.get::<_, i64>(2).unwrap_or(0),
+                            row.get::<_, i64>(3).unwrap_or(0),
+                            row.get::<_, i64>(4).unwrap_or(0),
+                            row.get::<_, f64>(5).unwrap_or(0.0),
+                            row.get::<_, f64>(6).unwrap_or(0.0),
+                        ))
+                    },
+                )?;
+
+                let total_u = total.max(0) as u64;
+                let avg_access_count = if total_u > 0 {
+                    sum_ac / total as f64
+                } else {
+                    0.0
+                };
+                let avg_age_secs = if total_u > 0 {
+                    sum_age / total as f64
+                } else {
+                    0.0
+                };
+
+                // Source comparison — distinct memories that any active replay
+                // summary points to via a `summarizes` edge.
+                let (source_count, sum_source_ac): (i64, i64) = c.query_row(
+                    "SELECT COUNT(*), COALESCE(SUM(src.access_count), 0)
+                       FROM (
+                         SELECT DISTINCT e.to_key
+                           FROM memory_edges e
+                           JOIN memories sum_m ON sum_m.key = e.from_key
+                          WHERE e.edge_type = ?1
+                            AND sum_m.status = 'active'
+                            AND sum_m.tags LIKE ?2
+                       ) AS srcs
+                       LEFT JOIN memories src ON src.key = srcs.to_key
+                                              AND src.status = 'active'",
+                    params![SUMMARIZES, TAG_LIKE],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0).unwrap_or(0),
+                            row.get::<_, i64>(1).unwrap_or(0),
+                        ))
+                    },
+                )?;
+                let source_count_u = source_count.max(0) as u64;
+                let avg_source_access_count = if source_count_u > 0 {
+                    sum_source_ac as f64 / source_count as f64
+                } else {
+                    0.0
+                };
+
+                // Top 5 by descending access_count.
+                let mut top_stmt = c.prepare(
+                    "SELECT key, created_at, last_accessed_at, access_count
+                       FROM memories
+                      WHERE status = 'active' AND tags LIKE ?1
+                      ORDER BY access_count DESC, created_at DESC
+                      LIMIT 5",
+                )?;
+                let top: Vec<ReplayAuditRow> = top_stmt
+                    .query_map(params![TAG_LIKE], |row| {
+                        let key: String = row.get(0)?;
+                        let created_at: i64 = row.get(1)?;
+                        Ok(ReplayAuditRow {
+                            key,
+                            created_at,
+                            last_accessed_at: row.get(2)?,
+                            access_count: row.get::<_, i64>(3)?.max(0) as u64,
+                            age_secs: (now - created_at).max(0),
+                        })
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+
+                // Up to 5 oldest with access_count = 0 — the dead-weight tail.
+                let mut dead_stmt = c.prepare(
+                    "SELECT key, created_at, last_accessed_at, access_count
+                       FROM memories
+                      WHERE status = 'active' AND tags LIKE ?1 AND access_count = 0
+                      ORDER BY created_at ASC
+                      LIMIT 5",
+                )?;
+                let dead: Vec<ReplayAuditRow> = dead_stmt
+                    .query_map(params![TAG_LIKE], |row| {
+                        let key: String = row.get(0)?;
+                        let created_at: i64 = row.get(1)?;
+                        Ok(ReplayAuditRow {
+                            key,
+                            created_at,
+                            last_accessed_at: row.get(2)?,
+                            access_count: row.get::<_, i64>(3)?.max(0) as u64,
+                            age_secs: (now - created_at).max(0),
+                        })
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+
+                Ok(ReplayAuditStats {
+                    total_summaries: total_u,
+                    never_accessed: never.max(0) as u64,
+                    accessed_once: once.max(0) as u64,
+                    accessed_multi: multi.max(0) as u64,
+                    stale_dead: stale_dead.max(0) as u64,
+                    avg_access_count,
+                    avg_age_secs,
+                    source_count: source_count_u,
+                    avg_source_access_count,
+                    top_summaries: top,
+                    dead_weight_summaries: dead,
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("replay_audit_stats: {e}")))?;
+        Ok(stats)
     }
 
     async fn recent_memory_get_keys(&self, limit: u32) -> Result<Vec<(String, i64)>> {
