@@ -669,6 +669,37 @@ pub struct WaypointRow {
     pub classification: String,
 }
 
+/// One pair of replay summaries whose `summarizes`-edge source sets
+/// overlap above the caller-supplied Jaccard threshold. Surfaces orphan
+/// duplicates from pre-Phase-2-#2 keys that skipped canonical-key
+/// dedupe — e.g. two summaries on the same cluster with different
+/// human-readable keys.
+///
+/// `classification_a` / `classification_b` are populated from the
+/// waypoint pass if both passes ran (window > 0). When two duplicate
+/// summaries land on different waypoint sides (e.g. one gateway, one
+/// trailing) it's strong evidence the role is access-order-driven
+/// rather than cluster-shape-driven.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OverlapPair {
+    pub key_a: String,
+    pub key_b: String,
+    /// Count of distinct sources that both summaries point to.
+    pub shared_sources: u64,
+    /// `|sources(a)|` — total distinct sources for `key_a`.
+    pub size_a: u64,
+    /// `|sources(b)|` — total distinct sources for `key_b`.
+    pub size_b: u64,
+    /// `shared / (size_a + size_b - shared)`. Range `(0, 1]`.
+    pub jaccard: f64,
+    /// Waypoint classification of `key_a` if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification_a: Option<String>,
+    /// Waypoint classification of `key_b` if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification_b: Option<String>,
+}
+
 /// Aggregate of [`WaypointRow`] across all replay summaries that had at
 /// least one `get` event in the trace. Surfaces the gateway-vs-decoration
 /// breakdown — answers "do summaries cause source access, or just
@@ -739,6 +770,11 @@ pub struct ReplayAuditStats {
     /// [`StateStore::replay_audit_stats`]. See [`WaypointStats`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waypoint: Option<WaypointStats>,
+    /// Pairs of active replay summaries sharing source-sets above the
+    /// caller-supplied Jaccard threshold. Empty when the caller passed
+    /// `overlap_min_jaccard <= 0.0`. See [`OverlapPair`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlap_pairs: Vec<OverlapPair>,
 }
 
 /// Compaction policy for `memory_compact`. After v0.7.1, both thresholds
@@ -1101,10 +1137,18 @@ pub trait StateStore: Send + Sync {
     /// pair them against `get` events for `summarizes`-edge sources
     /// within ± this window. Drives gateway / trailing / ambiguous /
     /// isolated classification (see [`WaypointStats`]). Pass 0 to skip.
+    ///
+    /// `overlap_min_jaccard > 0.0` enables the source-set overlap pass
+    /// (see [`OverlapPair`]). For each pair of active replay summaries
+    /// whose `summarizes`-edge source-sets intersect, compute Jaccard
+    /// similarity and emit those `>= overlap_min_jaccard`. Surfaces
+    /// pre-Phase-2-#2 duplicates that escaped canonical-key dedupe.
+    /// Pass 0.0 to skip.
     async fn replay_audit_stats(
         &self,
         stale_days: u32,
         waypoint_window_secs: i64,
+        overlap_min_jaccard: f64,
     ) -> Result<ReplayAuditStats>;
 
     /// δ-4 (Butlin PP-1 lift) — return recent `memory_get` events as

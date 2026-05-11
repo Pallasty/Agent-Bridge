@@ -363,6 +363,14 @@ enum DreamOp {
         /// this window. Default 30. Pass 0 to skip the waypoint pass.
         #[arg(long, default_value_t = 30)]
         waypoint_min: u32,
+        /// Jaccard threshold for the source-set overlap pass. Two
+        /// active replay summaries whose `summarizes`-edge source sets
+        /// overlap at this similarity or higher are surfaced as
+        /// duplicate-candidate pairs (pre-Phase-2-#2 keys that escaped
+        /// canonical-key dedupe). Range (0, 1]. Default 0.5. Pass 0 to
+        /// skip the overlap pass entirely.
+        #[arg(long, default_value_t = 0.5)]
+        overlap_min: f64,
         /// Emit raw JSON instead of pretty text.
         #[arg(long)]
         json: bool,
@@ -774,8 +782,11 @@ async fn main() -> Result<()> {
             DreamOp::ReplayAudit {
                 stale_days,
                 waypoint_min,
+                overlap_min,
                 json,
-            } => run_dream_replay_audit(*stale_days, *waypoint_min, *json).await,
+            } => {
+                run_dream_replay_audit(*stale_days, *waypoint_min, *overlap_min, *json).await
+            }
             DreamOp::Snapshot {
                 name,
                 days,
@@ -1892,6 +1903,7 @@ async fn run_dream_prune_coact_noise(
 async fn run_dream_replay_audit(
     stale_days: u32,
     waypoint_min: u32,
+    overlap_min: f64,
     as_json: bool,
 ) -> Result<()> {
     use ab_store::{default_db_path, SqliteStore, StateStore};
@@ -1902,7 +1914,7 @@ async fn run_dream_replay_audit(
         .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
     let waypoint_window_secs = (waypoint_min as i64).saturating_mul(60);
     let stats = store
-        .replay_audit_stats(stale_days, waypoint_window_secs)
+        .replay_audit_stats(stale_days, waypoint_window_secs, overlap_min)
         .await
         .map_err(|e| anyhow::anyhow!("replay_audit_stats: {e}"))?;
 
@@ -2022,6 +2034,33 @@ async fn run_dream_replay_audit(
                     short_key(&r.key, 52)
                 );
             }
+        }
+    }
+
+    // Overlap pairs — pre-Phase-2-#2 orphan duplicates that escaped
+    // canonical-key dedupe. Strong tell when two pairs share most
+    // sources but land on opposite waypoint sides: role is access-order
+    // driven, not cluster-shape driven.
+    if !stats.overlap_pairs.is_empty() {
+        println!();
+        println!("# source-set overlap (orphan-duplicate candidates)");
+        for op in &stats.overlap_pairs {
+            let cls_a = op.classification_a.as_deref().unwrap_or("?");
+            let cls_b = op.classification_b.as_deref().unwrap_or("?");
+            println!(
+                "  J={:.2}  {} shared / {} ∪ {}  · [{}] {}",
+                op.jaccard,
+                op.shared_sources,
+                op.size_a,
+                op.size_b,
+                cls_a,
+                short_key(&op.key_a, 52)
+            );
+            println!(
+                "                          ↕         · [{}] {}",
+                cls_b,
+                short_key(&op.key_b, 52)
+            );
         }
     }
 

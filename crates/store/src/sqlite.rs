@@ -63,7 +63,7 @@ use crate::{
     McpToolCallStats, McpToolErrorRecord, MemoryEdge, MemoryEdgeExport, MemoryExportFilter,
     MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats, MemoryRecord,
     MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep,
-    ReplayAuditRow, ReplayAuditStats, SessionFilter, StateStore, StoredSession,
+    OverlapPair, ReplayAuditRow, ReplayAuditStats, SessionFilter, StateStore, StoredSession,
     WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
     MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
 };
@@ -2616,6 +2616,7 @@ impl StateStore for SqliteStore {
         &self,
         stale_days: u32,
         waypoint_window_secs: i64,
+        overlap_min_jaccard: f64,
     ) -> Result<ReplayAuditStats> {
         let now = now_secs();
         let stale_cutoff = now - (stale_days as i64).saturating_mul(86_400);
@@ -2625,6 +2626,9 @@ impl StateStore for SqliteStore {
         const SUMMARIZES: &str = "summarizes";
         let waypoint_enabled = waypoint_window_secs > 0;
         let waypoint_window_secs = waypoint_window_secs.max(0);
+        let overlap_enabled = overlap_min_jaccard > 0.0;
+        // Clamp to (0, 1] — Jaccard outside that range is meaningless.
+        let overlap_min_jaccard = overlap_min_jaccard.clamp(0.0, 1.0);
 
         let stats = self
             .conn
@@ -2850,6 +2854,103 @@ impl StateStore for SqliteStore {
                     None
                 };
 
+                // Overlap pass — surface source-set duplicates that
+                // escaped Phase-2-#2 canonical-key dedupe (pre-canonical
+                // keys never went through the hash-derived key path).
+                // Single-pass SQL: enumerate (a, b) summary pairs sharing
+                // at least one source, compute Jaccard in Rust.
+                let overlap_pairs: Vec<OverlapPair> = if overlap_enabled {
+                    let mut size_stmt = c.prepare(
+                        "SELECT e.from_key, COUNT(DISTINCT e.to_key)
+                           FROM memory_edges e
+                           JOIN memories m ON m.key = e.from_key
+                          WHERE e.edge_type = ?1
+                            AND m.status = 'active'
+                            AND m.tags LIKE ?2
+                          GROUP BY e.from_key",
+                    )?;
+                    let sizes: std::collections::HashMap<String, u64> = size_stmt
+                        .query_map(params![SUMMARIZES, TAG_LIKE], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?.max(0) as u64))
+                        })?
+                        .filter_map(|r| r.ok())
+                        .collect();
+
+                    let mut pair_stmt = c.prepare(
+                        "SELECT a.from_key, b.from_key, COUNT(DISTINCT a.to_key)
+                           FROM memory_edges a
+                           JOIN memory_edges b
+                                ON a.to_key = b.to_key
+                               AND a.edge_type = b.edge_type
+                               AND a.from_key < b.from_key
+                           JOIN memories ma ON ma.key = a.from_key
+                                           AND ma.status = 'active'
+                                           AND ma.tags LIKE ?2
+                           JOIN memories mb ON mb.key = b.from_key
+                                           AND mb.status = 'active'
+                                           AND mb.tags LIKE ?2
+                          WHERE a.edge_type = ?1
+                          GROUP BY a.from_key, b.from_key
+                         HAVING COUNT(DISTINCT a.to_key) >= 1",
+                    )?;
+
+                    let cls_lookup: std::collections::HashMap<String, String> = waypoint
+                        .as_ref()
+                        .map(|w| {
+                            w.rows
+                                .iter()
+                                .map(|r| (r.key.clone(), r.classification.clone()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    let mut pairs: Vec<OverlapPair> = pair_stmt
+                        .query_map(params![SUMMARIZES, TAG_LIKE], |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, i64>(2)?.max(0) as u64,
+                            ))
+                        })?
+                        .filter_map(|r| r.ok())
+                        .filter_map(|(key_a, key_b, shared)| {
+                            let size_a = *sizes.get(&key_a).unwrap_or(&0);
+                            let size_b = *sizes.get(&key_b).unwrap_or(&0);
+                            let union = size_a + size_b - shared;
+                            if union == 0 {
+                                return None;
+                            }
+                            let jaccard = shared as f64 / union as f64;
+                            if jaccard < overlap_min_jaccard {
+                                return None;
+                            }
+                            Some(OverlapPair {
+                                classification_a: cls_lookup.get(&key_a).cloned(),
+                                classification_b: cls_lookup.get(&key_b).cloned(),
+                                key_a,
+                                key_b,
+                                shared_sources: shared,
+                                size_a,
+                                size_b,
+                                jaccard,
+                            })
+                        })
+                        .collect();
+                    // Order by Jaccard desc, then by shared count, then alpha
+                    // for deterministic output (used in tests and human read).
+                    pairs.sort_by(|a, b| {
+                        b.jaccard
+                            .partial_cmp(&a.jaccard)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                            .then(b.shared_sources.cmp(&a.shared_sources))
+                            .then(a.key_a.cmp(&b.key_a))
+                            .then(a.key_b.cmp(&b.key_b))
+                    });
+                    pairs
+                } else {
+                    Vec::new()
+                };
+
                 Ok(ReplayAuditStats {
                     total_summaries: total_u,
                     never_accessed: never.max(0) as u64,
@@ -2863,6 +2964,7 @@ impl StateStore for SqliteStore {
                     top_summaries: top,
                     dead_weight_summaries: dead,
                     waypoint,
+                    overlap_pairs,
                 })
             })
             .await
@@ -9314,6 +9416,222 @@ mod tests {
         assert_eq!(stats.decayed, 1);
         let imp = read_importance(&store, "near_floor_c").await;
         assert!((imp - 0.1).abs() < 1e-9, "imp={imp} (expected clamp to floor)");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    /// Helper: insert a `p5_replay` summary linked via `summarizes` to
+    /// a set of source memories. Used by the overlap-pass tests below.
+    async fn seed_summary_with_sources(
+        store: &SqliteStore,
+        summary_key: &str,
+        sources: &[&str],
+    ) {
+        use crate::MemoryRecord;
+        let mut tags = vec!["p5_replay".to_string()];
+        tags.push(format!("dedupe:cluster:{summary_key}"));
+        store
+            .memory_save(&MemoryRecord {
+                key: summary_key.into(),
+                kind: "context".into(),
+                content: format!("summary {summary_key}"),
+                tags,
+                related_keys: sources.iter().map(|s| s.to_string()).collect(),
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save summary");
+        for src in sources {
+            store
+                .memory_save(&MemoryRecord {
+                    key: src.to_string(),
+                    kind: "fact".into(),
+                    content: format!("source {src}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: String::new(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save source");
+            store
+                .memory_link(summary_key, src, "summarizes", 1.0)
+                .await
+                .expect("link summarizes");
+        }
+    }
+
+    fn overlap_temp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "ab-overlap-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    #[tokio::test]
+    async fn replay_audit_overlap_detects_full_duplicate_clusters() {
+        // Two summaries pointing at the EXACT same 3 sources → Jaccard=1.0.
+        // Mirrors the real-world finding on aio2 (2026-05-11) where
+        // `summary_cross_machine_network` and `summary_cross_machine_tailscale_setup`
+        // shared all 3 sources but escaped Phase-2-#2 canonical-key dedupe.
+        let temp_dir = overlap_temp_dir("full");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        seed_summary_with_sources(&store, "summ_a", &["src1", "src2", "src3"]).await;
+        seed_summary_with_sources(&store, "summ_b", &["src1", "src2", "src3"]).await;
+
+        let stats = store
+            .replay_audit_stats(7, 0, 0.5)
+            .await
+            .expect("audit");
+        assert_eq!(stats.overlap_pairs.len(), 1, "exactly one pair expected");
+        let p = &stats.overlap_pairs[0];
+        assert_eq!(p.key_a, "summ_a");
+        assert_eq!(p.key_b, "summ_b");
+        assert_eq!(p.shared_sources, 3);
+        assert_eq!(p.size_a, 3);
+        assert_eq!(p.size_b, 3);
+        assert!((p.jaccard - 1.0).abs() < 1e-9, "jaccard={}", p.jaccard);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn replay_audit_overlap_jaccard_threshold_filters_partial() {
+        // 3 summaries:
+        //   A = {s1, s2, s3, s4}
+        //   B = {s1, s2, s5, s6}       → shared=2, union=6, J = 2/6 ≈ 0.33
+        //   C = {s1, s2, s3, s4, s7}   → with A: shared=4, union=5, J = 4/5 = 0.8
+        // threshold=0.5 should only emit (A, C). threshold=0.0 emits all 3 pairs
+        // — we use >0 to keep the test scoped to threshold semantics.
+        let temp_dir = overlap_temp_dir("partial");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        seed_summary_with_sources(&store, "ovl_a", &["s1", "s2", "s3", "s4"]).await;
+        seed_summary_with_sources(&store, "ovl_b", &["s1", "s2", "s5", "s6"]).await;
+        seed_summary_with_sources(&store, "ovl_c", &["s1", "s2", "s3", "s4", "s7"]).await;
+
+        let stats = store
+            .replay_audit_stats(7, 0, 0.5)
+            .await
+            .expect("audit");
+        assert_eq!(stats.overlap_pairs.len(), 1, "only A↔C >= 0.5");
+        let p = &stats.overlap_pairs[0];
+        assert_eq!(p.key_a, "ovl_a");
+        assert_eq!(p.key_b, "ovl_c");
+        assert_eq!(p.shared_sources, 4);
+        assert!((p.jaccard - 0.8).abs() < 1e-9, "jaccard={}", p.jaccard);
+
+        // Lower the threshold — both pairs touching B should now appear.
+        let stats_lo = store
+            .replay_audit_stats(7, 0, 0.1)
+            .await
+            .expect("audit lo");
+        assert_eq!(stats_lo.overlap_pairs.len(), 3, "all pairs >= 0.1");
+        // Top should still be (a, c) at J=0.8.
+        assert_eq!(stats_lo.overlap_pairs[0].key_a, "ovl_a");
+        assert_eq!(stats_lo.overlap_pairs[0].key_b, "ovl_c");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn replay_audit_overlap_disabled_when_threshold_zero() {
+        // overlap_min_jaccard = 0.0 must skip the pass entirely, leaving
+        // overlap_pairs empty even when full-duplicate summaries exist.
+        let temp_dir = overlap_temp_dir("zero");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        seed_summary_with_sources(&store, "z_a", &["src1", "src2"]).await;
+        seed_summary_with_sources(&store, "z_b", &["src1", "src2"]).await;
+
+        let stats = store
+            .replay_audit_stats(7, 0, 0.0)
+            .await
+            .expect("audit");
+        assert!(
+            stats.overlap_pairs.is_empty(),
+            "overlap_min_jaccard=0 must disable the pass"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn replay_audit_overlap_ignores_non_replay_summaries() {
+        // A summary without the `p5_replay` tag must not appear in any pair,
+        // even if it shares sources with a real replay summary. Guards
+        // against false positives from manually-linked summaries.
+        use crate::MemoryRecord;
+        let temp_dir = overlap_temp_dir("filter");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        seed_summary_with_sources(&store, "real_summary", &["s1", "s2"]).await;
+        // Non-p5_replay summary linked to the same sources.
+        store
+            .memory_save(&MemoryRecord {
+                key: "manual_summary".into(),
+                kind: "context".into(),
+                content: "manual".into(),
+                tags: vec!["hand_written".into()],
+                related_keys: vec!["s1".into(), "s2".into()],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save manual");
+        for src in &["s1", "s2"] {
+            store
+                .memory_link("manual_summary", src, "summarizes", 1.0)
+                .await
+                .expect("link manual");
+        }
+
+        let stats = store
+            .replay_audit_stats(7, 0, 0.5)
+            .await
+            .expect("audit");
+        assert!(
+            stats.overlap_pairs.is_empty(),
+            "manual_summary lacks p5_replay tag and must not surface"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
