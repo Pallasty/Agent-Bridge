@@ -942,6 +942,45 @@
     .canvas-rail-discussions a { border-left: 2px solid #a87cff; }
     .canvas-rail-reports a     { border-left: 2px solid #5cc8c8; }
 
+    /* A↔B intent labels — anchor the vision_breathing_canvas semantic
+       layer (A = 殿堂 / palace = results; B = 工坊 / canvas = workshop)
+       to the actual UI surfaces. Low-opacity, top-left, clickable to
+       open the vision node so the wider meaning is one click away. */
+    .mode-badge {
+      position: fixed;
+      top: 12px;
+      left: 16px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      color: #5a5a68;
+      z-index: 50;
+      user-select: none;
+      pointer-events: none; /* let underlying clicks pass except on link */
+    }
+    .mode-badge .mode-sigil {
+      color: #7a7a90;
+      font-weight: 500;
+    }
+    .mode-badge a {
+      color: #5a5a68;
+      text-decoration: none;
+      border-bottom: 1px dotted #2a2a35;
+      transition: color 140ms, border-color 140ms;
+      pointer-events: auto;
+    }
+    .mode-badge a:hover {
+      color: #a87cff;
+      border-bottom-color: #a87cff;
+    }
+    /* A badge hides when canvas overlay is open — B badge takes over. */
+    body.canvas-open .mode-badge.a-mode { opacity: 0; pointer-events: none; }
+    /* B badge lives inside #canvas-overlay so it only renders when canvas is. */
+    #canvas-overlay .mode-badge.b-mode {
+      position: absolute;
+      top: 10px;
+      left: 20px;
+    }
+
     .canvas-foot {
       display: flex;
       align-items: center;
@@ -1057,6 +1096,12 @@
             title="review memories untouched for >7 days (C8)">🧊 review</button>
     <button id="filter-btn" type="button">filter</button>
   </div>
+  <!-- A↔B intent label. A · 殿堂 = palace (result layer); shown when no
+       canvas is open. Click the vision link to read the source vision. -->
+  <div class="mode-badge a-mode">
+    <span class="mode-sigil">A · 殿堂</span> ·
+    <a href="?focus=vision_breathing_canvas">vision · 呼吸式画布</a>
+  </div>
   <div id="filter-panel" class="hidden"></div>
   <div id="stale-panel" class="hidden"></div>
   <div id="cy"></div>
@@ -1073,6 +1118,15 @@
          reset to fullscreen. -->
     <div class="canvas-resize-handle" id="canvas-resize-handle"
          title="drag to resize · double-click to reset to fullscreen"></div>
+    <!-- A↔B intent label, B side. 工坊 = canvas/workshop; vision link
+         echoes the palace badge so the pair reads as one design intent.
+         Uses class="rail-switch" so the canvas-overlay click delegation
+         catches it and runs switchFocus instead of a full page navigation
+         — staying in workshop mode while re-focusing on the vision. -->
+    <div class="mode-badge b-mode">
+      <span class="mode-sigil">B · 工坊</span> ·
+      <a class="rail-switch" href="#" data-focus-key="vision_breathing_canvas">vision · 呼吸式画布</a>
+    </div>
     <div class="canvas-focus">
       <button class="canvas-close" type="button">← back to Palace</button>
       <div class="canvas-focus-card">
