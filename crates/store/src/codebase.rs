@@ -821,26 +821,28 @@ fn extract_rust_calls_from_line(
     }
 }
 
-/// Replace the interior of string literals (`"…"`) and comment bodies
-/// (`// …`, `/* … */`) with spaces, preserving newlines + the
-/// delimiters themselves. Used by the call extractor to neutralise
-/// Rust-looking text that lives inside string literals or comments —
-/// most importantly multi-line strings, where per-line scanning would
-/// otherwise treat the interior lines as real code.
+/// Replace the interior of string literals (`"…"`, raw `r#"…"#`),
+/// char literals (`'x'`, `'\n'`), and comment bodies (`// …`,
+/// `/* … */`) with spaces, preserving newlines + the delimiters
+/// themselves. Used by the call extractor to neutralise Rust-looking
+/// text that lives inside literals or comments — most importantly
+/// multi-line strings, where per-line scanning would otherwise treat
+/// the interior lines as real code.
 ///
 /// Limitations:
-/// - Raw strings (`r"…"`, `r#"…"#`) are not specially handled; their
-///   contents leak through.
-/// - Char literals (`'x'`, `'\n'`) are not masked — they're single-line
-///   and the per-line scanner already skips them inline.
+/// - Char-literal recognition handles `'x'` and `'\<single>'` only;
+///   `'\u{1F600}'`-style unicode escapes leak (rare in import sections
+///   and call-graph-relevant code).
 fn mask_strings_and_comments(content: &str) -> String {
     enum State {
         Normal,
         Str,
+        RawStr,
         LineCmt,
         BlockCmt,
     }
     let mut state = State::Normal;
+    let mut raw_hashes = 0usize;
     let mut prev_bs = false;
     let mut out = String::with_capacity(content.len());
     let bytes = content.as_bytes();
@@ -849,6 +851,55 @@ fn mask_strings_and_comments(content: &str) -> String {
         let c = bytes[i];
         match state {
             State::Normal => {
+                // Raw string: `r"…"`, `r#"…"#`, `r##"…"##`, etc., or
+                // byte raw `br"…"`, `br#"…"#`. Check word boundary.
+                let before_ok = i == 0
+                    || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
+                if before_ok && (c == b'r' || (c == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'r')) {
+                    let r_start = if c == b'b' { i + 1 } else { i };
+                    let mut k = r_start + 1;
+                    let mut hashes = 0;
+                    while k < bytes.len() && bytes[k] == b'#' {
+                        hashes += 1;
+                        k += 1;
+                    }
+                    if k < bytes.len() && bytes[k] == b'"' {
+                        // Confirmed raw string opener.
+                        for j in i..=k {
+                            out.push(bytes[j] as char);
+                        }
+                        raw_hashes = hashes;
+                        state = State::RawStr;
+                        i = k + 1;
+                        continue;
+                    }
+                }
+                if c == b'\'' {
+                    // Char literal: `'x'` (3 chars) or `'\x'` (4 chars).
+                    // Lifetime: `'a` followed by ident chars, no close.
+                    if i + 2 < bytes.len() && bytes[i + 2] == b'\'' && bytes[i + 1] != b'\\' {
+                        out.push('\'');
+                        out.push(' ');
+                        out.push('\'');
+                        i += 3;
+                        continue;
+                    }
+                    if i + 3 < bytes.len()
+                        && bytes[i + 1] == b'\\'
+                        && bytes[i + 3] == b'\''
+                    {
+                        out.push('\'');
+                        out.push(' ');
+                        out.push(' ');
+                        out.push('\'');
+                        i += 4;
+                        continue;
+                    }
+                    // Lifetime — keep as-is.
+                    out.push('\'');
+                    i += 1;
+                    continue;
+                }
                 if c == b'"' {
                     state = State::Str;
                     out.push('"');
@@ -883,6 +934,35 @@ fn mask_strings_and_comments(content: &str) -> String {
                     continue;
                 }
                 prev_bs = false;
+                if c == b'\n' {
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+            State::RawStr => {
+                // Closing is `"` followed by `raw_hashes` `#`s.
+                if c == b'"' {
+                    let mut all_hash = true;
+                    for hi in 1..=raw_hashes {
+                        if i + hi >= bytes.len() || bytes[i + hi] != b'#' {
+                            all_hash = false;
+                            break;
+                        }
+                    }
+                    if all_hash {
+                        // Push closing delimiter as-is.
+                        for j in i..=i + raw_hashes {
+                            if j < bytes.len() {
+                                out.push(bytes[j] as char);
+                            }
+                        }
+                        state = State::Normal;
+                        i = i + raw_hashes + 1;
+                        continue;
+                    }
+                }
                 if c == b'\n' {
                     out.push('\n');
                 } else {
@@ -3110,6 +3190,64 @@ fn outer() {
 ";
         let calls = extract_rust_calls(src, "f.rs");
         assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "real_call");
+    }
+
+    #[test]
+    fn rust_call_raw_string_does_not_leak() {
+        // Wet-run finding 2: `r###"..."###` raw strings were not masked,
+        // so any `"..."` inside leaked through and the masker's plain-
+        // string state machine fell out of sync, mistreating subsequent
+        // code as real Rust.
+        let src = r####"
+fn test_fn() {
+    let frag = r###"
+        let nested = "\
+fn fake() {
+    SqliteStore::new();
+}
+";
+    "###;
+    let _ = frag;
+    real_call();
+}
+"####;
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real_call");
+    }
+
+    #[test]
+    fn rust_call_char_literal_with_quote_does_not_open_string() {
+        // `'"'` (apostrophe + quote + apostrophe) is a char literal —
+        // not the start of a string. The masker must skip past it.
+        let src = "\
+fn outer() {
+    let _ = '\"';
+    let _ = ' ';
+    real_call();
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "real_call");
+    }
+
+    #[test]
+    fn rust_call_byte_string_and_byte_raw_string_handled() {
+        // `b"…"` is a plain byte string; `br"…"` and `br#"…"#` are raw.
+        // For the masker, `b` before `"` is just an ident-ish char —
+        // the `"` still enters Str state. For `br"…"`, we need raw
+        // detection to fire on the `b…r…"` pair.
+        let src = r#"
+fn outer() {
+    let a = b"foo";
+    let b = br"bar/baz";
+    real_call();
+}
+"#;
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
         assert_eq!(calls[0].callee, "real_call");
     }
 }
