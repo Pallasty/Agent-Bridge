@@ -31,11 +31,12 @@ pub fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Co
 }
 
 /// Extract `use`/`import` statements from `content` for the given language.
-/// Phase 2 #3 second slice ships Rust + Python; TS/JS/Go to follow.
+/// Phase 2 #3 second slice ships Rust + Python + TS/JS; Go to follow.
 pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<CodebaseImport> {
     match language {
         "rust" => extract_rust_imports(content, file_path),
         "python" => extract_python_imports(content, file_path),
+        "typescript" | "javascript" => extract_ts_imports(content, file_path, language),
         _ => vec![],
     }
 }
@@ -734,6 +735,427 @@ pub fn extract_python_imports(content: &str, file_path: &str) -> Vec<CodebaseImp
     out
 }
 
+// ── TS/JS imports (Phase 2 #3 second slice — TS/JS side) ─────────────────────
+
+/// Drop trailing `// …` line comment. String-aware for `'…'`, `"…"`, and
+/// template literals `` `…` `` so a `//` inside a string isn't taken as a
+/// comment opener. Template literal `${…}` interpolation is not parsed —
+/// imports almost never appear inside template strings.
+fn strip_ts_line_comment(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    let mut in_str = false;
+    let mut quote: u8 = b' ';
+    let mut prev_bs = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            if c == b'\\' && !prev_bs {
+                prev_bs = true;
+                i += 1;
+                continue;
+            }
+            if c == quote && !prev_bs {
+                in_str = false;
+            }
+            prev_bs = false;
+        } else if c == b'"' || c == b'\'' || c == b'`' {
+            in_str = true;
+            quote = c;
+        } else if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            return &s[..i];
+        }
+        i += 1;
+    }
+    s
+}
+
+/// Strip same-line `/* … */` block comments. Multi-line block comments
+/// inside import sections are rare; we leave any unterminated `/*` to
+/// truncate the rest of the line.
+fn strip_ts_block_comments(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            if let Some(rel) = s[i + 2..].find("*/") {
+                i = i + 2 + rel + 2;
+                out.push(' ');
+                continue;
+            }
+            break;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+fn is_ts_ident_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_' || c == b'$'
+}
+
+/// Read the string literal starting at `bytes[start]` (must be a quote).
+/// Returns `(content, end_exclusive)` or `None` if unterminated.
+fn read_ts_string_literal(bytes: &[u8], start: usize) -> Option<(String, usize)> {
+    let quote = *bytes.get(start)?;
+    if quote != b'"' && quote != b'\'' && quote != b'`' {
+        return None;
+    }
+    let mut j = start + 1;
+    let mut prev_bs = false;
+    let mut buf = String::new();
+    while j < bytes.len() {
+        let c = bytes[j];
+        if c == b'\\' && !prev_bs {
+            prev_bs = true;
+            j += 1;
+            continue;
+        }
+        if c == quote && !prev_bs {
+            return Some((buf, j + 1));
+        }
+        prev_bs = false;
+        buf.push(c as char);
+        j += 1;
+    }
+    None
+}
+
+/// Find the next string literal in `s` starting at byte index `from`.
+fn find_ts_next_string(s: &str, from: usize) -> Option<(String, usize)> {
+    let bytes = s.as_bytes();
+    let mut i = from;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c == b'"' || c == b'\'' || c == b'`' {
+            return read_ts_string_literal(bytes, i);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Parse `name as alias` for one item already split out of a brace list.
+fn split_ts_as(item: &str) -> (String, Option<String>) {
+    let trimmed = item.trim();
+    if let Some(idx) = trimmed.rfind(" as ") {
+        let name = trimmed[..idx].trim();
+        let alias = trimmed[idx + 4..].trim();
+        if !alias.is_empty() {
+            return (name.to_string(), Some(alias.to_string()));
+        }
+    }
+    (trimmed.to_string(), None)
+}
+
+/// Find the `from` keyword as a standalone word, string-aware. Returns the
+/// last occurrence so `import { from } from 'x'` resolves to the second `from`.
+fn find_ts_from_keyword(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut last = None;
+    let mut in_str = false;
+    let mut quote: u8 = b' ';
+    let mut prev_bs = false;
+    while i + 4 <= bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            if c == b'\\' && !prev_bs {
+                prev_bs = true;
+                i += 1;
+                continue;
+            }
+            if c == quote && !prev_bs {
+                in_str = false;
+            }
+            prev_bs = false;
+            i += 1;
+            continue;
+        }
+        if c == b'"' || c == b'\'' || c == b'`' {
+            in_str = true;
+            quote = c;
+            i += 1;
+            continue;
+        }
+        if &bytes[i..i + 4] == b"from" {
+            let before_ok = i == 0 || !is_ts_ident_char(bytes[i - 1]);
+            let after_ok = i + 4 == bytes.len() || !is_ts_ident_char(bytes[i + 4]);
+            if before_ok && after_ok {
+                last = Some(i);
+            }
+        }
+        i += 1;
+    }
+    last
+}
+
+/// If `bytes[i..]` starts with `kw` followed by optional whitespace + `(`,
+/// return the index just after `(`. Boundary-checked so `.require(` and
+/// `xrequire(` don't match.
+fn match_ts_call_keyword(bytes: &[u8], i: usize, kw: &str) -> Option<usize> {
+    let kb = kw.as_bytes();
+    if i + kb.len() > bytes.len() {
+        return None;
+    }
+    if &bytes[i..i + kb.len()] != kb {
+        return None;
+    }
+    if i > 0 {
+        let prev = bytes[i - 1];
+        if is_ts_ident_char(prev) || prev == b'.' {
+            return None;
+        }
+    }
+    let mut j = i + kb.len();
+    while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+        j += 1;
+    }
+    if j < bytes.len() && bytes[j] == b'(' {
+        Some(j + 1)
+    } else {
+        None
+    }
+}
+
+/// Emit one row per importable item from a clause body. The clause body
+/// is what sits between `import`/`export` and `from` (e.g. `foo`,
+/// `* as ns`, `{ a, b as x }`, `foo, { a, b }`).
+fn emit_ts_clause_rows(
+    clause: &str,
+    module: &str,
+    raw_full: &str,
+    line_no: u32,
+    language: &str,
+    file_path: &str,
+    out: &mut Vec<CodebaseImport>,
+) {
+    let clause = clause.trim();
+    if clause.is_empty() {
+        return;
+    }
+    for part in split_top_level_commas(clause) {
+        let p = part.trim();
+        if p.is_empty() {
+            continue;
+        }
+        if p.starts_with('{') && p.ends_with('}') {
+            let inner = &p[1..p.len() - 1];
+            for item in split_top_level_commas(inner) {
+                let item = item.trim().trim_start_matches("type ").trim();
+                if item.is_empty() {
+                    continue;
+                }
+                let (name, alias) = split_ts_as(item);
+                if name.is_empty() {
+                    continue;
+                }
+                out.push(CodebaseImport {
+                    file_path: file_path.to_string(),
+                    line: line_no,
+                    language: language.to_string(),
+                    raw: raw_full.chars().take(200).collect(),
+                    target: join_python_import_path(module, &name),
+                    alias,
+                });
+            }
+        } else if let Some(rest) = p.strip_prefix('*') {
+            let after = rest.trim();
+            let alias = after.strip_prefix("as ").map(|a| a.trim().to_string());
+            out.push(CodebaseImport {
+                file_path: file_path.to_string(),
+                line: line_no,
+                language: language.to_string(),
+                raw: raw_full.chars().take(200).collect(),
+                target: format!("{module}.*"),
+                alias: alias.filter(|a| !a.is_empty()),
+            });
+        } else {
+            let p = p.trim_end_matches(';').trim();
+            if p.is_empty() {
+                continue;
+            }
+            out.push(CodebaseImport {
+                file_path: file_path.to_string(),
+                line: line_no,
+                language: language.to_string(),
+                raw: raw_full.chars().take(200).collect(),
+                target: module.to_string(),
+                alias: Some(p.to_string()),
+            });
+        }
+    }
+}
+
+/// Match `import …`, `export … from …`, and side-effect `import 'mod';`.
+fn try_ts_static_form(
+    buf: &str,
+    raw_full: &str,
+    line_no: u32,
+    language: &str,
+    file_path: &str,
+    out: &mut Vec<CodebaseImport>,
+) {
+    let is_import = buf.starts_with("import ") || buf.starts_with("import\t");
+    let is_export = buf.starts_with("export ") || buf.starts_with("export\t");
+    if !is_import && !is_export {
+        return;
+    }
+
+    // Side-effect-only: `import 'mod';`. Has no `from` keyword and the
+    // body after `import ` is a single string literal.
+    if is_import && find_ts_from_keyword(buf).is_none() {
+        let rest = buf["import".len()..].trim_start().trim_end_matches(';').trim();
+        if !rest.is_empty() {
+            let rb = rest.as_bytes();
+            if matches!(rb[0], b'"' | b'\'' | b'`') {
+                if let Some((module, _)) = read_ts_string_literal(rb, 0) {
+                    if !module.is_empty() {
+                        out.push(CodebaseImport {
+                            file_path: file_path.to_string(),
+                            line: line_no,
+                            language: language.to_string(),
+                            raw: raw_full.chars().take(200).collect(),
+                            target: module,
+                            alias: None,
+                        });
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    let from_idx = match find_ts_from_keyword(buf) {
+        Some(idx) => idx,
+        None => return,
+    };
+    let clause = buf[..from_idx].trim_end();
+    let after_from = buf[from_idx + 4..].trim_start();
+    let module = match find_ts_next_string(after_from, 0) {
+        Some((s, _)) if !s.is_empty() => s,
+        _ => return,
+    };
+
+    let kw = if is_import { "import" } else { "export" };
+    let clause_body = clause[kw.len()..].trim();
+    let clause_body = clause_body
+        .strip_prefix("type ")
+        .map(|s| s.trim())
+        .unwrap_or(clause_body);
+
+    emit_ts_clause_rows(
+        clause_body, &module, raw_full, line_no, language, file_path, out,
+    );
+}
+
+/// Emit rows for `require('mod')` and dynamic `import('mod')` calls
+/// occurring anywhere in the (possibly aggregated) buffer.
+fn emit_ts_call_imports(
+    buf: &str,
+    raw_full: &str,
+    line_no: u32,
+    language: &str,
+    file_path: &str,
+    out: &mut Vec<CodebaseImport>,
+) {
+    let bytes = buf.as_bytes();
+    let mut in_str = false;
+    let mut quote: u8 = b' ';
+    let mut prev_bs = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            if c == b'\\' && !prev_bs {
+                prev_bs = true;
+                i += 1;
+                continue;
+            }
+            if c == quote && !prev_bs {
+                in_str = false;
+            }
+            prev_bs = false;
+            i += 1;
+            continue;
+        }
+        if c == b'"' || c == b'\'' || c == b'`' {
+            in_str = true;
+            quote = c;
+            i += 1;
+            continue;
+        }
+        if let Some(after) = match_ts_call_keyword(bytes, i, "require")
+            .or_else(|| match_ts_call_keyword(bytes, i, "import"))
+        {
+            if let Some((module, end)) = find_ts_next_string(&buf[after..], 0) {
+                if !module.is_empty() {
+                    out.push(CodebaseImport {
+                        file_path: file_path.to_string(),
+                        line: line_no,
+                        language: language.to_string(),
+                        raw: raw_full.chars().take(200).collect(),
+                        target: module,
+                        alias: None,
+                    });
+                }
+                i = after + end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Extract TS/JS ESM `import … from …`, `export … from …`,
+/// side-effect `import '…';`, dynamic `import('…')`, and CJS
+/// `require('…')` calls. Convention mirrors Python: named imports become
+/// `module.name`, namespace imports become `module.*`, default and
+/// side-effect imports use the bare module specifier.
+pub fn extract_ts_imports(
+    content: &str,
+    file_path: &str,
+    language: &str,
+) -> Vec<CodebaseImport> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0usize;
+    while i < lines.len() {
+        let raw = lines[i];
+        let working = strip_ts_block_comments(raw);
+        let no_cmt = strip_ts_line_comment(&working);
+        let stripped = no_cmt.trim();
+        let line_no = (i as u32) + 1;
+
+        // Multi-line aggregation: keep reading until braces balance.
+        let mut buf = stripped.to_string();
+        let mut end_line_idx = i;
+        while buf.matches('{').count() > buf.matches('}').count()
+            && end_line_idx + 1 < lines.len()
+        {
+            end_line_idx += 1;
+            let nw = strip_ts_block_comments(lines[end_line_idx]);
+            let next = strip_ts_line_comment(&nw).trim().to_string();
+            buf.push(' ');
+            buf.push_str(&next);
+        }
+
+        let raw_full = if end_line_idx == i {
+            raw.to_string()
+        } else {
+            lines[i..=end_line_idx.min(lines.len() - 1)].join(" ")
+        };
+
+        try_ts_static_form(&buf, &raw_full, line_no, language, file_path, &mut out);
+        emit_ts_call_imports(&buf, &raw_full, line_no, language, file_path, &mut out);
+
+        i = end_line_idx + 1;
+    }
+    out
+}
+
 // ── Python ───────────────────────────────────────────────────────────────────
 
 fn extract_python(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
@@ -1382,5 +1804,217 @@ x = 'from os import path'
 ";
         let imps = extract_python_imports(src, "f.py");
         assert!(imps.is_empty(), "spurious matches: {imps:#?}");
+    }
+
+    // ── Phase 2 #3 second slice — TS/JS import extractor ───────────────────
+
+    #[test]
+    fn ts_import_side_effect_only() {
+        let imps = extract_ts_imports("import 'reflect-metadata';\n", "f.ts", "typescript");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "reflect-metadata");
+        assert!(imps[0].alias.is_none());
+        assert_eq!(imps[0].language, "typescript");
+    }
+
+    #[test]
+    fn ts_import_default() {
+        let imps = extract_ts_imports("import React from 'react';\n", "f.ts", "typescript");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "react");
+        assert_eq!(imps[0].alias.as_deref(), Some("React"));
+    }
+
+    #[test]
+    fn ts_import_namespace() {
+        let imps = extract_ts_imports(
+            "import * as path from 'node:path';\n",
+            "f.ts",
+            "typescript",
+        );
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "node:path.*");
+        assert_eq!(imps[0].alias.as_deref(), Some("path"));
+    }
+
+    #[test]
+    fn ts_import_named() {
+        let imps = extract_ts_imports(
+            "import { useState, useEffect } from 'react';\n",
+            "f.tsx",
+            "typescript",
+        );
+        assert_eq!(imps.len(), 2);
+        let targets: Vec<&str> = imps.iter().map(|i| i.target.as_str()).collect();
+        assert_eq!(targets, ["react.useState", "react.useEffect"]);
+    }
+
+    #[test]
+    fn ts_import_named_with_alias() {
+        let imps = extract_ts_imports(
+            "import { Component as C, Fragment } from 'react';\n",
+            "f.ts",
+            "typescript",
+        );
+        assert_eq!(imps.len(), 2);
+        assert_eq!(imps[0].target, "react.Component");
+        assert_eq!(imps[0].alias.as_deref(), Some("C"));
+        assert_eq!(imps[1].target, "react.Fragment");
+        assert!(imps[1].alias.is_none());
+    }
+
+    #[test]
+    fn ts_import_default_plus_named() {
+        let imps = extract_ts_imports(
+            "import React, { useState } from 'react';\n",
+            "f.tsx",
+            "typescript",
+        );
+        assert_eq!(imps.len(), 2);
+        assert_eq!(imps[0].target, "react");
+        assert_eq!(imps[0].alias.as_deref(), Some("React"));
+        assert_eq!(imps[1].target, "react.useState");
+    }
+
+    #[test]
+    fn ts_import_default_plus_namespace() {
+        let imps = extract_ts_imports(
+            "import fs, * as fsAll from 'fs';\n",
+            "f.ts",
+            "typescript",
+        );
+        assert_eq!(imps.len(), 2);
+        assert_eq!(imps[0].target, "fs");
+        assert_eq!(imps[0].alias.as_deref(), Some("fs"));
+        assert_eq!(imps[1].target, "fs.*");
+        assert_eq!(imps[1].alias.as_deref(), Some("fsAll"));
+    }
+
+    #[test]
+    fn ts_import_type_prefix_stripped() {
+        let imps = extract_ts_imports(
+            "import type { Foo, Bar } from './types';\n",
+            "f.ts",
+            "typescript",
+        );
+        assert_eq!(imps.len(), 2);
+        assert_eq!(imps[0].target, "./types.Foo");
+        assert_eq!(imps[1].target, "./types.Bar");
+    }
+
+    #[test]
+    fn ts_import_inline_type_stripped() {
+        let imps = extract_ts_imports(
+            "import { type Foo, Bar } from './types';\n",
+            "f.ts",
+            "typescript",
+        );
+        assert_eq!(imps.len(), 2);
+        assert_eq!(imps[0].target, "./types.Foo");
+        assert_eq!(imps[1].target, "./types.Bar");
+    }
+
+    #[test]
+    fn ts_import_multi_line_braces() {
+        let src = "\
+import {
+  useState,
+  useEffect as useFx,
+  Fragment,
+} from 'react';
+";
+        let imps = extract_ts_imports(src, "f.tsx", "typescript");
+        assert_eq!(imps.len(), 3, "got {imps:#?}");
+        let targets: Vec<&str> = imps.iter().map(|i| i.target.as_str()).collect();
+        assert_eq!(targets, ["react.useState", "react.useEffect", "react.Fragment"]);
+        assert_eq!(imps[1].alias.as_deref(), Some("useFx"));
+        // All three should report the line where `import` started.
+        assert!(imps.iter().all(|i| i.line == 1));
+    }
+
+    #[test]
+    fn ts_export_named_from() {
+        let imps = extract_ts_imports(
+            "export { Foo, Bar as B } from './mod';\n",
+            "f.ts",
+            "typescript",
+        );
+        assert_eq!(imps.len(), 2);
+        assert_eq!(imps[0].target, "./mod.Foo");
+        assert_eq!(imps[1].target, "./mod.Bar");
+        assert_eq!(imps[1].alias.as_deref(), Some("B"));
+    }
+
+    #[test]
+    fn ts_export_star_from() {
+        let imps = extract_ts_imports("export * from './mod';\n", "f.ts", "typescript");
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "./mod.*");
+        assert!(imps[0].alias.is_none());
+    }
+
+    #[test]
+    fn ts_export_star_as_from() {
+        let imps = extract_ts_imports(
+            "export * as utils from './utils';\n",
+            "f.ts",
+            "typescript",
+        );
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "./utils.*");
+        assert_eq!(imps[0].alias.as_deref(), Some("utils"));
+    }
+
+    #[test]
+    fn ts_require_cjs() {
+        let imps = extract_ts_imports(
+            "const lodash = require('lodash');\n",
+            "f.js",
+            "javascript",
+        );
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "lodash");
+        assert_eq!(imps[0].language, "javascript");
+    }
+
+    #[test]
+    fn ts_dynamic_import() {
+        let imps = extract_ts_imports(
+            "const m = await import('./lazy');\n",
+            "f.ts",
+            "typescript",
+        );
+        assert_eq!(imps.len(), 1);
+        assert_eq!(imps[0].target, "./lazy");
+    }
+
+    #[test]
+    fn ts_skips_lookalikes_and_method_calls() {
+        // `.require(` / `xrequire(` / strings / comments must not match.
+        let src = "\
+// import { ignored } from 'no'
+/* import { also } from 'nope' */
+const x = self.require('not-cjs');
+const s = 'import foo from \"bar\"';
+function require_helper() {}
+const y = xrequire('mod');
+";
+        let imps = extract_ts_imports(src, "f.js", "javascript");
+        assert!(imps.is_empty(), "spurious matches: {imps:#?}");
+    }
+
+    #[test]
+    fn ts_static_and_call_in_same_buffer() {
+        // Two statements on one line: static + dynamic should both be seen.
+        let imps = extract_ts_imports(
+            "import foo from 'a'; const b = require('b');\n",
+            "f.js",
+            "javascript",
+        );
+        assert_eq!(imps.len(), 2, "got {imps:#?}");
+        assert_eq!(imps[0].target, "a");
+        assert_eq!(imps[0].alias.as_deref(), Some("foo"));
+        assert_eq!(imps[1].target, "b");
+        assert!(imps[1].alias.is_none());
     }
 }
