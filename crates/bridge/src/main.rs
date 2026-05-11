@@ -344,6 +344,34 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **ζ-1 (2026-05-11)** — Mid-grain self-portrait. Captures memory
+    /// stats + coactivation temporal-spread + top access + identity window
+    /// + δ-4 transitions into a structured JSON payload and (by default)
+    /// saves it as a `kind=snapshot` memory. Designed as the time-series
+    /// foundation for a future `dream diff` command — vision §5 身份元监控
+    /// at a 1-day grain (vs dream identity's 3-day window, AiOT Soul's
+    /// 256-dim trait vector, and AGENT.md's timeless self-portrait).
+    ///
+    /// Cheap (read-only over current store), idempotent, suitable for
+    /// daily cron.
+    Snapshot {
+        /// Optional slug for the memory key. Default: `anon`. Final key
+        /// is `snapshot_<slug>_<YYYYMMDD_HHMM>` so multiple runs/day
+        /// don't collide.
+        #[arg(long)]
+        name: Option<String>,
+        /// Identity-window span (matches `dream identity --days N`).
+        #[arg(long, default_value_t = 3)]
+        days: u32,
+        /// Print the snapshot to stdout but DON'T save as memory. Use to
+        /// preview shape before kicking off a recurring cron.
+        #[arg(long)]
+        print_only: bool,
+        /// Emit raw JSON to stdout instead of human-readable summary.
+        /// Memory body is always JSON regardless.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -700,6 +728,12 @@ async fn main() -> Result<()> {
                 dry_run,
                 json,
             } => run_dream_prune_coact_noise(*max_count, *older_than_days, *dry_run, *json).await,
+            DreamOp::Snapshot {
+                name,
+                days,
+                print_only,
+                json,
+            } => run_dream_snapshot(name.as_deref(), *days, *print_only, *json).await,
         };
     }
 
@@ -1796,6 +1830,351 @@ async fn run_dream_prune_coact_noise(
         );
     }
     Ok(())
+}
+
+/// ζ-1 (2026-05-11) — Self-portrait snapshot. Captures a mid-grain
+/// behavioural fingerprint by composing existing read-only store methods,
+/// renders as JSON, optionally saves to a `kind=snapshot` memory.
+///
+/// Designed as the *artifact* future `dream diff` will read: each row in
+/// the snapshot timeline is a frozen self-portrait readable cross-session.
+/// This is the 1-day grain in the identity-monitor stack:
+///   • AGENT.md           — timeless (markdown, drift-capped)
+///   • AiOT Soul          — 256-dim trait vector, EMA over 18 sessions
+///   • dream identity     — 3-day rolling window comparison
+///   • dream snapshot ←   — 1-day frozen point (this)
+///   • last_accessed_at   — per-row real-time
+async fn run_dream_snapshot(
+    name: Option<&str>,
+    days: u32,
+    print_only: bool,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, MemoryRecord, SqliteStore, StateStore};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    // ── memory stats ─────────────────────────────────────────────────────
+    let mstats = store
+        .memory_stats()
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_stats: {e}"))?;
+
+    // ── coactivation stats (ε-2 already exposes burst vs persistent) ─────
+    let cstats = store
+        .coactivation_stats()
+        .await
+        .map_err(|e| anyhow::anyhow!("coactivation_stats: {e}"))?;
+
+    // ── top-10 most-accessed non-skill memories (current attention) ──────
+    let top_access: Vec<(String, u64)> = {
+        let rows = store
+            .list_memories_in_scope(
+                "",
+                None,
+                ab_store::MemoryListSort::Frequent,
+                200,
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("list_memories: {e}"))?;
+        rows.into_iter()
+            .filter(|r| r.kind != "skill")
+            .take(10)
+            .map(|r| (r.key, r.access_count))
+            .collect()
+    };
+
+    // ── identity window cur vs prior ─────────────────────────────────────
+    let window_secs = days as i64 * 86_400;
+    let cur_start = now - window_secs;
+    let prior_start = cur_start - window_secs;
+    let id_cur = store
+        .identity_window(cur_start, now)
+        .await
+        .map_err(|e| anyhow::anyhow!("identity_window cur: {e}"))?;
+    let id_prior = store
+        .identity_window(prior_start, cur_start)
+        .await
+        .map_err(|e| anyhow::anyhow!("identity_window prior: {e}"))?;
+
+    // ── δ-4 transitions (top repeated A→B with span ≤ 10min) ─────────────
+    let transitions: Vec<(String, String, u32)> = {
+        let mut events = store
+            .recent_memory_get_keys(200)
+            .await
+            .unwrap_or_default();
+        events.reverse();
+        let mut counts: std::collections::HashMap<(String, String), u32> =
+            std::collections::HashMap::new();
+        for win in events.windows(2) {
+            let (a_key, a_at) = &win[0];
+            let (b_key, b_at) = &win[1];
+            if a_key == b_key {
+                continue;
+            }
+            if b_at - a_at > 600 {
+                continue;
+            }
+            *counts
+                .entry((a_key.clone(), b_key.clone()))
+                .or_insert(0) += 1;
+        }
+        let mut ranked: Vec<((String, String), u32)> =
+            counts.into_iter().filter(|(_, c)| *c >= 2).collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        ranked
+            .into_iter()
+            .take(5)
+            .map(|((a, b), n)| (a, b, n))
+            .collect()
+    };
+
+    // ── node label (matches daemon-http /identity convention) ────────────
+    let node = std::env::var("AGENT_BRIDGE_NODE")
+        .ok()
+        .or_else(|| {
+            std::fs::read_to_string("/etc/hostname")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // ── compose payload ──────────────────────────────────────────────────
+    // Use serde_json::json! for the body so the JSON is order-preserving
+    // and human-diffable. Schema v1.
+    let by_kind_non_skill: Vec<serde_json::Value> = mstats
+        .counts_by_kind
+        .iter()
+        .filter(|(k, _)| k != "skill")
+        .map(|(k, n)| json!({ "kind": k, "count": n }))
+        .collect();
+    let coact_top_persistent: Vec<serde_json::Value> = cstats
+        .top_5_persistent_edges
+        .iter()
+        .map(|e| {
+            json!({
+                "key_a": e.key_a,
+                "key_b": e.key_b,
+                "count": e.count,
+                "span_hours": (e.last_at - e.first_at) / 3600,
+            })
+        })
+        .collect();
+    let active_total = mstats
+        .counts_by_status
+        .get("active")
+        .copied()
+        .unwrap_or(0);
+    let archived_total = mstats
+        .counts_by_status
+        .get("archived")
+        .copied()
+        .unwrap_or(0);
+    let payload = json!({
+        "schema_version": 1,
+        "captured_at": now,
+        "node": node,
+        "name": name.unwrap_or("anon"),
+        "memory": {
+            "active_total": active_total,
+            "archived_total": archived_total,
+            "edge_count": mstats.edge_count,
+            "avg_importance_active": mstats.avg_importance_active,
+            "by_kind_non_skill": by_kind_non_skill,
+        },
+        "coactivation": {
+            "total_pairs": cstats.total_pairs,
+            "pairs_burst_lt_1h": cstats.pairs_burst_lt_1h,
+            "pairs_persistent_ge_6h": cstats.pairs_persistent_ge_6h,
+            "top10_to_median_ratio": cstats.top10_to_median_ratio,
+            "top_5_persistent": coact_top_persistent,
+        },
+        "access": {
+            "top_10_keys": top_access.iter().map(|(k, n)| json!({ "key": k, "access_count": n })).collect::<Vec<_>>(),
+        },
+        "identity": {
+            "days": days,
+            "current": id_cur,
+            "prior": id_prior,
+        },
+        "transitions": {
+            "top_5": transitions.iter().map(|(a, b, n)| json!({ "from": a, "to": b, "count": n })).collect::<Vec<_>>(),
+        },
+    });
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        // Human summary — same fields, narrative layout. Goes to stdout
+        // so it composes with shell pipelines.
+        println!("# ζ-1 self-portrait snapshot ({} {})",
+            chrono_like_date(now), node);
+        println!();
+        println!("memory       : {} active / {} archived / {} edges · avg imp {:.3}",
+            active_total, archived_total,
+            mstats.edge_count, mstats.avg_importance_active);
+        let non_skill: Vec<String> = by_kind_non_skill
+            .iter()
+            .take(6)
+            .filter_map(|v| {
+                let k = v.get("kind")?.as_str()?;
+                let n = v.get("count")?.as_u64()?;
+                Some(format!("{k}:{n}"))
+            })
+            .collect();
+        if !non_skill.is_empty() {
+            println!("  non-skill  : {}", non_skill.join(", "));
+        }
+        let burst_pct = if cstats.total_pairs > 0 {
+            100.0 * cstats.pairs_burst_lt_1h as f64 / cstats.total_pairs as f64
+        } else {
+            0.0
+        };
+        let persist_pct = if cstats.total_pairs > 0 {
+            100.0 * cstats.pairs_persistent_ge_6h as f64 / cstats.total_pairs as f64
+        } else {
+            0.0
+        };
+        println!(
+            "coactivation : {} pairs ({:.0}% burst <1h, {:.0}% persistent ≥6h)",
+            cstats.total_pairs, burst_pct, persist_pct
+        );
+        if let Some(e) = cstats.top_5_persistent_edges.first() {
+            let span = (e.last_at - e.first_at) / 3600;
+            println!(
+                "  top persistent (count={}, span={}h):",
+                e.count, span
+            );
+            println!("    {} ↔ {}",
+                short_key(&e.key_a, 40),
+                short_key(&e.key_b, 40));
+        }
+        println!("attention    : top-3 most-accessed (non-skill)");
+        for (key, n) in top_access.iter().take(3) {
+            println!("  a={n:>3}  {}", short_key(key, 60));
+        }
+        let tools_ratio = if id_prior.tool_calls_total > 0 {
+            id_cur.tool_calls_total as f64 / id_prior.tool_calls_total as f64
+        } else {
+            0.0
+        };
+        let saves_ratio = if id_prior.memory_saves > 0 {
+            id_cur.memory_saves as f64 / id_prior.memory_saves as f64
+        } else {
+            0.0
+        };
+        println!(
+            "identity {days}d : tools={} (×{:.1}) · saves={} (×{:.1})",
+            id_cur.tool_calls_total, tools_ratio,
+            id_cur.memory_saves, saves_ratio
+        );
+        if transitions.is_empty() {
+            println!("transitions  : (none surfaced yet — need ≥2 repeated A→B within 10min)");
+        } else {
+            println!("transitions  : {} surfaced", transitions.len());
+            for (a, b, n) in transitions.iter().take(3) {
+                println!(
+                    "  [×{n}] {} → {}",
+                    short_key(a, 30),
+                    short_key(b, 30)
+                );
+            }
+        }
+        println!();
+    }
+
+    if print_only {
+        eprintln!("(--print-only: not saving)");
+        return Ok(());
+    }
+
+    // ── save as kind=snapshot memory ─────────────────────────────────────
+    // Key format: `snapshot_<slug>_<YYYYMMDD_HHMM>`. Slug defaults to
+    // "anon" so daily cron without --name still produces unique keys.
+    let slug = name.unwrap_or("anon");
+    let key = format!("snapshot_{slug}_{}", time_slug(now));
+    let body = serde_json::to_string_pretty(&payload)
+        .map_err(|e| anyhow::anyhow!("serialize payload: {e}"))?;
+    let rec = MemoryRecord {
+        key: key.clone(),
+        kind: "snapshot".into(),
+        content: body,
+        tags: vec!["snapshot".into(), "self-portrait".into()],
+        related_keys: vec![],
+        scope: None,
+        created_at: now,
+        updated_at: now,
+        last_accessed_at: 0,
+        access_count: 0,
+        importance: 0.4,
+        status: String::new(),
+        trigger_pattern: None,
+        superseded_by: None,
+    };
+    store
+        .memory_save(&rec)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_save: {e}"))?;
+    if !as_json {
+        eprintln!("saved as memory: {key}");
+    } else {
+        // In JSON mode, echo the key on stderr so the JSON payload itself
+        // stays clean on stdout (pipeline-friendly).
+        eprintln!("saved as memory: {key}");
+    }
+    Ok(())
+}
+
+/// Format unix-epoch seconds as `YYYY-MM-DD HH:MM` in the local timezone.
+/// Avoids the chrono dependency since we only need this one call site.
+fn chrono_like_date(unix_secs: i64) -> String {
+    // libc::localtime is the cheapest path; fall back to UTC if it fails.
+    let secs = unix_secs as i64;
+    // Compute UTC components manually (no external deps). Good enough for
+    // logging — DST/local offset not critical here.
+    let days_since_epoch = secs.div_euclid(86_400);
+    let sod = secs.rem_euclid(86_400);
+    let hour = sod / 3600;
+    let minute = (sod % 3600) / 60;
+    // Use civil_from_days (Howard Hinnant algorithm) for date.
+    let (y, mo, d) = civil_from_days(days_since_epoch);
+    format!("{:04}-{:02}-{:02} {:02}:{:02} UTC", y, mo, d, hour, minute)
+}
+
+/// `YYYYMMDD_HHMM` slug for memory key suffix.
+fn time_slug(unix_secs: i64) -> String {
+    let days_since_epoch = unix_secs.div_euclid(86_400);
+    let sod = unix_secs.rem_euclid(86_400);
+    let hour = sod / 3600;
+    let minute = (sod % 3600) / 60;
+    let (y, mo, d) = civil_from_days(days_since_epoch);
+    format!("{:04}{:02}{:02}_{:02}{:02}", y, mo, d, hour, minute)
+}
+
+/// Convert days-since-1970-01-01 to (year, month, day) using Hinnant's
+/// civil_from_days algorithm. No external date library needed.
+fn civil_from_days(z: i64) -> (i32, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+    let y = if m <= 2 { y + 1 } else { y };
+    (y as i32, m, d)
 }
 
 /// Default HTML report destination for auto-triggered promote runs.
