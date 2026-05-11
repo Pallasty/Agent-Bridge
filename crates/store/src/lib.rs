@@ -666,9 +666,17 @@ pub struct MemoryExportFilter {
     pub tags_any: Option<Vec<String>>,
     /// Only export memories with `updated_at >= since_ts` (unix epoch secs).
     pub since_ts: Option<i64>,
-    /// When set, also write [`MemoryEdgeExport`] JSONL for edges whose **both**
-    /// endpoints appear among the exported memory keys (same filter as rows).
+    /// When set, also write [`MemoryEdgeExport`] JSONL for edges whose
+    /// endpoints satisfy the membership rule below.
     pub edges_out_path: Option<std::path::PathBuf>,
+    /// Edge filter mode. `false` (default, strict) = both endpoints must be
+    /// in the exported set; an edge to a non-exported node is dropped (this
+    /// is the original v0.6 contract). `true` (loose) = keep edges where
+    /// *either* endpoint is in the set; the cross-set endpoint may not exist
+    /// on the import side and will be dropped + counted by `memory_import`.
+    /// Loose mode unblocks narrow-filter exports (e.g. `kind=chat_session`)
+    /// that have edges to nodes living under other filters.
+    pub loose_edges: bool,
 }
 
 /// Result of [`StateStore::memory_export`].
@@ -702,6 +710,12 @@ pub struct ImportReport {
     pub edges_upserted: u64,
     #[serde(default)]
     pub edges_malformed: u64,
+    /// Edges where one or both endpoints did not exist in the destination
+    /// `memories` table at import time. These are skipped rather than upserted
+    /// — keeping the rule "no dangling refs in the graph". Counted here so
+    /// callers can decide whether to re-export the missing endpoints.
+    #[serde(default)]
+    pub edges_skipped_dangling: u64,
 }
 
 #[async_trait]

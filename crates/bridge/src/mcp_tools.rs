@@ -5656,11 +5656,14 @@ impl McpTool for MemoryExportTool {
             description: "Export memories to a newline-delimited JSON file (one record \
                  per line — JSONL is grep-friendly and stable across versions). \
                  Optional filters narrow what's exported. When `edges_out_path` \
-                 is set, a second JSONL file is written: one [`MemoryEdgeExport`] \
-                 per line for every `memory_edges` row whose **both** endpoints \
-                 are among the exported memory keys. The main file can then be \
-                 moved with the edge companion and consumed by `memory_import` \
-                 (pass the same paths as `path` + optional `edges_path`)."
+                 is set, a second JSONL file is written for edges. Edge \
+                 membership is controlled by `loose_edges`: false (default, \
+                 strict) keeps edges where **both** endpoints are in the \
+                 exported set; true keeps edges where **either** endpoint is in \
+                 the set. Loose is the right choice for narrow filters \
+                 (e.g. kind=chat_session) whose edges typically point at \
+                 nodes living under other filters; the destination side \
+                 will skip + count edges referring to keys it doesn't have."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -5669,7 +5672,8 @@ impl McpTool for MemoryExportTool {
                     "kind":     { "type": "string", "description": "Optional kind filter." },
                     "tags_any": { "type": "array", "items": {"type": "string"}, "description": "Match if memory has at least one tag." },
                     "since_ts": { "type": "integer", "description": "Only memories with updated_at >= this unix-epoch seconds value." },
-                    "edges_out_path": { "type": "string", "description": "Optional absolute path for companion edge JSONL (both endpoints must be in the exported memory set)." }
+                    "edges_out_path": { "type": "string", "description": "Optional absolute path for companion edge JSONL." },
+                    "loose_edges":    { "type": "boolean", "description": "Default false (strict: both endpoints in exported set). True keeps edges with at least one endpoint in the set — destination drops + counts edges referring to missing keys." }
                 },
                 "required": ["path"]
             }),
@@ -5700,6 +5704,10 @@ impl McpTool for MemoryExportTool {
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from),
+            loose_edges: args
+                .get("loose_edges")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
         };
         match store.memory_export(&filter, &path).await {
             Ok(res) => Ok(ToolResult::json_text(&json!({
@@ -5738,7 +5746,8 @@ impl McpTool for MemoryImportTool {
                    - `skip` (default): keep local row\n\
                    - `overwrite`: always replace with the imported row\n\
                    - `newer_wins`: replace only if imported.updated_at is greater\n\
-                 Returns {inserted, updated, skipped, malformed, edges_upserted, edges_malformed}."
+                 Returns {inserted, updated, skipped, malformed, edges_upserted, edges_malformed, edges_skipped_dangling}. \
+                 `edges_skipped_dangling` counts edges that referenced a key not present locally — these are dropped rather than upserted to keep the graph free of dangling refs."
                 .into(),
             input_schema: json!({
                 "type": "object",

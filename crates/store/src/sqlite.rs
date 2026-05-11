@@ -935,6 +935,7 @@ impl SqliteStore {
         &self,
         keys: &std::collections::HashSet<String>,
         out_path: &Path,
+        loose: bool,
     ) -> Result<u64> {
         let keys_clone = keys.clone();
         let rows: Vec<MemoryEdgeExport> = self
@@ -959,10 +960,20 @@ impl SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("export_edges query: {e}")))?;
 
-        let selected: Vec<MemoryEdgeExport> = rows
-            .into_iter()
-            .filter(|e| keys_clone.contains(&e.from_key) && keys_clone.contains(&e.to_key))
-            .collect();
+        // Strict (default): both endpoints in the exported set — guarantees
+        // edges land on a graph with no dangling refs. Loose: at least one
+        // endpoint, used by narrow-filter exports (chat_session, single tag)
+        // where the other endpoint typically lives in the destination already
+        // (e.g. the topic node was sedimented from a different source).
+        let selected: Vec<MemoryEdgeExport> = if loose {
+            rows.into_iter()
+                .filter(|e| keys_clone.contains(&e.from_key) || keys_clone.contains(&e.to_key))
+                .collect()
+        } else {
+            rows.into_iter()
+                .filter(|e| keys_clone.contains(&e.from_key) && keys_clone.contains(&e.to_key))
+                .collect()
+        };
 
         if let Some(parent) = out_path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -981,7 +992,13 @@ impl SqliteStore {
     }
 
     /// Upsert edges from JSONL (`MemoryEdgeExport` per line).
-    async fn import_edges_jsonl(&self, edges_path: &Path) -> Result<(u64, u64)> {
+    ///
+    /// Returns `(upserted, malformed, skipped_dangling)`. Edges referring to
+    /// keys that don't exist in the destination `memories` table are skipped
+    /// rather than upserted — this preserves the "no dangling refs" rule
+    /// even when loose-mode exports carry edges to nodes that didn't make
+    /// the cross-machine sync.
+    async fn import_edges_jsonl(&self, edges_path: &Path) -> Result<(u64, u64, u64)> {
         let bytes = tokio::fs::read(edges_path)
             .await
             .map_err(|e| Error::Backend(format!("read edges {edges_path:?}: {e}")))?;
@@ -1000,16 +1017,31 @@ impl SqliteStore {
         }
 
         let now = now_secs();
-        let upserted = self
+        let (upserted, dangling) = self
             .conn
-            .call(move |c| -> RusqliteResult<u64> {
+            .call(move |c| -> RusqliteResult<(u64, u64)> {
                 let tx = c.unchecked_transaction()?;
                 let mut n = 0u64;
+                let mut skipped = 0u64;
+                let mut exists = tx
+                    .prepare("SELECT 1 FROM memories WHERE key = ?1 LIMIT 1")?;
                 for e in parsed {
                     let from = e.from_key.trim();
                     let to = e.to_key.trim();
                     let et = e.edge_type.trim();
                     if from.is_empty() || to.is_empty() || et.is_empty() {
+                        continue;
+                    }
+                    let from_ok = exists
+                        .query_row(params![from], |_| Ok(()))
+                        .optional()?
+                        .is_some();
+                    let to_ok = exists
+                        .query_row(params![to], |_| Ok(()))
+                        .optional()?
+                        .is_some();
+                    if !from_ok || !to_ok {
+                        skipped += 1;
                         continue;
                     }
                     let w = e.weight.clamp(0.0, 2.0);
@@ -1023,13 +1055,14 @@ impl SqliteStore {
                     )?;
                     n += 1;
                 }
+                drop(exists);
                 tx.commit()?;
-                Ok(n)
+                Ok((n, skipped))
             })
             .await
             .map_err(|e| Error::Backend(format!("import_edges tx: {e}")))?;
 
-        Ok((upserted, malformed))
+        Ok((upserted, malformed, dangling))
     }
 }
 
@@ -2800,7 +2833,8 @@ impl StateStore for SqliteStore {
         let edges_written = if let Some(ref ep) = filter.edges_out_path {
             let keys: std::collections::HashSet<String> =
                 filtered.iter().map(|r| r.key.clone()).collect();
-            self.export_edges_for_key_set(&keys, ep.as_path()).await?
+            self.export_edges_for_key_set(&keys, ep.as_path(), filter.loose_edges)
+                .await?
         } else {
             0
         };
@@ -3003,9 +3037,10 @@ impl StateStore for SqliteStore {
 
         report.malformed += malformed_mem;
         if let Some(ep) = edges_path {
-            let (u, m) = self.import_edges_jsonl(ep).await?;
+            let (u, m, d) = self.import_edges_jsonl(ep).await?;
             report.edges_upserted = u;
             report.edges_malformed = m;
+            report.edges_skipped_dangling = d;
         }
         Ok(report)
     }
@@ -6069,6 +6104,224 @@ mod tests {
                 .any(|e| e.to_key == "edge_rt_b" && e.edge_type == "relates"),
             "expected relates edge; got {n:?}"
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // Phase 2.x #9: loose_edges = at-least-one-endpoint membership.
+    // Closes `lesson_chat_session_export_edge_drop`: narrow filters (kind,
+    // tag, since_ts) used to silently drop edges to nodes outside the set,
+    // which broke cross-machine sync of e.g. chat_session that reference
+    // topic nodes in unrelated kinds. Three scenarios:
+    //   1. strict (default) drops cross-set edges, preserving v0.6 contract
+    //   2. loose keeps them
+    //   3. import on destination missing the cross-set endpoint skips +
+    //      counts (preserves "no dangling refs in graph")
+    #[tokio::test]
+    async fn memory_export_loose_edges_default_strict_drops_cross_set() {
+        use crate::{MemoryExportFilter, MemoryRecord};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-loose-strict-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db).await.expect("open store");
+
+        let mk = |key: &str, kind: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: kind.to_string(),
+            content: format!("content {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000010,
+            updated_at: 1700000010,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&mk("loose_a", "fact")).await.expect("save a");
+        store.memory_save(&mk("loose_b", "note")).await.expect("save b");
+        store
+            .memory_link("loose_a", "loose_b", "relates", 1.0)
+            .await
+            .expect("link");
+
+        let mem_out = temp_dir.join("mem.jsonl");
+        let edges_out = temp_dir.join("edges.jsonl");
+        let filter = MemoryExportFilter {
+            kind: Some("fact".to_string()),
+            edges_out_path: Some(edges_out.clone()),
+            // strict (default) — edges_written should be 0 since loose_b is
+            // filtered out by kind=fact and the edge has it as endpoint.
+            ..Default::default()
+        };
+        let res = store
+            .memory_export(&filter, &mem_out)
+            .await
+            .expect("export strict");
+        assert_eq!(res.memories_written, 1, "only loose_a (kind=fact)");
+        assert_eq!(
+            res.edges_written, 0,
+            "strict drops the edge to non-exported loose_b"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_export_loose_edges_true_keeps_cross_set_edge() {
+        use crate::{MemoryExportFilter, MemoryRecord};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-loose-keeps-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db).await.expect("open store");
+
+        let mk = |key: &str, kind: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: kind.to_string(),
+            content: format!("content {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000010,
+            updated_at: 1700000010,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&mk("loose_a", "fact")).await.expect("save a");
+        store.memory_save(&mk("loose_b", "note")).await.expect("save b");
+        store
+            .memory_link("loose_a", "loose_b", "relates", 1.0)
+            .await
+            .expect("link");
+
+        let mem_out = temp_dir.join("mem.jsonl");
+        let edges_out = temp_dir.join("edges.jsonl");
+        let filter = MemoryExportFilter {
+            kind: Some("fact".to_string()),
+            edges_out_path: Some(edges_out.clone()),
+            loose_edges: true,
+            ..Default::default()
+        };
+        let res = store
+            .memory_export(&filter, &mem_out)
+            .await
+            .expect("export loose");
+        assert_eq!(res.memories_written, 1, "only loose_a (kind=fact)");
+        assert_eq!(
+            res.edges_written, 1,
+            "loose keeps edge with one endpoint inside set"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_import_edges_dangling_skips_and_counts() {
+        use crate::{ImportConflictPolicy, MemoryExportFilter, MemoryRecord};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-loose-import-dangling-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+
+        // Source: a + b + edge a->b, export with loose so edge survives.
+        let src_db = temp_dir.join("src.db");
+        let src = SqliteStore::open(&src_db).await.expect("open src");
+        let mk = |key: &str, kind: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: kind.to_string(),
+            content: format!("content {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000020,
+            updated_at: 1700000020,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        src.memory_save(&mk("loose_a", "fact"))
+            .await
+            .expect("save a");
+        src.memory_save(&mk("loose_b", "note"))
+            .await
+            .expect("save b");
+        src.memory_link("loose_a", "loose_b", "relates", 1.0)
+            .await
+            .expect("link");
+
+        let mem_out = temp_dir.join("mem.jsonl");
+        let edges_out = temp_dir.join("edges.jsonl");
+        let filter = MemoryExportFilter {
+            kind: Some("fact".to_string()),
+            edges_out_path: Some(edges_out.clone()),
+            loose_edges: true,
+            ..Default::default()
+        };
+        let res = src
+            .memory_export(&filter, &mem_out)
+            .await
+            .expect("export loose");
+        assert_eq!(res.edges_written, 1);
+
+        // Destination: fresh, has nothing → import will land loose_a (the
+        // only memory in the export) but the edge points at loose_b which
+        // does NOT exist on this side. Edge must be skipped + counted.
+        let dst_db = temp_dir.join("dst.db");
+        let dst = SqliteStore::open(&dst_db).await.expect("open dst");
+        let report = dst
+            .memory_import(&mem_out, ImportConflictPolicy::Skip, Some(&edges_out))
+            .await
+            .expect("import");
+        assert_eq!(report.inserted, 1, "loose_a inserted on dest");
+        assert_eq!(
+            report.edges_upserted, 0,
+            "dangling edge a->b must not be inserted (no loose_b on dest)"
+        );
+        assert_eq!(
+            report.edges_skipped_dangling, 1,
+            "dangling edge reported in skipped count"
+        );
+
+        // Now insert loose_b on the destination and re-import the edge file
+        // — the edge should now upsert cleanly (idempotent).
+        dst.memory_save(&mk("loose_b", "note"))
+            .await
+            .expect("save b on dest");
+        let report2 = dst
+            .memory_import(&mem_out, ImportConflictPolicy::Skip, Some(&edges_out))
+            .await
+            .expect("re-import after b lands");
+        assert_eq!(report2.edges_upserted, 1, "edge now applies");
+        assert_eq!(report2.edges_skipped_dangling, 0);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
