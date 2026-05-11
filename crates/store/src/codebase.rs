@@ -821,12 +821,112 @@ fn extract_rust_calls_from_line(
     }
 }
 
+/// Replace the interior of string literals (`"…"`) and comment bodies
+/// (`// …`, `/* … */`) with spaces, preserving newlines + the
+/// delimiters themselves. Used by the call extractor to neutralise
+/// Rust-looking text that lives inside string literals or comments —
+/// most importantly multi-line strings, where per-line scanning would
+/// otherwise treat the interior lines as real code.
+///
+/// Limitations:
+/// - Raw strings (`r"…"`, `r#"…"#`) are not specially handled; their
+///   contents leak through.
+/// - Char literals (`'x'`, `'\n'`) are not masked — they're single-line
+///   and the per-line scanner already skips them inline.
+fn mask_strings_and_comments(content: &str) -> String {
+    enum State {
+        Normal,
+        Str,
+        LineCmt,
+        BlockCmt,
+    }
+    let mut state = State::Normal;
+    let mut prev_bs = false;
+    let mut out = String::with_capacity(content.len());
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        match state {
+            State::Normal => {
+                if c == b'"' {
+                    state = State::Str;
+                    out.push('"');
+                    i += 1;
+                } else if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    state = State::LineCmt;
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2;
+                } else if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    state = State::BlockCmt;
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2;
+                } else {
+                    out.push(c as char);
+                    i += 1;
+                }
+            }
+            State::Str => {
+                if c == b'\\' && !prev_bs {
+                    prev_bs = true;
+                    out.push('\\');
+                    i += 1;
+                    continue;
+                }
+                if c == b'"' && !prev_bs {
+                    state = State::Normal;
+                    out.push('"');
+                    prev_bs = false;
+                    i += 1;
+                    continue;
+                }
+                prev_bs = false;
+                if c == b'\n' {
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+            State::LineCmt => {
+                if c == b'\n' {
+                    state = State::Normal;
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+            State::BlockCmt => {
+                if c == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    state = State::Normal;
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2;
+                    continue;
+                }
+                if c == b'\n' {
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
 /// Extract call sites from a Rust file. Tracks the enclosing function
 /// (mirroring [`extract_rust`]'s `impl_stack` so trait methods resolve
 /// to `<Type as Trait>::method`) and emits one [`CodebaseCall`] per
 /// call expression. Declaration lines (`fn`, `struct`, `enum`, …) are
 /// skipped so the symbol's header isn't mis-attributed as a call.
 pub fn extract_rust_calls(content: &str, file_path: &str) -> Vec<CodebaseCall> {
+    let content = mask_strings_and_comments(content);
+    let content = content.as_str();
     let mut out = Vec::new();
     let mut depth: i32 = 0;
     let mut impl_stack: Vec<RustImplScope> = Vec::new();
@@ -2955,5 +3055,61 @@ fn outer<'a>() {
         let calls = extract_rust_calls(src, "f.rs");
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].callee, "do_thing");
+    }
+
+    #[test]
+    fn rust_call_multiline_string_does_not_leak() {
+        // Wet-run finding: multi-line string literals that contain
+        // Rust-looking code were being parsed as real calls because
+        // string state didn't persist across lines. The
+        // mask_strings_and_comments preprocess pass should neutralise
+        // the interior so only the OUTER real call is detected.
+        let src = r###"
+fn test_helper() {
+    let src = "\
+fn outer() {
+    crate::store::SqliteStore::new();
+}
+";
+    let _ = src;
+    real_call();
+}
+"###;
+        let calls = extract_rust_calls(src, "f.rs");
+        // Only `real_call()` should be detected; SqliteStore::new is
+        // inside the multi-line string literal and must not leak.
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real_call");
+        assert_eq!(calls[0].caller, "test_helper");
+    }
+
+    #[test]
+    fn rust_call_block_comment_does_not_leak() {
+        let src = "\
+fn outer() {
+    /* fake_call(); also_fake(); */
+    real_call();
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "real_call");
+    }
+
+    #[test]
+    fn rust_call_multiline_block_comment_does_not_leak() {
+        let src = "\
+fn outer() {
+    /* multi
+       line
+       fake_call();
+       another_fake();
+    */
+    real_call();
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "real_call");
     }
 }
