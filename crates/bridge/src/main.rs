@@ -279,6 +279,34 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **δ-3 (Butlin HOT-4 hygiene)** — Drop low-weight coactivation
+    /// rows that never crystallised. A pair with `count <= --max-count`
+    /// AND `last_at` older than `--older-than-days` is noise: it co-fired
+    /// briefly once, never re-fired, and is ageing the table. Sibling
+    /// hygiene op to `dream decay-unused`: shares the daily timer cron
+    /// path (`scripts/systemd/agent-bridge-memory-decay-unused.service`).
+    ///
+    /// CLI mirror of the `memory_prune_coactivation_noise` MCP tool. See
+    /// commit `f5b9b6e` for design rationale; pairs with `dream promote`
+    /// (anything left below promote threshold after this window is by
+    /// definition unworthy of the synaptic graph).
+    PruneCoactivationNoise {
+        /// Prune pairs whose count is ≤ this. Default 1: only single
+        /// co-firings get dropped. Raise to 2 for sporadic twice-fired
+        /// pairs that never reached the promote threshold.
+        #[arg(long, default_value_t = 1)]
+        max_count: i64,
+        /// Only prune pairs whose `last_at` is at least this many days
+        /// old. Default 30 — gives a pair a month to grow before GC.
+        #[arg(long, default_value_t = 30)]
+        older_than_days: i64,
+        /// Preview only: count what would be pruned without deleting.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -629,6 +657,12 @@ async fn main() -> Result<()> {
                 floor,
                 json,
             } => run_dream_decay_unused(*window_days, *step, *floor, *json).await,
+            DreamOp::PruneCoactivationNoise {
+                max_count,
+                older_than_days,
+                dry_run,
+                json,
+            } => run_dream_prune_coact_noise(*max_count, *older_than_days, *dry_run, *json).await,
         };
     }
 
@@ -1465,6 +1499,60 @@ async fn run_dream_decay_unused(
     } else if stats.decayed == 0 {
         println!();
         println!("(every candidate already at/below floor — nothing to shave)");
+    }
+    Ok(())
+}
+
+/// δ-3 — CLI mirror of the `memory_prune_coactivation_noise` MCP tool.
+/// Sibling to `dream decay-unused`: pure SQL, no LLM, daily-cron-friendly.
+/// Where decay shaves importance on stale memory rows, prune deletes
+/// noise edges in the coactivation graph. Both share the same daily
+/// service (`scripts/systemd/agent-bridge-memory-decay-unused.service`)
+/// — a single 03:42 pass that scrubs both half-lives.
+async fn run_dream_prune_coact_noise(
+    max_count: i64,
+    older_than_days: i64,
+    dry_run: bool,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+
+    let max_count = max_count.max(0);
+    let older_than_days = older_than_days.max(0);
+
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let pruned = store
+        .memory_prune_coactivation_noise(max_count, older_than_days, dry_run)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_prune_coactivation_noise: {e}"))?;
+
+    if as_json {
+        let payload = json!({
+            "dry_run": dry_run,
+            "max_count": max_count,
+            "older_than_days": older_than_days,
+            "pruned_count": pruned,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# δ-3 — coactivation noise prune");
+    println!("DB: {}", path.display());
+    println!(
+        "max_count: {max_count} · older_than: {older_than_days}d · dry_run: {dry_run}"
+    );
+    println!();
+    let label = if dry_run { "would prune" } else { "pruned" };
+    println!("{label:16} : {pruned}");
+    if pruned == 0 {
+        println!();
+        println!(
+            "(nothing met the predicate — raise --max-count or lower --older-than-days to find candidates)"
+        );
     }
     Ok(())
 }

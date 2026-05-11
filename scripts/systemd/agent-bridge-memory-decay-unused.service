@@ -1,9 +1,25 @@
-# systemd user unit for `agent-bridge dream decay-unused` (Phase 2.x #8).
+# systemd user unit for the daily agent-bridge memory hygiene pass.
 #
-# Daily read-recency importance decay: every memory whose last_accessed_at
-# is older than --window-days gets `step` shaved off its importance.
-# Pairs with the Palace viewer C7/C8/C10 stale UI — retrieval rank
-# follows what the viewer surfaces as "cold".
+# Runs two ambient operations back-to-back in a single oneshot:
+#   1. `dream decay-unused`   — Phase 2.x #8: shave `importance` on memory
+#                               rows whose last_accessed_at is older than
+#                               --window-days. Pairs with Palace C7/C8/C10
+#                               stale UI so retrieval rank tracks viewer.
+#   2. `dream prune-coactivation-noise` — δ-3 (Butlin HOT-4): drop coact
+#                               pairs that fired once briefly and never
+#                               grew again (count <= --max-count AND
+#                               last_at older than --older-than-days).
+#                               Pairs with dream promote — anything still
+#                               below the promote threshold after the
+#                               window is by definition synaptic noise.
+#
+# Both are pure SQL, no LLM, idempotent. `ExecStart=-` lets the second
+# run even if the first fails; failure modes for either are unlikely
+# (no network, no LLM, no auth).
+#
+# Filename keeps `memory-decay-unused` for backward compat with the
+# initial install (Mac + aio2 already enabled). Migration is just
+# `git pull && ./scripts/systemd/install.sh`.
 #
 # Install (see also `install.sh` next to this file):
 #   mkdir -p ~/.config/systemd/user
@@ -15,26 +31,28 @@
 # One-shot manual run (don't wait for timer):
 #   systemctl --user start agent-bridge-memory-decay-unused.service
 #
-# Logs:
+# Logs (both ops append to the same file):
 #   tail -f ~/.cache/agent-bridge/memory-decay-unused.log
 #
-# Tuning (window_days, step, floor):
-#   systemctl --user edit agent-bridge-memory-decay-unused.service
-# add:
+# Tuning: override either ExecStart via `systemctl --user edit` (drop-in).
+# Reset the matching line to empty first, e.g.:
 #   [Service]
 #   ExecStart=
-#   ExecStart=%h/.local/bin/agent-bridge.real dream decay-unused \
+#   ExecStart=-%h/.local/bin/agent-bridge.real dream decay-unused \
 #       --window-days 14 --step 0.03 --floor 0.05
 
 [Unit]
-Description=agent-bridge daily read-recency importance decay (Phase 2.x #8)
-Documentation=file://%h/.claude/projects/-Data-CascadeProjects-agent-bridge/memory/project_memory_decay_unused_shipped.md
+Description=agent-bridge daily memory hygiene (decay-unused + prune-coactivation-noise)
+Documentation=file://%h/.claude/projects/-Data-CascadeProjects-agent-bridge/memory/project_memory_decay_unused_cron_shipped.md
 
 [Service]
 Type=oneshot
-# `.real` bypasses the wrapper's ANTHROPIC_* injection — decay is pure SQL,
-# no LLM, so the wrapper's env scaffolding is dead weight here.
-ExecStart=%h/.local/bin/agent-bridge.real dream decay-unused --window-days 30 --step 0.05 --floor 0.1
+# `.real` bypasses the wrapper's ANTHROPIC_* injection — both ops are pure
+# SQL, no LLM, so wrapper env scaffolding is dead weight here.
+# `ExecStart=-` so a transient failure on one op doesn't block the other
+# (e.g. lock contention with palace serve or dream replay).
+ExecStart=-%h/.local/bin/agent-bridge.real dream decay-unused --window-days 30 --step 0.05 --floor 0.1
+ExecStart=-%h/.local/bin/agent-bridge.real dream prune-coactivation-noise --max-count 1 --older-than-days 30
 StandardOutput=append:%h/.cache/agent-bridge/memory-decay-unused.log
 StandardError=append:%h/.cache/agent-bridge/memory-decay-unused.log
-TimeoutStartSec=60
+TimeoutStartSec=120
