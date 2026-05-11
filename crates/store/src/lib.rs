@@ -898,6 +898,23 @@ pub trait StateStore: Send + Sync {
         dry_run: bool,
     ) -> Result<Vec<String>>;
 
+    /// δ-3 (Butlin HOT-4 hygiene) — drop low-weight coactivation rows that
+    /// never crystallised. A pair with `count <= max_count` AND
+    /// `last_at <= now - older_than_days*86400` is noise: it co-fired briefly
+    /// once, never re-fired, and is now ageing the table. Returns the number
+    /// of rows that would be (or were) removed.
+    ///
+    /// Conservative defaults at the caller level: `max_count=1`,
+    /// `older_than_days=30`. dream promote only crystallises pairs at
+    /// `count >= min_count` (usually 3–5), so leaving count=2 rows live
+    /// gives them a chance to grow before this GC removes them.
+    async fn memory_prune_coactivation_noise(
+        &self,
+        max_count: i64,
+        older_than_days: i64,
+        dry_run: bool,
+    ) -> Result<u64>;
+
     /// Export memories matching `filter` to a newline-delimited JSON file
     /// (one [`MemoryRecord`] per line). Optionally writes a sibling edge file
     /// when [`MemoryExportFilter::edges_out_path`] is set.

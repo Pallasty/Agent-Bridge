@@ -5322,6 +5322,88 @@ impl McpTool for MemoryPurgeTombstonesTool {
 }
 
 // ===========================================================================
+//          memory_prune_coactivation_noise (δ-3 — Butlin HOT-4 hygiene)
+// ===========================================================================
+
+pub struct MemoryPruneCoactivationNoiseTool {
+    hub: Hub,
+}
+impl MemoryPruneCoactivationNoiseTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryPruneCoactivationNoiseTool {
+    fn name(&self) -> &'static str {
+        "memory_prune_coactivation_noise"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Drop low-weight coactivation pairs that never crystallised. \
+                A pair with count <= max_count AND last_at older than older_than_days \
+                is noise: it co-fired briefly once, never re-fired, and is now ageing the \
+                table. Pair with dream promote (which crystallises pairs at count≥N into \
+                cofires edges) — anything left below the promote threshold for a long \
+                window is by definition unworthy of the synaptic graph. Returns \
+                {pruned_count}. dry_run=true previews."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "max_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 1,
+                        "description": "Prune pairs whose count is ≤ this. Default 1: only \
+                            single co-firings get pruned. Raise to 2 to also drop sporadic \
+                            twice-fired pairs that never reached promote threshold."
+                    },
+                    "older_than_days": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 30,
+                        "description": "Only prune pairs whose last_at is at least this many \
+                            days old. Default 30 — gives a pair a month to grow before GC."
+                    },
+                    "dry_run": { "type": "boolean", "default": false }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let max_count = args
+            .get("max_count")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(1)
+            .max(0);
+        let older_than_days = args
+            .get("older_than_days")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(30)
+            .max(0);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let pruned = store
+            .memory_prune_coactivation_noise(max_count, older_than_days, dry_run)
+            .await?;
+        Ok(ToolResult::json_text(&json!({
+            "dry_run": dry_run,
+            "max_count": max_count,
+            "older_than_days": older_than_days,
+            "pruned_count": pruned,
+        })))
+    }
+}
+
+// ===========================================================================
 //                  memory_decay_unused (Phase 2.x #8 — read-recency decay)
 // ===========================================================================
 
@@ -11690,6 +11772,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPurgeTombstonesTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPruneCoactivationNoiseTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryDecayUnusedTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));

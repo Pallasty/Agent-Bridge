@@ -2505,6 +2505,43 @@ impl StateStore for SqliteStore {
         Ok(removed)
     }
 
+    async fn memory_prune_coactivation_noise(
+        &self,
+        max_count: i64,
+        older_than_days: i64,
+        dry_run: bool,
+    ) -> Result<u64> {
+        let max_count = max_count.max(0);
+        let days = older_than_days.max(0);
+        let cutoff = now_secs() - days.saturating_mul(86_400);
+        let pruned = self
+            .conn
+            .call(move |c| -> RusqliteResult<u64> {
+                let tx = c.unchecked_transaction()?;
+                // Count first so dry-run reports the same number a live run
+                // would actually delete. Single WHERE clause used twice keeps
+                // the two paths consistent.
+                let n: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM memory_coactivation
+                      WHERE count <= ?1 AND last_at <= ?2",
+                    params![max_count, cutoff],
+                    |row| row.get(0),
+                )?;
+                if !dry_run {
+                    tx.execute(
+                        "DELETE FROM memory_coactivation
+                          WHERE count <= ?1 AND last_at <= ?2",
+                        params![max_count, cutoff],
+                    )?;
+                }
+                tx.commit()?;
+                Ok(n as u64)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_prune_coactivation_noise: {e}")))?;
+        Ok(pruned)
+    }
+
     async fn memory_decay_importance(
         &self,
         half_life_days: f64,
@@ -6663,6 +6700,131 @@ mod tests {
             .await
             .expect("purge all");
         assert_eq!(purged_all, vec!["fresh_tomb".to_string()]);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn prune_coactivation_noise_only_drops_low_count_and_aged_rows() {
+        // δ-3 (HOT-4 hygiene): rows with count <= max_count AND last_at
+        // older than cutoff are noise. Anything ageing OR higher-count must
+        // survive. dry_run must report the same number a live run deletes.
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-coact-noise-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+
+        let mk = |key: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: "fact".into(),
+            content: format!("body-{key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000000,
+            updated_at: 1700000000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        for k in ["a1", "a2", "b1", "b2", "c1", "c2"] {
+            store.memory_save(&mk(k)).await.expect("save");
+        }
+
+        // Pair (a1,a2): count=1 and old → noise, should be pruned.
+        // Pair (b1,b2): count=1 but fresh → keep (might still grow).
+        // Pair (c1,c2): count=5 and old → keep (already crystallised territory).
+        let now = now_secs();
+        let old = now - 60 * 86_400;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                let tx = c.unchecked_transaction()?;
+                tx.execute(
+                    "INSERT INTO memory_coactivation (key_a,key_b,count,first_at,last_at)
+                     VALUES ('a1','a2',1,?1,?1), ('b1','b2',1,?2,?2), ('c1','c2',5,?1,?1)",
+                    params![old, now],
+                )?;
+                tx.commit()?;
+                Ok(0)
+            })
+            .await
+            .expect("seed coact rows");
+
+        // Sanity: 3 rows present.
+        let before: i64 = store
+            .conn
+            .call(|c| c.query_row("SELECT COUNT(*) FROM memory_coactivation", [], |r| r.get(0)))
+            .await
+            .expect("count");
+        assert_eq!(before, 3);
+
+        // dry_run: should report 1 (only a1,a2 qualifies) but delete nothing.
+        let preview = store
+            .memory_prune_coactivation_noise(1, 30, true)
+            .await
+            .expect("dry");
+        assert_eq!(preview, 1);
+        let mid: i64 = store
+            .conn
+            .call(|c| c.query_row("SELECT COUNT(*) FROM memory_coactivation", [], |r| r.get(0)))
+            .await
+            .expect("count after dry");
+        assert_eq!(mid, 3, "dry_run must not delete");
+
+        // Live run: same 1 row goes.
+        let pruned = store
+            .memory_prune_coactivation_noise(1, 30, false)
+            .await
+            .expect("live");
+        assert_eq!(pruned, 1);
+
+        let remaining: Vec<(String, String, i64)> = store
+            .conn
+            .call(|c| {
+                let mut s = c.prepare(
+                    "SELECT key_a, key_b, count FROM memory_coactivation ORDER BY key_a",
+                )?;
+                let rows: RusqliteResult<Vec<(String, String, i64)>> = s
+                    .query_map([], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                    })?
+                    .collect();
+                rows
+            })
+            .await
+            .expect("list");
+        assert_eq!(
+            remaining,
+            vec![
+                ("b1".into(), "b2".into(), 1), // fresh — survives
+                ("c1".into(), "c2".into(), 5), // high-count — survives
+            ]
+        );
+
+        // older_than_days=0 + max_count=5 nukes everything.
+        let purged_all = store
+            .memory_prune_coactivation_noise(5, 0, false)
+            .await
+            .expect("nuke");
+        assert_eq!(purged_all, 2);
+        let after: i64 = store
+            .conn
+            .call(|c| c.query_row("SELECT COUNT(*) FROM memory_coactivation", [], |r| r.get(0)))
+            .await
+            .expect("count final");
+        assert_eq!(after, 0);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
