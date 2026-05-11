@@ -64,7 +64,8 @@ use crate::{
     MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats, MemoryRecord,
     MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep,
     ReplayAuditRow, ReplayAuditStats, SessionFilter, StateStore, StoredSession,
-    MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
+    WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
+    MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -2611,13 +2612,19 @@ impl StateStore for SqliteStore {
         Ok(pruned)
     }
 
-    async fn replay_audit_stats(&self, stale_days: u32) -> Result<ReplayAuditStats> {
+    async fn replay_audit_stats(
+        &self,
+        stale_days: u32,
+        waypoint_window_secs: i64,
+    ) -> Result<ReplayAuditStats> {
         let now = now_secs();
         let stale_cutoff = now - (stale_days as i64).saturating_mul(86_400);
         // Tag is JSON-encoded as `"p5_replay"` inside a JSON array — match
         // quoted form so a hypothetical `p5_replay_v2` tag won't collide.
         const TAG_LIKE: &str = "%\"p5_replay\"%";
         const SUMMARIZES: &str = "summarizes";
+        let waypoint_enabled = waypoint_window_secs > 0;
+        let waypoint_window_secs = waypoint_window_secs.max(0);
 
         let stats = self
             .conn
@@ -2744,6 +2751,105 @@ impl StateStore for SqliteStore {
                     .filter_map(|r| r.ok())
                     .collect();
 
+                // Optional waypoint pass — temporal classification.
+                // Pairs `get(summary)` events against `get(source)` from
+                // `summarizes` edges within `waypoint_window_secs`. Drives
+                // the gateway / trailing / ambiguous / isolated split.
+                let waypoint = if waypoint_enabled {
+                    let mut wp_stmt = c.prepare(
+                        "WITH get_events AS (
+                           SELECT query AS key, at FROM memory_query_log
+                            WHERE kind = 'get'
+                         )
+                         SELECT sg.key,
+                                SUM(CASE WHEN (srcg.at - sg.at) > 0 THEN 1 ELSE 0 END)
+                                  AS leading,
+                                SUM(CASE WHEN (srcg.at - sg.at) < 0 THEN 1 ELSE 0 END)
+                                  AS trailing,
+                                COUNT(*) AS pairs
+                           FROM get_events sg
+                           JOIN memories sum_m ON sum_m.key = sg.key
+                                              AND sum_m.status = 'active'
+                                              AND sum_m.tags LIKE ?1
+                           JOIN memory_edges e ON e.from_key = sg.key
+                                              AND e.edge_type = ?2
+                           JOIN get_events srcg ON srcg.key = e.to_key
+                                              AND ABS(srcg.at - sg.at) <= ?3
+                          GROUP BY sg.key",
+                    )?;
+                    let mut rows: Vec<WaypointRow> = wp_stmt
+                        .query_map(
+                            params![TAG_LIKE, SUMMARIZES, waypoint_window_secs],
+                            |row| {
+                                let leading = row.get::<_, i64>(1)?.max(0) as u64;
+                                let trailing = row.get::<_, i64>(2)?.max(0) as u64;
+                                let pairs = row.get::<_, i64>(3)?.max(0) as u64;
+                                let classification = if leading > trailing {
+                                    "gateway"
+                                } else if trailing > leading {
+                                    "trailing"
+                                } else {
+                                    "ambiguous"
+                                };
+                                Ok(WaypointRow {
+                                    key: row.get(0)?,
+                                    leading_pairs: leading,
+                                    trailing_pairs: trailing,
+                                    pairs_total: pairs,
+                                    classification: classification.into(),
+                                })
+                            },
+                        )?
+                        .filter_map(|r| r.ok())
+                        .collect();
+
+                    // Isolated = summaries with their own `get` events
+                    // but no paired source-get in the window.
+                    let with_pairs: std::collections::HashSet<String> =
+                        rows.iter().map(|r| r.key.clone()).collect();
+                    let mut iso_stmt = c.prepare(
+                        "SELECT DISTINCT g.query
+                           FROM memory_query_log g
+                           JOIN memories m ON m.key = g.query
+                                          AND m.status = 'active'
+                                          AND m.tags LIKE ?1
+                          WHERE g.kind = 'get'",
+                    )?;
+                    let touched: Vec<String> = iso_stmt
+                        .query_map(params![TAG_LIKE], |row| row.get::<_, String>(0))?
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    let isolated_count =
+                        touched.iter().filter(|k| !with_pairs.contains(*k)).count() as u64;
+
+                    let gateway = rows
+                        .iter()
+                        .filter(|r| r.classification == "gateway")
+                        .count() as u64;
+                    let trailing = rows
+                        .iter()
+                        .filter(|r| r.classification == "trailing")
+                        .count() as u64;
+                    let ambiguous = rows
+                        .iter()
+                        .filter(|r| r.classification == "ambiguous")
+                        .count() as u64;
+
+                    rows.sort_by(|a, b| b.pairs_total.cmp(&a.pairs_total));
+
+                    Some(WaypointStats {
+                        window_secs: waypoint_window_secs,
+                        summaries_with_pairs: rows.len() as u64,
+                        isolated_summaries: isolated_count,
+                        gateway_summaries: gateway,
+                        trailing_summaries: trailing,
+                        ambiguous_summaries: ambiguous,
+                        rows,
+                    })
+                } else {
+                    None
+                };
+
                 Ok(ReplayAuditStats {
                     total_summaries: total_u,
                     never_accessed: never.max(0) as u64,
@@ -2756,6 +2862,7 @@ impl StateStore for SqliteStore {
                     avg_source_access_count,
                     top_summaries: top,
                     dead_weight_summaries: dead,
+                    waypoint,
                 })
             })
             .await

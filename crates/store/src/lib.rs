@@ -642,6 +642,60 @@ pub struct ReplayAuditRow {
     pub age_secs: i64,
 }
 
+/// Temporal-relation classification for one replay summary. Built by
+/// scanning `memory_query_log` (kind='get' events) and pairing each
+/// `get(summary)` event with `get(summary_source)` events within
+/// [`WaypointStats::window_secs`].
+///
+/// Interpretation:
+/// - `gateway`  — `leading_pairs > trailing_pairs`. User touched the
+///                summary first, then the source(s). Summary is acting
+///                as an attention entrypoint.
+/// - `trailing` — `trailing_pairs > leading_pairs`. User touched the
+///                source(s) first, summary touched after. Summary is
+///                decoration / acknowledgement, not entrypoint.
+/// - `ambiguous`— equal counts, both > 0. Bidirectional or insufficient
+///                signal to call it.
+/// - `isolated` — summary itself had `get` events but no source-get
+///                fell within the window. Recall happened independently
+///                of source recall in this window. Counted separately
+///                in [`WaypointStats::isolated_summaries`] (not in `rows`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WaypointRow {
+    pub key: String,
+    pub leading_pairs: u64,
+    pub trailing_pairs: u64,
+    pub pairs_total: u64,
+    pub classification: String,
+}
+
+/// Aggregate of [`WaypointRow`] across all replay summaries that had at
+/// least one `get` event in the trace. Surfaces the gateway-vs-decoration
+/// breakdown — answers "do summaries cause source access, or just
+/// trail it?"
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WaypointStats {
+    /// Pairing window in seconds. Caller-controlled; 1800 (30 min) is
+    /// the typical session-locality default.
+    pub window_secs: i64,
+    /// Summaries that had at least one paired source-get in the window
+    /// (i.e. `rows.len()`). Denominator for the classification ratios.
+    pub summaries_with_pairs: u64,
+    /// Summaries that had `get` events but no source-get within the
+    /// window. Independent recall — not part of a topical session.
+    pub isolated_summaries: u64,
+    /// `leading_pairs > trailing_pairs` — gateway pattern.
+    pub gateway_summaries: u64,
+    /// `trailing_pairs > leading_pairs` — decoration pattern.
+    pub trailing_summaries: u64,
+    /// `leading_pairs == trailing_pairs` with both > 0 — bidirectional.
+    pub ambiguous_summaries: u64,
+    /// Per-summary detail rows (gateway/trailing/ambiguous only, sorted
+    /// by `pairs_total` desc). Isolated summaries omitted to keep the
+    /// detail list focused on summaries actually carrying signal.
+    pub rows: Vec<WaypointRow>,
+}
+
 /// Aggregate health of `dream replay` output. Are LLM-consolidated summary
 /// memories actually being used after creation? This is the audit surface
 /// for that question — pairs with `dream replay-audit` CLI.
@@ -680,6 +734,11 @@ pub struct ReplayAuditStats {
     /// Up to 5 `access_count=0` summaries by ascending `created_at` —
     /// the oldest unused (most likely dead weight).
     pub dead_weight_summaries: Vec<ReplayAuditRow>,
+    /// Optional temporal-classification block. `None` when the caller
+    /// passes `waypoint_window_secs <= 0` to
+    /// [`StateStore::replay_audit_stats`]. See [`WaypointStats`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waypoint: Option<WaypointStats>,
 }
 
 /// Compaction policy for `memory_compact`. After v0.7.1, both thresholds
@@ -1036,7 +1095,17 @@ pub trait StateStore: Send + Sync {
     ///
     /// Pure read pass — no writes. See [`ReplayAuditStats`] for fields
     /// and [`ReplayAuditRow`] for the per-summary detail rows.
-    async fn replay_audit_stats(&self, stale_days: u32) -> Result<ReplayAuditStats>;
+    ///
+    /// `waypoint_window_secs > 0` enables the temporal classification
+    /// pass — for each summary with `get` events in `memory_query_log`,
+    /// pair them against `get` events for `summarizes`-edge sources
+    /// within ± this window. Drives gateway / trailing / ambiguous /
+    /// isolated classification (see [`WaypointStats`]). Pass 0 to skip.
+    async fn replay_audit_stats(
+        &self,
+        stale_days: u32,
+        waypoint_window_secs: i64,
+    ) -> Result<ReplayAuditStats>;
 
     /// δ-4 (Butlin PP-1 lift) — return recent `memory_get` events as
     /// `(key, at)` pairs ordered by `at` DESC, capped at `limit`. Drives the
