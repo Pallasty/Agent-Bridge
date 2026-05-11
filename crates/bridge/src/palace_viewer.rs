@@ -41,7 +41,10 @@ use anyhow::{Context, Result};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{Html, IntoResponse},
+    response::{
+        sse::{Event as SseEvent, KeepAlive, Sse},
+        Html, IntoResponse,
+    },
     routing::{get, post},
     Json, Router,
 };
@@ -116,6 +119,7 @@ pub async fn run(
         .route("/api/reports", get(api_reports))
         .route("/reports/:filename", get(serve_report))
         .route("/api/canvas-chat", post(api_canvas_chat))
+        .route("/api/canvas-chat-stream", post(api_canvas_chat_stream))
         .route("/api/memory/:key/tombstone", post(api_memory_tombstone))
         .route("/api/lineage/:key", get(api_lineage))
         .with_state(state);
@@ -1214,6 +1218,228 @@ async fn api_canvas_chat(
         "elapsed_ms": elapsed_ms,
         "stderr":     if stderr.is_empty() { Value::Null } else { Value::String(stderr) },
     })))
+}
+
+// ── Streaming canvas chat (P8) ──────────────────────────────────────────
+//
+// SSE counterpart of `api_canvas_chat`. Spawns `claude -p
+// --output-format=stream-json --verbose --include-partial-messages` and
+// forwards `content_block_delta.text_delta.text` chunks as SSE events,
+// so the canvas chat panel can render tokens as they arrive instead of
+// waiting for the full response.
+//
+// SSE events emitted:
+//   data: {"type":"delta","text":"..."}       — one token chunk
+//   data: {"type":"done","elapsed_ms":N}      — process exited cleanly
+//   data: {"type":"error","message":"..."}    — spawn / nonzero exit /
+//                                                timeout / parse fail
+//
+// stream-json shape (relevant subset):
+//   {"type":"stream_event","event":{"type":"content_block_delta",
+//    "delta":{"type":"text_delta","text":"…"}}, …}
+//   {"type":"result","subtype":"success", …}    final summary
+//
+// Failure handling: any spawn / process error becomes an SSE error event
+// rather than an HTTP error response — the connection is already open,
+// the client needs structured info to surface to the user.
+
+async fn api_canvas_chat_stream(
+    State(s): State<AppState>,
+    Json(p): Json<CanvasChatPayload>,
+) -> Sse<impl futures::Stream<Item = std::result::Result<SseEvent, std::convert::Infallible>>> {
+    use futures::stream;
+    use std::convert::Infallible;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::sync::mpsc;
+
+    let focus = p.focus_key.trim().to_string();
+    let user_msg = p.message.trim().to_string();
+
+    let (tx, rx) = mpsc::unbounded_channel::<SseEvent>();
+    let send_err = |tx: &mpsc::UnboundedSender<SseEvent>, msg: String| {
+        let _ = tx.send(
+            SseEvent::default().data(json!({"type":"error","message":msg}).to_string()),
+        );
+    };
+
+    // Build the prompt now (uses State; can't move S into the spawn).
+    // Empty inputs are flagged early but the actual error is sent from
+    // inside the spawn so the SSE stream has a single return shape.
+    let validation_err = if focus.is_empty() || user_msg.is_empty() {
+        Some("focus_key + message required".to_string())
+    } else {
+        None
+    };
+    let focus_block = if validation_err.is_none() {
+        build_focus_block(&s, &focus).await
+    } else {
+        String::new()
+    };
+    let neighbor_block = if validation_err.is_none() {
+        build_neighbor_block(&s, &focus).await
+    } else {
+        String::new()
+    };
+    let history_block = format_history(&p.history);
+
+    let prompt = format!(
+        "你正在 Palace 画布的 chat panel 里和用户讨论 memory 节点 `{focus}`。\n\
+         你的目标是帮用户思考、提出连接、起草 working_doc 内容。\n\
+         回复用中文，简洁直接，避免空泛。\n\
+         如果用户想沉淀某段为 working_doc，提示他可以点 [→ copy to editor]。\n\n\
+         ## 当前焦点节点\n{focus_block}\n\n\
+         ## 邻居节点（top {n} by edge weight）\n{neighbor_block}\n\n\
+         ## 对话历史\n{history_block}\n\n\
+         ## 用户最新消息\n{user_msg}\n",
+        focus = focus,
+        n = CANVAS_CHAT_NEIGHBOR_LIMIT,
+        focus_block = focus_block,
+        neighbor_block = neighbor_block,
+        history_block = history_block,
+        user_msg = user_msg,
+    );
+
+    let timeout = p
+        .timeout_secs
+        .unwrap_or(CANVAS_CHAT_DEFAULT_TIMEOUT_SECS)
+        .min(CANVAS_CHAT_MAX_TIMEOUT_SECS);
+
+    // Spawn streaming claude in a background task; bg pipes parsed
+    // deltas into `tx`. SSE response polls `rx` until the bg task
+    // emits "done" or "error" and closes the channel.
+    tokio::spawn(async move {
+        let started = SystemTime::now();
+        if let Some(msg) = validation_err {
+            send_err(&tx, msg);
+            let _ = tx.send(
+                SseEvent::default().data(json!({"type":"done","elapsed_ms":0}).to_string()),
+            );
+            return;
+        }
+        let mut cmd = tokio::process::Command::new("claude");
+        cmd.arg("-p")
+            .arg("--output-format=stream-json")
+            .arg("--verbose")
+            .arg("--include-partial-messages")
+            .arg(&prompt);
+        cmd.stdin(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                send_err(&tx, format!("spawn claude: {e}"));
+                let _ = tx.send(
+                    SseEvent::default()
+                        .data(json!({"type":"done","elapsed_ms":0}).to_string()),
+                );
+                return;
+            }
+        };
+        let stdout = match child.stdout.take() {
+            Some(s) => s,
+            None => {
+                send_err(&tx, "no stdout pipe".to_string());
+                let _ = tx.send(
+                    SseEvent::default()
+                        .data(json!({"type":"done","elapsed_ms":0}).to_string()),
+                );
+                return;
+            }
+        };
+
+        let reader = BufReader::new(stdout);
+        let mut lines = reader.lines();
+        let read_fut = async {
+            while let Ok(Some(line)) = lines.next_line().await {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                // Only forward content_block_delta.text_delta; ignore all
+                // the other stream-json envelopes (system/init, rate_limit,
+                // tool_use, result). Lossy parse — a malformed line is
+                // skipped rather than killing the stream.
+                let val: Value = match serde_json::from_str(&line) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                if val.get("type").and_then(|v| v.as_str()) != Some("stream_event") {
+                    continue;
+                }
+                let event = match val.get("event") {
+                    Some(e) => e,
+                    None => continue,
+                };
+                if event.get("type").and_then(|v| v.as_str()) != Some("content_block_delta") {
+                    continue;
+                }
+                let delta = match event.get("delta") {
+                    Some(d) => d,
+                    None => continue,
+                };
+                if delta.get("type").and_then(|v| v.as_str()) != Some("text_delta") {
+                    continue;
+                }
+                let text = match delta.get("text").and_then(|v| v.as_str()) {
+                    Some(t) => t,
+                    None => continue,
+                };
+                let _ = tx.send(
+                    SseEvent::default()
+                        .data(json!({"type":"delta","text":text}).to_string()),
+                );
+            }
+        };
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout),
+            async {
+                read_fut.await;
+                child.wait().await
+            },
+        )
+        .await;
+
+        let elapsed_ms = started.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
+        match result {
+            Ok(Ok(status)) if status.success() => {
+                let _ = tx.send(
+                    SseEvent::default()
+                        .data(json!({"type":"done","elapsed_ms":elapsed_ms}).to_string()),
+                );
+            }
+            Ok(Ok(status)) => {
+                send_err(
+                    &tx,
+                    format!("claude exited code={:?} after {elapsed_ms}ms", status.code()),
+                );
+                let _ = tx.send(
+                    SseEvent::default()
+                        .data(json!({"type":"done","elapsed_ms":elapsed_ms}).to_string()),
+                );
+            }
+            Ok(Err(e)) => {
+                send_err(&tx, format!("wait claude: {e}"));
+                let _ = tx.send(
+                    SseEvent::default()
+                        .data(json!({"type":"done","elapsed_ms":elapsed_ms}).to_string()),
+                );
+            }
+            Err(_elapsed) => {
+                let _ = child.start_kill();
+                send_err(&tx, format!("claude exceeded {timeout}s timeout"));
+                let _ = tx.send(
+                    SseEvent::default()
+                        .data(json!({"type":"done","elapsed_ms":elapsed_ms}).to_string()),
+                );
+            }
+        }
+    });
+
+    let stream = stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|e| (Ok::<_, Infallible>(e), rx))
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 async fn build_focus_block(s: &AppState, key: &str) -> String {

@@ -737,6 +737,24 @@
       0%, 100% { opacity: 0.4; }
       50%      { opacity: 1; }
     }
+    /* P8 streaming bubble — same shape as .chat-msg.assistant but with
+       a blinking caret at the tail to signal "still writing". When the
+       SSE 'done' frame lands, the bubble is pushed to history as a
+       normal assistant msg and the caret disappears. */
+    .chat-msg.assistant.streaming {
+      border-left-color: #a87cff;
+    }
+    .streaming-caret {
+      display: inline-block;
+      margin-left: 2px;
+      color: #5cc8c8;
+      font-weight: 500;
+      animation: chat-caret 0.9s steps(2) infinite;
+    }
+    @keyframes chat-caret {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0; }
+    }
     .chat-msg .copy-to-editor {
       position: absolute;
       top: 4px;
@@ -3161,7 +3179,14 @@ function renderChatHistory() {
       html += `<div class="chat-msg user">${escapeHTML(m.content)}</div>`;
     }
   }
-  if (pending) {
+  // Streaming bubble: once first delta lands, show accumulated text in
+  // a live-updating assistant-styled bubble. Until the first delta,
+  // pending=true falls back to the "thinking…" pulse so the user sees
+  // a beat between send and first token.
+  const streaming = canvasState.chat.streaming;
+  if (typeof streaming === "string" && streaming.length > 0) {
+    html += `<div class="chat-msg assistant streaming">${escapeHTML(streaming)}<span class="streaming-caret">▋</span></div>`;
+  } else if (pending) {
     html += `<div class="chat-msg thinking">claude thinking…</div>`;
   }
   root.innerHTML = html;
@@ -3206,6 +3231,13 @@ function copyChatMsgToEditor(text) {
   editor.selectionStart = editor.selectionEnd = editor.value.length;
 }
 
+// P8 — streaming chat via /api/canvas-chat-stream (SSE).
+//
+// Old endpoint /api/canvas-chat is still mounted for clients that don't
+// support streaming (fallback path below if the stream endpoint 404s or
+// throws before we see the first delta). The streaming bubble lives in
+// canvasState.chat.streaming while in flight; renderChatHistory shows
+// it appended after history with class "chat-msg streaming".
 async function sendChatMessage() {
   if (!canvasState.current || canvasState.chat.pending) return;
   // Viewer mode = read-only; reject any send (keyboard or click).
@@ -3219,12 +3251,15 @@ async function sendChatMessage() {
   const historySnapshot = canvasState.chat.history.slice(); // before this turn
   canvasState.chat.history.push({ role: "user", content: text });
   canvasState.chat.pending = true;
+  canvasState.chat.streaming = ""; // will accumulate deltas
   input.value = "";
   sendBtn.disabled = true;
   renderChatHistory();
 
+  let finalText = null;
+  let errMsg = null;
   try {
-    const r = await fetch("/api/canvas-chat", {
+    const r = await fetch("/api/canvas-chat-stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -3237,22 +3272,62 @@ async function sendChatMessage() {
       const txt = await r.text();
       throw new Error(`${r.status} · ${txt.slice(0, 200)}`);
     }
-    const j = await r.json();
-    const assistant = (j.assistant || "").trim();
-    canvasState.chat.history.push({
-      role: "assistant",
-      content: assistant || "(empty response)",
-    });
+    // Parse text/event-stream frames: each frame ends with \n\n, lines
+    // beginning with "data: " carry the payload. We assume JSON payloads
+    // (which our server emits) and concatenate multi-line data: chunks.
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const dataLines = frame
+          .split("\n")
+          .filter((l) => l.startsWith("data:"))
+          .map((l) => l.slice(5).replace(/^ /, ""));
+        if (!dataLines.length) continue;
+        let ev;
+        try {
+          ev = JSON.parse(dataLines.join("\n"));
+        } catch (e) {
+          continue; // malformed frame — skip
+        }
+        if (ev.type === "delta" && typeof ev.text === "string") {
+          canvasState.chat.streaming += ev.text;
+          renderChatHistory();
+        } else if (ev.type === "error" && ev.message) {
+          errMsg = String(ev.message).slice(0, 240);
+        } else if (ev.type === "done") {
+          finalText = canvasState.chat.streaming;
+        }
+      }
+    }
+    if (finalText === null && errMsg === null) {
+      // Stream ended without a done event — treat as truncated.
+      finalText = canvasState.chat.streaming;
+    }
   } catch (e) {
-    canvasState.chat.history.push({
-      role: "error",
-      content: "✗ " + String(e).slice(0, 240),
-    });
+    errMsg = "✗ " + String(e).slice(0, 240);
   } finally {
+    if (errMsg) {
+      canvasState.chat.history.push({ role: "error", content: errMsg });
+    } else {
+      canvasState.chat.history.push({
+        role: "assistant",
+        content: (finalText || "").trim() || "(empty response)",
+      });
+    }
+    canvasState.chat.streaming = null;
     canvasState.chat.pending = false;
     sendBtn.disabled = false;
     // Persist after each completed turn (success OR error). We don't
-    // persist `pending=true` — that's session-only state.
+    // persist `pending=true` or the in-flight streaming buffer — those
+    // are session-only state.
     persistChat(canvasState.chat.focusKey, canvasState.chat.history);
     renderChatHistory();
   }
