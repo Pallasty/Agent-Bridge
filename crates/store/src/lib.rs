@@ -546,6 +546,11 @@ pub struct CodebaseIndexStats {
     /// Counted across all languages that have an importer (Rust as of v24).
     #[serde(default)]
     pub imports: u32,
+    /// Phase 2 #3 third slice — call sites extracted alongside symbols.
+    /// Counted across all languages that have a call extractor (Rust as
+    /// of v25).
+    #[serde(default)]
+    pub calls: u32,
     pub duration_ms: u64,
     pub root_path: String,
 }
@@ -569,6 +574,29 @@ pub struct CodebaseImport {
     /// `use foo as bar` → `Some("bar")`. None when no alias.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
+}
+
+/// One call site extracted from a function body. Third slice of Phase 2 #3
+/// — joins symbols (callers) and imports (callees) so the codebase graph
+/// can answer "what calls X" / "what does Y call" without re-walking
+/// source. Callee resolution is callee-textual: a call site to `foo` is
+/// emitted with callee=`foo`, and the actual cross-file resolution
+/// happens at query time by joining against `codebase_symbols` (defs)
+/// and `codebase_imports` (in-scope aliases).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseCall {
+    pub file_path: String,
+    pub line: u32,
+    pub language: String,
+    /// Qualified name of the enclosing function, mirroring
+    /// [`CodebaseSymbol::name`] convention for trait/impl methods
+    /// (e.g. `Foo::bar`, `<Foo as Bar>::baz`). Empty when the call
+    /// occurs at file scope (rare in Rust; common in scripts).
+    pub caller: String,
+    /// Raw callee identifier as written at the call site. May be a bare
+    /// name (`foo`), a qualified path (`Foo::bar`), or a method call
+    /// prefixed with `.` (`.method` for `obj.method(...)`).
+    pub callee: String,
 }
 
 /// Reorder memories so `kind == "session_handoff"` rows appear first.
@@ -1466,6 +1494,32 @@ pub trait StateStore: Send + Sync {
         let _ = (target_substr, file_filter, root_path, limit);
         Err(ab_core::Error::Backend(
             "codebase_imports_for not implemented".into(),
+        ))
+    }
+
+    /// Phase 2 #3 third slice — query the calls table by `callee` and/or
+    /// `caller` substring (LIKE), optionally narrowed to a file or root.
+    /// Returns rows ordered by `(file_path, line)` ascending. Use to
+    /// answer "who calls X" or "what does Y call" without re-walking
+    /// source. At least one of `callee_substr` / `caller_substr` must
+    /// be `Some` to narrow the result set.
+    async fn codebase_calls_for(
+        &self,
+        callee_substr: Option<&str>,
+        caller_substr: Option<&str>,
+        file_filter: Option<&str>,
+        root_path: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<CodebaseCall>> {
+        let _ = (
+            callee_substr,
+            caller_substr,
+            file_filter,
+            root_path,
+            limit,
+        );
+        Err(ab_core::Error::Backend(
+            "codebase_calls_for not implemented".into(),
         ))
     }
 }

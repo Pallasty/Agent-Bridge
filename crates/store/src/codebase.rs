@@ -4,7 +4,7 @@
 //! pattern matching. Accurate enough for agent codebase navigation; a
 //! tree-sitter backend can be swapped in later if precision is needed.
 
-use crate::{CodebaseImport, CodebaseSymbol};
+use crate::{CodebaseCall, CodebaseImport, CodebaseSymbol};
 use std::path::Path;
 
 /// Map a file extension to a canonical language name.
@@ -38,6 +38,16 @@ pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<Co
         "python" => extract_python_imports(content, file_path),
         "typescript" | "javascript" => extract_ts_imports(content, file_path, language),
         "go" => extract_go_imports(content, file_path),
+        _ => vec![],
+    }
+}
+
+/// Extract call sites from `content` for the given language. Phase 2 #3
+/// third slice ships Rust; Python/TS/Go to follow once the storage +
+/// query plumbing is wet-validated.
+pub fn extract_calls(content: &str, file_path: &str, language: &str) -> Vec<CodebaseCall> {
+    match language {
+        "rust" => extract_rust_calls(content, file_path),
         _ => vec![],
     }
 }
@@ -567,6 +577,373 @@ pub fn extract_rust_imports(content: &str, file_path: &str) -> Vec<CodebaseImpor
             continue;
         }
         i += 1;
+    }
+    out
+}
+
+// ── Rust calls (Phase 2 #3 third slice — call graph) ─────────────────────────
+
+/// Reserved keywords that appear in `ident(` positions but aren't calls.
+fn is_rust_call_keyword(s: &str) -> bool {
+    matches!(
+        s,
+        "if" | "while"
+            | "for"
+            | "match"
+            | "loop"
+            | "return"
+            | "let"
+            | "mut"
+            | "const"
+            | "static"
+            | "pub"
+            | "fn"
+            | "struct"
+            | "enum"
+            | "impl"
+            | "trait"
+            | "mod"
+            | "use"
+            | "as"
+            | "where"
+            | "in"
+            | "move"
+            | "async"
+            | "await"
+            | "unsafe"
+            | "extern"
+            | "type"
+            | "crate"
+            | "super"
+            | "Self"
+            | "self"
+            | "box"
+            | "dyn"
+            | "true"
+            | "false"
+            | "ref"
+            | "else"
+            | "break"
+            | "continue"
+    )
+}
+
+fn is_rust_ident_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_'
+}
+
+/// Skip a turbofish `::<…>` starting at `i` (must point at the first
+/// `:`). Returns the new index past the closing `>`. If the input
+/// doesn't match `::<`, returns `i` unchanged.
+fn skip_rust_turbofish(bytes: &[u8], i: usize) -> usize {
+    if i + 2 >= bytes.len()
+        || bytes[i] != b':'
+        || bytes[i + 1] != b':'
+        || bytes[i + 2] != b'<'
+    {
+        return i;
+    }
+    let mut k = i + 3;
+    let mut depth = 1i32;
+    while k < bytes.len() && depth > 0 {
+        if bytes[k] == b'<' {
+            depth += 1;
+        } else if bytes[k] == b'>' {
+            depth -= 1;
+        }
+        k += 1;
+    }
+    k
+}
+
+fn skip_rust_whitespace(bytes: &[u8], i: usize) -> usize {
+    let mut k = i;
+    while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+        k += 1;
+    }
+    k
+}
+
+/// Walk one line and emit one [`CodebaseCall`] per call expression seen.
+/// Skips strings (`"…"`), char/lifetime tokens (`'x'`, `'a`), `//` line
+/// comments, Rust keywords, and macro invocations (`name!(…)`). Recognizes
+/// bare calls (`foo(`), qualified-path calls (`Foo::bar(`), and method
+/// calls (`.method(`). Turbofish (`::<T>`) is skipped between path and
+/// `(`. Inside a `fn`/`struct`/etc. declaration line, the symbol's own
+/// header (e.g. `name(` after `fn `) is skipped by the caller — this
+/// fn doesn't know about scope.
+fn extract_rust_calls_from_line(
+    line: &str,
+    line_no: u32,
+    caller: &str,
+    file_path: &str,
+    out: &mut Vec<CodebaseCall>,
+) {
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+    let mut in_str = false;
+    let mut prev_bs = false;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            if c == b'\\' && !prev_bs {
+                prev_bs = true;
+                i += 1;
+                continue;
+            }
+            if c == b'"' && !prev_bs {
+                in_str = false;
+            }
+            prev_bs = false;
+            i += 1;
+            continue;
+        }
+        // Line comment terminator.
+        if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            break;
+        }
+        if c == b'"' {
+            in_str = true;
+            i += 1;
+            continue;
+        }
+        // Char / byte / lifetime literal: skip the apostrophe + a small
+        // window. Rust char literals are short (≤4 bytes for unicode
+        // escapes); lifetimes are `'a` (apostrophe + ident, no close).
+        if c == b'\'' {
+            let mut k = i + 1;
+            // Possibly `\` escape inside char literal.
+            if k < bytes.len() && bytes[k] == b'\\' {
+                k += 1;
+                while k < bytes.len() && bytes[k] != b'\'' && k - i < 12 {
+                    k += 1;
+                }
+                if k < bytes.len() && bytes[k] == b'\'' {
+                    k += 1;
+                }
+            } else {
+                // Read identifier-ish chars; if we then hit `'`, it's a
+                // char literal — skip past it. Otherwise it's a lifetime.
+                while k < bytes.len() && is_rust_ident_char(bytes[k]) {
+                    k += 1;
+                }
+                if k < bytes.len() && bytes[k] == b'\'' {
+                    k += 1;
+                }
+            }
+            i = k;
+            continue;
+        }
+        // Method call: `.NAME(` (also tolerates `.NAME::<T>(`).
+        if c == b'.'
+            && i + 1 < bytes.len()
+            && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'_')
+        {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() && is_rust_ident_char(bytes[j]) {
+                j += 1;
+            }
+            let name = &line[start..j];
+            let mut k = skip_rust_turbofish(bytes, j);
+            k = skip_rust_whitespace(bytes, k);
+            if k < bytes.len() && bytes[k] == b'(' && !is_rust_call_keyword(name) {
+                out.push(CodebaseCall {
+                    file_path: file_path.to_string(),
+                    line: line_no,
+                    language: "rust".to_string(),
+                    caller: caller.to_string(),
+                    callee: format!(".{name}"),
+                });
+            }
+            i = j;
+            continue;
+        }
+        // Identifier / qualified path: must be at token boundary.
+        if c.is_ascii_alphabetic() || c == b'_' {
+            if i > 0 && (is_rust_ident_char(bytes[i - 1]) || bytes[i - 1] == b'.') {
+                i += 1;
+                continue;
+            }
+            let start_first = i;
+            let mut j = i;
+            while j < bytes.len() && is_rust_ident_char(bytes[j]) {
+                j += 1;
+            }
+            // Accumulate path parts separately so an inline turbofish
+            // (`Vec::<u8>::new`) doesn't leave generic chars in the callee.
+            let mut parts: Vec<&str> = vec![&line[start_first..j]];
+            loop {
+                if j + 1 < bytes.len() && bytes[j] == b':' && bytes[j + 1] == b':' {
+                    // Inline turbofish — skip it and keep extending the path.
+                    if j + 2 < bytes.len() && bytes[j + 2] == b'<' {
+                        j = skip_rust_turbofish(bytes, j);
+                        continue;
+                    }
+                    let s = j + 2;
+                    let mut t = s;
+                    while t < bytes.len() && is_rust_ident_char(bytes[t]) {
+                        t += 1;
+                    }
+                    if t == s {
+                        break;
+                    }
+                    parts.push(&line[s..t]);
+                    j = t;
+                } else {
+                    break;
+                }
+            }
+            let path = parts.join("::");
+            let mut k = skip_rust_turbofish(bytes, j);
+            k = skip_rust_whitespace(bytes, k);
+            if k < bytes.len() && bytes[k] == b'!' {
+                // Macro invocation — skip.
+                i = k + 1;
+                continue;
+            }
+            if k < bytes.len() && bytes[k] == b'(' {
+                let last_seg = path.rsplit("::").next().unwrap_or(path.as_str());
+                if !is_rust_call_keyword(last_seg) && !is_rust_call_keyword(&path) {
+                    out.push(CodebaseCall {
+                        file_path: file_path.to_string(),
+                        line: line_no,
+                        language: "rust".to_string(),
+                        caller: caller.to_string(),
+                        callee: path,
+                    });
+                }
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+}
+
+/// Extract call sites from a Rust file. Tracks the enclosing function
+/// (mirroring [`extract_rust`]'s `impl_stack` so trait methods resolve
+/// to `<Type as Trait>::method`) and emits one [`CodebaseCall`] per
+/// call expression. Declaration lines (`fn`, `struct`, `enum`, …) are
+/// skipped so the symbol's header isn't mis-attributed as a call.
+pub fn extract_rust_calls(content: &str, file_path: &str) -> Vec<CodebaseCall> {
+    let mut out = Vec::new();
+    let mut depth: i32 = 0;
+    let mut impl_stack: Vec<RustImplScope> = Vec::new();
+    let mut pending_impl: Option<(String, Option<String>)> = None;
+    // (qualified_caller_name, depth_at_body_open)
+    let mut fn_stack: Vec<(String, i32)> = Vec::new();
+    let mut pending_fn: Option<String> = None;
+
+    for (i, raw) in content.lines().enumerate() {
+        let line_no = (i as u32) + 1;
+        let t = raw.trim();
+        let is_comment = t.starts_with("//") || t.starts_with("/*") || t.starts_with('*');
+        if is_comment {
+            continue;
+        }
+
+        let s = strip_vis(t);
+        let s2 = s
+            .trim_start_matches("async ")
+            .trim_start_matches("unsafe ")
+            .trim_start_matches("const ");
+        let s2 = strip_vis(s2);
+
+        let mut is_decl_line = false;
+
+        // Item declarations like `const X = …` / `static Y = …` / `type Z =`
+        // never count as call sites — but the `const ` modifier trim above
+        // also eats the standalone `const` keyword. Check the raw
+        // (visibility-stripped) line so item decls aren't mis-scanned.
+        if s.starts_with("const ")
+            || s.starts_with("static ")
+            || s.starts_with("type ")
+            || s.starts_with("use ")
+            || s.starts_with("mod ")
+            || s.starts_with("extern crate ")
+        {
+            is_decl_line = true;
+        }
+
+        // Track impl scopes (same logic as extract_rust).
+        if let Some((type_name, trait_name)) = parse_rust_impl_header(s2) {
+            is_decl_line = true;
+            if t.contains('{') {
+                impl_stack.push(RustImplScope {
+                    type_name,
+                    trait_name,
+                    open_depth: depth,
+                });
+            } else {
+                pending_impl = Some((type_name, trait_name));
+            }
+        } else if pending_impl.is_some() && raw.contains('{') {
+            let (type_name, trait_name) = pending_impl.take().unwrap();
+            impl_stack.push(RustImplScope {
+                type_name,
+                trait_name,
+                open_depth: depth,
+            });
+        } else if let Some((kind, name)) = try_kw(
+            s2,
+            &[
+                ("fn ", "fn"),
+                ("struct ", "struct"),
+                ("enum ", "enum"),
+                ("trait ", "trait"),
+                ("type ", "type"),
+                ("const ", "const"),
+                ("static ", "static"),
+                ("mod ", "mod"),
+                ("macro_rules! ", "macro"),
+            ],
+        ) {
+            is_decl_line = true;
+            if kind == "fn" {
+                let qualified = if let Some(scope) = impl_stack.last() {
+                    match &scope.trait_name {
+                        Some(tr) => format!("<{} as {}>::{}", scope.type_name, tr, name),
+                        None => format!("{}::{}", scope.type_name, name),
+                    }
+                } else {
+                    name
+                };
+                if raw.contains('{') {
+                    fn_stack.push((qualified, depth));
+                } else {
+                    pending_fn = Some(qualified);
+                }
+            }
+        } else if pending_fn.is_some() && raw.contains('{') {
+            fn_stack.push((pending_fn.take().unwrap(), depth));
+            // Don't mark as decl-line; subsequent body could start here.
+        }
+
+        if !is_decl_line {
+            let caller = fn_stack.last().map(|(n, _)| n.as_str()).unwrap_or("");
+            extract_rust_calls_from_line(raw, line_no, caller, file_path, &mut out);
+        }
+
+        // Update brace depth from this line's `{` / `}`.
+        let (opens, closes) = count_braces(raw);
+        depth += opens - closes;
+        // Pop fn scopes whose body has closed.
+        while let Some((_, open_depth)) = fn_stack.last() {
+            if depth <= *open_depth {
+                fn_stack.pop();
+            } else {
+                break;
+            }
+        }
+        // Pop impl scopes whose body has closed.
+        while let Some(scope) = impl_stack.last() {
+            if depth <= scope.open_depth {
+                impl_stack.pop();
+            } else {
+                break;
+            }
+        }
     }
     out
 }
@@ -2351,5 +2728,232 @@ func importHandler() {}
         );
         assert_eq!(imps.len(), 1);
         assert_eq!(imps[0].target, "github.com/user/repo/sub/pkg");
+    }
+
+    // ── Phase 2 #3 third slice — Rust call extractor ───────────────────────
+
+    #[test]
+    fn rust_call_bare_function() {
+        let src = "\
+fn outer() {
+    foo();
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "foo");
+        assert_eq!(calls[0].caller, "outer");
+        assert_eq!(calls[0].line, 2);
+        assert_eq!(calls[0].language, "rust");
+    }
+
+    #[test]
+    fn rust_call_qualified_path() {
+        let src = "\
+fn outer() {
+    crate::store::SqliteStore::new();
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "crate::store::SqliteStore::new");
+        assert_eq!(calls[0].caller, "outer");
+    }
+
+    #[test]
+    fn rust_call_method_dot() {
+        let src = "\
+fn outer() {
+    obj.method();
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, ".method");
+        assert_eq!(calls[0].caller, "outer");
+    }
+
+    #[test]
+    fn rust_call_skips_macros_and_keywords() {
+        let src = "\
+fn outer() {
+    println!(\"hi\");
+    if cond() { return; }
+    while true { break; }
+    match val { _ => () }
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        // Only `cond()` should be a real call.
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "cond");
+    }
+
+    #[test]
+    fn rust_call_skips_strings_and_comments() {
+        let src = "\
+fn outer() {
+    let s = \"foo()\";        // not a call
+    // bar();
+    real_call();
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "real_call");
+    }
+
+    #[test]
+    fn rust_call_skips_declaration_lines() {
+        // The `fn outer()` header should NOT emit a self-call.
+        let src = "\
+fn outer() {
+    inner();
+}
+
+struct Foo;
+const N: usize = 10;
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "inner");
+        assert_eq!(calls[0].caller, "outer");
+    }
+
+    #[test]
+    fn rust_call_caller_qualified_in_impl() {
+        let src = "\
+impl Foo {
+    fn bar(&self) {
+        helper();
+    }
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "helper");
+        assert_eq!(calls[0].caller, "Foo::bar");
+    }
+
+    #[test]
+    fn rust_call_caller_qualified_in_trait_impl() {
+        let src = "\
+impl Bar for Foo {
+    fn baz(&self) {
+        helper();
+    }
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "helper");
+        assert_eq!(calls[0].caller, "<Foo as Bar>::baz");
+    }
+
+    #[test]
+    fn rust_call_with_turbofish() {
+        let src = "\
+fn outer() {
+    Vec::<u8>::new();
+    parse::<u32>(s);
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "Vec::new");
+        assert_eq!(calls[1].callee, "parse");
+    }
+
+    #[test]
+    fn rust_call_method_with_turbofish() {
+        let src = "\
+fn outer() {
+    iter.collect::<Vec<_>>();
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, ".collect");
+    }
+
+    #[test]
+    fn rust_call_multiple_per_line() {
+        let src = "\
+fn outer() {
+    foo(bar(baz()));
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, ["foo", "bar", "baz"]);
+        assert!(calls.iter().all(|c| c.caller == "outer"));
+    }
+
+    #[test]
+    fn rust_call_nested_fns_track_caller() {
+        let src = "\
+fn outer() {
+    fn inner() {
+        helper();
+    }
+    inner();
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        // `helper()` inside `inner`, `inner()` inside `outer`.
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        let helper = calls.iter().find(|c| c.callee == "helper").unwrap();
+        assert_eq!(helper.caller, "inner");
+        let inner = calls.iter().find(|c| c.callee == "inner").unwrap();
+        assert_eq!(inner.caller, "outer");
+    }
+
+    #[test]
+    fn rust_call_file_scope_caller_is_empty() {
+        // `lazy_static!` etc. live at file scope. A bare call there
+        // shouldn't crash — caller is empty.
+        let src = "\
+const X: u32 = compute(42);
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        // `const X` is a decl line so call extraction is skipped — no rows.
+        // Move the call to a non-decl context (let at fn scope):
+        let src2 = "\
+fn x() {
+    let y = compute(42);
+}
+";
+        let calls2 = extract_rust_calls(src2, "f.rs");
+        assert_eq!(calls2.len(), 1);
+        assert_eq!(calls2[0].callee, "compute");
+        assert_eq!(calls2[0].caller, "x");
+        // And the const case: should produce no rows (skipped).
+        assert!(calls.is_empty(), "got {calls:#?}");
+    }
+
+    #[test]
+    fn rust_call_chained_method() {
+        let src = "\
+fn outer() {
+    x.foo().bar().baz();
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, [".foo", ".bar", ".baz"]);
+    }
+
+    #[test]
+    fn rust_call_lifetime_not_misread_as_char() {
+        // `'a` in lifetime context shouldn't make us read past the
+        // following call.
+        let src = "\
+fn outer<'a>() {
+    do_thing();
+}
+";
+        let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "do_thing");
     }
 }

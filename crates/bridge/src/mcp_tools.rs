@@ -10833,6 +10833,119 @@ impl McpTool for CodebaseImportsTool {
 }
 
 // ===========================================================================
+//        codebase_calls — Phase 2 #3 third slice: call graph queries
+// ===========================================================================
+
+pub struct CodebaseCallsTool {
+    hub: Hub,
+}
+impl CodebaseCallsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for CodebaseCallsTool {
+    fn name(&self) -> &'static str {
+        "codebase_calls"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Query the codebase call-graph table built by \
+                 codebase_index. Returns one row per call expression matching \
+                 the given `callee` and/or `caller` substring (LIKE). Use to \
+                 answer 'who calls X' (set `callee`) or 'what does Y call' \
+                 (set `caller`) without re-walking source. At least one of \
+                 `callee` / `caller` is required. Method calls appear with \
+                 a leading dot (e.g. `.collect`). Currently Rust only — \
+                 Python/TS/Go call extractors ship later. Run codebase_index \
+                 first if no results appear."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "callee": {
+                        "type": "string",
+                        "description": "Substring matched against the called name (e.g. 'SqliteStore::new' or '.collect')."
+                    },
+                    "caller": {
+                        "type": "string",
+                        "description": "Substring matched against the enclosing function (e.g. 'Foo::bar' or '<Foo as Bar>::baz')."
+                    },
+                    "file_filter": {
+                        "type": "string",
+                        "description": "Optional substring matched against file_path."
+                    },
+                    "root_path": {
+                        "type": "string",
+                        "description": "Optional root directory to restrict results to a specific index."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let callee = args
+            .get("callee")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let caller = args
+            .get("caller")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        if callee.is_none() && caller.is_none() {
+            return Ok(ToolResult::error(
+                "at least one of 'callee' or 'caller' is required",
+            ));
+        }
+        let file_filter = args
+            .get("file_filter")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let root_path = args
+            .get("root_path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .min(500) as u32;
+
+        match store
+            .codebase_calls_for(
+                callee.as_deref(),
+                caller.as_deref(),
+                file_filter.as_deref(),
+                root_path.as_deref(),
+                limit,
+            )
+            .await
+        {
+            Ok(hits) => Ok(ToolResult::json_text(
+                &serde_json::to_value(hits).unwrap_or(Value::Null),
+            )),
+            Err(e) => Ok(ToolResult::error(&format!("codebase_calls failed: {e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                       tailscale REST API — ACL editing
 // ===========================================================================
 
@@ -11862,6 +11975,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(WorktreeCreateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseSearchTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseImportsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseCallsTool::new(hub.clone())));
 
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));
