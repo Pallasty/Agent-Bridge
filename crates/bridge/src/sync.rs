@@ -77,6 +77,16 @@ pub async fn run_sync(verbose: bool) -> Result<bool> {
 
     git_pull_rebase(&repo, verbose);
 
+    // If pull left us off a branch (or some earlier run did and was never
+    // cleaned), refuse to proceed: every code path below assumes HEAD is on a
+    // real branch, and the prior failure mode was "commit on detached HEAD,
+    // push HEAD, get rejected with 'destination not a full refname'" — which
+    // looks like success in the logs but blocks all future syncs.
+    let branch = git_current_branch(&repo).with_context(|| {
+        "sync requires HEAD on a branch; aborting. Manual recovery: \
+         cd repo && git rebase --abort (or --quit), then check out main."
+    })?;
+
     let memory_file = repo.join(MEMORY_FILE);
     let store = open_store().await?;
 
@@ -149,7 +159,11 @@ pub async fn run_sync(verbose: bool) -> Result<bool> {
     let msg = format!("sync from {host} at {ts}");
 
     run_git(&repo, &["commit", "-m", &msg]).context("git commit")?;
-    run_git(&repo, &["push", "origin", "HEAD"]).context("git push")?;
+    // Push the named branch — never `HEAD`. A detached commit pushed as
+    // `HEAD` is rejected by both gitlab and github with "destination is not
+    // a full refname", and silent for ~1.5 days of "no changes" sync logs.
+    let refspec = format!("{branch}:refs/heads/{branch}");
+    run_git(&repo, &["push", "origin", &refspec]).context("git push")?;
     if verbose {
         eprintln!("[sync] pushed: {msg}");
     }
@@ -425,7 +439,14 @@ fn git_capture(repo: &Path, args: &[&str]) -> Result<String> {
 /// Best-effort `git pull --rebase --autostash`. Last-resort fallback (when
 /// rebase fails) checks out the remote `memory.jsonl` so subsequent
 /// import/export reconciles via the local SQLite store.
+///
+/// Always cleans up leftover rebase state (`.git/rebase-merge` /
+/// `rebase-apply`) before and after the pull. Without this, a single
+/// conflicting pull-rebase would strand the repo in interactive-rebase
+/// mode forever, with every subsequent sync committing on detached HEAD
+/// and silently failing the push (see commit msg for the 1.5-day outage).
 fn git_pull_rebase(repo: &Path, verbose: bool) {
+    abort_leftover_rebase(repo, verbose);
     let out = Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -440,6 +461,8 @@ fn git_pull_rebase(repo: &Path, verbose: bool) {
                     String::from_utf8_lossy(&o.stderr).trim()
                 );
             }
+            // pull --rebase may have stopped mid-rebase; clean before fallback.
+            abort_leftover_rebase(repo, verbose);
             let _ = Command::new("git")
                 .arg("-C")
                 .arg(repo)
@@ -463,6 +486,40 @@ fn git_pull_rebase(repo: &Path, verbose: bool) {
             }
         }
     }
+    // Belt-and-braces: even a "successful" pull --rebase --autostash can leave
+    // rebase state if the autostash pop conflicts.
+    abort_leftover_rebase(repo, verbose);
+}
+
+/// If `.git/rebase-merge` or `.git/rebase-apply` exists, run `git rebase
+/// --abort` to clean it. No-op when neither directory is present.
+fn abort_leftover_rebase(repo: &Path, verbose: bool) {
+    let merge = repo.join(".git/rebase-merge").exists();
+    let apply = repo.join(".git/rebase-apply").exists();
+    if !merge && !apply {
+        return;
+    }
+    if verbose {
+        eprintln!("[sync] leftover rebase state detected — running `git rebase --abort`");
+    }
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rebase", "--abort"])
+        .status();
+}
+
+/// Returns the current branch name (e.g. `"main"`). Errors when HEAD is
+/// detached — sync refuses to operate from detached HEAD because the
+/// subsequent push would have nothing to name on the remote.
+fn git_current_branch(repo: &Path) -> Result<String> {
+    let s = git_capture(repo, &["symbolic-ref", "--short", "HEAD"])
+        .context("HEAD is detached (no current branch)")?;
+    let name = s.trim().to_string();
+    if name.is_empty() {
+        bail!("HEAD is detached (no current branch)");
+    }
+    Ok(name)
 }
 
 /// Returns true iff the staging area differs from HEAD for `path`.
