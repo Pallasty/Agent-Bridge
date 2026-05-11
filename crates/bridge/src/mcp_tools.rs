@@ -8510,64 +8510,30 @@ impl McpTool for MemorySuggestTool {
             .await
             .unwrap_or_default();
 
-        let source_prefix = key_prefix(&key);
-        let source_tokens = content_tokens(&source.content);
-
-        let mut candidates: Vec<Value> = all
-            .iter()
-            .filter(|m| m.key != key && !already_linked.contains(&m.key))
-            .filter_map(|m| {
-                let mut score = 0.0f64;
-                let mut reasons: Vec<&str> = Vec::new();
-
-                // Tag overlap
-                let tag_overlap = source.tags.iter().filter(|t| m.tags.contains(t)).count();
-                if tag_overlap > 0 {
-                    score += 0.4 * tag_overlap as f64;
-                    reasons.push("tag_overlap");
-                }
-
-                // Key prefix similarity
-                let m_prefix = key_prefix(&m.key);
-                if !source_prefix.is_empty() && source_prefix == m_prefix {
-                    score += 0.3;
-                    reasons.push("same_prefix");
-                }
-
-                // Content token overlap (Jaccard-like)
-                let m_tokens = content_tokens(&m.content);
-                let intersection = source_tokens
-                    .iter()
-                    .filter(|t| m_tokens.contains(*t))
-                    .count();
-                let union = source_tokens.len() + m_tokens.len() - intersection;
-                if union > 0 && intersection > 2 {
-                    let jaccard = intersection as f64 / union as f64;
-                    score += jaccard;
-                    reasons.push("content_overlap");
-                }
-
-                if score < 0.1 {
-                    return None;
-                }
-
-                Some(json!({
-                    "key": m.key,
-                    "kind": m.kind,
-                    "confidence": (score * 100.0).min(100.0).round() / 100.0,
-                    "reason": reasons.join("+"),
-                    "snippet": m.content.chars().take(80).collect::<String>()
-                }))
+        // ζ-7: scoring extracted into `compute_link_suggestions` helper so
+        // batch tools (memory_link_orphans) can reuse it without N store
+        // round-trips. JSON shape preserved by rebuilding from the helper's
+        // (key, conf, reason) tuples + a snippet lookup against `all`.
+        let by_key: std::collections::HashMap<&str, &MemoryRecord> =
+            all.iter().map(|m| (m.key.as_str(), m)).collect();
+        let suggestions = compute_link_suggestions(&source, &all, &already_linked, limit as usize);
+        let candidates: Vec<Value> = suggestions
+            .into_iter()
+            .map(|(k, conf, reason)| {
+                let kind = by_key.get(k.as_str()).map(|m| m.kind.clone()).unwrap_or_default();
+                let snippet = by_key
+                    .get(k.as_str())
+                    .map(|m| m.content.chars().take(80).collect::<String>())
+                    .unwrap_or_default();
+                json!({
+                    "key": k,
+                    "kind": kind,
+                    "confidence": conf,
+                    "reason": reason,
+                    "snippet": snippet,
+                })
             })
             .collect();
-
-        // Sort by confidence descending
-        candidates.sort_by(|a, b| {
-            let ca = a.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let cb = b.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            cb.partial_cmp(&ca).unwrap_or(std::cmp::Ordering::Equal)
-        });
-        candidates.truncate(limit as usize);
 
         Ok(ToolResult::json_text(&json!({
             "source_key": key,
@@ -8587,6 +8553,235 @@ fn content_tokens(content: &str) -> std::collections::HashSet<String> {
         .filter(|t| t.len() >= 4)
         .map(|t| t.to_lowercase())
         .collect()
+}
+
+/// ζ-7 (2026-05-11) — Suggestion-scoring core extracted from
+/// `MemorySuggestTool`. Returns `(key, confidence, reason)` triples ranked
+/// by confidence DESC. Same heuristic stack the MCP tool uses: tag
+/// overlap (×0.4) + same-prefix (+0.3) + content-token Jaccard.
+///
+/// Caller supplies `source` + `candidates` + `already_linked` so this
+/// function does ZERO store I/O — it can be called in a tight loop (e.g.
+/// `memory_link_orphans` iterating over hundreds of orphans).
+pub fn compute_link_suggestions(
+    source: &MemoryRecord,
+    candidates: &[MemoryRecord],
+    already_linked: &std::collections::HashSet<String>,
+    limit: usize,
+) -> Vec<(String, f64, String)> {
+    let source_prefix = key_prefix(&source.key);
+    let source_tokens = content_tokens(&source.content);
+    let mut scored: Vec<(String, f64, String)> = candidates
+        .iter()
+        .filter(|m| m.key != source.key && !already_linked.contains(&m.key))
+        .filter_map(|m| {
+            let mut score = 0.0f64;
+            let mut reasons: Vec<&str> = Vec::new();
+            let tag_overlap = source.tags.iter().filter(|t| m.tags.contains(t)).count();
+            if tag_overlap > 0 {
+                score += 0.4 * tag_overlap as f64;
+                reasons.push("tag_overlap");
+            }
+            let m_prefix = key_prefix(&m.key);
+            if !source_prefix.is_empty() && source_prefix == m_prefix {
+                score += 0.3;
+                reasons.push("same_prefix");
+            }
+            let m_tokens = content_tokens(&m.content);
+            let intersection = source_tokens
+                .iter()
+                .filter(|t| m_tokens.contains(*t))
+                .count();
+            let union = source_tokens.len() + m_tokens.len() - intersection;
+            if union > 0 && intersection > 2 {
+                let jaccard = intersection as f64 / union as f64;
+                score += jaccard;
+                reasons.push("content_overlap");
+            }
+            if score < 0.1 {
+                return None;
+            }
+            let conf = (score * 100.0).min(100.0).round() / 100.0;
+            Some((m.key.clone(), conf, reasons.join("+")))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(limit);
+    scored
+}
+
+// ===========================================================================
+//          memory_link_orphans (ζ-7 — clear orphan backlog)
+// ===========================================================================
+
+/// ζ-7 — Find non-skill active memories with **zero** edges (orphans),
+/// score candidates via `compute_link_suggestions`, auto-link the top
+/// match per orphan when confidence ≥ threshold. Symmetric to
+/// `memory_prune_coactivation_noise` in spirit: a one-shot graph-hygiene
+/// pass. Pair with proactive `memory_save` -> `memory_link` habits.
+pub struct MemoryLinkOrphansTool {
+    hub: Hub,
+}
+impl MemoryLinkOrphansTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryLinkOrphansTool {
+    fn name(&self) -> &'static str {
+        "memory_link_orphans"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Find non-skill active memories with zero edges (orphans). \
+                For each, run `compute_link_suggestions` over all memories and, \
+                when the top candidate scores >= threshold, write a `relates` \
+                edge. Returns {examined, eligible, linked, skipped_low_score, \
+                links}. dry_run=true previews without writing. Idempotent: \
+                anything already linked is excluded from the orphan set."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 2.0,
+                        "default": 0.7,
+                        "description": "Top candidate must score ≥ this to auto-link. \
+                            0.7 is conservative (tag_overlap ×0.4 + same_prefix ×0.3 + jaccard); \
+                            lower for higher recall, raise for higher precision."
+                    },
+                    "min_content_len": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 50,
+                        "description": "Skip orphans whose content is shorter than this many \
+                            bytes. Default 50 — `curated_implicit_*` 44-byte stubs are signal-poor \
+                            and rarely have meaningful suggestions; let them age out instead."
+                    },
+                    "max_orphans": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 100,
+                        "description": "Cap on orphans examined per run."
+                    },
+                    "dry_run": { "type": "boolean", "default": false }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let threshold = args
+            .get("threshold")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.7);
+        let min_content_len = args
+            .get("min_content_len")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as usize;
+        let max_orphans = args
+            .get("max_orphans")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100)
+            .min(500) as usize;
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Single store pass: load all active memories (capped to 1000 — generous
+        // for the orphan corpus, scoring is in-memory O(n) per orphan).
+        let all = store
+            .list_memories(None, MemoryListSort::Recent, 1000)
+            .await
+            .unwrap_or_default();
+
+        // Identify orphans: non-skill, active, ≥ min_content_len, zero edges.
+        // For each candidate we batch-check via memory_neighbors. Loop is N
+        // small (typically <200) so cheap enough; could be one SQL pass if
+        // we ever need to scale.
+        let mut orphans: Vec<MemoryRecord> = Vec::new();
+        let mut examined: u64 = 0;
+        for rec in all.iter() {
+            if rec.kind == "skill" {
+                continue;
+            }
+            if rec.status != "active" && !rec.status.is_empty() {
+                continue;
+            }
+            if rec.content.len() < min_content_len {
+                continue;
+            }
+            examined += 1;
+            let nbrs = store
+                .memory_neighbors(&rec.key)
+                .await
+                .unwrap_or_default();
+            if nbrs.is_empty() {
+                orphans.push(rec.clone());
+            }
+            if orphans.len() >= max_orphans {
+                break;
+            }
+        }
+
+        // For each orphan, score against the full corpus. Top-1 only —
+        // we don't want to spray multiple low-quality links per orphan.
+        let mut linked = 0u64;
+        let mut skipped_low_score = 0u64;
+        let mut decisions: Vec<Value> = Vec::new();
+        for orphan in &orphans {
+            // already_linked is empty since orphan has no edges by definition.
+            let already_linked: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            let sugg = compute_link_suggestions(orphan, &all, &already_linked, 1);
+            if let Some((target, conf, reason)) = sugg.first().cloned() {
+                if conf >= threshold {
+                    if !dry_run {
+                        // Skip self-references defensively (helper already filters
+                        // but make this idempotent against weird states).
+                        if target == orphan.key {
+                            continue;
+                        }
+                        store
+                            .memory_link(&orphan.key, &target, "relates", 1.0)
+                            .await
+                            .ok();
+                    }
+                    linked += 1;
+                    decisions.push(json!({
+                        "orphan": orphan.key,
+                        "target": target,
+                        "confidence": conf,
+                        "reason": reason,
+                    }));
+                } else {
+                    skipped_low_score += 1;
+                }
+            } else {
+                skipped_low_score += 1;
+            }
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "dry_run": dry_run,
+            "threshold": threshold,
+            "min_content_len": min_content_len,
+            "examined": examined,
+            "eligible_orphans": orphans.len(),
+            "linked": linked,
+            "skipped_low_score": skipped_low_score,
+            "links": decisions,
+        })))
+    }
 }
 
 pub struct SessionFinalizeTool {
@@ -11989,6 +12184,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryQueryStatsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkAuditTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySuggestTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkOrphansTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentKillTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentMessageTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentInboxTool::new(hub.clone())));
