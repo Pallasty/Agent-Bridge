@@ -1130,16 +1130,24 @@ pub fn extract_ts_imports(
         let line_no = (i as u32) + 1;
 
         // Multi-line aggregation: keep reading until braces balance.
+        // Only aggregate when the line opens a static `import`/`export`
+        // statement — a `{` on a function/object literal line would
+        // otherwise sweep require()/import() calls inside the body and
+        // mis-attribute their line number to the function declaration.
         let mut buf = stripped.to_string();
         let mut end_line_idx = i;
-        while buf.matches('{').count() > buf.matches('}').count()
-            && end_line_idx + 1 < lines.len()
-        {
-            end_line_idx += 1;
-            let nw = strip_ts_block_comments(lines[end_line_idx]);
-            let next = strip_ts_line_comment(&nw).trim().to_string();
-            buf.push(' ');
-            buf.push_str(&next);
+        let needs_aggregation =
+            stripped.starts_with("import") || stripped.starts_with("export");
+        if needs_aggregation {
+            while buf.matches('{').count() > buf.matches('}').count()
+                && end_line_idx + 1 < lines.len()
+            {
+                end_line_idx += 1;
+                let nw = strip_ts_block_comments(lines[end_line_idx]);
+                let next = strip_ts_line_comment(&nw).trim().to_string();
+                buf.push(' ');
+                buf.push_str(&next);
+            }
         }
 
         let raw_full = if end_line_idx == i {
@@ -2001,6 +2009,25 @@ const y = xrequire('mod');
 ";
         let imps = extract_ts_imports(src, "f.js", "javascript");
         assert!(imps.is_empty(), "spurious matches: {imps:#?}");
+    }
+
+    #[test]
+    fn ts_require_inside_function_keeps_correct_line() {
+        // Regression: brace aggregation must not sweep function bodies
+        // and mis-attribute require() lines to the function header.
+        let src = "\
+function isWSL(): boolean {
+    if (process.platform !== \"linux\") return false;
+    try {
+        const { readFileSync } = require(\"node:fs\");
+        return true;
+    } catch { return false; }
+}
+";
+        let imps = extract_ts_imports(src, "f.ts", "typescript");
+        assert_eq!(imps.len(), 1, "got {imps:#?}");
+        assert_eq!(imps[0].target, "node:fs");
+        assert_eq!(imps[0].line, 4, "require should be on its own line");
     }
 
     #[test]
