@@ -645,6 +645,53 @@
       margin-top: 30px;
       letter-spacing: 0.05em;
     }
+    /* Viewer mode — chat panel rehydrates a saved chat_session transcript.
+       Read-only; banner explains origin + offers a "continue" hop back
+       to the original node so the user can riff on top of past context. */
+    .chat-past-banner {
+      align-self: stretch;
+      background: #1a1626;
+      border-left: 3px solid #a87cff;
+      padding: 8px 14px;
+      margin: -4px 0 6px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 11px;
+      color: #c0a0e8;
+      letter-spacing: 0.04em;
+      border-radius: 0 4px 4px 0;
+    }
+    .chat-past-banner strong {
+      color: #d8c0f8;
+      font-weight: 500;
+    }
+    .chat-continue-btn {
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid #4a3a72;
+      color: #a87cff;
+      padding: 3px 10px;
+      font-size: 10px;
+      border-radius: 3px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    .chat-continue-btn:hover {
+      color: #fff;
+      background: #4a3a72;
+      border-color: #a87cff;
+    }
+    /* Disabled chat input dims to signal viewer mode. */
+    #chat-input:disabled,
+    #chat-send:disabled,
+    .chat-banner .chat-save-btn:disabled,
+    .chat-banner .chat-clear-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
     .chat-msg {
       max-width: 88%;
       padding: 8px 12px;
@@ -2681,23 +2728,117 @@ async function saveCanvas() {
 // Assistant messages get a hover [→ copy to editor] button so a useful
 // passage flows into the working_doc draft above.
 
-function resetChat(memory) {
-  const restored = loadPersistedChat(memory.key);
-  canvasState.chat = { focusKey: memory.key, history: restored, pending: false };
-  // Update the context pill to reflect what the backend will attach.
-  const pill = document.getElementById("chat-ctx-pill");
-  if (pill) pill.textContent = `${memory.key} + neighbors`;
-  // Surface restored count so the user knows continuation happened.
-  const restoredHint = document.getElementById("chat-restored-hint");
-  if (restoredHint) {
-    if (restored.length > 0) {
-      restoredHint.textContent = `· restored ${restored.length} message${restored.length === 1 ? "" : "s"}`;
-      restoredHint.style.display = "inline";
-    } else {
-      restoredHint.textContent = "";
-      restoredHint.style.display = "none";
+// Rehydrate a saved chat_session transcript back into structured
+// messages. Format is the inverse of formatChatTranscript: a markdown
+// preamble (# Chat session · KEY / _saved TS_) followed by alternating
+// blocks led by `**USER**:` / `**ASSISTANT**:` / `**ERROR**:` headers.
+// Lines before the first header are preamble and skipped; trailing
+// blank lines within a block are trimmed.
+function parseChatTranscript(content) {
+  if (!content || typeof content !== "string") return [];
+  const lines = content.split("\n");
+  const out = [];
+  let role = null;
+  let buf = [];
+  const flush = () => {
+    if (role === null) return;
+    const text = buf.join("\n").replace(/^\s+|\s+$/g, "");
+    if (text.length > 0) out.push({ role, content: text });
+    buf = [];
+  };
+  for (const line of lines) {
+    const m = line.match(/^\*\*(USER|ASSISTANT|ERROR)\*\*:\s*$/);
+    if (m) {
+      flush();
+      role = m[1] === "ASSISTANT" ? "assistant"
+           : m[1] === "ERROR"     ? "error"
+           : "user";
+      continue;
     }
+    if (role !== null) buf.push(line);
   }
+  flush();
+  return out;
+}
+
+// Toggle chat panel UI between live mode (input + save/clear active)
+// and viewer mode (input disabled, banner + continue button). Single
+// source of truth = canvasState.chat.viewMode.
+function applyChatViewerMode() {
+  const isPast = canvasState.chat.viewMode === "past";
+  const pill = document.getElementById("chat-ctx-pill");
+  const restoredHint = document.getElementById("chat-restored-hint");
+  const input = document.getElementById("chat-input");
+  const sendBtn = document.getElementById("chat-send");
+  const saveBtn = document.getElementById("chat-save-btn");
+  const clearBtn = document.getElementById("chat-clear-btn");
+  if (isPast) {
+    const n = canvasState.chat.history.length;
+    if (pill) pill.textContent = "past discussion";
+    if (restoredHint) {
+      restoredHint.textContent = `· ${n} message${n === 1 ? "" : "s"} from saved chat`;
+      restoredHint.style.color = "#a87cff";
+      restoredHint.style.display = "inline";
+    }
+    if (input) {
+      input.disabled = true;
+      input.placeholder = "viewing past discussion — click ↪ continue to riff on the original node";
+    }
+    if (sendBtn) sendBtn.disabled = true;
+    if (saveBtn) saveBtn.disabled = true;
+    if (clearBtn) clearBtn.disabled = true;
+  } else {
+    const n = canvasState.chat.history.length;
+    if (pill) pill.textContent = `${canvasState.chat.focusKey} + neighbors`;
+    if (restoredHint) {
+      restoredHint.style.color = "#5cc8c8";
+      if (n > 0) {
+        restoredHint.textContent = `· restored ${n} message${n === 1 ? "" : "s"}`;
+        restoredHint.style.display = "inline";
+      } else {
+        restoredHint.textContent = "";
+        restoredHint.style.display = "none";
+      }
+    }
+    if (input) {
+      input.disabled = false;
+      input.placeholder = "ask Claude about this node…  (cmd/ctrl+enter to send)";
+    }
+    if (sendBtn) sendBtn.disabled = false;
+    if (saveBtn) saveBtn.disabled = false;
+    if (clearBtn) clearBtn.disabled = false;
+  }
+}
+
+function resetChat(memory) {
+  // Viewer mode triggers when focus is itself a saved chat_session and
+  // the content parses into at least one message. Origin = first
+  // `discussed_at` neighbor (the topic the chat was about), used by
+  // the banner + the future continue button.
+  let parsed = [];
+  if (memory.kind === "chat_session" && typeof memory.content === "string") {
+    parsed = parseChatTranscript(memory.content);
+  }
+  if (parsed.length > 0) {
+    const about = neighborsOfType(memory.key, "discussed_at");
+    canvasState.chat = {
+      focusKey: memory.key,
+      history: parsed,
+      pending: false,
+      viewMode: "past",
+      viewerOrigin: about[0] || null,
+    };
+  } else {
+    const restored = loadPersistedChat(memory.key);
+    canvasState.chat = {
+      focusKey: memory.key,
+      history: restored,
+      pending: false,
+      viewMode: null,
+      viewerOrigin: null,
+    };
+  }
+  applyChatViewerMode();
   renderChatHistory();
   const input = document.getElementById("chat-input");
   if (input) input.value = "";
@@ -2706,6 +2847,8 @@ function resetChat(memory) {
 function clearChatForCurrent() {
   if (!canvasState.chat.focusKey) return;
   if (canvasState.chat.history.length === 0) return;
+  // Viewer mode never wrote localStorage, nothing to clear.
+  if (canvasState.chat.viewMode === "past") return;
   const ok = confirm("Clear chat history for this node? This wipes the persisted localStorage entry too.");
   if (!ok) return;
   canvasState.chat.history = [];
@@ -2724,6 +2867,8 @@ function clearChatForCurrent() {
 async function saveChatAsMemory() {
   if (!canvasState.chat.focusKey) return;
   if (canvasState.chat.history.length === 0) return;
+  // Viewer mode — already a saved chat_session, no re-save.
+  if (canvasState.chat.viewMode === "past") return;
   const btn = document.getElementById("chat-save-btn");
   if (!btn || btn.disabled) return;
   btn.disabled = true;
@@ -2799,12 +2944,28 @@ function formatChatTranscript(history) {
 function renderChatHistory() {
   const root = document.getElementById("chat-history");
   if (!root) return;
-  const { history, pending } = canvasState.chat;
+  const { history, pending, viewMode, viewerOrigin } = canvasState.chat;
+  // Viewer banner — only in past-discussion mode. Continue button is a
+  // placeholder; Phase 2 will preload this transcript onto the origin
+  // node so the user can riff. For now it just signals the affordance.
+  let banner = "";
+  if (viewMode === "past") {
+    const originLabel = viewerOrigin
+      ? `discussion of <strong>${escapeHTML(viewerOrigin)}</strong>`
+      : `past discussion`;
+    const n = history.length;
+    banner = `<div class="chat-past-banner">` +
+      `<span>📖 ${originLabel} · ${n} message${n === 1 ? "" : "s"}</span>` +
+      `<button class="chat-continue-btn" type="button" id="chat-continue-btn"` +
+      ` title="hop back to the original node and preload this transcript (Phase 2)">` +
+      `↪ continue this discussion</button>` +
+      `</div>`;
+  }
   if (history.length === 0 && !pending) {
-    root.innerHTML = `<div class="chat-empty">type below to discuss this node — Claude sees the node + key neighbors</div>`;
+    root.innerHTML = banner + `<div class="chat-empty">type below to discuss this node — Claude sees the node + key neighbors</div>`;
     return;
   }
-  let html = "";
+  let html = banner;
   for (const m of history) {
     if (m.role === "error") {
       html += `<div class="chat-msg error">${escapeHTML(m.content)}</div>`;
@@ -2828,6 +2989,21 @@ function renderChatHistory() {
       copyChatMsgToEditor(msg.content);
     });
   });
+  // Bind continue button (placeholder — Phase 2 wires the real hop).
+  const continueBtn = document.getElementById("chat-continue-btn");
+  if (continueBtn) {
+    continueBtn.addEventListener("click", () => {
+      const origin = canvasState.chat.viewerOrigin;
+      const hint = document.getElementById("canvas-hint");
+      if (hint) {
+        hint.textContent = origin
+          ? `↪ continue → ${origin} (Phase 2: will preload this chat there)`
+          : `↪ continue (Phase 2 — no origin node linked)`;
+        hint.className = "canvas-hint";
+        setTimeout(resetCanvasHint, 3500);
+      }
+    });
+  }
   // Auto-scroll to latest.
   root.scrollTop = root.scrollHeight;
 }
@@ -2845,6 +3021,8 @@ function copyChatMsgToEditor(text) {
 
 async function sendChatMessage() {
   if (!canvasState.current || canvasState.chat.pending) return;
+  // Viewer mode = read-only; reject any send (keyboard or click).
+  if (canvasState.chat.viewMode === "past") return;
   const input = document.getElementById("chat-input");
   const sendBtn = document.getElementById("chat-send");
   const text = input.value.trim();
