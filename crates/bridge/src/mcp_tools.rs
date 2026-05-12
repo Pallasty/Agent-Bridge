@@ -5484,6 +5484,117 @@ impl McpTool for MemoryPruneDegenerateRelatesTool {
 }
 
 // ===========================================================================
+//          memory_archive_orphan_stubs (ζ-14 — retire signal-poor stubs)
+// ===========================================================================
+
+/// ζ-14 — Flip orphan stubs carrying a blacklist tag from `status='active'`
+/// to `status='archived'`. Closes the ζ-9 → ζ-11 → ζ-12 loop:
+/// - ζ-11 stops new degenerate links forming
+/// - ζ-12 deletes legacy degenerate edges
+/// - ζ-14 actively retires the resulting orphan stubs instead of waiting
+///   for passive decay
+///
+/// Stubs that are simultaneously (a) tagged blacklist, (b) orphan, (c)
+/// older than N days are by construction signal-poor dead weight: ζ-11
+/// blacklist prevents them from ever re-linking; the only sensible
+/// transition is into archived.
+pub struct MemoryArchiveOrphanStubsTool {
+    hub: Hub,
+}
+impl MemoryArchiveOrphanStubsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryArchiveOrphanStubsTool {
+    fn name(&self) -> &'static str {
+        "memory_archive_orphan_stubs"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "ζ-14 (graph-hygiene close-out). Transition orphan stubs from \
+                `status='active'` to `status='archived'`. Criterion: status=active AND tags \
+                overlap blacklist_tags AND no edges AND created_at <= now-older_than_days*86400. \
+                Defaults are conservative: only auto_curated stubs older than 3 days, capped at \
+                200 per run. Pair with memory_link_orphans skip_tags (ζ-11) and \
+                memory_prune_degenerate_relates (ζ-12) for a full hygiene cycle. dry_run=true \
+                previews. Returns {archived_count}."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "blacklist_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["auto_curated"],
+                        "description": "Stubs whose tags overlap this list are eligible for \
+                            archive. Default `['auto_curated']` matches the ζ-11 / ζ-12 lane."
+                    },
+                    "older_than_days": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 3,
+                        "description": "Only stubs whose created_at is at least this many days \
+                            old are archived. Default 3 — gives a session window to revisit \
+                            recent stubs before they go cold."
+                    },
+                    "max_archive": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 200,
+                        "description": "Hard cap on archives per run. Bounds accidents and \
+                            keeps a single tx small."
+                    },
+                    "dry_run": { "type": "boolean", "default": false }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let blacklist_tags: Vec<String> = args
+            .get("blacklist_tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec!["auto_curated".to_string()]);
+        let older_than_days = args
+            .get("older_than_days")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(3)
+            .max(0);
+        let max_archive = args
+            .get("max_archive")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(200)
+            .clamp(1, 1000);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let archived = store
+            .memory_archive_orphan_stubs(&blacklist_tags, older_than_days, max_archive, dry_run)
+            .await?;
+        Ok(ToolResult::json_text(&json!({
+            "dry_run": dry_run,
+            "blacklist_tags": blacklist_tags,
+            "older_than_days": older_than_days,
+            "max_archive": max_archive,
+            "archived_count": archived,
+        })))
+    }
+}
+
+// ===========================================================================
 //                  memory_decay_unused (Phase 2.x #8 — read-recency decay)
 // ===========================================================================
 
@@ -12462,6 +12573,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPurgeTombstonesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPruneCoactivationNoiseTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPruneDegenerateRelatesTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryArchiveOrphanStubsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryDecayUnusedTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));

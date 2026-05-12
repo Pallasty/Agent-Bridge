@@ -1319,6 +1319,35 @@ pub trait StateStore: Send + Sync {
         Ok(0)
     }
 
+    /// ζ-14 (2026-05-12) — flip orphan stubs carrying a blacklist tag from
+    /// `status='active'` to `status='archived'`. Closes the ζ-9 → ζ-12
+    /// loop: ζ-11 stopped new degenerate links, ζ-12 removed the legacy
+    /// ones, leaving ~90 auto_curated stubs in orphan-set. ζ-11's blacklist
+    /// blocks them from re-linking, so they are by construction signal-poor
+    /// dead weight. ζ-14 actively retires them rather than waiting for
+    /// passive decay.
+    ///
+    /// Criterion (all three required):
+    /// - `status = 'active'`
+    /// - `tags` overlaps `blacklist_tags`
+    /// - no edges (orphan)
+    /// - `created_at <= now - older_than_days*86400`
+    ///
+    /// `max_archive` caps a single run (default caller: 200) so accidents
+    /// are bounded. Returns the count archived (or that would be archived
+    /// if `dry_run`). `archived` is a soft transition — rows are excluded
+    /// from snapshot/Palace/search but remain in the DB for forensics.
+    async fn memory_archive_orphan_stubs(
+        &self,
+        blacklist_tags: &[String],
+        older_than_days: i64,
+        max_archive: i64,
+        dry_run: bool,
+    ) -> Result<u64> {
+        let _ = (blacklist_tags, older_than_days, max_archive, dry_run);
+        Ok(0)
+    }
+
     /// Audit `dream replay` output: are the LLM-consolidated summary
     /// memories actually used after creation? `stale_days` controls the
     /// "dead weight" cutoff — a `p5_replay`-tagged memory with
