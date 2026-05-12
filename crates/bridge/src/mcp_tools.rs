@@ -11141,6 +11141,110 @@ impl McpTool for CodebaseCallsTool {
 }
 
 // ===========================================================================
+//   codebase_callers — alias-resolved "who calls X" cross the imports table
+// ===========================================================================
+
+pub struct CodebaseCallersTool {
+    hub: Hub,
+}
+impl CodebaseCallersTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for CodebaseCallersTool {
+    fn name(&self) -> &'static str {
+        "codebase_callers"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Alias-resolved 'who calls X' across the imports + \
+                 calls tables built by codebase_index. Joins use/import \
+                 aliases per file so a `target` like \
+                 `crate::store::SqliteStore::new` surfaces sites that wrote \
+                 `Baz::new()` after `use crate::store::SqliteStore as Baz` \
+                 and sites that wrote `store::SqliteStore::new()` after \
+                 `use crate::store`. Each row carries the as-written \
+                 `callee`, the resolved `resolved_callee` (= target), and \
+                 the `via_alias` / `via_import` that produced the match. \
+                 Currently Rust only — when Python/TS/Go call extractors \
+                 ship their imports already work via the same v24 table."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Fully-qualified path to resolve callers for, e.g. 'crate::store::SqliteStore::new' or 'serde_json::to_string'."
+                    },
+                    "file_filter": {
+                        "type": "string",
+                        "description": "Optional substring matched against file_path."
+                    },
+                    "root_path": {
+                        "type": "string",
+                        "description": "Optional root directory to restrict results to a specific index."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50
+                    }
+                },
+                "required": ["target"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let target = args
+            .get("target")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if target.is_empty() {
+            return Ok(ToolResult::error("'target' is required"));
+        }
+        let file_filter = args
+            .get("file_filter")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let root_path = args
+            .get("root_path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .min(500) as u32;
+
+        match store
+            .codebase_callers(
+                &target,
+                file_filter.as_deref(),
+                root_path.as_deref(),
+                limit,
+            )
+            .await
+        {
+            Ok(hits) => Ok(ToolResult::json_text(
+                &serde_json::to_value(hits).unwrap_or(Value::Null),
+            )),
+            Err(e) => Ok(ToolResult::error(&format!("codebase_callers failed: {e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                       tailscale REST API — ACL editing
 // ===========================================================================
 
@@ -12171,6 +12275,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseSearchTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseImportsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseCallsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseCallersTool::new(hub.clone())));
 
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));

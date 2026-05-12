@@ -9524,6 +9524,134 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
+    // Phase 2 #3 third slice — alias-resolved call lookup. Joins
+    // `codebase_imports` × `codebase_calls` so a target name like
+    // `crate::store::SqliteStore::new` surfaces sites that wrote
+    // `Baz::new()` after a `use crate::store::SqliteStore as Baz`.
+    #[tokio::test]
+    async fn codebase_callers_resolves_aliased_imports() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-codebase-callers-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        // Seed: three files with different ways of importing & calling
+        // `crate::store::SqliteStore::new`:
+        //  A) `use crate::store::SqliteStore;` then `SqliteStore::new();`
+        //  B) `use crate::store::SqliteStore as Baz;` then `Baz::new();`
+        //  C) `use crate::store;` then `store::SqliteStore::new();`
+        // All should resolve back to `crate::store::SqliteStore::new`.
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                let mut imp_stmt = c.prepare(
+                    "INSERT INTO codebase_imports
+                       (file_path, line, language, raw, target, alias, root_path, indexed_at)
+                     VALUES (?1, ?2, 'rust', ?3, ?4, ?5, '/repo', 1)",
+                )?;
+                imp_stmt.execute(params![
+                    "/repo/a.rs",
+                    1_i64,
+                    "use crate::store::SqliteStore;",
+                    "crate::store::SqliteStore",
+                    Option::<String>::None,
+                ])?;
+                imp_stmt.execute(params![
+                    "/repo/b.rs",
+                    1_i64,
+                    "use crate::store::SqliteStore as Baz;",
+                    "crate::store::SqliteStore",
+                    Some("Baz"),
+                ])?;
+                imp_stmt.execute(params![
+                    "/repo/c.rs",
+                    1_i64,
+                    "use crate::store;",
+                    "crate::store",
+                    Option::<String>::None,
+                ])?;
+                drop(imp_stmt);
+                let mut call_stmt = c.prepare(
+                    "INSERT INTO codebase_calls
+                       (file_path, line, language, caller, callee, root_path, indexed_at)
+                     VALUES (?1, ?2, 'rust', ?3, ?4, '/repo', 1)",
+                )?;
+                call_stmt.execute(params![
+                    "/repo/a.rs", 5_i64, "user_a", "SqliteStore::new",
+                ])?;
+                call_stmt.execute(params![
+                    "/repo/b.rs", 7_i64, "user_b", "Baz::new",
+                ])?;
+                call_stmt.execute(params![
+                    "/repo/c.rs", 9_i64, "user_c", "store::SqliteStore::new",
+                ])?;
+                // Negative — different callee in /repo/a.rs that should NOT
+                // resolve to SqliteStore::new.
+                call_stmt.execute(params![
+                    "/repo/a.rs", 11_i64, "user_a", "println",
+                ])?;
+                Ok(())
+            })
+            .await
+            .expect("seed rows");
+
+        let hits = store
+            .codebase_callers(
+                "crate::store::SqliteStore::new",
+                None,
+                Some("/repo"),
+                50,
+            )
+            .await
+            .expect("codebase_callers");
+        // Expect 3 resolved hits (a + b + c), no `println` row.
+        assert_eq!(hits.len(), 3, "got {hits:#?}");
+        let by_file: std::collections::HashMap<&str, &crate::ResolvedCall> =
+            hits.iter().map(|h| (h.file_path.as_str(), h)).collect();
+
+        // a.rs — direct use, no alias.
+        let a = by_file.get("/repo/a.rs").expect("a.rs hit");
+        assert_eq!(a.callee, "SqliteStore::new");
+        assert_eq!(a.resolved_callee, "crate::store::SqliteStore::new");
+        assert!(a.via_alias.is_none());
+        assert_eq!(a.via_import, "crate::store::SqliteStore");
+
+        // b.rs — aliased use.
+        let b = by_file.get("/repo/b.rs").expect("b.rs hit");
+        assert_eq!(b.callee, "Baz::new");
+        assert_eq!(b.resolved_callee, "crate::store::SqliteStore::new");
+        assert_eq!(b.via_alias.as_deref(), Some("Baz"));
+        assert_eq!(b.via_import, "crate::store::SqliteStore");
+
+        // c.rs — module-level use.
+        let c = by_file.get("/repo/c.rs").expect("c.rs hit");
+        assert_eq!(c.callee, "store::SqliteStore::new");
+        assert_eq!(c.resolved_callee, "crate::store::SqliteStore::new");
+        assert!(c.via_alias.is_none());
+        assert_eq!(c.via_import, "crate::store");
+
+        // Empty target → error.
+        let err = store
+            .codebase_callers("", None, None, 10)
+            .await;
+        assert!(err.is_err());
+
+        // No matching imports → empty result.
+        let empty = store
+            .codebase_callers("totally::made::up::Path", None, None, 10)
+            .await
+            .expect("empty");
+        assert!(empty.is_empty());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
     // Phase 2.x #8: read-recency decay (memory_decay_unused_importance).
     // Sets up rows via memory_import so last_accessed_at can be backdated
     // — memory_save would force it to `now`. The tests cover the four
