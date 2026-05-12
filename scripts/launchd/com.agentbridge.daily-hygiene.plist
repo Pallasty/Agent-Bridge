@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ζ-17 macOS LaunchAgent — daily memory hygiene mirror.
+
+  Mirrors the Linux systemd unit
+    scripts/systemd/agent-bridge-memory-decay-unused.service
+  for Mac Pro nodes. launchd plists don't natively chain a sequence of
+  ProgramArguments the way systemd's `ExecStart=` array does, so the
+  six-stage hygiene cycle lives inside the sibling shell wrapper
+  `scripts/launchd/daily-hygiene.sh`. That keeps the per-op rationale
+  documented once (in the systemd .service file) and avoids divergence.
+
+  The plist itself is intentionally static — no install-time string
+  substitution. `$HOME` is resolved at run-time by /bin/bash, and the
+  wrapper redirects its own stdout/stderr to the log file (matching the
+  Linux node's `~/.cache/agent-bridge/memory-decay-unused.log` path so
+  cross-node `tail -f` workflows just work).
+
+  Install via scripts/launchd/install.sh — handles the launchctl
+  bootstrap/load incantation across the macOS version range.
+
+  Schedule: 03:42 daily (same minute Linux uses — keeps the two nodes
+  in sync so `dream diff` with the auto flag aligns cross-machine).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.agentbridge.daily-hygiene</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <string>exec "$HOME/.local/share/agent-bridge/launchd/daily-hygiene.sh"</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>42</integer>
+    </dict>
+
+    <!--
+      RunAtLoad=false: don't kick off when the LaunchAgent is loaded
+      (avoids double-firing during install or after a reboot).
+      The calendar schedule is the sole trigger.
+    -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!--
+      AbandonProcessGroup: keep the run isolated from the parent
+      launchd process group so a stalled child can't take the agent
+      down with it. Defensive — hygiene ops are bounded but external
+      lock contention could still hang.
+    -->
+    <key>AbandonProcessGroup</key>
+    <true/>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
