@@ -440,6 +440,16 @@ CREATE INDEX IF NOT EXISTS idx_ccall_caller ON codebase_calls(caller COLLATE NOC
 CREATE INDEX IF NOT EXISTS idx_ccall_file ON codebase_calls(file_path);
 "#;
 
+// v26 — embedding_backend column on memories (P9). Records which backend
+// produced each row's vector so memory_reindex(only_stale=true) can
+// upgrade rows embedded under a different backend (e.g. hash fallback
+// during ONNX BG-init → upgrade once ONNX ready). NULL backend (pre-v26)
+// rows are skipped in stale mode; full reindex covers them.
+const SCHEMA_V26: &str = r#"
+ALTER TABLE memories ADD COLUMN embedding_backend TEXT;
+CREATE INDEX IF NOT EXISTS idx_memories_embedding_backend ON memories(embedding_backend);
+"#;
+
 // v23 — Phase 1 P2 reconsolidation: `superseded_by` foreign key on memories.
 // Lets memory_save auto-detect when a new save semantically supersedes an
 // existing record (cosine ≥ threshold) and mark the old row → status='superseded'
@@ -959,6 +969,19 @@ impl SqliteStore {
             if cur.as_str() == "24" {
                 c.execute_batch(SCHEMA_V25)?;
                 let _ = c.execute("UPDATE schema_meta SET value='25' WHERE key='version'", []);
+            }
+
+            // ── v26: embedding_backend column on memories (P9) ────────
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "25".to_string());
+            if cur.as_str() == "25" {
+                c.execute_batch(SCHEMA_V26)?;
+                let _ = c.execute("UPDATE schema_meta SET value='26' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -1821,13 +1844,19 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("memory_save preflight: {e}")))?;
 
-        let embedding_bytes = match existing {
+        // P9: fresh computes stamp current backend name; reused
+        // embeddings keep their prior tag (None signals "leave").
+        let (embedding_bytes, fresh_backend_name): (Vec<u8>, Option<String>) = match existing {
             Some((existing_content, existing_emb))
                 if existing_content == content && existing_emb.len() == EXPECTED_EMBED_BYTES =>
             {
-                existing_emb
+                (existing_emb, None)
             }
-            _ => crate::vector::encode_embedding(&crate::vector::embed_text(&content)),
+            _ => {
+                let backend = crate::embedding::default_backend();
+                let vec = backend.embed(&content);
+                (crate::vector::encode_embedding(&vec), Some(backend.name().to_string()))
+            }
         };
 
         // Pre-compute overlap tokens for contradiction detection (outside closure).
@@ -1850,12 +1879,15 @@ impl StateStore for SqliteStore {
 
         self.conn
             .call(move |c| -> RusqliteResult<()> {
+                // P9: embedding_backend column. COALESCE keeps prior tag
+                // when re-saving with reused (None) embedding.
                 c.execute(
                     "INSERT INTO memories
                        (key, kind, content, tags, related_keys, scope,
                         created_at, updated_at, last_accessed_at, access_count,
-                        importance, status, trigger_pattern, embedding, dedupe_key)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11, ?12)
+                        importance, status, trigger_pattern, embedding, dedupe_key,
+                        embedding_backend)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13)
                      ON CONFLICT(key) DO UPDATE SET
                         kind          = excluded.kind,
                         content       = excluded.content,
@@ -1871,7 +1903,8 @@ impl StateStore for SqliteStore {
                         END,
                         trigger_pattern = excluded.trigger_pattern,
                         embedding     = excluded.embedding,
-                        dedupe_key    = excluded.dedupe_key",
+                        dedupe_key    = excluded.dedupe_key,
+                        embedding_backend = COALESCE(excluded.embedding_backend, memories.embedding_backend)",
                     params![
                         key,
                         kind_clone,
@@ -1884,7 +1917,8 @@ impl StateStore for SqliteStore {
                         status,
                         trigger_pattern,
                         embedding_bytes,
-                        dedupe_key_storage
+                        dedupe_key_storage,
+                        fresh_backend_name,
                     ],
                 )?;
 
@@ -4707,22 +4741,44 @@ impl StateStore for SqliteStore {
             .collect())
     }
 
-    async fn memory_reindex_embeddings(&self, batch_size: usize) -> Result<usize> {
+    async fn memory_reindex_embeddings(
+        &self,
+        batch_size: usize,
+        only_stale: bool,
+    ) -> Result<usize> {
         let cap = batch_size.max(1).min(1000);
-        // Load rows needing re-embedding (embedding IS NULL or wrong-dim).
+        let current_backend = crate::embedding::default_backend()
+            .name()
+            .to_string();
+        let stale_flag = only_stale;
+        let backend_arg = current_backend.clone();
         let to_update: Vec<(String, String)> = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<(String, String)>> {
-                let mut stmt = c.prepare(
+                let sql = if stale_flag {
+                    "SELECT key, content FROM memories
+                     WHERE status = 'active'
+                       AND (embedding IS NULL
+                            OR (embedding_backend IS NOT NULL
+                                AND embedding_backend != ?2))
+                     LIMIT ?1"
+                } else {
                     "SELECT key, content FROM memories
                      WHERE status = 'active' AND embedding IS NULL
-                     LIMIT ?1",
-                )?;
-                let rows = stmt
-                    .query_map([cap as i64], |row| {
+                     LIMIT ?1"
+                };
+                let mut stmt = c.prepare(sql)?;
+                let rows = if stale_flag {
+                    stmt.query_map(params![cap as i64, backend_arg], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                     })?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                    .collect::<std::result::Result<Vec<_>, _>>()?
+                } else {
+                    stmt.query_map([cap as i64], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?
+                };
                 Ok(rows)
             })
             .await
@@ -4732,11 +4788,12 @@ impl StateStore for SqliteStore {
             return Ok(0);
         }
 
-        // Compute embeddings on the calling thread (CPU work outside DB conn).
+        let backend_now = crate::embedding::default_backend();
+        let backend_name = backend_now.name().to_string();
         let pairs: Vec<(String, Vec<u8>)> = to_update
             .into_iter()
             .map(|(key, content)| {
-                let emb = crate::vector::embed_text(&content);
+                let emb = backend_now.embed(&content);
                 let bytes = crate::vector::encode_embedding(&emb);
                 (key, bytes)
             })
@@ -4746,10 +4803,13 @@ impl StateStore for SqliteStore {
         self.conn
             .call(move |c| -> RusqliteResult<()> {
                 let tx = c.unchecked_transaction()?;
-                let mut stmt =
-                    tx.prepare("UPDATE memories SET embedding = ?2 WHERE key = ?1")?;
+                let mut stmt = tx.prepare(
+                    "UPDATE memories
+                        SET embedding = ?2, embedding_backend = ?3
+                      WHERE key = ?1",
+                )?;
                 for (key, emb_bytes) in &pairs {
-                    stmt.execute(params![key, emb_bytes])?;
+                    stmt.execute(params![key, emb_bytes, backend_name])?;
                 }
                 drop(stmt);
                 tx.commit()?;

@@ -5593,10 +5593,11 @@ impl McpTool for MemoryReindexTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Re-compute embeddings for active memories with no stored vector \
-                 (e.g. after dim migration). Processes batch_size rows per call \
-                 (default 100, max 1000). Call repeatedly until updated=0. Refreshes the \
-                 embedding cache so semantic search sees new vectors."
+            description: "Re-compute embeddings for active memories. Two modes:\n\
+                 - Default (only_stale=false): fills rows with `embedding IS NULL`.\n\
+                 - only_stale=true (P9): also reindexes rows whose embedding_backend \
+                   tag differs from current default — hash → ONNX upgrade path. \
+                   Pre-v26 NULL-backend rows skipped in stale mode."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -5607,6 +5608,11 @@ impl McpTool for MemoryReindexTool {
                         "maximum": 1000,
                         "default": 100,
                         "description": "Number of rows to re-embed per call."
+                    },
+                    "only_stale": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Also reindex rows with embedding_backend != current default."
                     }
                 }
             }),
@@ -5621,8 +5627,14 @@ impl McpTool for MemoryReindexTool {
             .get("batch_size")
             .and_then(|v| v.as_u64())
             .unwrap_or(100) as usize;
+        let only_stale = args
+            .get("only_stale")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
-        let updated = store.memory_reindex_embeddings(batch_size).await?;
+        let updated = store
+            .memory_reindex_embeddings(batch_size, only_stale)
+            .await?;
 
         // Refresh the in-process embedding cache so the new vectors are visible.
         if updated > 0 {

@@ -1736,11 +1736,17 @@ pub trait StateStore: Send + Sync {
         Ok(Vec::new())
     }
 
-    /// Re-compute embeddings for all active memories that have `embedding IS NULL`.
-    /// Processes up to `batch_size` rows per call; returns the number of rows updated.
-    /// Default impl returns 0 (no-op for non-SQLite backends).
-    async fn memory_reindex_embeddings(&self, batch_size: usize) -> Result<usize> {
-        let _ = batch_size;
+    /// Re-compute embeddings for active memories.
+    /// - `only_stale=false`: rows with `embedding IS NULL` only.
+    /// - `only_stale=true` (P9): also rows tagged with a different
+    ///   `embedding_backend` than current default. NULL-backend rows
+    ///   (pre-v26) are NOT touched in stale mode.
+    async fn memory_reindex_embeddings(
+        &self,
+        batch_size: usize,
+        only_stale: bool,
+    ) -> Result<usize> {
+        let _ = (batch_size, only_stale);
         Ok(0)
     }
 
