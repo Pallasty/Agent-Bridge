@@ -971,6 +971,14 @@
       margin-right: 6px;
       font-weight: 500;
     }
+    /* P7b — bidirectional sub-labels inside the lineage section. */
+    .canvas-rail-sub {
+      color: #5a5a68;
+      font-size: 9px;
+      letter-spacing: 0.06em;
+      margin: 4px 0 2px 6px;
+      text-transform: uppercase;
+    }
 
     /* A↔B intent labels — anchor the vision_breathing_canvas semantic
        layer (A = 殿堂 / palace = results; B = 工坊 / canvas = workshop)
@@ -1195,8 +1203,11 @@
             <div id="canvas-rail-discussions"><div class="canvas-rail-empty">none</div></div>
           </div>
           <div class="canvas-rail-section" id="canvas-rail-lineage-section" style="display:none;">
-            <div class="canvas-rail-title">lineage chain (ancestors)</div>
-            <div id="canvas-rail-lineage"><div class="canvas-rail-empty">none</div></div>
+            <div class="canvas-rail-title">lineage chain</div>
+            <div class="canvas-rail-sub" id="canvas-rail-lineage-up-label">↑ ancestors</div>
+            <div id="canvas-rail-lineage-up"><div class="canvas-rail-empty">none</div></div>
+            <div class="canvas-rail-sub" id="canvas-rail-lineage-down-label">↓ descendants</div>
+            <div id="canvas-rail-lineage-down"><div class="canvas-rail-empty">none</div></div>
           </div>
           <div class="canvas-rail-section">
             <div class="canvas-rail-title">related reports</div>
@@ -2731,37 +2742,50 @@ async function loadCanvasRail(memory) {
 
   // 3.5 lineage chain — server-side BFS along evolved_from from this key.
   //
-  // /api/graph truncates by importance, so chains of low-importance
-  // chat_sessions disappear from the rendered subgraph even though the
-  // edges live in memory_edges. This section bypasses the truncation
-  // by walking directly from the DB. Hidden when focus is not a
-  // chat_session (most other kinds have no evolved_from chain).
+  // Bidirectional: ancestors via direction=out (this evolved_from THAT),
+  // descendants via direction=in (THAT evolved_from this). Two parallel
+  // /api/lineage requests; each sub-list renders independently. /api/graph
+  // truncates by importance so chains of low-importance chat_sessions
+  // would otherwise disappear; this section bypasses that.
   const lineageSection = document.getElementById("canvas-rail-lineage-section");
-  const lineageEl = document.getElementById("canvas-rail-lineage");
-  lineageEl.parentElement.classList.add("canvas-rail-lineage");
+  const lineageUpEl = document.getElementById("canvas-rail-lineage-up");
+  const lineageDownEl = document.getElementById("canvas-rail-lineage-down");
+  lineageUpEl.parentElement.classList.add("canvas-rail-lineage");
   if (memory.kind === "chat_session") {
     lineageSection.style.display = "";
-    try {
-      const r = await fetch(
-        `/api/lineage/${encodeURIComponent(memory.key)}?type=evolved_from&direction=out&depth=20`
-      );
-      const j = await r.json();
-      const hops = (j && j.chain) ? j.chain : [];
-      if (hops.length) {
-        lineageEl.innerHTML = hops.map(h => {
-          const short = h.to.replace(/^palace_chat_session_/, "chat ");
-          return `<a class="rail-switch" href="#" data-focus-key="${escapeHTML(h.to)}" title="hop ${h.hop} via ${escapeHTML(h.edge_type)} → ${escapeHTML(h.to)}">` +
-            `<span class="hop">↑${h.hop}</span>${escapeHTML(short)}</a>`;
-        }).join("") + (j.truncated ? `<div class="canvas-rail-empty" style="font-style:italic;">…chain truncated at depth ${j.depth_limit}</div>` : "");
-      } else {
-        lineageEl.innerHTML = `<div class="canvas-rail-empty">no ancestors</div>`;
+    const renderChain = (el, hops, truncated, depth, glyph, emptyMsg) => {
+      if (hops.length === 0) {
+        el.innerHTML = `<div class="canvas-rail-empty">${emptyMsg}</div>`;
+        return;
       }
-    } catch (e) {
-      lineageEl.innerHTML = `<div class="canvas-rail-empty">error</div>`;
-    }
+      // Server BFS records each hop as {from: cur, to: next} where `next`
+      // is the newly discovered key — same convention for both directions.
+      // So h.to is always the target to jump to (the ancestor when walking
+      // out, the descendant when walking in).
+      el.innerHTML = hops.map(h => {
+        const target = h.to;
+        const short = target.replace(/^palace_chat_session_/, "chat ");
+        return `<a class="rail-switch" href="#" data-focus-key="${escapeHTML(target)}" title="hop ${h.hop} via ${escapeHTML(h.edge_type)} → ${escapeHTML(target)}">` +
+          `<span class="hop">${glyph}${h.hop}</span>${escapeHTML(short)}</a>`;
+      }).join("") + (truncated ? `<div class="canvas-rail-empty" style="font-style:italic;">…chain truncated at depth ${depth}</div>` : "");
+    };
+    const fetchChain = async (dir) => {
+      try {
+        const r = await fetch(
+          `/api/lineage/${encodeURIComponent(memory.key)}?type=evolved_from&direction=${dir}&depth=20`
+        );
+        return await r.json();
+      } catch (e) {
+        return { chain: [], truncated: false, depth_limit: 0, _err: String(e) };
+      }
+    };
+    const [up, down] = await Promise.all([fetchChain("out"), fetchChain("in")]);
+    renderChain(lineageUpEl, up.chain || [], up.truncated, up.depth_limit, "↑", "no ancestors");
+    renderChain(lineageDownEl, down.chain || [], down.truncated, down.depth_limit, "↓", "no descendants");
   } else {
     lineageSection.style.display = "none";
-    lineageEl.innerHTML = `<div class="canvas-rail-empty">none</div>`;
+    lineageUpEl.innerHTML = `<div class="canvas-rail-empty">none</div>`;
+    lineageDownEl.innerHTML = `<div class="canvas-rail-empty">none</div>`;
   }
 
   // 4. related reports — same /api/reports endpoint the side panel uses.
