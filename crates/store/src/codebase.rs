@@ -43,13 +43,14 @@ pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<Co
 }
 
 /// Extract call sites from `content` for the given language. Phase 2 #3
-/// third slice now covers Rust + Python + Go; TS/JS is in a sibling
-/// branch. Dispatch returns `vec![]` for unhandled languages so the
-/// table is always queryable.
+/// third slice now covers Rust + Python + TS/JS + Go (all four).
+/// Dispatch returns `vec![]` for unhandled languages so the table is
+/// always queryable.
 pub fn extract_calls(content: &str, file_path: &str, language: &str) -> Vec<CodebaseCall> {
     match language {
         "rust" => extract_rust_calls(content, file_path),
         "python" => extract_python_calls(content, file_path),
+        "typescript" | "javascript" => extract_ts_calls(content, file_path, language),
         "go" => extract_go_calls(content, file_path),
         _ => vec![],
     }
@@ -3173,6 +3174,370 @@ pub fn extract_go_calls(content: &str, file_path: &str) -> Vec<CodebaseCall> {
     out
 }
 
+// ── TS/JS calls (Phase 2 #3 third slice — TS/JS side) ───────────────────────
+
+/// Replace string and comment interiors with spaces. Handles all three
+/// TS/JS quote styles (`"…"`, `'…'`, `` `…` ``), `//` line comments,
+/// and multi-line `/* … */` block comments. Template literals are
+/// masked wholesale — `${…}` interpolation calls are NOT extracted
+/// (V1 limit; rare in practice).
+fn mask_ts_strings_and_comments(content: &str) -> String {
+    enum State {
+        Normal,
+        Str(u8),
+        LineCmt,
+        BlockCmt,
+    }
+    let mut state = State::Normal;
+    let mut prev_bs = false;
+    let mut out = String::with_capacity(content.len());
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        match state {
+            State::Normal => {
+                if c == b'"' || c == b'\'' || c == b'`' {
+                    out.push(c as char);
+                    state = State::Str(c);
+                    i += 1;
+                } else if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    out.push(' ');
+                    out.push(' ');
+                    state = State::LineCmt;
+                    i += 2;
+                } else if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    out.push(' ');
+                    out.push(' ');
+                    state = State::BlockCmt;
+                    i += 2;
+                } else {
+                    out.push(c as char);
+                    i += 1;
+                }
+            }
+            State::Str(quote) => {
+                if c == b'\\' && !prev_bs {
+                    prev_bs = true;
+                    out.push('\\');
+                    i += 1;
+                    continue;
+                }
+                if c == quote && !prev_bs {
+                    out.push(c as char);
+                    state = State::Normal;
+                    prev_bs = false;
+                    i += 1;
+                    continue;
+                }
+                prev_bs = false;
+                if c == b'\n' {
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+            State::LineCmt => {
+                if c == b'\n' {
+                    state = State::Normal;
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+            State::BlockCmt => {
+                if c == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    out.push(' ');
+                    out.push(' ');
+                    state = State::Normal;
+                    i += 2;
+                    continue;
+                }
+                if c == b'\n' {
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+fn is_ts_call_keyword(s: &str) -> bool {
+    matches!(
+        s,
+        "if" | "else"
+            | "for"
+            | "while"
+            | "do"
+            | "switch"
+            | "case"
+            | "default"
+            | "break"
+            | "continue"
+            | "return"
+            | "throw"
+            | "try"
+            | "catch"
+            | "finally"
+            | "function"
+            | "class"
+            | "const"
+            | "let"
+            | "var"
+            | "async"
+            | "await"
+            | "yield"
+            | "typeof"
+            | "instanceof"
+            | "in"
+            | "of"
+            | "delete"
+            | "void"
+            | "true"
+            | "false"
+            | "null"
+            | "undefined"
+            | "import"
+            | "export"
+            | "from"
+            | "this"
+            | "super"
+            | "enum"
+            | "interface"
+            | "type"
+            | "namespace"
+            | "module"
+            | "public"
+            | "private"
+            | "protected"
+            | "readonly"
+            | "static"
+            | "abstract"
+            | "override"
+            | "declare"
+            | "as"
+            | "is"
+            | "new"
+    )
+}
+
+fn extract_ts_calls_from_line(
+    line: &str,
+    line_no: u32,
+    caller: &str,
+    language: &str,
+    file_path: &str,
+    out: &mut Vec<CodebaseCall>,
+) {
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i];
+        // Method call: `.NAME(` (or `?.NAME(` optional chain).
+        if c == b'.'
+            && i + 1 < bytes.len()
+            && (bytes[i + 1].is_ascii_alphabetic()
+                || bytes[i + 1] == b'_'
+                || bytes[i + 1] == b'$')
+        {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() && is_ts_ident_char(bytes[j]) {
+                j += 1;
+            }
+            let name = &line[start..j];
+            let mut k = j;
+            while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+                k += 1;
+            }
+            if k + 1 < bytes.len() && bytes[k] == b'?' && bytes[k + 1] == b'.' {
+                k += 2;
+                while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+                    k += 1;
+                }
+            }
+            if k < bytes.len() && bytes[k] == b'(' && !is_ts_call_keyword(name) {
+                out.push(CodebaseCall {
+                    file_path: file_path.to_string(),
+                    line: line_no,
+                    language: language.to_string(),
+                    caller: caller.to_string(),
+                    callee: format!(".{name}"),
+                });
+            }
+            i = j;
+            continue;
+        }
+        if c.is_ascii_alphabetic() || c == b'_' || c == b'$' {
+            if i > 0 && (is_ts_ident_char(bytes[i - 1]) || bytes[i - 1] == b'.') {
+                i += 1;
+                continue;
+            }
+            let start = i;
+            let mut j = i;
+            while j < bytes.len() && is_ts_ident_char(bytes[j]) {
+                j += 1;
+            }
+            loop {
+                if j < bytes.len()
+                    && bytes[j] == b'.'
+                    && j + 1 < bytes.len()
+                    && (bytes[j + 1].is_ascii_alphabetic()
+                        || bytes[j + 1] == b'_'
+                        || bytes[j + 1] == b'$')
+                {
+                    let s = j + 1;
+                    let mut t = s;
+                    while t < bytes.len() && is_ts_ident_char(bytes[t]) {
+                        t += 1;
+                    }
+                    j = t;
+                } else {
+                    break;
+                }
+            }
+            let path = &line[start..j];
+            let mut k = j;
+            while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+                k += 1;
+            }
+            if k < bytes.len() && bytes[k] == b'(' {
+                let last_seg = path.rsplit('.').next().unwrap_or(path);
+                let first_seg = path.split('.').next().unwrap_or(path);
+                if !is_ts_call_keyword(last_seg) && !is_ts_call_keyword(first_seg) {
+                    out.push(CodebaseCall {
+                        file_path: file_path.to_string(),
+                        line: line_no,
+                        language: language.to_string(),
+                        caller: caller.to_string(),
+                        callee: path.to_string(),
+                    });
+                }
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+}
+
+/// Extract call sites from a TS/JS file. Tracks brace depth to maintain
+/// a stack of enclosing function declarations + class scopes. Class
+/// methods qualify as `ClassName.method`. V1 known limits:
+///   • Arrow-function assignments (`const f = () => …`) don't push to
+///     the fn stack — caller for body lines remains the outer scope.
+///   • Object-literal methods (`{ method() {} }`) likewise.
+///   • Decorator lines (`@decorator(args)`) emit calls but don't gate
+///     the following declaration.
+pub fn extract_ts_calls(
+    content: &str,
+    file_path: &str,
+    language: &str,
+) -> Vec<CodebaseCall> {
+    let masked = mask_ts_strings_and_comments(content);
+    let content = masked.as_str();
+    let mut out = Vec::new();
+    let mut depth: i32 = 0;
+    let mut scope_stack: Vec<(String, i32, bool)> = Vec::new();
+
+    for (i, raw) in content.lines().enumerate() {
+        let line_no = (i as u32) + 1;
+        let t = raw.trim();
+        if t.is_empty() {
+            continue;
+        }
+
+        let mut is_decl_line = false;
+
+        let pre = t
+            .strip_prefix("export default ")
+            .or_else(|| t.strip_prefix("export "))
+            .unwrap_or(t);
+        let fn_rest = pre
+            .strip_prefix("async function ")
+            .or_else(|| pre.strip_prefix("function "));
+        if let Some(rest) = fn_rest {
+            is_decl_line = true;
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+                .collect();
+            if !name.is_empty() && raw.contains('{') {
+                let qualified = if let Some((cls, _, true)) = scope_stack.last() {
+                    format!("{cls}.{name}")
+                } else {
+                    name
+                };
+                scope_stack.push((qualified, depth, false));
+            }
+        }
+        if let Some(rest) = pre.strip_prefix("class ") {
+            is_decl_line = true;
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+                .collect();
+            if !name.is_empty() && raw.contains('{') {
+                scope_stack.push((name, depth, true));
+            }
+        }
+        if !is_decl_line {
+            if let Some((cls_name, _, true)) = scope_stack.last().cloned() {
+                let stripped = t
+                    .trim_start_matches("public ")
+                    .trim_start_matches("private ")
+                    .trim_start_matches("protected ")
+                    .trim_start_matches("static ")
+                    .trim_start_matches("readonly ")
+                    .trim_start_matches("abstract ")
+                    .trim_start_matches("override ")
+                    .trim_start_matches("async ")
+                    .trim_start_matches("get ")
+                    .trim_start_matches("set ");
+                let head: String = stripped
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+                    .collect();
+                if !head.is_empty()
+                    && !is_ts_call_keyword(&head)
+                    && stripped[head.len()..].trim_start().starts_with('(')
+                    && raw.contains('{')
+                {
+                    is_decl_line = true;
+                    let qualified = format!("{cls_name}.{head}");
+                    scope_stack.push((qualified, depth, false));
+                }
+            }
+        }
+
+        if !is_decl_line {
+            let caller = scope_stack
+                .iter()
+                .rev()
+                .find(|(_, _, is_class)| !*is_class)
+                .map(|(n, _, _)| n.as_str())
+                .unwrap_or("");
+            extract_ts_calls_from_line(raw, line_no, caller, language, file_path, &mut out);
+        }
+
+        let (opens, closes) = count_braces(raw);
+        depth += opens - closes;
+        while let Some((_, open_depth, _)) = scope_stack.last() {
+            if depth <= *open_depth {
+                scope_stack.pop();
+            } else {
+                break;
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5199,5 +5564,174 @@ func LongName(
         assert_eq!(calls.len(), 1, "got {calls:#?}");
         assert_eq!(calls[0].callee, "body_call");
         assert_eq!(calls[0].caller, "LongName");
+    }
+
+    // ── Phase 2 #3 third slice (cont.) — TS/JS call extractor ──────────────
+
+    #[test]
+    fn ts_call_bare_function() {
+        let src = "\
+function outer() {
+    foo();
+}
+";
+        let calls = extract_ts_calls(src, "f.ts", "typescript");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, "foo");
+        assert_eq!(calls[0].caller, "outer");
+        assert_eq!(calls[0].language, "typescript");
+    }
+
+    #[test]
+    fn ts_call_qualified_path() {
+        let src = "\
+function outer() {
+    React.useState(0);
+    Object.keys(map);
+}
+";
+        let calls = extract_ts_calls(src, "f.tsx", "typescript");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, ["React.useState", "Object.keys"]);
+    }
+
+    #[test]
+    fn ts_call_method_via_qualified_path() {
+        // TS/JS uses `.` for both qualified calls and method calls,
+        // so `arr.push(1)` becomes callee=`arr.push` (not `.push`).
+        let src = "\
+function outer() {
+    arr.push(1);
+    arr.map(x => x);
+}
+";
+        let calls = extract_ts_calls(src, "f.ts", "typescript");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].callee, "arr.push");
+        assert_eq!(calls[1].callee, "arr.map");
+    }
+
+    #[test]
+    fn ts_call_method_dot_after_call_expression() {
+        // The leading-`.` method form fires when there's no preceding
+        // identifier — typically after a `)` from a chained call.
+        let src = "\
+function outer() {
+    foo().bar();
+    arr.filter(x => x).map(y => y);
+}
+";
+        let calls = extract_ts_calls(src, "f.ts", "typescript");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, ["foo", ".bar", "arr.filter", ".map"]);
+    }
+
+    #[test]
+    fn ts_call_skips_keywords() {
+        let src = "\
+function outer() {
+    if (cond()) return;
+    while (more()) { break; }
+    const x = new Foo();
+    return foo();
+}
+";
+        let calls = extract_ts_calls(src, "f.ts", "typescript");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, ["cond", "more", "Foo", "foo"]);
+    }
+
+    #[test]
+    fn ts_call_skips_strings_and_comments() {
+        let src = "\
+function outer() {
+    const s = \"foo()\";
+    const t = 'bar()';
+    const u = `template ${baz()}`;
+    /* multi
+       line fake_call();
+       another();
+    */
+    real_call();
+}
+";
+        let calls = extract_ts_calls(src, "f.ts", "typescript");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real_call");
+    }
+
+    #[test]
+    fn ts_call_class_method_qualifies_caller() {
+        let src = "\
+class Foo {
+    bar() {
+        helper();
+    }
+    static factory() {
+        Foo.bar();
+    }
+}
+";
+        let calls = extract_ts_calls(src, "f.ts", "typescript");
+        let helper = calls.iter().find(|c| c.callee == "helper").unwrap();
+        assert_eq!(helper.caller, "Foo.bar");
+        let factory_call = calls.iter().find(|c| c.callee == "Foo.bar").unwrap();
+        assert_eq!(factory_call.caller, "Foo.factory");
+    }
+
+    #[test]
+    fn ts_call_async_function() {
+        let src = "\
+async function outer() {
+    await fetch(url);
+    return data();
+}
+";
+        let calls = extract_ts_calls(src, "f.ts", "typescript");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, ["fetch", "data"]);
+        assert!(calls.iter().all(|c| c.caller == "outer"));
+    }
+
+    #[test]
+    fn ts_call_constructor_emits_class_name() {
+        let src = "\
+function outer() {
+    const a = new Foo(1);
+    const b = new pkg.Bar();
+}
+";
+        let calls = extract_ts_calls(src, "f.ts", "typescript");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, ["Foo", "pkg.Bar"]);
+    }
+
+    #[test]
+    fn ts_call_optional_chain_method() {
+        let src = "\
+function outer() {
+    obj?.method?.();
+    arr?.length;
+}
+";
+        let calls = extract_ts_calls(src, "f.ts", "typescript");
+        // `?.length` is a property access (no `(` after), not a call.
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].callee, ".method");
+    }
+
+    #[test]
+    fn ts_call_multiline_template_string_does_not_leak() {
+        let src = "\
+function outer() {
+    const t = `multi
+        line template
+        with fake_call();`;
+    real_call();
+}
+";
+        let calls = extract_ts_calls(src, "f.ts", "typescript");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real_call");
     }
 }
