@@ -514,11 +514,20 @@ enum DreamOp {
     ///
     /// Order-independent: caller can pass the two keys in any order; the
     /// command swaps them so the diff is always "older → newer".
+    ///
+    /// **ζ-16 (2026-05-12)** — `--auto` skips the key arguments and pulls
+    /// the two most-recent `snapshot_daily_*` rows from the store. Pairs
+    /// with the ζ-10 daily cron so a one-word `dream diff --auto` shows
+    /// the last 24h hygiene net effect.
     Diff {
-        /// First snapshot memory key.
-        key_a: String,
-        /// Second snapshot memory key.
-        key_b: String,
+        /// First snapshot memory key. Required unless `--auto` is set.
+        key_a: Option<String>,
+        /// Second snapshot memory key. Required unless `--auto` is set.
+        key_b: Option<String>,
+        /// ζ-16 — fetch the two most-recent active `snapshot_daily_*`
+        /// memories and diff them. Errors out if fewer than 2 exist yet.
+        #[arg(long, conflicts_with_all = ["key_a", "key_b"])]
+        auto: bool,
         /// Emit raw JSON deltas instead of pretty text. Useful for
         /// piping into other tools.
         #[arg(long)]
@@ -954,8 +963,8 @@ async fn main() -> Result<()> {
                 print_only,
                 json,
             } => run_dream_snapshot(name.as_deref(), *days, *print_only, *json).await,
-            DreamOp::Diff { key_a, key_b, json } => {
-                run_dream_diff(key_a, key_b, *json).await
+            DreamOp::Diff { key_a, key_b, auto, json } => {
+                run_dream_diff(key_a.as_deref(), key_b.as_deref(), *auto, *json).await
             }
             DreamOp::Weekly { no_snapshot, json } => {
                 run_dream_weekly(*no_snapshot, *json).await
@@ -2950,13 +2959,48 @@ fn civil_from_days(z: i64) -> (i32, u32, u32) {
 /// Closes the `dream snapshot` time-series loop: ζ-1 wrote the artifact
 /// shape, ζ-3 makes it answer "what changed about me between t_a and t_b"
 /// in one command. Vision §5 身份元监控 reaches usable shape.
-async fn run_dream_diff(key_a: &str, key_b: &str, as_json: bool) -> Result<()> {
+async fn run_dream_diff(
+    key_a: Option<&str>,
+    key_b: Option<&str>,
+    auto: bool,
+    as_json: bool,
+) -> Result<()> {
     use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
         .await
         .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+
+    // ζ-16: --auto pulls the latest pair of snapshot_daily_* rows.
+    // Without --auto, both keys are required (CLI validation lets one
+    // through as None for clap reasons, so re-check at runtime).
+    let (resolved_a, resolved_b) = if auto {
+        let pair = store
+            .latest_daily_snapshot_pair()
+            .await
+            .map_err(|e| anyhow::anyhow!("latest_daily_snapshot_pair: {e}"))?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--auto needs at least 2 active `snapshot_daily_*` rows in the store; \
+                     run `agent-bridge dream snapshot --name daily` twice (e.g. via the \
+                     ζ-10 daily cron) before retrying"
+                )
+            })?;
+        // pair = (older, newer); diff helper auto-orders by captured_at,
+        // so order here is informational only.
+        (pair.0, pair.1)
+    } else {
+        let a = key_a
+            .ok_or_else(|| anyhow::anyhow!("KEY_A is required unless `--auto` is set"))?
+            .to_string();
+        let b = key_b
+            .ok_or_else(|| anyhow::anyhow!("KEY_B is required unless `--auto` is set"))?
+            .to_string();
+        (a, b)
+    };
+    let key_a = resolved_a.as_str();
+    let key_b = resolved_b.as_str();
 
     let rec_a = store
         .memory_get(key_a)

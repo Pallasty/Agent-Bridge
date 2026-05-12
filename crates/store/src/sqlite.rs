@@ -2877,6 +2877,47 @@ impl StateStore for SqliteStore {
         Ok(archived)
     }
 
+    async fn latest_daily_snapshot_pair(&self) -> Result<Option<(String, String)>> {
+        // ζ-16: ORDER BY created_at DESC + LIMIT 2. The ζ-10 cron stamps
+        // a fresh `snapshot_daily_<YYYYMMDD_HHMM>` row each morning, so
+        // created_at strictly increases per run and rank-by-time matches
+        // rank-by-key alphabetically. We still order by created_at (not
+        // key) so a manual mid-day snapshot named with a different slug
+        // wouldn't poison the chain — only the cron's `_daily_*` prefix
+        // is considered.
+        // `superseded` is intentionally included alongside `active`:
+        // dream snapshot writes through memory_save, which Phase-1-P2
+        // auto-reconsolidates same-kind rows by content similarity and
+        // marks the older one `superseded`. For diff purposes that older
+        // row is exactly what we want — yesterday's frozen state — so
+        // skipping it would defeat the entire --auto contract. We do
+        // exclude `tombstoned` + `archived`: those represent operator
+        // intent to retire, and resurrecting them as a diff source
+        // would silently reverse that decision.
+        let pair = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<String>> {
+                let mut stmt = c.prepare(
+                    "SELECT key FROM memories \
+                     WHERE status IN ('active', 'superseded') \
+                       AND kind = 'snapshot' \
+                       AND key LIKE 'snapshot_daily_%' \
+                     ORDER BY created_at DESC LIMIT 2",
+                )?;
+                let rows: Vec<String> = stmt
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<RusqliteResult<_>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("latest_daily_snapshot_pair: {e}")))?;
+        // DESC means [newest, second-newest]. Caller wants (older, newer).
+        match pair.as_slice() {
+            [newer, older] => Ok(Some((older.clone(), newer.clone()))),
+            _ => Ok(None),
+        }
+    }
+
     async fn replay_audit_stats(
         &self,
         stale_days: u32,
@@ -11568,6 +11609,124 @@ mod tests {
             stats.spearman_r_touched
         );
 
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // ── ζ-16 latest_daily_snapshot_pair ─────────────────────────────
+
+    async fn open_zeta16_store() -> (SqliteStore, std::path::PathBuf) {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-zeta16-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("zeta16.db"))
+            .await
+            .expect("open");
+        (store, temp_dir)
+    }
+
+    /// Insert a `kind=snapshot` row with the given key + an artificial
+    /// `created_at`. Bypasses memory_save which would stamp `now`, since
+    /// the whole point of the test is to control ordering.
+    async fn insert_snapshot(store: &SqliteStore, key: &str, created_at: i64, status: &str) {
+        let key = key.to_string();
+        let status = status.to_string();
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "INSERT INTO memories (key, kind, content, tags, related_keys, status,
+                                           created_at, updated_at, last_accessed_at,
+                                           access_count, importance)
+                     VALUES (?, 'snapshot', '{}', '[]', '[]', ?, ?, ?, 0, 0, 0.5)",
+                    rusqlite::params![key, status, created_at, created_at],
+                )
+            })
+            .await
+            .expect("insert snapshot");
+    }
+
+    #[tokio::test]
+    async fn latest_daily_snapshot_pair_returns_none_when_empty() {
+        let (store, temp_dir) = open_zeta16_store().await;
+        let pair = store.latest_daily_snapshot_pair().await.expect("query");
+        assert!(pair.is_none(), "expected None on empty store, got {:?}", pair);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn latest_daily_snapshot_pair_returns_none_with_only_one() {
+        // Single daily snapshot ≠ enough to diff. Caller must surface the
+        // friendly "run again tomorrow" message via Ok(None).
+        let (store, temp_dir) = open_zeta16_store().await;
+        insert_snapshot(&store, "snapshot_daily_20260512_0342", 100, "active").await;
+        let pair = store.latest_daily_snapshot_pair().await.expect("query");
+        assert!(pair.is_none(), "expected None with single row, got {:?}", pair);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn latest_daily_snapshot_pair_returns_older_then_newer_by_created_at() {
+        // (older, newer) order is the contract — `dream diff` happens to
+        // auto-order by captured_at, but downstream callers and humans
+        // both want chronological order regardless.
+        let (store, temp_dir) = open_zeta16_store().await;
+        insert_snapshot(&store, "snapshot_daily_old", 100, "active").await;
+        insert_snapshot(&store, "snapshot_daily_mid", 200, "active").await;
+        insert_snapshot(&store, "snapshot_daily_new", 300, "active").await;
+        let pair = store
+            .latest_daily_snapshot_pair()
+            .await
+            .expect("query")
+            .expect("at least 2 rows");
+        // Latest 2 = mid + new. Returned as (older=mid, newer=new).
+        assert_eq!(pair.0, "snapshot_daily_mid");
+        assert_eq!(pair.1, "snapshot_daily_new");
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn latest_daily_snapshot_pair_includes_superseded_but_skips_tombstoned_archived() {
+        // Phase-1-P2 auto-supersedes older same-kind rows when a fresh
+        // snapshot lands. For diff purposes that superseded row is
+        // *exactly* what we want (yesterday's state); excluding it would
+        // break --auto in any store the cron has touched twice. Tombstoned
+        // and archived snapshots reflect explicit retirement and stay out.
+        // Also exercises the prefix + kind filters: a manual-named
+        // snapshot and a non-snapshot kind don't poison the pair.
+        let (store, temp_dir) = open_zeta16_store().await;
+        insert_snapshot(&store, "snapshot_daily_a", 100, "superseded").await;
+        insert_snapshot(&store, "snapshot_daily_b", 200, "active").await;
+        insert_snapshot(&store, "snapshot_daily_dead", 350, "tombstoned").await;
+        insert_snapshot(&store, "snapshot_daily_old_dead", 400, "archived").await;
+        insert_snapshot(&store, "snapshot_manual_xyz", 500, "active").await; // wrong prefix
+        // Wrong kind: insert manually with kind=memory not snapshot.
+        store
+            .conn
+            .call(|c| -> RusqliteResult<usize> {
+                c.execute(
+                    "INSERT INTO memories (key, kind, content, tags, related_keys, status,
+                                           created_at, updated_at, last_accessed_at,
+                                           access_count, importance)
+                     VALUES ('snapshot_daily_wrongkind', 'memory', '{}', '[]', '[]',
+                             'active', 600, 600, 0, 0, 0.5)",
+                    [],
+                )
+            })
+            .await
+            .expect("insert");
+
+        let pair = store
+            .latest_daily_snapshot_pair()
+            .await
+            .expect("query")
+            .expect("two valid daily snapshots remain");
+        assert_eq!(pair.0, "snapshot_daily_a");
+        assert_eq!(pair.1, "snapshot_daily_b");
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 }

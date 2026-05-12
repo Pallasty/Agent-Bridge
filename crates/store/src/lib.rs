@@ -1348,6 +1348,27 @@ pub trait StateStore: Send + Sync {
         Ok(0)
     }
 
+    /// ζ-16 — return the two most-recent `snapshot_daily_*` memory keys
+    /// as `(older, newer)`. Designed to feed `dream diff --auto` so the
+    /// operator doesn't have to look up yesterday's vs today's slug
+    /// after the ζ-10 daily cron fires.
+    ///
+    /// Implementations should:
+    /// - filter `kind = 'snapshot'`, `key LIKE 'snapshot_daily_%'`
+    /// - accept both `active` and `superseded` (dream snapshot writes
+    ///   through memory_save → Phase-1-P2 auto-supersedes the older
+    ///   same-kind row, but for diff purposes that older row *is* the
+    ///   target). Exclude `tombstoned` + `archived` — those reflect
+    ///   explicit retirement.
+    /// - order by `created_at DESC` and LIMIT 2
+    /// - return `Ok(None)` when fewer than 2 daily snapshots exist
+    ///
+    /// Default returns `Ok(None)` so non-sqlite stores can opt out
+    /// without a build break.
+    async fn latest_daily_snapshot_pair(&self) -> Result<Option<(String, String)>> {
+        Ok(None)
+    }
+
     /// Audit `dream replay` output: are the LLM-consolidated summary
     /// memories actually used after creation? `stale_days` controls the
     /// "dead weight" cutoff — a `p5_replay`-tagged memory with
