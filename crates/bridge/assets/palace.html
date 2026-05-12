@@ -1190,6 +1190,23 @@
       gap: 16px;
     }
     #footer .hint { color: #4a4a55; }
+    /* P12 — embedding_backend breakdown pill in footer. Surfaces the
+       hash/onnx/unknown split so the user sees when reindex would help. */
+    #footer .embedding-stats {
+      color: #4a4a55;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    #footer .embedding-stats .bk {
+      margin-right: 8px;
+    }
+    #footer .embedding-stats .bk.onnx { color: #5cc89a; }
+    #footer .embedding-stats .bk.hash { color: #c8a96a; }
+    #footer .embedding-stats .bk.unknown { color: #7a7a85; }
+    #footer .embedding-stats .reindex-hint {
+      color: #a87cff;
+      margin-left: 10px;
+      letter-spacing: 0.04em;
+    }
   </style>
 </head>
 <body>
@@ -1312,6 +1329,7 @@
 
   <div id="footer">
     <span>circles = sqlite · rounded squares = markdown · cyan dotted = co-activation</span>
+    <span class="embedding-stats" id="embedding-stats" title="embedding backend distribution across active memories"></span>
     <span class="hint" id="focus-hint"></span>
   </div>
 
@@ -1470,6 +1488,45 @@ const state = {
 };
 
 // ── Load graph from server ──────────────────────────────────────
+// P12 — fetch embedding_backend breakdown + render footer pill. Called
+// at startup + after operations that may shift the distribution (memory
+// save, reindex). Failure is silent: footer just shows nothing.
+async function loadEmbeddingStats() {
+  const el = document.getElementById("embedding-stats");
+  if (!el) return;
+  try {
+    const r = await fetch("/api/embedding-stats");
+    const j = await r.json();
+    if (!j || !Array.isArray(j.breakdown)) { el.textContent = ""; return; }
+    // Map backend names to short, color-coded display:
+    //   all-MiniLM-L6-v2 → onnx (green)
+    //   fnv1a-hash-384   → hash (amber)
+    //   unknown          → unknown (gray)
+    //   any future       → its raw name (gray)
+    const labelFor = (bk) => {
+      if (bk === "all-MiniLM-L6-v2") return { short: "onnx", cls: "onnx" };
+      if (bk === "fnv1a-hash-384") return { short: "hash", cls: "hash" };
+      if (bk === "unknown") return { short: "?", cls: "unknown" };
+      return { short: bk, cls: "unknown" };
+    };
+    const parts = j.breakdown.map(b => {
+      const { short, cls } = labelFor(b.backend);
+      return `<span class="bk ${cls}" title="${escapeHTML(b.backend)}: ${b.count}">${short}:${b.count}</span>`;
+    });
+    // Reindex hint when hash or unknown rows are non-trivial — the
+    // P9 only_stale path can upgrade hash→ONNX once ONNX is ready.
+    const reindexable = j.breakdown
+      .filter(b => b.backend === "fnv1a-hash-384")
+      .reduce((s, b) => s + b.count, 0);
+    const hint = reindexable > 0
+      ? `<span class="reindex-hint" title="run memory_reindex(only_stale=true) to upgrade hash → ONNX">↑ ${reindexable} reindexable</span>`
+      : "";
+    el.innerHTML = parts.join("") + hint;
+  } catch (e) {
+    el.textContent = "";
+  }
+}
+
 async function loadGraph() {
   const url = state.includeSkills ? "/api/graph?all=1" : "/api/graph";
   let data;
@@ -3042,6 +3099,7 @@ async function saveCanvas() {
     setTimeout(async () => {
       closeCanvas();
       await loadGraph();
+      loadEmbeddingStats();  // P12 — new memory shifts the breakdown
       // Land focus on the new working_doc so the user sees the sediment.
       // Add `.new-sediment` class for ~1.5s — cytoscape's overlay-* gives
       // a soft cyan ring telegraphing "this is the node you just made".
@@ -3690,6 +3748,7 @@ function bindCanvasGlobals() {
 // panel via /api/memory — the focus highlight is best-effort.
 (async () => {
   await loadGraph();
+  loadEmbeddingStats();  // P12 footer pill — fire-and-forget, not awaited
   bindCanvasGlobals();
   const focus = new URLSearchParams(location.search).get("focus");
   if (!focus) return;

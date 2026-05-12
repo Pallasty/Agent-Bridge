@@ -122,6 +122,7 @@ pub async fn run(
         .route("/api/canvas-chat-stream", post(api_canvas_chat_stream))
         .route("/api/memory/:key/tombstone", post(api_memory_tombstone))
         .route("/api/lineage/:key", get(api_lineage))
+        .route("/api/embedding-stats", get(api_embedding_stats))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen)
@@ -776,6 +777,37 @@ async fn api_lineage(
         "chain": chain,
         "chain_length": chain.len(),
         "truncated": truncated,
+    })))
+}
+
+// ── Embedding backend stats (P12) ────────────────────────────────────────
+//
+// Surfaces the v26 `embedding_backend` distribution so Palace can show
+// "you have N hash-quality memories, run memory_reindex --only-stale
+// when ONNX is ready." NULL is reported as `"unknown"` (pre-v26 rows).
+
+async fn api_embedding_stats(
+    State(s): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let rows = s
+        .store
+        .memory_embedding_backend_counts()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("embedding_backend_counts: {e}"),
+            )
+        })?;
+    let total: u64 = rows.iter().map(|(_, n)| n).sum();
+    let breakdown: Vec<Value> = rows
+        .into_iter()
+        .map(|(b, n)| json!({ "backend": b, "count": n }))
+        .collect();
+    Ok(Json(json!({
+        "ok": true,
+        "total_active": total,
+        "breakdown": breakdown,
     })))
 }
 

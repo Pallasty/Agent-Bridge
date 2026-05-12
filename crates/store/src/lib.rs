@@ -1431,6 +1431,15 @@ pub trait StateStore: Send + Sync {
     /// Intended for `memory_stats` MCP tool and session-curate diagnostics.
     async fn memory_stats(&self) -> Result<MemoryStats>;
 
+    /// P12: counts of active memories grouped by `embedding_backend`
+    /// (added v26). NULL is reported as the literal string `"unknown"`
+    /// so the caller doesn't have to special-case it. Used by Palace
+    /// footer to surface "you have N hash-quality rows; reindex when
+    /// ONNX is ready" awareness. Default impl returns empty vec.
+    async fn memory_embedding_backend_counts(&self) -> Result<Vec<(String, u64)>> {
+        Ok(Vec::new())
+    }
+
     /// Semantic search: embed `query` via feature hashing, load all stored
     /// embeddings, return memories ranked by cosine similarity ≥ `threshold`.
     /// Falls back gracefully when no embeddings are stored yet.
