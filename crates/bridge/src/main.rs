@@ -479,6 +479,26 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **Monday-morning composite** — Bundles three read-only audits into
+    /// one command: replay-audit (P5 summary quality + waypoint pass +
+    /// orphan-overlap), signal-fidelity (Spearman importance↔access +
+    /// misranks), and an optional snapshot capture. Designed for a weekly
+    /// review pulse where you want the full state-of-the-memory in one
+    /// scroll instead of three.
+    ///
+    /// All three component ops are pure SQL/Rust passes — no LLM, no
+    /// writes (except the optional snapshot save). Vision §5 身份元监控
+    /// surface for the human reviewer.
+    Weekly {
+        /// Skip the snapshot capture step (just print the audits).
+        /// Default: capture a `kind=snapshot` memory tagged `weekly`.
+        #[arg(long)]
+        no_snapshot: bool,
+        /// Emit raw JSON containing all three structured results.
+        /// Pretty text is the default — easier to skim.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -870,6 +890,9 @@ async fn main() -> Result<()> {
             } => run_dream_snapshot(name.as_deref(), *days, *print_only, *json).await,
             DreamOp::Diff { key_a, key_b, json } => {
                 run_dream_diff(key_a, key_b, *json).await
+            }
+            DreamOp::Weekly { no_snapshot, json } => {
+                run_dream_weekly(*no_snapshot, *json).await
             }
         };
     }
@@ -3103,6 +3126,163 @@ async fn run_dream_diff(key_a: &str, key_b: &str, as_json: bool) -> Result<()> {
         println!();
         println!("(no notable deltas — quiet window)");
     }
+    Ok(())
+}
+
+/// Monday-morning composite: bundles replay-audit + signal-fidelity +
+/// optional snapshot into one command. Vision §5 身份元监控 surface for
+/// the human reviewer — answers "what does the memory state look like
+/// this week, and is the Hebbian closure still working?" in one scroll.
+///
+/// Three sections, separated by blank-line dividers in pretty mode:
+///   1. replay-audit (P5 summary use + waypoint + orphan-overlap)
+///   2. signal-fidelity (Spearman importance↔access + misranks)
+///   3. snapshot key (if not --no-snapshot; identifies the freshly-saved
+///      `kind=snapshot` memory the next `dream weekly` can diff against)
+async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+
+    // Replay-audit with defaults: stale_days=7, waypoint_window=30min,
+    // overlap=0.5.
+    let replay = store
+        .replay_audit_stats(7, 30 * 60, 0.5)
+        .await
+        .map_err(|e| anyhow::anyhow!("replay_audit_stats: {e}"))?;
+
+    // Signal-fidelity with default top_n=5.
+    let fidelity = store
+        .signal_fidelity_stats(5)
+        .await
+        .map_err(|e| anyhow::anyhow!("signal_fidelity_stats: {e}"))?;
+
+    // Optional snapshot: tag it `weekly` so future weekly diffs can find
+    // the prior pulse without grepping all `kind=snapshot` rows.
+    let now_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let snapshot_key: Option<String> = if no_snapshot {
+        None
+    } else {
+        let auto_name = format!("weekly_{now_epoch}");
+        match run_dream_snapshot(Some(&auto_name), 1, false, true).await {
+            Ok(()) => Some(format!("snapshot_{auto_name}")),
+            Err(e) => {
+                eprintln!("(snapshot save skipped: {e})");
+                None
+            }
+        }
+    };
+
+    if as_json {
+        let payload = serde_json::json!({
+            "generated_at_epoch": now_epoch,
+            "snapshot_key": snapshot_key,
+            "replay_audit": replay,
+            "signal_fidelity": fidelity,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    // ── Section 1: replay-audit ────────────────────────────────────────
+    println!("════════════════════════════════════════════════════════════");
+    println!("  dream weekly — Monday-morning composite");
+    println!("  DB: {}", path.display());
+    println!("  generated_at_epoch: {now_epoch}");
+    println!("════════════════════════════════════════════════════════════");
+    println!();
+    println!("[1/3] replay-audit (P5 summary quality)");
+    println!("─────────────────────────────────────────");
+    if replay.total_summaries == 0 {
+        println!("  (no p5_replay summaries yet — run `dream replay` first)");
+    } else {
+        let useful_ratio = 100.0 * replay.accessed_multi as f64 / replay.total_summaries as f64;
+        println!(
+            "  {} summaries · {:.0}% accessed≥2 · avg access {:.1} (vs source {:.1})",
+            replay.total_summaries, useful_ratio,
+            replay.avg_access_count, replay.avg_source_access_count
+        );
+        if let Some(wp) = &replay.waypoint {
+            println!(
+                "  waypoint ±{}min: {} gateway, {} trailing, {} isolated",
+                wp.window_secs / 60,
+                wp.gateway_summaries,
+                wp.trailing_summaries,
+                wp.isolated_summaries,
+            );
+        }
+        if !replay.overlap_pairs.is_empty() {
+            println!(
+                "  orphan-overlap (J≥0.5): {} duplicate-candidate pair(s)",
+                replay.overlap_pairs.len()
+            );
+            for op in replay.overlap_pairs.iter().take(3) {
+                println!(
+                    "    J={:.2}  {} ↔ {}",
+                    op.jaccard,
+                    short_key(&op.key_a, 40),
+                    short_key(&op.key_b, 40),
+                );
+            }
+        }
+    }
+
+    // ── Section 2: signal-fidelity ────────────────────────────────────
+    println!();
+    println!("[2/3] signal-fidelity (Hebbian closure observability)");
+    println!("─────────────────────────────────────────");
+    if fidelity.total_active < 2 {
+        println!("  (not enough rows to compute correlation)");
+    } else {
+        println!(
+            "  {} active · {} zero-access ({:.0}%) · {} at floor ({:.0}%)",
+            fidelity.total_active,
+            fidelity.n_zero_access,
+            100.0 * fidelity.n_zero_access as f64 / fidelity.total_active as f64,
+            fidelity.n_floor_importance,
+            100.0 * fidelity.n_floor_importance as f64 / fidelity.total_active as f64,
+        );
+        println!(
+            "  spearman r (all)     : {:>+.3}  (touched={:>+.3}, n={})",
+            fidelity.spearman_r, fidelity.spearman_r_touched, fidelity.n_touched,
+        );
+        if !fidelity.under_reinforced.is_empty() {
+            println!(
+                "  top under-reinforced: imp={:.2} acc={} · {}",
+                fidelity.under_reinforced[0].importance,
+                fidelity.under_reinforced[0].access_count,
+                short_key(&fidelity.under_reinforced[0].key, 48),
+            );
+        }
+        if !fidelity.over_promoted.is_empty() {
+            println!(
+                "  top over-promoted   : imp={:.2} acc={} · {}",
+                fidelity.over_promoted[0].importance,
+                fidelity.over_promoted[0].access_count,
+                short_key(&fidelity.over_promoted[0].key, 48),
+            );
+        }
+    }
+
+    // ── Section 3: snapshot key ───────────────────────────────────────
+    println!();
+    println!("[3/3] snapshot");
+    println!("─────────────────────────────────────────");
+    match &snapshot_key {
+        Some(key) => println!("  saved: {key}"),
+        None => println!("  (skipped — pass without --no-snapshot to capture)"),
+    }
+    println!();
+    println!(
+        "next: re-run `dream weekly` in 7 days; \
+         compare via `dream diff <prev_key> <this_key>` for drift."
+    );
     Ok(())
 }
 
