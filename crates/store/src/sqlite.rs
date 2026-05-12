@@ -2114,10 +2114,19 @@ impl StateStore for SqliteStore {
                     .map(|(r, bm25)| {
                         // bm25 is negative (more negative = better match in SQLite).
                         // Convert to positive "match strength", then mix with our
-                        // existing recency+frequency score.
+                        // existing recency+frequency score plus an importance
+                        // bonus. The `+ 0.5 * importance` term closes the
+                        // Hebbian retrieval loop: reinforce-active (586cbb1)
+                        // bumps importance for repeat-use memories, and this
+                        // line is what makes that bump actually move ranks.
+                        // Weight 0.5 calibrated against match_strength + memory_score
+                        // (typical 1.5..7.5) → importance contributes 7-14% of total,
+                        // comparable to semantic search's `+ 0.2 * importance` against
+                        // cosine 0..1. Mirror in exact-key branch below.
                         let match_strength = (-bm25).max(0.0);
-                        let score =
-                            match_strength + memory_score(r.last_accessed_at, r.access_count, now, &r.kind);
+                        let score = match_strength
+                            + memory_score(r.last_accessed_at, r.access_count, now, &r.kind)
+                            + 0.5 * r.importance;
                         MemorySearchHit { record: r, score }
                     })
                     .collect();
@@ -2164,9 +2173,14 @@ impl StateStore for SqliteStore {
                     let tags_match = tags.is_empty() || tags.iter().any(|t| rec.tags.contains(t));
                     let exists = hits.iter().any(|h| h.record.key == rec.key);
                     if tags_match && !exists {
-                        // Keep exact-key hits above fuzzy matches.
-                        let score =
-                            1_000_000.0 + memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind);
+                        // Keep exact-key hits above fuzzy matches. Importance
+                        // term mirrors the fuzzy-match formula above so
+                        // ranking is consistent across paths (matters when
+                        // multiple exact-key candidates exist — rare, but
+                        // deterministic order beats coin flip).
+                        let score = 1_000_000.0
+                            + memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind)
+                            + 0.5 * rec.importance;
                         hits.push(MemorySearchHit { record: rec, score });
                     }
                 }
@@ -10763,6 +10777,78 @@ mod tests {
         let stats = store.signal_fidelity_stats(5).await.expect("fidelity");
         assert_eq!(stats.total_active, 0);
         assert!(stats.spearman_r.is_nan(), "expected NaN, got {}", stats.spearman_r);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_search_fts_rank_respects_importance() {
+        // Two memories with identical content (so bm25 + recency are equal),
+        // differing only in importance. After 2026-05-12 fix
+        // (`+ 0.5 * importance` in FTS scoring), the higher-importance row
+        // must rank first. Before the fix, order was undefined (bm25 tie).
+        use crate::MemoryRecord;
+        let temp_dir = fidelity_temp_dir("fts_rank");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        // Note: memory_save auto-supersedes on token_overlap_ratio > 0.5,
+        // so the two memories must share enough query tokens to BOTH match
+        // FTS but differ enough OVERALL to escape the supersede trigger.
+        // Strategy: shared phrase plus disjoint distinguishing words.
+        let make = |key: &str, importance: f64, body: &str| MemoryRecord {
+            key: key.into(),
+            kind: "fact".into(),
+            content: body.into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store
+            .memory_save(&make(
+                "low_imp",
+                0.10,
+                "synaptic plasticity alpha beta gamma delta epsilon zeta eta theta",
+            ))
+            .await
+            .expect("save low");
+        store
+            .memory_save(&make(
+                "high_imp",
+                0.95,
+                "synaptic plasticity iota kappa lambda mu nu xi omicron pi",
+            ))
+            .await
+            .expect("save high");
+
+        let hits = store
+            .memory_search("synaptic plasticity", &[], 10)
+            .await
+            .expect("search");
+        assert!(hits.len() >= 2, "expected ≥2 hits, got {}", hits.len());
+        // Higher importance must come first.
+        assert_eq!(
+            hits[0].record.key, "high_imp",
+            "high-importance row should rank first; got {:?}",
+            hits.iter().map(|h| &h.record.key).collect::<Vec<_>>()
+        );
+        // Score gap should include ≈ 0.5 * (0.95 - 0.10) = 0.425 from
+        // importance term; bm25 may differ slightly between rows due to
+        // suffix tokens, so allow a wider tolerance.
+        let gap = hits[0].score - hits[1].score;
+        assert!(
+            gap > 0.3 && gap < 0.6,
+            "expected score gap dominated by importance term (~0.425), got {gap}"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
