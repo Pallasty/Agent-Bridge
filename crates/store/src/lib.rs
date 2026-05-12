@@ -599,6 +599,33 @@ pub struct CodebaseCall {
     pub callee: String,
 }
 
+/// One alias-resolved call site — output of [`StateStore::codebase_callers`].
+/// Same fields as [`CodebaseCall`] plus the resolved fully-qualified
+/// callee (rewritten through the in-scope `use` alias) and the alias
+/// that brought the import into scope (when applicable).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedCall {
+    pub file_path: String,
+    pub line: u32,
+    pub language: String,
+    pub caller: String,
+    /// As-written callee at the call site (e.g. `Baz::new` from a
+    /// `use foo::Bar as Baz`).
+    pub callee: String,
+    /// Fully-qualified callee after alias rewrite (e.g. `foo::Bar::new`).
+    /// When emitted from [`StateStore::codebase_callers`] this is the
+    /// path that the call resolved TO — equal to the user's `target`
+    /// argument or a longer suffix of it.
+    pub resolved_callee: String,
+    /// Local alias that brought the import into scope. `None` when the
+    /// import was a plain `use` (last segment used as the local name).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via_alias: Option<String>,
+    /// The `use`/`import` target that resolved this call. Useful for
+    /// debugging why a particular call was matched.
+    pub via_import: String,
+}
+
 /// Reorder memories so `kind == "session_handoff"` rows appear first.
 ///
 /// Session bootstrap and similar call sites use importance-based SQL ordering;
@@ -626,6 +653,30 @@ pub struct DecayUnusedStats {
     pub decayed: u64,
     /// Candidates already at or below the floor — counted but not decayed.
     pub skipped_at_floor: u64,
+}
+
+/// Counts emitted by `memory_reinforce_active` — the positive-reinforcement
+/// mirror of `memory_decay_unused_importance`. Active rows with
+/// `access_count >= min_access` and `last_accessed_at` within the window
+/// get their `importance` bumped by `step`, capped at `ceiling`.
+///
+/// Why it exists: prior to this op the system was entropy-monotonic. Three
+/// passes (`memory_compact`, `memory_decay_importance`, `memory_decay_unused_importance`)
+/// could only LOWER `importance`. Repeatedly-accessed memories were
+/// indistinguishable from inert ones once decay had cratered everything.
+/// Hebbian "cells that fire together wire together" needs a wire-strengthen
+/// step — this is it for single-node importance (the wire-strengthen for
+/// pairs is `dream promote`).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct ReinforceActiveStats {
+    /// Active rows whose `access_count >= min_access` AND
+    /// `last_accessed_at > cutoff` (i.e. "matched the active predicate").
+    pub candidates: u64,
+    /// Rows whose `importance` was actually raised this pass (below ceiling
+    /// and the SQL UPDATE touched them).
+    pub reinforced: u64,
+    /// Candidates already at or above the ceiling — counted but not bumped.
+    pub skipped_at_ceiling: u64,
 }
 
 /// One per-summary row in [`ReplayAuditStats::top_summaries`] /
@@ -1090,6 +1141,30 @@ pub trait StateStore: Send + Sync {
         step: f64,
         floor: f64,
     ) -> Result<DecayUnusedStats>;
+
+    /// Positive-reinforcement mirror of [`Self::memory_decay_unused_importance`].
+    /// Bumps `importance` by `step` (capped at `ceiling`) for every active
+    /// row that has `access_count >= min_access` AND was read within the
+    /// window (`last_accessed_at > now - window_secs`).
+    ///
+    /// Designed to compose with the daily hygiene service alongside
+    /// `decay-unused` and `prune-coactivation-noise`: those two only
+    /// remove signal, this one rewards repeat use so frequently-touched
+    /// memories don't get crushed to the floor by background decay.
+    ///
+    /// Rows with `last_accessed_at = 0` are skipped (markdown imports
+    /// and never-accessed rows can't be reinforced even if their
+    /// `access_count > 0` due to bootstrap inserts).
+    ///
+    /// Typical call: `memory_reinforce_active(7 * 86400, 5, 0.05, 0.95)`
+    /// (7-day window, ≥5 accesses, 5% step, 0.95 ceiling).
+    async fn memory_reinforce_active(
+        &self,
+        window_secs: i64,
+        min_access: u64,
+        step: f64,
+        ceiling: f64,
+    ) -> Result<ReinforceActiveStats>;
 
     /// Apply [`CompactPolicy`]; returns the keys that were (or would be)
     /// removed. Honours `dry_run`.
@@ -1633,6 +1708,35 @@ pub trait StateStore: Send + Sync {
         );
         Err(ab_core::Error::Backend(
             "codebase_calls_for not implemented".into(),
+        ))
+    }
+
+    /// Phase 2 #3 third-slice — alias-resolved call lookup. Joins
+    /// `codebase_imports` (in-scope aliases) with `codebase_calls`
+    /// (textual call sites) so a query for `crate::store::SqliteStore::new`
+    /// also surfaces sites that wrote `Baz::new()` after a
+    /// `use crate::store::SqliteStore as Baz`. Algorithm:
+    ///
+    /// 1. Split `target` at every `::` boundary into (prefix, suffix) pairs.
+    /// 2. For each prefix, find imports whose target equals that prefix.
+    ///    The import's local name is `alias.unwrap_or(last_segment(target))`.
+    /// 3. For each such import, look up calls in the same file whose
+    ///    callee equals `local_name + suffix` (or just `local_name` when
+    ///    suffix is empty).
+    /// 4. Emit one `ResolvedCall` per match, deduping by `(file, line)`.
+    ///
+    /// Returns rows ordered by `(file_path, line)` ascending. Default
+    /// implementation errors so non-sqlite backends opt-in explicitly.
+    async fn codebase_callers(
+        &self,
+        target: &str,
+        file_filter: Option<&str>,
+        root_path: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<ResolvedCall>> {
+        let _ = (target, file_filter, root_path, limit);
+        Err(ab_core::Error::Backend(
+            "codebase_callers not implemented".into(),
         ))
     }
 }

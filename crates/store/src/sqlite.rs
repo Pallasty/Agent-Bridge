@@ -58,6 +58,7 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 use crate::{
     AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
     CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, DecayUnusedStats,
+    ReinforceActiveStats,
     ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
     ForumThreadExport, ForumThreadRecord, IdentityWindow, ImportConflictPolicy, ImportReport,
     McpToolCallStats, McpToolErrorRecord, MemoryEdge, MemoryEdgeExport, MemoryExportFilter,
@@ -3100,6 +3101,61 @@ impl StateStore for SqliteStore {
         Ok(stats)
     }
 
+    async fn memory_reinforce_active(
+        &self,
+        window_secs: i64,
+        min_access: u64,
+        step: f64,
+        ceiling: f64,
+    ) -> Result<ReinforceActiveStats> {
+        let cutoff = now_secs().saturating_sub(window_secs.max(0));
+        let step = step.max(0.0);
+        let ceiling = ceiling.clamp(0.0, 1.0);
+        let min_access_i = min_access as i64;
+        let stats = self
+            .conn
+            .call(move |c| -> RusqliteResult<ReinforceActiveStats> {
+                let tx = c.unchecked_transaction()?;
+                // Count active candidates: read recently AND used at least
+                // `min_access` times. Mirrors decay_unused's separate
+                // count → distinguishes "reinforced" from "at ceiling".
+                let candidates: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM memories
+                      WHERE status = 'active'
+                        AND access_count >= ?1
+                        AND last_accessed_at > 0
+                        AND last_accessed_at > ?2",
+                    params![min_access_i, cutoff],
+                    |r| r.get::<_, i64>(0),
+                )?;
+                // Bump only rows still below the ceiling. CASE is used
+                // over MIN(a,b) for portability (matches decay's symmetry).
+                let reinforced = tx.execute(
+                    "UPDATE memories
+                        SET importance = CASE
+                              WHEN importance + ?2 > ?3 THEN ?3
+                              ELSE importance + ?2
+                            END
+                      WHERE status = 'active'
+                        AND access_count >= ?1
+                        AND last_accessed_at > 0
+                        AND last_accessed_at > ?4
+                        AND importance < ?3",
+                    params![min_access_i, step, ceiling, cutoff],
+                )? as u64;
+                tx.commit()?;
+                let candidates = candidates.max(0) as u64;
+                Ok(ReinforceActiveStats {
+                    candidates,
+                    reinforced,
+                    skipped_at_ceiling: candidates.saturating_sub(reinforced),
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_reinforce_active: {e}")))?;
+        Ok(stats)
+    }
+
     async fn memory_compact(&self, policy: CompactPolicy) -> Result<Vec<String>> {
         let CompactPolicy {
             min_uses,
@@ -4688,6 +4744,157 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("codebase_calls_for: {e}")))
+    }
+
+    async fn codebase_callers(
+        &self,
+        target: &str,
+        file_filter: Option<&str>,
+        root_path: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<crate::ResolvedCall>> {
+        if target.is_empty() {
+            return Err(Error::Backend(
+                "codebase_callers: target is required".into(),
+            ));
+        }
+        let target_owned = target.to_string();
+        let file_f = file_filter.map(|s| format!("%{}%", s));
+        let root_f = root_path.map(|s| s.to_string());
+        let lim = limit.min(500) as usize;
+
+        // Generate every (prefix, suffix) split of the target. For
+        // `crate::store::SqliteStore::new` that's:
+        //   ("crate::store::SqliteStore::new", "")   ← exact match in imports
+        //   ("crate::store::SqliteStore", "new")
+        //   ("crate::store", "SqliteStore::new")
+        //   ("crate", "store::SqliteStore::new")
+        // For each prefix we look up imports, then look up calls in the
+        // same file with callee = local_name + "::" + suffix.
+        let segments: Vec<String> = target_owned
+            .split("::")
+            .map(|s| s.to_string())
+            .collect();
+
+        let mut splits: Vec<(String, String)> = Vec::new();
+        for k in 0..segments.len() {
+            let prefix = segments[..segments.len() - k].join("::");
+            let suffix = segments[segments.len() - k..].join("::");
+            splits.push((prefix, suffix));
+        }
+
+        let mut out: Vec<crate::ResolvedCall> = Vec::new();
+        let mut seen: std::collections::HashSet<(String, u32)> =
+            std::collections::HashSet::new();
+
+        // Single SQL query per prefix to keep round-trips bounded.
+        // Could be optimized to one giant UNION query, but per-prefix
+        // is clearer and the prefix count is small (~ depth of path).
+        for (prefix, suffix) in splits {
+            if prefix.is_empty() {
+                continue;
+            }
+            let prefix_clone = prefix.clone();
+            let suffix_clone = suffix.clone();
+            let file_f_clone = file_f.clone();
+            let root_f_clone = root_f.clone();
+            let target_clone = target_owned.clone();
+            let rows = self
+                .conn
+                .call(move |c| -> RusqliteResult<Vec<crate::ResolvedCall>> {
+                    // Step 1: imports whose target equals this prefix.
+                    let mut imp_stmt = c.prepare(
+                        "SELECT file_path, target, alias
+                         FROM codebase_imports
+                         WHERE target = ?1
+                           AND (?2 IS NULL OR root_path = ?2)
+                           AND (?3 IS NULL OR file_path LIKE ?3)",
+                    )?;
+                    let imports: Vec<(String, String, Option<String>)> = imp_stmt
+                        .query_map(
+                            params![prefix_clone, root_f_clone, file_f_clone],
+                            |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, String>(1)?,
+                                    row.get::<_, Option<String>>(2)?,
+                                ))
+                            },
+                        )?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    if imports.is_empty() {
+                        return Ok(Vec::new());
+                    }
+
+                    // Step 2: for each import, look up calls in same file
+                    // with the expected callee.
+                    let mut call_stmt = c.prepare(
+                        "SELECT line, language, caller, callee
+                         FROM codebase_calls
+                         WHERE file_path = ?1
+                           AND callee = ?2
+                         ORDER BY line",
+                    )?;
+                    let mut local_out: Vec<crate::ResolvedCall> = Vec::new();
+                    for (file_path, imp_target, alias) in imports {
+                        let local_name = alias.clone().unwrap_or_else(|| {
+                            imp_target
+                                .rsplit("::")
+                                .next()
+                                .unwrap_or(&imp_target)
+                                .to_string()
+                        });
+                        let expected_callee = if suffix_clone.is_empty() {
+                            local_name.clone()
+                        } else {
+                            format!("{}::{}", local_name, suffix_clone)
+                        };
+                        let calls: Vec<(i64, String, String, String)> = call_stmt
+                            .query_map(
+                                params![file_path, expected_callee],
+                                |row| {
+                                    Ok((
+                                        row.get::<_, i64>(0)?,
+                                        row.get::<_, String>(1)?,
+                                        row.get::<_, String>(2)?,
+                                        row.get::<_, String>(3)?,
+                                    ))
+                                },
+                            )?
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
+                        for (line, language, caller, callee) in calls {
+                            local_out.push(crate::ResolvedCall {
+                                file_path: file_path.clone(),
+                                line: line as u32,
+                                language,
+                                caller,
+                                callee,
+                                resolved_callee: target_clone.clone(),
+                                via_alias: alias.clone(),
+                                via_import: imp_target.clone(),
+                            });
+                        }
+                    }
+                    Ok(local_out)
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("codebase_callers: {e}")))?;
+
+            for row in rows {
+                if seen.insert((row.file_path.clone(), row.line)) {
+                    out.push(row);
+                    if out.len() >= lim {
+                        out.sort_by(|a, b| {
+                            a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line))
+                        });
+                        return Ok(out);
+                    }
+                }
+            }
+        }
+
+        out.sort_by(|a, b| a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line)));
+        Ok(out)
     }
 
 
@@ -9632,6 +9839,259 @@ mod tests {
             stats.overlap_pairs.is_empty(),
             "manual_summary lacks p5_replay tag and must not surface"
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // Hebbian wire-strengthen (memory_reinforce_active) — positive-reinforcement
+    // mirror of memory_decay_unused_importance. Uses a memory_import seed
+    // (memory_save would force last_accessed_at=now, defeating the recency
+    // filter). Covers each WHERE-clause branch: too-old skip, below-min skip,
+    // never-accessed skip, at-ceiling counted-but-skipped, tombstoned skip,
+    // happy-path reinforce.
+
+    async fn import_reinforce_fixture(
+        store: &SqliteStore,
+        temp_dir: &std::path::Path,
+        rows: &[(&str, i64, u64, f64, &str)], // key, last_at, access_count, importance, status
+    ) {
+        let jsonl = temp_dir.join("reinforce-fixture.jsonl");
+        let mut buf = String::new();
+        for (key, last_accessed_at, access_count, importance, status) in rows {
+            let line = serde_json::json!({
+                "key": key,
+                "kind": "fact",
+                "content": format!("reinforce-fixture:{key}"),
+                "tags": [],
+                "related_keys": [],
+                "scope": null,
+                "created_at": 1_700_000_000_i64,
+                "updated_at": 1_700_000_000_i64,
+                "last_accessed_at": last_accessed_at,
+                "access_count": access_count,
+                "importance": importance,
+                "status": status,
+                "trigger_pattern": null,
+            });
+            buf.push_str(&line.to_string());
+            buf.push('\n');
+        }
+        tokio::fs::write(&jsonl, buf).await.expect("write jsonl");
+        store
+            .memory_import(&jsonl, ImportConflictPolicy::Overwrite, None)
+            .await
+            .expect("import");
+    }
+
+    fn reinforce_temp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "ab-reinforce-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    #[tokio::test]
+    async fn reinforce_active_bumps_recently_used_rows() {
+        let temp_dir = reinforce_temp_dir("happy");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let now = now_secs();
+        let day = 86_400_i64;
+        // Accessed 1 day ago, 10 hits, importance 0.2 → should jump to 0.25.
+        import_reinforce_fixture(
+            &store,
+            &temp_dir,
+            &[("hot_x", now - 1 * day, 10, 0.2, "active")],
+        )
+        .await;
+
+        let stats = store
+            .memory_reinforce_active(7 * day, 5, 0.05, 0.95)
+            .await
+            .expect("reinforce");
+        assert_eq!(stats.candidates, 1);
+        assert_eq!(stats.reinforced, 1);
+        assert_eq!(stats.skipped_at_ceiling, 0);
+        let imp = read_importance(&store, "hot_x").await;
+        assert!((imp - 0.25).abs() < 1e-9, "imp={imp} (expected 0.20 + 0.05)");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn reinforce_active_skips_stale_access() {
+        let temp_dir = reinforce_temp_dir("stale");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let now = now_secs();
+        let day = 86_400_i64;
+        // Accessed 30 days ago — well past the 7-day window.
+        import_reinforce_fixture(
+            &store,
+            &temp_dir,
+            &[("old_a", now - 30 * day, 20, 0.3, "active")],
+        )
+        .await;
+
+        let stats = store
+            .memory_reinforce_active(7 * day, 5, 0.05, 0.95)
+            .await
+            .expect("reinforce");
+        assert_eq!(stats.candidates, 0);
+        assert_eq!(stats.reinforced, 0);
+        assert!((read_importance(&store, "old_a").await - 0.3).abs() < 1e-9);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn reinforce_active_skips_below_min_access() {
+        let temp_dir = reinforce_temp_dir("below_min");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let now = now_secs();
+        let day = 86_400_i64;
+        // Accessed yesterday but only 3 hits — below default min of 5.
+        import_reinforce_fixture(
+            &store,
+            &temp_dir,
+            &[("rare_b", now - 1 * day, 3, 0.4, "active")],
+        )
+        .await;
+
+        let stats = store
+            .memory_reinforce_active(7 * day, 5, 0.05, 0.95)
+            .await
+            .expect("reinforce");
+        assert_eq!(stats.candidates, 0);
+        assert_eq!(stats.reinforced, 0);
+        assert!((read_importance(&store, "rare_b").await - 0.4).abs() < 1e-9);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn reinforce_active_skips_never_accessed() {
+        let temp_dir = reinforce_temp_dir("never");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let day = 86_400_i64;
+        // last_accessed_at=0 means never read — bootstrap insert pattern,
+        // must not be reinforced even if access_count somehow non-zero.
+        import_reinforce_fixture(
+            &store,
+            &temp_dir,
+            &[("ghost_c", 0, 10, 0.3, "active")],
+        )
+        .await;
+
+        let stats = store
+            .memory_reinforce_active(7 * day, 5, 0.05, 0.95)
+            .await
+            .expect("reinforce");
+        assert_eq!(stats.candidates, 0);
+        assert_eq!(stats.reinforced, 0);
+        assert!((read_importance(&store, "ghost_c").await - 0.3).abs() < 1e-9);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn reinforce_active_clamps_to_ceiling() {
+        let temp_dir = reinforce_temp_dir("ceiling");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let now = now_secs();
+        let day = 86_400_i64;
+        // 0.92 + 0.05 = 0.97 > ceiling 0.95 → CASE clamps to 0.95.
+        import_reinforce_fixture(
+            &store,
+            &temp_dir,
+            &[("near_top_d", now - 1 * day, 50, 0.92, "active")],
+        )
+        .await;
+
+        let stats = store
+            .memory_reinforce_active(7 * day, 5, 0.05, 0.95)
+            .await
+            .expect("reinforce");
+        assert_eq!(stats.candidates, 1);
+        assert_eq!(stats.reinforced, 1);
+        let imp = read_importance(&store, "near_top_d").await;
+        assert!(
+            (imp - 0.95).abs() < 1e-9,
+            "imp={imp} (expected clamp to ceiling)"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn reinforce_active_counts_but_skips_at_ceiling() {
+        let temp_dir = reinforce_temp_dir("at_ceiling");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let now = now_secs();
+        let day = 86_400_i64;
+        // Already at ceiling — candidate predicate matches (recent + hits)
+        // but importance NOT updated. Mirrors decay's "skipped_at_floor".
+        import_reinforce_fixture(
+            &store,
+            &temp_dir,
+            &[("topped_e", now - 1 * day, 100, 0.95, "active")],
+        )
+        .await;
+
+        let stats = store
+            .memory_reinforce_active(7 * day, 5, 0.05, 0.95)
+            .await
+            .expect("reinforce");
+        assert_eq!(stats.candidates, 1);
+        assert_eq!(stats.reinforced, 0);
+        assert_eq!(stats.skipped_at_ceiling, 1);
+        assert!((read_importance(&store, "topped_e").await - 0.95).abs() < 1e-9);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn reinforce_active_skips_tombstoned() {
+        let temp_dir = reinforce_temp_dir("tombed");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let now = now_secs();
+        let day = 86_400_i64;
+        // Tombstoned + recent + many hits — status filter must skip.
+        import_reinforce_fixture(
+            &store,
+            &temp_dir,
+            &[("tombed_f", now - 1 * day, 30, 0.5, "tombstoned")],
+        )
+        .await;
+
+        let stats = store
+            .memory_reinforce_active(7 * day, 5, 0.05, 0.95)
+            .await
+            .expect("reinforce");
+        assert_eq!(stats.candidates, 0);
+        assert_eq!(stats.reinforced, 0);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

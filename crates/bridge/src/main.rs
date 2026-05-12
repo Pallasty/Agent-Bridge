@@ -316,6 +316,40 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **Hebbian wire-strengthen** — Positive-reinforcement mirror of
+    /// `decay-unused`. Bumps `importance` by `--step` (capped at
+    /// `--ceiling`) for every active memory that was accessed ≥
+    /// `--min-access` times AND last touched within `--window-days`.
+    ///
+    /// Without this op the system was entropy-monotonic — `decay-unused`,
+    /// `decay-importance`, and `compact` only LOWERED importance. Repeat
+    /// use produced no signal in retrieval rank. This op rewards
+    /// "neurons that fire often" so frequently-touched memories aren't
+    /// crushed to the floor by background decay.
+    ///
+    /// Pairs with the daily cron service (3rd ExecStart=- alongside
+    /// `decay-unused` and `prune-coactivation-noise`).
+    ReinforceActive {
+        /// Only reinforce rows whose `last_accessed_at` is within this
+        /// many days. Default 7. (Decay's mirror is 30; reinforce is
+        /// narrower because we want a stronger signal of recency.)
+        #[arg(long, default_value_t = 7.0)]
+        window_days: f64,
+        /// Minimum `access_count` to qualify. Default 5. Below this the
+        /// memory is too rarely touched to call "repeatedly used."
+        #[arg(long, default_value_t = 5)]
+        min_access: u64,
+        /// How much to add to `importance` per pass. Default 0.05.
+        #[arg(long, default_value_t = 0.05)]
+        step: f64,
+        /// Importance never grows above this ceiling. Default 0.95
+        /// (leaves manual headroom for an explicit `importance = 1.0`).
+        #[arg(long, default_value_t = 0.95)]
+        ceiling: f64,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// **δ-3 (Butlin HOT-4 hygiene)** — Drop low-weight coactivation
     /// rows that never crystallised. A pair with `count <= --max-count`
     /// AND `last_at` older than `--older-than-days` is noise: it co-fired
@@ -773,6 +807,22 @@ async fn main() -> Result<()> {
                 floor,
                 json,
             } => run_dream_decay_unused(*window_days, *step, *floor, *json).await,
+            DreamOp::ReinforceActive {
+                window_days,
+                min_access,
+                step,
+                ceiling,
+                json,
+            } => {
+                run_dream_reinforce_active(
+                    *window_days,
+                    *min_access,
+                    *step,
+                    *ceiling,
+                    *json,
+                )
+                .await
+            }
             DreamOp::PruneCoactivationNoise {
                 max_count,
                 older_than_days,
@@ -1836,6 +1886,73 @@ async fn run_dream_decay_unused(
     } else if stats.decayed == 0 {
         println!();
         println!("(every candidate already at/below floor — nothing to shave)");
+    }
+    Ok(())
+}
+
+/// Hebbian wire-strengthen — positive-reinforcement mirror of
+/// `run_dream_decay_unused`. Bumps `importance` by `step` (capped at
+/// `ceiling`) for every active row with `access_count >= min_access`
+/// and `last_accessed_at` within `window_days`.
+///
+/// Composes with the daily cron service as a 3rd ExecStart=- alongside
+/// `decay-unused` and `prune-coactivation-noise`. Without this op the
+/// system was entropy-monotonic; this is the wire-strengthen that
+/// closes the Hebbian loop at the single-node level.
+async fn run_dream_reinforce_active(
+    window_days: f64,
+    min_access: u64,
+    step: f64,
+    ceiling: f64,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+
+    let window_days = window_days.max(0.0);
+    let step = step.clamp(0.0, 1.0);
+    let ceiling = ceiling.clamp(0.0, 1.0);
+    let window_secs = (window_days * 86_400.0) as i64;
+
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let stats = store
+        .memory_reinforce_active(window_secs, min_access, step, ceiling)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_reinforce_active: {e}"))?;
+
+    if as_json {
+        let payload = json!({
+            "window_days": window_days,
+            "min_access": min_access,
+            "step": step,
+            "ceiling": ceiling,
+            "candidates": stats.candidates,
+            "reinforced": stats.reinforced,
+            "skipped_at_ceiling": stats.skipped_at_ceiling,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# Hebbian wire-strengthen — read-recency reinforcement");
+    println!("DB: {}", path.display());
+    println!(
+        "window: <{window_days:.1}d accessed · ≥{min_access} hits · step: {step:.3} · ceiling: {ceiling:.3}"
+    );
+    println!();
+    println!("candidates         : {}", stats.candidates);
+    println!("reinforced         : {}", stats.reinforced);
+    println!("skipped at ceiling : {}", stats.skipped_at_ceiling);
+    if stats.candidates == 0 {
+        println!();
+        println!(
+            "(no memory met access≥{min_access} AND recency<{window_days:.0}d — try a smaller --min-access)"
+        );
+    } else if stats.reinforced == 0 {
+        println!();
+        println!("(every candidate already at/above ceiling — nothing to lift)");
     }
     Ok(())
 }
