@@ -1350,15 +1350,18 @@ async fn api_canvas_chat_stream(
 
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
+        // Track each content_block index → kind (text / tool_use / thinking)
+        // because content_block_stop arrives with only the index, not the
+        // kind. We need the kind to decide whether to emit a tool_stop.
+        let mut block_kind_by_index: std::collections::HashMap<i64, String> =
+            std::collections::HashMap::new();
         let read_fut = async {
             while let Ok(Some(line)) = lines.next_line().await {
                 if line.trim().is_empty() {
                     continue;
                 }
-                // Only forward content_block_delta.text_delta; ignore all
-                // the other stream-json envelopes (system/init, rate_limit,
-                // tool_use, result). Lossy parse — a malformed line is
-                // skipped rather than killing the stream.
+                // Lossy parse — a malformed line is skipped rather than
+                // killing the stream.
                 let val: Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
                     Err(_) => continue,
@@ -1370,24 +1373,88 @@ async fn api_canvas_chat_stream(
                     Some(e) => e,
                     None => continue,
                 };
-                if event.get("type").and_then(|v| v.as_str()) != Some("content_block_delta") {
-                    continue;
+                let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+                match event_type {
+                    // Text token chunk — the bread-and-butter streaming event.
+                    "content_block_delta" => {
+                        let delta = match event.get("delta") {
+                            Some(d) => d,
+                            None => continue,
+                        };
+                        if delta.get("type").and_then(|v| v.as_str()) == Some("text_delta") {
+                            if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
+                                let _ = tx.send(
+                                    SseEvent::default()
+                                        .data(json!({"type":"delta","text":text}).to_string()),
+                                );
+                            }
+                        }
+                        // input_json_delta / signature_delta etc. — silently
+                        // skipped for v1; tool args + reasoning signature
+                        // not surfaced to the chat panel.
+                    }
+                    // Block start — record kind by index; if it's a tool_use
+                    // emit tool_start with the tool name + id so the client
+                    // can render a chip.
+                    "content_block_start" => {
+                        let idx = match event.get("index").and_then(|v| v.as_i64()) {
+                            Some(i) => i,
+                            None => continue,
+                        };
+                        let cb = match event.get("content_block") {
+                            Some(c) => c,
+                            None => continue,
+                        };
+                        let kind = cb
+                            .get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        block_kind_by_index.insert(idx, kind.clone());
+                        if kind == "tool_use" {
+                            let name = cb
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let id = cb
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let _ = tx.send(SseEvent::default().data(
+                                json!({
+                                    "type": "tool_start",
+                                    "index": idx,
+                                    "name": name,
+                                    "id": id,
+                                })
+                                .to_string(),
+                            ));
+                        }
+                    }
+                    // Block end — if it was a tool_use, emit tool_stop so
+                    // the client flips the chip from "running" to "done".
+                    "content_block_stop" => {
+                        let idx = match event.get("index").and_then(|v| v.as_i64()) {
+                            Some(i) => i,
+                            None => continue,
+                        };
+                        if let Some(kind) = block_kind_by_index.get(&idx) {
+                            if kind == "tool_use" {
+                                let _ = tx.send(SseEvent::default().data(
+                                    json!({"type":"tool_stop","index":idx}).to_string(),
+                                ));
+                            }
+                        }
+                    }
+                    // message_start / message_delta / message_stop are
+                    // currently ignored — the SSE done event fires on
+                    // process exit (sub-thread) which is the simpler
+                    // truth-of-completion signal.
+                    _ => {}
                 }
-                let delta = match event.get("delta") {
-                    Some(d) => d,
-                    None => continue,
-                };
-                if delta.get("type").and_then(|v| v.as_str()) != Some("text_delta") {
-                    continue;
-                }
-                let text = match delta.get("text").and_then(|v| v.as_str()) {
-                    Some(t) => t,
-                    None => continue,
-                };
-                let _ = tx.send(
-                    SseEvent::default()
-                        .data(json!({"type":"delta","text":text}).to_string()),
-                );
             }
         };
 

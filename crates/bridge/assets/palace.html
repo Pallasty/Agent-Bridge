@@ -744,6 +744,50 @@
     .chat-msg.assistant.streaming {
       border-left-color: #a87cff;
     }
+    /* P8b tool-use chips — rendered in streaming + assistant bubbles to
+       show which MCP / Claude Code tools claude leaned on for this turn.
+       Sits above the text content (display:block on the wrapper). */
+    .tool-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin: 0 0 6px 0;
+    }
+    .tool-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: rgba(20, 30, 35, 0.6);
+      border: 1px solid #2a3a40;
+      color: #6a8e94;
+      padding: 1px 7px;
+      font-size: 10px;
+      border-radius: 10px;
+      letter-spacing: 0.04em;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    .tool-chip .tool-glyph {
+      font-size: 11px;
+      line-height: 1;
+    }
+    .tool-chip.running {
+      color: #5cc8c8;
+      border-color: #2a5560;
+      background: rgba(28, 50, 56, 0.6);
+    }
+    .tool-chip.running .tool-glyph {
+      animation: tool-spin 1.2s linear infinite;
+      display: inline-block;
+    }
+    .tool-chip.done {
+      color: #809088;
+      border-color: #3a4a48;
+    }
+    .tool-chip.done .tool-glyph { color: #5cc89a; }
+    @keyframes tool-spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
     .streaming-caret {
       display: inline-block;
       margin-left: 2px;
@@ -3169,6 +3213,20 @@ function formatChatTranscript(history) {
   return lines.join("\n");
 }
 
+// Tool chip — small pill in streaming bubble (and persisted assistant
+// bubble) signaling claude called an MCP / Claude Code tool. Strips the
+// long `mcp__agent-bridge__` prefix so chips read as short verbs.
+// status: "running" = cyan ⟳ animated; "done" = muted ✓.
+function renderToolChip(name, status) {
+  const short = String(name || "")
+    .replace(/^mcp__agent-bridge__/, "")
+    .replace(/^mcp__[a-z0-9_]+__/, "");
+  const cls = status === "running" ? "tool-chip running" : "tool-chip done";
+  const glyph = status === "running" ? "⟳" : "✓";
+  return `<span class="${cls}" title="${escapeHTML(name)} · ${escapeHTML(status)}">` +
+    `<span class="tool-glyph">${glyph}</span>${escapeHTML(short)}</span>`;
+}
+
 function renderChatHistory() {
   const root = document.getElementById("chat-history");
   if (!root) return;
@@ -3198,18 +3256,40 @@ function renderChatHistory() {
     if (m.role === "error") {
       html += `<div class="chat-msg error">${escapeHTML(m.content)}</div>`;
     } else if (m.role === "assistant") {
-      html += `<div class="chat-msg assistant">${escapeHTML(m.content)}<button class="copy-to-editor" type="button" data-msg-idx="${history.indexOf(m)}">→ copy to editor</button></div>`;
+      // Persisted tool chips (saved alongside the message at finalization
+      // time). If a past chat_session has them, they survive view-mode
+      // rehydrate too — surface what claude used to think on that turn.
+      let chipsHtml = "";
+      if (Array.isArray(m.tools) && m.tools.length) {
+        chipsHtml = `<div class="tool-chips">` +
+          m.tools.map(t => renderToolChip(t.name, t.status || "done")).join("") +
+          `</div>`;
+      }
+      html += `<div class="chat-msg assistant">${chipsHtml}${escapeHTML(m.content)}<button class="copy-to-editor" type="button" data-msg-idx="${history.indexOf(m)}">→ copy to editor</button></div>`;
     } else {
       html += `<div class="chat-msg user">${escapeHTML(m.content)}</div>`;
     }
   }
-  // Streaming bubble: once first delta lands, show accumulated text in
-  // a live-updating assistant-styled bubble. Until the first delta,
-  // pending=true falls back to the "thinking…" pulse so the user sees
-  // a beat between send and first token.
+  // Streaming bubble: once first delta lands or first tool starts,
+  // show accumulated text + tool chips in a live-updating bubble.
+  // Until the first event of either kind, pending=true falls back to
+  // the "thinking…" pulse so the user sees a beat between send and
+  // first signal.
   const streaming = canvasState.chat.streaming;
-  if (typeof streaming === "string" && streaming.length > 0) {
-    html += `<div class="chat-msg assistant streaming">${escapeHTML(streaming)}<span class="streaming-caret">▋</span></div>`;
+  const streamingTools = canvasState.chat.streamingTools || [];
+  const hasText = typeof streaming === "string" && streaming.length > 0;
+  const hasTools = streamingTools.length > 0;
+  if (hasText || hasTools) {
+    let chipsHtml = "";
+    if (hasTools) {
+      chipsHtml = `<div class="tool-chips">` +
+        streamingTools.map(t => renderToolChip(t.name, t.status)).join("") +
+        `</div>`;
+    }
+    const textHtml = hasText
+      ? `${escapeHTML(streaming)}<span class="streaming-caret">▋</span>`
+      : (hasTools ? `<span class="streaming-caret">▋</span>` : "");
+    html += `<div class="chat-msg assistant streaming">${chipsHtml}${textHtml}</div>`;
   } else if (pending) {
     html += `<div class="chat-msg thinking">claude thinking…</div>`;
   }
@@ -3276,6 +3356,10 @@ async function sendChatMessage() {
   canvasState.chat.history.push({ role: "user", content: text });
   canvasState.chat.pending = true;
   canvasState.chat.streaming = ""; // will accumulate deltas
+  // P8b — tool calls claude makes during this turn, in order seen.
+  // Each entry: {index, id, name, status: "running"|"done"}. Index is the
+  // server-emitted stream-json content_block index; status flips on tool_stop.
+  canvasState.chat.streamingTools = [];
   input.value = "";
   sendBtn.disabled = true;
   renderChatHistory();
@@ -3324,6 +3408,21 @@ async function sendChatMessage() {
         if (ev.type === "delta" && typeof ev.text === "string") {
           canvasState.chat.streaming += ev.text;
           renderChatHistory();
+        } else if (ev.type === "tool_start") {
+          canvasState.chat.streamingTools.push({
+            index: ev.index,
+            id: ev.id || "",
+            name: ev.name || "(unnamed)",
+            status: "running",
+          });
+          renderChatHistory();
+        } else if (ev.type === "tool_stop") {
+          // Match by index — id is only set on tool_start.
+          const t = canvasState.chat.streamingTools.find(
+            (x) => x.index === ev.index
+          );
+          if (t) t.status = "done";
+          renderChatHistory();
         } else if (ev.type === "error" && ev.message) {
           errMsg = String(ev.message).slice(0, 240);
         } else if (ev.type === "done") {
@@ -3341,12 +3440,18 @@ async function sendChatMessage() {
     if (errMsg) {
       canvasState.chat.history.push({ role: "error", content: errMsg });
     } else {
+      const tools = canvasState.chat.streamingTools || [];
       canvasState.chat.history.push({
         role: "assistant",
         content: (finalText || "").trim() || "(empty response)",
+        // Snapshot the tool usage so it persists with the message in
+        // localStorage + transcript exports. Reading back later, the
+        // user still sees which tools claude leaned on for this turn.
+        tools: tools.length ? tools.map((t) => ({ name: t.name, status: t.status })) : undefined,
       });
     }
     canvasState.chat.streaming = null;
+    canvasState.chat.streamingTools = [];
     canvasState.chat.pending = false;
     sendBtn.disabled = false;
     // Persist after each completed turn (success OR error). We don't
