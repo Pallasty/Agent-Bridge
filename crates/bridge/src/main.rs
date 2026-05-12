@@ -289,6 +289,25 @@ enum DreamOp {
         /// and links each key to the running Palace viewer (?focus=KEY).
         #[arg(long)]
         html: Option<PathBuf>,
+        /// Promotion tier. Default 1 = strong-tier `cofires` edges (the
+        /// classic dream-promote behavior). Set to 2 for **secondary
+        /// promotion**: scans recurring-but-weak pairs (default
+        /// `min_count=3`) that have NO existing edge of any type
+        /// between them, and crystallises them as `co_referenced`
+        /// edges with lower weight (0.3–0.5). This salvages the
+        /// middle-tier signal that tier-1 cofires misses — the
+        /// research_coactivation_data_audit_20260512 memory observed
+        /// 43 such pairs in the live store. `cofires` is for "they
+        /// fired together a lot"; `co_referenced` is for "they fired
+        /// together more than once and we've never noticed in the
+        /// graph."
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=2))]
+        tier: u8,
+        /// Edge type to write in tier-2 mode. Default `co_referenced`
+        /// keeps the provenance traceable to coactivation data rather
+        /// than colliding with hand-authored `relates`.
+        #[arg(long, default_value = "co_referenced")]
+        tier2_edge: String,
     },
     /// **Phase 2.x #8** — Read-recency importance decay: shave
     /// `importance` by `--step` on every active memory whose
@@ -892,6 +911,8 @@ async fn main() -> Result<()> {
                         50, // matches `dream promote --limit` default
                         *dry_run,
                         report_path.as_deref(),
+                        1,
+                        "co_referenced",
                     )
                     .await?;
                 }
@@ -902,7 +923,27 @@ async fn main() -> Result<()> {
                 limit,
                 dry_run,
                 html,
-            } => run_dream_promote(*min_count, *limit, *dry_run, html.as_deref()).await,
+                tier,
+                tier2_edge,
+            } => {
+                // Tier 2 gets a softer default: count >= 3 (vs 5) since
+                // the whole point is to catch the mid-tier that tier 1
+                // misses. User can still override via --min-count.
+                let effective_min = if *tier == 2 && *min_count == 5 {
+                    3
+                } else {
+                    *min_count
+                };
+                run_dream_promote(
+                    effective_min,
+                    *limit,
+                    *dry_run,
+                    html.as_deref(),
+                    *tier,
+                    tier2_edge.as_str(),
+                )
+                .await
+            }
             DreamOp::DecayUnused {
                 window_days,
                 step,
@@ -1505,9 +1546,20 @@ async fn run_dream_promote(
     limit: u32,
     dry_run: bool,
     html_path: Option<&std::path::Path>,
+    tier: u8,
+    tier2_edge: &str,
 ) -> Result<()> {
     use ab_store::{default_db_path, SqliteStore, StateStore};
     use std::collections::HashSet;
+
+    // Tier semantics:
+    //   1 = classic dream-promote, writes `cofires`, skips pairs that
+    //       already have a `cofires` edge (other edge types stack on top).
+    //   2 = secondary promotion, writes `<tier2_edge>` (default
+    //       `co_referenced`), skips pairs that have ANY existing edge of
+    //       any type. Targets the middle-tier signal (count≥3) that
+    //       lives in coact but never gets captured in the graph.
+    let primary_edge_type = if tier == 2 { tier2_edge } else { "cofires" };
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -1530,18 +1582,14 @@ async fn run_dream_promote(
         return Ok(());
     }
 
-    // Build the existing-cofires set by querying memory_neighbors for every
+    // Build the existing-edge set by querying memory_neighbors for every
     // key referenced in the candidate pairs. Single pass per key (cached).
     //
-    // ε-1 (2026-05-11): originally tracked *any* edge type, but
-    // self-archaeology found that 5 of the top-10 strongest coactivation
-    // pairs (including the all-time #1 at count=9) were already linked by
-    // P4 evolved / summarizes / derived_from edges — auto-engines, not
-    // human structure — and the old "structural wins" rule suppressed
-    // their cofires crystallisation. New rule: only skip if the pair
-    // already has a cofires edge. Cofires now stacks on top of other
-    // edge types. Idempotency on cofires itself is preserved (memory_link
-    // is INSERT … ON CONFLICT UPDATE weight).
+    // Tier 1 only tracks `cofires` edges (matches the ε-1 rule from
+    // 2026-05-11: cofires stacks alongside other edge types).
+    // Tier 2 tracks ALL edge types — the secondary promote is for pairs
+    // that have nothing yet; we don't want to pollute pairs that the
+    // human (or another auto-engine) already linked.
     let mut existing: HashSet<(String, String)> = HashSet::new();
     let mut probed: HashSet<String> = HashSet::new();
     for c in &pairs {
@@ -1551,9 +1599,10 @@ async fn run_dream_promote(
             }
             let nbrs = store.memory_neighbors(k).await.unwrap_or_default();
             for e in nbrs {
-                if e.edge_type != "cofires" {
+                if tier == 1 && e.edge_type != "cofires" {
                     continue;
                 }
+                // Tier 2 falls through and counts every edge.
                 let p = if e.from_key < e.to_key {
                     (e.from_key, e.to_key)
                 } else {
@@ -1564,9 +1613,15 @@ async fn run_dream_promote(
         }
     }
 
-    println!("# Hebbian promote — coact ≥ {min_count} → `cofires` edge");
+    println!(
+        "# Hebbian promote (tier {}) — coact ≥ {min_count} → `{}` edge",
+        tier, primary_edge_type
+    );
     println!("DB: {}", path.display());
     println!("candidates: {} pair(s)", pairs.len());
+    if tier == 2 {
+        println!("tier-2 mode: skip if any existing edge between pair");
+    }
     println!();
 
     let mut decisions: Vec<PromoteDecision> = Vec::with_capacity(pairs.len());
@@ -1576,16 +1631,21 @@ async fn run_dream_promote(
         } else {
             (c.key_b.clone(), c.key_a.clone())
         };
-        // Map count → weight in [0.5, 0.95]. Stay strictly below 1.0 so
-        // memory_link doesn't auto-substitute the canonical type weight
-        // (its 1.0-sentinel branch). Lower bound ensures even a min-count
-        // pair has a measurable weight.
-        let weight = ((c.count as f64) / 10.0).clamp(0.5, 0.95);
+        // Map count → weight. Tier 1: [0.5, 0.95]. Tier 2: [0.3, 0.5]
+        // — weaker because the signal is weaker (count=3-8 typically)
+        // and we don't want secondary `co_referenced` edges crowding out
+        // hand-authored / strong cofires in graph weight comparisons.
+        let weight = if tier == 2 {
+            ((c.count as f64) / 20.0).clamp(0.3, 0.5)
+        } else {
+            ((c.count as f64) / 10.0).clamp(0.5, 0.95)
+        };
 
         if existing.contains(&pair) {
             if dry_run {
+                let reason = if tier == 2 { "edge already exists" } else { "cofires already exists" };
                 println!(
-                    "  SKIP    ({:>2} fires)  {}  ↔  {}    [cofires already exists]",
+                    "  SKIP    ({:>2} fires)  {}  ↔  {}    [{reason}]",
                     c.count,
                     short_key(&pair.0, 38),
                     short_key(&pair.1, 38),
@@ -1618,7 +1678,7 @@ async fn run_dream_promote(
             });
         } else {
             match store
-                .memory_link(&pair.0, &pair.1, "cofires", weight)
+                .memory_link(&pair.0, &pair.1, primary_edge_type, weight)
                 .await
             {
                 Ok(()) => {
@@ -1673,7 +1733,10 @@ async fn run_dream_promote(
             "(dry run — no writes)  would promote {promoted}, skip {skipped}"
         );
     } else if errors == 0 {
-        println!("✓ promoted {promoted} pairs as `cofires`, skipped {skipped} (cofires already exists)");
+        let skip_reason = if tier == 2 { "edge already exists" } else { "cofires already exists" };
+        println!(
+            "✓ promoted {promoted} pairs as `{primary_edge_type}`, skipped {skipped} ({skip_reason})"
+        );
     } else {
         println!(
             "promoted {promoted}, skipped {skipped}, FAILED {errors} — see stderr"
