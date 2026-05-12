@@ -400,6 +400,51 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **ζ-12 (graph hygiene)** — Drop `relates` edges where BOTH endpoints
+    /// carry any tag in `--blacklist-tags`. CLI mirror of the
+    /// `memory_prune_degenerate_relates` MCP tool. Sibling daily-hygiene
+    /// op to `dream decay-unused` / `prune-coactivation-noise`. Only the
+    /// softest edge type (`relates`) is in scope — causal/structural
+    /// edges are preserved.
+    PruneDegenerateRelates {
+        /// Edges where both endpoints carry any of these tags are
+        /// pruned. Comma-separated. Default `auto_curated`.
+        #[arg(long, default_value = "auto_curated", value_delimiter = ',')]
+        blacklist_tags: Vec<String>,
+        /// Preview only.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// **ζ-14 (graph hygiene)** — Flip orphan stubs carrying a blacklist
+    /// tag from `status='active'` to `status='archived'`. Criterion (all
+    /// four required): status=active, tags overlap blacklist, zero edges,
+    /// created_at ≤ now-`--older-than-days`*86400. CLI mirror of the
+    /// `memory_archive_orphan_stubs` MCP tool. Closes the ζ-9→ζ-12
+    /// hygiene loop: ζ-11 stops new degenerate links, ζ-12 deletes the
+    /// legacy ones, ζ-14 retires the resulting orphan stubs instead of
+    /// waiting for passive decay.
+    ArchiveOrphanStubs {
+        /// Stubs whose tags overlap this list are eligible. Default
+        /// `auto_curated`.
+        #[arg(long, default_value = "auto_curated", value_delimiter = ',')]
+        blacklist_tags: Vec<String>,
+        /// Only stubs whose `created_at` is at least this many days old.
+        /// Default 3 — gives a session window to revisit recent stubs.
+        #[arg(long, default_value_t = 3)]
+        older_than_days: i64,
+        /// Hard cap on archives per run. Default 200, clamp [1, 1000].
+        #[arg(long, default_value_t = 200)]
+        max_archive: i64,
+        /// Preview only.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// **Replay quality audit** — are the LLM-consolidated summaries that
     /// `dream replay` writes actually being used? Pure read pass: counts
     /// `p5_replay`-tagged active memories, bins access patterns, surfaces
@@ -874,6 +919,27 @@ async fn main() -> Result<()> {
                 dry_run,
                 json,
             } => run_dream_prune_coact_noise(*max_count, *older_than_days, *dry_run, *json).await,
+            DreamOp::PruneDegenerateRelates {
+                blacklist_tags,
+                dry_run,
+                json,
+            } => run_dream_prune_degenerate_relates(blacklist_tags, *dry_run, *json).await,
+            DreamOp::ArchiveOrphanStubs {
+                blacklist_tags,
+                older_than_days,
+                max_archive,
+                dry_run,
+                json,
+            } => {
+                run_dream_archive_orphan_stubs(
+                    blacklist_tags,
+                    *older_than_days,
+                    *max_archive,
+                    *dry_run,
+                    *json,
+                )
+                .await
+            }
             DreamOp::ReplayAudit {
                 stale_days,
                 waypoint_min,
@@ -2186,6 +2252,106 @@ async fn run_dream_prune_coact_noise(
         println!();
         println!(
             "(nothing met the predicate — raise --max-count or lower --older-than-days to find candidates)"
+        );
+    }
+    Ok(())
+}
+
+/// **ζ-12** — Drop `relates` edges where both endpoints carry a tag in
+/// the blacklist. CLI mirror of the `memory_prune_degenerate_relates`
+/// MCP tool. Idempotent — re-running after a successful prune is a no-op.
+async fn run_dream_prune_degenerate_relates(
+    blacklist_tags: &[String],
+    dry_run: bool,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let pruned = store
+        .memory_prune_degenerate_relates(blacklist_tags, dry_run)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_prune_degenerate_relates: {e}"))?;
+
+    if as_json {
+        let payload = json!({
+            "dry_run": dry_run,
+            "blacklist_tags": blacklist_tags,
+            "pruned_count": pruned,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# ζ-12 — degenerate relates prune");
+    println!("DB: {}", path.display());
+    println!(
+        "blacklist_tags: {:?} · dry_run: {dry_run}",
+        blacklist_tags
+    );
+    println!();
+    let label = if dry_run { "would prune" } else { "pruned" };
+    println!("{label:16} : {pruned}");
+    if pruned == 0 {
+        println!();
+        println!(
+            "(no degenerate relates edges found — pre-ζ-11 noise hubs already cleaned)"
+        );
+    }
+    Ok(())
+}
+
+/// **ζ-14** — Flip orphan stubs to `status='archived'`. CLI mirror of the
+/// `memory_archive_orphan_stubs` MCP tool. Closes the ζ-9→ζ-12 hygiene
+/// loop by actively retiring stubs that ζ-11's blacklist would block from
+/// ever re-linking. Pairs with `dream prune-degenerate-relates`.
+async fn run_dream_archive_orphan_stubs(
+    blacklist_tags: &[String],
+    older_than_days: i64,
+    max_archive: i64,
+    dry_run: bool,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+    let older_than_days = older_than_days.max(0);
+    let max_archive = max_archive.clamp(1, 1000);
+
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let archived = store
+        .memory_archive_orphan_stubs(blacklist_tags, older_than_days, max_archive, dry_run)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_archive_orphan_stubs: {e}"))?;
+
+    if as_json {
+        let payload = json!({
+            "dry_run": dry_run,
+            "blacklist_tags": blacklist_tags,
+            "older_than_days": older_than_days,
+            "max_archive": max_archive,
+            "archived_count": archived,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# ζ-14 — archive orphan stubs");
+    println!("DB: {}", path.display());
+    println!(
+        "blacklist_tags: {:?} · older_than: {older_than_days}d · max_archive: {max_archive} · dry_run: {dry_run}",
+        blacklist_tags
+    );
+    println!();
+    let label = if dry_run { "would archive" } else { "archived" };
+    println!("{label:16} : {archived}");
+    if archived == 0 {
+        println!();
+        println!(
+            "(no eligible orphan stubs — lower --older-than-days or check `memory_list status=active tag=auto_curated`)"
         );
     }
     Ok(())
