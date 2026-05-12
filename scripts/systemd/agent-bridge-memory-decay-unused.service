@@ -27,7 +27,10 @@
 #                               archived once they have aged past
 #                               --older-than-days. Closes the ζ-9→ζ-12
 #                               loop by retiring signal-poor stubs that
-#                               ζ-11 would never re-link.
+#                               ζ-11 would never re-link. ζ-15: with
+#                               --alarm-threshold N, archives >= N
+#                               also save a `kind=alert` memory + log
+#                               to stderr so the journal flags bursts.
 #   5. `dream reinforce-active` — Hebbian wire-strengthen: bump
 #                               `importance` by --step (capped at
 #                               --ceiling) for every row with
@@ -74,7 +77,7 @@
 #       --window-days 14 --step 0.03 --floor 0.05
 
 [Unit]
-Description=agent-bridge daily memory hygiene (ζ-10 full cycle — decay + prune + archive + reinforce + snapshot)
+Description=agent-bridge daily memory hygiene (ζ-10 full cycle — decay + prune + archive[+ζ-15 alarm] + reinforce + snapshot)
 Documentation=file://%h/.claude/projects/-Data-CascadeProjects-agent-bridge/memory/project_memory_decay_unused_cron_shipped.md
 
 [Service]
@@ -91,7 +94,7 @@ Type=oneshot
 ExecStart=-%h/.local/bin/agent-bridge.real dream decay-unused --window-days 30 --step 0.05 --floor 0.1
 ExecStart=-%h/.local/bin/agent-bridge.real dream prune-coactivation-noise --max-count 1 --older-than-days 30
 ExecStart=-%h/.local/bin/agent-bridge.real dream prune-degenerate-relates
-ExecStart=-%h/.local/bin/agent-bridge.real dream archive-orphan-stubs --older-than-days 3
+ExecStart=-%h/.local/bin/agent-bridge.real dream archive-orphan-stubs --older-than-days 3 --alarm-threshold 10
 ExecStart=-%h/.local/bin/agent-bridge.real dream reinforce-active --window-days 7 --min-access 5 --step 0.05 --ceiling 0.95
 ExecStart=-%h/.local/bin/agent-bridge.real dream snapshot --name daily
 StandardOutput=append:%h/.cache/agent-bridge/memory-decay-unused.log

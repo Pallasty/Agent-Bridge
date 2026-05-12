@@ -438,6 +438,12 @@ enum DreamOp {
         /// Hard cap on archives per run. Default 200, clamp [1, 1000].
         #[arg(long, default_value_t = 200)]
         max_archive: i64,
+        /// **ζ-15** — when archived count ≥ this threshold (and run is not
+        /// dry), write a `kind=alert` memory and shout on stderr so the
+        /// ζ-10 daily cron's journal captures the burst. Steady-state is
+        /// 0-3/day; 10 is a sane "look at this" floor. Set 0 to disable.
+        #[arg(long, default_value_t = 10)]
+        alarm_threshold: i64,
         /// Preview only.
         #[arg(long)]
         dry_run: bool,
@@ -937,6 +943,7 @@ async fn main() -> Result<()> {
                 blacklist_tags,
                 older_than_days,
                 max_archive,
+                alarm_threshold,
                 dry_run,
                 json,
             } => {
@@ -944,6 +951,7 @@ async fn main() -> Result<()> {
                     blacklist_tags,
                     *older_than_days,
                     *max_archive,
+                    *alarm_threshold,
                     *dry_run,
                     *json,
                 )
@@ -2320,10 +2328,12 @@ async fn run_dream_archive_orphan_stubs(
     blacklist_tags: &[String],
     older_than_days: i64,
     max_archive: i64,
+    alarm_threshold: i64,
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{default_db_path, MemoryRecord, SqliteStore, StateStore};
+    use std::time::{SystemTime, UNIX_EPOCH};
     let older_than_days = older_than_days.max(0);
     let max_archive = max_archive.clamp(1, 1000);
 
@@ -2336,13 +2346,78 @@ async fn run_dream_archive_orphan_stubs(
         .await
         .map_err(|e| anyhow::anyhow!("memory_archive_orphan_stubs: {e}"))?;
 
+    // ζ-15 — burst alarm. Runs *before* normal output so the alert key
+    // can be echoed alongside the count. Pure-decision helper keeps the
+    // condition unit-testable.
+    let alarm_key = if archive_alarm_should_fire(archived, alarm_threshold, dry_run) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let key = format!("alert_archive_burst_{}", time_slug(now));
+        let body = format!(
+            "# ζ-15 archive burst alert\n\n\
+             - archived: {archived}\n\
+             - alarm_threshold: {alarm_threshold}\n\
+             - blacklist_tags: {blacklist_tags:?}\n\
+             - older_than_days: {older_than_days}\n\
+             - max_archive: {max_archive}\n\
+             - at: {ts}\n\n\
+             Steady-state daily archive count is 0–3 after the initial \
+             ζ-14 sweep. A burst this size suggests one of:\n\
+             1. blacklist tag was widened (re-run with `--dry-run` to inspect)\n\
+             2. an automated process injected many `auto_curated` stubs\n\
+             3. one-off cleanup of a previously-deferred cohort\n\n\
+             If neither (1) nor (2) applies, this alarm can be ignored — the \
+             post-archive snapshot (via ζ-10 cron) will record the new \
+             steady-state, and `dream diff --auto` tomorrow will show \
+             `orphan -N` as the net effect.\n",
+            ts = chrono_like_date(now),
+        );
+        let rec = MemoryRecord {
+            key: key.clone(),
+            kind: "alert".into(),
+            content: body,
+            tags: vec![
+                "alert".into(),
+                "zeta-15".into(),
+                "archive-burst".into(),
+            ],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            // Mid-high importance — not as critical as a true incident
+            // (this is "look at this", not "act now") but should sit
+            // above ambient noise so default FTS surfaces it.
+            importance: 0.6,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store
+            .memory_save(&rec)
+            .await
+            .map_err(|e| anyhow::anyhow!("memory_save alert: {e}"))?;
+        eprintln!(
+            "⚠ ζ-15 alarm: archived {archived} orphan stubs (threshold {alarm_threshold}) — saved as memory {key}"
+        );
+        Some(key)
+    } else {
+        None
+    };
+
     if as_json {
         let payload = json!({
             "dry_run": dry_run,
             "blacklist_tags": blacklist_tags,
             "older_than_days": older_than_days,
             "max_archive": max_archive,
+            "alarm_threshold": alarm_threshold,
             "archived_count": archived,
+            "alert_key": alarm_key,
         });
         println!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(());
@@ -2351,7 +2426,7 @@ async fn run_dream_archive_orphan_stubs(
     println!("# ζ-14 — archive orphan stubs");
     println!("DB: {}", path.display());
     println!(
-        "blacklist_tags: {:?} · older_than: {older_than_days}d · max_archive: {max_archive} · dry_run: {dry_run}",
+        "blacklist_tags: {:?} · older_than: {older_than_days}d · max_archive: {max_archive} · alarm_threshold: {alarm_threshold} · dry_run: {dry_run}",
         blacklist_tags
     );
     println!();
@@ -2363,7 +2438,23 @@ async fn run_dream_archive_orphan_stubs(
             "(no eligible orphan stubs — lower --older-than-days or check `memory_list status=active tag=auto_curated`)"
         );
     }
+    if let Some(k) = &alarm_key {
+        println!();
+        println!("⚠ alarm fired (≥{alarm_threshold}) — alert memory: {k}");
+    }
     Ok(())
+}
+
+/// ζ-15 — pure decision: should the archive-burst alarm fire?
+///
+/// - `dry_run=true` always returns false (no real archives happened).
+/// - `threshold <= 0` disables the alarm (operator opt-out).
+/// - Otherwise compare archived count against threshold.
+fn archive_alarm_should_fire(archived: u64, threshold: i64, dry_run: bool) -> bool {
+    if dry_run || threshold <= 0 {
+        return false;
+    }
+    (archived as i64) >= threshold
 }
 
 /// **Replay quality audit** — pure read pass, no writes, no LLM.
@@ -3907,5 +3998,44 @@ mod tests {
                 "{shell:?} snippet missing doc reference"
             );
         }
+    }
+
+    // ── ζ-15 archive_alarm_should_fire ──────────────────────────────
+
+    #[test]
+    fn archive_alarm_fires_when_above_threshold() {
+        // The plain happy path: real archive run, count clears the
+        // floor. Threshold-equal also fires (≥, not >).
+        assert!(archive_alarm_should_fire(10, 10, false));
+        assert!(archive_alarm_should_fire(99, 10, false));
+    }
+
+    #[test]
+    fn archive_alarm_quiet_below_threshold() {
+        // Steady-state cron output: a few archives, well under the
+        // operator-set ceiling. Silence is the correct response.
+        assert!(!archive_alarm_should_fire(0, 10, false));
+        assert!(!archive_alarm_should_fire(9, 10, false));
+    }
+
+    #[test]
+    fn archive_alarm_silent_on_dry_run() {
+        // No archives actually happened — a dry-run count of 500 is a
+        // capacity estimate, not a burst. Firing here would spam the
+        // operator running `dream archive-orphan-stubs --dry-run` to
+        // check what *would* be cleaned.
+        assert!(!archive_alarm_should_fire(500, 10, true));
+        assert!(!archive_alarm_should_fire(500, 1, true));
+    }
+
+    #[test]
+    fn archive_alarm_disabled_by_zero_or_negative_threshold() {
+        // Operator opt-out: cron clusters where the burst is the
+        // expected steady state (e.g. initial sweep) can set
+        // --alarm-threshold 0. Negative is treated identically out of
+        // defensive programming — clap accepts i64 so a typo like
+        // `--alarm-threshold -10` shouldn't silently re-enable.
+        assert!(!archive_alarm_should_fire(9999, 0, false));
+        assert!(!archive_alarm_should_fire(9999, -1, false));
     }
 }
