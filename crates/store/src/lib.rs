@@ -227,6 +227,34 @@ pub struct CoactivationStats {
     pub top_5_persistent_edges: Vec<CoactivationEdge>,
 }
 
+/// **ζ-9 (2026-05-12)** — Graph topology snapshot. Single output of
+/// [`StateStore::graph_topology`]. Designed for `dream snapshot` schema
+/// v2's `topology` section: orphan rate, degree distribution, top hubs,
+/// P4 evolved coverage. Cheap (4 small SQL passes), suitable for daily
+/// capture.
+///
+/// Catches the blind spot `finding_graph_orphan_topology_20260511`
+/// surfaced manually: 60% orphan rate was invisible to existing
+/// snapshot/dream-stats output.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct GraphTopology {
+    /// Active non-skill memories (denominator for orphan_pct).
+    pub non_skill_active_total: u64,
+    /// Active non-skill memories with **zero** edges in `memory_edges`.
+    pub orphan_count: u64,
+    /// Histogram of node degrees (in+out edges). Buckets:
+    /// `"0"`, `"1"`, `"2-3"`, `"4-5"`, `"6-10"`, `"11-20"`, `"21+"`.
+    /// Ordered as listed; zero-count buckets are still included for
+    /// stable diff alignment.
+    pub degree_histogram: Vec<(String, u64)>,
+    /// Top-5 nodes by total degree, non-skill active only. (key, degree).
+    pub top_5_hubs: Vec<(String, u64)>,
+    /// Number of active non-skill memories with at least one `evolved`
+    /// edge. P4 coverage indicator — divides over `non_skill_active_total`
+    /// to read as percentage at the caller.
+    pub p4_evolved_coverage: u64,
+}
+
 /// One window of "what did self look like during these N days" — the
 /// behavioral fingerprint output of [`StateStore::identity_window`].
 /// Two of these (current vs prior) compose an identity-continuity delta
@@ -1359,6 +1387,12 @@ pub trait StateStore: Send + Sync {
             pairs_persistent_ge_6h: 0,
             top_5_persistent_edges: Vec::new(),
         })
+    }
+
+    /// ζ-9 — Graph topology snapshot. Default returns empty so older
+    /// backends keep compiling.
+    async fn graph_topology(&self) -> Result<GraphTopology> {
+        Ok(GraphTopology::default())
     }
 
     /// v21 — Identity meta-monitor: behavioral fingerprint over a time
