@@ -58,7 +58,7 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 use crate::{
     AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
     CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, DecayUnusedStats,
-    ReinforceActiveStats,
+    MisrankRow, ReinforceActiveStats, SignalFidelityStats,
     ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
     ForumThreadExport, ForumThreadRecord, GraphTopology, IdentityWindow, ImportConflictPolicy,
     ImportReport,
@@ -1151,6 +1151,71 @@ fn now_secs() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// Compute 1-based fractional ranks for `xs` with ties averaged. Returned
+/// vector is in original-index order: `result[i]` is the rank of `xs[i]`.
+///
+/// Used by `signal_fidelity_stats` to rank-transform `importance` and
+/// `access_count` before computing Pearson correlation (= Spearman).
+/// `O(n log n)` sort dominated; tie-averaging keeps the statistic robust
+/// against the heavy floor cluster on `importance` and zero cluster on
+/// `access_count`.
+fn avg_tie_ranks(xs: &[f64]) -> Vec<f64> {
+    let n = xs.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut indexed: Vec<(usize, f64)> = xs.iter().copied().enumerate().collect();
+    // NaN sorts last; in our use-case importance/access are never NaN.
+    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut ranks = vec![0.0_f64; n];
+    let mut i = 0usize;
+    while i < n {
+        let mut j = i + 1;
+        while j < n && indexed[j].1 == indexed[i].1 {
+            j += 1;
+        }
+        // Average rank for the block [i, j). 1-based ranks → (i+1 + j) / 2.
+        let avg = (i as f64 + 1.0 + j as f64) / 2.0;
+        for k in i..j {
+            ranks[indexed[k].0] = avg;
+        }
+        i = j;
+    }
+    ranks
+}
+
+/// Pearson product-moment correlation between `xs` and `ys`. Returns
+/// `NaN` if `n < 2` or either vector has zero variance.
+///
+/// In `signal_fidelity_stats` this is applied to RANKED vectors —
+/// `pearson(avg_tie_ranks(xs), avg_tie_ranks(ys))` is mathematically
+/// equivalent to Spearman's ρ with tie correction.
+fn pearson(xs: &[f64], ys: &[f64]) -> f64 {
+    let n = xs.len();
+    if n < 2 || n != ys.len() {
+        return f64::NAN;
+    }
+    let nf = n as f64;
+    let mean_x = xs.iter().sum::<f64>() / nf;
+    let mean_y = ys.iter().sum::<f64>() / nf;
+    let mut num = 0.0_f64;
+    let mut sx = 0.0_f64;
+    let mut sy = 0.0_f64;
+    for (x, y) in xs.iter().zip(ys.iter()) {
+        let dx = x - mean_x;
+        let dy = y - mean_y;
+        num += dx * dy;
+        sx += dx * dx;
+        sy += dy * dy;
+    }
+    let denom = (sx * sy).sqrt();
+    if denom == 0.0 {
+        return f64::NAN;
+    }
+    num / denom
 }
 
 /// **Phase 1 P3** — kind-aware decay constant. Faster decay for ephemeral
@@ -3290,6 +3355,118 @@ impl StateStore for SqliteStore {
         Ok(stats)
     }
 
+    async fn signal_fidelity_stats(&self, top_n: u32) -> Result<SignalFidelityStats> {
+        let top_n = top_n.clamp(0, 50) as usize;
+        let rows: Vec<(String, f64, i64)> = self
+            .conn
+            .call(|c| -> RusqliteResult<Vec<(String, f64, i64)>> {
+                let mut stmt = c.prepare(
+                    "SELECT key, importance, access_count
+                       FROM memories
+                      WHERE status = 'active'",
+                )?;
+                let mapped = stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, f64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })?;
+                mapped.collect::<RusqliteResult<Vec<_>>>()
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("signal_fidelity_stats: {e}")))?;
+
+        let total_active = rows.len() as u64;
+        if total_active < 2 {
+            return Ok(SignalFidelityStats {
+                total_active,
+                spearman_r: f64::NAN,
+                spearman_r_touched: f64::NAN,
+                ..Default::default()
+            });
+        }
+
+        let importances: Vec<f64> = rows.iter().map(|(_, i, _)| *i).collect();
+        let accesses: Vec<f64> = rows.iter().map(|(_, _, a)| (*a) as f64).collect();
+
+        let mean_importance = importances.iter().sum::<f64>() / total_active as f64;
+        let mean_access = accesses.iter().sum::<f64>() / total_active as f64;
+
+        let n_zero_access = accesses.iter().filter(|a| **a == 0.0).count() as u64;
+        // Decay-unused's default floor is 0.1; allow ε so a single
+        // post-floor reinforce (0.1 + 0.05 = 0.15) doesn't escape the
+        // "at floor" bucket immediately.
+        let n_floor_importance =
+            importances.iter().filter(|i| **i <= 0.11).count() as u64;
+
+        let rank_importance = avg_tie_ranks(&importances);
+        let rank_access = avg_tie_ranks(&accesses);
+        let spearman_r = pearson(&rank_importance, &rank_access);
+
+        // Touched subset — filter both vectors in lockstep, re-rank.
+        let touched: Vec<(&String, f64, f64)> = rows
+            .iter()
+            .filter(|(_, _, a)| *a > 0)
+            .map(|(k, i, a)| (k, *i, (*a) as f64))
+            .collect();
+        let (spearman_r_touched, n_touched) = if touched.len() >= 2 {
+            let ti: Vec<f64> = touched.iter().map(|(_, i, _)| *i).collect();
+            let ta: Vec<f64> = touched.iter().map(|(_, _, a)| *a).collect();
+            (pearson(&avg_tie_ranks(&ti), &avg_tie_ranks(&ta)), touched.len() as u64)
+        } else {
+            (f64::NAN, touched.len() as u64)
+        };
+
+        // Misranks: build per-row records carrying rank-diff. Don't filter
+        // on absolute value yet — we sort and take top/bottom.
+        let mut all_misranks: Vec<MisrankRow> = rows
+            .iter()
+            .enumerate()
+            .map(|(idx, (key, importance, access_count))| MisrankRow {
+                key: key.clone(),
+                importance: *importance,
+                access_count: (*access_count).max(0) as u64,
+                rank_importance: rank_importance[idx],
+                rank_access: rank_access[idx],
+                rank_diff: rank_importance[idx] - rank_access[idx],
+            })
+            .collect();
+
+        // Under-reinforced: most-negative rank_diff (high access, low imp).
+        all_misranks
+            .sort_by(|a, b| a.rank_diff.partial_cmp(&b.rank_diff).unwrap_or(std::cmp::Ordering::Equal));
+        let under_reinforced: Vec<MisrankRow> = all_misranks
+            .iter()
+            .take(top_n)
+            .filter(|r| r.rank_diff < 0.0)
+            .cloned()
+            .collect();
+
+        // Over-promoted: most-positive rank_diff.
+        all_misranks
+            .sort_by(|a, b| b.rank_diff.partial_cmp(&a.rank_diff).unwrap_or(std::cmp::Ordering::Equal));
+        let over_promoted: Vec<MisrankRow> = all_misranks
+            .iter()
+            .take(top_n)
+            .filter(|r| r.rank_diff > 0.0)
+            .cloned()
+            .collect();
+
+        Ok(SignalFidelityStats {
+            total_active,
+            spearman_r,
+            spearman_r_touched,
+            n_touched,
+            n_zero_access,
+            n_floor_importance,
+            mean_importance,
+            mean_access,
+            under_reinforced,
+            over_promoted,
+        })
+    }
+
     async fn memory_compact(&self, policy: CompactPolicy) -> Result<Vec<String>> {
         let CompactPolicy {
             min_uses,
@@ -4920,6 +5097,61 @@ impl StateStore for SqliteStore {
         let mut out: Vec<crate::ResolvedCall> = Vec::new();
         let mut seen: std::collections::HashSet<(String, u32)> =
             std::collections::HashSet::new();
+
+        // Direct fallback: any call whose `callee` equals the target
+        // literally is a hit — regardless of imports. Catches the
+        // common pattern of `serde_json::to_string_pretty(...)` written
+        // out in full when only `serde_json::{json, Value}` is in scope.
+        {
+            let target_clone = target_owned.clone();
+            let file_f_clone = file_f.clone();
+            let root_f_clone = root_f.clone();
+            let direct = self
+                .conn
+                .call(move |c| -> RusqliteResult<Vec<crate::ResolvedCall>> {
+                    let mut stmt = c.prepare(
+                        "SELECT file_path, line, language, caller, callee
+                         FROM codebase_calls
+                         WHERE callee = ?1
+                           AND (?2 IS NULL OR root_path = ?2)
+                           AND (?3 IS NULL OR file_path LIKE ?3)
+                         ORDER BY file_path, line",
+                    )?;
+                    let rows: Vec<crate::ResolvedCall> = stmt
+                        .query_map(
+                            params![target_clone, root_f_clone, file_f_clone],
+                            |row| {
+                                Ok(crate::ResolvedCall {
+                                    file_path: row.get(0)?,
+                                    line: row.get::<_, i64>(1)? as u32,
+                                    language: row.get(2)?,
+                                    caller: row.get(3)?,
+                                    callee: row.get(4)?,
+                                    resolved_callee: String::new(),
+                                    via_alias: None,
+                                    via_import: String::new(),
+                                })
+                            },
+                        )?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(rows)
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("codebase_callers direct: {e}")))?;
+            for mut row in direct {
+                row.resolved_callee = target_owned.clone();
+                row.via_import = "<direct>".to_string();
+                if seen.insert((row.file_path.clone(), row.line)) {
+                    out.push(row);
+                    if out.len() >= lim {
+                        out.sort_by(|a, b| {
+                            a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line))
+                        });
+                        return Ok(out);
+                    }
+                }
+            }
+        }
 
         // Single SQL query per prefix to keep round-trips bounded.
         // Could be optimized to one giant UNION query, but per-prefix
@@ -9596,6 +9828,12 @@ mod tests {
                 call_stmt.execute(params![
                     "/repo/a.rs", 11_i64, "user_a", "println",
                 ])?;
+                // Direct — file with no relevant import that calls the
+                // full path verbatim. Should be caught by the direct
+                // fallback (via_import="<direct>").
+                call_stmt.execute(params![
+                    "/repo/d.rs", 3_i64, "user_d", "crate::store::SqliteStore::new",
+                ])?;
                 Ok(())
             })
             .await
@@ -9610,8 +9848,8 @@ mod tests {
             )
             .await
             .expect("codebase_callers");
-        // Expect 3 resolved hits (a + b + c), no `println` row.
-        assert_eq!(hits.len(), 3, "got {hits:#?}");
+        // Expect 4 resolved hits (a + b + c via aliases + d via direct).
+        assert_eq!(hits.len(), 4, "got {hits:#?}");
         let by_file: std::collections::HashMap<&str, &crate::ResolvedCall> =
             hits.iter().map(|h| (h.file_path.as_str(), h)).collect();
 
@@ -9635,6 +9873,13 @@ mod tests {
         assert_eq!(c.resolved_callee, "crate::store::SqliteStore::new");
         assert!(c.via_alias.is_none());
         assert_eq!(c.via_import, "crate::store");
+
+        // d.rs — direct full-path call, no import. via_import="<direct>".
+        let d = by_file.get("/repo/d.rs").expect("d.rs hit");
+        assert_eq!(d.callee, "crate::store::SqliteStore::new");
+        assert_eq!(d.resolved_callee, "crate::store::SqliteStore::new");
+        assert!(d.via_alias.is_none());
+        assert_eq!(d.via_import, "<direct>");
 
         // Empty target → error.
         let err = store
@@ -10354,6 +10599,205 @@ mod tests {
             .expect("reinforce");
         assert_eq!(stats.candidates, 0);
         assert_eq!(stats.reinforced, 0);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // signal-fidelity Spearman rank correlation. avg_tie_ranks + pearson are
+    // the inner helpers; the outer `signal_fidelity_stats` builds on them by
+    // pulling (importance, access_count) rows from `memories WHERE active`.
+
+    #[test]
+    fn avg_tie_ranks_simple_ascending() {
+        let r = avg_tie_ranks(&[10.0, 20.0, 30.0, 40.0]);
+        assert_eq!(r, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn avg_tie_ranks_handles_ties() {
+        // [5, 5, 10] → first two tie at rank (1+2)/2=1.5, last at 3.
+        let r = avg_tie_ranks(&[5.0, 5.0, 10.0]);
+        assert_eq!(r, vec![1.5, 1.5, 3.0]);
+    }
+
+    #[test]
+    fn avg_tie_ranks_original_order_preserved() {
+        // input [3, 1, 2] should give ranks [3, 1, 2] (rank in original idx).
+        let r = avg_tie_ranks(&[3.0, 1.0, 2.0]);
+        assert_eq!(r, vec![3.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn pearson_perfect_positive() {
+        let r = pearson(&[1.0, 2.0, 3.0, 4.0], &[10.0, 20.0, 30.0, 40.0]);
+        assert!((r - 1.0).abs() < 1e-9, "r={r}");
+    }
+
+    #[test]
+    fn pearson_perfect_negative() {
+        let r = pearson(&[1.0, 2.0, 3.0, 4.0], &[40.0, 30.0, 20.0, 10.0]);
+        assert!((r - (-1.0)).abs() < 1e-9, "r={r}");
+    }
+
+    #[test]
+    fn pearson_zero_variance_returns_nan() {
+        let r = pearson(&[5.0, 5.0, 5.0], &[1.0, 2.0, 3.0]);
+        assert!(r.is_nan(), "zero variance should be NaN, got {r}");
+    }
+
+    fn fidelity_temp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "ab-fidelity-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    /// Insert rows directly via memory_import — memory_save would clobber
+    /// access_count and importance with defaults / now() values.
+    async fn import_fidelity_fixture(
+        store: &SqliteStore,
+        temp_dir: &std::path::Path,
+        rows: &[(&str, f64, u64)], // key, importance, access_count
+    ) {
+        let jsonl = temp_dir.join("fidelity-fixture.jsonl");
+        let mut buf = String::new();
+        for (key, importance, access_count) in rows {
+            let line = serde_json::json!({
+                "key": key,
+                "kind": "fact",
+                "content": format!("fidelity-fixture:{key}"),
+                "tags": [],
+                "related_keys": [],
+                "scope": null,
+                "created_at": 1_700_000_000_i64,
+                "updated_at": 1_700_000_000_i64,
+                "last_accessed_at": 1_700_000_000_i64,
+                "access_count": access_count,
+                "importance": importance,
+                "status": "active",
+                "trigger_pattern": null,
+            });
+            buf.push_str(&line.to_string());
+            buf.push('\n');
+        }
+        tokio::fs::write(&jsonl, buf).await.expect("write jsonl");
+        store
+            .memory_import(&jsonl, ImportConflictPolicy::Overwrite, None)
+            .await
+            .expect("import");
+    }
+
+    #[tokio::test]
+    async fn signal_fidelity_perfect_correlation() {
+        // imp ascends with access → Spearman r = +1.0.
+        let temp_dir = fidelity_temp_dir("perfect");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        import_fidelity_fixture(
+            &store,
+            &temp_dir,
+            &[
+                ("fid_a", 0.1, 1),
+                ("fid_b", 0.3, 5),
+                ("fid_c", 0.5, 10),
+                ("fid_d", 0.8, 50),
+            ],
+        )
+        .await;
+
+        let stats = store.signal_fidelity_stats(5).await.expect("fidelity");
+        assert_eq!(stats.total_active, 4);
+        assert!((stats.spearman_r - 1.0).abs() < 1e-9, "r={}", stats.spearman_r);
+        // No misranks expected on perfect correlation.
+        assert!(
+            stats.under_reinforced.is_empty(),
+            "expected no under-reinforced on perfect r, got {:?}",
+            stats.under_reinforced
+        );
+        assert!(stats.over_promoted.is_empty());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn signal_fidelity_anti_correlation_surfaces_both_sides() {
+        // imp descends as access ascends → r = -1.0; both misrank piles fill.
+        let temp_dir = fidelity_temp_dir("anti");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        import_fidelity_fixture(
+            &store,
+            &temp_dir,
+            &[
+                ("hot_unloved", 0.1, 100),
+                ("warm_medium", 0.4, 10),
+                ("cold_loved", 0.95, 1),
+            ],
+        )
+        .await;
+
+        let stats = store.signal_fidelity_stats(5).await.expect("fidelity");
+        assert!((stats.spearman_r - (-1.0)).abs() < 1e-9, "r={}", stats.spearman_r);
+        // hot_unloved is the under-reinforced extreme.
+        assert_eq!(stats.under_reinforced[0].key, "hot_unloved");
+        // cold_loved is the over-promoted extreme.
+        assert_eq!(stats.over_promoted[0].key, "cold_loved");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn signal_fidelity_handles_empty_store() {
+        let temp_dir = fidelity_temp_dir("empty");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let stats = store.signal_fidelity_stats(5).await.expect("fidelity");
+        assert_eq!(stats.total_active, 0);
+        assert!(stats.spearman_r.is_nan(), "expected NaN, got {}", stats.spearman_r);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn signal_fidelity_touched_subset_excludes_zero_access() {
+        // Mix: 2 rows with access > 0 (perfectly correlated) plus 1 with
+        // access = 0. Overall r = +1.0 (touched-only also = +1.0 with n=2).
+        // The n_zero_access count should equal 1.
+        let temp_dir = fidelity_temp_dir("touched");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        import_fidelity_fixture(
+            &store,
+            &temp_dir,
+            &[
+                ("touched_a", 0.3, 5),
+                ("touched_b", 0.6, 20),
+                ("zero_c", 0.5, 0),
+            ],
+        )
+        .await;
+
+        let stats = store.signal_fidelity_stats(5).await.expect("fidelity");
+        assert_eq!(stats.total_active, 3);
+        assert_eq!(stats.n_zero_access, 1);
+        assert_eq!(stats.n_touched, 2);
+        // touched-only correlation between (0.3, 0.6) and (5, 20) is +1.0.
+        assert!(
+            (stats.spearman_r_touched - 1.0).abs() < 1e-9,
+            "spearman_r_touched={}",
+            stats.spearman_r_touched
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

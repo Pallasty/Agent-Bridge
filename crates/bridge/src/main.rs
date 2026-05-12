@@ -350,6 +350,28 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **Hebbian closure observability** — Spearman rank correlation
+    /// between `importance` and `access_count` over active memories.
+    /// Answers "does importance actually predict access?" — i.e. is
+    /// the post-Hebbian-loop ranking signal real or noise?
+    ///
+    /// Baseline question: pre-`reinforce-active` (commit `586cbb1`)
+    /// expectation is `r ≈ 0` because decay had flattened importance
+    /// to the floor. Post-cron-cycles, `r` should drift toward 0.4+.
+    /// Re-run weekly; longitudinal trend is the actual measurement.
+    ///
+    /// Also surfaces the worst misranks for inspection: under-reinforced
+    /// rows (high access, low importance) and over-promoted rows
+    /// (high importance, low access).
+    SignalFidelity {
+        /// Top-N misranks to surface on each side. Capped at 50.
+        /// Default 5.
+        #[arg(long, default_value_t = 5)]
+        top_n: u32,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// **δ-3 (Butlin HOT-4 hygiene)** — Drop low-weight coactivation
     /// rows that never crystallised. A pair with `count <= --max-count`
     /// AND `last_at` older than `--older-than-days` is noise: it co-fired
@@ -822,6 +844,9 @@ async fn main() -> Result<()> {
                     *json,
                 )
                 .await
+            }
+            DreamOp::SignalFidelity { top_n, json } => {
+                run_dream_signal_fidelity(*top_n, *json).await
             }
             DreamOp::PruneCoactivationNoise {
                 max_count,
@@ -1954,6 +1979,138 @@ async fn run_dream_reinforce_active(
         println!();
         println!("(every candidate already at/above ceiling — nothing to lift)");
     }
+    Ok(())
+}
+
+/// Hebbian-closure observability — Spearman rank correlation of
+/// `importance` vs `access_count` across active memories, plus the
+/// top-N misranks on each side. Pure read, no writes.
+///
+/// Baseline reading taken pre-reinforce-active-cron is the anchor for a
+/// longitudinal study: re-run weekly, compare. If the closure works,
+/// `spearman_r` should drift from ≈ 0 (decay-flattened) toward 0.4+.
+async fn run_dream_signal_fidelity(top_n: u32, as_json: bool) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let stats = store
+        .signal_fidelity_stats(top_n)
+        .await
+        .map_err(|e| anyhow::anyhow!("signal_fidelity_stats: {e}"))?;
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&stats)?);
+        return Ok(());
+    }
+
+    println!("# Hebbian-closure observability — importance vs access");
+    println!("DB: {}", path.display());
+    println!();
+    println!("total active           : {}", stats.total_active);
+    println!(
+        "  zero-access          : {}    ({:.0}% — bootstrap / never-read)",
+        stats.n_zero_access,
+        if stats.total_active > 0 {
+            100.0 * stats.n_zero_access as f64 / stats.total_active as f64
+        } else {
+            0.0
+        }
+    );
+    println!(
+        "  at importance floor  : {}    ({:.0}% — decay-flattened)",
+        stats.n_floor_importance,
+        if stats.total_active > 0 {
+            100.0 * stats.n_floor_importance as f64 / stats.total_active as f64
+        } else {
+            0.0
+        }
+    );
+    println!();
+    println!(
+        "mean importance        : {:.3}    mean access : {:.2}",
+        stats.mean_importance, stats.mean_access
+    );
+    println!();
+    let spearman_label = |r: f64| -> &'static str {
+        if r.is_nan() {
+            "(undefined)"
+        } else if r.abs() < 0.1 {
+            "noise"
+        } else if r.abs() < 0.3 {
+            "weak"
+        } else if r.abs() < 0.5 {
+            "moderate"
+        } else if r.abs() < 0.7 {
+            "strong"
+        } else {
+            "very strong"
+        }
+    };
+    println!(
+        "spearman r (all)       : {:>+.3}  [{}]",
+        stats.spearman_r,
+        spearman_label(stats.spearman_r),
+    );
+    println!(
+        "spearman r (touched)   : {:>+.3}  [{}]  (n={})",
+        stats.spearman_r_touched,
+        spearman_label(stats.spearman_r_touched),
+        stats.n_touched,
+    );
+
+    if !stats.under_reinforced.is_empty() {
+        println!();
+        println!("under-reinforced — high access, low importance (reinforce target):");
+        for r in &stats.under_reinforced {
+            println!(
+                "  Δ{:>+6.1}  imp={:.2}  acc={:>3}  · {}",
+                r.rank_diff,
+                r.importance,
+                r.access_count,
+                short_key(&r.key, 52),
+            );
+        }
+    }
+    if !stats.over_promoted.is_empty() {
+        println!();
+        println!("over-promoted — high importance, low access (decay/review target):");
+        for r in &stats.over_promoted {
+            println!(
+                "  Δ{:>+6.1}  imp={:.2}  acc={:>3}  · {}",
+                r.rank_diff,
+                r.importance,
+                r.access_count,
+                short_key(&r.key, 52),
+            );
+        }
+    }
+
+    if stats.total_active >= 10 {
+        println!();
+        if stats.spearman_r.is_nan() {
+            println!(
+                "verdict: signal undefined — too few rows or zero variance."
+            );
+        } else if stats.spearman_r.abs() < 0.1 {
+            println!(
+                "verdict: importance is noise — ranking does NOT predict access. \
+                Hebbian closure (reinforce-active) has not yet produced informative ranks."
+            );
+        } else if stats.spearman_r < 0.3 {
+            println!(
+                "verdict: weak signal — closure is starting to bite, give it more cron cycles."
+            );
+        } else {
+            println!(
+                "verdict: importance is a real prior (r={:.2}) — Hebbian closure working.",
+                stats.spearman_r
+            );
+        }
+    }
+
     Ok(())
 }
 

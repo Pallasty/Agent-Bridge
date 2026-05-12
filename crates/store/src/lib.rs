@@ -707,6 +707,75 @@ pub struct ReinforceActiveStats {
     pub skipped_at_ceiling: u64,
 }
 
+/// One row in [`SignalFidelityStats::under_reinforced`] /
+/// [`SignalFidelityStats::over_promoted`]. Surfaces a single memory whose
+/// `importance` rank disagrees most strongly with its `access_count` rank.
+/// Under-reinforced rows are candidates for a manual `reinforce-active`
+/// bump; over-promoted rows are candidates for `decay-unused`-or-tombstone
+/// review.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MisrankRow {
+    pub key: String,
+    pub importance: f64,
+    pub access_count: u64,
+    /// 1-based fractional rank (ties averaged) over all active rows.
+    pub rank_importance: f64,
+    pub rank_access: f64,
+    /// `rank_importance - rank_access`. Positive = over-promoted (high
+    /// importance, low access); negative = under-reinforced.
+    pub rank_diff: f64,
+}
+
+/// Aggregate of the `dream signal-fidelity` probe: how well does
+/// `importance` actually predict observed access? Computed by Spearman
+/// rank correlation (Pearson on rank-transformed vectors with ties
+/// averaged) over all active memories — robust to the heavy left-cluster
+/// at the importance floor and the right-skew of access counts.
+///
+/// Interpretation:
+/// - `spearman_r ≈ 0.0` — importance is noise: ranking doesn't predict
+///   access. Expected baseline pre-`reinforce-active` because decay had
+///   flattened importance to the floor.
+/// - `spearman_r ≈ 0.4-0.6` — meaningful signal: the Hebbian closure
+///   produced informative ranks.
+/// - `spearman_r > 0.7` — strong signal: importance is a reliable
+///   retrieval prior.
+///
+/// Pairs longitudinally: baseline before `reinforce-active` has had time
+/// to work, re-run after N cron cycles, observe drift.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SignalFidelityStats {
+    /// Total active memories considered.
+    pub total_active: u64,
+    /// Spearman rank correlation between `importance` and `access_count`.
+    /// Range `[-1.0, 1.0]`. `NaN` if `total_active < 2` or either vector
+    /// has zero variance.
+    pub spearman_r: f64,
+    /// Same correlation but restricted to memories with
+    /// `access_count > 0` — strips bootstrap-imported never-read rows
+    /// that would otherwise dominate the rank distribution at 0.
+    pub spearman_r_touched: f64,
+    /// Number of rows considered after the `access_count > 0` filter.
+    /// `spearman_r_touched`'s denominator.
+    pub n_touched: u64,
+    /// Memories with `access_count = 0`. Dominated by markdown imports
+    /// and bootstrap inserts that were never retrieved.
+    pub n_zero_access: u64,
+    /// Memories at or below `importance = 0.11` (decay-unused floor + ε).
+    /// High count here is the "everyone got crushed by decay" tell.
+    pub n_floor_importance: u64,
+    /// Mean importance across all active rows.
+    pub mean_importance: f64,
+    /// Mean access_count across all active rows.
+    pub mean_access: f64,
+    /// Top-N memories with `access_count` rank much higher than
+    /// `importance` rank. Reinforce-active should be pulling these up.
+    pub under_reinforced: Vec<MisrankRow>,
+    /// Top-N memories with `importance` rank much higher than
+    /// `access_count` rank. Candidates for review (stale-but-pinned).
+    pub over_promoted: Vec<MisrankRow>,
+}
+
 /// One per-summary row in [`ReplayAuditStats::top_summaries`] /
 /// [`ReplayAuditStats::dead_weight_summaries`]. Captures the post-creation
 /// fate of a single replay-generated summary.
@@ -1193,6 +1262,15 @@ pub trait StateStore: Send + Sync {
         step: f64,
         ceiling: f64,
     ) -> Result<ReinforceActiveStats>;
+
+    /// Compute Spearman rank correlation between `importance` and
+    /// `access_count` over active memories. Pure read pass — no writes.
+    /// Surfaces the worst `top_n` misranks on each side
+    /// (under-reinforced + over-promoted) to make the scalar
+    /// interpretable. See [`SignalFidelityStats`] for fields.
+    ///
+    /// `top_n` is capped at 50 to keep the result bounded.
+    async fn signal_fidelity_stats(&self, top_n: u32) -> Result<SignalFidelityStats>;
 
     /// Apply [`CompactPolicy`]; returns the keys that were (or would be)
     /// removed. Honours `dry_run`.
