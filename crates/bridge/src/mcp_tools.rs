@@ -8516,7 +8516,8 @@ impl McpTool for MemorySuggestTool {
         // (key, conf, reason) tuples + a snippet lookup against `all`.
         let by_key: std::collections::HashMap<&str, &MemoryRecord> =
             all.iter().map(|m| (m.key.as_str(), m)).collect();
-        let suggestions = compute_link_suggestions(&source, &all, &already_linked, limit as usize);
+        let suggestions =
+            compute_link_suggestions(&source, &all, &already_linked, limit as usize, &[]);
         let candidates: Vec<Value> = suggestions
             .into_iter()
             .map(|(k, conf, reason)| {
@@ -8563,17 +8564,31 @@ fn content_tokens(content: &str) -> std::collections::HashSet<String> {
 /// Caller supplies `source` + `candidates` + `already_linked` so this
 /// function does ZERO store I/O — it can be called in a tight loop (e.g.
 /// `memory_link_orphans` iterating over hundreds of orphans).
+///
+/// ζ-11 (2026-05-12) — added `skip_target_tags`: any candidate whose tag
+/// set intersects `skip_target_tags` is dropped before scoring. This is
+/// how `memory_link_orphans` excludes `auto_curated` stubs from becoming
+/// link targets — the ζ-9 snapshot revealed that all 82 `curated_implicit_*`
+/// stubs collapsed onto the lex-earliest sibling (degree=84 noise hub)
+/// because tag+prefix overlap evaluated to a ~tie. Pass `&[]` to disable.
 pub fn compute_link_suggestions(
     source: &MemoryRecord,
     candidates: &[MemoryRecord],
     already_linked: &std::collections::HashSet<String>,
     limit: usize,
+    skip_target_tags: &[String],
 ) -> Vec<(String, f64, String)> {
     let source_prefix = key_prefix(&source.key);
     let source_tokens = content_tokens(&source.content);
     let mut scored: Vec<(String, f64, String)> = candidates
         .iter()
         .filter(|m| m.key != source.key && !already_linked.contains(&m.key))
+        .filter(|m| {
+            if skip_target_tags.is_empty() {
+                return true;
+            }
+            !m.tags.iter().any(|t| skip_target_tags.contains(t))
+        })
         .filter_map(|m| {
             let mut score = 0.0f64;
             let mut reasons: Vec<&str> = Vec::new();
@@ -8669,6 +8684,27 @@ impl McpTool for MemoryLinkOrphansTool {
                         "default": 100,
                         "description": "Cap on orphans examined per run."
                     },
+                    "skip_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["auto_curated"],
+                        "description": "ζ-11 noise-hub fix. Orphans whose tags overlap this list \
+                            are skipped (don't pick a target) AND candidates whose tags overlap \
+                            this list cannot be picked as targets. Default `['auto_curated']` \
+                            prevents `curated_implicit_*` stubs from collapsing onto a single \
+                            sibling — the ζ-9 wet-run showed 82 stubs all linking to the \
+                            lex-earliest auto_curated sibling, creating a degree-84 noise hub."
+                    },
+                    "max_inbound_per_target": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 5,
+                        "description": "ζ-11 defense-in-depth. Within a single run, no target \
+                            receives more than this many new inbound `relates` edges. If the \
+                            top-1 candidate is already at cap, the tool falls back to the next \
+                            of up to 5 alternatives before giving up on the orphan."
+                    },
                     "dry_run": { "type": "boolean", "default": false }
                 }
             }),
@@ -8692,6 +8728,22 @@ impl McpTool for MemoryLinkOrphansTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(100)
             .min(500) as usize;
+        // ζ-11 skip_tags: default ["auto_curated"] excludes both source orphans
+        // AND candidate targets whose tags overlap. Empty array disables.
+        let skip_tags: Vec<String> = args
+            .get("skip_tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec!["auto_curated".to_string()]);
+        let max_inbound_per_target = args
+            .get("max_inbound_per_target")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5)
+            .clamp(1, 50) as u32;
         let dry_run = args
             .get("dry_run")
             .and_then(|v| v.as_bool())
@@ -8710,6 +8762,7 @@ impl McpTool for MemoryLinkOrphansTool {
         // we ever need to scale.
         let mut orphans: Vec<MemoryRecord> = Vec::new();
         let mut examined: u64 = 0;
+        let mut skipped_blacklisted_orphan: u64 = 0;
         for rec in all.iter() {
             if rec.kind == "skill" {
                 continue;
@@ -8725,60 +8778,95 @@ impl McpTool for MemoryLinkOrphansTool {
                 .memory_neighbors(&rec.key)
                 .await
                 .unwrap_or_default();
-            if nbrs.is_empty() {
-                orphans.push(rec.clone());
+            if !nbrs.is_empty() {
+                continue;
             }
+            // ζ-11 source-side blacklist: stubs tagged `auto_curated` should
+            // decay/archive naturally, not get force-linked.
+            if !skip_tags.is_empty()
+                && rec.tags.iter().any(|t| skip_tags.contains(t))
+            {
+                skipped_blacklisted_orphan += 1;
+                continue;
+            }
+            orphans.push(rec.clone());
             if orphans.len() >= max_orphans {
                 break;
             }
         }
 
-        // For each orphan, score against the full corpus. Top-1 only —
-        // we don't want to spray multiple low-quality links per orphan.
+        // For each orphan, score against the full corpus and pick the first
+        // viable target. ζ-11: ask for top-5 alternatives so that if the
+        // top-1 hit the per-target inbound cap we can fall back gracefully.
         let mut linked = 0u64;
         let mut skipped_low_score = 0u64;
+        let mut skipped_overloaded_target = 0u64;
+        let mut target_inbound_this_run: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
         let mut decisions: Vec<Value> = Vec::new();
         for orphan in &orphans {
             // already_linked is empty since orphan has no edges by definition.
             let already_linked: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
-            let sugg = compute_link_suggestions(orphan, &all, &already_linked, 1);
-            if let Some((target, conf, reason)) = sugg.first().cloned() {
-                if conf >= threshold {
-                    if !dry_run {
-                        // Skip self-references defensively (helper already filters
-                        // but make this idempotent against weird states).
-                        if target == orphan.key {
-                            continue;
-                        }
-                        store
-                            .memory_link(&orphan.key, &target, "relates", 1.0)
-                            .await
-                            .ok();
-                    }
-                    linked += 1;
-                    decisions.push(json!({
-                        "orphan": orphan.key,
-                        "target": target,
-                        "confidence": conf,
-                        "reason": reason,
-                    }));
-                } else {
-                    skipped_low_score += 1;
-                }
-            } else {
+            let sugg = compute_link_suggestions(orphan, &all, &already_linked, 5, &skip_tags);
+            if sugg.is_empty() {
                 skipped_low_score += 1;
+                continue;
             }
+            let top_conf = sugg.first().map(|s| s.1).unwrap_or(0.0);
+            if top_conf < threshold {
+                skipped_low_score += 1;
+                continue;
+            }
+            // Walk candidates in confidence order; pick the first that
+            // still has headroom under the per-target inbound cap.
+            let mut chosen: Option<(String, f64, String)> = None;
+            for (target, conf, reason) in sugg.iter() {
+                if *conf < threshold {
+                    break;
+                }
+                if target == &orphan.key {
+                    continue;
+                }
+                let cur = target_inbound_this_run.get(target).copied().unwrap_or(0);
+                if cur >= max_inbound_per_target {
+                    continue;
+                }
+                chosen = Some((target.clone(), *conf, reason.clone()));
+                break;
+            }
+            let Some((target, conf, reason)) = chosen else {
+                skipped_overloaded_target += 1;
+                continue;
+            };
+            if !dry_run {
+                store
+                    .memory_link(&orphan.key, &target, "relates", 1.0)
+                    .await
+                    .ok();
+            }
+            *target_inbound_this_run.entry(target.clone()).or_insert(0) += 1;
+            linked += 1;
+            decisions.push(json!({
+                "orphan": orphan.key,
+                "target": target,
+                "confidence": conf,
+                "reason": reason,
+            }));
         }
 
         Ok(ToolResult::json_text(&json!({
             "dry_run": dry_run,
             "threshold": threshold,
             "min_content_len": min_content_len,
+            "skip_tags": skip_tags,
+            "max_inbound_per_target": max_inbound_per_target,
             "examined": examined,
             "eligible_orphans": orphans.len(),
             "linked": linked,
             "skipped_low_score": skipped_low_score,
+            "skipped_blacklisted_orphan": skipped_blacklisted_orphan,
+            "skipped_overloaded_target": skipped_overloaded_target,
             "links": decisions,
         })))
     }
@@ -13294,6 +13382,209 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         }
+    }
+
+    // ── ζ-11 compute_link_suggestions blacklist tests ──────────────────
+
+    fn mk_mem(key: &str, kind: &str, content: &str, tags: &[&str]) -> MemoryRecord {
+        MemoryRecord {
+            key: key.into(),
+            kind: kind.into(),
+            content: content.into(),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            related_keys: Vec::new(),
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    #[test]
+    fn link_suggest_empty_blacklist_preserves_top_match() {
+        // baseline: stubs tied by tag/prefix; no blacklist → highest still wins
+        let src = mk_mem(
+            "curated_implicit_todoaaa",
+            "todo",
+            "long enough content to pass min filters",
+            &["auto_curated", "implicit"],
+        );
+        let cands = vec![
+            mk_mem(
+                "curated_implicit_todobbb",
+                "todo",
+                "long enough content to pass min filters",
+                &["auto_curated", "implicit"],
+            ),
+            mk_mem(
+                "curated_implicit_todoccc",
+                "todo",
+                "long enough content to pass min filters",
+                &["auto_curated", "implicit"],
+            ),
+        ];
+        let out = compute_link_suggestions(
+            &src,
+            &cands,
+            &std::collections::HashSet::new(),
+            5,
+            &[],
+        );
+        assert!(!out.is_empty(), "no skip_tags → tag-prefix overlap still picks a target");
+        assert!(out[0].0.starts_with("curated_implicit_todo"));
+    }
+
+    #[test]
+    fn link_suggest_blacklist_drops_tagged_candidates() {
+        // ζ-9 wet-run reproduction: auto_curated stubs should NOT be reachable
+        // as targets when caller passes skip=["auto_curated"].
+        let src = mk_mem(
+            "real_orphan_key",
+            "lesson",
+            "shared overlapping tokens shared overlapping tokens shared overlapping",
+            &["zeta-11", "hygiene"],
+        );
+        let cands = vec![
+            mk_mem(
+                "curated_implicit_todof9e6c185",
+                "todo",
+                "shared overlapping tokens shared overlapping tokens shared overlapping",
+                &["auto_curated", "implicit"],
+            ),
+            mk_mem(
+                "real_target_key",
+                "lesson",
+                "shared overlapping tokens shared overlapping tokens shared overlapping",
+                &["zeta-11"],
+            ),
+        ];
+        let blacklist = vec!["auto_curated".to_string()];
+        let out = compute_link_suggestions(
+            &src,
+            &cands,
+            &std::collections::HashSet::new(),
+            5,
+            &blacklist,
+        );
+        // The auto_curated noise hub must be invisible.
+        assert!(
+            !out.iter().any(|(k, _, _)| k == "curated_implicit_todof9e6c185"),
+            "auto_curated candidate leaked past blacklist: {:?}",
+            out
+        );
+        // The real candidate must still be returned.
+        assert!(out.iter().any(|(k, _, _)| k == "real_target_key"));
+    }
+
+    #[test]
+    fn link_suggest_blacklist_any_of_semantics() {
+        // Multiple blacklist tags: candidate is excluded if ANY tag matches.
+        let src = mk_mem("src", "x", "shared shared shared shared", &["topicA"]);
+        let cands = vec![
+            mk_mem("c1", "x", "shared shared shared shared", &["topicA", "auto_curated"]),
+            mk_mem("c2", "x", "shared shared shared shared", &["topicA", "junk"]),
+            mk_mem("c3", "x", "shared shared shared shared", &["topicA"]),
+        ];
+        let skip = vec!["auto_curated".to_string(), "junk".to_string()];
+        let out =
+            compute_link_suggestions(&src, &cands, &std::collections::HashSet::new(), 5, &skip);
+        let keys: Vec<&str> = out.iter().map(|(k, _, _)| k.as_str()).collect();
+        assert_eq!(keys, vec!["c3"]);
+    }
+
+    #[test]
+    fn link_orphan_cap_falls_back_to_alternates() {
+        // Mirror the per-target inbound cap loop in MemoryLinkOrphansTool.
+        // Three orphans with the `orphan_only` tag scoring against two
+        // candidate targets that share an overlapping content vocabulary.
+        // cap=1 → 2 successful links, 1 overloaded fallback.
+        let orphans = vec![
+            mk_mem(
+                "o1",
+                "lesson",
+                "alpha beta gamma delta epsilon zeta",
+                &["orphan_only"],
+            ),
+            mk_mem(
+                "o2",
+                "lesson",
+                "alpha beta gamma delta epsilon zeta",
+                &["orphan_only"],
+            ),
+            mk_mem(
+                "o3",
+                "lesson",
+                "alpha beta gamma delta epsilon zeta",
+                &["orphan_only"],
+            ),
+        ];
+        // Targets share `target_only` (no overlap with orphans on tag) but
+        // share content tokens — content-jaccard alone drives scoring.
+        let targets = vec![
+            mk_mem(
+                "tA",
+                "lesson",
+                "alpha beta gamma delta epsilon zeta",
+                &["target_only"],
+            ),
+            mk_mem(
+                "tB",
+                "lesson",
+                "alpha beta gamma delta epsilon zeta",
+                &["target_only"],
+            ),
+        ];
+        // The tool would call compute_link_suggestions with the FULL corpus,
+        // but in practice orphans wouldn't include each other since they
+        // share the source's prefix/tags identically and we want a clean
+        // probe of the cap. Use ONLY the targets as candidate corpus for
+        // this focused test; the corpus-construction concern is exercised
+        // separately by the blacklist tests.
+        let mut inbound: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
+        let cap: u32 = 1;
+        let mut chosen: Vec<String> = Vec::new();
+        let mut overloaded = 0u64;
+        for o in &orphans {
+            let sugg = compute_link_suggestions(
+                o,
+                &targets,
+                &std::collections::HashSet::new(),
+                5,
+                &[],
+            );
+            let mut picked: Option<String> = None;
+            for (t, _, _) in sugg.iter() {
+                if t == &o.key {
+                    continue;
+                }
+                if inbound.get(t).copied().unwrap_or(0) >= cap {
+                    continue;
+                }
+                picked = Some(t.clone());
+                break;
+            }
+            match picked {
+                Some(t) => {
+                    *inbound.entry(t.clone()).or_insert(0) += 1;
+                    chosen.push(t);
+                }
+                None => overloaded += 1,
+            }
+        }
+        // 3 orphans, 2 targets at cap=1 → 2 link, 1 overloaded.
+        assert_eq!(chosen.len(), 2, "chosen={:?}", chosen);
+        assert_eq!(overloaded, 1);
+        // Both targets used (inbound spread evenly).
+        let mut keys: Vec<String> = chosen.clone();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), 2);
     }
 
     // ── Perception Filter block tests ───────────────────────────────────
