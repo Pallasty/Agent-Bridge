@@ -818,6 +818,51 @@
     }
     .chat-msg.assistant:hover .copy-to-editor { opacity: 1; }
     .chat-msg .copy-to-editor:hover { color: #aef0f0; border-color: #5cc8c8; }
+    /* P14 — attachment chips above input row. Each chip shows a tiny
+       thumbnail for images + the filename. Click ✕ to remove before
+       sending (also strips the `[image: path]` marker from textarea). */
+    .chat-attachments {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 8px 18px 0;
+    }
+    .chat-attachments .att-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #16242a;
+      border: 1px solid #2a4550;
+      padding: 4px 8px 4px 4px;
+      border-radius: 6px;
+      font-size: 10px;
+      color: #aef0f0;
+      letter-spacing: 0.04em;
+    }
+    .chat-attachments .att-chip img {
+      width: 32px;
+      height: 32px;
+      object-fit: cover;
+      border-radius: 3px;
+      background: #0a0a10;
+    }
+    .chat-attachments .att-chip .att-name {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .chat-attachments .att-chip .att-rm {
+      background: transparent;
+      border: none;
+      color: #5a5a68;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0 2px;
+      line-height: 1;
+    }
+    .chat-attachments .att-chip .att-rm:hover { color: #c8505c; }
     .chat-input-row {
       display: flex;
       gap: 8px;
@@ -1317,9 +1362,10 @@
         <div class="chat-history" id="chat-history">
           <div class="chat-empty">type below to discuss this node — Claude sees the node + key neighbors</div>
         </div>
+        <div class="chat-attachments" id="chat-attachments" style="display:none;"></div>
         <div class="chat-input-row">
           <textarea id="chat-input" rows="2" spellcheck="false"
-                    placeholder="ask Claude about this node…  (cmd/ctrl+enter to send)"></textarea>
+                    placeholder="ask Claude about this node…  (cmd/ctrl+enter to send · ⌘V to paste image)"></textarea>
           <button id="chat-send" type="button">send</button>
         </div>
       </div>
@@ -3274,6 +3320,11 @@ function resetChat(memory) {
   if (memory.kind === "chat_session" && typeof memory.content === "string") {
     parsed = parseChatTranscript(memory.content);
   }
+  // P14 — revoke any leftover preview blob URLs from prior chat before
+  // clobbering canvasState.chat (otherwise memory leaks accumulate).
+  for (const a of (canvasState.chat && canvasState.chat.attachments) || []) {
+    if (a && a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+  }
   if (parsed.length > 0) {
     const about = neighborsOfType(memory.key, "discussed_at");
     canvasState.chat = {
@@ -3284,6 +3335,7 @@ function resetChat(memory) {
       viewerOrigin: about[0] || null,
       // Viewer is read-only; no lineage flows from here.
       continuedFrom: null,
+      attachments: [],
     };
   } else {
     const restored = loadPersistedChat(memory.key);
@@ -3297,10 +3349,12 @@ function resetChat(memory) {
       // discarded on focus switch — lineage tracks the *current* chat
       // session being authored, not history that drifted away.
       continuedFrom: null,
+      attachments: [],
     };
   }
   applyChatViewerMode();
   renderChatHistory();
+  renderCanvasAttachments();  // P14 — clear chip row visually on focus switch
   const input = document.getElementById("chat-input");
   if (input) input.value = "";
 }
@@ -3744,6 +3798,125 @@ function copyChatMsgToEditor(text) {
 // throws before we see the first delta). The streaming bubble lives in
 // canvasState.chat.streaming while in flight; renderChatHistory shows
 // it appended after history with class "chat-msg streaming".
+// P14 — multi-modal paste v0.5. Intercept clipboard image pastes on
+// the chat input, upload to /api/canvas-chat-attachment, insert an
+// `[image: <path>]` marker into the textarea, and surface a chip
+// preview row above the input so the user can remove before sending.
+// Spawned claude is told (via the chat prompt template) to call its
+// Read tool on `/tmp/canvas-chat-attachments/...` paths it sees in
+// user messages.
+async function uploadCanvasAttachment(blob, mediaType, displayName) {
+  const buf = await blob.arrayBuffer();
+  // chunked base64 to avoid call-stack blow on big images
+  const u8 = new Uint8Array(buf);
+  let s = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < u8.length; i += CHUNK) {
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+  }
+  const data_base64 = btoa(s);
+  const r = await fetch("/api/canvas-chat-attachment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ media_type: mediaType, data_base64 }),
+  });
+  if (!r.ok) throw new Error(`upload failed: ${r.status} ${await r.text()}`);
+  const j = await r.json();
+  return { ...j, displayName: displayName || j.filename };
+}
+
+function renderCanvasAttachments() {
+  const wrap = document.getElementById("chat-attachments");
+  if (!wrap) return;
+  const list = canvasState.chat.attachments || [];
+  if (list.length === 0) {
+    wrap.innerHTML = "";
+    wrap.style.display = "none";
+    return;
+  }
+  wrap.style.display = "";
+  wrap.innerHTML = list.map((a, idx) => {
+    const thumb = a.previewUrl
+      ? `<img src="${a.previewUrl}" alt="${escapeHTML(a.displayName)}">`
+      : "";
+    return `<span class="att-chip" data-att-idx="${idx}">` +
+      thumb +
+      `<span class="att-name" title="${escapeHTML(a.path)}">${escapeHTML(a.displayName)}</span>` +
+      `<button type="button" class="att-rm" data-rm-idx="${idx}" title="remove">✕</button>` +
+      `</span>`;
+  }).join("");
+  // Bind remove buttons.
+  wrap.querySelectorAll(".att-rm").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.rmIdx, 10);
+      const att = canvasState.chat.attachments[idx];
+      if (!att) return;
+      // Strip the corresponding marker from textarea content (best effort).
+      const input = document.getElementById("chat-input");
+      if (input && att.path) {
+        const marker = `[image: ${att.path}]`;
+        input.value = input.value.replace(marker, "").replace(/\n{3,}/g, "\n\n");
+      }
+      // Revoke object URL + remove from list.
+      if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+      canvasState.chat.attachments.splice(idx, 1);
+      renderCanvasAttachments();
+    });
+  });
+}
+
+async function handleCanvasPaste(e) {
+  if (!canvasState.current) return;
+  if (canvasState.chat.viewMode === "past") return;
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  let handled = false;
+  for (const item of items) {
+    if (item.kind !== "file") continue;
+    if (!item.type.startsWith("image/")) continue;
+    const blob = item.getAsFile();
+    if (!blob) continue;
+    // Image clipboard event — keep the default text paste from
+    // happening (browser otherwise inserts nothing for image, but
+    // belt-and-suspenders).
+    e.preventDefault();
+    handled = true;
+    try {
+      const att = await uploadCanvasAttachment(
+        blob,
+        item.type,
+        `paste-${new Date().toISOString().slice(11, 19)}.${item.type.split("/")[1] || "bin"}`
+      );
+      att.previewUrl = URL.createObjectURL(blob);
+      canvasState.chat.attachments = canvasState.chat.attachments || [];
+      canvasState.chat.attachments.push(att);
+      // Insert marker into textarea at cursor.
+      const input = document.getElementById("chat-input");
+      if (input) {
+        const marker = `[image: ${att.path}]`;
+        const start = input.selectionStart || 0;
+        const end = input.selectionEnd || 0;
+        const sep = input.value && start === input.value.length ? " " : "";
+        const inject = `${sep}${marker} `;
+        input.value =
+          input.value.slice(0, start) + inject + input.value.slice(end);
+        input.selectionStart = input.selectionEnd = start + inject.length;
+      }
+      renderCanvasAttachments();
+    } catch (err) {
+      console.error("canvas paste upload failed:", err);
+      // Surface as a hint in canvas-hint.
+      const hint = document.getElementById("canvas-hint");
+      if (hint) {
+        hint.textContent = "✗ paste upload: " + String(err).slice(0, 160);
+        hint.className = "canvas-hint error";
+        setTimeout(resetCanvasHint, 4000);
+      }
+    }
+  }
+  return handled;
+}
+
 async function sendChatMessage() {
   if (!canvasState.current || canvasState.chat.pending) return;
   // Viewer mode = read-only; reject any send (keyboard or click).
@@ -3867,6 +4040,12 @@ async function sendChatMessage() {
     canvasState.chat.streamingTools = [];
     canvasState.chat.pending = false;
     sendBtn.disabled = false;
+    // P14 — clear attachment chips post-send. URLs revoke to free memory.
+    for (const a of (canvasState.chat.attachments || [])) {
+      if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+    }
+    canvasState.chat.attachments = [];
+    renderCanvasAttachments();
     // Persist after each completed turn (success OR error). We don't
     // persist `pending=true` or the in-flight streaming buffer — those
     // are session-only state.
@@ -3902,6 +4081,10 @@ function bindCanvasGlobals() {
         e.preventDefault();
         sendChatMessage();
       }
+    });
+    // P14 — clipboard image paste upload.
+    chatInput.addEventListener("paste", (e) => {
+      handleCanvasPaste(e);
     });
   }
   const chatClear = document.getElementById("chat-clear-btn");

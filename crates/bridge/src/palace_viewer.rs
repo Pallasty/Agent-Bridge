@@ -38,6 +38,7 @@
 
 use ab_store::{MemoryListSort, MemoryQueryRecord, MemoryRecord, StateStore};
 use anyhow::{Context, Result};
+use base64::{engine::general_purpose, Engine as _};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -123,6 +124,7 @@ pub async fn run(
         .route("/api/memory/:key/tombstone", post(api_memory_tombstone))
         .route("/api/lineage/:key", get(api_lineage))
         .route("/api/embedding-stats", get(api_embedding_stats))
+        .route("/api/canvas-chat-attachment", post(api_canvas_chat_attachment))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen)
@@ -811,6 +813,88 @@ async fn api_embedding_stats(
     })))
 }
 
+// ── Canvas chat attachment upload (P14: multi-modal paste v0.5) ─────────
+//
+// Accepts base64-encoded images (or any binary) from the chat panel's
+// paste handler. Writes to `/tmp/canvas-chat-attachments/<ts>-<hex>.<ext>`
+// and returns the path. The spawned-claude in canvas chat has Read tool
+// access by default and can interpret images natively, so the chat
+// flow only has to surface "[image: <path>]" markers in the prompt and
+// claude will reach for Read on its own (the chat prompt template also
+// hints this).
+//
+// No auth/quota in v0.5; Palace is local-only; abuse risk is low.
+
+#[derive(Deserialize)]
+struct AttachmentPayload {
+    /// MIME type, e.g. `image/png`, `image/jpeg`. Used to derive file
+    /// extension; defaults to `bin` for unknown types.
+    media_type: String,
+    /// Base64-encoded payload (no `data:` URL prefix).
+    data_base64: String,
+}
+
+async fn api_canvas_chat_attachment(
+    State(_s): State<AppState>,
+    Json(p): Json<AttachmentPayload>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let ext = match p.media_type.as_str() {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        _ => "bin",
+    };
+    let bytes = general_purpose::STANDARD
+        .decode(p.data_base64.trim())
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid base64: {e}")))?;
+    // 8 MiB cap — Palace chat is for snippets / screenshots, not
+    // large media. Past that, user should put the file on disk
+    // and paste the path directly.
+    if bytes.len() > 8 * 1024 * 1024 {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!("attachment {} bytes exceeds 8 MiB cap", bytes.len()),
+        ));
+    }
+    let dir = std::path::PathBuf::from("/tmp/canvas-chat-attachments");
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("mkdir: {e}")))?;
+    // Filename: <unix-ms>-<8-hex>.ext — sortable + collision-resistant
+    // without a uuid crate. A second process landing in the same ms
+    // collides only on full 8-hex match (1 in 4 billion).
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let mut rand_hex = String::with_capacity(8);
+    for _ in 0..8 {
+        let r: u8 = (now_ms as u8).wrapping_mul(31).wrapping_add(rand_hex.len() as u8 * 7);
+        rand_hex.push_str(&format!("{:x}", r % 16));
+    }
+    // Mix in a tiny entropy from the byte content itself so two pastes
+    // of different content in the same millisecond don't collide.
+    let content_hash: u32 = bytes
+        .iter()
+        .take(64)
+        .fold(0u32, |a, b| a.wrapping_mul(131).wrapping_add(*b as u32));
+    let filename = format!("{:013}-{:08x}.{}", now_ms, content_hash, ext);
+    let path = dir.join(&filename);
+    tokio::fs::write(&path, &bytes)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("write {path:?}: {e}")))?;
+
+    Ok(Json(json!({
+        "ok": true,
+        "path": path.display().to_string(),
+        "filename": filename,
+        "media_type": p.media_type,
+        "size_bytes": bytes.len(),
+    })))
+}
+
 // ── Annotate endpoint (C1: closes the 呼吸 loop) ─────────────────────────
 
 #[derive(Deserialize)]
@@ -1187,7 +1271,9 @@ async fn api_canvas_chat(
         "你正在 Palace 画布的 chat panel 里和用户讨论 memory 节点 `{focus}`。\n\
          你的目标是帮用户思考、提出连接、起草 working_doc 内容。\n\
          回复用中文，简洁直接，避免空泛。\n\
-         如果用户想沉淀某段为 working_doc，提示他可以点 [→ copy to editor]。\n\n\
+         如果用户想沉淀某段为 working_doc，提示他可以点 [→ copy to editor]。\n\
+         如果用户消息里出现 `[image: /tmp/canvas-chat-attachments/...]` 标记（粘贴的图），\
+         请用 Read 工具读取那个路径来看图，然后基于图的内容回答。\n\n\
          ## 当前焦点节点\n{focus_block}\n\n\
          ## 邻居节点（top {n} by edge weight）\n{neighbor_block}\n\n\
          ## 对话历史\n{history_block}\n\n\
@@ -1336,7 +1422,9 @@ async fn api_canvas_chat_stream(
         "你正在 Palace 画布的 chat panel 里和用户讨论 memory 节点 `{focus}`。\n\
          你的目标是帮用户思考、提出连接、起草 working_doc 内容。\n\
          回复用中文，简洁直接，避免空泛。\n\
-         如果用户想沉淀某段为 working_doc，提示他可以点 [→ copy to editor]。\n\n\
+         如果用户想沉淀某段为 working_doc，提示他可以点 [→ copy to editor]。\n\
+         如果用户消息里出现 `[image: /tmp/canvas-chat-attachments/...]` 标记（粘贴的图），\
+         请用 Read 工具读取那个路径来看图，然后基于图的内容回答。\n\n\
          ## 当前焦点节点\n{focus_block}\n\n\
          ## 邻居节点（top {n} by edge weight）\n{neighbor_block}\n\n\
          ## 对话历史\n{history_block}\n\n\
