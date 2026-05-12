@@ -700,11 +700,19 @@ async fn api_lineage(
         ));
     }
 
-    // BFS queue of (key, hop_count). visited prevents re-traversal so
-    // cycles in the edge graph don't loop forever.
+    // BFS queue of (key, hop_count). Two distinct visited sets:
+    //   `enqueued`  — guards cycle re-traversal (per-node, like classic BFS)
+    //   `emitted`   — guards duplicate chain entries (per (next, edge_type))
+    // Without the (next, edge_type) tier, two edges between the same
+    // pair (e.g. fork-chain creates BOTH evolved_from B→A AND an
+    // auto-supersedes B→A from threshold dedupe) would have only one
+    // emitted: whichever came first via memory_neighbors. Bug surfaced
+    // in P10-B e2e where evolved_from quietly disappeared from the
+    // lineage rail because supersedes happened to win the iteration race.
     use std::collections::{HashSet, VecDeque};
-    let mut visited: HashSet<String> = HashSet::new();
-    visited.insert(key.clone());
+    let mut enqueued: HashSet<String> = HashSet::new();
+    enqueued.insert(key.clone());
+    let mut emitted: HashSet<(String, String)> = HashSet::new();
     let mut queue: VecDeque<(String, u32)> = VecDeque::new();
     queue.push_back((key.clone(), 0));
 
@@ -734,10 +742,13 @@ async fn api_lineage(
             } else {
                 continue;
             };
-            if visited.contains(&next) {
+            // Dedup per (target_key, edge_type): multiple edge types
+            // between the same pair each emit their own chain entry.
+            let emit_key = (next.clone(), e.edge_type.clone());
+            if emitted.contains(&emit_key) {
                 continue;
             }
-            visited.insert(next.clone());
+            emitted.insert(emit_key);
             chain.push(json!({
                 "from": cur,
                 "to": next,
@@ -745,7 +756,14 @@ async fn api_lineage(
                 "weight": e.weight,
                 "hop": hop + 1,
             }));
-            queue.push_back((next, hop + 1));
+            // Enqueue once per target (cycle guard): if we already walked
+            // from this node before, don't re-traverse its outgoing edges
+            // — but we still emitted the new edge type above so the
+            // chain surface stays complete.
+            if !enqueued.contains(&next) {
+                enqueued.insert(next.clone());
+                queue.push_back((next, hop + 1));
+            }
         }
     }
 
@@ -1389,10 +1407,28 @@ async fn api_canvas_chat_stream(
                                         .data(json!({"type":"delta","text":text}).to_string()),
                                 );
                             }
+                        } else if delta.get("type").and_then(|v| v.as_str())
+                            == Some("input_json_delta")
+                        {
+                            // Tool args chunk — forward to client so the
+                            // chip tooltip can accumulate the JSON args
+                            // claude is sending to the tool.
+                            if let (Some(idx), Some(chunk)) = (
+                                event.get("index").and_then(|v| v.as_i64()),
+                                delta.get("partial_json").and_then(|v| v.as_str()),
+                            ) {
+                                let _ = tx.send(SseEvent::default().data(
+                                    json!({
+                                        "type": "tool_args_delta",
+                                        "index": idx,
+                                        "chunk": chunk,
+                                    })
+                                    .to_string(),
+                                ));
+                            }
                         }
-                        // input_json_delta / signature_delta etc. — silently
-                        // skipped for v1; tool args + reasoning signature
-                        // not surfaced to the chat panel.
+                        // signature_delta etc. — silently skipped for v1;
+                        // reasoning signature not surfaced to the chat panel.
                     }
                     // Block start — record kind by index; if it's a tool_use
                     // emit tool_start with the tool name + id so the client
