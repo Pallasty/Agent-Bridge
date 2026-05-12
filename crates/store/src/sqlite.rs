@@ -2791,6 +2791,92 @@ impl StateStore for SqliteStore {
         Ok(pruned)
     }
 
+    async fn memory_archive_orphan_stubs(
+        &self,
+        blacklist_tags: &[String],
+        older_than_days: i64,
+        max_archive: i64,
+        dry_run: bool,
+    ) -> Result<u64> {
+        if blacklist_tags.is_empty() || max_archive <= 0 {
+            return Ok(0);
+        }
+        let days = older_than_days.max(0);
+        let cutoff = now_secs() - days.saturating_mul(86_400);
+        let cap = max_archive.max(1);
+        // Same anchored-LIKE pattern as ζ-12 prune to avoid lookalike
+        // substring collisions on JSON-encoded tag arrays.
+        let patterns: Vec<String> = blacklist_tags
+            .iter()
+            .map(|t| format!("%\"{}\"%", t.replace('"', "")))
+            .collect();
+        let n = patterns.len();
+        let tag_or = std::iter::repeat("tags LIKE ?")
+            .take(n)
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        // Select-then-update via key IN (subquery) — SQLite refuses LIMIT
+        // directly inside UPDATE without the SQLITE_ENABLE_UPDATE_DELETE_LIMIT
+        // build option which we don't rely on. The subquery + LIMIT keeps a
+        // single live run bounded.
+        let select_keys_sql = format!(
+            "SELECT key FROM memories
+              WHERE status = 'active'
+                AND ({tag_or})
+                AND created_at <= ?
+                AND NOT EXISTS (
+                  SELECT 1 FROM memory_edges e
+                  WHERE e.from_key = memories.key OR e.to_key = memories.key
+                )
+              ORDER BY created_at ASC
+              LIMIT ?"
+        );
+        let count_sql = format!("SELECT COUNT(*) FROM ({select_keys_sql})");
+        let update_sql = format!(
+            "UPDATE memories SET status='archived', updated_at=?
+              WHERE key IN ({select_keys_sql})"
+        );
+        let now = now_secs();
+        let archived = self
+            .conn
+            .call(move |c| -> RusqliteResult<u64> {
+                let tx = c.unchecked_transaction()?;
+                // params: N tag patterns + cutoff + cap
+                let mut count_params: Vec<rusqlite::types::Value> = patterns
+                    .iter()
+                    .map(|s| rusqlite::types::Value::Text(s.clone()))
+                    .collect();
+                count_params.push(rusqlite::types::Value::Integer(cutoff));
+                count_params.push(rusqlite::types::Value::Integer(cap));
+                let count_n: i64 = tx.query_row(
+                    &count_sql,
+                    rusqlite::params_from_iter(count_params.iter()),
+                    |row| row.get(0),
+                )?;
+                if !dry_run {
+                    // UPDATE binds `now` first, then same N+2 select params.
+                    let mut update_params: Vec<rusqlite::types::Value> =
+                        vec![rusqlite::types::Value::Integer(now)];
+                    update_params.extend(
+                        patterns
+                            .iter()
+                            .map(|s| rusqlite::types::Value::Text(s.clone())),
+                    );
+                    update_params.push(rusqlite::types::Value::Integer(cutoff));
+                    update_params.push(rusqlite::types::Value::Integer(cap));
+                    tx.execute(
+                        &update_sql,
+                        rusqlite::params_from_iter(update_params.iter()),
+                    )?;
+                }
+                tx.commit()?;
+                Ok(count_n as u64)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_archive_orphan_stubs: {e}")))?;
+        Ok(archived)
+    }
+
     async fn replay_audit_stats(
         &self,
         stale_days: u32,
@@ -7334,6 +7420,113 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
+    // P9 follow-up: memory_reindex_embeddings(only_stale=true) must:
+    //   • update rows whose embedding_backend != current backend name
+    //   • leave NULL-backend rows alone (those are pre-v26 simulants;
+    //     they get touched only when their *embedding* is NULL, i.e.
+    //     in the only_stale=false path)
+    //   • return the number of rows it actually rewrote
+    // After the reindex, the stale row's embedding_backend column must
+    // be the current backend's name (deterministic via HashBackend).
+    #[tokio::test]
+    async fn memory_reindex_only_stale_upgrades_mismatched_backend() {
+        use crate::embedding::{set_default_backend, HashBackend};
+        use crate::MemoryRecord;
+        use std::sync::Arc;
+
+        // Force deterministic backend (idempotent — Err if already set).
+        let _ = set_default_backend(Arc::new(HashBackend));
+        // The reindex compares against whatever default_backend() reports
+        // at call-time, so capture that here for the assertion below.
+        let expected_backend = crate::embedding::default_backend().name().to_string();
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-reindex-stale-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        let mk = |key: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: "fact".to_string(),
+            content: format!("content for {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+
+        store.memory_save(&mk("stale_a")).await.expect("save stale_a");
+        store.memory_save(&mk("null_b")).await.expect("save null_b");
+        store.memory_save(&mk("fresh_c")).await.expect("save fresh_c");
+
+        // Pre-seed backend tags: stale_a gets a wrong tag, null_b gets NULL,
+        // fresh_c stays at the default-stamped current backend name.
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET embedding_backend = ?2 WHERE key = ?1",
+                    params!["stale_a", "stale-backend-x"],
+                )?;
+                c.execute(
+                    "UPDATE memories SET embedding_backend = NULL WHERE key = ?1",
+                    params!["null_b"],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed backend tags");
+
+        // only_stale=true: should pick up just stale_a (NULL backend on
+        // null_b is explicitly excluded by the v26 stale predicate).
+        let n_stale = store
+            .memory_reindex_embeddings(100, true)
+            .await
+            .expect("reindex stale");
+        assert_eq!(n_stale, 1, "only stale_a should be reindexed in stale mode");
+
+        // Verify stale_a's backend column is now the current backend name.
+        let stale_a_backend: Option<String> = store
+            .conn
+            .call(|c| -> RusqliteResult<Option<String>> {
+                c.query_row(
+                    "SELECT embedding_backend FROM memories WHERE key = ?1",
+                    params!["stale_a"],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+            })
+            .await
+            .expect("query stale_a backend");
+        assert_eq!(
+            stale_a_backend.as_deref(),
+            Some(expected_backend.as_str()),
+            "stale_a backend tag should flip to current default"
+        );
+
+        // only_stale=false: no NULL embeddings (every save populated one),
+        // so reindex is a no-op.
+        let n_null = store
+            .memory_reindex_embeddings(100, false)
+            .await
+            .expect("reindex null");
+        assert_eq!(n_null, 0, "no NULL embeddings remain; reindex must return 0");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
     // Phase 2.x #9: loose_edges = at-least-one-endpoint membership.
     // Closes `lesson_chat_session_export_edge_drop`: narrow filters (kind,
     // tag, since_ts) used to silently drop edges to nodes outside the set,
@@ -8479,6 +8672,220 @@ mod tests {
             .await
             .expect("multi");
         assert_eq!(multi, 1, "multi-tag any-of catches misc_m→stub_a");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn archive_orphan_stubs_retires_only_eligible_rows() {
+        // ζ-14: an orphan stub is archive-eligible iff
+        //   status='active' AND tags overlap blacklist AND no edges
+        //   AND created_at <= now - older_than_days*86400.
+        // Rows that fail any one criterion stay active. dry_run reports
+        // the same count a live run would archive; live flips status and
+        // bumps updated_at; max_archive caps run size.
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-archive-stubs-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+
+        let now = now_secs();
+        let old = now - 10 * 86_400; // safely past any reasonable cutoff
+        let mk = |key: &str, tags: &[&str]| MemoryRecord {
+            key: key.to_string(),
+            // Unique kind per row defeats Phase-1-P2 auto supersede on save.
+            kind: format!("kind_{key}"),
+            content: format!("body-{key} content"),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        // - stub_old_orphan: eligible (auto_curated + old + orphan)
+        // - stub_new_orphan: blocked by age (auto_curated + new + orphan)
+        // - stub_old_linked: blocked by edge (auto_curated + old + has edge)
+        // - real_old_orphan: blocked by tag (no auto_curated + old + orphan)
+        // - stub_archived: blocked by status (already archived)
+        // - stub_old_orphan_b: a 2nd eligible row to test cap behavior
+        for key in [
+            "stub_old_orphan",
+            "stub_old_orphan_b",
+            "stub_new_orphan",
+            "stub_old_linked",
+            "stub_archived",
+        ] {
+            store
+                .memory_save(&mk(key, &["auto_curated"]))
+                .await
+                .expect("save");
+        }
+        store
+            .memory_save(&mk("real_old_orphan", &["topic"]))
+            .await
+            .expect("save");
+        // memory_save stamps created_at = now regardless of the MemoryRecord
+        // value, so backdate the rows we want considered "old" via direct
+        // UPDATE. Also pre-archive stub_archived to verify the status filter.
+        let backdate_keys: Vec<&str> = vec![
+            "stub_old_orphan",
+            "stub_old_orphan_b",
+            "stub_old_linked",
+            "stub_archived",
+            "real_old_orphan",
+        ];
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                let q = format!(
+                    "UPDATE memories SET created_at=? WHERE key IN ({})",
+                    backdate_keys
+                        .iter()
+                        .map(|_| "?")
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                let mut p: Vec<rusqlite::types::Value> =
+                    vec![rusqlite::types::Value::Integer(old)];
+                p.extend(
+                    backdate_keys
+                        .into_iter()
+                        .map(|k| rusqlite::types::Value::Text(k.to_string())),
+                );
+                c.execute(&q, rusqlite::params_from_iter(p.iter()))
+            })
+            .await
+            .expect("backdate");
+        store
+            .conn
+            .call(|c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET status='archived' WHERE key='stub_archived'",
+                    [],
+                )
+            })
+            .await
+            .expect("pre-archive");
+        // Edge that anchors stub_old_linked (so it isn't an orphan).
+        store
+            .memory_link("stub_old_linked", "real_old_orphan", "relates", 1.0)
+            .await
+            .expect("link");
+
+        let blacklist = vec!["auto_curated".to_string()];
+
+        // dry_run preview: 2 eligible (stub_old_orphan + stub_old_orphan_b),
+        // older_than_days=3 well under 10-day age.
+        let preview = store
+            .memory_archive_orphan_stubs(&blacklist, 3, 100, true)
+            .await
+            .expect("dry");
+        assert_eq!(preview, 2, "two eligible orphan stubs expected");
+        // dry_run must not flip status.
+        let still_active: i64 = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM memories
+                     WHERE key IN ('stub_old_orphan','stub_old_orphan_b')
+                       AND status='active'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .expect("post-dry");
+        assert_eq!(still_active, 2, "dry_run must not change status");
+
+        // Cap test: max_archive=1 archives one of the two.
+        let capped = store
+            .memory_archive_orphan_stubs(&blacklist, 3, 1, false)
+            .await
+            .expect("capped");
+        assert_eq!(capped, 1, "max_archive=1 stops at one row");
+        let active_after_cap: i64 = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM memories
+                     WHERE key IN ('stub_old_orphan','stub_old_orphan_b')
+                       AND status='active'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .expect("post-cap");
+        assert_eq!(active_after_cap, 1, "one row remains active after cap");
+
+        // Live full run: catches the remaining eligible row.
+        let archived = store
+            .memory_archive_orphan_stubs(&blacklist, 3, 100, false)
+            .await
+            .expect("live");
+        assert_eq!(archived, 1);
+
+        // Final state assertions: exactly the two stub_old_orphan_* rows
+        // are archived from this run; the pre-archived row stays as-is;
+        // every other row stays active.
+        let archived_keys: Vec<String> = store
+            .conn
+            .call(|c| {
+                let mut s = c.prepare(
+                    "SELECT key FROM memories WHERE status='archived' ORDER BY key",
+                )?;
+                let rows: RusqliteResult<Vec<String>> = s
+                    .query_map([], |r| r.get::<_, String>(0))?
+                    .collect();
+                rows
+            })
+            .await
+            .expect("collect archived");
+        assert_eq!(
+            archived_keys,
+            vec![
+                "stub_archived".to_string(),
+                "stub_old_orphan".to_string(),
+                "stub_old_orphan_b".to_string(),
+            ]
+        );
+
+        // updated_at must have bumped on freshly-archived rows.
+        let bumped: i64 = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM memories
+                     WHERE key IN ('stub_old_orphan','stub_old_orphan_b')
+                       AND updated_at > created_at",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .expect("bumped");
+        assert_eq!(bumped, 2, "updated_at bumped on archive");
+
+        // Empty blacklist → no-op even with large cap.
+        let zero = store
+            .memory_archive_orphan_stubs(&[], 0, 100, false)
+            .await
+            .expect("empty");
+        assert_eq!(zero, 0);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
