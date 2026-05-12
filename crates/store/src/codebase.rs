@@ -43,11 +43,13 @@ pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<Co
 }
 
 /// Extract call sites from `content` for the given language. Phase 2 #3
-/// third slice ships Rust; Python/TS/Go to follow once the storage +
-/// query plumbing is wet-validated.
+/// third slice now covers Rust + Python; TS/Go to follow once the
+/// language-specific extractors are written. Dispatch returns `vec![]`
+/// for unhandled languages so the table is always queryable.
 pub fn extract_calls(content: &str, file_path: &str, language: &str) -> Vec<CodebaseCall> {
     match language {
         "rust" => extract_rust_calls(content, file_path),
+        "python" => extract_python_calls(content, file_path),
         _ => vec![],
     }
 }
@@ -1957,6 +1959,511 @@ fn extract_python(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
     out
 }
 
+// ── Python calls (Phase 2 #3 third slice — Python side) ──────────────────────
+
+/// Python keywords / soft keywords that can appear in `ident(` shape but
+/// are not function calls (e.g. `if (cond):`, `return(x)`, `yield (x)`).
+/// Mirrors [`is_rust_call_keyword`]'s policy: language keywords are
+/// filtered out; built-ins (`print`, `len`, `range`, …) are emitted as
+/// real calls because they ARE function calls at runtime and are useful
+/// as graph leaves. `True`/`False`/`None` are reserved but won't appear
+/// before `(` in valid code; included defensively.
+fn is_python_call_keyword(s: &str) -> bool {
+    matches!(
+        s,
+        "if" | "elif"
+            | "else"
+            | "while"
+            | "for"
+            | "in"
+            | "not"
+            | "and"
+            | "or"
+            | "is"
+            | "lambda"
+            | "return"
+            | "yield"
+            | "await"
+            | "raise"
+            | "assert"
+            | "del"
+            | "from"
+            | "import"
+            | "as"
+            | "pass"
+            | "break"
+            | "continue"
+            | "global"
+            | "nonlocal"
+            | "with"
+            | "try"
+            | "except"
+            | "finally"
+            | "class"
+            | "def"
+            | "async"
+            | "True"
+            | "False"
+            | "None"
+    )
+}
+
+fn is_python_ident_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_'
+}
+
+fn skip_python_whitespace(bytes: &[u8], i: usize) -> usize {
+    let mut k = i;
+    while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+        k += 1;
+    }
+    k
+}
+
+/// Python equivalent of [`mask_strings_and_comments`]. Replaces the
+/// interior of string literals (`'…'`, `"…"`, triple-quoted `"""…"""`
+/// and `'''…'''`, plus their `r`/`b`/`f`/`rb`/`br`/`u` prefixes) and
+/// `# …` line comments with spaces. Preserves newlines + the delimiters
+/// themselves so per-line scanning sees a string-like shell but no
+/// code-like interior.
+///
+/// Limitations:
+/// - `f"…{expr}…"` f-string interpolations: the interior including the
+///   `{expr}` is masked out, so calls inside f-strings won't be
+///   detected. Acceptable: such calls are rare in normal code.
+/// - String concatenation across lines via `\` line continuation is
+///   handled by the parser naturally because we mask per-character.
+fn mask_python_strings_and_comments(content: &str) -> String {
+    enum State {
+        Normal,
+        // Single-quoted string with given delimiter byte (`'` or `"`).
+        Str(u8),
+        // Triple-quoted string with given delimiter byte (`'` or `"`).
+        Triple(u8),
+        LineCmt,
+    }
+    let mut state = State::Normal;
+    let mut prev_bs = false;
+    let bytes = content.as_bytes();
+    let mut out = String::with_capacity(content.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i];
+        match state {
+            State::Normal => {
+                // Detect string prefix (r, b, f, u, rb, br, fr, rf, …).
+                // We only need to know where the quote starts — the
+                // prefix chars themselves are passed through unchanged.
+                let mut k = i;
+                while k < bytes.len()
+                    && matches!(
+                        bytes[k],
+                        b'r' | b'R' | b'b' | b'B' | b'f' | b'F' | b'u' | b'U'
+                    )
+                    && k - i < 2
+                {
+                    k += 1;
+                }
+                // Word-boundary: chars before `i` must not be ident chars,
+                // otherwise `er"foo"` isn't actually a string prefix.
+                let before_ok = i == 0
+                    || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
+                if k > i
+                    && before_ok
+                    && k < bytes.len()
+                    && (bytes[k] == b'"' || bytes[k] == b'\'')
+                {
+                    // Emit prefix chars verbatim, fall through with i = k.
+                    for j in i..k {
+                        out.push(bytes[j] as char);
+                    }
+                    i = k;
+                    continue;
+                }
+                if c == b'#' {
+                    state = State::LineCmt;
+                    out.push(' ');
+                    i += 1;
+                    continue;
+                }
+                // Triple-quoted detection — `"""` or `'''`.
+                if (c == b'"' || c == b'\'')
+                    && i + 2 < bytes.len()
+                    && bytes[i + 1] == c
+                    && bytes[i + 2] == c
+                {
+                    out.push(c as char);
+                    out.push(c as char);
+                    out.push(c as char);
+                    state = State::Triple(c);
+                    i += 3;
+                    continue;
+                }
+                if c == b'"' || c == b'\'' {
+                    state = State::Str(c);
+                    out.push(c as char);
+                    i += 1;
+                    continue;
+                }
+                out.push(c as char);
+                i += 1;
+            }
+            State::Str(quote) => {
+                if c == b'\\' && !prev_bs {
+                    prev_bs = true;
+                    out.push('\\');
+                    i += 1;
+                    continue;
+                }
+                if c == quote && !prev_bs {
+                    state = State::Normal;
+                    out.push(c as char);
+                    prev_bs = false;
+                    i += 1;
+                    continue;
+                }
+                if c == b'\n' {
+                    // Unterminated single-quoted string: drop back to
+                    // Normal at newline (Python forbids raw newline in
+                    // non-triple strings).
+                    state = State::Normal;
+                    out.push('\n');
+                    prev_bs = false;
+                    i += 1;
+                    continue;
+                }
+                prev_bs = false;
+                out.push(' ');
+                i += 1;
+            }
+            State::Triple(quote) => {
+                // Closing is three consecutive `quote` bytes.
+                if c == quote
+                    && i + 2 < bytes.len()
+                    && bytes[i + 1] == quote
+                    && bytes[i + 2] == quote
+                {
+                    out.push(c as char);
+                    out.push(c as char);
+                    out.push(c as char);
+                    state = State::Normal;
+                    i += 3;
+                    continue;
+                }
+                if c == b'\n' {
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+            State::LineCmt => {
+                if c == b'\n' {
+                    state = State::Normal;
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Walk one Python line and emit one [`CodebaseCall`] per call expression.
+/// Recognises bare calls (`foo(`), dotted-path calls (`Foo.bar(`,
+/// `mod.Cls.method(`), and method calls on an expression (`obj.method(`,
+/// `self.foo(`). Subscripts (`func[int](`) are stripped so the callee
+/// path is the bare identifier path. Skips Python keywords.
+///
+/// Output convention (mirrors the Rust extractor):
+/// - Bare or dotted-path call ending in an upper-case-irrelevant ident:
+///   callee = full path (e.g. `foo`, `Foo.bar`, `os.path.join`).
+/// - Single-segment method call on a non-trivial expression that we
+///   can't reduce to a path: callee = `.method` (e.g. `result.bar()`
+///   after `result = something()`).
+/// - `self.NAME(…)` is treated as a method-style call → `.NAME` so
+///   "who calls `.bar`" lights up both `self.bar()` and `obj.bar()`.
+///   `Cls.NAME(…)` keeps the class prefix so it doesn't blur with
+///   instance-method calls.
+fn extract_python_calls_from_line(
+    line: &str,
+    line_no: u32,
+    caller: &str,
+    file_path: &str,
+    out: &mut Vec<CodebaseCall>,
+) {
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i];
+        // Identifier (start of bare or dotted path). Must be at word boundary.
+        if c.is_ascii_alphabetic() || c == b'_' {
+            if i > 0 && (is_python_ident_char(bytes[i - 1]) || bytes[i - 1] == b'.') {
+                i += 1;
+                continue;
+            }
+            let start_first = i;
+            let mut j = i;
+            while j < bytes.len() && is_python_ident_char(bytes[j]) {
+                j += 1;
+            }
+            let first_seg = &line[start_first..j];
+            let mut parts: Vec<String> = vec![first_seg.to_string()];
+            // Extend through `.ident` chains. Also tolerate `[…]` subscript
+            // (`func[int](…)`) between path and `(`.
+            loop {
+                let mut k = j;
+                if k < bytes.len() && bytes[k] == b'[' {
+                    // Skip balanced `[…]`.
+                    let mut depth = 1i32;
+                    k += 1;
+                    while k < bytes.len() && depth > 0 {
+                        if bytes[k] == b'[' {
+                            depth += 1;
+                        } else if bytes[k] == b']' {
+                            depth -= 1;
+                        }
+                        k += 1;
+                    }
+                    j = k;
+                    continue;
+                }
+                if k < bytes.len() && bytes[k] == b'.' {
+                    let s = k + 1;
+                    let mut t = s;
+                    while t < bytes.len() && is_python_ident_char(bytes[t]) {
+                        t += 1;
+                    }
+                    if t == s {
+                        break;
+                    }
+                    parts.push(line[s..t].to_string());
+                    j = t;
+                    continue;
+                }
+                break;
+            }
+            let k = skip_python_whitespace(bytes, j);
+            if k < bytes.len() && bytes[k] == b'(' {
+                // Check for `def`/`class` header on this line — caller
+                // logic in the outer loop already skips declaration lines,
+                // so we don't need to re-check here.
+                let last_seg = parts.last().cloned().unwrap_or_default();
+                if !is_python_call_keyword(&last_seg) {
+                    let callee = if parts.len() == 1 {
+                        // Bare identifier call.
+                        parts[0].clone()
+                    } else if parts[0] == "self" || parts[0] == "cls" {
+                        // `self.foo(…)` → `.foo`. For longer chains like
+                        // `self.a.b()`, keep the trailing-segment shape:
+                        // we can't tell from a single line whether `a`
+                        // is a sub-attr or a re-binding, so collapse to
+                        // `.b` (the final call) — matches Rust's policy
+                        // of emitting `.method` for unresolved receivers.
+                        format!(".{last_seg}")
+                    } else {
+                        // Qualified path: `Foo.bar`, `os.path.join`, etc.
+                        parts.join(".")
+                    };
+                    out.push(CodebaseCall {
+                        file_path: file_path.to_string(),
+                        line: line_no,
+                        language: "python".to_string(),
+                        caller: caller.to_string(),
+                        callee,
+                    });
+                }
+            }
+            i = j;
+            continue;
+        }
+        // Dotted method call on a non-ident receiver (e.g. `x.y().bar()`
+        // — after consuming `x.y` as a path, the `.bar` is left over).
+        // Same pattern as Rust's method-call branch.
+        if c == b'.'
+            && i + 1 < bytes.len()
+            && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'_')
+            && (i == 0 || !is_python_ident_char(bytes[i - 1]))
+        {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() && is_python_ident_char(bytes[j]) {
+                j += 1;
+            }
+            let name = &line[start..j];
+            let mut k = j;
+            // Tolerate subscript before `(`.
+            if k < bytes.len() && bytes[k] == b'[' {
+                let mut depth = 1i32;
+                k += 1;
+                while k < bytes.len() && depth > 0 {
+                    if bytes[k] == b'[' {
+                        depth += 1;
+                    } else if bytes[k] == b']' {
+                        depth -= 1;
+                    }
+                    k += 1;
+                }
+            }
+            k = skip_python_whitespace(bytes, k);
+            if k < bytes.len() && bytes[k] == b'(' && !is_python_call_keyword(name) {
+                out.push(CodebaseCall {
+                    file_path: file_path.to_string(),
+                    line: line_no,
+                    language: "python".to_string(),
+                    caller: caller.to_string(),
+                    callee: format!(".{name}"),
+                });
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+}
+
+/// Python scope record. Indent col is the column the `def`/`class`
+/// keyword started at; the body lives at strictly greater indent.
+#[derive(Debug, Clone)]
+struct PythonScope {
+    indent: usize,
+    /// Qualified name as it should appear in the `caller` column.
+    /// For `def foo` at file scope: `foo`. Inside `class Foo:`: `Foo.foo`.
+    /// Nested defs: `outer.inner` (or `Foo.outer.inner` inside a class).
+    qualified: String,
+    /// Whether this scope is a class (so we don't list it as a caller —
+    /// callers are only `def`s).
+    is_class: bool,
+}
+
+/// Extract call sites from a Python file. Tracks the enclosing function
+/// via indent-based scope stack: each `def`/`async def`/`class` line
+/// pushes a scope at the indent it sits at, and a non-blank line at
+/// indent <= scope.indent pops it. Mirrors [`extract_python`]'s class-
+/// scope logic but adds `def`-scopes for caller attribution.
+///
+/// Python differs from Rust in three structural ways:
+/// 1. **Indent vs braces**: no `{`/`}` to count, so scope pop is keyed
+///    on the first non-blank line at indent ≤ the scope's indent (rather
+///    than `depth <= open_depth`). Blank/comment lines are skipped so
+///    they don't trigger spurious pops.
+/// 2. **No turbofish**: Python uses `[T]` subscript for generics. The
+///    extractor strips `[…]` between path and `(` so `func[int]()`
+///    normalises to `func` — analogous to Rust's `Vec::<u8>::new` →
+///    `Vec::new`.
+/// 3. **Class scopes contribute to caller name, not to call sites**.
+///    A `class Foo:` line is NOT a caller (calls at class-body scope
+///    that AREN'T inside a `def` are emitted with the surrounding
+///    `def`'s name if any, otherwise empty — mirroring Rust's file-
+///    scope policy).
+pub fn extract_python_calls(content: &str, file_path: &str) -> Vec<CodebaseCall> {
+    let masked = mask_python_strings_and_comments(content);
+    let mut out = Vec::new();
+    let mut scope_stack: Vec<PythonScope> = Vec::new();
+
+    for (i, raw) in masked.lines().enumerate() {
+        let line_no = (i as u32) + 1;
+        // Compute indent (tabs counted as 1 column — same convention as
+        // extract_python). Blank / comment lines don't affect scope.
+        let indent = raw.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+        let t = raw.trim();
+        if t.is_empty() {
+            continue;
+        }
+        // After masking, a `#`-line becomes spaces but the trimmed
+        // result will be empty (handled above). A leading `#` only
+        // appears if the masker didn't reach it, which shouldn't happen.
+
+        // Pop scopes whose body has ended (current line dedented to <= scope indent).
+        while let Some(scope) = scope_stack.last() {
+            if indent <= scope.indent {
+                scope_stack.pop();
+            } else {
+                break;
+            }
+        }
+
+        // Strip a leading `@decorator` line — decorators are not call
+        // sites for the function they decorate, but their argument list
+        // (if any) IS a call expression. Treat the whole `@…` line as
+        // a declaration line to mirror Rust's `is_decl_line` skip.
+        let is_decorator = t.starts_with('@');
+
+        // Detect `def` / `async def` / `class` headers.
+        let def_rest = t
+            .strip_prefix("async def ")
+            .or_else(|| t.strip_prefix("def "));
+        let mut is_decl_line = is_decorator;
+
+        if let Some(rest) = def_rest {
+            is_decl_line = true;
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                // Build qualified caller from current scope chain.
+                let prefix: Vec<&str> = scope_stack
+                    .iter()
+                    .map(|s| s.qualified.as_str())
+                    .collect();
+                let qualified = if let Some(last) = prefix.last() {
+                    format!("{last}.{name}")
+                } else {
+                    name.clone()
+                };
+                scope_stack.push(PythonScope {
+                    indent,
+                    qualified,
+                    is_class: false,
+                });
+            }
+        } else if let Some(rest) = t.strip_prefix("class ") {
+            is_decl_line = true;
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                // Class qualified name mirrors extract_python: nested
+                // class inside another class joins with `.`.
+                let prefix: Vec<&str> = scope_stack
+                    .iter()
+                    .filter(|s| s.is_class)
+                    .map(|s| s.qualified.as_str())
+                    .collect();
+                let qualified = if let Some(last) = prefix.last() {
+                    format!("{last}.{name}")
+                } else {
+                    name.clone()
+                };
+                scope_stack.push(PythonScope {
+                    indent,
+                    qualified,
+                    is_class: true,
+                });
+            }
+        }
+
+        if !is_decl_line {
+            // Caller is the innermost `def` scope (skip class scopes —
+            // a call directly inside a class body but not in a method
+            // is at module-init time and should attribute to the
+            // enclosing def, or empty if none).
+            let caller = scope_stack
+                .iter()
+                .rev()
+                .find(|s| !s.is_class)
+                .map(|s| s.qualified.as_str())
+                .unwrap_or("");
+            extract_python_calls_from_line(raw, line_no, caller, file_path, &mut out);
+        }
+    }
+    out
+}
+
 // ── TypeScript / JavaScript ──────────────────────────────────────────────────
 
 fn extract_ts_js(content: &str, file_path: &str, lang: &str) -> Vec<CodebaseSymbol> {
@@ -3247,6 +3754,377 @@ fn outer() {
 }
 "#;
         let calls = extract_rust_calls(src, "f.rs");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real_call");
+    }
+
+    // ── Phase 2 #3 third slice (cont.) — Python call extractor ─────────────
+
+    #[test]
+    fn python_call_bare_function() {
+        let src = "\
+def outer():
+    foo()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "foo");
+        assert_eq!(calls[0].caller, "outer");
+        assert_eq!(calls[0].line, 2);
+        assert_eq!(calls[0].language, "python");
+    }
+
+    #[test]
+    fn python_call_qualified_path() {
+        let src = "\
+def outer():
+    os.path.join(a, b)
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "os.path.join");
+        assert_eq!(calls[0].caller, "outer");
+    }
+
+    #[test]
+    fn python_call_method_in_class_self() {
+        // `self.foo()` collapses to `.foo` (mirrors Rust method-call
+        // policy: receiver unknown, callee normalised to `.NAME`).
+        let src = "\
+class Foo:
+    def bar(self):
+        self.helper()
+    def helper(self):
+        pass
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, ".helper");
+        assert_eq!(calls[0].caller, "Foo.bar", "method caller is qualified");
+    }
+
+    #[test]
+    fn python_call_class_static_qualified() {
+        // `Foo.bar()` at call site keeps the class prefix because it's
+        // a path call, not a receiver-method call.
+        let src = "\
+class Foo:
+    @staticmethod
+    def bar():
+        pass
+
+def caller():
+    Foo.bar()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "Foo.bar");
+        assert_eq!(calls[0].caller, "caller");
+    }
+
+    #[test]
+    fn python_call_factory_method_chain() {
+        // `Foo().bar()` — `Foo` is a constructor call AND `.bar` is a
+        // method call. Both should be detected.
+        let src = "\
+def caller():
+    Foo().bar()
+";
+        let calls = extract_python_calls(src, "f.py");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, ["Foo", ".bar"], "got {calls:#?}");
+        assert!(calls.iter().all(|c| c.caller == "caller"));
+    }
+
+    #[test]
+    fn python_call_nested_fn_caller_qualified() {
+        // `outer.inner` mirrors Rust nested-fn convention but with `.`
+        // separator (Python doesn't have `::`).
+        let src = "\
+def outer():
+    def inner():
+        helper()
+    inner()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        let helper = calls.iter().find(|c| c.callee == "helper").unwrap();
+        assert_eq!(helper.caller, "outer.inner");
+        let inner = calls.iter().find(|c| c.callee == "inner").unwrap();
+        assert_eq!(inner.caller, "outer");
+    }
+
+    #[test]
+    fn python_call_keyword_filter() {
+        // Python control-flow keywords with paren shapes don't emit calls.
+        // Built-ins (`print`, `len`) DO emit — same policy as Rust.
+        let src = "\
+def outer():
+    if (cond):
+        return (x)
+    while (running):
+        pass
+    print(\"hello\")
+    n = len(items)
+";
+        let calls = extract_python_calls(src, "f.py");
+        // Only `cond`, `running`, `print`, `len` are real calls in syntactic
+        // shape. But `if (cond):` etc. — `cond` here IS a bare identifier
+        // call shape because `if (` puts a `(` right after `if`. Our
+        // keyword filter rejects `if`, but `cond` itself is bare ident
+        // followed by no `(` (it's followed by `)` and `:`). So `cond`
+        // is NOT a call. Same for `running`. So we expect exactly
+        // `print`, `len`.
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, ["print", "len"], "got {calls:#?}");
+    }
+
+    #[test]
+    fn python_call_skips_strings_and_comments() {
+        let src = "\
+def outer():
+    s = \"foo()\"          # not a call
+    # bar()
+    t = 'baz()'
+    real_call()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real_call");
+    }
+
+    #[test]
+    fn python_call_triple_quoted_string_masked() {
+        // Triple-quoted docstring with call-looking content shouldn't leak.
+        let src = "\
+def outer():
+    \"\"\"This is a docstring with fake_call() inside.\"\"\"
+    real_call()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real_call");
+    }
+
+    #[test]
+    fn python_call_multiline_triple_string_does_not_leak() {
+        // Same as the Rust multi-line string regression test: triple-
+        // quoted strings span lines and per-line scanning would
+        // otherwise treat their interior as real code.
+        let src = "\
+def outer():
+    doc = \"\"\"
+    fake_call()
+    another_fake()
+    \"\"\"
+    real_call()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real_call");
+    }
+
+    #[test]
+    fn python_call_decorator_line_not_a_call() {
+        // `@app.route(...)` is a decorator — the wrapped function is
+        // not a call here; but the decorator argument IS a call.
+        // Conservative policy: skip the entire decorator line, mirroring
+        // Rust's `is_decl_line` skip for `use`/`const`/etc.
+        let src = "\
+@app.route(\"/foo\")
+def handler():
+    real_call()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real_call");
+        assert_eq!(calls[0].caller, "handler");
+    }
+
+    #[test]
+    fn python_call_async_def_is_caller() {
+        let src = "\
+async def outer():
+    await something()
+";
+        let calls = extract_python_calls(src, "f.py");
+        // `await` is a keyword → filtered. `something()` is a real call.
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "something");
+        assert_eq!(calls[0].caller, "outer");
+    }
+
+    #[test]
+    fn python_call_multiple_per_line() {
+        let src = "\
+def outer():
+    foo(bar(baz()))
+";
+        let calls = extract_python_calls(src, "f.py");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, ["foo", "bar", "baz"], "got {calls:#?}");
+        assert!(calls.iter().all(|c| c.caller == "outer"));
+    }
+
+    #[test]
+    fn python_call_module_scope_caller_is_empty() {
+        // Free-floating call at module top level: caller is empty,
+        // mirroring Rust's file-scope policy.
+        let src = "\
+configure_logging()
+
+def real_def():
+    inside_def()
+";
+        let calls = extract_python_calls(src, "f.py");
+        // `configure_logging()` at module scope → caller="".
+        // `inside_def()` at function scope → caller="real_def".
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        let cfg = calls.iter().find(|c| c.callee == "configure_logging").unwrap();
+        assert_eq!(cfg.caller, "");
+        let inside = calls.iter().find(|c| c.callee == "inside_def").unwrap();
+        assert_eq!(inside.caller, "real_def");
+    }
+
+    #[test]
+    fn python_call_outside_class_after_dedent() {
+        // After a class block closes, a subsequent def must not inherit
+        // the class qualifier. Mirrors Rust's `rust_impl_scope_pops_on_closing_brace`.
+        let src = "\
+class Foo:
+    def bar(self):
+        helper()
+
+def free():
+    other_helper()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        let helper = calls.iter().find(|c| c.callee == "helper").unwrap();
+        assert_eq!(helper.caller, "Foo.bar");
+        let other = calls.iter().find(|c| c.callee == "other_helper").unwrap();
+        assert_eq!(other.caller, "free", "free() must not inherit Foo.");
+    }
+
+    #[test]
+    fn python_call_subscript_normalises_to_path() {
+        // `func[int](…)` → callee="func". Python equivalent of Rust
+        // turbofish normalisation (`Vec::<u8>::new` → `Vec::new`).
+        let src = "\
+def outer():
+    typing_thing[int](x)
+    obj.method[str]()
+";
+        let calls = extract_python_calls(src, "f.py");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, ["typing_thing", "obj.method"], "got {calls:#?}");
+    }
+
+    #[test]
+    fn python_call_chained_method() {
+        let src = "\
+def outer():
+    x.foo().bar().baz()
+";
+        let calls = extract_python_calls(src, "f.py");
+        // `x.foo` is dotted path → callee="x.foo".
+        // `.bar` and `.baz` are unresolved method calls → ".bar", ".baz".
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(names, ["x.foo", ".bar", ".baz"], "got {calls:#?}");
+    }
+
+    #[test]
+    fn python_call_skips_def_header_self_call() {
+        // The `def outer(arg):` header should NOT emit a `outer(` call
+        // self-attribution. Same as Rust's decl-line skip.
+        let src = "\
+def outer(arg):
+    inner_call()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "inner_call");
+    }
+
+    #[test]
+    fn python_call_class_method_calls_module_func() {
+        // `Foo().bar()` from outside the class → caller="user" (top-level
+        // def), callee includes both the constructor `Foo` and method
+        // `.bar`. The factory-method-chain test covers this; here we add
+        // the asymmetric variant: inside another class, calling a module
+        // function.
+        let src = "\
+def util():
+    pass
+
+class Foo:
+    def bar(self):
+        util()
+        other_mod.helper()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        let u = calls.iter().find(|c| c.callee == "util").unwrap();
+        assert_eq!(u.caller, "Foo.bar");
+        let h = calls.iter().find(|c| c.callee == "other_mod.helper").unwrap();
+        assert_eq!(h.caller, "Foo.bar");
+    }
+
+    #[test]
+    fn python_call_nested_class_method() {
+        // `class Outer: class Inner: def m(self):` → caller="Outer.Inner.m".
+        let src = "\
+class Outer:
+    class Inner:
+        def m(self):
+            helper()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "helper");
+        assert_eq!(calls[0].caller, "Outer.Inner.m");
+    }
+
+    #[test]
+    fn python_call_decorator_argument_not_emitted_as_call() {
+        // The decorator line `@app.route("/x")` is skipped entirely:
+        // - `app.route` is NOT recorded as a call (decorator, not invocation).
+        // - The decorated `def handler` becomes the caller scope.
+        let src = "\
+@app.route(\"/x\")
+@cached(ttl=60)
+def handler():
+    real_call()
+";
+        let calls = extract_python_calls(src, "f.py");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real_call");
+        assert_eq!(calls[0].caller, "handler");
+    }
+
+    #[test]
+    fn python_call_f_string_interior_does_not_leak() {
+        // f-string interpolation `f"{fake_call()}"` is masked.
+        let src = "\
+def outer():
+    msg = f\"hello {fake_call()} world\"
+    real_call()
+";
+        let calls = extract_python_calls(src, "f.py");
+        // `msg`, `fake_call` inside f-string masked → only real_call.
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real_call");
+    }
+
+    #[test]
+    fn python_call_dotted_attr_access_without_paren_not_a_call() {
+        // `x.attr` without `(` is not a call — only emits when followed by `(`.
+        let src = "\
+def outer():
+    val = obj.attr
+    real_call()
+";
+        let calls = extract_python_calls(src, "f.py");
         assert_eq!(calls.len(), 1, "got {calls:#?}");
         assert_eq!(calls[0].callee, "real_call");
     }
