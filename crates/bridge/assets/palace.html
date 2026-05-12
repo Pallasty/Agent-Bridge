@@ -1253,6 +1253,23 @@
       margin-left: 10px;
       letter-spacing: 0.04em;
     }
+    /* P17 — working/catalog split. Working = non-catalog kinds (the
+       memory that's actually being read/written); catalog = bulk imports
+       like kind='skill'. Without this split a 484-row skill import
+       dominates every "active count" reading. */
+    #footer .embedding-stats .working {
+      color: #5cc89a;
+      margin-right: 4px;
+      font-weight: 500;
+    }
+    #footer .embedding-stats .catalog {
+      color: #7a7a85;
+      margin-right: 10px;
+    }
+    #footer .embedding-stats .split-sep {
+      color: #3a3a45;
+      margin: 0 4px;
+    }
   </style>
 </head>
 <body>
@@ -1562,6 +1579,30 @@ async function loadEmbeddingStats() {
       const { short, cls } = labelFor(b.backend);
       return `<span class="bk ${cls}" title="${escapeHTML(b.backend)}: ${b.count}">${short}:${b.count}</span>`;
     });
+    // P17 — working/catalog split. Sum the kind_breakdown rows that
+    // match j.catalog_kinds (default ["skill"]) into a catalog total;
+    // everything else is working memory. If kind_breakdown missing
+    // (older server), fall back to bare total_active.
+    let splitHtml = "";
+    if (Array.isArray(j.kind_breakdown)) {
+      const catalogSet = new Set(Array.isArray(j.catalog_kinds) ? j.catalog_kinds : ["skill"]);
+      let catalogN = 0, workingN = 0;
+      for (const row of j.kind_breakdown) {
+        if (catalogSet.has(row.kind)) catalogN += row.count;
+        else workingN += row.count;
+      }
+      if (catalogN > 0) {
+        const kindsListed = Array.from(catalogSet).join(", ");
+        splitHtml =
+          `<span class="working" title="working memory: active rows whose kind is not in [${kindsListed}]">working:${workingN}</span>` +
+          `<span class="catalog" title="catalog: kind in [${kindsListed}] — bulk-imported reference data, not working memory">catalog:${catalogN}</span>` +
+          `<span class="split-sep">·</span>`;
+      } else {
+        splitHtml =
+          `<span class="working" title="active rows (no catalog kinds present)">active:${workingN}</span>` +
+          `<span class="split-sep">·</span>`;
+      }
+    }
     // Reindex hint when hash or unknown rows are non-trivial — the
     // P9 only_stale path can upgrade hash→ONNX once ONNX is ready.
     const reindexable = j.breakdown
@@ -1570,7 +1611,7 @@ async function loadEmbeddingStats() {
     const hint = reindexable > 0
       ? `<span class="reindex-hint" title="run memory_reindex(only_stale=true) to upgrade hash → ONNX">↑ ${reindexable} reindexable</span>`
       : "";
-    el.innerHTML = parts.join("") + hint;
+    el.innerHTML = splitHtml + parts.join("") + hint;
   } catch (e) {
     el.textContent = "";
   }

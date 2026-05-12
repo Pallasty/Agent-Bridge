@@ -806,10 +806,25 @@ async fn api_embedding_stats(
         .into_iter()
         .map(|(b, n)| json!({ "backend": b, "count": n }))
         .collect();
+    // P17: also surface kind breakdown so the footer can separate
+    // working memory from catalog-style bulk imports (e.g. kind='skill').
+    // Raw counts only; UI decides which kinds are catalog.
+    let kind_rows = s.store.memory_kind_counts().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("memory_kind_counts: {e}"),
+        )
+    })?;
+    let kind_breakdown: Vec<Value> = kind_rows
+        .into_iter()
+        .map(|(k, n)| json!({ "kind": k, "count": n }))
+        .collect();
     Ok(Json(json!({
         "ok": true,
         "total_active": total,
         "breakdown": breakdown,
+        "kind_breakdown": kind_breakdown,
+        "catalog_kinds": ["skill"],
     })))
 }
 

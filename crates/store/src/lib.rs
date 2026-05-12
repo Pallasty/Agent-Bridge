@@ -1440,6 +1440,15 @@ pub trait StateStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// P17: counts of active memories grouped by `kind`. Used by Palace
+    /// footer to separate working memory (kind='lesson' / 'project' / ...)
+    /// from catalog imports (kind='skill', etc.) — without this split a
+    /// 484-row skill bulk-import distorts every "active count" reading.
+    /// Default impl returns empty vec.
+    async fn memory_kind_counts(&self) -> Result<Vec<(String, u64)>> {
+        Ok(Vec::new())
+    }
+
     /// Semantic search: embed `query` via feature hashing, load all stored
     /// embeddings, return memories ranked by cosine similarity ≥ `threshold`.
     /// Falls back gracefully when no embeddings are stored yet.

@@ -4077,6 +4077,33 @@ impl StateStore for SqliteStore {
         Ok(rows)
     }
 
+    async fn memory_kind_counts(&self) -> Result<Vec<(String, u64)>> {
+        let rows: Vec<(String, u64)> = self
+            .conn
+            .call(|c| -> RusqliteResult<Vec<(String, u64)>> {
+                let mut stmt = c.prepare(
+                    "SELECT COALESCE(NULLIF(TRIM(kind), ''), 'unknown') AS k,
+                            COUNT(*) AS n
+                       FROM memories
+                      WHERE status = 'active'
+                      GROUP BY k
+                      ORDER BY n DESC",
+                )?;
+                let collected: Vec<(String, u64)> = stmt
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?.max(0) as u64,
+                        ))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(collected)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_kind_counts: {e}")))?;
+        Ok(rows)
+    }
+
     async fn memory_stats(&self) -> Result<MemoryStats> {
         let stats = self
             .conn
