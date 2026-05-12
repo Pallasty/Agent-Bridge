@@ -43,13 +43,14 @@ pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<Co
 }
 
 /// Extract call sites from `content` for the given language. Phase 2 #3
-/// third slice now covers Rust + Python; TS/Go to follow once the
-/// language-specific extractors are written. Dispatch returns `vec![]`
-/// for unhandled languages so the table is always queryable.
+/// third slice now covers Rust + Python + Go; TS/JS is in a sibling
+/// branch. Dispatch returns `vec![]` for unhandled languages so the
+/// table is always queryable.
 pub fn extract_calls(content: &str, file_path: &str, language: &str) -> Vec<CodebaseCall> {
     match language {
         "rust" => extract_rust_calls(content, file_path),
         "python" => extract_python_calls(content, file_path),
+        "go" => extract_go_calls(content, file_path),
         _ => vec![],
     }
 }
@@ -2564,6 +2565,614 @@ fn extract_go(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
     out
 }
 
+// ── Go calls (Phase 2 #3 third slice — Go side) ──────────────────────────────
+
+fn is_go_call_keyword(s: &str) -> bool {
+    // Keywords and control-flow constructs that can sit just before `(`
+    // (e.g. `if (cond)` is uncommon but legal-looking; `for (init; cond;
+    // post)` is invalid Go but a defensive filter keeps the extractor
+    // robust to malformed snippets).
+    //
+    // `panic`, `recover`, `print`, `println` are filtered here (control-
+    // flow / debug builtins). `make`, `new`, `len`, `cap`, `append`,
+    // `copy`, `delete` are NOT filtered — they're real function calls
+    // useful in a call graph.
+    //
+    // `defer X()` and `go X()` are handled specially in the call extractor
+    // (the inner call `X` is recorded, not the keyword itself), so `defer`
+    // / `go` appear here so they aren't mis-recorded if they ever land
+    // before `(` directly.
+    matches!(
+        s,
+        "if" | "else"
+            | "for"
+            | "switch"
+            | "case"
+            | "default"
+            | "select"
+            | "return"
+            | "break"
+            | "continue"
+            | "goto"
+            | "fallthrough"
+            | "defer"
+            | "go"
+            | "chan"
+            | "range"
+            | "type"
+            | "var"
+            | "const"
+            | "package"
+            | "import"
+            | "func"
+            | "interface"
+            | "struct"
+            | "map"
+            | "panic"
+            | "recover"
+            | "print"
+            | "println"
+            | "true"
+            | "false"
+            | "nil"
+    )
+}
+
+fn is_go_ident_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_'
+}
+
+fn skip_go_whitespace(bytes: &[u8], i: usize) -> usize {
+    let mut k = i;
+    while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+        k += 1;
+    }
+    k
+}
+
+/// Skip a balanced `[…]` instantiation (Go generics: `F[int]`, `M[T, U]`).
+/// Returns the index past the closing `]`. If `bytes[i] != '['`, returns
+/// `i` unchanged.
+fn skip_go_type_params(bytes: &[u8], i: usize) -> usize {
+    if i >= bytes.len() || bytes[i] != b'[' {
+        return i;
+    }
+    let mut k = i + 1;
+    let mut depth = 1i32;
+    while k < bytes.len() && depth > 0 {
+        if bytes[k] == b'[' {
+            depth += 1;
+        } else if bytes[k] == b']' {
+            depth -= 1;
+        }
+        k += 1;
+    }
+    k
+}
+
+/// Replace the interior of Go string literals (`"…"`, raw `` `…` ``), rune
+/// literals (`'x'`, `'\n'`), and comment bodies (`// …`, `/* … */`) with
+/// spaces, preserving newlines + the delimiters themselves. Raw strings
+/// can span multiple lines and do NOT process escapes — critical because
+/// a raw string with `{` inside would otherwise corrupt brace counting.
+fn mask_go_strings_and_comments(content: &str) -> String {
+    enum State {
+        Normal,
+        Str,
+        RawStr,
+        LineCmt,
+        BlockCmt,
+    }
+    let mut state = State::Normal;
+    let mut prev_bs = false;
+    let bytes = content.as_bytes();
+    let mut out = String::with_capacity(content.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i];
+        match state {
+            State::Normal => {
+                if c == b'"' {
+                    state = State::Str;
+                    out.push('"');
+                    i += 1;
+                    continue;
+                }
+                if c == b'`' {
+                    state = State::RawStr;
+                    out.push('`');
+                    i += 1;
+                    continue;
+                }
+                if c == b'\'' {
+                    // Rune literal: scan to the matching `'`. Bounded so
+                    // a lone `'` won't run away (Go has no apostrophe-
+                    // identifier syntax like Rust lifetimes).
+                    out.push('\'');
+                    let mut k = i + 1;
+                    let mut esc = false;
+                    while k < bytes.len() {
+                        let cc = bytes[k];
+                        if cc == b'\n' {
+                            break;
+                        }
+                        if esc {
+                            esc = false;
+                            out.push(' ');
+                            k += 1;
+                            continue;
+                        }
+                        if cc == b'\\' {
+                            esc = true;
+                            out.push(' ');
+                            k += 1;
+                            continue;
+                        }
+                        if cc == b'\'' {
+                            out.push('\'');
+                            k += 1;
+                            break;
+                        }
+                        out.push(' ');
+                        k += 1;
+                    }
+                    i = k;
+                    continue;
+                }
+                if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    state = State::LineCmt;
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2;
+                    continue;
+                }
+                if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    state = State::BlockCmt;
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2;
+                    continue;
+                }
+                out.push(c as char);
+                i += 1;
+            }
+            State::Str => {
+                if c == b'\\' && !prev_bs {
+                    prev_bs = true;
+                    out.push('\\');
+                    i += 1;
+                    continue;
+                }
+                if c == b'"' && !prev_bs {
+                    state = State::Normal;
+                    out.push('"');
+                    prev_bs = false;
+                    i += 1;
+                    continue;
+                }
+                if c == b'\n' {
+                    // Unterminated interpreted string: drop back to Normal
+                    // (Go forbids raw newlines in "..." strings).
+                    state = State::Normal;
+                    out.push('\n');
+                    prev_bs = false;
+                    i += 1;
+                    continue;
+                }
+                prev_bs = false;
+                out.push(' ');
+                i += 1;
+            }
+            State::RawStr => {
+                if c == b'`' {
+                    state = State::Normal;
+                    out.push('`');
+                    i += 1;
+                    continue;
+                }
+                // Raw strings can span lines; preserve newlines so per-
+                // line scanning still produces the right number of lines.
+                if c == b'\n' {
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+            State::LineCmt => {
+                if c == b'\n' {
+                    state = State::Normal;
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+            State::BlockCmt => {
+                if c == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    state = State::Normal;
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2;
+                    continue;
+                }
+                if c == b'\n' {
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Parse a Go function/method declaration header into its qualified caller
+/// name and report whether the line opens a body (`{` on this line).
+///
+/// Returns `Some((qualified, opens_body))` when the line starts with `func `
+/// (possibly with a receiver group). Examples:
+///   `func Name(...)`            → `("Name", _)`
+///   `func Name[T any](...)`     → `("Name", _)`
+///   `func (r T) Method(...)`    → `("T.Method", _)`
+///   `func (r *T) Method(...)`   → `("T.Method", _)`
+///   `func (r T[U]) Method(...)` → `("T.Method", _)`
+///   `func() { … }`              → `None` (anonymous func — transparent
+///                                  to scope; caller of inner calls
+///                                  remains the enclosing scope).
+///
+/// `opens_body` is `true` if the line contains an unmatched `{` at the
+/// top level (after masking strings/comments — caller passes a masked
+/// line). For headers spanning multiple lines (`func F(\n  a int,\n) {`)
+/// the caller waits for the brace by checking subsequent lines.
+fn parse_go_func_header(line: &str) -> Option<(String, bool)> {
+    let t = line.trim_start();
+    let rest = t.strip_prefix("func")?;
+    // Must be followed by a token boundary: space, tab, or `(` (receiver
+    // group, or anonymous-func like `func()`).
+    let first = rest.as_bytes().first().copied()?;
+    if !matches!(first, b' ' | b'\t' | b'(') {
+        return None;
+    }
+    let after = rest.trim_start();
+    let bytes = after.as_bytes();
+
+    // Anonymous func: `func(` (no name, no receiver-then-name).
+    if bytes.first().copied() == Some(b'(') {
+        // Could be either (a) receiver group `func (r T) Name(...)`
+        // or (b) anonymous `func(... ) { ... }`. Distinguish by what
+        // follows the matched `)`:
+        //   - identifier → receiver group, this is a method
+        //   - `{` / nothing / type-keywords → anonymous func
+        let close = match_balanced(bytes, 0, b'(', b')');
+        let close = match close {
+            Some(k) => k,
+            None => return None,
+        };
+        // Look at what follows the `)`.
+        let mut k = close + 1;
+        while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+            k += 1;
+        }
+        if k < bytes.len() && (bytes[k].is_ascii_alphabetic() || bytes[k] == b'_') {
+            // Method declaration: parse receiver group, then name.
+            let recv_inner = &after[1..close];
+            let receiver_type = parse_go_receiver_type(recv_inner)?;
+            let mut j = k;
+            while j < bytes.len() && is_go_ident_char(bytes[j]) {
+                j += 1;
+            }
+            let name = &after[k..j];
+            let opens = line_opens_body(line);
+            return Some((format!("{receiver_type}.{name}"), opens));
+        }
+        // Anonymous function — no caller name to push.
+        return None;
+    }
+
+    // Plain function: `func Name`. Read identifier.
+    let mut j = 0usize;
+    while j < bytes.len() && is_go_ident_char(bytes[j]) {
+        j += 1;
+    }
+    if j == 0 {
+        return None;
+    }
+    let name = &after[..j];
+    let opens = line_opens_body(line);
+    Some((name.to_string(), opens))
+}
+
+/// Parse a Go method receiver group's inner content (the part between
+/// `(` and `)`) and return the bare type name. Strips pointer `*` and
+/// generic type parameters `[T]`.
+///
+/// Examples:
+///   `r T`           → `Some("T")`
+///   `r *T`          → `Some("T")`
+///   `T`             → `Some("T")` (unnamed receiver)
+///   `*T`            → `Some("T")`
+///   `r T[U]`        → `Some("T")`
+///   `r *T[U, V]`    → `Some("T")`
+fn parse_go_receiver_type(inner: &str) -> Option<String> {
+    let s = inner.trim();
+    // Split on whitespace; receiver may be `name Type` or just `Type`.
+    // We want the last whitespace-separated token (the type), then strip
+    // leading `*` and trailing `[…]`.
+    let last = s.rsplit(|c: char| c.is_whitespace()).next()?;
+    let last = last.trim_start_matches('*');
+    // Cut at the first `[` (type parameters).
+    let bare = last.split('[').next().unwrap_or(last);
+    if bare.is_empty() {
+        return None;
+    }
+    Some(bare.to_string())
+}
+
+/// Find the matching `close` for an `open` at `bytes[start]`, with simple
+/// nesting (no string awareness — caller should pass already-masked input).
+/// Returns the index of the matching close, or None if unbalanced.
+fn match_balanced(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usize> {
+    if start >= bytes.len() || bytes[start] != open {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut k = start;
+    while k < bytes.len() {
+        if bytes[k] == open {
+            depth += 1;
+        } else if bytes[k] == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(k);
+            }
+        }
+        k += 1;
+    }
+    None
+}
+
+/// True if `line` (already masked) has a net-positive brace balance, i.e.
+/// at least one `{` more than `}`. Used to detect "this line opens the
+/// function body" without re-scanning.
+fn line_opens_body(line: &str) -> bool {
+    let (opens, closes) = count_braces(line);
+    opens > closes
+}
+
+/// Walk one masked Go line and emit one [`CodebaseCall`] per call site.
+/// Recognises bare calls (`foo(`), package-qualified calls (`pkg.Func(`),
+/// method calls (`obj.Method(`), and generic instantiations
+/// (`F[int](…)` / `M.Method[T, U](…)`). Skips Go keywords / control-flow
+/// constructs, and skips immediate-invocation of anonymous funcs
+/// (`func() {...}()` — the trailing `()` has no identifier callee).
+fn extract_go_calls_from_line(
+    line: &str,
+    line_no: u32,
+    caller: &str,
+    file_path: &str,
+    out: &mut Vec<CodebaseCall>,
+) {
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i];
+        // Method-call on a non-ident receiver: `.Name(` after consuming
+        // a path. Must NOT be glued to the preceding identifier (that
+        // case is handled by the path walker below); only fire when
+        // the previous byte is non-ident (e.g. `)`, `]`, whitespace).
+        if c == b'.'
+            && i + 1 < bytes.len()
+            && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'_')
+            && (i == 0 || !is_go_ident_char(bytes[i - 1]))
+        {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() && is_go_ident_char(bytes[j]) {
+                j += 1;
+            }
+            let name = &line[start..j];
+            let mut k = skip_go_type_params(bytes, j);
+            k = skip_go_whitespace(bytes, k);
+            if k < bytes.len() && bytes[k] == b'(' && !is_go_call_keyword(name) {
+                out.push(CodebaseCall {
+                    file_path: file_path.to_string(),
+                    line: line_no,
+                    language: "go".to_string(),
+                    caller: caller.to_string(),
+                    callee: format!(".{name}"),
+                });
+            }
+            i = j;
+            continue;
+        }
+        if c.is_ascii_alphabetic() || c == b'_' {
+            // Must be at a word boundary.
+            if i > 0 && (is_go_ident_char(bytes[i - 1]) || bytes[i - 1] == b'.') {
+                i += 1;
+                continue;
+            }
+            let start_first = i;
+            let mut j = i;
+            while j < bytes.len() && is_go_ident_char(bytes[j]) {
+                j += 1;
+            }
+            let first_seg = &line[start_first..j];
+            let mut parts: Vec<&str> = vec![first_seg];
+            // Extend through `.Ident` chains. (Go has no `::`.)
+            loop {
+                if j < bytes.len() && bytes[j] == b'.' {
+                    let s = j + 1;
+                    let mut t = s;
+                    while t < bytes.len() && is_go_ident_char(bytes[t]) {
+                        t += 1;
+                    }
+                    if t == s {
+                        break;
+                    }
+                    parts.push(&line[s..t]);
+                    j = t;
+                    continue;
+                }
+                break;
+            }
+            // Strip trailing generic instantiation `[T, U]` then whitespace.
+            let mut k = skip_go_type_params(bytes, j);
+            k = skip_go_whitespace(bytes, k);
+            let last_seg = parts.last().copied().unwrap_or("");
+            if k < bytes.len() && bytes[k] == b'(' {
+                if !is_go_call_keyword(last_seg) && !is_go_call_keyword(parts[0]) {
+                    let callee = if parts.len() == 1 {
+                        parts[0].to_string()
+                    } else {
+                        // `pkg.Func` / `obj.Method` / `pkg.sub.Func` — keep
+                        // dotted path so package-qualified calls survive.
+                        // Receiver-vs-package can't be distinguished
+                        // without type info; we record the literal text.
+                        parts.join(".")
+                    };
+                    out.push(CodebaseCall {
+                        file_path: file_path.to_string(),
+                        line: line_no,
+                        language: "go".to_string(),
+                        caller: caller.to_string(),
+                        callee,
+                    });
+                }
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+}
+
+/// Scope record for the enclosing function during Go call extraction.
+/// `open_depth` is the brace depth just before the function's opening
+/// `{` — when depth drops back to this value, the scope pops.
+#[derive(Debug, Clone)]
+struct GoFnScope {
+    qualified: String,
+    open_depth: i32,
+}
+
+/// Extract call sites from a Go file.
+///
+/// Scope tracking is brace-counted (mirrors [`extract_rust_calls`]):
+/// each `func …` declaration ending with `{` (or whose `{` lands on a
+/// later line) pushes a [`GoFnScope`]; the scope pops when the brace
+/// depth drops back below `open_depth`.
+///
+/// Method receivers (`func (r Type) M`) and pointer receivers
+/// (`func (r *Type) M`) are normalised to `Type.M`. Generic functions
+/// (`func F[T any]()`) and generic receivers (`func (r T[U]) M()`) are
+/// also normalised (type parameters stripped).
+///
+/// Anonymous function literals (`func() { ... }`) are treated as
+/// *transparent* to scope: they do NOT push a new caller, and calls
+/// inside them attribute to the surrounding function. This is the
+/// commonly useful policy for `defer func() { cleanup() }()` and
+/// `go func() { work() }()` patterns where the closure exists to
+/// capture the outer function's work.
+///
+/// Known limitations:
+/// - **Interface method dispatch**: `iface.Method()` is recorded as
+///   `.Method` with no way to resolve the concrete implementing type.
+///   Same as Rust's trait-object dispatch.
+/// - **`init()` and `main()` module-level work**: calls inside `var x
+///   = compute()` at file scope record an empty caller. Mirrors Rust
+///   const-init policy.
+/// - **Inline functions**: `func F() { call() }` declared and closed
+///   on one line emits the call with caller `F` only if the brace
+///   balance lands on that same line — which it does, since both
+///   `{` and `}` count and `F` is pushed before the call walker runs.
+pub fn extract_go_calls(content: &str, file_path: &str) -> Vec<CodebaseCall> {
+    let masked = mask_go_strings_and_comments(content);
+    let mut out = Vec::new();
+    let mut depth: i32 = 0;
+    let mut fn_stack: Vec<GoFnScope> = Vec::new();
+    // When a `func …` header doesn't have `{` on the same line, hold
+    // its qualified name here until the brace arrives.
+    let mut pending_fn: Option<String> = None;
+
+    for (i, raw) in masked.lines().enumerate() {
+        let line_no = (i as u32) + 1;
+        let t = raw.trim();
+        if t.is_empty() {
+            continue;
+        }
+
+        let mut is_decl_line = false;
+
+        // Top-level item declarations that never count as call sites.
+        // Note `var x = foo()` IS a call site (we don't filter), but
+        // `package p` / `import …` are not.
+        if t.starts_with("package ") || t.starts_with("import ") {
+            is_decl_line = true;
+        }
+
+        // `func` header detection. `parse_go_func_header` returns None
+        // for anonymous funcs — we want anonymous funcs to be
+        // transparent, so calls inside them are STILL attributed.
+        // However, the anonymous func still contributes `{` / `}` to
+        // the brace count, which means its body opens push depth but
+        // there's no scope to pop. This is fine: only `fn_stack` pops
+        // based on `open_depth`, and a transparent anonymous func
+        // never pushed, so it never pops.
+        if let Some((qualified, opens)) = parse_go_func_header(t) {
+            is_decl_line = true;
+            if opens {
+                fn_stack.push(GoFnScope {
+                    qualified,
+                    open_depth: depth,
+                });
+            } else {
+                pending_fn = Some(qualified);
+            }
+        } else if pending_fn.is_some() && line_opens_body(raw) {
+            // Header from a previous line + this line carries the `{`.
+            let qualified = pending_fn.take().unwrap();
+            fn_stack.push(GoFnScope {
+                qualified,
+                open_depth: depth,
+            });
+            // Don't mark as a decl line — the body could start with code
+            // on the same line, though by convention Go puts `{` at the
+            // end of the signature line.
+        }
+
+        if !is_decl_line {
+            // `defer X()` and `go X()` — the inner call IS a call site.
+            // The path walker treats `defer`/`go` as keywords (so they
+            // won't be emitted as callees), but to find the inner
+            // identifier we need to start scanning AFTER the keyword.
+            // The walker already does this naturally: word-boundary
+            // detection allows `defer foo()` to walk past `defer`
+            // (which is keyword-filtered) and then re-enter at `foo`.
+            // No special handling needed beyond the keyword filter.
+            let caller = fn_stack
+                .last()
+                .map(|s| s.qualified.as_str())
+                .unwrap_or("");
+            extract_go_calls_from_line(raw, line_no, caller, file_path, &mut out);
+        }
+
+        // Update brace depth from this line's `{` / `}`.
+        let (opens, closes) = count_braces(raw);
+        depth += opens - closes;
+        // Pop fn scopes whose body has closed.
+        while let Some(scope) = fn_stack.last() {
+            if depth <= scope.open_depth {
+                fn_stack.pop();
+            } else {
+                break;
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4127,5 +4736,468 @@ def outer():
         let calls = extract_python_calls(src, "f.py");
         assert_eq!(calls.len(), 1, "got {calls:#?}");
         assert_eq!(calls[0].callee, "real_call");
+    }
+
+    // ── Go call-graph extraction (Phase 2 #3 third slice — Go side) ──
+
+    #[test]
+    fn go_call_bare_function() {
+        let src = "\
+package main
+
+func main() {
+    greet()
+}
+
+func greet() {}
+";
+        let calls = extract_go_calls(src, "main.go");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "greet");
+        assert_eq!(calls[0].caller, "main");
+        assert_eq!(calls[0].language, "go");
+        assert_eq!(calls[0].line, 4);
+    }
+
+    #[test]
+    fn go_call_value_receiver_method() {
+        // `func (r T) M(...)` — caller of inner calls is `T.M`.
+        let src = "\
+package p
+
+type Greeter struct{}
+
+func (g Greeter) Hello() {
+    fmt.Println(\"hi\")
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "fmt.Println");
+        assert_eq!(calls[0].caller, "Greeter.Hello");
+    }
+
+    #[test]
+    fn go_call_pointer_receiver_collapses_star() {
+        // Pointer-receiver methods qualify identically to value-receiver
+        // methods — extraction doesn't care about pointer vs value.
+        let src = "\
+package p
+
+func (g *Greeter) Hello() {
+    log.Print(\"hi\")
+}
+
+func (g Greeter) Other() {
+    helper()
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        let hello = calls.iter().find(|c| c.callee == "log.Print").unwrap();
+        assert_eq!(hello.caller, "Greeter.Hello");
+        let other = calls.iter().find(|c| c.callee == "helper").unwrap();
+        assert_eq!(other.caller, "Greeter.Other");
+    }
+
+    #[test]
+    fn go_call_generic_function_declaration() {
+        // `func F[T any](...)` — caller is `F`, type-param list stripped.
+        let src = "\
+package p
+
+func Map[T, U any](xs []T, f func(T) U) []U {
+    inner()
+    return nil
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        // Note `func(T) U` is an anonymous function *type* (not a literal).
+        // The walker should not record it as a call site — `func` is a
+        // keyword. Only `inner()` should be emitted.
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "inner");
+        assert_eq!(calls[0].caller, "Map");
+    }
+
+    #[test]
+    fn go_call_generic_call_site_strips_brackets() {
+        // `F[int]()` and `M.Method[T, U](...)` — type-param brackets
+        // between path and `(` are stripped from the callee.
+        let src = "\
+package p
+
+func main() {
+    Cast[int](42)
+    container.Get[string](\"k\")
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        let cast = calls.iter().find(|c| c.callee == "Cast").unwrap();
+        assert_eq!(cast.caller, "main");
+        let get = calls.iter().find(|c| c.callee == "container.Get").unwrap();
+        assert_eq!(get.caller, "main");
+    }
+
+    #[test]
+    fn go_call_defer_records_inner_call() {
+        // `defer X()` — `defer` is filtered, `X` is emitted as callee.
+        let src = "\
+package p
+
+func main() {
+    defer cleanup()
+    defer fmt.Println(\"bye\")
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        assert!(calls.iter().any(|c| c.callee == "cleanup"));
+        assert!(calls.iter().any(|c| c.callee == "fmt.Println"));
+        // `defer` itself must NOT appear.
+        assert!(
+            !calls.iter().any(|c| c.callee == "defer"),
+            "defer keyword should be filtered, got {calls:#?}"
+        );
+    }
+
+    #[test]
+    fn go_call_go_keyword_records_inner_call() {
+        // `go X()` — `go` is filtered, `X` is emitted as callee.
+        let src = "\
+package p
+
+func spawn() {
+    go worker()
+    go pool.Submit(task)
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        assert!(calls.iter().any(|c| c.callee == "worker"));
+        assert!(calls.iter().any(|c| c.callee == "pool.Submit"));
+        assert!(
+            !calls.iter().any(|c| c.callee == "go"),
+            "go keyword should be filtered, got {calls:#?}"
+        );
+    }
+
+    #[test]
+    fn go_call_builtin_filter_policy() {
+        // Policy:
+        //   make / new / len / cap / append / copy / delete  → RECORDED
+        //   panic / recover / print / println               → FILTERED
+        let src = "\
+package p
+
+func work() {
+    s := make([]int, 0)
+    p := new(int)
+    n := len(s)
+    c := cap(s)
+    s = append(s, 1)
+    copy(dst, src)
+    delete(m, k)
+    panic(\"x\")
+    recover()
+    println(\"x\")
+    print(\"x\")
+    real_call()
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        // Recorded builtins:
+        for kept in &["make", "new", "len", "cap", "append", "copy", "delete"] {
+            assert!(
+                names.contains(kept),
+                "expected {kept} to be recorded, got {names:?}"
+            );
+        }
+        // Filtered builtins:
+        for filtered in &["panic", "recover", "println", "print"] {
+            assert!(
+                !names.contains(filtered),
+                "expected {filtered} to be filtered, got {names:?}"
+            );
+        }
+        // And real_call must also be there.
+        assert!(names.contains(&"real_call"));
+    }
+
+    #[test]
+    fn go_call_string_and_comment_masking() {
+        // Calls inside strings / comments must NOT be recorded.
+        let src = "\
+package p
+
+func main() {
+    s := \"foo() bar()\"
+    // ignored() also
+    /* block_call() too */
+    real()
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "real");
+        assert_eq!(calls[0].caller, "main");
+    }
+
+    #[test]
+    fn go_call_raw_string_with_braces_doesnt_break_scope() {
+        // A raw string `\`...\`` can span lines AND contain `{` — these
+        // must NOT count toward brace depth, otherwise the function
+        // scope would close mid-body.
+        let src = "\
+package p
+
+func main() {
+    q := `SELECT { a } FROM t WHERE { b }`
+    later()
+}
+
+func other() {
+    elsewhere()
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        let later = calls.iter().find(|c| c.callee == "later").unwrap();
+        assert_eq!(later.caller, "main");
+        let elsewhere = calls.iter().find(|c| c.callee == "elsewhere").unwrap();
+        assert_eq!(elsewhere.caller, "other");
+    }
+
+    #[test]
+    fn go_call_multiline_raw_string_with_braces() {
+        // Same as above but the raw string actually spans multiple lines.
+        let src = "\
+package p
+
+func main() {
+    q := `line1 {
+multi { line }
+end }`
+    later()
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "later");
+        assert_eq!(calls[0].caller, "main", "scope must survive multi-line raw string");
+    }
+
+    #[test]
+    fn go_call_anonymous_func_transparent_to_scope() {
+        // Calls inside `func() { … }()` literals attribute to the outer
+        // function — anonymous func is transparent. Most common in
+        // `defer func() { … }()` and `go func() { … }()`.
+        let src = "\
+package p
+
+func outer() {
+    defer func() {
+        cleanup()
+    }()
+    go func() {
+        worker()
+    }()
+    direct()
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        // cleanup + worker + direct = 3
+        assert_eq!(calls.len(), 3, "got {calls:#?}");
+        for c in &calls {
+            assert_eq!(
+                c.caller, "outer",
+                "anonymous func should be transparent — caller stays `outer`"
+            );
+        }
+    }
+
+    #[test]
+    fn go_call_module_scope_call() {
+        // A call inside a top-level `var x = compute()` has caller="".
+        let src = "\
+package p
+
+var x = compute()
+
+func F() {
+    inside()
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        let c1 = calls.iter().find(|c| c.callee == "compute").unwrap();
+        assert_eq!(c1.caller, "", "module-scope call gets empty caller");
+        let c2 = calls.iter().find(|c| c.callee == "inside").unwrap();
+        assert_eq!(c2.caller, "F");
+    }
+
+    #[test]
+    fn go_call_keyword_filter() {
+        // `if`, `for`, `switch` look like calls but aren't. `for cond {`
+        // doesn't have `(`, but `for (cond) {` (rare) shouldn't fire
+        // either, nor should patterns like `if cond {`.
+        let src = "\
+package p
+
+func main() {
+    if cond {
+        real_a()
+    }
+    for i := 0; i < n; i++ {
+        real_b()
+    }
+    switch x {
+    case 1:
+        real_c()
+    }
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        for filtered in &["if", "for", "switch", "case"] {
+            assert!(
+                !names.contains(filtered),
+                "expected {filtered} to be filtered, got {names:?}"
+            );
+        }
+        // The three real calls must be there.
+        assert!(names.contains(&"real_a"));
+        assert!(names.contains(&"real_b"));
+        assert!(names.contains(&"real_c"));
+        for c in &calls {
+            assert_eq!(c.caller, "main");
+        }
+    }
+
+    #[test]
+    fn go_call_multiple_calls_per_line() {
+        // Several calls on a single line — all recorded, same caller / line.
+        let src = "\
+package p
+
+func main() {
+    a(); b(); c.D(e())
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 4, "got {calls:#?}");
+        let names: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert!(names.contains(&"a"));
+        assert!(names.contains(&"b"));
+        assert!(names.contains(&"c.D"));
+        assert!(names.contains(&"e"));
+        for c in &calls {
+            assert_eq!(c.line, 4);
+            assert_eq!(c.caller, "main");
+        }
+    }
+
+    #[test]
+    fn go_call_nested_function_scope_pops_correctly() {
+        // After the first function closes, calls in the next function
+        // must NOT carry the previous caller.
+        let src = "\
+package p
+
+func A() {
+    one()
+}
+
+func B() {
+    two()
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        let one = calls.iter().find(|c| c.callee == "one").unwrap();
+        assert_eq!(one.caller, "A");
+        let two = calls.iter().find(|c| c.callee == "two").unwrap();
+        assert_eq!(two.caller, "B", "scope must pop after A's `}}`");
+    }
+
+    #[test]
+    fn go_call_method_on_call_result() {
+        // `f().Method()` — `f` is one call, `.Method` is another (the
+        // receiver is a non-identifier expression so the dotted-method
+        // branch fires).
+        let src = "\
+package p
+
+func main() {
+    f().Method()
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 2, "got {calls:#?}");
+        assert!(calls.iter().any(|c| c.callee == "f"));
+        assert!(calls.iter().any(|c| c.callee == ".Method"));
+        for c in &calls {
+            assert_eq!(c.caller, "main");
+        }
+    }
+
+    #[test]
+    fn go_call_immediate_invocation_anonymous_func_skips() {
+        // `func() { x() }()` — the trailing `()` after `}` has no
+        // identifier prefix, so no call is emitted FOR the IIFE itself.
+        // The inner `x()` IS emitted, attributed to the outer caller.
+        let src = "\
+package p
+
+func outer() {
+    func() {
+        x()
+    }()
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "x");
+        assert_eq!(calls[0].caller, "outer");
+    }
+
+    #[test]
+    fn go_call_generic_receiver_normalises() {
+        // `func (r T[U]) Method()` — receiver type params stripped, so
+        // caller becomes `T.Method` (not `T[U].Method`).
+        let src = "\
+package p
+
+func (c Container[T]) Get(k string) T {
+    return c.lookup(k)
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        // `c.lookup` — path walker keeps the literal text; we don't
+        // attempt receiver-vs-package disambiguation.
+        assert_eq!(calls[0].callee, "c.lookup");
+        assert_eq!(calls[0].caller, "Container.Get");
+    }
+
+    #[test]
+    fn go_call_multiline_signature() {
+        // Signature that wraps with `{` on a later line.
+        let src = "\
+package p
+
+func LongName(
+    a int,
+    b string,
+) {
+    body_call()
+}
+";
+        let calls = extract_go_calls(src, "g.go");
+        assert_eq!(calls.len(), 1, "got {calls:#?}");
+        assert_eq!(calls[0].callee, "body_call");
+        assert_eq!(calls[0].caller, "LongName");
     }
 }
