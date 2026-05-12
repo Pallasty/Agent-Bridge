@@ -59,7 +59,8 @@ use crate::{
     AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
     CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, DecayUnusedStats,
     ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
-    ForumThreadExport, ForumThreadRecord, IdentityWindow, ImportConflictPolicy, ImportReport,
+    ForumThreadExport, ForumThreadRecord, GraphTopology, IdentityWindow, ImportConflictPolicy,
+    ImportReport,
     McpToolCallStats, McpToolErrorRecord, MemoryEdge, MemoryEdgeExport, MemoryExportFilter,
     MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats, MemoryRecord,
     MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep,
@@ -2993,6 +2994,139 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("recent_memory_get_keys: {e}")))?;
         Ok(rows)
+    }
+
+    /// ζ-9 (2026-05-12) — Composed graph topology computation. Four cheap
+    /// SQL passes inside one transaction so the snapshot is internally
+    /// consistent (no concurrent writes can skew between queries).
+    async fn graph_topology(&self) -> Result<GraphTopology> {
+        let topo = self
+            .conn
+            .call(|c| -> RusqliteResult<GraphTopology> {
+                let tx = c.unchecked_transaction()?;
+
+                // 1. non-skill active total
+                let total: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM memories WHERE status='active' AND kind != 'skill'",
+                    [],
+                    |r| r.get(0),
+                )?;
+
+                // 2. orphan count — non-skill active with zero edges.
+                // NOT EXISTS is faster than NOT IN here because memory_edges has
+                // composite (from_key, to_key) and SQLite optimizer picks the
+                // covering index for either side.
+                let orphans: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM memories m
+                       WHERE m.status='active' AND m.kind != 'skill'
+                         AND NOT EXISTS (
+                           SELECT 1 FROM memory_edges e
+                            WHERE e.from_key = m.key OR e.to_key = m.key
+                         )",
+                    [],
+                    |r| r.get(0),
+                )?;
+
+                // 3. degree histogram over non-skill active nodes.
+                // Build via per-key degree count then bucket.
+                let mut stmt_deg = tx.prepare(
+                    "WITH ext AS (
+                       SELECT from_key AS k FROM memory_edges
+                       UNION ALL
+                       SELECT to_key AS k FROM memory_edges
+                     )
+                     SELECT
+                       CASE
+                         WHEN deg = 0 THEN '0'
+                         WHEN deg = 1 THEN '1'
+                         WHEN deg <= 3 THEN '2-3'
+                         WHEN deg <= 5 THEN '4-5'
+                         WHEN deg <= 10 THEN '6-10'
+                         WHEN deg <= 20 THEN '11-20'
+                         ELSE '21+' END AS bucket,
+                       COUNT(*) AS nodes
+                     FROM (
+                       SELECT m.key,
+                              COALESCE((SELECT COUNT(*) FROM ext WHERE ext.k = m.key), 0) AS deg
+                         FROM memories m
+                        WHERE m.status='active' AND m.kind != 'skill'
+                     )
+                     GROUP BY bucket
+                     ORDER BY MIN(deg)",
+                )?;
+                let raw_buckets: Vec<(String, u64)> = stmt_deg
+                    .query_map([], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+                    })?
+                    .collect::<RusqliteResult<Vec<_>>>()?;
+                drop(stmt_deg);
+                // Align to canonical bucket order so diff is stable across
+                // snapshots even when some buckets are empty.
+                let canonical = [
+                    "0", "1", "2-3", "4-5", "6-10", "11-20", "21+",
+                ];
+                let raw_map: std::collections::HashMap<String, u64> = raw_buckets
+                    .iter()
+                    .cloned()
+                    .collect();
+                let degree_histogram: Vec<(String, u64)> = canonical
+                    .iter()
+                    .map(|b| ((*b).to_string(), raw_map.get(*b).copied().unwrap_or(0)))
+                    .collect();
+
+                // 4. top-5 hubs — non-skill active only, by degree DESC.
+                let mut stmt_hubs = tx.prepare(
+                    "WITH ext AS (
+                       SELECT from_key AS k FROM memory_edges
+                       UNION ALL
+                       SELECT to_key AS k FROM memory_edges
+                     ),
+                     degrees AS (
+                       SELECT k, COUNT(*) AS deg FROM ext GROUP BY k
+                     )
+                     SELECT d.k, d.deg
+                       FROM degrees d
+                       JOIN memories m ON m.key = d.k
+                      WHERE m.status='active' AND m.kind != 'skill'
+                      ORDER BY d.deg DESC, d.k ASC
+                      LIMIT 5",
+                )?;
+                let top_5_hubs: Vec<(String, u64)> = stmt_hubs
+                    .query_map([], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+                    })?
+                    .collect::<RusqliteResult<Vec<_>>>()?;
+                drop(stmt_hubs);
+
+                // 5. P4 evolved coverage — distinct non-skill active nodes
+                // appearing as either endpoint of any `evolved` edge.
+                let p4_coverage: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM (
+                       SELECT m.key
+                         FROM memories m
+                        WHERE m.status='active' AND m.kind != 'skill'
+                          AND EXISTS (
+                            SELECT 1 FROM memory_edges e
+                             WHERE (e.from_key = m.key OR e.to_key = m.key)
+                               AND e.edge_type = 'evolved'
+                          )
+                     )",
+                    [],
+                    |r| r.get(0),
+                )?;
+
+                tx.commit()?;
+                Ok(GraphTopology {
+                    non_skill_active_total: total as u64,
+                    orphan_count: orphans as u64,
+                    degree_histogram,
+                    top_5_hubs,
+                    p4_evolved_coverage: p4_coverage as u64,
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("graph_topology: {e}")))?;
+        Ok(topo)
     }
 
     async fn memory_decay_importance(

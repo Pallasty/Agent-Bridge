@@ -2144,6 +2144,12 @@ async fn run_dream_snapshot(
         .await
         .map_err(|e| anyhow::anyhow!("coactivation_stats: {e}"))?;
 
+    // ── graph topology (ζ-9) — orphan rate + degree + hubs + P4 coverage ─
+    let topo = store
+        .graph_topology()
+        .await
+        .map_err(|e| anyhow::anyhow!("graph_topology: {e}"))?;
+
     // ── top-10 most-accessed non-skill memories (current attention) ──────
     let top_access: Vec<(String, u64)> = {
         let rows = store
@@ -2250,7 +2256,7 @@ async fn run_dream_snapshot(
         .copied()
         .unwrap_or(0);
     let payload = json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "captured_at": now,
         "node": node,
         "name": name.unwrap_or("anon"),
@@ -2278,6 +2284,13 @@ async fn run_dream_snapshot(
         },
         "transitions": {
             "top_5": transitions.iter().map(|(a, b, n)| json!({ "from": a, "to": b, "count": n })).collect::<Vec<_>>(),
+        },
+        "topology": {
+            "non_skill_active_total": topo.non_skill_active_total,
+            "orphan_count": topo.orphan_count,
+            "p4_evolved_coverage": topo.p4_evolved_coverage,
+            "degree_histogram": topo.degree_histogram.iter().map(|(b,n)| json!({"bucket":b,"count":n})).collect::<Vec<_>>(),
+            "top_5_hubs": topo.top_5_hubs.iter().map(|(k,d)| json!({"key":k,"degree":d})).collect::<Vec<_>>(),
         },
     });
 
@@ -2358,6 +2371,24 @@ async fn run_dream_snapshot(
                     short_key(b, 30)
                 );
             }
+        }
+        // ζ-9 — topology line (orphan rate + P4 coverage + top hubs)
+        let orphan_pct = if topo.non_skill_active_total > 0 {
+            100.0 * topo.orphan_count as f64 / topo.non_skill_active_total as f64
+        } else {
+            0.0
+        };
+        let p4_pct = if topo.non_skill_active_total > 0 {
+            100.0 * topo.p4_evolved_coverage as f64 / topo.non_skill_active_total as f64
+        } else {
+            0.0
+        };
+        println!(
+            "topology     : {} non-skill · {} orphan ({:.0}%) · P4 evolved cov {:.0}%",
+            topo.non_skill_active_total, topo.orphan_count, orphan_pct, p4_pct
+        );
+        if let Some((k, deg)) = topo.top_5_hubs.first() {
+            println!("  top hub    : deg={deg}  {}", short_key(k, 60));
         }
         println!();
     }
@@ -2490,9 +2521,13 @@ async fn run_dream_diff(key_a: &str, key_b: &str, as_json: bool) -> Result<()> {
 
     let schema_a = pa.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(0);
     let schema_b = pb.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(0);
-    if schema_a != schema_b {
+    // ζ-9: allow v1↔v2 — newer schemas are strict supersets so missing
+    // fields default to 0/empty via gi64/gf64 helpers below. Bail only on
+    // wholly-unsupported versions (e.g. some future v3 that drops fields).
+    let supported = (1..=2).contains(&schema_a) && (1..=2).contains(&schema_b);
+    if !supported {
         anyhow::bail!(
-            "schema_version mismatch ({schema_a} vs {schema_b}); diff would be unreliable"
+            "unsupported schema_version pair ({schema_a} vs {schema_b}); diff requires both in 1..=2"
         );
     }
 
@@ -2599,6 +2634,41 @@ async fn run_dream_diff(key_a: &str, key_b: &str, as_json: bool) -> Result<()> {
     let saves_d = gi64(newer, &["identity", "current", "memory_saves"])
         - gi64(older, &["identity", "current", "memory_saves"]);
 
+    // ζ-9 — topology deltas (v1 snapshots default to 0/empty via gi64).
+    let topo_total_d = gi64(newer, &["topology", "non_skill_active_total"])
+        - gi64(older, &["topology", "non_skill_active_total"]);
+    let topo_orphan_d = gi64(newer, &["topology", "orphan_count"])
+        - gi64(older, &["topology", "orphan_count"]);
+    let topo_p4_d = gi64(newer, &["topology", "p4_evolved_coverage"])
+        - gi64(older, &["topology", "p4_evolved_coverage"]);
+    // Hub set diff — which keys entered/left top-5 hubs.
+    let hub_set = |v: Option<&serde_json::Value>| -> Vec<(String, i64)> {
+        let mut out = Vec::new();
+        if let Some(arr) = v.and_then(|x| x.as_array()) {
+            for item in arr {
+                if let (Some(k), Some(d)) = (
+                    item.get("key").and_then(|x| x.as_str()),
+                    item.get("degree").and_then(|x| x.as_i64()),
+                ) {
+                    out.push((k.to_string(), d));
+                }
+            }
+        }
+        out
+    };
+    let hubs_old = hub_set(older.get("topology").and_then(|t| t.get("top_5_hubs")));
+    let hubs_new = hub_set(newer.get("topology").and_then(|t| t.get("top_5_hubs")));
+    let hubs_entered: Vec<(String, i64)> = hubs_new
+        .iter()
+        .filter(|(k, _)| !hubs_old.iter().any(|(x, _)| x == k))
+        .cloned()
+        .collect();
+    let hubs_dropped: Vec<(String, i64)> = hubs_old
+        .iter()
+        .filter(|(k, _)| !hubs_new.iter().any(|(x, _)| x == k))
+        .cloned()
+        .collect();
+
     // transitions.top_5 — entered/left
     let trans_old = trans_set(older.get("transitions").and_then(|t| t.get("top_5")));
     let trans_new = trans_set(newer.get("transitions").and_then(|t| t.get("top_5")));
@@ -2642,6 +2712,13 @@ async fn run_dream_diff(key_a: &str, key_b: &str, as_json: bool) -> Result<()> {
             "transitions": {
                 "entered_top5": trans_entered.iter().map(|(a,b,n)| serde_json::json!({"from":a,"to":b,"count":n})).collect::<Vec<_>>(),
                 "dropped_top5": trans_dropped.iter().map(|(a,b,n)| serde_json::json!({"from":a,"to":b,"count":n})).collect::<Vec<_>>(),
+            },
+            "topology": {
+                "non_skill_active_delta": topo_total_d,
+                "orphan_delta": topo_orphan_d,
+                "p4_coverage_delta": topo_p4_d,
+                "hubs_entered": hubs_entered.iter().map(|(k,d)| serde_json::json!({"key":k,"degree":d})).collect::<Vec<_>>(),
+                "hubs_dropped": hubs_dropped.iter().map(|(k,d)| serde_json::json!({"key":k,"degree":d})).collect::<Vec<_>>(),
             },
         });
         println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -2715,6 +2792,27 @@ async fn run_dream_diff(key_a: &str, key_b: &str, as_json: bool) -> Result<()> {
             );
         }
     }
+    // ζ-9 — topology delta (suppressed when both snapshots are v1 since
+    // all deltas would be zero anyway).
+    let has_topology = schema_a >= 2 || schema_b >= 2;
+    if has_topology {
+        println!(
+            "topology     : non-skill {:+} · orphan {:+} · P4 cov {:+}",
+            topo_total_d, topo_orphan_d, topo_p4_d
+        );
+        if !hubs_entered.is_empty() {
+            println!("  hubs entered top-5");
+            for (k, d) in hubs_entered.iter().take(3) {
+                println!("  + deg={d}  {}", short_key(k, 60));
+            }
+        }
+        if !hubs_dropped.is_empty() {
+            println!("  hubs dropped from top-5");
+            for (k, d) in hubs_dropped.iter().take(3) {
+                println!("  - deg={d}  {}", short_key(k, 60));
+            }
+        }
+    }
     if entered_top.is_empty()
         && dropped_top.is_empty()
         && access_changed.is_empty()
@@ -2724,6 +2822,9 @@ async fn run_dream_diff(key_a: &str, key_b: &str, as_json: bool) -> Result<()> {
         && active_d == 0
         && archived_d == 0
         && edges_d == 0
+        && topo_total_d == 0
+        && topo_orphan_d == 0
+        && topo_p4_d == 0
     {
         println!();
         println!("(no notable deltas — quiet window)");
