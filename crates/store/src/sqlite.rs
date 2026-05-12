@@ -2693,6 +2693,70 @@ impl StateStore for SqliteStore {
         Ok(pruned)
     }
 
+    async fn memory_prune_degenerate_relates(
+        &self,
+        blacklist_tags: &[String],
+        dry_run: bool,
+    ) -> Result<u64> {
+        if blacklist_tags.is_empty() {
+            return Ok(0);
+        }
+        // Build LIKE patterns: `%"<tag>"%` matches the tag inside a JSON
+        // array like `["auto_curated","implicit"]` without substring
+        // lookalike collisions — the JSON quotes anchor the boundary.
+        let patterns: Vec<String> = blacklist_tags
+            .iter()
+            .map(|t| format!("%\"{}\"%", t.replace('"', "")))
+            .collect();
+        let n = patterns.len();
+        let placeholder = std::iter::repeat("tags LIKE ?")
+            .take(n)
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        // Same WHERE used by COUNT and DELETE so dry_run mirrors live.
+        // Degenerate-cluster criterion: both endpoints overlap blacklist.
+        // Edges from stub→real or real→stub stay (those are not the noise
+        // pattern ζ-9 surfaced).
+        let where_clause = format!(
+            "edge_type = 'relates'
+              AND EXISTS (SELECT 1 FROM memories src
+                          WHERE src.key = memory_edges.from_key
+                            AND ({patterns_src}))
+              AND EXISTS (SELECT 1 FROM memories tgt
+                          WHERE tgt.key = memory_edges.to_key
+                            AND ({patterns_tgt}))",
+            patterns_src = placeholder,
+            patterns_tgt = placeholder,
+        );
+        let count_sql = format!("SELECT COUNT(*) FROM memory_edges WHERE {where_clause}");
+        let delete_sql = format!("DELETE FROM memory_edges WHERE {where_clause}");
+        // 2N params: N for from-side EXISTS, N for to-side.
+        let mut sql_params: Vec<String> = Vec::with_capacity(n * 2);
+        sql_params.extend(patterns.iter().cloned());
+        sql_params.extend(patterns.iter().cloned());
+        let pruned = self
+            .conn
+            .call(move |c| -> RusqliteResult<u64> {
+                let tx = c.unchecked_transaction()?;
+                let count_n: i64 = tx.query_row(
+                    &count_sql,
+                    rusqlite::params_from_iter(sql_params.iter()),
+                    |row| row.get(0),
+                )?;
+                if !dry_run {
+                    tx.execute(
+                        &delete_sql,
+                        rusqlite::params_from_iter(sql_params.iter()),
+                    )?;
+                }
+                tx.commit()?;
+                Ok(count_n as u64)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_prune_degenerate_relates: {e}")))?;
+        Ok(pruned)
+    }
+
     async fn replay_audit_stats(
         &self,
         stale_days: u32,
@@ -8203,6 +8267,158 @@ mod tests {
             .await
             .expect("count final");
         assert_eq!(after, 0);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn prune_degenerate_relates_drops_pair_when_both_endpoints_tagged() {
+        // ζ-12 (Hebbian wire-cut): a `relates` edge survives only if AT LEAST
+        // one endpoint is outside the blacklist. ζ-9 wet-run showed 83
+        // auto_curated→auto_curated edges all landing on the same noise hub;
+        // this prune deletes that shape in one pass without touching
+        // legitimate stub→real or real→stub edges, and without touching
+        // non-`relates` edges.
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-prune-degen-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+
+        // memory_save runs Phase-1-P2 reconsolidation (token-overlap > 0.5
+        // within `kind = ?` → auto supersedes edge). Give each row a unique
+        // `kind` so the contradiction-detection candidate query returns
+        // empty for every save — no auto wiring fires before our explicit
+        // seed edges land.
+        let mk = |key: &str, tags: &[&str]| MemoryRecord {
+            key: key.to_string(),
+            kind: format!("kind_{key}"),
+            content: format!("body-{key} content"),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000000,
+            updated_at: 1700000000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        // 3 stubs (auto_curated), 2 real, 1 misc-tagged.
+        store.memory_save(&mk("stub_a", &["auto_curated", "implicit"])).await.expect("save");
+        store.memory_save(&mk("stub_b", &["auto_curated"])).await.expect("save");
+        store.memory_save(&mk("stub_c", &["auto_curated"])).await.expect("save");
+        store.memory_save(&mk("real_x", &["topic"])).await.expect("save");
+        store.memory_save(&mk("real_y", &["topic"])).await.expect("save");
+        store.memory_save(&mk("misc_m", &["junk"])).await.expect("save");
+
+        // Edge layout:
+        // - stub_a → stub_b  (relates) — DEGENERATE, prune
+        // - stub_b → stub_c  (relates) — DEGENERATE, prune
+        // - stub_a → real_x  (relates) — KEEP (only source tagged)
+        // - real_x → stub_b  (relates) — KEEP (only target tagged)
+        // - real_x → real_y  (relates) — KEEP (no endpoint tagged)
+        // - stub_a → stub_c  (caused_by) — KEEP (wrong edge_type)
+        // - misc_m → stub_a  (relates) — KEEP under blacklist=[auto_curated]
+        //                                 (only target tagged)
+        let edges = vec![
+            ("stub_a", "stub_b", "relates"),
+            ("stub_b", "stub_c", "relates"),
+            ("stub_a", "real_x", "relates"),
+            ("real_x", "stub_b", "relates"),
+            ("real_x", "real_y", "relates"),
+            ("stub_a", "stub_c", "caused_by"),
+            ("misc_m", "stub_a", "relates"),
+        ];
+        for (f, t, ty) in &edges {
+            store.memory_link(f, t, ty, 1.0).await.expect("link");
+        }
+
+        let before: i64 = store
+            .conn
+            .call(|c| c.query_row("SELECT COUNT(*) FROM memory_edges", [], |r| r.get(0)))
+            .await
+            .expect("count");
+        assert_eq!(before, 7, "explicit seed only; no auto edges expected");
+
+        let blacklist = vec!["auto_curated".to_string()];
+
+        let preview = store
+            .memory_prune_degenerate_relates(&blacklist, true)
+            .await
+            .expect("dry");
+        assert_eq!(preview, 2, "two degenerate relates edges expected");
+        let mid: i64 = store
+            .conn
+            .call(|c| c.query_row("SELECT COUNT(*) FROM memory_edges", [], |r| r.get(0)))
+            .await
+            .expect("count");
+        assert_eq!(mid, 7, "dry_run must not delete");
+
+        let pruned = store
+            .memory_prune_degenerate_relates(&blacklist, false)
+            .await
+            .expect("live");
+        assert_eq!(pruned, 2);
+
+        let remaining: Vec<(String, String, String)> = store
+            .conn
+            .call(|c| {
+                let mut s = c.prepare(
+                    "SELECT from_key, to_key, edge_type FROM memory_edges
+                       ORDER BY from_key, to_key, edge_type",
+                )?;
+                let rows: RusqliteResult<Vec<(String, String, String)>> = s
+                    .query_map([], |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?,
+                        ))
+                    })?
+                    .collect();
+                rows
+            })
+            .await
+            .expect("read remaining");
+        assert_eq!(remaining.len(), 5);
+        for (f, t, ty) in &remaining {
+            let degenerate = ty == "relates"
+                && f.starts_with("stub_")
+                && t.starts_with("stub_");
+            assert!(
+                !degenerate,
+                "remaining edge {}→{} ({}) should have been pruned",
+                f, t, ty
+            );
+        }
+
+        // Empty blacklist → 0 (no-op).
+        let zero = store
+            .memory_prune_degenerate_relates(&[], false)
+            .await
+            .expect("empty");
+        assert_eq!(zero, 0);
+
+        // Multi-tag any-of: catches misc_m→stub_a whose endpoints overlap
+        // blacklist on different tags (junk and auto_curated).
+        let multi = store
+            .memory_prune_degenerate_relates(
+                &["auto_curated".to_string(), "junk".to_string()],
+                false,
+            )
+            .await
+            .expect("multi");
+        assert_eq!(multi, 1, "multi-tag any-of catches misc_m→stub_a");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

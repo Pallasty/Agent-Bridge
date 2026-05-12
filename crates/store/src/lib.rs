@@ -1304,6 +1304,21 @@ pub trait StateStore: Send + Sync {
         dry_run: bool,
     ) -> Result<u64>;
 
+    /// ζ-12 (2026-05-12) — drop `relates` edges where BOTH endpoints carry
+    /// any tag in `blacklist_tags`. Cleans the legacy noise hubs produced by
+    /// pre-ζ-11 `memory_link_orphans` runs that collapsed auto_curated stubs
+    /// onto a single sibling. Defensive: only `relates` (the softest edge
+    /// type) is in scope — causal/structural edges are preserved. Returns
+    /// the number of edges removed (or that would be removed if `dry_run`).
+    async fn memory_prune_degenerate_relates(
+        &self,
+        blacklist_tags: &[String],
+        dry_run: bool,
+    ) -> Result<u64> {
+        let _ = (blacklist_tags, dry_run);
+        Ok(0)
+    }
+
     /// Audit `dream replay` output: are the LLM-consolidated summary
     /// memories actually used after creation? `stale_days` controls the
     /// "dead weight" cutoff — a `p5_replay`-tagged memory with

@@ -5404,6 +5404,86 @@ impl McpTool for MemoryPruneCoactivationNoiseTool {
 }
 
 // ===========================================================================
+//          memory_prune_degenerate_relates (ζ-12 — clean legacy noise hubs)
+// ===========================================================================
+
+/// ζ-12 — Drop `relates` edges where BOTH endpoints carry a tag in
+/// `blacklist_tags`. Defensive cleanup for the ζ-9-revealed pattern:
+/// pre-ζ-11 `memory_link_orphans` runs collapsed all auto_curated stubs
+/// onto a single sibling (degree-84 noise hub on aio2). Pairs with
+/// ζ-11's preventive `skip_tags` parameter — ζ-11 stops new degenerate
+/// links forming, ζ-12 deletes the legacy ones already in the graph.
+/// Only `relates` (softest edge type) is in scope.
+pub struct MemoryPruneDegenerateRelatesTool {
+    hub: Hub,
+}
+impl MemoryPruneDegenerateRelatesTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryPruneDegenerateRelatesTool {
+    fn name(&self) -> &'static str {
+        "memory_prune_degenerate_relates"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "ζ-12 (one-shot graph hygiene). Delete `relates` edges where BOTH \
+                endpoints carry any tag in `blacklist_tags`. Defensive: only `relates` (softest \
+                edge type) is in scope — causal/structural edges (caused_by, supersedes, \
+                implements, ...) are preserved even when both endpoints overlap the blacklist. \
+                Pair with `memory_link_orphans`' ζ-11 `skip_tags` to stop new degenerate \
+                edges from forming. Returns {pruned_count}. dry_run=true previews."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "blacklist_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["auto_curated"],
+                        "description": "Edges where both endpoints carry any of these tags are \
+                            pruned. Default `['auto_curated']` targets the noise-hub pattern \
+                            surfaced by ζ-9: pre-ζ-11 `memory_link_orphans` runs collapsed \
+                            curated_implicit_* stubs onto a single sibling."
+                    },
+                    "dry_run": { "type": "boolean", "default": false }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let blacklist_tags: Vec<String> = args
+            .get("blacklist_tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec!["auto_curated".to_string()]);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let pruned = store
+            .memory_prune_degenerate_relates(&blacklist_tags, dry_run)
+            .await?;
+        Ok(ToolResult::json_text(&json!({
+            "dry_run": dry_run,
+            "blacklist_tags": blacklist_tags,
+            "pruned_count": pruned,
+        })))
+    }
+}
+
+// ===========================================================================
 //                  memory_decay_unused (Phase 2.x #8 — read-recency decay)
 // ===========================================================================
 
@@ -12369,6 +12449,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPurgeTombstonesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPruneCoactivationNoiseTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPruneDegenerateRelatesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryDecayUnusedTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));
