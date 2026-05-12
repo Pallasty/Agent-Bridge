@@ -608,6 +608,7 @@
       letter-spacing: 0.04em;
     }
     .chat-banner .chat-save-btn,
+    .chat-banner .chat-export-btn,
     .chat-banner .chat-clear-btn {
       background: transparent;
       border: 1px solid #2a2a35;
@@ -1307,6 +1308,8 @@
           <span class="chat-restored-hint" id="chat-restored-hint" style="display:none; color:#5cc8c8;"></span>
           <button class="chat-save-btn" id="chat-save-btn" type="button"
                   title="sediment whole chat as a chat_session memory linked to this focus">💾 save chat</button>
+          <button class="chat-export-btn" id="chat-export-btn" type="button"
+                  title="export this chat as a self-contained HTML file">📄 export</button>
           <button class="chat-clear-btn" id="chat-clear-btn" type="button"
                   title="clear chat history for this node + wipe localStorage">🗑 clear</button>
           <span class="chat-meta-hint">spawned per message · ~5–30s</span>
@@ -3384,6 +3387,207 @@ async function saveChatAsMemory() {
   }
 }
 
+// P13-M — Export the current chat as a self-contained HTML file.
+// Works on both live chats (history accumulating in this session) and
+// past chat_sessions in viewer mode (history rehydrated from sediment).
+// Uses Blob + anchor[download] — no server round-trip; everything is
+// in canvasState. Output is a standalone .html with inlined CSS so it
+// can be shared / archived / mailed without any dependency.
+function exportChatToHtml() {
+  if (!canvasState.chat.focusKey) return;
+  if (canvasState.chat.history.length === 0) return;
+  const focusKey = canvasState.chat.focusKey;
+  const viewerOrigin = canvasState.chat.viewerOrigin;
+  const isPast = canvasState.chat.viewMode === "past";
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  const fmtRole = (r) => r === "assistant" ? "Claude"
+    : r === "error" ? "Error"
+    : "You";
+  const roleClass = (r) => r === "assistant" ? "assistant"
+    : r === "error" ? "error"
+    : "user";
+
+  const renderMsg = (m, idx) => {
+    const toolsHtml = (Array.isArray(m.tools) && m.tools.length)
+      ? `<div class="tools">` + m.tools.map(t => {
+          const short = String(t.name || "")
+            .replace(/^mcp__agent-bridge__/, "")
+            .replace(/^mcp__[a-z0-9_]+__/, "");
+          const argsHtml = t.args ? ` <span class="tool-args">${escapeHTML(String(t.args).slice(0, 240))}</span>` : "";
+          return `<span class="tool-chip">🔧 ${escapeHTML(short)}${argsHtml}</span>`;
+        }).join("") + `</div>`
+      : "";
+    return `<div class="msg ${roleClass(m.role)}">` +
+      `<div class="role">${fmtRole(m.role)}</div>` +
+      toolsHtml +
+      `<div class="content">${escapeHTML(m.content || "")}</div>` +
+      `</div>`;
+  };
+
+  const messagesHtml = canvasState.chat.history.map(renderMsg).join("\n");
+  const lineageMeta = viewerOrigin
+    ? `<div class="meta-row">discussion of: <code>${escapeHTML(viewerOrigin)}</code></div>`
+    : "";
+  const modeBadge = isPast
+    ? `<span class="mode-badge past">📖 past discussion</span>`
+    : `<span class="mode-badge live">💬 live chat</span>`;
+
+  const html = `<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>chat · ${escapeHTML(focusKey)}</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  background: #0a0a10;
+  color: #d8d8e0;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+  padding: 32px 48px;
+  max-width: 980px;
+}
+header { margin-bottom: 28px; }
+h1 {
+  font-size: 18px;
+  font-weight: 500;
+  color: #e0e0e8;
+  margin: 0 0 8px 0;
+  letter-spacing: 0.02em;
+}
+.meta-row {
+  color: #6a6a78;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin: 4px 0;
+}
+.meta-row code {
+  color: #a87cff;
+  background: rgba(74,58,114,0.18);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.mode-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.05em;
+  margin-left: 6px;
+}
+.mode-badge.past { color: #a87cff; background: rgba(74,58,114,0.3); }
+.mode-badge.live { color: #5cc8c8; background: rgba(22,40,46,0.6); }
+.msg {
+  margin: 14px 0;
+  padding: 12px 16px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+}
+.msg .role {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6a6a78;
+  margin-bottom: 4px;
+}
+.msg.user {
+  background: #1a1a24;
+  border-left-color: #4a4a55;
+}
+.msg.user .role { color: #9090a0; }
+.msg.assistant {
+  background: #0e1820;
+  border-left-color: #5cc8c8;
+}
+.msg.assistant .role { color: #5cc8c8; }
+.msg.error {
+  background: #2a161a;
+  border-left-color: #c8505c;
+  color: #d88090;
+}
+.msg .content {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.tools {
+  margin-bottom: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(20,30,35,0.6);
+  border: 1px solid #2a3a40;
+  color: #6a8e94;
+  padding: 1px 8px;
+  font-size: 10px;
+  border-radius: 10px;
+  letter-spacing: 0.04em;
+}
+.tool-args {
+  margin-left: 6px;
+  color: #4a8b9c;
+  font-size: 9px;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+footer {
+  margin-top: 36px;
+  color: #4a4a55;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  border-top: 1px solid #1f1f2a;
+  padding-top: 14px;
+}
+footer code { color: #6a6a78; }
+</style>
+</head>
+<body>
+<header>
+  <h1>${escapeHTML(focusKey)} ${modeBadge}</h1>
+  <div class="meta-row">exported ${escapeHTML(ts)}</div>
+  ${lineageMeta}
+  <div class="meta-row">${canvasState.chat.history.length} messages</div>
+</header>
+<main>
+${messagesHtml}
+</main>
+<footer>
+  generated by agent-bridge Palace · <code>${escapeHTML(focusKey)}</code>
+</footer>
+</body>
+</html>`;
+
+  const safeName = focusKey.replace(/[^a-zA-Z0-9_\-]/g, "_").slice(0, 80);
+  const fileName = `chat-${safeName}-${Date.now()}.html`;
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  const btn = document.getElementById("chat-export-btn");
+  if (btn) {
+    const old = btn.textContent;
+    btn.textContent = "✓ exported";
+    btn.classList.add("ok");
+    setTimeout(() => {
+      btn.textContent = old;
+      btn.classList.remove("ok");
+    }, 1500);
+  }
+}
+
 // Markdown transcript for the chat_session sediment. Each turn is
 // prefixed with **USER** / **ASSISTANT** / **ERROR** so the saved
 // memory reads cleanly when surfaced in side panel or HTML reports.
@@ -3704,6 +3908,8 @@ function bindCanvasGlobals() {
   if (chatClear) chatClear.addEventListener("click", clearChatForCurrent);
   const chatSave = document.getElementById("chat-save-btn");
   if (chatSave) chatSave.addEventListener("click", saveChatAsMemory);
+  const chatExport = document.getElementById("chat-export-btn");
+  if (chatExport) chatExport.addEventListener("click", exportChatToHtml);
   // In-canvas focus-switch delegation. Any element inside the overlay
   // with `class="rail-switch"` and `data-focus-key="..."` triggers
   // switchFocus. Started as a rail-only handler (cofires/annotations);
