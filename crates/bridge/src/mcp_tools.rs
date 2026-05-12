@@ -8271,7 +8271,10 @@ impl McpTool for MemoryStatsTool {
             name: self.name().into(),
             description: "Aggregate statistics about the memory store: counts by status, \
                  per-kind counts for active rows, edge count, oldest/newest timestamps, \
-                 average importance, top tags, approximate DB size. Call before \
+                 average importance, top tags, approximate DB size. P17b: also returns \
+                 `working_active` vs `catalog_active` (catalog = kinds in `catalog_kinds`, \
+                 default [\"skill\"]) so callers don't get fooled by bulk-imported \
+                 reference data dominating raw active counts. Call before \
                  session_curate / session_finalize to gauge store health."
                 .into(),
             input_schema: json!({ "type": "object", "properties": {} }),
@@ -8299,11 +8302,34 @@ impl McpTool for MemoryStatsTool {
             .map(|(tag, n)| json!({ "tag": tag, "count": n }))
             .collect();
 
+        // P17b: working vs catalog split. Uses the un-capped
+        // memory_kind_counts (vs counts_by_kind which is top-20 only) so
+        // a catalog kind sitting at #21 still gets counted correctly.
+        // catalog_kinds is fixed here; future bulk-import kinds can be
+        // added in one place if needed.
+        const CATALOG_KINDS: &[&str] = &["skill"];
+        let kind_rows = store
+            .memory_kind_counts()
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("memory_kind_counts: {e}")))?;
+        let mut catalog_active: u64 = 0;
+        let mut working_active: u64 = 0;
+        for (k, n) in &kind_rows {
+            if CATALOG_KINDS.iter().any(|c| *c == k.as_str()) {
+                catalog_active += *n;
+            } else {
+                working_active += *n;
+            }
+        }
+
         Ok(ToolResult::json_text(&json!({
             "counts_by_status": stats.counts_by_status,
             "active_total": stats.counts_by_status.get("active").copied().unwrap_or(0),
             "archived_total": stats.counts_by_status.get("archived").copied().unwrap_or(0),
             "superseded_total": stats.counts_by_status.get("superseded").copied().unwrap_or(0),
+            "working_active": working_active,
+            "catalog_active": catalog_active,
+            "catalog_kinds": CATALOG_KINDS,
             "counts_by_kind": counts_by_kind_json,
             "edge_count": stats.edge_count,
             "oldest_created_at": stats.oldest_created_at,
