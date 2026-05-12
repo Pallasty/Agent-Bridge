@@ -3263,13 +3263,17 @@ function formatChatTranscript(history) {
 // bubble) signaling claude called an MCP / Claude Code tool. Strips the
 // long `mcp__agent-bridge__` prefix so chips read as short verbs.
 // status: "running" = cyan ⟳ animated; "done" = muted ✓.
-function renderToolChip(name, status) {
+function renderToolChip(name, status, args) {
   const short = String(name || "")
     .replace(/^mcp__agent-bridge__/, "")
     .replace(/^mcp__[a-z0-9_]+__/, "");
   const cls = status === "running" ? "tool-chip running" : "tool-chip done";
   const glyph = status === "running" ? "⟳" : "✓";
-  return `<span class="${cls}" title="${escapeHTML(name)} · ${escapeHTML(status)}">` +
+  // 200-char cap keeps the tooltip readable even when claude sends big
+  // file contents or long search queries as input_json args.
+  const argsPreview = args ? ` · args: ${String(args).slice(0, 200)}` : "";
+  const title = escapeHTML(`${name} · ${status}${argsPreview}`);
+  return `<span class="${cls}" title="${title}">` +
     `<span class="tool-glyph">${glyph}</span>${escapeHTML(short)}</span>`;
 }
 
@@ -3308,7 +3312,7 @@ function renderChatHistory() {
       let chipsHtml = "";
       if (Array.isArray(m.tools) && m.tools.length) {
         chipsHtml = `<div class="tool-chips">` +
-          m.tools.map(t => renderToolChip(t.name, t.status || "done")).join("") +
+          m.tools.map(t => renderToolChip(t.name, t.status || "done", t.args)).join("") +
           `</div>`;
       }
       html += `<div class="chat-msg assistant">${chipsHtml}${escapeHTML(m.content)}<button class="copy-to-editor" type="button" data-msg-idx="${history.indexOf(m)}">→ copy to editor</button></div>`;
@@ -3329,7 +3333,7 @@ function renderChatHistory() {
     let chipsHtml = "";
     if (hasTools) {
       chipsHtml = `<div class="tool-chips">` +
-        streamingTools.map(t => renderToolChip(t.name, t.status)).join("") +
+        streamingTools.map(t => renderToolChip(t.name, t.status, t.args)).join("") +
         `</div>`;
     }
     const textHtml = hasText
@@ -3462,6 +3466,17 @@ async function sendChatMessage() {
             status: "running",
           });
           renderChatHistory();
+        } else if (ev.type === "tool_args_delta" && typeof ev.chunk === "string") {
+          // Tool input_json arrives in chunks (one per partial_json delta).
+          // Accumulate by index so the chip tooltip can show the full args
+          // claude sent to the tool.
+          const t = canvasState.chat.streamingTools.find(
+            (x) => x.index === ev.index
+          );
+          if (t) {
+            t.args = (t.args || "") + ev.chunk;
+            renderChatHistory();
+          }
         } else if (ev.type === "tool_stop") {
           // Match by index — id is only set on tool_start.
           const t = canvasState.chat.streamingTools.find(
@@ -3493,7 +3508,7 @@ async function sendChatMessage() {
         // Snapshot the tool usage so it persists with the message in
         // localStorage + transcript exports. Reading back later, the
         // user still sees which tools claude leaned on for this turn.
-        tools: tools.length ? tools.map((t) => ({ name: t.name, status: t.status })) : undefined,
+        tools: tools.length ? tools.map((t) => ({ name: t.name, status: t.status, args: t.args })) : undefined,
       });
     }
     canvasState.chat.streaming = null;
