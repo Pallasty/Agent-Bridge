@@ -1415,6 +1415,43 @@ function relTime(epochSecs) {
   return Math.floor(diff / (86400 * 365)) + "y ago";
 }
 
+// ζ-13: degree-based hub/orphan classification. Mirrors ζ-9 snapshot v2
+// topology but stays client-side — no extra server round-trip, and the
+// label tracks whatever edge filter is currently active.
+//
+// `coactivation` edges are intentionally excluded: they're an attention
+// overlay, not structural plumbing, and ζ-12 / ζ-14 hygiene only acts on
+// the explicit graph. Counting them would inflate hub degrees with
+// transient co-fires.
+//
+// Threshold: degree ≥ max(5, P95). The min-5 floor stops the label from
+// flapping on tiny graphs; the P95 keeps it adaptive as the graph grows.
+// `enableHubs = false` on graphs with <20 connected nodes — at that size
+// P95 is statistically meaningless and the operator can see the whole
+// topology at a glance anyway.
+function computeDegrees(data) {
+  const degreeMap = {};
+  data.nodes.forEach(n => { degreeMap[n.id] = 0; });
+  data.edges.forEach(e => {
+    if (e.type === "coactivation") return;
+    if (degreeMap[e.source] !== undefined) degreeMap[e.source]++;
+    if (degreeMap[e.target] !== undefined) degreeMap[e.target]++;
+  });
+  const connected = Object.values(degreeMap).filter(d => d > 0).sort((a, b) => a - b);
+  const p95Idx = Math.floor(connected.length * 0.95);
+  const p95 = connected.length > 0 ? connected[Math.min(p95Idx, connected.length - 1)] : 0;
+  const hubThreshold = Math.max(5, p95);
+  const enableHubs = connected.length >= 20;
+  let hubCount = 0;
+  let orphanCount = 0;
+  for (const id in degreeMap) {
+    const d = degreeMap[id];
+    if (d === 0) orphanCount++;
+    else if (enableHubs && d >= hubThreshold) hubCount++;
+  }
+  return { degreeMap, hubThreshold, enableHubs, hubCount, orphanCount };
+}
+
 // ── Global state ────────────────────────────────────────────────
 const state = {
   cy: null,
@@ -1426,6 +1463,10 @@ const state = {
   includeSkills: false,
   focused: null,        // currently-focused node id (or null)
   staleKindFilter: null, // C10: null = show all kinds, string = restrict stale panel rows
+  // ζ-13: degree info computed once per loadGraph, consumed by both the
+  // footer badge and buildCy's per-node hub/orphan marker. Stashed here
+  // (rather than recomputed twice) so the two surfaces can't drift.
+  degrees: null,
 };
 
 // ── Load graph from server ──────────────────────────────────────
@@ -1474,7 +1515,18 @@ async function loadGraph() {
   const staleBadge = staleCount > 0
     ? ` · <span style="color:#5a5a68">${staleCount} stale</span>`
     : "";
-  document.getElementById("stats").innerHTML = baseLabel + freshBadge + staleBadge;
+  // ζ-13: structural topology summary. Amber matches the hub double
+  // border; muted gray matches the orphan dashed border + the stale
+  // tail. After ζ-12/ζ-14 hygiene the hub line is real-lesson dense
+  // (deg ~15) instead of noise-stub dense (deg ~84 pre-ζ-12).
+  state.degrees = computeDegrees(data);
+  const hubBadge = state.degrees.hubCount > 0
+    ? ` · <span style="color:#c8a96a" title="degree ≥ ${state.degrees.hubThreshold} (P95)">${state.degrees.hubCount} hubs</span>`
+    : "";
+  const orphanBadge = state.degrees.orphanCount > 0
+    ? ` · <span style="color:#7a7a85" title="no explicit edges — candidates for memory_link_orphans or archive">${state.degrees.orphanCount} orphans</span>`
+    : "";
+  document.getElementById("stats").innerHTML = baseLabel + freshBadge + staleBadge + hubBadge + orphanBadge;
 
   // C8: stale-review button reflects staleCount. has-stale = clickable;
   // empty = dim affordance (still visible so users learn the entry point).
@@ -1533,6 +1585,9 @@ const STALE_WINDOW_SECS = 7 * 24 * 3600;
 function buildCy(data) {
   if (state.cy) state.cy.destroy();
   const nowSecs = data.now || Math.floor(Date.now() / 1000);
+  // ζ-13: degree state was stamped by loadGraph; fall back to a fresh
+  // compute if buildCy is ever called outside that path (defensive).
+  const degInfo = state.degrees || computeDegrees(data);
 
   const elements = [
     ...data.nodes.map(n => {
@@ -1541,6 +1596,13 @@ function buildCy(data) {
       const ageSecs = lastAccessed > 0 ? (nowSecs - lastAccessed) : Number.MAX_SAFE_INTEGER;
       const fresh = ageSecs < FRESH_WINDOW_SECS ? 1 : 0;
       const stale = lastAccessed > 0 && ageSecs > STALE_WINDOW_SECS ? 1 : 0;
+      // ζ-13: degree-driven role marker. orphan flips on at degree 0
+      // (no explicit edges — the structural loner ζ-14 archives).
+      // hub flips on when degree clears the P95 floor — the structural
+      // anchor ζ-12 prunes around. Mutually exclusive by construction.
+      const degree = degInfo.degreeMap[n.id] || 0;
+      const orphan = degree === 0 ? 1 : 0;
+      const hub = degInfo.enableHubs && degree >= degInfo.hubThreshold ? 1 : 0;
       return {
         data: {
           id: n.id,
@@ -1555,6 +1617,9 @@ function buildCy(data) {
           source: n.source || "sqlite",
           fresh,
           stale,
+          orphan,
+          hub,
+          degree,
           ageSecs,
           searchHaystack: [
             n.id, n.kind, ...(n.tags || []),
@@ -1597,6 +1662,18 @@ function buildCy(data) {
         "border-width": 2, "border-color": "#e0e0ec", "border-opacity": 0.55,
         "opacity": 0.96,
       }},
+      // ζ-13 orphan: degree 0 in the explicit graph — structural loner
+      // that ζ-11 link-orphans would re-link or ζ-14 archive would
+      // retire. Dashed muted gray reads quietly so cyan-fresh and
+      // amber-hub still dominate. Placed before fresh/stale so those
+      // override its border / opacity when they apply (a fresh orphan
+      // still wears the cyan ring; a stale orphan still gets 0.45 fade).
+      { selector: "node[orphan = 1]", style: {
+        "border-style": "dashed",
+        "border-color": "#555562",
+        "border-width": 1.5,
+        "opacity": 0.62,
+      }},
       // C5 freshness: nodes accessed within FRESH_WINDOW_SECS get a cyan
       // ring matching the coactivation color, so "the system is breathing
       // here right now" reads as a single visual concept (recent click + the
@@ -1610,6 +1687,19 @@ function buildCy(data) {
       // focus or search hit still pops the node back to full opacity.
       { selector: "node[stale = 1]", style: {
         "opacity": 0.45,
+      }},
+      // ζ-13 hub: degree ≥ max(5, P95) in the explicit graph. Amber
+      // double border halos the structural anchors. After ζ-12/ζ-14
+      // hygiene these are real lessons (deg ~15) rather than noise
+      // stubs (deg ~84 pre-ζ-12) — so the surface earns its visual
+      // weight. Placed after fresh/stale so hub-fresh and hub-stale
+      // both still read as hub first (border wins over fresh's cyan;
+      // stale's opacity stays since hub doesn't touch opacity).
+      { selector: "node[hub = 1]", style: {
+        "border-style": "double",
+        "border-color": "#c8a96a",
+        "border-width": 3,
+        "border-opacity": 0.95,
       }},
       { selector: "node.faded", style: {
         "opacity": 0.08, "text-opacity": 0,
