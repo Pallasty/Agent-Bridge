@@ -5339,24 +5339,31 @@ impl StateStore for SqliteStore {
         let root_f = root_path.map(|s| s.to_string());
         let lim = limit.min(500) as usize;
 
-        // Generate every (prefix, suffix) split of the target. For
-        // `crate::store::SqliteStore::new` that's:
-        //   ("crate::store::SqliteStore::new", "")   ← exact match in imports
-        //   ("crate::store::SqliteStore", "new")
-        //   ("crate::store", "SqliteStore::new")
-        //   ("crate", "store::SqliteStore::new")
-        // For each prefix we look up imports, then look up calls in the
-        // same file with callee = local_name + "::" + suffix.
-        let segments: Vec<String> = target_owned
-            .split("::")
-            .map(|s| s.to_string())
-            .collect();
-
-        let mut splits: Vec<(String, String)> = Vec::new();
-        for k in 0..segments.len() {
-            let prefix = segments[..segments.len() - k].join("::");
-            let suffix = segments[segments.len() - k..].join("::");
-            splits.push((prefix, suffix));
+        // Generate every (prefix, suffix, sep_used) split of the target
+        // for BOTH `::` (Rust) and `.` (Python / TS / JS / Go) so a single
+        // codebase_callers query works for any language. For
+        // `crate::store::SqliteStore::new` the `::` splits give the Rust
+        // ladder, and for `node:fs.readFileSync` the `.` splits give the
+        // TS/Python ladder. The `sep_used` field is carried so we can
+        // rebuild the expected callee in the import's path style when
+        // a non-empty suffix needs to be joined under a different
+        // import language.
+        let mut splits: Vec<(String, String, &'static str)> = Vec::new();
+        for sep in ["::", "."] {
+            if !target_owned.contains(sep) {
+                continue;
+            }
+            let segments: Vec<&str> = target_owned.split(sep).collect();
+            for k in 0..segments.len() {
+                let prefix = segments[..segments.len() - k].join(sep);
+                let suffix = segments[segments.len() - k..].join(sep);
+                splits.push((prefix, suffix, sep));
+            }
+        }
+        if splits.is_empty() {
+            // No separator in target — just the bare name. Still useful for
+            // single-segment matches like `Bar` against `use foo::Bar`.
+            splits.push((target_owned.clone(), String::new(), "::"));
         }
 
         let mut out: Vec<crate::ResolvedCall> = Vec::new();
@@ -5421,34 +5428,45 @@ impl StateStore for SqliteStore {
         // Single SQL query per prefix to keep round-trips bounded.
         // Could be optimized to one giant UNION query, but per-prefix
         // is clearer and the prefix count is small (~ depth of path).
-        for (prefix, suffix) in splits {
+        for (prefix, suffix, suffix_sep) in splits {
             if prefix.is_empty() {
                 continue;
             }
             let prefix_clone = prefix.clone();
+            let prefix_wildcard = format!("{prefix}.*");
             let suffix_clone = suffix.clone();
+            let suffix_sep_str = suffix_sep.to_string();
             let file_f_clone = file_f.clone();
             let root_f_clone = root_f.clone();
             let target_clone = target_owned.clone();
             let rows = self
                 .conn
                 .call(move |c| -> RusqliteResult<Vec<crate::ResolvedCall>> {
-                    // Step 1: imports whose target equals this prefix.
+                    // Step 1: imports whose target equals this prefix
+                    // OR equals "<prefix>.*" (TS/Python namespace).
+                    // Carry the language so we can pick the per-language
+                    // path separator when constructing expected callees.
                     let mut imp_stmt = c.prepare(
-                        "SELECT file_path, target, alias
+                        "SELECT file_path, target, alias, language
                          FROM codebase_imports
-                         WHERE target = ?1
-                           AND (?2 IS NULL OR root_path = ?2)
-                           AND (?3 IS NULL OR file_path LIKE ?3)",
+                         WHERE (target = ?1 OR target = ?2)
+                           AND (?3 IS NULL OR root_path = ?3)
+                           AND (?4 IS NULL OR file_path LIKE ?4)",
                     )?;
-                    let imports: Vec<(String, String, Option<String>)> = imp_stmt
+                    let imports: Vec<(String, String, Option<String>, String)> = imp_stmt
                         .query_map(
-                            params![prefix_clone, root_f_clone, file_f_clone],
+                            params![
+                                prefix_clone,
+                                prefix_wildcard,
+                                root_f_clone,
+                                file_f_clone
+                            ],
                             |row| {
                                 Ok((
                                     row.get::<_, String>(0)?,
                                     row.get::<_, String>(1)?,
                                     row.get::<_, Option<String>>(2)?,
+                                    row.get::<_, String>(3)?,
                                 ))
                             },
                         )?
@@ -5467,18 +5485,35 @@ impl StateStore for SqliteStore {
                          ORDER BY line",
                     )?;
                     let mut local_out: Vec<crate::ResolvedCall> = Vec::new();
-                    for (file_path, imp_target, alias) in imports {
+                    for (file_path, imp_target, alias, imp_language) in imports {
+                        let import_sep = if imp_language == "rust" { "::" } else { "." };
+                        // Strip `.*` from namespace imports for local_name
+                        // derivation. The bare prefix `mod` is what gets
+                        // bound to the alias (or to no name when no alias).
+                        let target_for_local = imp_target.trim_end_matches(".*");
                         let local_name = alias.clone().unwrap_or_else(|| {
-                            imp_target
-                                .rsplit("::")
+                            target_for_local
+                                .rsplit(import_sep)
                                 .next()
-                                .unwrap_or(&imp_target)
+                                .unwrap_or(target_for_local)
                                 .to_string()
                         });
-                        let expected_callee = if suffix_clone.is_empty() {
+                        if local_name.is_empty() {
+                            continue;
+                        }
+                        // Convert suffix from query separator → import
+                        // separator (Rust uses `::`, others use `.`).
+                        let suffix_in_import_sep = if suffix_clone.is_empty() {
+                            String::new()
+                        } else if suffix_sep_str == import_sep {
+                            suffix_clone.clone()
+                        } else {
+                            suffix_clone.replace(suffix_sep_str.as_str(), import_sep)
+                        };
+                        let expected_callee = if suffix_in_import_sep.is_empty() {
                             local_name.clone()
                         } else {
-                            format!("{}::{}", local_name, suffix_clone)
+                            format!("{local_name}{import_sep}{suffix_in_import_sep}")
                         };
                         let calls: Vec<(i64, String, String, String)> = call_stmt
                             .query_map(
@@ -10631,6 +10666,124 @@ mod tests {
             .await
             .expect("empty");
         assert!(empty.is_empty());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // Phase 2 #3 third-slice extension — codebase_callers must also
+    // handle TS namespace imports (`target=mod.*`) and Python-style
+    // `.`-separated targets. Without this, queries like
+    // `node:fs.readFileSync` returned empty even when files imported
+    // `* as fs from "node:fs"` and wrote `fs.readFileSync(...)`.
+    #[tokio::test]
+    async fn codebase_callers_handles_ts_namespace_and_python_imports() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-codebase-callers-ts-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                // ── TypeScript: `import * as fs from "node:fs"` →
+                //    target=`node:fs.*`, alias=`fs`. Call `fs.readFileSync()`
+                //    should resolve to `node:fs.readFileSync`.
+                let mut imp_stmt = c.prepare(
+                    "INSERT INTO codebase_imports
+                       (file_path, line, language, raw, target, alias, root_path, indexed_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, '/repo', 1)",
+                )?;
+                imp_stmt.execute(params![
+                    "/repo/a.ts",
+                    1_i64,
+                    "typescript",
+                    "import * as fs from 'node:fs';",
+                    "node:fs.*",
+                    Some("fs"),
+                ])?;
+                // ── Python: `from os import path` →
+                //    target=`os.path`. Call `path.join()` resolves to `os.path.join`.
+                imp_stmt.execute(params![
+                    "/repo/b.py",
+                    1_i64,
+                    "python",
+                    "from os import path",
+                    "os.path",
+                    Option::<String>::None,
+                ])?;
+                // ── Python: `import numpy as np` →
+                //    target=`numpy`, alias=`np`. Call `np.array()` resolves to `numpy.array`.
+                imp_stmt.execute(params![
+                    "/repo/c.py",
+                    1_i64,
+                    "python",
+                    "import numpy as np",
+                    "numpy",
+                    Some("np"),
+                ])?;
+                drop(imp_stmt);
+
+                let mut call_stmt = c.prepare(
+                    "INSERT INTO codebase_calls
+                       (file_path, line, language, caller, callee, root_path, indexed_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, '/repo', 1)",
+                )?;
+                call_stmt.execute(params![
+                    "/repo/a.ts", 5_i64, "typescript", "user_a", "fs.readFileSync",
+                ])?;
+                call_stmt.execute(params![
+                    "/repo/b.py", 7_i64, "python", "user_b", "path.join",
+                ])?;
+                call_stmt.execute(params![
+                    "/repo/c.py", 9_i64, "python", "user_c", "np.array",
+                ])?;
+                // Negative — different callee in a.ts.
+                call_stmt.execute(params![
+                    "/repo/a.ts", 11_i64, "typescript", "user_a", "console.log",
+                ])?;
+                Ok(())
+            })
+            .await
+            .expect("seed rows");
+
+        // TS namespace import resolution.
+        let ts_hits = store
+            .codebase_callers("node:fs.readFileSync", None, Some("/repo"), 50)
+            .await
+            .expect("ts callers");
+        assert_eq!(ts_hits.len(), 1, "got {ts_hits:#?}");
+        assert_eq!(ts_hits[0].callee, "fs.readFileSync");
+        assert_eq!(ts_hits[0].resolved_callee, "node:fs.readFileSync");
+        assert_eq!(ts_hits[0].via_alias.as_deref(), Some("fs"));
+        assert_eq!(ts_hits[0].via_import, "node:fs.*");
+
+        // Python from-import resolution (`.` separator + last-segment alias).
+        let py_hits = store
+            .codebase_callers("os.path.join", None, Some("/repo"), 50)
+            .await
+            .expect("py callers");
+        assert_eq!(py_hits.len(), 1, "got {py_hits:#?}");
+        assert_eq!(py_hits[0].callee, "path.join");
+        assert_eq!(py_hits[0].resolved_callee, "os.path.join");
+        assert!(py_hits[0].via_alias.is_none());
+        assert_eq!(py_hits[0].via_import, "os.path");
+
+        // Python aliased import (`import numpy as np` + `np.array`).
+        let np_hits = store
+            .codebase_callers("numpy.array", None, Some("/repo"), 50)
+            .await
+            .expect("numpy callers");
+        assert_eq!(np_hits.len(), 1, "got {np_hits:#?}");
+        assert_eq!(np_hits[0].callee, "np.array");
+        assert_eq!(np_hits[0].resolved_callee, "numpy.array");
+        assert_eq!(np_hits[0].via_alias.as_deref(), Some("np"));
+        assert_eq!(np_hits[0].via_import, "numpy");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
