@@ -123,6 +123,7 @@ pub async fn run(
         .route("/api/canvas-chat-stream", post(api_canvas_chat_stream))
         .route("/api/memory/:key/tombstone", post(api_memory_tombstone))
         .route("/api/lineage/:key", get(api_lineage))
+        .route("/api/coactivation-peers/:key", get(api_coactivation_peers))
         .route("/api/embedding-stats", get(api_embedding_stats))
         .route("/api/canvas-chat-attachment", post(api_canvas_chat_attachment))
         .with_state(state);
@@ -779,6 +780,86 @@ async fn api_lineage(
         "chain": chain,
         "chain_length": chain.len(),
         "truncated": truncated,
+    })))
+}
+
+// ── Coactivation peers (P18) ─────────────────────────────────────────────
+//
+// One-hop neighbors over the **explicit** attention edges (`cofires` from
+// dream-promote tier 1, `co_referenced` from tier 2 — see P16-M). Direct
+// memory_edges scan; bypasses the /api/graph VIEWER_NODE_CAP=500 filter
+// that drops these edges when their endpoints sit below the top-500
+// importance line (very common for chat_session + lesson clusters).
+//
+// Same pattern as P7 /api/lineage: focused endpoint per key, no graph
+// truncation, used by the canvas rail to surface tier-1 + tier-2
+// Hebbian peers for whichever node the user is working on.
+
+async fn api_coactivation_peers(
+    State(s): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let nbrs = s.store.memory_neighbors(&key).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("memory_neighbors: {e}"),
+        )
+    })?;
+
+    // Project to peer view. Dedupe by (peer, edge_type) so two parallel
+    // edges of the same type collapse, but the same peer can appear under
+    // both 'cofires' AND 'co_referenced' if the dream-promote pass added
+    // both (rare; tier-2 normally skips when tier-1 cofires exists).
+    let mut peers: Vec<Value> = Vec::new();
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    for e in nbrs {
+        let et = e.edge_type.as_str();
+        if et != "cofires" && et != "co_referenced" {
+            continue;
+        }
+        let other = if e.from_key == key {
+            e.to_key.clone()
+        } else {
+            e.from_key.clone()
+        };
+        if other == key {
+            continue;
+        }
+        if !seen.insert((other.clone(), et.to_string())) {
+            continue;
+        }
+        peers.push(json!({
+            "key": other,
+            "edge_type": et,
+            "weight": (e.weight * 1000.0).round() / 1000.0,
+        }));
+    }
+
+    // Sort: cofires (tier 1, weight 0.5-0.95) first, co_referenced
+    // (tier 2, weight 0.3-0.5) after; within each tier, weight desc.
+    peers.sort_by(|a, b| {
+        let ta = a["edge_type"].as_str() == Some("cofires");
+        let tb = b["edge_type"].as_str() == Some("cofires");
+        tb.cmp(&ta).then_with(|| {
+            let wa = a["weight"].as_f64().unwrap_or(0.0);
+            let wb = b["weight"].as_f64().unwrap_or(0.0);
+            wb.partial_cmp(&wa).unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+
+    let cofires_count = peers
+        .iter()
+        .filter(|p| p["edge_type"].as_str() == Some("cofires"))
+        .count();
+    let co_referenced_count = peers.len() - cofires_count;
+
+    Ok(Json(json!({
+        "ok": true,
+        "key": key,
+        "peers": peers,
+        "edge_types": ["cofires", "co_referenced"],
+        "cofires_count": cofires_count,
+        "co_referenced_count": co_referenced_count,
     })))
 }
 

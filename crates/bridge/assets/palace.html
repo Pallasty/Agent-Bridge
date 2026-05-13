@@ -1046,6 +1046,29 @@
       border-bottom-color: #a87cff;
     }
     .canvas-rail-cofires a     { border-left: 2px solid #6dd4bd; }
+    /* P18 — tier chips for Hebbian peers section. cofires = tier 1
+       (dream-promote count≥5, weight 0.5-0.95) — vivid teal echoing
+       the solid graph color. co_referenced = tier 2 (count≥3, weight
+       0.3-0.5) — muted teal-gray, mirroring its lower-confidence role.
+       Mirrors the .edge-tag pattern already used for lineage evo/sup. */
+    .canvas-rail-cofires .edge-tag {
+      font-size: 8px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 0 4px;
+      border-radius: 3px;
+      margin-right: 6px;
+      font-weight: 500;
+      vertical-align: middle;
+    }
+    .canvas-rail-cofires .edge-tag.t1 {
+      color: #6dd4bd;
+      background: rgba(40, 78, 70, 0.45);
+    }
+    .canvas-rail-cofires .edge-tag.t2 {
+      color: #7a9b94;
+      background: rgba(35, 60, 55, 0.35);
+    }
     .canvas-rail-annotations a { border-left: 2px solid #ffe070; }
     .canvas-rail-discussions a { border-left: 2px solid #a87cff; }
     .canvas-rail-reports a     { border-left: 2px solid #5cc8c8; }
@@ -1337,7 +1360,7 @@
         </div>
         <div class="canvas-rail">
           <div class="canvas-rail-section">
-            <div class="canvas-rail-title">cofires neighbors</div>
+            <div class="canvas-rail-title">Hebbian peers</div>
             <div id="canvas-rail-cofires"><div class="canvas-rail-empty">none</div></div>
           </div>
           <div class="canvas-rail-section">
@@ -2996,17 +3019,32 @@ function renderMarkdownPreview(src) {
 // neighbors come from the cytoscape graph (already loaded). Recent
 // annotations + related reports re-use existing endpoints.
 async function loadCanvasRail(memory) {
-  // 1. cofires neighbors — derive from the loaded graph data.
+  // 1. Hebbian peers — P18: server endpoint that scans memory_edges direct
+  // (cofires + co_referenced). Bypasses /api/graph VIEWER_NODE_CAP=500
+  // truncation that hides these edges when endpoints sit below the top
+  // importance line. Each peer renders with a tier chip:
+  //   T1 (cofires)       — dream-promote tier 1, weight 0.5-0.95, vivid teal
+  //   T2 (co_referenced) — dream-promote tier 2, weight 0.3-0.5, muted teal
   const cofiresEl = document.getElementById("canvas-rail-cofires");
-  cofiresEl.parentElement.classList.remove("canvas-rail-cofires"); // ensure parent gets the class
+  cofiresEl.parentElement.classList.remove("canvas-rail-cofires");
   cofiresEl.parentElement.classList.add("canvas-rail-cofires");
-  const cofiresList = neighborsOfType(memory.key, "cofires").slice(0, 8);
-  if (cofiresList.length) {
-    cofiresEl.innerHTML = cofiresList.map(k =>
-      `<a class="rail-switch" href="#" data-focus-key="${escapeHTML(k)}" title="${escapeHTML(k)}">${escapeHTML(k)}</a>`
-    ).join("");
-  } else {
-    cofiresEl.innerHTML = `<div class="canvas-rail-empty">none yet</div>`;
+  try {
+    const r = await fetch(`/api/coactivation-peers/${encodeURIComponent(memory.key)}`);
+    const j = await r.json();
+    const peers = Array.isArray(j.peers) ? j.peers.slice(0, 10) : [];
+    if (peers.length === 0) {
+      cofiresEl.innerHTML = `<div class="canvas-rail-empty">none yet</div>`;
+    } else {
+      cofiresEl.innerHTML = peers.map(p => {
+        const tier = p.edge_type === "cofires" ? "t1" : "t2";
+        const label = p.edge_type === "cofires" ? "T1" : "T2";
+        const title = `${p.edge_type} · weight ${p.weight}\n→ ${p.key}`;
+        return `<a class="rail-switch" href="#" data-focus-key="${escapeHTML(p.key)}" title="${escapeHTML(title)}">` +
+               `<span class="edge-tag ${tier}">${label}</span>${escapeHTML(p.key)}</a>`;
+      }).join("");
+    }
+  } catch (e) {
+    cofiresEl.innerHTML = `<div class="canvas-rail-empty">error</div>`;
   }
 
   // 2. recent annotations — sqlite memories with `palace` tag, sorted by mtime.
