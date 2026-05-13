@@ -19,7 +19,7 @@
 
 use std::sync::{Arc, Mutex, OnceLock};
 
-use ab_store::embedding::{EmbeddingBackend, HashBackend};
+use ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend};
 use seed_neuron::NeuronGrid;
 use serde::{Deserialize, Serialize};
 
@@ -67,19 +67,41 @@ pub fn install_default() -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Mirror of `ab_store::embedding::select_default` selection logic so
-/// SeedBackend wraps whatever would have been the default. Only the
-/// hash fallback is built-in here; ONNX gets pulled in by ab-store's
-/// feature flag and would require linking against fastembed which is
-/// out of scope for seed-bridge — phase 1 wraps hash. Phase 2 lifts the
-/// ONNX inner through a constructor parameter so MCP startup picks it.
+/// Env var ab-store uses to pick the default backend. We mirror its
+/// precedence so wrapping decisions stay in sync — substrate observes
+/// the same kind of perception that retrieval would have produced.
+const ABSTORE_BACKEND_ENV: &str = "AGENT_BRIDGE_EMBED_BACKEND";
+
+/// Mirror of `ab_store::embedding::select_default` so SeedBackend wraps
+/// whatever would have been the default. Selection precedence:
+///   1. `AGENT_BRIDGE_EMBED_BACKEND` env (`onnx` | `hash`)
+///   2. Compile-time default: ONNX (ab-store has `onnx-embed` feature on
+///      by default).
+///
+/// `OnnxBackend` carries its own hash fallback if the model fails to
+/// load, so picking onnx is always safe — at worst it degrades to hash
+/// at first call. Phase 2.1 lifts wrap from hash-only (phase 1) to
+/// real-semantic ONNX so substrate perception is in the same vector
+/// space the L3 retrieval sees.
 fn build_inner_backend() -> Arc<dyn EmbeddingBackend> {
-    // Phase 1: hash inner is sufficient to validate the wiring (G1-G3
-    // smoke). The substrate observes hashed perception, not real
-    // semantic vectors, so cluster quality is degraded — but the
-    // step_count / connection_logits / surprise pipeline is identical
-    // to what the ONNX-wrapped version will exercise in phase 2.
-    Arc::new(HashBackend)
+    match select_inner_kind().as_str() {
+        "hash" => Arc::new(HashBackend),
+        // "onnx" or anything else → onnx (it falls back to hash on
+        // model-load failure, so unknown values are safe-by-default).
+        _ => Arc::new(OnnxBackend),
+    }
+}
+
+/// Pure helper for selection precedence. Extracted so the choice is
+/// unit-testable without spinning up ONNX. Returns `"onnx"` or
+/// `"hash"`; unknown env values fall through to `"onnx"` and the
+/// `build_inner_backend` arm handles the fallback safely.
+fn select_inner_kind() -> String {
+    std::env::var(ABSTORE_BACKEND_ENV)
+        .ok()
+        .map(|s| s.to_lowercase())
+        .filter(|s| s == "hash" || s == "onnx")
+        .unwrap_or_else(|| "onnx".to_string())
 }
 
 /// v22 substrate config. Defaults from `DESIGN-v22-...md` §3.3 (Q-back-1
@@ -406,6 +428,72 @@ mod tests {
         // Unit norm within float error.
         let norm: f32 = z.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 1e-4, "expected unit norm, got {}", norm);
+    }
+
+    #[test]
+    fn select_inner_kind_default_is_onnx() {
+        // Phase 2.1: with no env hint, prefer ONNX (matches ab-store
+        // default + has built-in hash fallback so we can't actually
+        // crash from this choice).
+        // Snapshot + restore to avoid racing with parallel tests.
+        let prev = std::env::var(ABSTORE_BACKEND_ENV).ok();
+        std::env::remove_var(ABSTORE_BACKEND_ENV);
+        let kind = select_inner_kind();
+        if let Some(v) = prev {
+            std::env::set_var(ABSTORE_BACKEND_ENV, v);
+        }
+        assert_eq!(kind, "onnx");
+    }
+
+    #[test]
+    fn select_inner_kind_respects_hash_env() {
+        // Explicit `hash` keeps the phase-1 cheap path available for
+        // CI / dev loops where ONNX model download is undesirable.
+        let prev = std::env::var(ABSTORE_BACKEND_ENV).ok();
+        std::env::set_var(ABSTORE_BACKEND_ENV, "hash");
+        let kind = select_inner_kind();
+        std::env::remove_var(ABSTORE_BACKEND_ENV);
+        if let Some(v) = prev {
+            std::env::set_var(ABSTORE_BACKEND_ENV, v);
+        }
+        assert_eq!(kind, "hash");
+    }
+
+    #[test]
+    fn select_inner_kind_unknown_falls_through_to_onnx() {
+        // Unknown values are unsafe to honor literally; defer to ab-store
+        // pattern which warns + uses compile-time default. Substrate
+        // mirrors that: unknown → onnx (which itself falls back to hash
+        // if model load fails, so this is doubly safe).
+        let prev = std::env::var(ABSTORE_BACKEND_ENV).ok();
+        std::env::set_var(ABSTORE_BACKEND_ENV, "fictional-model");
+        let kind = select_inner_kind();
+        std::env::remove_var(ABSTORE_BACKEND_ENV);
+        if let Some(v) = prev {
+            std::env::set_var(ABSTORE_BACKEND_ENV, v);
+        }
+        assert_eq!(kind, "onnx");
+    }
+
+    #[test]
+    fn build_inner_returns_correct_kind_per_env() {
+        // End-to-end check on `build_inner_backend()`. We don't actually
+        // call .embed() on the ONNX path (would trigger model download
+        // in CI), just verify the chosen backend's name() identifies it.
+        let prev = std::env::var(ABSTORE_BACKEND_ENV).ok();
+
+        std::env::set_var(ABSTORE_BACKEND_ENV, "hash");
+        let hash_b = build_inner_backend();
+        assert_eq!(hash_b.name(), "fnv1a-hash-384");
+
+        std::env::set_var(ABSTORE_BACKEND_ENV, "onnx");
+        let onnx_b = build_inner_backend();
+        assert_eq!(onnx_b.name(), "all-MiniLM-L6-v2");
+
+        std::env::remove_var(ABSTORE_BACKEND_ENV);
+        if let Some(v) = prev {
+            std::env::set_var(ABSTORE_BACKEND_ENV, v);
+        }
     }
 
     #[test]
