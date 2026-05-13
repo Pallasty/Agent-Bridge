@@ -1,12 +1,32 @@
 name: CI
 
-# PR-time sanity check: build + test on both Linux and macOS so we don't
-# tag a release that fails to build on either platform. The existing
-# `verify-warp-integration.yml` covers master-push regression on Linux;
-# this workflow's job is matrix coverage on incoming changes.
+# Sanity check: build + test on both Linux and macOS so we don't ship a
+# master commit that fails to build on either platform.
+#
+# Triggers:
+#   - pull_request  — pre-merge gate (matrix coverage on incoming PRs)
+#   - push to master — post-merge safety net (P24, 2026-05-13). Direct
+#     pushes to master bypass PR review, so this catches broken-HEAD
+#     commits like `f88e5ef` where an enum dispatch went in without
+#     its target fn definition. `verify-warp-integration.yml` already
+#     covered Linux on master push; this adds macOS to that coverage.
+#
+# Branch protection (recommended but not enforced by repo):
+#   Enable "Require status checks to pass before merging" on master
+#   with this workflow + verify-warp-integration as required checks.
+#   Without that, a failing CI on master is detected but not blocking.
 
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "memory_snapshots/**"
+      - ".gitignore"
+      - "LICENSE"
+  push:
+    branches:
+      - master
     paths-ignore:
       - "**/*.md"
       - "docs/**"

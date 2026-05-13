@@ -1,5 +1,8 @@
 # agent-bridge
 
+[![CI](https://github.com/pallasting/Agent-Bridge/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/pallasting/Agent-Bridge/actions/workflows/ci.yml)
+[![Verify Warp Integration](https://github.com/pallasting/Agent-Bridge/actions/workflows/verify-warp-integration.yml/badge.svg?branch=master)](https://github.com/pallasting/Agent-Bridge/actions/workflows/verify-warp-integration.yml)
+
 A Unix-native AI-agent control plane: desktop notifications, cross-session memory,
 MCP tool registry, terminal multiplexer glue, browser automation (CDP), git-worktree
 orchestration, and sub-agent spawning — all pluggable via Rust traits.
@@ -807,6 +810,25 @@ MCP **`capabilities`** reports `terminal.capabilities` (`TerminalCapabilities`),
 | P1-E | MCP stdio server (56 tools) | ✅ |
 | P1-F | Cross-session memory (FTS5 + graph edges + scopes) | ✅ |
 | P1-G | PreCompact curator hook + `agent-bridge setup` | ✅ |
+
+## Contributing
+
+```bash
+git clone <repo>
+./scripts/wrapper/install.sh    # wrapper + creds template + githooks
+```
+
+The wrapper installer wires a **pre-commit hook** that runs
+`cargo check -p ab-bridge --all-targets` on staged Rust changes (P23,
+commit `a5d81b4`). This catches broken-HEAD commits like a missing fn
+definition before they hit `master`. Bypass per-commit with
+`--no-verify` or `AGENT_BRIDGE_SKIP_PRECOMMIT=1 git commit ...`; skip
+the install entirely with `AGENT_BRIDGE_SKIP_GITHOOKS=1`.
+
+For maintainers: GitHub branch protection is recommended on `master` —
+require **CI** + **Verify Warp Integration** status checks to pass
+before merging. The badges at the top of this README reflect master's
+current state; if they go red, master shouldn't be pulled until fixed.
 
 ## License
 
