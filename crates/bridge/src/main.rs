@@ -484,6 +484,29 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **β v0 (vision §5 seed-self-evolution scaffolding)** —
+    /// Read-only probe of Hebbian clusters: connected components on
+    /// the `cofires` + `co_referenced` subgraph. v0 surfaces raw
+    /// groups so the operator can inspect thematic coherence; v1 will
+    /// layer LLM abstraction to generate seed memories. `coactivation`
+    /// edges (the soft trace) are excluded — only crystallised
+    /// promotions count toward structure.
+    ClusterProbe {
+        /// Minimum component size to surface. Default 2 (skip
+        /// singletons). Set to 3+ to filter out isolated pairs.
+        #[arg(long, default_value_t = 2)]
+        min_size: i64,
+        /// Cap clusters in the output. Default 20 — enough to scan
+        /// in one screen.
+        #[arg(long, default_value_t = 20)]
+        top_k: i64,
+        /// Per-cluster member preview cap. Default 5.
+        #[arg(long, default_value_t = 5)]
+        preview: i64,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// **ζ-19 (graph hygiene retire-end GC)** — Time-based downgrade of
     /// stale `archived` rows to `tombstoned`. Closes the hygiene state
     /// machine: active → ζ-14 → archived → ζ-19 → tombstoned →
@@ -1089,6 +1112,12 @@ async fn main() -> Result<()> {
             DreamOp::RestoreArchived { key, json } => {
                 run_dream_restore_archived(key, *json).await
             }
+            DreamOp::ClusterProbe {
+                min_size,
+                top_k,
+                preview,
+                json,
+            } => run_dream_cluster_probe(*min_size, *top_k, *preview, *json).await,
             DreamOp::TombstoneAgedArchived {
                 older_than_days,
                 max_count,
@@ -3104,6 +3133,87 @@ async fn run_dream_tombstone_aged_archived(
         println!(
             "(no archived rows aged past --older-than-days; lower the threshold or check `memory_list` after archive-orphan-stubs)"
         );
+    }
+    Ok(())
+}
+
+/// **β v0** — Read-only probe of Hebbian clusters. Surfaces connected
+/// components on the `cofires` + `co_referenced` subgraph so the
+/// operator can inspect thematic coherence before β v1 layers LLM
+/// abstraction on top. No writes, no LLM, no network.
+async fn run_dream_cluster_probe(
+    min_size: i64,
+    top_k: i64,
+    preview: i64,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+    let min_size = min_size.max(2);
+    let top_k = top_k.max(1) as usize;
+    let preview = preview.max(1) as usize;
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let clusters = store
+        .hebbian_clusters(min_size)
+        .await
+        .map_err(|e| anyhow::anyhow!("hebbian_clusters: {e}"))?;
+
+    let total_nodes: usize = clusters.iter().map(|c| c.size as usize).sum();
+    let shown = clusters.len().min(top_k);
+
+    if as_json {
+        let payload = clusters
+            .iter()
+            .take(top_k)
+            .map(|c| {
+                json!({
+                    "hub": c.hub,
+                    "size": c.size,
+                    "members": c.members,
+                })
+            })
+            .collect::<Vec<_>>();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "min_size": min_size,
+                "clusters_total": clusters.len(),
+                "clusters_shown": shown,
+                "nodes_in_clusters": total_nodes,
+                "clusters": payload,
+            }))?
+        );
+        return Ok(());
+    }
+
+    println!("# β v0 — Hebbian cluster probe");
+    println!("DB: {}", path.display());
+    println!(
+        "min_size: {min_size} · top_k: {top_k} · preview: {preview} · clusters: {n} ({shown} shown) · nodes: {total_nodes}",
+        n = clusters.len()
+    );
+    println!();
+    if clusters.is_empty() {
+        println!(
+            "(no Hebbian clusters yet — wait for `dream promote` (T1/T2) cron to crystallise cofires/co_referenced edges, or lower --min-size to 1)"
+        );
+        return Ok(());
+    }
+    for (i, c) in clusters.iter().take(top_k).enumerate() {
+        println!("## cluster #{i} (size {size}, hub: {hub})", i = i + 1, size = c.size, hub = c.hub);
+        for m in c.members.iter().take(preview) {
+            let star = if *m == c.hub { " ★" } else { "" };
+            println!("  - {m}{star}");
+        }
+        if c.members.len() > preview {
+            println!("  - … ({} more)", c.members.len() - preview);
+        }
+        println!();
+    }
+    if clusters.len() > top_k {
+        println!("({} more clusters below --top-k cap)", clusters.len() - top_k);
     }
     Ok(())
 }

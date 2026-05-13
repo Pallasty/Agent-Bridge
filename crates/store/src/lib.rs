@@ -654,6 +654,27 @@ pub struct ResolvedCall {
     pub via_import: String,
 }
 
+/// β v0 — A connected component on the subgraph defined by `cofires` +
+/// `co_referenced` edges. Output of [`StateStore::hebbian_clusters`];
+/// the foundational data structure for vision §5 β "seed self-evolution":
+/// each cluster is a candidate for LLM abstraction into a new `seed`
+/// memory. v0 ships read-only surfacing; v1 will layer LLM summary.
+///
+/// `hub` is the member with the highest within-cluster degree (ties
+/// broken by lexicographic key ASC for determinism). `members` includes
+/// the hub and is sorted ASC. `size` == `members.len()`.
+///
+/// `coactivation` edges (the soft Hebbian trace) are intentionally
+/// excluded — they are noisy by design (every co-fire pair gets one).
+/// Only explicit promotions (`cofires` tier-1, `co_referenced` tier-2)
+/// constitute crystallised structure worth seeding from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HebbianCluster {
+    pub hub: String,
+    pub members: Vec<String>,
+    pub size: u64,
+}
+
 /// Aggregate view of the `codebase_calls` table for a single index root.
 /// Output of [`StateStore::codebase_call_stats`]; consumed by
 /// `dream codebase-report --html` to render the audit page. Computed
@@ -1456,6 +1477,25 @@ pub trait StateStore: Send + Sync {
     async fn memory_restore_archived(&self, key: &str) -> Result<bool> {
         let _ = key;
         Ok(false)
+    }
+
+    /// β v0 (2026-05-13) — Surface connected components on the
+    /// `cofires` + `co_referenced` subgraph. Each component is a
+    /// candidate cluster for vision §5 β seed-self-evolution; v0
+    /// returns the raw groups so the operator (or v1 LLM pass) can
+    /// inspect thematic coherence before paying summary cost.
+    ///
+    /// `min_size` filters out trivial (e.g. size-1 singletons in the
+    /// rare case of self-edges; size-2 isolated pairs if uninteresting).
+    /// Default callers pass 2. Components sorted by size DESC, ties
+    /// broken by hub key ASC.
+    ///
+    /// `coactivation` edges are excluded: they fire on every pair and
+    /// would collapse the graph into one giant component without
+    /// signal. Only crystallised Hebbian edges count toward structure.
+    async fn hebbian_clusters(&self, min_size: i64) -> Result<Vec<HebbianCluster>> {
+        let _ = min_size;
+        Ok(Vec::new())
     }
 
     /// ζ-19 (2026-05-13) — retire-end GC. Time-based downgrade of stale

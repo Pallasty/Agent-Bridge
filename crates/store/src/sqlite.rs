@@ -58,7 +58,7 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 use crate::{
     AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
     CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, DecayUnusedStats,
-    MisrankRow, ReinforceActiveStats, SignalFidelityStats,
+    HebbianCluster, MisrankRow, ReinforceActiveStats, SignalFidelityStats,
     ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
     ForumThreadExport, ForumThreadRecord, GraphTopology, IdentityWindow, ImportConflictPolicy,
     ImportReport,
@@ -3007,6 +3007,113 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("memory_restore_archived: {e}")))?;
         Ok(changed > 0)
+    }
+
+    async fn hebbian_clusters(&self, min_size: i64) -> Result<Vec<HebbianCluster>> {
+        // β v0 — load all Hebbian edges, Union-Find for components,
+        // determine hub by within-component degree, sort.
+        // Dataset is small (≤ low-100s of edges expected for the
+        // foreseeable future); single SELECT + in-memory aggregation
+        // is much simpler than a recursive CTE.
+        let edges: Vec<(String, String)> = self
+            .conn
+            .call(|c| -> RusqliteResult<Vec<(String, String)>> {
+                let mut s = c.prepare(
+                    "SELECT from_key, to_key FROM memory_edges
+                      WHERE edge_type IN ('cofires', 'co_referenced')",
+                )?;
+                let rows: RusqliteResult<Vec<(String, String)>> = s
+                    .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                    .collect();
+                rows
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("hebbian_clusters edges: {e}")))?;
+
+        // Build node set + adjacency for hub-degree counting.
+        use std::collections::{BTreeMap, BTreeSet, HashMap};
+        let mut nodes: BTreeSet<String> = BTreeSet::new();
+        let mut adj: HashMap<String, BTreeSet<String>> = HashMap::new();
+        for (a, b) in &edges {
+            if a == b {
+                continue; // skip self-loops; they'd inflate hub degree
+            }
+            nodes.insert(a.clone());
+            nodes.insert(b.clone());
+            adj.entry(a.clone()).or_default().insert(b.clone());
+            adj.entry(b.clone()).or_default().insert(a.clone());
+        }
+        if nodes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Union-Find with BTreeMap-indexed nodes (BTreeSet gave us a
+        // sorted iteration which yields deterministic component IDs).
+        let node_vec: Vec<String> = nodes.into_iter().collect();
+        let idx: HashMap<String, usize> = node_vec
+            .iter()
+            .enumerate()
+            .map(|(i, k)| (k.clone(), i))
+            .collect();
+        let mut parent: Vec<usize> = (0..node_vec.len()).collect();
+        fn find(p: &mut [usize], x: usize) -> usize {
+            let mut x = x;
+            while p[x] != x {
+                p[x] = p[p[x]];
+                x = p[x];
+            }
+            x
+        }
+        for (a, b) in &edges {
+            if a == b {
+                continue;
+            }
+            let (ai, bi) = (idx[a], idx[b]);
+            let (ra, rb) = (find(&mut parent, ai), find(&mut parent, bi));
+            if ra != rb {
+                parent[ra] = rb;
+            }
+        }
+        let mut comps: BTreeMap<usize, Vec<String>> = BTreeMap::new();
+        for (i, k) in node_vec.iter().enumerate() {
+            let root = find(&mut parent, i);
+            comps.entry(root).or_default().push(k.clone());
+        }
+
+        let min_size_u = min_size.max(0) as usize;
+        let mut clusters: Vec<HebbianCluster> = comps
+            .into_values()
+            .filter(|members| members.len() >= min_size_u.max(1))
+            .map(|mut members| {
+                members.sort();
+                // Hub = max within-cluster degree; tie → lex-smaller key.
+                let in_set: BTreeSet<&String> = members.iter().collect();
+                let hub = members
+                    .iter()
+                    .map(|m| {
+                        let d = adj
+                            .get(m)
+                            .map(|nbrs| {
+                                nbrs.iter().filter(|n| in_set.contains(*n)).count()
+                            })
+                            .unwrap_or(0);
+                        (m.clone(), d)
+                    })
+                    .max_by(|(ak, ad), (bk, bd)| {
+                        ad.cmp(bd).then_with(|| bk.cmp(ak))
+                    })
+                    .map(|(k, _)| k)
+                    .unwrap_or_default();
+                let size = members.len() as u64;
+                HebbianCluster {
+                    hub,
+                    members,
+                    size,
+                }
+            })
+            .collect();
+        clusters.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.hub.cmp(&b.hub)));
+        Ok(clusters)
     }
 
     async fn latest_daily_snapshot_pair(&self) -> Result<Option<(String, String)>> {
@@ -9614,6 +9721,242 @@ mod tests {
             .await
             .expect("restore empty");
         assert!(!empty);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn hebbian_clusters_empty_store_returns_empty() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-clus-empty-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let clusters = store.hebbian_clusters(2).await.expect("probe");
+        assert!(clusters.is_empty());
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn hebbian_clusters_single_pair_via_cofires() {
+        // β v0 — minimal viable: two memories joined by one `cofires`
+        // edge form one size-2 cluster. Hub is the lexicographically
+        // smaller key (tie-break under equal degree).
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-clus-pair-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let now = now_secs();
+        for key in ["mem_a", "mem_b"] {
+            store
+                .memory_save(&MemoryRecord {
+                    key: key.to_string(),
+                    kind: format!("k_{key}"),
+                    content: format!("x_{key}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: now,
+                    updated_at: now,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: String::new(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save");
+        }
+        store
+            .memory_link("mem_a", "mem_b", "cofires", 0.7)
+            .await
+            .expect("link");
+
+        let clusters = store.hebbian_clusters(2).await.expect("probe");
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(clusters[0].size, 2);
+        assert_eq!(clusters[0].members, vec!["mem_a", "mem_b"]);
+        // Both have degree 1 → lex-smaller wins.
+        assert_eq!(clusters[0].hub, "mem_a");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn hebbian_clusters_two_disjoint_components_sorted_by_size() {
+        // β v0 — A-B-C connected via cofires + co_referenced; X-Y
+        // joined by single cofires. Two components, sorted by size DESC.
+        // Hub of A/B/C cluster = the one with the most within-component
+        // edges (B has 2: A and C).
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-clus-disjoint-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let now = now_secs();
+        for key in ["a", "b", "c", "x", "y"] {
+            store
+                .memory_save(&MemoryRecord {
+                    key: key.to_string(),
+                    kind: format!("k_{key}"),
+                    content: format!("body-{key}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: now,
+                    updated_at: now,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: String::new(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save");
+        }
+        store.memory_link("a", "b", "cofires", 0.7).await.expect("ab");
+        store.memory_link("b", "c", "co_referenced", 0.4).await.expect("bc");
+        store.memory_link("x", "y", "cofires", 0.7).await.expect("xy");
+
+        let clusters = store.hebbian_clusters(2).await.expect("probe");
+        assert_eq!(clusters.len(), 2);
+        // Larger first.
+        assert_eq!(clusters[0].size, 3);
+        assert_eq!(clusters[0].members, vec!["a", "b", "c"]);
+        assert_eq!(clusters[0].hub, "b"); // degree 2 vs a/c degree 1
+        assert_eq!(clusters[1].size, 2);
+        assert_eq!(clusters[1].members, vec!["x", "y"]);
+        assert_eq!(clusters[1].hub, "x"); // tie → lex smaller
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn hebbian_clusters_min_size_filters_small_components() {
+        // β v0 — `min_size=3` drops the 2-node X-Y cluster, keeping
+        // only A-B-C. Caller-side filter, no behavior surprises.
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-clus-minsize-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let now = now_secs();
+        for key in ["a", "b", "c", "x", "y"] {
+            store
+                .memory_save(&MemoryRecord {
+                    key: key.to_string(),
+                    kind: format!("k_{key}"),
+                    content: format!("body-{key}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: now,
+                    updated_at: now,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: String::new(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save");
+        }
+        store.memory_link("a", "b", "cofires", 0.7).await.expect("ab");
+        store.memory_link("b", "c", "cofires", 0.7).await.expect("bc");
+        store.memory_link("x", "y", "cofires", 0.7).await.expect("xy");
+
+        let clusters = store.hebbian_clusters(3).await.expect("probe");
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(clusters[0].members, vec!["a", "b", "c"]);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn hebbian_clusters_excludes_coactivation_edges() {
+        // β v0 — `coactivation` is the soft trace (every pair gets one)
+        // and is intentionally ignored. Only crystallised `cofires` /
+        // `co_referenced` count. Without this filter, a single noisy
+        // coact pair would create a fake cluster.
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-clus-coact-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let now = now_secs();
+        for key in ["coact_a", "coact_b"] {
+            store
+                .memory_save(&MemoryRecord {
+                    key: key.to_string(),
+                    kind: format!("k_{key}"),
+                    content: format!("body-{key}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: now,
+                    updated_at: now,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: String::new(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save");
+        }
+        // record_coactivation writes to a different table (memory_coactivations)
+        // not memory_edges. But to be doubly safe, even direct memory_link
+        // of 'coactivation' edge_type should be ignored. Use memory_link
+        // because record_coactivation has different semantics.
+        store
+            .memory_link("coact_a", "coact_b", "coactivation", 0.5)
+            .await
+            .expect("link");
+
+        let clusters = store.hebbian_clusters(2).await.expect("probe");
+        assert!(
+            clusters.is_empty(),
+            "coactivation edges must not form clusters"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
