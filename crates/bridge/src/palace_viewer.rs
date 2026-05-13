@@ -328,12 +328,28 @@ async fn api_graph(
             )
         })?;
 
-    let active: Vec<_> = nodes
+    // P19 — fill VIEWER_NODE_CAP working-memory-first, then catalog.
+    //
+    // Pre-P19 the cap was a flat `take(500)` after sort-by-importance. When
+    // `q.all=true` (the default for the canvas viewer) catalog rows (484
+    // kind='skill' bulk imports) dominate the top-500, pushing chat_session
+    // / lesson / decision off the cap. Result: cofires + co_referenced
+    // edges silently dropped because one endpoint sits outside `is_node`.
+    // P17 diagnosed the catalog skew; P18 worked around it via a focused
+    // endpoint; P19 fixes the graph itself: working memory always fits
+    // first (today: 186 < 500), catalog only takes the leftover slots.
+    let active_all: Vec<_> = nodes
         .into_iter()
         .filter(|m| m.status == "active")
         .filter(|m| q.all || m.kind != "skill")
-        .take(VIEWER_NODE_CAP)
         .collect();
+    const CATALOG_KINDS: &[&str] = &["skill"];
+    let (catalog_nodes, working_nodes): (Vec<_>, Vec<_>) = active_all
+        .into_iter()
+        .partition(|m| CATALOG_KINDS.iter().any(|c| *c == m.kind.as_str()));
+    let mut active: Vec<_> = working_nodes.into_iter().take(VIEWER_NODE_CAP).collect();
+    let remaining = VIEWER_NODE_CAP.saturating_sub(active.len());
+    active.extend(catalog_nodes.into_iter().take(remaining));
     let sqlite_keys: HashSet<String> = active.iter().map(|m| m.key.clone()).collect();
 
     // ── markdown layer ──────────────────────────────────────────────────
