@@ -22,6 +22,7 @@ ab-terminal.workspace = true
 ab-browser.workspace = true
 ab-agent.workspace = true
 ab-mcp.workspace = true
+ab-seed-bridge = { path = "../seed-bridge" }
 base64.workspace = true
 async-trait.workspace = true
 serde.workspace = true

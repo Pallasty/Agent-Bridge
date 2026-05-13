@@ -9,6 +9,7 @@ members = [
     "crates/store",
     "crates/mcp",
     "crates/bridge",
+    "crates/seed-bridge",
     "bin/agent-cli",
 ]
 

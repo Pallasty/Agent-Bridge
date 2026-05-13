@@ -1,0 +1,28 @@
+[package]
+name = "ab-seed-bridge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+description = """
+v22 — agent-bridge memory substrate Layer 2 wiring.
+
+Wraps AiOT seed_neuron::NeuronGrid as an EmbeddingBackend that observes
+every memory event (save/get/search) and learns topology over them, while
+returning the inner backend's embedding unchanged so the L3 retrieval
+contract (384-dim cosine search) is preserved.
+
+Phase 1 ships: NeuronGrid (N=256, D=192) + truncate projection +
+substrate stats CLI. Phase 2 adds learned projection + snapshot/replay +
+neighbors_of query API.
+"""
+
+[dependencies]
+ab-store = { path = "../store" }
+seed_neuron = { path = "/Data/CascadeProjects/AiOT/rust/seed_neuron", default-features = false }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

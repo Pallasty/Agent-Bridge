@@ -106,6 +106,17 @@ enum Cmd {
         #[command(subcommand)]
         op: DreamOp,
     },
+    /// **v22 phase 1** — Memory substrate Layer 2 introspection.
+    ///
+    /// Substrate is opt-in via `AB_SUBSTRATE=1` and lives only inside the
+    /// running MCP server / palace serve process. CLI introspection
+    /// reads the in-process global if this binary was the one that
+    /// installed it; otherwise reports config + "not installed" state.
+    /// Phase 2 will add snapshot persistence enabling cross-process query.
+    Substrate {
+        #[command(subcommand)]
+        op: SubstrateOp,
+    },
     /// **呼吸式画布 P1** — Static Palace viewer.
     ///
     /// Renders the active memory graph as a force-directed network in your
@@ -692,6 +703,19 @@ enum DreamOp {
 }
 
 #[derive(Subcommand, Debug)]
+enum SubstrateOp {
+    /// Print substrate config + (if installed) live stats. Output
+    /// shows N / D / outer_dim / step_count / surprise / connection
+    /// mean. JSON mode is machine-readable for forum / dream pipeline
+    /// integration.
+    Stats {
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum SyncOp {
     /// Bootstrap the cross-device memory repo via `gh` (GitHub) or
     /// `glab` (GitLab) CLI. Uses `--provider auto` (default) to pick:
@@ -955,6 +979,17 @@ async fn main() -> Result<()> {
     // overwrites the shell wrapper. See `creds.rs` for resolution order.
     ab_bridge::creds::load_at_startup();
 
+    // v22 phase 1 — opt-in substrate install. Must precede any embedding
+    // touch so the OnceLock in ab-store::embedding lands on SeedBackend.
+    // Env-gated: `AB_SUBSTRATE=1`. Silent + ablation-safe when unset.
+    if ab_seed_bridge::env_enabled() {
+        if let Err(e) = ab_seed_bridge::install_default() {
+            tracing::warn!("seed-bridge install_default failed: {e}");
+        } else {
+            tracing::info!("seed-bridge installed (v22 phase 1)");
+        }
+    }
+
     let cli = Cli::parse();
     let cmd = cli.cmd.unwrap_or(Cmd::Daemon);
 
@@ -989,6 +1024,14 @@ async fn main() -> Result<()> {
             SkillsOp::List { limit } => skills::run_list(*limit).await,
             SkillsOp::Show { key } => skills::run_show(key).await,
             SkillsOp::Install { key, yes } => skills::run_install(key, *yes).await,
+        };
+    }
+
+    // Substrate subcommand: short-lived read-only introspection over
+    // in-process seed-bridge global. No state.db touched.
+    if let Cmd::Substrate { op } = &cmd {
+        return match op {
+            SubstrateOp::Stats { json } => run_substrate_stats(*json).await,
         };
     }
 
@@ -1275,10 +1318,67 @@ async fn main() -> Result<()> {
         | Cmd::Sync { .. }
         | Cmd::Skills { .. }
         | Cmd::Dream { .. }
+        | Cmd::Substrate { .. }
         | Cmd::Palace { .. }
         | Cmd::ShellInit { .. }
         | Cmd::WorktreeSession { .. } => unreachable!(),
     }
+}
+
+/// **v22 phase 1** — Substrate stats CLI. Reads the in-process global
+/// installed by `ab_seed_bridge::install_default()`. If substrate is not
+/// installed (env not set, or process didn't install), reports config
+/// + the disabled state — useful for confirming env var spelling.
+async fn run_substrate_stats(as_json: bool) -> Result<()> {
+    let env_on = ab_seed_bridge::env_enabled();
+    let installed = ab_seed_bridge::current();
+    let stats = installed.as_ref().map(|s| s.stats());
+
+    if as_json {
+        let payload = json!({
+            "env_var": ab_seed_bridge::SUBSTRATE_ENV_VAR,
+            "env_enabled": env_on,
+            "installed": stats.is_some(),
+            "stats": stats,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# v22 substrate stats (phase 1)");
+    println!(
+        "env: {var}={state}",
+        var = ab_seed_bridge::SUBSTRATE_ENV_VAR,
+        state = if env_on { "enabled" } else { "unset (substrate disabled)" }
+    );
+    match stats {
+        Some(s) => {
+            println!("backend (inner) : {}", s.backend_name);
+            println!("N (neurons)     : {}", s.n);
+            println!("D (substrate)   : {}", s.d);
+            println!("outer_dim       : {}", s.outer_dim);
+            println!("step_count      : {}", s.step_count);
+            println!(
+                "last surprise   : mean={:.4} max={:.4}",
+                s.last_surprise_mean, s.last_surprise_max
+            );
+            println!("|conn| mean     : {:.6}", s.connection_mean_abs);
+            if s.step_count == 0 {
+                println!();
+                println!("(no perception events yet — substrate is opt-in to this process only;");
+                println!(" trigger via memory_save / memory_search inside an MCP session with");
+                println!(" `AB_SUBSTRATE=1` in env)");
+            }
+        }
+        None => {
+            println!("not installed");
+            println!();
+            println!(
+                "(set `AB_SUBSTRATE=1` in env and re-launch the long-lived process;");
+            println!(" stats are in-process only in phase 1 — phase 2 will persist to disk)");
+        }
+    }
+    Ok(())
 }
 
 /// OSC 133 shell-integration snippets. Source-of-truth lives here; the
