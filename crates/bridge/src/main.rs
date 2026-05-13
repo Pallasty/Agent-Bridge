@@ -4525,6 +4525,51 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
         Some(key) => println!("  saved: {key}"),
         None => println!("  (skipped — pass without --no-snapshot to capture)"),
     }
+
+    // ── P-ε substrate-readiness one-liner ─────────────────────────────
+    // Pure read; cost is bounded by memory_substrate_audit (<200ms target
+    // per memo §1 G4). Surfaces 3 most-actionable numbers from the audit.
+    println!();
+    println!("[bonus] substrate-readiness (P-ε)");
+    println!("─────────────────────────────────────────");
+    match {
+        use ab_store::{default_db_path, SqliteStore, StateStore as _};
+        let path = default_db_path();
+        let store_res = SqliteStore::open(&path).await;
+        match store_res {
+            Ok(s) => s.memory_substrate_audit(7 * 86_400).await,
+            Err(e) => Err(ab_core::Error::Backend(format!(
+                "open state.db at {path:?}: {e}"
+            ))),
+        }
+    } {
+        Ok(r) => {
+            let m1_verdict = if r.m1_components.components == 0 {
+                "(empty)"
+            } else if r.m1_components.components == 1 {
+                "⚠ hairball"
+            } else if r.m1_components.components < 3 {
+                "partially modular"
+            } else {
+                "✓ modular"
+            };
+            println!(
+                "  substrate: {} components ({}) · {:.3} edges/active · {:.1}% L2-covered · signal={}",
+                r.m1_components.components,
+                m1_verdict,
+                r.m2_edges.density_per_active,
+                r.m5_edge_coverage.fraction * 100.0,
+                r.m7_signal_fidelity.verdict,
+            );
+            println!(
+                "  (run `dream substrate-audit` for full M1-M8 breakdown)"
+            );
+        }
+        Err(e) => {
+            eprintln!("  substrate-audit skipped: {e}");
+        }
+    }
+
     println!();
     println!(
         "next: re-run `dream weekly` in 7 days; \
