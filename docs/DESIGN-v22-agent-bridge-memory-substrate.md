@@ -108,7 +108,15 @@ agent-bridge memory event  (kind, key, content/query, ts)
 encoder  (existing fastembed ONNX, 384-dim if MiniLM-L6-v2; deferred)
     │  cost: ~50 ms/event (dominant)
     ▼
-projection  (linear layer 384 → N=256; learned offline or zero-init + Hebbian online)
+projection  (linear layer 384 → D, where D ∈ [128, 192] per Q-back-1 PCA scree post 56;
+              learned offline via SVD warm-start per Q6, see §11)
+    │  ⚠ D ≠ N: D is the perception dim feeding each neuron; N=256 is the neuron count.
+    │    Crate `z_states: [N][D]` confirms axes independent (post 51 Task A reviewer).
+    │  D=128: 80.9% cum_var captured (min acceptable per scree on 659 active embeddings)
+    │  D=192: 90.8% cum_var captured (recommended; sweet spot before diminishing returns)
+    │  D=64 NOT recommended (62.9% cum_var, fails 80% threshold for memory-text domain;
+    │  multigrid-foundations encoder memo §2 default D=64 was scoped to /proc telemetry,
+    │  not text embedding — overridden by Q-back-1 measurement, post 56)
     │  cost: ~1 ms/event
     ▼
 substrate_step(z: [f32; N])
@@ -147,7 +155,7 @@ Final snapshot schema:
   - `step` (i64)
   - `cycle_ts` (i64 unix secs)
   - `n_alive` (i32)
-  - `connection_logits` (flat f32 array, N×N, **only on multi-cadence "long-window" snapshots**, see below)
+  - `connection_logits` (flat f32 array, **N×(N-1)** — crate skips diagonal since neurons have no self-logit per post 51 Task A reviewer; **only on long-tier snapshots**, see below)
   - `in_strengths` (f32 array, N)
   - `last_perceived_key` (string array, N)
   - `last_perceived_ts` (i64 array, N)
@@ -161,9 +169,9 @@ Final snapshot schema:
 | Cadence tier | Trigger | What's written |
 |---|---|---|
 | Hot | Every 20 events (or per substrate step config) | metadata + `in_strengths` + `last_perceived_*` + trailing means (cheap row, no N×N matrix) |
-| Long | Every 100-event multiple OR every 6h, whichever first | full row incl. `connection_logits` (the expensive N×N flat) |
+| Long | Every 100-event multiple OR every 6h, whichever first | full row incl. `connection_logits` (the expensive N×(N-1) flat) |
 
-Cost: hot row ≈ N×4 bytes + 2 floats ≈ 1 KB; long row ≈ N²×4 bytes ≈ 260 KB. At our event rate (~57/day working), hot snapshots fire ≈ 3/day; long snapshots fire ≈ 4/day max (6h floor dominates). Total disk ≈ 1 MB/day = 365 MB/year (still well under the 5 GB/year G7 budget).
+Cost: hot row ≈ N×4 bytes + 2 floats ≈ 1 KB; long row ≈ N×(N-1)×4 bytes ≈ 260 KB. At our event rate (~57/day working), hot snapshots fire ≈ 3/day; long snapshots fire ≈ 4/day max (6h floor dominates). Total disk ≈ 1 MB/day = 365 MB/year (still well under the 5 GB/year G7 budget).
 
 The two-cadence design fulfills γ's "drift detection on long window" + Hot's "per-event responsiveness", giving the actuator/retrieval layer access to both timescales without paying N² storage per event.
 
@@ -171,16 +179,32 @@ The two-cadence design fulfills γ's "drift detection on long window" + Hot's "p
 
 ```rust
 trait MemorySubstrate {
-    // Step once with externally encoded perception vector.
-    fn step(&mut self, z: [f32; N], event: PerceptionEvent) -> StepReport;
+    // Step once with a perception event. Substrate manages encoding +
+    // projection + secondary-window buffer internally (per post 51 Task
+    // A reviewer: real `DynamicGrid::step(primary, secondary, lr)` takes
+    // two slices; we hide the secondary axis behind the trait).
+    fn step(&mut self, event: PerceptionEvent) -> StepReport;
 
     // Read current state — no mutation, no access bump.
     fn neighbors_of(&self, key: &str, k: usize) -> Vec<(String, f32)>;
     fn snapshot(&self) -> SubstrateSnapshot;
     fn stats(&self) -> SubstrateStats;
 
-    // Capability gate for L5 ablation (G5).
+    // Capability gate for ablation (G5).
     fn enabled(&self) -> bool;
+}
+
+// Single-event input to substrate. Mirrors the existing
+// `QueryRecord` (used by `store.record_memory_query`) so the
+// agent-bridge hook in mcp_tools.rs:4677-4679 can pass it through
+// unchanged (post 52 Task B).
+struct PerceptionEvent {
+    pub kind: String,         // "save" | "get" | "search_fts" | …
+    pub source: String,       // "mcp:memory_save" | "palace_viewer:click" | …
+    pub key: Option<String>,  // resolved memory key when known
+    pub query: String,        // the text to encode
+    pub at: i64,              // unix secs
+    // hit_count / duration_us elided — substrate doesn't need them yet
 }
 ```
 
@@ -422,29 +446,47 @@ Substrate-biased: re-rank top-50 semantic hits by `score' = score × (1 + α · 
 
 ## 12 · File map (implementation reference — not yet code)
 
+**Major revision per post 55** (Q-back-3 closure):
+`crates/store/src/embedding.rs:36-61` already defines a pluggable
+`EmbeddingBackend` trait + `set_default_backend()` global setter. The
+substrate doesn't need a new crate scaffolded from scratch — it just
+implements `EmbeddingBackend` and registers itself at startup. The
+projection (384→D internal) is hidden inside the impl; the trait's
+public `dim()` stays at 384 so the existing `embeddings` column and all
+semantic-search code paths are untouched. This is **one-line wiring**.
+
 ```
 agent-bridge/
 ├── crates/
-│   ├── substrate/                            # NEW crate, depends on AiOT seed_neuron
-│   │   ├── Cargo.toml
+│   ├── seed-bridge/                          # NEW crate (slimmer than original draft)
+│   │   ├── Cargo.toml                        # dep: AiOT seed_neuron (git submodule or path-dep)
 │   │   ├── src/
-│   │   │   ├── lib.rs                        # MemorySubstrate trait
-│   │   │   ├── grid.rs                       # Wrapper around seed_neuron::Grid
-│   │   │   ├── projection.rs                 # Linear 384 → N
-│   │   │   ├── perception.rs                 # Event → encoded perception adapter
-│   │   │   ├── snapshot.rs                   # Parquet read/write
+│   │   │   ├── lib.rs                        # SeedBackend impls ab_store::embedding::EmbeddingBackend
+│   │   │   ├── grid.rs                       # Wrapper around AiOT seed_neuron::DynamicGrid
+│   │   │   ├── projection.rs                 # 384 → D linear (SVD warm-start per Q6)
+│   │   │   ├── perception_buffer.rs          # secondary rolling window (managed internally per post 51)
+│   │   │   ├── snapshot.rs                   # Parquet read/write (two-cadence per §3.4)
 │   │   │   └── replay.rs                     # Deterministic replay from event log
 │   │   └── tests/
 │   │       ├── smoke.rs                      # G1-G3 smoke tests
 │   │       ├── determinism.rs                # G4 + P5
 │   │       └── budget.rs                     # G6 + G7
 │   ├── bridge/src/
-│   │   ├── main.rs                           # +Cmd::Substrate { ... }
-│   │   └── mcp_tools.rs                      # Hook perception into Memory* tools
-│   └── store/src/sqlite.rs                   # Event-log table for replay (optional)
+│   │   ├── main.rs                           # +Cmd::Substrate { ... } CLI subtree
+│   │   │                                     #   subcommands: stats / snapshot / replay
+│   │   └── startup.rs                        # one-line: ab_store::embedding::set_default_backend(Arc::new(SeedBackend::new()))?
+│   └── store/src/embedding.rs                # ALREADY has the trait + set_default_backend (post 55) — unchanged
 └── docs/
     └── DESIGN-v22-agent-bridge-memory-substrate.md   # this file
 ```
+
+**Note**: §3.5's `MemorySubstrate` trait is **agent-bridge-internal API**
+(seed-bridge exposes neighbors_of/snapshot/stats for the v22 retrieval-
+bias surface). The store-layer `EmbeddingBackend` is a separate, narrower
+trait — same `SeedBackend` impl implements both, but the two concerns
+stay typed-separate. `EmbeddingBackend` answers "give me 384-dim vector
+for this text"; `MemorySubstrate` answers "show me the substrate's
+topology".
 
 ## 13 · Vision review checkpoint
 
