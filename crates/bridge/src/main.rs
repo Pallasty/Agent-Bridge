@@ -484,6 +484,50 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **ζ-19 (graph hygiene retire-end GC)** — Time-based downgrade of
+    /// stale `archived` rows to `tombstoned`. Closes the hygiene state
+    /// machine: active → ζ-14 → archived → ζ-19 → tombstoned →
+    /// purge_tombstones (7d) → DELETE. Tombstoned (not direct DELETE)
+    /// preserves the dedupe_key slot so resurrect-by-import/re-save
+    /// can't bypass earlier retire decisions.
+    TombstoneAgedArchived {
+        /// Rows whose updated_at is at least this many days old.
+        /// `updated_at` is what ζ-14 bumps at archive time, so this
+        /// measures time-spent-in-archived. Default 14 — comfortably
+        /// outside the ζ-18 restore window.
+        #[arg(long, default_value_t = 14)]
+        older_than_days: i64,
+        /// Hard cap per run. Default 500, clamp [1, 5000].
+        #[arg(long, default_value_t = 500)]
+        max_count: i64,
+        /// Preview only.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// **Phase 2.x #6 (sync-window GC)** — Hard-DELETE rows that have been
+    /// tombstoned (soft-deleted) for at least `--older-than-days` days.
+    /// Tombstone semantics keep deleted rows alive so the deletion
+    /// propagates via `agent-bridge sync`; this GC pass cleans them up
+    /// once the cross-machine sync window is safely past. CLI mirror of
+    /// the `memory_purge_tombstones` MCP tool — adds it to the ζ-10
+    /// daily hygiene chain so tombstones don't accumulate indefinitely.
+    PurgeTombstones {
+        /// Minimum tombstone age in days before a row becomes eligible
+        /// for hard-delete. Default 7 = matches the cross-machine sync
+        /// cadence (Mac/aio2 weekly catch-up). Set to 0 to purge ALL
+        /// tombstones (use only when no peer is offline).
+        #[arg(long, default_value_t = 7)]
+        older_than_days: i64,
+        /// Preview only — print would-be-deleted keys but don't write.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// **Replay quality audit** — are the LLM-consolidated summaries that
     /// `dream replay` writes actually being used? Pure read pass: counts
     /// `p5_replay`-tagged active memories, bins access patterns, surfaces
@@ -589,6 +633,36 @@ enum DreamOp {
         no_snapshot: bool,
         /// Emit raw JSON containing all three structured results.
         /// Pretty text is the default — easier to skim.
+        #[arg(long)]
+        json: bool,
+    },
+    /// **Codebase call-graph audit** — Aggregate read of the
+    /// `codebase_calls` table for a single index root and render a
+    /// self-contained HTML report (sibling to `dream promote --html`).
+    /// Sections: per-language pills, hot callees, fan-out callers,
+    /// orphan-function candidates, fan-out by file. Caveats: callee
+    /// matching is alias-blind (use `codebase_callers` MCP tool when
+    /// alias resolution matters); orphan detection is best-effort
+    /// last-segment matching so trait dispatch / FFI / string-key
+    /// dispatch will surface false positives.
+    ///
+    /// Pure SQL pass — no writes. Run after `agent-bridge codebase
+    /// index` (or rely on auto-indexing) to ensure the table is fresh.
+    CodebaseReport {
+        /// Index root to aggregate. Defaults to the current working
+        /// directory — same convention as `codebase_index`.
+        #[arg(long)]
+        root: Option<PathBuf>,
+        /// Cap on hot_callees / hot_callers / orphan_functions /
+        /// fan_out_files (each individually). Default 20.
+        #[arg(long, default_value_t = 20)]
+        top_n: u32,
+        /// Write a self-contained HTML report to PATH. Pretty text
+        /// remains on stdout when this is set.
+        #[arg(long)]
+        html: Option<PathBuf>,
+        /// Emit raw JSON of `CodebaseCallStats` instead of pretty text.
+        /// The HTML still writes if --html is set.
         #[arg(long)]
         json: bool,
     },
@@ -1015,6 +1089,25 @@ async fn main() -> Result<()> {
             DreamOp::RestoreArchived { key, json } => {
                 run_dream_restore_archived(key, *json).await
             }
+            DreamOp::TombstoneAgedArchived {
+                older_than_days,
+                max_count,
+                dry_run,
+                json,
+            } => {
+                run_dream_tombstone_aged_archived(
+                    *older_than_days,
+                    *max_count,
+                    *dry_run,
+                    *json,
+                )
+                .await
+            }
+            DreamOp::PurgeTombstones {
+                older_than_days,
+                dry_run,
+                json,
+            } => run_dream_purge_tombstones(*older_than_days, *dry_run, *json).await,
             DreamOp::ReplayAudit {
                 stale_days,
                 waypoint_min,
@@ -1034,6 +1127,15 @@ async fn main() -> Result<()> {
             }
             DreamOp::Weekly { no_snapshot, json } => {
                 run_dream_weekly(*no_snapshot, *json).await
+            }
+            DreamOp::CodebaseReport { root, top_n, html, json } => {
+                run_dream_codebase_report(
+                    root.as_deref(),
+                    *top_n,
+                    html.as_deref(),
+                    *json,
+                )
+                .await
             }
         };
     }
@@ -2039,6 +2141,340 @@ fn render_promote_html(
     )
 }
 
+/// Render a self-contained HTML report for `dream codebase-report`.
+///
+/// Layout (top → bottom):
+///   1. Header — root path, timestamp, totals
+///   2. Per-language pills
+///   3. Hot callees table (callee · count · callers · langs)
+///   4. Hot callers table (caller · file · fan-out · total)
+///   5. Fan-out files table
+///   6. Orphan function candidates list (with caveat banner)
+///   7. Footer — DB path, generation timestamp
+///
+/// Color motif matches `render_promote_html` (cyan = activity intensity,
+/// purple = orphan/structural, amber = caveat) so both audit reports
+/// read as a coherent family in a browser.
+fn render_codebase_report_html(
+    stats: &ab_store::CodebaseCallStats,
+    db_path: &std::path::Path,
+) -> String {
+    let now = chrono_now_utc_string();
+
+    let lang_pills = if stats.per_language.is_empty() {
+        r#"<span class="empty-inline">no calls</span>"#.to_string()
+    } else {
+        stats
+            .per_language
+            .iter()
+            .map(|l| {
+                format!(
+                    r#"<span class="lang-pill"><b>{lang}</b> <span class="num">{calls}</span> calls · <span class="num">{files}</span> files</span>"#,
+                    lang = html_escape(&l.language),
+                    calls = l.call_count,
+                    files = l.distinct_files,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let callee_peak = stats.hot_callees.first().map(|x| x.call_count).unwrap_or(1);
+    let hot_callee_rows = stats
+        .hot_callees
+        .iter()
+        .enumerate()
+        .map(|(i, h)| {
+            format!(
+                r##"<tr>
+  <td class="rank">{rank}</td>
+  <td class="callee"><code>{callee}</code></td>
+  <td class="num"><span class="bar" style="width:{bar_pct}%"></span>{count}</td>
+  <td class="num">{callers}</td>
+  <td class="langs">{langs}</td>
+</tr>"##,
+                rank = i + 1,
+                callee = html_escape(&h.callee),
+                bar_pct = bar_pct(h.call_count, callee_peak),
+                count = h.call_count,
+                callers = h.distinct_callers,
+                langs = h
+                    .languages
+                    .iter()
+                    .map(|l| format!(r#"<span class="lang-chip">{}</span>"#, html_escape(l)))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )
+        })
+        .collect::<String>();
+
+    let caller_peak = stats
+        .hot_callers
+        .first()
+        .map(|x| x.distinct_callees)
+        .unwrap_or(1);
+    let hot_caller_rows = stats
+        .hot_callers
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            format!(
+                r##"<tr>
+  <td class="rank">{rank}</td>
+  <td class="caller"><code>{caller}</code></td>
+  <td class="file"><code>{file}</code></td>
+  <td class="num"><span class="bar bar-purple" style="width:{bar_pct}%"></span>{fanout}</td>
+  <td class="num">{total}</td>
+  <td class="langs"><span class="lang-chip">{lang}</span></td>
+</tr>"##,
+                rank = i + 1,
+                caller = html_escape(&c.caller),
+                file = html_escape(&c.file_path),
+                bar_pct = bar_pct(c.distinct_callees, caller_peak),
+                fanout = c.distinct_callees,
+                total = c.total_calls,
+                lang = html_escape(&c.language),
+            )
+        })
+        .collect::<String>();
+
+    let file_peak = stats
+        .fan_out_files
+        .first()
+        .map(|x| x.distinct_callees)
+        .unwrap_or(1);
+    let fan_file_rows = stats
+        .fan_out_files
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            format!(
+                r##"<tr>
+  <td class="rank">{rank}</td>
+  <td class="file"><code>{file}</code></td>
+  <td class="num"><span class="bar bar-purple" style="width:{bar_pct}%"></span>{fanout}</td>
+  <td class="num">{total}</td>
+  <td class="langs"><span class="lang-chip">{lang}</span></td>
+</tr>"##,
+                rank = i + 1,
+                file = html_escape(&f.file_path),
+                bar_pct = bar_pct(f.distinct_callees, file_peak),
+                fanout = f.distinct_callees,
+                total = f.total_calls,
+                lang = html_escape(&f.language),
+            )
+        })
+        .collect::<String>();
+
+    let orphan_rows = stats
+        .orphan_functions
+        .iter()
+        .enumerate()
+        .map(|(i, o)| {
+            format!(
+                r##"<tr>
+  <td class="rank">{rank}</td>
+  <td class="kind"><span class="kind-chip">{kind}</span></td>
+  <td class="name"><code>{name}</code></td>
+  <td class="file"><code>{file}:{line}</code></td>
+  <td class="langs"><span class="lang-chip">{lang}</span></td>
+</tr>"##,
+                rank = i + 1,
+                kind = html_escape(&o.kind),
+                name = html_escape(&o.name),
+                file = html_escape(&o.file_path),
+                line = o.line,
+                lang = html_escape(&o.language),
+            )
+        })
+        .collect::<String>();
+
+    let empty_state = if stats.total_calls == 0 {
+        r#"<p class="empty">No calls indexed for this root. Run <code>agent-bridge codebase index &lt;root&gt;</code> first, or check that the root path matches the indexed one (canonical form).</p>"#
+    } else {
+        ""
+    };
+
+    format!(
+        r##"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>codebase report — {timestamp}</title>
+<style>
+  :root {{
+    --bg: #0f0f14;
+    --panel: #1a1a22;
+    --border: #2a2a38;
+    --text: #e0e0e8;
+    --dim: #8a8a96;
+    --cyan-strong: #5cc8c8;
+    --cyan-mid: #4a8b9c;
+    --amber: #d4a64a;
+    --purple: #7a4ba8;
+    --red: #c8505c;
+    --green: #5cc88a;
+  }}
+  * {{ box-sizing: border-box; }}
+  html, body {{ margin: 0; padding: 0; }}
+  body {{
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif;
+    padding: 28px 36px 60px;
+    max-width: 1280px;
+    margin: 0 auto;
+  }}
+  h1 {{ margin: 0 0 8px; font-size: 22px; font-weight: 600; }}
+  h2 {{ margin: 32px 0 12px; font-size: 14px; font-weight: 600; color: var(--dim);
+        text-transform: uppercase; letter-spacing: 0.08em; }}
+  code {{ font-family: "JetBrains Mono", "SF Mono", Menlo, monospace; color: var(--text); }}
+  a {{ color: inherit; text-decoration: none; }}
+  .header {{ display: flex; flex-direction: column; gap: 6px; padding-bottom: 18px;
+            border-bottom: 1px solid var(--border); }}
+  .meta-row {{ display: flex; gap: 14px; flex-wrap: wrap; color: var(--dim); font-size: 12px; }}
+  .meta-row code {{ color: var(--text); }}
+  .stats {{ display: flex; gap: 18px; margin-top: 6px; }}
+  .stat .num {{ font-size: 18px; font-weight: 600; margin-right: 4px; }}
+  .stat-calls .num {{ color: var(--cyan-strong); }}
+  .stat-files .num {{ color: var(--cyan-mid); }}
+
+  .lang-pills {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }}
+  .lang-pill {{ padding: 6px 12px; border-radius: 4px;
+               background: var(--panel); border: 1px solid var(--border);
+               font-size: 13px; color: var(--cyan-mid); }}
+  .lang-pill b {{ color: var(--text); }}
+  .lang-pill .num {{ color: var(--cyan-strong); font-weight: 600; }}
+
+  table {{ width: 100%; border-collapse: collapse; margin: 8px 0 0;
+          font-size: 13px; }}
+  th, td {{ text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }}
+  th {{ color: var(--dim); font-weight: 600; font-size: 11px;
+       text-transform: uppercase; letter-spacing: 0.06em; }}
+  tr:hover td {{ background: rgba(255,255,255,0.025); }}
+  td.rank {{ color: var(--dim); width: 36px; }}
+  td.num {{ font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+           font-variant-numeric: tabular-nums; white-space: nowrap;
+           position: relative; }}
+  td.callee code, td.caller code, td.name code {{ color: var(--cyan-strong); }}
+  td.file code {{ color: var(--dim); font-size: 12px; }}
+
+  .bar {{ display: inline-block; height: 100%;
+         position: absolute; left: 0; top: 0;
+         background: linear-gradient(90deg, var(--cyan-mid), var(--cyan-strong));
+         opacity: 0.18; }}
+  .bar-purple {{ background: linear-gradient(90deg, var(--purple), #b07ed0); }}
+
+  .lang-chip {{ display: inline-block; padding: 1px 6px; border-radius: 2px;
+               background: rgba(92,200,200,0.1); color: var(--cyan-mid);
+               font-size: 11px; font-family: "JetBrains Mono", monospace;
+               margin-right: 3px; }}
+  .kind-chip {{ display: inline-block; padding: 1px 6px; border-radius: 2px;
+               background: rgba(122,75,168,0.12); color: var(--purple);
+               font-size: 11px; font-family: "JetBrains Mono", monospace; }}
+
+  .caveat {{ margin: 10px 0; padding: 8px 12px;
+            background: #2a2316; border-left: 3px solid var(--amber);
+            border-radius: 2px; color: var(--amber); font-size: 12px; }}
+  .caveat b {{ color: #f0c468; }}
+
+  .empty {{ color: var(--dim); padding: 16px; background: var(--panel);
+           border-radius: 4px; border: 1px dashed var(--border); }}
+  .empty-inline {{ color: var(--dim); font-style: italic; }}
+
+  .footer {{ margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border);
+            color: var(--dim); font-size: 12px; }}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>codebase call-graph audit</h1>
+  <div class="meta-row">
+    <span>root <code>{root}</code></span>
+    <span>generated <code>{timestamp}</code></span>
+  </div>
+  <div class="stats">
+    <span class="stat stat-calls"><span class="num">{total_calls}</span>calls</span>
+    <span class="stat stat-files"><span class="num">{files}</span>files with calls</span>
+  </div>
+</div>
+
+{empty_state}
+
+<h2>Per-language</h2>
+<div class="lang-pills">{lang_pills}</div>
+
+<h2>Hot callees — top {hc_n}</h2>
+<table>
+<thead><tr>
+  <th></th><th>callee (raw)</th><th>calls</th><th>callers</th><th>langs</th>
+</tr></thead>
+<tbody>{hot_callee_rows}</tbody>
+</table>
+
+<h2>Fan-out callers — top {hcr_n}</h2>
+<table>
+<thead><tr>
+  <th></th><th>caller</th><th>file</th><th>fan-out</th><th>total</th><th>lang</th>
+</tr></thead>
+<tbody>{hot_caller_rows}</tbody>
+</table>
+
+<h2>Fan-out files — top {ff_n}</h2>
+<table>
+<thead><tr>
+  <th></th><th>file</th><th>fan-out</th><th>total</th><th>lang</th>
+</tr></thead>
+<tbody>{fan_file_rows}</tbody>
+</table>
+
+<h2>Orphan function candidates — {orphan_n}</h2>
+<div class="caveat">
+  <b>Best-effort, alias-blind.</b> Last-segment matching only — false positives include trait dispatch, dyn dispatch, reflection / string-key dispatch, FFI exports, and test-only entry points. Use as a starting list, not a verdict.
+</div>
+<table>
+<thead><tr>
+  <th></th><th>kind</th><th>name</th><th>file:line</th><th>lang</th>
+</tr></thead>
+<tbody>{orphan_rows}</tbody>
+</table>
+
+<div class="footer">
+  DB: <code>{db_display}</code><br>
+  Generated by <code>dream codebase-report</code> at <code>{timestamp}</code>.
+</div>
+
+</body>
+</html>
+"##,
+        timestamp = html_escape(&now),
+        root = html_escape(&stats.root_path),
+        total_calls = stats.total_calls,
+        files = stats.distinct_caller_files,
+        lang_pills = lang_pills,
+        hc_n = stats.hot_callees.len(),
+        hot_callee_rows = hot_callee_rows,
+        hcr_n = stats.hot_callers.len(),
+        hot_caller_rows = hot_caller_rows,
+        ff_n = stats.fan_out_files.len(),
+        fan_file_rows = fan_file_rows,
+        orphan_n = stats.orphan_functions.len(),
+        orphan_rows = orphan_rows,
+        empty_state = empty_state,
+        db_display = html_escape(&db_path.display().to_string()),
+    )
+}
+
+/// Map an absolute count to a 0–100 bar width relative to a peak value.
+/// Used in HTML tables to give callees / callers a visual scale-bar.
+fn bar_pct(count: u64, peak: u64) -> u32 {
+    if peak == 0 {
+        return 0;
+    }
+    let raw = (count as f64 / peak as f64) * 100.0;
+    raw.round().clamp(0.0, 100.0) as u32
+}
+
 /// Phase 2.x #8 — CLI mirror of the `memory_decay_unused` MCP tool.
 /// Pure SQL pass over `memories`: shaves `importance` by `step` for
 /// every active row whose `last_accessed_at` is older than
@@ -2572,6 +3008,68 @@ async fn run_dream_restore_archived(key: &str, as_json: bool) -> Result<()> {
             "(no-op — row is missing, already active, superseded, or tombstoned; \
              check `memory_get key={key}` for current status)"
         );
+    }
+    Ok(())
+}
+
+/// **Phase 2.x #6 — sync-window GC for tombstones.** CLI mirror of the
+/// `memory_purge_tombstones` MCP tool. Hard-DELETEs rows that have been
+/// tombstoned for at least `older_than_days`. Designed to ride the ζ-10
+/// daily hygiene service after `dream reinforce-active` (snapshot then
+/// captures the post-GC state, so tomorrow's diff sees the cleanup).
+async fn run_dream_purge_tombstones(
+    older_than_days: i64,
+    dry_run: bool,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let removed = store
+        .memory_purge_tombstones(older_than_days, dry_run)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_purge_tombstones: {e}"))?;
+
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "older_than_days": older_than_days,
+                "dry_run": dry_run,
+                "removed_count": removed.len(),
+                "removed_keys": removed,
+            }))?
+        );
+        return Ok(());
+    }
+
+    println!("# Phase 2.x #6 — purge tombstones (sync-window GC)");
+    println!("DB: {}", path.display());
+    println!(
+        "older_than: {older_than_days}d · dry_run: {dry_run}"
+    );
+    println!();
+    let verb = if dry_run { "would remove" } else { "removed" };
+    println!("{verb:<16}: {}", removed.len());
+    if removed.is_empty() {
+        println!();
+        println!(
+            "(no tombstones older than {older_than_days}d — \
+             nothing to GC)"
+        );
+    } else if removed.len() <= 20 {
+        println!();
+        for k in &removed {
+            println!("  · {k}");
+        }
+    } else {
+        println!();
+        for k in removed.iter().take(20) {
+            println!("  · {k}");
+        }
+        println!("  … (+{} more)", removed.len() - 20);
     }
     Ok(())
 }
@@ -3704,6 +4202,142 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
          compare via `dream diff <prev_key> <this_key>` for drift."
     );
     Ok(())
+}
+
+/// Codebase call-graph audit — sibling to `dream promote --html`. Loads
+/// `codebase_call_stats(root, top_n)` from the store and renders a
+/// terminal summary plus (optionally) a self-contained HTML report.
+async fn run_dream_codebase_report(
+    root: Option<&std::path::Path>,
+    top_n: u32,
+    html_path: Option<&std::path::Path>,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+
+    let cwd = std::env::current_dir()
+        .map_err(|e| anyhow::anyhow!("current_dir: {e}"))?;
+    let root_path = root.map(|p| p.to_path_buf()).unwrap_or(cwd);
+    let root_canonical = std::fs::canonicalize(&root_path)
+        .unwrap_or(root_path.clone())
+        .to_string_lossy()
+        .to_string();
+
+    let db_path = default_db_path();
+    let store = SqliteStore::open(&db_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
+
+    let stats = store
+        .codebase_call_stats(&root_canonical, top_n)
+        .await
+        .map_err(|e| anyhow::anyhow!("codebase_call_stats: {e}"))?;
+
+    if as_json {
+        let s = serde_json::to_string_pretty(&stats)
+            .map_err(|e| anyhow::anyhow!("serialize stats: {e}"))?;
+        println!("{s}");
+    } else {
+        println!("# Codebase call-graph audit");
+        println!("root: {}", stats.root_path);
+        println!("DB:   {}", db_path.display());
+        println!();
+        println!(
+            "{} total calls across {} files",
+            stats.total_calls, stats.distinct_caller_files
+        );
+        if stats.total_calls == 0 {
+            println!();
+            println!(
+                "(no calls in `codebase_calls` for this root — run \
+                 `agent-bridge codebase index` first, or check that the \
+                 root path matches the indexed one)"
+            );
+        } else {
+            println!();
+            println!("per-language:");
+            for l in &stats.per_language {
+                println!(
+                    "  {:<8} {:>6} calls   {:>4} files",
+                    l.language, l.call_count, l.distinct_files
+                );
+            }
+
+            if !stats.hot_callees.is_empty() {
+                println!();
+                println!("top {} hottest callees:", stats.hot_callees.len());
+                for h in &stats.hot_callees {
+                    println!(
+                        "  {:>5} fires  {:>3} callers  {:<24}  [{}]",
+                        h.call_count,
+                        h.distinct_callers,
+                        truncate_chars(&h.callee, 60),
+                        h.languages.join(",")
+                    );
+                }
+            }
+
+            if !stats.hot_callers.is_empty() {
+                println!();
+                println!("top {} fan-out callers:", stats.hot_callers.len());
+                for c in &stats.hot_callers {
+                    println!(
+                        "  fan={:>3} ({:>4} calls)  {:<32}  [{}]",
+                        c.distinct_callees,
+                        c.total_calls,
+                        truncate_chars(&c.caller, 50),
+                        c.language
+                    );
+                }
+            }
+
+            if !stats.fan_out_files.is_empty() {
+                println!();
+                println!("top {} fan-out files:", stats.fan_out_files.len());
+                for f in &stats.fan_out_files {
+                    println!(
+                        "  fan={:>3} ({:>4} calls)  {}",
+                        f.distinct_callees, f.total_calls, f.file_path
+                    );
+                }
+            }
+
+            if !stats.orphan_functions.is_empty() {
+                println!();
+                println!(
+                    "orphan function candidates ({}) — best-effort, alias-blind:",
+                    stats.orphan_functions.len()
+                );
+                for o in &stats.orphan_functions {
+                    println!(
+                        "  {:<10} {:<32}  {}:{}",
+                        o.kind,
+                        truncate_chars(&o.name, 40),
+                        o.file_path,
+                        o.line
+                    );
+                }
+            }
+        }
+    }
+
+    if let Some(p) = html_path {
+        let html = render_codebase_report_html(&stats, &db_path);
+        std::fs::write(p, html)
+            .map_err(|e| anyhow::anyhow!("write html report to {p:?}: {e}"))?;
+        println!();
+        println!("html report: {}", p.display());
+    }
+    Ok(())
+}
+
+fn truncate_chars(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        let prefix: String = s.chars().take(n.saturating_sub(1)).collect();
+        format!("{prefix}…")
+    }
 }
 
 /// Build a kind→count map from a JSON array of `{kind, count}` objects.

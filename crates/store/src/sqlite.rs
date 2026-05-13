@@ -2877,6 +2877,56 @@ impl StateStore for SqliteStore {
         Ok(archived)
     }
 
+    async fn memory_tombstone_aged_archived(
+        &self,
+        older_than_days: i64,
+        max_count: i64,
+        dry_run: bool,
+    ) -> Result<u64> {
+        // ζ-19 — time-anchor is `updated_at`, which ζ-14 bumps at archive
+        // time. So "older_than_days" measures "how long has this row been
+        // sitting in archived state" — not "row age from creation".
+        // Cap is bounded; subquery + LIMIT keeps the tx small.
+        if max_count <= 0 {
+            return Ok(0);
+        }
+        let days = older_than_days.max(0);
+        let cutoff = now_secs() - days.saturating_mul(86_400);
+        let cap = max_count.max(1);
+        let select_keys_sql = "SELECT key FROM memories
+              WHERE status = 'archived'
+                AND updated_at <= ?
+              ORDER BY updated_at ASC
+              LIMIT ?";
+        let count_sql = format!("SELECT COUNT(*) FROM ({select_keys_sql})");
+        let update_sql = format!(
+            "UPDATE memories SET status='tombstoned', updated_at=?
+              WHERE key IN ({select_keys_sql})"
+        );
+        let now = now_secs();
+        let tombstoned = self
+            .conn
+            .call(move |c| -> RusqliteResult<u64> {
+                let tx = c.unchecked_transaction()?;
+                let count_n: i64 = tx.query_row(
+                    &count_sql,
+                    rusqlite::params![cutoff, cap],
+                    |row| row.get(0),
+                )?;
+                if !dry_run && count_n > 0 {
+                    tx.execute(
+                        &update_sql,
+                        rusqlite::params![now, cutoff, cap],
+                    )?;
+                }
+                tx.commit()?;
+                Ok(count_n as u64)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_tombstone_aged_archived: {e}")))?;
+        Ok(tombstoned)
+    }
+
     async fn memory_restore_archived(&self, key: &str) -> Result<bool> {
         // ζ-18 — reverse of ζ-14. Single UPDATE with status='archived'
         // gate; rows-changed (0 or 1) is the answer. `key` is UNIQUE so
@@ -5642,6 +5692,215 @@ impl StateStore for SqliteStore {
 
         out.sort_by(|a, b| a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line)));
         Ok(out)
+    }
+
+    async fn codebase_call_stats(
+        &self,
+        root_path: &str,
+        top_n: u32,
+    ) -> Result<crate::CodebaseCallStats> {
+        let root_owned = root_path.to_string();
+        let top = top_n.clamp(1, 500) as i64;
+        // Function-like symbol kinds across all current extractors.
+        // Rust: `fn`. Python: `def`, `method`. TS/JS: `function`.
+        // Go: `func`, `method`.
+        const FN_KINDS: &[&str] = &["fn", "def", "method", "function", "func"];
+
+        self.conn
+            .call(move |c| -> RusqliteResult<crate::CodebaseCallStats> {
+                let total_calls: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM codebase_calls WHERE root_path = ?1",
+                        params![root_owned],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+                let distinct_caller_files: i64 = c
+                    .query_row(
+                        "SELECT COUNT(DISTINCT file_path) FROM codebase_calls \
+                         WHERE root_path = ?1",
+                        params![root_owned],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+
+                let mut per_lang_stmt = c.prepare(
+                    "SELECT language, COUNT(*) as call_count,
+                            COUNT(DISTINCT file_path) as distinct_files
+                     FROM codebase_calls
+                     WHERE root_path = ?1
+                     GROUP BY language
+                     ORDER BY call_count DESC",
+                )?;
+                let per_language: Vec<crate::LanguageCallCount> = per_lang_stmt
+                    .query_map(params![root_owned], |row| {
+                        Ok(crate::LanguageCallCount {
+                            language: row.get(0)?,
+                            call_count: row.get::<_, i64>(1)? as u64,
+                            distinct_files: row.get::<_, i64>(2)? as u64,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                let mut hot_callee_stmt = c.prepare(
+                    "SELECT callee, COUNT(*) as call_count,
+                            COUNT(DISTINCT caller) as distinct_callers,
+                            GROUP_CONCAT(DISTINCT language) as langs
+                     FROM codebase_calls
+                     WHERE root_path = ?1 AND callee != ''
+                     GROUP BY callee
+                     ORDER BY call_count DESC, callee
+                     LIMIT ?2",
+                )?;
+                let hot_callees: Vec<crate::HotCallee> = hot_callee_stmt
+                    .query_map(params![root_owned, top], |row| {
+                        let langs: Option<String> = row.get(3)?;
+                        let mut languages: Vec<String> = langs
+                            .map(|s| s.split(',').map(str::to_string).collect())
+                            .unwrap_or_default();
+                        languages.sort();
+                        Ok(crate::HotCallee {
+                            callee: row.get(0)?,
+                            call_count: row.get::<_, i64>(1)? as u64,
+                            distinct_callers: row.get::<_, i64>(2)? as u64,
+                            languages,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                // GROUP BY (caller, file_path) — same caller name can appear
+                // in multiple files (e.g. `main` in different binaries).
+                let mut hot_caller_stmt = c.prepare(
+                    "SELECT caller, file_path, language,
+                            COUNT(*) as total_calls,
+                            COUNT(DISTINCT callee) as distinct_callees
+                     FROM codebase_calls
+                     WHERE root_path = ?1 AND caller != ''
+                     GROUP BY caller, file_path
+                     ORDER BY distinct_callees DESC, total_calls DESC, caller
+                     LIMIT ?2",
+                )?;
+                let hot_callers: Vec<crate::HotCaller> = hot_caller_stmt
+                    .query_map(params![root_owned, top], |row| {
+                        Ok(crate::HotCaller {
+                            caller: row.get(0)?,
+                            file_path: row.get(1)?,
+                            language: row.get(2)?,
+                            total_calls: row.get::<_, i64>(3)? as u64,
+                            distinct_callees: row.get::<_, i64>(4)? as u64,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                let mut fan_out_stmt = c.prepare(
+                    "SELECT file_path, language,
+                            COUNT(*) as total_calls,
+                            COUNT(DISTINCT callee) as distinct_callees
+                     FROM codebase_calls
+                     WHERE root_path = ?1
+                     GROUP BY file_path
+                     ORDER BY distinct_callees DESC, total_calls DESC, file_path
+                     LIMIT ?2",
+                )?;
+                let fan_out_files: Vec<crate::FileFanOut> = fan_out_stmt
+                    .query_map(params![root_owned, top], |row| {
+                        Ok(crate::FileFanOut {
+                            file_path: row.get(0)?,
+                            language: row.get(1)?,
+                            total_calls: row.get::<_, i64>(2)? as u64,
+                            distinct_callees: row.get::<_, i64>(3)? as u64,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                // Build the "ever-called" name set in app code:
+                //   - Every distinct `callee` (raw)
+                //   - Every last-segment of `callee` after `::` or `.`
+                //   - Strip leading `.` for method-only callees like `.push`
+                let mut callee_stmt = c.prepare(
+                    "SELECT DISTINCT callee FROM codebase_calls \
+                     WHERE root_path = ?1 AND callee != ''",
+                )?;
+                let raw_callees: Vec<String> = callee_stmt
+                    .query_map(params![root_owned], |row| row.get::<_, String>(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                let mut called_names: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                for raw in raw_callees {
+                    let trimmed = raw.trim_start_matches('.').to_string();
+                    called_names.insert(trimmed.clone());
+                    let last_dd = trimmed.rsplit("::").next().unwrap_or(&trimmed);
+                    let last_dot = last_dd.rsplit('.').next().unwrap_or(last_dd);
+                    if !last_dot.is_empty() {
+                        called_names.insert(last_dot.to_string());
+                    }
+                }
+
+                let kinds_placeholder = FN_KINDS
+                    .iter()
+                    .map(|_| "?")
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sym_sql = format!(
+                    "SELECT name, kind, file_path, language, line
+                     FROM codebase_symbols
+                     WHERE root_path = ?1 AND kind IN ({kinds})
+                     ORDER BY file_path, line",
+                    kinds = kinds_placeholder,
+                );
+                let mut sym_stmt = c.prepare(&sym_sql)?;
+                let mut sym_params: Vec<&dyn rusqlite::ToSql> =
+                    Vec::with_capacity(1 + FN_KINDS.len());
+                sym_params.push(&root_owned);
+                for k in FN_KINDS {
+                    sym_params.push(k);
+                }
+                let candidate_rows: Vec<(String, String, String, String, i64)> = sym_stmt
+                    .query_map(
+                        rusqlite::params_from_iter(sym_params.iter()),
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                                row.get::<_, String>(3)?,
+                                row.get::<_, i64>(4)?,
+                            ))
+                        },
+                    )?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                let mut orphan_functions: Vec<crate::OrphanFunction> = Vec::new();
+                for (name, kind, file_path, language, line) in candidate_rows {
+                    let last_dd = name.rsplit("::").next().unwrap_or(&name);
+                    let last_dot = last_dd.rsplit('.').next().unwrap_or(last_dd);
+                    if called_names.contains(&name) || called_names.contains(last_dot) {
+                        continue;
+                    }
+                    orphan_functions.push(crate::OrphanFunction {
+                        name,
+                        kind,
+                        file_path,
+                        language,
+                        line: line as u32,
+                    });
+                    if orphan_functions.len() >= top as usize {
+                        break;
+                    }
+                }
+
+                Ok(crate::CodebaseCallStats {
+                    root_path: root_owned.clone(),
+                    total_calls: total_calls as u64,
+                    distinct_caller_files: distinct_caller_files as u64,
+                    per_language,
+                    hot_callees,
+                    hot_callers,
+                    orphan_functions,
+                    fan_out_files,
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("codebase_call_stats: {e}")))
     }
 
 
@@ -9291,6 +9550,357 @@ mod tests {
             .await
             .expect("restore empty");
         assert!(!empty);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn tombstone_aged_archived_flips_only_aged_rows() {
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-tomb-aged-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let now = now_secs();
+        let old_ts = now - 30 * 86_400;
+        let recent_ts = now - 2 * 86_400;
+        let mk = |key: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: format!("k_{key}"),
+            content: format!("body-{key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        for key in [
+            "aged_archived_a",
+            "aged_archived_b",
+            "fresh_archived",
+            "live_row",
+            "tomb_already",
+            "super_row",
+        ] {
+            store.memory_save(&mk(key)).await.expect("save");
+        }
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute_batch(&format!(
+                    "UPDATE memories SET status='archived', updated_at={old_ts}
+                       WHERE key IN ('aged_archived_a','aged_archived_b');
+                     UPDATE memories SET status='archived', updated_at={recent_ts}
+                       WHERE key='fresh_archived';
+                     UPDATE memories SET status='tombstoned', updated_at={old_ts}
+                       WHERE key='tomb_already';
+                     UPDATE memories SET status='superseded', updated_at={old_ts}
+                       WHERE key='super_row';"
+                ))?;
+                Ok(0)
+            })
+            .await
+            .expect("setup");
+
+        let preview = store
+            .memory_tombstone_aged_archived(14, 100, true)
+            .await
+            .expect("dry");
+        assert_eq!(preview, 2);
+        let still_archived: i64 = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM memories
+                     WHERE key IN ('aged_archived_a','aged_archived_b')
+                       AND status='archived'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .expect("post-dry");
+        assert_eq!(still_archived, 2);
+
+        let flipped = store
+            .memory_tombstone_aged_archived(14, 100, false)
+            .await
+            .expect("live");
+        assert_eq!(flipped, 2);
+
+        let statuses: std::collections::HashMap<String, String> = store
+            .conn
+            .call(|c| -> RusqliteResult<Vec<(String, String)>> {
+                let mut s = c.prepare(
+                    "SELECT key, status FROM memories
+                     WHERE key IN (
+                       'aged_archived_a','aged_archived_b','fresh_archived',
+                       'live_row','tomb_already','super_row'
+                     )",
+                )?;
+                let rows: RusqliteResult<Vec<(String, String)>> = s
+                    .query_map([], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    })?
+                    .collect();
+                rows
+            })
+            .await
+            .expect("collect statuses")
+            .into_iter()
+            .collect();
+        assert_eq!(statuses.get("aged_archived_a").map(String::as_str), Some("tombstoned"));
+        assert_eq!(statuses.get("aged_archived_b").map(String::as_str), Some("tombstoned"));
+        assert_eq!(statuses.get("fresh_archived").map(String::as_str), Some("archived"));
+        assert_eq!(statuses.get("live_row").map(String::as_str), Some("active"));
+        assert_eq!(statuses.get("tomb_already").map(String::as_str), Some("tombstoned"));
+        assert_eq!(statuses.get("super_row").map(String::as_str), Some("superseded"));
+
+        let bumped: i64 = store
+            .conn
+            .call(move |c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM memories
+                     WHERE key IN ('aged_archived_a','aged_archived_b')
+                       AND updated_at > ?",
+                    rusqlite::params![old_ts],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .expect("bumped");
+        assert_eq!(bumped, 2);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn tombstone_aged_archived_respects_max_count_cap() {
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-tomb-cap-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let now = now_secs();
+        let mk = |key: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: format!("k_{key}"),
+            content: format!("body-{key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        for k in ["a_oldest", "b_middle", "c_newest"] {
+            store.memory_save(&mk(k)).await.expect("save");
+        }
+        let a_ts = now - 30 * 86_400;
+        let b_ts = now - 25 * 86_400;
+        let c_ts = now - 20 * 86_400;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute_batch(&format!(
+                    "UPDATE memories SET status='archived', updated_at={a_ts} WHERE key='a_oldest';
+                     UPDATE memories SET status='archived', updated_at={b_ts} WHERE key='b_middle';
+                     UPDATE memories SET status='archived', updated_at={c_ts} WHERE key='c_newest';"
+                ))?;
+                Ok(0)
+            })
+            .await
+            .expect("setup");
+
+        let flipped = store
+            .memory_tombstone_aged_archived(14, 1, false)
+            .await
+            .expect("cap");
+        assert_eq!(flipped, 1);
+
+        let tombed: String = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT key FROM memories WHERE status='tombstoned'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .expect("which key");
+        assert_eq!(tombed, "a_oldest");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn tombstone_aged_archived_zero_cap_is_noop() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-tomb-zero-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let flipped = store
+            .memory_tombstone_aged_archived(14, 0, false)
+            .await
+            .expect("zero");
+        assert_eq!(flipped, 0);
+        let neg = store
+            .memory_tombstone_aged_archived(14, -10, false)
+            .await
+            .expect("neg");
+        assert_eq!(neg, 0);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn tombstone_aged_archived_zero_days_catches_all_archived() {
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-tomb-zeroday-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let now = now_secs();
+        let rec = MemoryRecord {
+            key: "just_archived".to_string(),
+            kind: "lesson".to_string(),
+            content: "x".to_string(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+        store
+            .conn
+            .call(|c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET status='archived' WHERE key='just_archived'",
+                    [],
+                )
+            })
+            .await
+            .expect("archive");
+
+        let flipped = store
+            .memory_tombstone_aged_archived(0, 100, false)
+            .await
+            .expect("zero-day");
+        assert_eq!(flipped, 1);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn tombstone_aged_archived_dry_run_alone_changes_nothing() {
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-tomb-dry-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let now = now_secs();
+        let rec = MemoryRecord {
+            key: "old_arch".to_string(),
+            kind: "lesson".to_string(),
+            content: "x".to_string(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+        let pre_ts = now - 30 * 86_400;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET status='archived', updated_at=? WHERE key='old_arch'",
+                    rusqlite::params![pre_ts],
+                )
+            })
+            .await
+            .expect("setup");
+
+        let preview = store
+            .memory_tombstone_aged_archived(14, 100, true)
+            .await
+            .expect("dry");
+        assert_eq!(preview, 1);
+
+        let (status, updated_at): (String, i64) = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT status, updated_at FROM memories WHERE key='old_arch'",
+                    [],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+                )
+            })
+            .await
+            .expect("verify");
+        assert_eq!(status, "archived");
+        assert_eq!(updated_at, pre_ts);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

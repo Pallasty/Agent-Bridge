@@ -654,6 +654,76 @@ pub struct ResolvedCall {
     pub via_import: String,
 }
 
+/// Aggregate view of the `codebase_calls` table for a single index root.
+/// Output of [`StateStore::codebase_call_stats`]; consumed by
+/// `dream codebase-report --html` to render the audit page. Computed
+/// against a single `root_path` so cross-project pollution is impossible.
+///
+/// Caveat: `hot_callees` / `orphan_functions` rely on raw textual `callee`
+/// matching — they are alias-blind (a call to `Baz::new` after
+/// `use Foo::Bar as Baz` shows up under `Baz`, not `Foo::Bar`). Use
+/// [`StateStore::codebase_callers`] when you need alias-resolved lookups.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseCallStats {
+    pub root_path: String,
+    pub total_calls: u64,
+    pub distinct_caller_files: u64,
+    pub per_language: Vec<LanguageCallCount>,
+    pub hot_callees: Vec<HotCallee>,
+    pub hot_callers: Vec<HotCaller>,
+    /// Function/method symbols whose last-segment name never appears as a
+    /// callee in `codebase_calls` for the same root. Best-effort "dead
+    /// code" candidates — false positives include trait-object dispatch,
+    /// reflection/string-key dispatch, FFI exports, and tests-only entry
+    /// points. Capped to `top_n`.
+    pub orphan_functions: Vec<OrphanFunction>,
+    /// Per-file fan-out — files that issue the most distinct callees.
+    /// Proxy for module coupling.
+    pub fan_out_files: Vec<FileFanOut>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LanguageCallCount {
+    pub language: String,
+    pub call_count: u64,
+    pub distinct_files: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HotCallee {
+    pub callee: String,
+    pub call_count: u64,
+    pub distinct_callers: u64,
+    /// Sorted distinct language tags that issue calls to this name.
+    pub languages: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HotCaller {
+    pub caller: String,
+    pub file_path: String,
+    pub language: String,
+    pub total_calls: u64,
+    pub distinct_callees: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrphanFunction {
+    pub name: String,
+    pub kind: String,
+    pub file_path: String,
+    pub language: String,
+    pub line: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileFanOut {
+    pub file_path: String,
+    pub language: String,
+    pub total_calls: u64,
+    pub distinct_callees: u64,
+}
+
 /// Reorder memories so `kind == "session_handoff"` rows appear first.
 ///
 /// Session bootstrap and similar call sites use importance-based SQL ordering;
@@ -1373,6 +1443,37 @@ pub trait StateStore: Send + Sync {
         Ok(false)
     }
 
+    /// ζ-19 (2026-05-13) — retire-end GC. Time-based downgrade of stale
+    /// `archived` rows to `tombstoned`. Closes the hygiene state machine:
+    ///
+    ///   active → ζ-14 → archived → ζ-19 → tombstoned → purge (7d) → DELETE
+    ///
+    /// Why archived → tombstoned (not direct DELETE)?
+    /// - `tombstoned` rows still occupy their `dedupe_key` slot (Phase 2 #2),
+    ///   so a NewerWins import or a same-content re-save will not silently
+    ///   resurrect a row the operator already retired twice over. Going
+    ///   straight to DELETE would forget the dedupe contract.
+    /// - The 7-day purge_tombstones window provides a final undo before
+    ///   physical loss.
+    ///
+    /// Criterion (both required):
+    /// - `status = 'archived'`
+    /// - `updated_at <= now - older_than_days*86400` (so ζ-14's flip
+    ///    timestamp anchors the GC clock — 14-day default leaves a
+    ///    generous ζ-18 restore window)
+    ///
+    /// `max_count` caps a single run; `dry_run` previews without writing.
+    /// Returns the count tombstoned (or that would be tombstoned).
+    async fn memory_tombstone_aged_archived(
+        &self,
+        older_than_days: i64,
+        max_count: i64,
+        dry_run: bool,
+    ) -> Result<u64> {
+        let _ = (older_than_days, max_count, dry_run);
+        Ok(0)
+    }
+
     /// ζ-16 — return the two most-recent `snapshot_daily_*` memory keys
     /// as `(older, newer)`. Designed to feed `dream diff --auto` so the
     /// operator doesn't have to look up yesterday's vs today's slug
@@ -1963,6 +2064,26 @@ pub trait StateStore: Send + Sync {
         let _ = (target, file_filter, root_path, limit);
         Err(ab_core::Error::Backend(
             "codebase_callers not implemented".into(),
+        ))
+    }
+
+    /// Phase 2 #3 third slice — aggregate stats for a single `root_path`,
+    /// used by `dream codebase-report --html`. Combines per-language
+    /// counts, hot callees/callers, fan-out by file, and a best-effort
+    /// orphan-function list (function/method symbols whose last-segment
+    /// name never appears as a callee).
+    ///
+    /// `top_n` caps the size of `hot_callees`, `hot_callers`,
+    /// `orphan_functions`, and `fan_out_files`. The per-language and
+    /// total counts are always full.
+    async fn codebase_call_stats(
+        &self,
+        root_path: &str,
+        top_n: u32,
+    ) -> Result<CodebaseCallStats> {
+        let _ = (root_path, top_n);
+        Err(ab_core::Error::Backend(
+            "codebase_call_stats not implemented".into(),
         ))
     }
 }
