@@ -470,6 +470,20 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **ζ-18 (graph hygiene escape hatch)** — Restore a single archived
+    /// memory back to `status='active'`. Operator-driven inverse of
+    /// ζ-14 `archive-orphan-stubs`. Single-key by design: bulk restore
+    /// would re-introduce the noise ζ-14 just retired. Only matches
+    /// `status='archived'`; active/superseded/tombstoned rows are
+    /// no-ops. CLI mirror of the `memory_restore_archived` MCP tool.
+    RestoreArchived {
+        /// The memory key to restore. UNIQUE column, so at most one row
+        /// flips per invocation.
+        key: String,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// **Replay quality audit** — are the LLM-consolidated summaries that
     /// `dream replay` writes actually being used? Pure read pass: counts
     /// `p5_replay`-tagged active memories, bins access patterns, surfaces
@@ -997,6 +1011,9 @@ async fn main() -> Result<()> {
                     *json,
                 )
                 .await
+            }
+            DreamOp::RestoreArchived { key, json } => {
+                run_dream_restore_archived(key, *json).await
             }
             DreamOp::ReplayAudit {
                 stale_days,
@@ -2518,6 +2535,45 @@ fn archive_alarm_should_fire(archived: u64, threshold: i64, dry_run: bool) -> bo
         return false;
     }
     (archived as i64) >= threshold
+}
+
+/// **ζ-18** — CLI mirror of `memory_restore_archived` MCP tool.
+/// Operator escape hatch when ζ-14 retires a row that turns out to
+/// still carry signal. Single-key, status-gated, returns bool.
+async fn run_dream_restore_archived(key: &str, as_json: bool) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let restored = store
+        .memory_restore_archived(key)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_restore_archived: {e}"))?;
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "key": key,
+                "restored": restored,
+            }))?
+        );
+        return Ok(());
+    }
+    println!("# ζ-18 — restore archived");
+    println!("DB:  {}", path.display());
+    println!("key: {key}");
+    if restored {
+        println!();
+        println!("✓ restored: {key} → status=active (updated_at bumped)");
+    } else {
+        println!();
+        println!(
+            "(no-op — row is missing, already active, superseded, or tombstoned; \
+             check `memory_get key={key}` for current status)"
+        );
+    }
+    Ok(())
 }
 
 /// **Replay quality audit** — pure read pass, no writes, no LLM.

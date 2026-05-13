@@ -5595,6 +5595,69 @@ impl McpTool for MemoryArchiveOrphanStubsTool {
 }
 
 // ===========================================================================
+//        memory_restore_archived (ζ-18 — escape hatch for ζ-14 false positives)
+// ===========================================================================
+
+/// ζ-18 — Reverse of ζ-14. Restore a single archived row back to
+/// `status='active'`. Single-key, not criterion-based: operator inspects
+/// a specific row and decides. A bulk restore would re-introduce the
+/// noise ζ-14 just retired.
+///
+/// Only `status='archived'` rows are eligible. `active` / `superseded` /
+/// `tombstoned` are no-ops returning `restored=false`. The
+/// tombstone → active path goes through supersede chains, not here.
+pub struct MemoryRestoreArchivedTool {
+    hub: Hub,
+}
+impl MemoryRestoreArchivedTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryRestoreArchivedTool {
+    fn name(&self) -> &'static str {
+        "memory_restore_archived"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "ζ-18 (graph-hygiene escape hatch). Restore a single \
+                `status='archived'` memory back to active by key. Operator-driven \
+                inverse of ζ-14 memory_archive_orphan_stubs. Only matches archived \
+                rows — active / superseded / tombstoned rows are no-ops. Bumps \
+                updated_at on success. Returns {restored: bool}."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Memory key (UNIQUE) to restore from archived → active."
+                    }
+                },
+                "required": ["key"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(k) if !k.is_empty() => k.to_string(),
+            _ => return Ok(ToolResult::error("key is required and must be non-empty")),
+        };
+        let restored = store.memory_restore_archived(&key).await?;
+        Ok(ToolResult::json_text(&json!({
+            "key": key,
+            "restored": restored,
+        })))
+    }
+}
+
+// ===========================================================================
 //                  memory_decay_unused (Phase 2.x #8 — read-recency decay)
 // ===========================================================================
 
@@ -12600,6 +12663,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPruneCoactivationNoiseTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPruneDegenerateRelatesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryArchiveOrphanStubsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryRestoreArchivedTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryDecayUnusedTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));

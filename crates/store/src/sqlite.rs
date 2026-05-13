@@ -2877,6 +2877,31 @@ impl StateStore for SqliteStore {
         Ok(archived)
     }
 
+    async fn memory_restore_archived(&self, key: &str) -> Result<bool> {
+        // ζ-18 — reverse of ζ-14. Single UPDATE with status='archived'
+        // gate; rows-changed (0 or 1) is the answer. `key` is UNIQUE so
+        // we never flip more than one row even in absence of the LIMIT
+        // clause. Empty key short-circuits.
+        if key.is_empty() {
+            return Ok(false);
+        }
+        let now = now_secs();
+        let key_owned = key.to_string();
+        let changed = self
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories
+                        SET status = 'active', updated_at = ?
+                      WHERE key = ? AND status = 'archived'",
+                    rusqlite::params![now, key_owned],
+                )
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_restore_archived: {e}")))?;
+        Ok(changed > 0)
+    }
+
     async fn latest_daily_snapshot_pair(&self) -> Result<Option<(String, String)>> {
         // ζ-16: ORDER BY created_at DESC + LIMIT 2. The ζ-10 cron stamps
         // a fresh `snapshot_daily_<YYYYMMDD_HHMM>` row each morning, so
@@ -9018,6 +9043,254 @@ mod tests {
             .await
             .expect("empty");
         assert_eq!(zero, 0);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn restore_archived_flips_status_back_to_active_and_bumps_updated_at() {
+        // ζ-18 — happy path. Save a row, archive it directly via UPDATE,
+        // restore it, observe status='active' and updated_at strictly
+        // greater than the pre-restore value.
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-restore-flip-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let now = now_secs();
+        let rec = MemoryRecord {
+            key: "stub_misclassified".to_string(),
+            kind: "lesson".to_string(),
+            content: "false positive — actually has signal".to_string(),
+            tags: vec!["auto_curated".to_string()],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+        // Force-archive + freeze updated_at deep in the past so the
+        // post-restore bump is unambiguously detectable.
+        let frozen = now - 3600;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET status='archived', updated_at=? WHERE key='stub_misclassified'",
+                    rusqlite::params![frozen],
+                )
+            })
+            .await
+            .expect("pre-archive");
+
+        let restored = store
+            .memory_restore_archived("stub_misclassified")
+            .await
+            .expect("restore");
+        assert!(restored, "archived row should restore");
+
+        let (status, updated_at): (String, i64) = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT status, updated_at FROM memories WHERE key='stub_misclassified'",
+                    [],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+                )
+            })
+            .await
+            .expect("verify");
+        assert_eq!(status, "active", "status flipped to active");
+        assert!(
+            updated_at > frozen,
+            "updated_at bumped on restore (was {frozen}, now {updated_at})"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn restore_archived_no_op_on_already_active_row() {
+        // ζ-18 — guard against accidental "restore" of an already-active
+        // row touching updated_at. Returns false, leaves the row alone.
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-restore-active-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let now = now_secs();
+        let rec = MemoryRecord {
+            key: "live_row".to_string(),
+            kind: "lesson".to_string(),
+            content: "still active".to_string(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+        let frozen = now - 3600;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET updated_at=? WHERE key='live_row'",
+                    rusqlite::params![frozen],
+                )
+            })
+            .await
+            .expect("freeze");
+
+        let restored = store
+            .memory_restore_archived("live_row")
+            .await
+            .expect("restore");
+        assert!(!restored, "active row is not restorable");
+
+        let (status, updated_at): (String, i64) = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT status, updated_at FROM memories WHERE key='live_row'",
+                    [],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+                )
+            })
+            .await
+            .expect("verify");
+        assert_eq!(status, "active");
+        assert_eq!(
+            updated_at, frozen,
+            "no-op must not touch updated_at"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn restore_archived_no_op_on_tombstoned_row() {
+        // ζ-18 — tombstone → active path goes through supersede chain,
+        // not restore. Forcing it here would bypass dedupe key
+        // reservation that Phase 2 #2 relies on.
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-restore-tomb-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let now = now_secs();
+        let rec = MemoryRecord {
+            key: "tomb_row".to_string(),
+            kind: "lesson".to_string(),
+            content: "buried".to_string(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+        store
+            .conn
+            .call(|c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET status='tombstoned' WHERE key='tomb_row'",
+                    [],
+                )
+            })
+            .await
+            .expect("tombstone");
+
+        let restored = store
+            .memory_restore_archived("tomb_row")
+            .await
+            .expect("restore");
+        assert!(!restored, "tombstoned row is not restorable through ζ-18");
+
+        let status: String = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT status FROM memories WHERE key='tomb_row'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .expect("verify");
+        assert_eq!(status, "tombstoned", "status untouched");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn restore_archived_no_op_on_missing_key() {
+        // ζ-18 — missing key returns Ok(false), not an error, so a
+        // batch caller iterating over a list can ignore "key not found"
+        // and "key found but already active" with the same branch.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-restore-miss-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+
+        let restored = store
+            .memory_restore_archived("does_not_exist")
+            .await
+            .expect("restore");
+        assert!(!restored, "missing key returns false, not error");
+
+        // Empty key also short-circuits (no SQL hit).
+        let empty = store
+            .memory_restore_archived("")
+            .await
+            .expect("restore empty");
+        assert!(!empty);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

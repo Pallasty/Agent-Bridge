@@ -1348,6 +1348,31 @@ pub trait StateStore: Send + Sync {
         Ok(0)
     }
 
+    /// ζ-18 (2026-05-13) — reverse of ζ-14. Restore a single archived row
+    /// back to `status='active'`. Designed as the operator escape hatch
+    /// when ζ-14 auto-archive misclassifies a row, or when a sweep
+    /// captured a cohort that turns out to still carry signal after all.
+    ///
+    /// Single-row by key (not criterion-based): ζ-14 retires by sweep,
+    /// ζ-18 restores by inspection. The asymmetry is intentional — a
+    /// bulk restore op would re-introduce the noise ζ-14 just retired.
+    ///
+    /// Behavior:
+    /// - Match only `status = 'archived'`. `active` / `superseded` /
+    ///   `tombstoned` are no-ops (returns `Ok(false)`); the tombstone →
+    ///   active path goes through `memory_save` + supersede chain, not
+    ///   here. Resurrecting a tombstoned row through restore would
+    ///   bypass the dedupe key reservation Phase-2-#2 relies on.
+    /// - On match: flip status to `active`, bump `updated_at`.
+    /// - Missing key returns `Ok(false)` (no error — same shape as a
+    ///   status-mismatch no-op so callers can ignore both uniformly).
+    ///
+    /// Returns `true` iff a row was actually flipped.
+    async fn memory_restore_archived(&self, key: &str) -> Result<bool> {
+        let _ = key;
+        Ok(false)
+    }
+
     /// ζ-16 — return the two most-recent `snapshot_daily_*` memory keys
     /// as `(older, newer)`. Designed to feed `dream diff --auto` so the
     /// operator doesn't have to look up yesterday's vs today's slug
