@@ -136,4 +136,21 @@ else
 fi
 
 echo
+
+# Repo-level githooks wire-up (P23) — opt-in by ENV in case the user
+# is running from outside the working tree (e.g. system-wide install).
+# Idempotent; running this every wrapper install is fine.
+GITHOOKS_INSTALLER="$(cd "$SCRIPT_DIR/.." && pwd)/install-githooks.sh"
+if [ -x "$GITHOOKS_INSTALLER" ] && git -C "$(dirname "$GITHOOKS_INSTALLER")" rev-parse --show-toplevel >/dev/null 2>&1; then
+    if [[ "${AGENT_BRIDGE_SKIP_GITHOOKS:-0}" == "1" ]]; then
+        echo "Skipping githooks install (AGENT_BRIDGE_SKIP_GITHOOKS=1)."
+    else
+        echo "Wiring repo githooks (pre-commit cargo check, etc):"
+        "$GITHOOKS_INSTALLER" 2>&1 | sed 's/^/  /'
+        echo "  Bypass with AGENT_BRIDGE_SKIP_GITHOOKS=1 next time, or"
+        echo "  AGENT_BRIDGE_SKIP_PRECOMMIT=1 / --no-verify per commit."
+    fi
+fi
+
+echo
 echo "Done. Verify with:  $WRAPPER_PATH --version"

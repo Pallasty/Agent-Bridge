@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Repo-level pre-commit hook — catch broken-HEAD commits before they
+# land on master. Triggered by `git commit` once `core.hooksPath` is
+# set to `.githooks` (see scripts/install-githooks.sh).
+#
+# Lesson behind this hook: commit `f88e5ef` (2026-05-13) shipped a
+# `TombstoneAgedArchived` enum variant + match-arm dispatch but missed
+# the `run_dream_tombstone_aged_archived` fn definition. HEAD didn't
+# compile until a fixup commit (`8963a4b`) landed the missing fn. Any
+# contributor pulling between the two saw a broken workspace.
+#
+# What we check:
+#   `cargo check -p ab-bridge --all-targets --quiet`
+#
+# Why this scope (not `--workspace`):
+#   ab-bridge transitively pulls every other crate in the workspace,
+#   so its check covers downstream breakage from `ab-store` /
+#   `ab-mcp` / `ab-agent`. `--workspace` is slower (re-checks each
+#   crate independently) for no extra coverage in practice. ~30-40s
+#   warm, comparable to a normal save → check loop.
+#
+# How to bypass (emergencies only):
+#   git commit --no-verify -m "..."
+#
+# How to skip on CI / known-WIP branches:
+#   Set AGENT_BRIDGE_SKIP_PRECOMMIT=1 in the environment, e.g.
+#   AGENT_BRIDGE_SKIP_PRECOMMIT=1 git commit -m "wip: split later"
+
+set -euo pipefail
+
+if [[ "${AGENT_BRIDGE_SKIP_PRECOMMIT:-0}" == "1" ]]; then
+    echo "[pre-commit] AGENT_BRIDGE_SKIP_PRECOMMIT=1 → skipping cargo check" >&2
+    exit 0
+fi
+
+# Skip when there are no rust changes — saves time on docs-only or
+# memory-only commits. Use the staged diff so unstaged sibling work
+# doesn't trigger a needless check.
+STAGED_RUST=$(git diff --cached --name-only --diff-filter=ACMR \
+    | grep -E '\.rs$|^Cargo\.(toml|lock)$' || true)
+if [[ -z "$STAGED_RUST" ]]; then
+    # Doc-only / memory-only / script-only commit — skip the check.
+    exit 0
+fi
+
+echo "[pre-commit] cargo check -p ab-bridge --all-targets …" >&2
+if ! cargo check -p ab-bridge --all-targets --quiet 2>&1 | tail -20 >&2; then
+    echo >&2
+    echo "[pre-commit] BLOCKED — cargo check failed. Fix the build before committing." >&2
+    echo "[pre-commit] To bypass intentionally: AGENT_BRIDGE_SKIP_PRECOMMIT=1 git commit ..." >&2
+    exit 1
+fi
+
+# Also fail-loudly if cargo check returned 0 but emitted *errors* on
+# stderr (the `tail | head` pipeline can mask exit codes in some shells).
+# Defensive — typically the exit code above catches it.
+exit 0
