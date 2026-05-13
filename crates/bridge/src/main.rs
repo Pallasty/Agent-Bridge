@@ -720,6 +720,30 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **P-α — Always-Warm Coactivation Tick (manual mirror).** One
+    /// sweep of `memory_coactivation` decay with integer half-life:
+    /// every row where `last_at + tau ≤ now` gets `count /= 2` and
+    /// `last_at += tau`; rows with `count < 1` are DELETEd. The
+    /// in-daemon background task (spawned by `Cmd::Daemon`) runs the
+    /// same primitive every `tick_secs`; this CLI is for ad-hoc
+    /// inspection + cron safety net.
+    ///
+    /// See `docs/DESIGN-P-alpha-always-warm-coactivation-tick.md`.
+    DecayCoactivation {
+        /// Half-life in days. Default 7. Clamp [0.5, 30] days.
+        #[arg(long, default_value_t = 7.0)]
+        tau_days: f64,
+        /// Cap iterations per sweep (catches up multi-half-life stale
+        /// rows). Default 10. Clamp [1, 100].
+        #[arg(long, default_value_t = 10)]
+        max_iterations: u32,
+        /// Preview only — print decay candidates without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1232,6 +1256,9 @@ async fn main() -> Result<()> {
             DreamOp::SubstrateAudit { window_days, json } => {
                 run_dream_substrate_audit(*window_days, *json).await
             }
+            DreamOp::DecayCoactivation { tau_days, max_iterations, dry_run, json } => {
+                run_dream_decay_coactivation(*tau_days, *max_iterations, *dry_run, *json).await
+            }
         };
     }
 
@@ -1302,6 +1329,60 @@ async fn main() -> Result<()> {
         Cmd::Daemon => {
             let socket = default_socket_path();
             tracing::info!(socket = %socket.display(), "starting agent-bridge daemon");
+            // P-α — spawn always-warm coactivation tick if a store is
+            // available and the env disable flag is not set. The task
+            // runs for the daemon's lifetime; detached on shutdown.
+            // See docs/DESIGN-P-alpha-always-warm-coactivation-tick.md
+            if std::env::var("AGENT_BRIDGE_DISABLE_SUBSTRATE_TICK")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false)
+            {
+                tracing::info!("substrate-tick: disabled by env (AGENT_BRIDGE_DISABLE_SUBSTRATE_TICK=1)");
+            } else if let Some(store) = hub.store.clone() {
+                let tick_secs: u64 = std::env::var("AGENT_BRIDGE_TICK_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(30)
+                    .clamp(5, 300);
+                let tau_secs: i64 = std::env::var("AGENT_BRIDGE_TAU_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(7 * 86_400)
+                    .clamp(3600, 30 * 86_400);
+                tracing::info!(
+                    tick_secs, tau_secs,
+                    "substrate-tick: spawning P-α always-warm coactivation tick"
+                );
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(tick_secs));
+                    interval.set_missed_tick_behavior(
+                        tokio::time::MissedTickBehavior::Delay,
+                    );
+                    // Skip the first immediate fire (interval ticks once at t=0).
+                    interval.tick().await;
+                    loop {
+                        interval.tick().await;
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0);
+                        match store.decay_coactivation_once(tau_secs, now, 10).await {
+                            Ok(s) if s.iterations > 0 => {
+                                tracing::debug!(
+                                    swept = s.swept, pruned = s.pruned, iters = s.iterations,
+                                    "substrate-tick: ran"
+                                );
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                tracing::warn!(error = %e, "substrate-tick: decay error");
+                            }
+                        }
+                    }
+                });
+            } else {
+                tracing::info!("substrate-tick: no store configured, skipping");
+            }
             serve(&socket, Router::new(hub)).await
         }
         Cmd::Mcp => {
@@ -3403,6 +3484,96 @@ async fn run_dream_purge_tombstones(
     Ok(())
 }
 
+/// **P-α — Always-Warm Coactivation Tick CLI mirror.** Manual / cron
+/// invocation of the same `decay_coactivation_once` that the daemon
+/// background task calls every `tick_secs` seconds. Useful for ad-hoc
+/// inspection (`--dry-run`) and as a cron safety net independent of
+/// the daemon being up.
+///
+/// See `docs/DESIGN-P-alpha-always-warm-coactivation-tick.md` §3.5.
+async fn run_dream_decay_coactivation(
+    tau_days: f64,
+    max_iterations: u32,
+    dry_run: bool,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+
+    let tau_days = tau_days.clamp(0.5, 30.0);
+    let tau_secs = (tau_days * 86_400.0) as i64;
+    let max_iter = max_iterations.clamp(1, 100);
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    if dry_run {
+        if as_json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "tau_days": tau_days,
+                    "tau_secs": tau_secs,
+                    "max_iterations": max_iter,
+                    "dry_run": true,
+                    "note": "dry-run reports config only; v1 does not enumerate candidate rows",
+                }))?
+            );
+            return Ok(());
+        }
+        println!("# P-α — decay-coactivation (dry-run)");
+        println!("DB: {}", path.display());
+        println!("tau_days: {tau_days:.1} · max_iter: {max_iter} · dry_run: true");
+        println!();
+        println!("(no writes performed — re-run without --dry-run to apply decay)");
+        return Ok(());
+    }
+
+    let stats = store
+        .decay_coactivation_once(tau_secs, now, max_iter)
+        .await
+        .map_err(|e| anyhow::anyhow!("decay_coactivation_once: {e}"))?;
+
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "tau_days": tau_days,
+                "tau_secs": tau_secs,
+                "max_iterations": max_iter,
+                "dry_run": false,
+                "stats": {
+                    "swept": stats.swept,
+                    "pruned": stats.pruned,
+                    "iterations": stats.iterations,
+                },
+            }))?
+        );
+        return Ok(());
+    }
+
+    println!("# P-α — decay-coactivation (manual mirror)");
+    println!("DB: {}", path.display());
+    println!("tau_days: {tau_days:.1} · max_iter: {max_iter}");
+    println!();
+    println!("swept       : {} rows", stats.swept);
+    println!("pruned      : {} rows", stats.pruned);
+    println!("iterations  : {}", stats.iterations);
+    if stats.iterations == 0 {
+        println!();
+        println!(
+            "(no rows eligible — coactivation table is fresh or tau_days \
+             too small for current row ages)"
+        );
+    }
+    Ok(())
+}
+
 /// **Replay quality audit** — pure read pass, no writes, no LLM.
 /// Counts `p5_replay`-tagged active memories, bins access patterns
 /// (never / once / multi), flags `access_count = 0` + aged rows as
@@ -4882,6 +5053,7 @@ async fn run_dream_substrate_audit(window_days: u32, as_json: bool) -> Result<()
 
     Ok(())
 }
+
 
 /// Build a kind→count map from a JSON array of `{kind, count}` objects.
 /// Returns empty map on None / non-array / malformed entries.
