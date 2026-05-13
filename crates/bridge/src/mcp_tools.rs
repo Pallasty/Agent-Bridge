@@ -8720,6 +8720,80 @@ impl McpTool for MemorySubstrateAuditTool {
 }
 
 // ===========================================================================
+//             substrate_stats — v22 Phase 2.3 — runtime grid state read
+// ===========================================================================
+
+/// Phase 2.3 MCP wrapper around `ab_seed_bridge::current().stats()`. Complements
+/// `memory_substrate_audit` (P-ε): audit reads L1/L2 SQL trace tables;
+/// `substrate_stats` reads the in-process Seed grid runtime state.
+///
+/// Hub-less by design — substrate is a process-wide `OnceLock`, not Hub-mediated.
+pub struct SubstrateStatsTool;
+
+impl SubstrateStatsTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for SubstrateStatsTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for SubstrateStatsTool {
+    fn name(&self) -> &'static str {
+        "substrate_stats"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "v22 Phase 2.3 — runtime state of the in-process Seed substrate (L2). \
+                 Reports backend, N (neurons), D (substrate dim), step_count, last surprise \
+                 mean/max, and connection mean-abs. Substrate is opt-in via `AB_SUBSTRATE=1` \
+                 env var; when unset, returns `{installed: false}` + hint. Complements \
+                 `memory_substrate_audit` (which reads SQL trace, not the live grid)."
+                .into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let env_enabled = ab_seed_bridge::env_enabled();
+        let stats = ab_seed_bridge::current().as_ref().map(|s| s.stats());
+        let payload = match stats {
+            Some(s) => json!({
+                "env_var": ab_seed_bridge::SUBSTRATE_ENV_VAR,
+                "env_enabled": env_enabled,
+                "installed": true,
+                "stats": {
+                    "backend_inner": s.backend_name,
+                    "n": s.n,
+                    "d": s.d,
+                    "outer_dim": s.outer_dim,
+                    "step_count": s.step_count,
+                    "last_surprise_mean": (s.last_surprise_mean as f64 * 10000.0).round() / 10000.0,
+                    "last_surprise_max": (s.last_surprise_max as f64 * 10000.0).round() / 10000.0,
+                    "connection_mean_abs": (s.connection_mean_abs as f64 * 1_000_000.0).round() / 1_000_000.0,
+                },
+            }),
+            None => json!({
+                "env_var": ab_seed_bridge::SUBSTRATE_ENV_VAR,
+                "env_enabled": env_enabled,
+                "installed": false,
+                "hint": if env_enabled {
+                    "env set but substrate not installed — process likely started before install_default() ran"
+                } else {
+                    "set AB_SUBSTRATE=1 in env and relaunch the long-lived MCP process to enable"
+                },
+            }),
+        };
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //             memory_link_audit — Phase 0 dead-link probe over bodies
 // ===========================================================================
 
@@ -12902,6 +12976,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryStatsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryQueryStatsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySubstrateAuditTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SubstrateStatsTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkAuditTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySuggestTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkOrphansTool::new(hub.clone())));
@@ -15153,5 +15228,52 @@ mod tests {
         assert!(!path_exists_in_any_root("/definitely/not/here.zzz", &roots));
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── substrate_stats MCP tool tests (v22 Phase 2.3) ──────────────────
+
+    #[tokio::test]
+    async fn substrate_stats_reports_disabled_when_no_install() {
+        // ab_seed_bridge::current() is None unless install_default() ran.
+        // Test context has no install, so tool returns installed=false
+        // with a hint — never an error.
+        let tool = SubstrateStatsTool::new();
+        let ctx = ToolContext::default();
+        let res = tool.execute(json!({}), &ctx).await.expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["installed"], json!(false));
+        assert_eq!(v["env_var"], json!(ab_seed_bridge::SUBSTRATE_ENV_VAR));
+        assert!(v.get("hint").is_some(), "disabled payload must include hint");
+        assert!(v.get("stats").is_none(), "disabled payload must omit stats");
+    }
+
+    #[tokio::test]
+    async fn substrate_stats_schema_has_empty_input() {
+        let tool = SubstrateStatsTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "substrate_stats");
+        let props = schema
+            .input_schema
+            .get("properties")
+            .expect("schema must have properties object");
+        assert!(
+            props.as_object().map(|m| m.is_empty()).unwrap_or(false),
+            "substrate_stats takes no input args"
+        );
+    }
+
+    #[test]
+    fn substrate_stats_tool_default_constructs() {
+        // Hub-less tool default-constructs without setup.
+        let t1 = SubstrateStatsTool::new();
+        let t2 = SubstrateStatsTool;
+        let t3 = SubstrateStatsTool::default();
+        assert_eq!(t1.name(), t2.name());
+        assert_eq!(t2.name(), t3.name());
+        assert_eq!(t1.name(), "substrate_stats");
     }
 }
