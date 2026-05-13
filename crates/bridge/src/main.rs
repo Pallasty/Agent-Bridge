@@ -2266,8 +2266,12 @@ fn render_codebase_report_html(
         })
         .collect::<String>();
 
-    let orphan_rows = stats
+    // Split orphans into high-confidence + likely-FP for visual demotion.
+    let (orphan_real, orphan_fp): (Vec<_>, Vec<_>) = stats
         .orphan_functions
+        .iter()
+        .partition(|o| !o.likely_fp);
+    let orphan_rows = orphan_real
         .iter()
         .enumerate()
         .map(|(i, o)| {
@@ -2282,6 +2286,29 @@ fn render_codebase_report_html(
                 rank = i + 1,
                 kind = html_escape(&o.kind),
                 name = html_escape(&o.name),
+                file = html_escape(&o.file_path),
+                line = o.line,
+                lang = html_escape(&o.language),
+            )
+        })
+        .collect::<String>();
+    let orphan_fp_rows = orphan_fp
+        .iter()
+        .enumerate()
+        .map(|(i, o)| {
+            format!(
+                r##"<tr class="fp-row">
+  <td class="rank">{rank}</td>
+  <td class="kind"><span class="kind-chip">{kind}</span></td>
+  <td class="name"><code>{name}</code></td>
+  <td class="fp-reason"><span class="fp-chip">{reason}</span></td>
+  <td class="file"><code>{file}:{line}</code></td>
+  <td class="langs"><span class="lang-chip">{lang}</span></td>
+</tr>"##,
+                rank = i + 1,
+                kind = html_escape(&o.kind),
+                name = html_escape(&o.name),
+                reason = html_escape(&o.likely_fp_reason),
                 file = html_escape(&o.file_path),
                 line = o.line,
                 lang = html_escape(&o.language),
@@ -2372,6 +2399,12 @@ fn render_codebase_report_html(
   .kind-chip {{ display: inline-block; padding: 1px 6px; border-radius: 2px;
                background: rgba(122,75,168,0.12); color: var(--purple);
                font-size: 11px; font-family: "JetBrains Mono", monospace; }}
+  .fp-chip {{ display: inline-block; padding: 1px 6px; border-radius: 2px;
+             background: rgba(212,166,74,0.10); color: var(--amber);
+             font-size: 11px; font-family: "JetBrains Mono", monospace; }}
+  .fp-table tr.fp-row td {{ color: var(--dim); }}
+  .fp-table tr.fp-row td.name code,
+  .fp-table tr.fp-row td.file code {{ color: var(--dim); }}
 
   .caveat {{ margin: 10px 0; padding: 8px 12px;
             background: #2a2316; border-left: 3px solid var(--amber);
@@ -2428,15 +2461,26 @@ fn render_codebase_report_html(
 <tbody>{fan_file_rows}</tbody>
 </table>
 
-<h2>Orphan function candidates — {orphan_n}</h2>
+<h2>Orphan function candidates — {orphan_real_n} high-confidence</h2>
 <div class="caveat">
-  <b>Best-effort, alias-blind.</b> Last-segment matching only — false positives include trait dispatch, dyn dispatch, reflection / string-key dispatch, FFI exports, and test-only entry points. Use as a starting list, not a verdict.
+  <b>Best-effort, alias-blind.</b> Last-segment matching only — false positives include trait dispatch, dyn dispatch, reflection / string-key dispatch, FFI exports, and macro-generated callers. Use as a starting list, not a verdict.
 </div>
 <table>
 <thead><tr>
   <th></th><th>kind</th><th>name</th><th>file:line</th><th>lang</th>
 </tr></thead>
 <tbody>{orphan_rows}</tbody>
+</table>
+
+<h2>Likely false positives — {orphan_fp_n}</h2>
+<div class="caveat" style="background: #1f1a2a; border-left-color: var(--purple); color: var(--dim);">
+  Rows tagged with known false-positive heuristics: test-file paths (callers via <code>#[test]</code> / pytest macros are invisible to the extractor), <code>main</code> entries (runtime-called), pytest <code>test_*</code> naming convention. Shown for completeness — verify before acting.
+</div>
+<table class="fp-table">
+<thead><tr>
+  <th></th><th>kind</th><th>name</th><th>reason</th><th>file:line</th><th>lang</th>
+</tr></thead>
+<tbody>{orphan_fp_rows}</tbody>
 </table>
 
 <div class="footer">
@@ -2458,8 +2502,10 @@ fn render_codebase_report_html(
         hot_caller_rows = hot_caller_rows,
         ff_n = stats.fan_out_files.len(),
         fan_file_rows = fan_file_rows,
-        orphan_n = stats.orphan_functions.len(),
+        orphan_real_n = orphan_real.len(),
         orphan_rows = orphan_rows,
+        orphan_fp_n = orphan_fp.len(),
+        orphan_fp_rows = orphan_fp_rows,
         empty_state = empty_state,
         db_display = html_escape(&db_path.display().to_string()),
     )
@@ -4353,19 +4399,42 @@ async fn run_dream_codebase_report(
             }
 
             if !stats.orphan_functions.is_empty() {
+                let (real, likely_fp): (Vec<_>, Vec<_>) = stats
+                    .orphan_functions
+                    .iter()
+                    .partition(|o| !o.likely_fp);
                 println!();
                 println!(
-                    "orphan function candidates ({}) — best-effort, alias-blind:",
-                    stats.orphan_functions.len()
+                    "orphan function candidates — {} high-confidence + {} likely false positives:",
+                    real.len(),
+                    likely_fp.len()
                 );
-                for o in &stats.orphan_functions {
-                    println!(
-                        "  {:<10} {:<32}  {}:{}",
-                        o.kind,
-                        truncate_chars(&o.name, 40),
-                        o.file_path,
-                        o.line
-                    );
+                if real.is_empty() {
+                    println!("  (none — every orphan candidate was tagged as a likely FP)");
+                } else {
+                    for o in &real {
+                        println!(
+                            "  {:<10} {:<32}  {}:{}",
+                            o.kind,
+                            truncate_chars(&o.name, 40),
+                            o.file_path,
+                            o.line
+                        );
+                    }
+                }
+                if !likely_fp.is_empty() {
+                    println!();
+                    println!("  likely false positives (test files / main entry / pytest convention):");
+                    for o in &likely_fp {
+                        println!(
+                            "    {:<10} {:<28}  [{}]  {}:{}",
+                            o.kind,
+                            truncate_chars(&o.name, 36),
+                            o.likely_fp_reason,
+                            o.file_path,
+                            o.line
+                        );
+                    }
                 }
             }
         }

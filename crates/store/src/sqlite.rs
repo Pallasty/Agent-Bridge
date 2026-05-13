@@ -1176,6 +1176,57 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// Classify an orphan-function candidate as likely-FP or not.
+/// Returns `(likely_fp, reason)`. Reason is a short tag for the HTML/CLI
+/// to display ("test file", "main entry", etc.) — empty when not FP.
+///
+/// FP heuristics (each is a coarse safety net, not a hard rule):
+///   - `file_path` matches `/tests/` segment → test file (callers via
+///     `#[test]` / `#[tokio::test]` macros are invisible to the
+///     extractor, so almost everything in a tests dir looks orphan)
+///   - `file_path` ends in `_test.rs` / `_tests.rs` / `_test.go` /
+///     `.test.ts` / `.test.tsx` / `.test.js` / `_test.py` (Go +
+///     pytest + jest conventions) → test file
+///   - `name` is exactly `main` (no `::` path) → runtime entry; called
+///     by Rust/Go runtime, never by user code
+///   - kind == "method" / "function" with a `test_` name prefix in
+///     Python → pytest discovery convention
+///
+/// Conservative ordering — first match wins so the reason is stable.
+fn orphan_fp_classify(name: &str, kind: &str, file_path: &str) -> (bool, &'static str) {
+    // Test-file paths — covers most language conventions.
+    if file_path.contains("/tests/")
+        || file_path.contains("/test/")
+        || file_path.ends_with("_test.rs")
+        || file_path.ends_with("_tests.rs")
+        || file_path.ends_with("_test.go")
+        || file_path.ends_with(".test.ts")
+        || file_path.ends_with(".test.tsx")
+        || file_path.ends_with(".test.js")
+        || file_path.ends_with(".spec.ts")
+        || file_path.ends_with(".spec.tsx")
+        || file_path.ends_with(".spec.js")
+        || file_path.ends_with("_test.py")
+        || file_path.ends_with("/conftest.py")
+    {
+        return (true, "test file");
+    }
+    // Runtime entry points — `main` (Rust/Go), `__main__` (Python).
+    if name == "main" || name == "__main__" {
+        return (true, "main entry");
+    }
+    // Python pytest discovery convention: any function-like symbol whose
+    // unqualified name starts with `test_` is a test target.
+    let last_seg = name.rsplit("::").next().unwrap_or(name);
+    let last_seg = last_seg.rsplit('.').next().unwrap_or(last_seg);
+    if (kind == "def" || kind == "method" || kind == "function")
+        && last_seg.starts_with("test_")
+    {
+        return (true, "pytest convention");
+    }
+    (false, "")
+}
+
 /// Compute 1-based fractional ranks for `xs` with ties averaged. Returned
 /// vector is in original-index order: `result[i]` is the rank of `xs[i]`.
 ///
@@ -5876,12 +5927,19 @@ impl StateStore for SqliteStore {
                     if called_names.contains(&name) || called_names.contains(last_dot) {
                         continue;
                     }
+                    // ── orphan_likely_fp_rules ──
+                    // Tag rows likely to be false positives. Visual
+                    // demotion only — they stay in the output so the
+                    // caller can audit.
+                    let (likely_fp, reason) = orphan_fp_classify(&name, &kind, &file_path);
                     orphan_functions.push(crate::OrphanFunction {
                         name,
                         kind,
                         file_path,
                         language,
                         line: line as u32,
+                        likely_fp,
+                        likely_fp_reason: reason.to_string(),
                     });
                     if orphan_functions.len() >= top as usize {
                         break;
@@ -11588,6 +11646,116 @@ mod tests {
         assert!(stats.hot_callers.is_empty());
         assert!(stats.fan_out_files.is_empty());
         assert!(stats.orphan_functions.is_empty());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // P22 — `likely_fp` tagging on orphan candidates. Verifies the
+    // `orphan_fp_classify` heuristics route rows to high-confidence vs
+    // likely-FP buckets correctly: test-file paths, `main` entry, and
+    // pytest `test_*` naming convention.
+    #[tokio::test]
+    async fn codebase_call_stats_tags_likely_fp_orphans() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-codebase-call-stats-fp-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                // Seed one call so the table is non-empty (otherwise we
+                // hit the empty-table fast path).
+                let mut call_stmt = c.prepare(
+                    "INSERT INTO codebase_calls
+                       (file_path, line, language, caller, callee, root_path, indexed_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+                )?;
+                call_stmt.execute(params![
+                    "/repo/src/lib.rs", 1_i64, "rust", "outer", "called_fn", "/repo"
+                ])?;
+
+                // 6 function-like symbols, none of which are called:
+                //   bare_orphan       → high-confidence
+                //   main              → FP: main entry
+                //   in_tests_dir      → FP: test file
+                //   in_test_file      → FP: test file (_test.rs suffix)
+                //   in_spec_ts        → FP: test file (.spec.ts)
+                //   test_pytest_thing → FP: pytest convention
+                let mut sym_stmt = c.prepare(
+                    "INSERT INTO codebase_symbols
+                       (root_path, file_path, line, kind, name, signature, language, indexed_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+                )?;
+                sym_stmt.execute(params![
+                    "/repo", "/repo/src/lib.rs", 1_i64, "fn", "bare_orphan", "fn bare_orphan()", "rust"
+                ])?;
+                sym_stmt.execute(params![
+                    "/repo", "/repo/src/main.rs", 1_i64, "fn", "main", "fn main()", "rust"
+                ])?;
+                sym_stmt.execute(params![
+                    "/repo", "/repo/tests/integration.rs", 1_i64, "fn", "in_tests_dir",
+                    "fn in_tests_dir()", "rust"
+                ])?;
+                sym_stmt.execute(params![
+                    "/repo", "/repo/src/foo_test.rs", 1_i64, "fn", "in_test_file",
+                    "fn in_test_file()", "rust"
+                ])?;
+                sym_stmt.execute(params![
+                    "/repo", "/repo/src/foo.spec.ts", 1_i64, "function", "in_spec_ts",
+                    "function in_spec_ts()", "ts"
+                ])?;
+                sym_stmt.execute(params![
+                    "/repo", "/repo/src/util.py", 1_i64, "def", "test_pytest_thing",
+                    "def test_pytest_thing()", "python"
+                ])?;
+                Ok(())
+            })
+            .await
+            .expect("seed rows");
+
+        let stats = store
+            .codebase_call_stats("/repo", 100)
+            .await
+            .expect("call_stats");
+
+        let by_name: std::collections::HashMap<String, &crate::OrphanFunction> = stats
+            .orphan_functions
+            .iter()
+            .map(|o| (o.name.clone(), o))
+            .collect();
+
+        let bare = by_name.get("bare_orphan").expect("bare_orphan must be orphan");
+        assert!(!bare.likely_fp, "bare_orphan must NOT be likely-FP");
+        assert_eq!(bare.likely_fp_reason, "");
+
+        let main_row = by_name.get("main").expect("main must be orphan");
+        assert!(main_row.likely_fp, "main must be likely-FP");
+        assert_eq!(main_row.likely_fp_reason, "main entry");
+
+        let in_tests = by_name.get("in_tests_dir").expect("in_tests_dir must be orphan");
+        assert!(in_tests.likely_fp);
+        assert_eq!(in_tests.likely_fp_reason, "test file");
+
+        let in_test = by_name.get("in_test_file").expect("in_test_file must be orphan");
+        assert!(in_test.likely_fp);
+        assert_eq!(in_test.likely_fp_reason, "test file");
+
+        let in_spec = by_name.get("in_spec_ts").expect("in_spec_ts must be orphan");
+        assert!(in_spec.likely_fp);
+        assert_eq!(in_spec.likely_fp_reason, "test file");
+
+        let pytest_row = by_name
+            .get("test_pytest_thing")
+            .expect("test_pytest_thing must be orphan");
+        assert!(pytest_row.likely_fp);
+        assert_eq!(pytest_row.likely_fp_reason, "pytest convention");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

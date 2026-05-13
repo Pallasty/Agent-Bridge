@@ -714,6 +714,21 @@ pub struct OrphanFunction {
     pub file_path: String,
     pub language: String,
     pub line: u32,
+    /// True when the row is *probably* a false positive — e.g. test
+    /// functions whose callers are `#[tokio::test]` macro-generated and
+    /// invisible to the extractor, or bare `main` which is called by the
+    /// runtime rather than user code. Used by `dream codebase-report` to
+    /// split the orphan list into a high-confidence section and a
+    /// likely-FP tail (visual demotion, not removal). Tagging rules live
+    /// in the SQLite impl (`codebase_call_stats`); see
+    /// `orphan_likely_fp_rules` doc there.
+    #[serde(default)]
+    pub likely_fp: bool,
+    /// Why the orphan was flagged as likely-FP. Short reason string so
+    /// the HTML/CLI can show "test file" / "main entry" without
+    /// re-running heuristics. Empty when `likely_fp = false`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub likely_fp_reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
