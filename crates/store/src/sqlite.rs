@@ -1194,6 +1194,12 @@ fn now_secs() -> i64 {
 ///
 /// Conservative ordering — first match wins so the reason is stable.
 fn orphan_fp_classify(name: &str, kind: &str, file_path: &str) -> (bool, &'static str) {
+    // P22 — Rust `#[test]` / `#[tokio::test]` / etc. tagged at extraction
+    // time as kind=`test_fn`. Macro-generated callers are invisible to
+    // the extractor so every test fn looks orphan — pre-flag them.
+    if kind == "test_fn" {
+        return (true, "#[test] attr");
+    }
     // Test-file paths — covers most language conventions.
     if file_path.contains("/tests/")
         || file_path.contains("/test/")
@@ -5755,7 +5761,7 @@ impl StateStore for SqliteStore {
         // Function-like symbol kinds across all current extractors.
         // Rust: `fn`. Python: `def`, `method`. TS/JS: `function`.
         // Go: `func`, `method`.
-        const FN_KINDS: &[&str] = &["fn", "def", "method", "function", "func"];
+        const FN_KINDS: &[&str] = &["fn", "test_fn", "def", "method", "function", "func"];
 
         self.conn
             .call(move |c| -> RusqliteResult<crate::CodebaseCallStats> {
@@ -11715,6 +11721,14 @@ mod tests {
                     "/repo", "/repo/src/util.py", 1_i64, "def", "test_pytest_thing",
                     "def test_pytest_thing()", "python"
                 ])?;
+                // P22 — test_fn kind (tagged at extraction time when
+                // `#[test]`-like attr precedes the fn). Lives in regular
+                // source files (not in tests/ dir) — kind alone must
+                // route it to likely-FP.
+                sym_stmt.execute(params![
+                    "/repo", "/repo/src/lib.rs", 100_i64, "test_fn",
+                    "unit_check", "fn unit_check()", "rust"
+                ])?;
                 Ok(())
             })
             .await
@@ -11756,6 +11770,13 @@ mod tests {
             .expect("test_pytest_thing must be orphan");
         assert!(pytest_row.likely_fp);
         assert_eq!(pytest_row.likely_fp_reason, "pytest convention");
+
+        // P22 — test_fn kind takes precedence over file-path filters
+        // (it would be in src/lib.rs which doesn't match any test-path
+        // heuristic, but the kind itself tags it).
+        let unit_row = by_name.get("unit_check").expect("unit_check must be orphan");
+        assert!(unit_row.likely_fp);
+        assert_eq!(unit_row.likely_fp_reason, "#[test] attr");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

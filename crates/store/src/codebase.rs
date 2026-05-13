@@ -247,6 +247,50 @@ fn count_braces(line: &str) -> (i32, i32) {
     (opens, closes)
 }
 
+/// Recognize Rust test-attribute lines. Used by `extract_rust` to tag
+/// the following `fn` as `kind="test_fn"` so the codebase-report orphan
+/// audit can flag macro-generated callers as known FPs.
+///
+/// Coverage:
+///   - `#[test]` — built-in
+///   - `#[tokio::test]` / `#[tokio::test(...)]` — async runtime
+///   - `#[rstest]` — fixture framework
+///   - `#[test_case(...)]` — parameterized tests
+///   - `#[wasm_bindgen_test]` — wasm tests
+///   - `#[async_std::test]` — async-std
+///   - `#[actix_rt::test]` / `#[actix_web::test]` — actix
+///   - `#[smol_potat::test]` — smol
+///
+/// Conservative — only matches at line start (after trim). False
+/// negatives are acceptable (a missed test fn just shows as a real
+/// orphan — annoying but recoverable); false positives would tag
+/// real functions as tests (bad).
+fn is_rust_test_attr_line(s: &str) -> bool {
+    if !s.starts_with("#[") {
+        return false;
+    }
+    // Match against common test attribute names. The `[` is fixed at
+    // index 1; check the body for known patterns.
+    let body = &s[2..]; // strip "#["
+    // Drop trailing `]...` so we look only at the attribute payload.
+    let body = body.split(']').next().unwrap_or(body).trim();
+    // Strip arguments to get the bare attribute name.
+    let name = body.split('(').next().unwrap_or(body).trim();
+    matches!(
+        name,
+        "test"
+            | "tokio::test"
+            | "rstest"
+            | "test_case"
+            | "wasm_bindgen_test"
+            | "async_std::test"
+            | "actix_rt::test"
+            | "actix_web::test"
+            | "smol_potat::test"
+            | "case"
+    )
+}
+
 fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
     let mut out = Vec::new();
     let mut depth: i32 = 0;
@@ -255,6 +299,13 @@ fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
     // a later line (typical with `where` clauses spanning multiple lines),
     // the scope is held here until the brace arrives.
     let mut pending_impl: Option<(String, Option<String>)> = None;
+    // P22 — set when the most recent non-blank, non-comment line was a
+    // test-attribute like `#[test]` / `#[tokio::test]` / `#[rstest]` /
+    // `#[test_case]` / `#[wasm_bindgen_test]`. Consumed by the next `fn`
+    // emit so the symbol kind becomes `test_fn` instead of `fn`. Allows
+    // `dream codebase-report` to treat #[test] callers as known-FP
+    // without the caller's macro-generated visibility being a problem.
+    let mut pending_test_attr = false;
 
     for (i, raw) in content.lines().enumerate() {
         let t = raw.trim();
@@ -263,6 +314,24 @@ fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
             // Comments still count braces (they generally don't contain unmatched
             // ones, but if they do the depth would skew indefinitely; the safer
             // default is to skip brace counting on comment-only lines).
+            continue;
+        }
+
+        // P22 — detect test-attribute lines (`#[test]`, `#[tokio::test]`,
+        // `#[rstest]`, `#[test_case]`, `#[wasm_bindgen_test]`, `#[case]`).
+        // Set the pending flag and skip to brace counting — these lines
+        // don't emit symbols themselves. We tolerate attribute-list rows
+        // like `#[tokio::test(flavor = "multi_thread")]`.
+        if is_rust_test_attr_line(t) {
+            pending_test_attr = true;
+            let (opens, closes) = count_braces(raw);
+            depth += opens - closes;
+            continue;
+        }
+        // Blank lines preserve the pending flag (attr+blank+fn is valid
+        // formatting). Other code lines clear it.
+        if t.is_empty() {
+            // No depth change.
             continue;
         }
 
@@ -334,7 +403,21 @@ fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
             } else {
                 name
             };
-            out.push(make(file_path, (i + 1) as u32, kind, emit_name, t, "rust"));
+            // P22 — if the prior non-blank line was a test attribute,
+            // emit as `test_fn` instead of `fn` so `dream codebase-report`
+            // can mark these as likely-FP (the macro-generated caller is
+            // invisible to the extractor, so they always look orphan).
+            let final_kind = if kind == "fn" && pending_test_attr {
+                "test_fn"
+            } else {
+                kind
+            };
+            pending_test_attr = false;
+            out.push(make(file_path, (i + 1) as u32, final_kind, emit_name, t, "rust"));
+        } else {
+            // Any other code line clears the pending attribute flag —
+            // attributes only apply to the immediately-following item.
+            pending_test_attr = false;
         }
 
         // Update brace depth from this line's `{` / `}` (string-aware,
@@ -3608,6 +3691,79 @@ impl Display for Foo {
         assert_eq!(syms[0].name, "Foo", "type goes in name (not the trait)");
         assert_eq!(syms[1].kind, "fn");
         assert_eq!(syms[1].name, "<Foo as Display>::fmt");
+    }
+
+    // P22 — `#[test]` / `#[tokio::test]` attributes flip the next fn to
+    // kind="test_fn" so codebase-report orphan audit can mark them as
+    // known FPs (macro-generated callers are invisible to the extractor).
+    #[test]
+    fn rust_test_attr_promotes_fn_to_test_fn() {
+        let src = "\
+#[test]
+fn unit_check() {}
+
+#[tokio::test]
+async fn async_check() {}
+
+#[tokio::test(flavor = \"multi_thread\")]
+async fn async_check_with_args() {}
+
+#[rstest]
+fn fixture_check() {}
+
+fn regular_fn() {}
+";
+        let syms = extract_rust(src, "t.rs");
+        let by_name: std::collections::HashMap<&str, &CodebaseSymbol> =
+            syms.iter().map(|s| (s.name.as_str(), s)).collect();
+        assert_eq!(by_name["unit_check"].kind, "test_fn");
+        assert_eq!(by_name["async_check"].kind, "test_fn");
+        assert_eq!(by_name["async_check_with_args"].kind, "test_fn");
+        assert_eq!(by_name["fixture_check"].kind, "test_fn");
+        assert_eq!(
+            by_name["regular_fn"].kind, "fn",
+            "no preceding test attr → plain fn"
+        );
+    }
+
+    // Blank line between attribute and fn is valid Rust formatting
+    // (rustfmt sometimes inserts one). The pending-test-attr flag must
+    // survive blank lines.
+    #[test]
+    fn rust_test_attr_survives_blank_line() {
+        let src = "\
+#[tokio::test]
+
+async fn async_check() {}
+";
+        let syms = extract_rust(src, "t.rs");
+        assert_eq!(syms[0].kind, "test_fn");
+    }
+
+    // Doc comments between attribute and fn ARE allowed by the language
+    // but the extractor currently skips them — confirm this still tags
+    // the following fn as test_fn (comment skip preserves the flag).
+    #[test]
+    fn rust_test_attr_survives_doc_comment() {
+        let src = "\
+#[test]
+// Verify the foo behavior
+fn unit_check() {}
+";
+        let syms = extract_rust(src, "t.rs");
+        assert_eq!(syms[0].kind, "test_fn");
+    }
+
+    // Non-test code line between attribute and fn clears the flag.
+    #[test]
+    fn rust_unrelated_code_clears_test_attr() {
+        let src = "\
+#[test]
+let x = 1;
+fn regular_fn() {}
+";
+        let syms = extract_rust(src, "t.rs");
+        assert_eq!(syms[0].kind, "fn", "intervening stmt clears test flag");
     }
 
     #[test]
