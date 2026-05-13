@@ -31,7 +31,21 @@
 #                               --alarm-threshold N, archives >= N
 #                               also save a `kind=alert` memory + log
 #                               to stderr so the journal flags bursts.
-#   5. `dream reinforce-active` — Hebbian wire-strengthen: bump
+#   5. `dream promote`        — Hebbian wire-together (tier 1):
+#                               crystallise co-fire pairs with count >=
+#                               --min-count (default 5, weight 0.5-0.95)
+#                               into explicit `cofires` edges. Skips
+#                               pairs that already have a `cofires` edge
+#                               (idempotent).
+#   6. `dream promote --tier 2` — Secondary promotion (P16-M):
+#                               crystallise recurring-but-weak pairs
+#                               (count >= 3) that have NO existing edge
+#                               of any type into `co_referenced` edges
+#                               (weight 0.3-0.5). Salvages the mid-tier
+#                               signal that tier 1 misses. Skips on ANY
+#                               existing edge so it doesn't pollute
+#                               structural connections.
+#   7. `dream reinforce-active` — Hebbian wire-strengthen: bump
 #                               `importance` by --step (capped at
 #                               --ceiling) for every row with
 #                               access_count >= --min-access AND
@@ -39,7 +53,7 @@
 #                               Positive-reinforcement mirror of #1 —
 #                               without it, the system is entropy-monotonic
 #                               (decay only, never reward).
-#   6. `dream snapshot`       — ζ-1 + ζ-9 v2: dump a daily self-portrait
+#   8. `dream snapshot`       — ζ-1 + ζ-9 v2: dump a daily self-portrait
 #                               (memory counts, coactivation, attention,
 #                               identity, transitions, topology) as a
 #                               `snapshot_daily_YYYYMMDD_HHMM` memory.
@@ -77,7 +91,7 @@
 #       --window-days 14 --step 0.03 --floor 0.05
 
 [Unit]
-Description=agent-bridge daily memory hygiene (ζ-10 full cycle — decay + prune + archive[+ζ-15 alarm] + reinforce + snapshot)
+Description=agent-bridge daily memory hygiene (ζ-10 full cycle — decay + prune + archive[+ζ-15 alarm] + promote(T1+T2) + reinforce + snapshot)
 Documentation=file://%h/.claude/projects/-Data-CascadeProjects-agent-bridge/memory/project_memory_decay_unused_cron_shipped.md
 
 [Service]
@@ -88,13 +102,24 @@ Type=oneshot
 # (e.g. lock contention with palace serve or dream replay).
 #
 # Order: subtract (decay → prune-coact → prune-relates → archive) → add
-# (reinforce-active) → record (snapshot). Subtract first to remove dead
-# weight, then strengthen what's left, then capture the post-hygiene
-# state so tomorrow's diff sees a clean delta.
+# (promote T1 → promote T2 → reinforce-active) → record (snapshot).
+# Subtract first to remove dead weight, then build new attention
+# structure from the cleaned coact data (promote tier 1 first so tier 2
+# can see the fresh cofires when applying its "skip any edge" rule),
+# then strengthen importance, then capture the post-hygiene state so
+# tomorrow's diff sees a clean delta.
 ExecStart=-%h/.local/bin/agent-bridge.real dream decay-unused --window-days 30 --step 0.05 --floor 0.1
 ExecStart=-%h/.local/bin/agent-bridge.real dream prune-coactivation-noise --max-count 1 --older-than-days 30
 ExecStart=-%h/.local/bin/agent-bridge.real dream prune-degenerate-relates
 ExecStart=-%h/.local/bin/agent-bridge.real dream archive-orphan-stubs --older-than-days 3 --alarm-threshold 10
+# P20 — Hebbian wire-together. Tier 1 first (count >= 5, weight 0.5-0.95)
+# then tier 2 (count >= 3, weight 0.3-0.5, skips any-edge pairs only).
+# Order matters: tier-1 must run first so tier-2's "skip any existing
+# edge" check sees today's freshly-promoted cofires and stays out of
+# their way. Both write fresh edges to memory_edges so the post-hygiene
+# snapshot in step 8 captures the day's attention-structure growth.
+ExecStart=-%h/.local/bin/agent-bridge.real dream promote
+ExecStart=-%h/.local/bin/agent-bridge.real dream promote --tier 2
 ExecStart=-%h/.local/bin/agent-bridge.real dream reinforce-active --window-days 7 --min-access 5 --step 0.10 --ceiling 0.95
 ExecStart=-%h/.local/bin/agent-bridge.real dream snapshot --name daily
 StandardOutput=append:%h/.cache/agent-bridge/memory-decay-unused.log
