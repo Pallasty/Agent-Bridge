@@ -11660,6 +11660,353 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
+    // ── P-ε: substrate-audit tests (act phase 3/5) ──
+    // Each test seeds a minimal DB and verifies one or more of M1-M8.
+
+    #[tokio::test]
+    async fn substrate_audit_empty_store_returns_zeros() {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-substrate-audit-empty-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let r = store
+            .memory_substrate_audit(86_400 * 7)
+            .await
+            .expect("audit");
+
+        assert_eq!(r.version, 1);
+        assert_eq!(r.window_secs, 86_400 * 7);
+        assert_eq!(r.m1_components.components, 0);
+        assert_eq!(r.m1_components.total_clustered_nodes, 0);
+        assert_eq!(r.m2_edges.total, 0);
+        assert_eq!(r.m3_coactivation.total_pairs, 0);
+        assert_eq!(r.m4_retire.active, 0);
+        assert_eq!(r.m4_retire.archived_fraction, 0.0);
+        assert_eq!(r.m5_edge_coverage.active_total, 0);
+        assert_eq!(r.m5_edge_coverage.fraction, 0.0);
+        assert_eq!(r.m6_embedding.total, 0);
+        assert_eq!(r.m6_embedding.stale_fraction, 0.0);
+        assert!(r.m7_signal_fidelity.r_touched.is_nan() || r.m7_signal_fidelity.n_touched == 0);
+        assert_eq!(r.m8_query.total_queries, 0);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn substrate_audit_m1_single_component_hairball() {
+        // Seed a triangle of cofires edges → 1 component of size 3.
+        let dir = std::env::temp_dir().join(format!(
+            "ab-substrate-audit-m1single-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        // 3 active memories.
+        for k in ["a", "b", "c"] {
+            store
+                .memory_save(&crate::MemoryRecord {
+                    key: k.into(),
+                    kind: "lesson".into(),
+                    content: format!("content for {k}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: "active".into(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save");
+        }
+
+        // Triangle cofires: a-b, b-c, a-c → all in one component.
+        for (from, to) in [("a", "b"), ("b", "c"), ("a", "c")] {
+            store
+                .memory_link(from, to, "cofires", 0.8)
+                .await
+                .expect("link");
+        }
+
+        let r = store
+            .memory_substrate_audit(86_400 * 7)
+            .await
+            .expect("audit");
+
+        assert_eq!(r.m1_components.components, 1, "single component");
+        assert_eq!(r.m1_components.largest_size, 3);
+        assert_eq!(r.m1_components.total_clustered_nodes, 3);
+        // memory_link writes 1 directed row per call → 3 links = 3 rows.
+        assert_eq!(r.m2_edges.total, 3);
+        let cofires = *r.m2_edges.per_type.get("cofires").unwrap_or(&0);
+        assert_eq!(cofires, 3);
+        // All 3 active memories participate in cofires edges.
+        assert_eq!(r.m5_edge_coverage.active_with_l2_edge, 3);
+        assert_eq!(r.m5_edge_coverage.active_total, 3);
+        assert_eq!(r.m5_edge_coverage.fraction, 1.0);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn substrate_audit_m1_two_disjoint_components() {
+        // Two triangles, no inter-cluster edge → 2 components.
+        let dir = std::env::temp_dir().join(format!(
+            "ab-substrate-audit-m1two-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+        for k in ["a", "b", "c", "x", "y", "z"] {
+            store
+                .memory_save(&crate::MemoryRecord {
+                    key: k.into(),
+                    kind: "lesson".into(),
+                    content: format!("content for {k}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: "active".into(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save");
+        }
+        for (from, to) in [
+            ("a", "b"),
+            ("b", "c"),
+            ("a", "c"),
+            ("x", "y"),
+            ("y", "z"),
+            ("x", "z"),
+        ] {
+            store
+                .memory_link(from, to, "cofires", 0.8)
+                .await
+                .expect("link");
+        }
+
+        let r = store
+            .memory_substrate_audit(86_400 * 7)
+            .await
+            .expect("audit");
+
+        assert_eq!(r.m1_components.components, 2);
+        assert_eq!(r.m1_components.largest_size, 3);
+        assert_eq!(r.m1_components.total_clustered_nodes, 6);
+        assert_eq!(r.m1_components.distribution, vec![3, 3]);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn substrate_audit_m2_edge_types_split_correctly() {
+        // 2 cofires + 1 co_referenced + 1 relates + 1 derived_from.
+        let dir = std::env::temp_dir().join(format!(
+            "ab-substrate-audit-m2-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+        for k in ["a", "b", "c", "d", "e"] {
+            store
+                .memory_save(&crate::MemoryRecord {
+                    key: k.into(),
+                    kind: "lesson".into(),
+                    content: format!("c {k}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: "active".into(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save");
+        }
+        store.memory_link("a", "b", "cofires", 0.8).await.expect("link");
+        store.memory_link("b", "c", "cofires", 0.8).await.expect("link");
+        store.memory_link("c", "d", "co_referenced", 0.4).await.expect("link");
+        store.memory_link("a", "c", "relates", 1.0).await.expect("link");
+        store.memory_link("d", "e", "derived_from", 0.8).await.expect("link");
+
+        let r = store
+            .memory_substrate_audit(86_400 * 7)
+            .await
+            .expect("audit");
+
+        // memory_link writes 1 directed row per call → 5 links = 5 rows.
+        assert_eq!(r.m2_edges.total, 5);
+        assert_eq!(*r.m2_edges.per_type.get("cofires").unwrap_or(&0), 2);
+        assert_eq!(*r.m2_edges.per_type.get("co_referenced").unwrap_or(&0), 1);
+        assert_eq!(*r.m2_edges.per_type.get("relates").unwrap_or(&0), 1);
+        assert_eq!(*r.m2_edges.per_type.get("derived_from").unwrap_or(&0), 1);
+        assert!((r.m2_edges.density_per_active - (5.0 / 5.0)).abs() < 1e-9);
+        // M5: only cofires + co_referenced count; that touches {a,b,c,d} = 4.
+        assert_eq!(r.m5_edge_coverage.active_with_l2_edge, 4);
+        assert_eq!(r.m5_edge_coverage.active_total, 5);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn substrate_audit_m4_retire_balance_status_distribution() {
+        // Seed 3 active + 1 archived + 1 tombstoned via direct status set.
+        let dir = std::env::temp_dir().join(format!(
+            "ab-substrate-audit-m4-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+        for (k, status) in [
+            ("a1", "active"),
+            ("a2", "active"),
+            ("a3", "active"),
+            ("arc1", "archived"),
+            ("tomb1", "tombstoned"),
+        ] {
+            store
+                .memory_save(&crate::MemoryRecord {
+                    key: k.into(),
+                    kind: "lesson".into(),
+                    content: format!("c {k}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: status.into(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save");
+        }
+
+        let r = store
+            .memory_substrate_audit(86_400 * 7)
+            .await
+            .expect("audit");
+
+        assert_eq!(r.m4_retire.active, 3);
+        assert_eq!(r.m4_retire.archived, 1);
+        assert_eq!(r.m4_retire.tombstoned, 1);
+        assert_eq!(r.m4_retire.superseded, 0);
+        assert!((r.m4_retire.archived_fraction - 0.2).abs() < 1e-9, "1/5 archived");
+        assert!(r.m4_retire.delta.is_approximate, "row-timestamp fallback");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn substrate_audit_m6_embedding_backend_distribution() {
+        // Seed 1 onnx + 1 hash + 1 unknown (NULL) row via raw SQL.
+        let dir = std::env::temp_dir().join(format!(
+            "ab-substrate-audit-m6-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+        // Insert 3 active rows with different embedding_backend values.
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                let now = 1_000_000_i64;
+                for (key, backend) in [
+                    ("a", "onnx:all-MiniLM-L6-v2"),
+                    ("b", "hash:fnv1a-384"),
+                ] {
+                    c.execute(
+                        "INSERT INTO memories
+                           (key, kind, content, tags, related_keys, scope,
+                            created_at, updated_at, last_accessed_at,
+                            access_count, importance, status, embedding_backend)
+                         VALUES (?1, 'lesson', '', '[]', '[]', NULL,
+                                 ?2, ?2, ?2, 0, 0.5, 'active', ?3)",
+                        params![key, now, backend],
+                    )?;
+                }
+                // Third row: embedding_backend left as NULL ("unknown").
+                c.execute(
+                    "INSERT INTO memories
+                       (key, kind, content, tags, related_keys, scope,
+                        created_at, updated_at, last_accessed_at,
+                        access_count, importance, status)
+                     VALUES ('c', 'lesson', '', '[]', '[]', NULL,
+                             ?1, ?1, ?1, 0, 0.5, 'active')",
+                    params![now],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed embedding rows");
+
+        let r = store
+            .memory_substrate_audit(86_400 * 7)
+            .await
+            .expect("audit");
+
+        assert_eq!(r.m6_embedding.onnx, 1, "onnx backend");
+        assert_eq!(r.m6_embedding.hash, 1, "hash backend");
+        assert_eq!(r.m6_embedding.unknown, 1, "NULL backend");
+        assert_eq!(r.m6_embedding.total, 3);
+        assert!((r.m6_embedding.stale_fraction - (2.0 / 3.0)).abs() < 1e-9);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
     #[tokio::test]
     async fn coactivation_ordered_by_count_desc() {
         // Pair (a, b) co-activated 3 times; pair (a, c) co-activated 1 time.
