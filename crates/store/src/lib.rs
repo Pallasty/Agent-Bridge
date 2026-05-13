@@ -760,6 +760,122 @@ pub struct FileFanOut {
     pub distinct_callees: u64,
 }
 
+/// P-ε — Aggregate substrate-readiness audit (`memory_substrate_audit`).
+/// Pure read-only composition of existing trait methods + a few raw SQL
+/// queries. Surfaces 7 metric families relevant to Layer-2 substrate
+/// (current state, edge crystallization, retire balance, signal fidelity)
+/// so the verify-design-act workflow has continuous evidence for the
+/// other 4 proposals (P-α/β/γ/δ) in `verify_memory_layers_vs_seed_l1l2l3`.
+///
+/// **Caveat**: this report does NOT touch the substrate itself — it
+/// reports the L1+L2 observable surface. No schema changes, no writes.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SubstrateAuditReport {
+    pub version: u8,
+    pub generated_at_secs: i64,
+    pub window_secs: u64,
+    pub m1_components: SubstrateComponents,
+    pub m2_edges: EdgeBreakdown,
+    pub m3_coactivation: CoactivationGrowth,
+    pub m4_retire: RetireBalance,
+    pub m5_edge_coverage: EdgeCoverage,
+    pub m6_embedding: EmbeddingBackendDist,
+    pub m7_signal_fidelity: SignalFidelityCompact,
+    pub m8_query: MemoryQueryStats,
+}
+
+/// M1 — connected-component breakdown of crystallized substrate edges.
+/// Hairball detection: `components=1` and `largest_size ≈ total_clustered_nodes`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SubstrateComponents {
+    pub min_size: i64,
+    pub components: u64,
+    pub total_clustered_nodes: u64,
+    pub largest_size: u64,
+    /// Per-component sizes, sorted descending.
+    pub distribution: Vec<u64>,
+}
+
+/// M2 — Edge density per edge_type. Splits L1-authored (`relates`,
+/// `derived_from`, etc.) from L2-crystallized (`cofires`, `co_referenced`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EdgeBreakdown {
+    pub total: u64,
+    pub per_type: std::collections::HashMap<String, u64>,
+    /// `total / active_memories` (0.0 if no active memories).
+    pub density_per_active: f64,
+}
+
+/// M3 — coactivation table growth. Tracks trace expansion vs saturation.
+/// Distinct from [`CoactivationStats`] (the β-trigger summary) — this is
+/// the temporal-growth-flavoured view scoped to a window.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CoactivationGrowth {
+    pub total_pairs: u64,
+    /// Pairs whose `last_at >= now - window_secs`.
+    pub recent_active: u64,
+    pub avg_count: f64,
+    pub max_count: u64,
+    /// Estimated new pairs per day = `recent_active / (window_secs / 86400)`.
+    pub est_daily_new_pairs: f64,
+}
+
+/// M4 — retire state machine balance + 7d delta.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RetireBalance {
+    pub active: u64,
+    pub archived: u64,
+    pub superseded: u64,
+    pub tombstoned: u64,
+    /// `archived / (active + archived + superseded + tombstoned)`.
+    pub archived_fraction: f64,
+    /// Net change over the window. Path-a: snapshot diff; path-b:
+    /// row-timestamp fallback. Approximate when `is_approximate=true`.
+    pub delta: RetireDelta,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RetireDelta {
+    pub active: i64,
+    pub archived: i64,
+    pub superseded: i64,
+    pub tombstoned: i64,
+    /// True when computed from row timestamps (no prior snapshot found);
+    /// false when computed by snapshot diff.
+    pub is_approximate: bool,
+}
+
+/// M5 — fraction of active memories with ≥1 cofires/co_referenced edge.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EdgeCoverage {
+    pub active_with_l2_edge: u64,
+    pub active_total: u64,
+    pub fraction: f64,
+}
+
+/// M6 — embedding backend distribution (P9/P12 column).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EmbeddingBackendDist {
+    pub onnx: u64,
+    pub hash: u64,
+    pub unknown: u64,
+    pub total: u64,
+    /// `(hash + unknown) / total` (0.0 if total=0).
+    pub stale_fraction: f64,
+}
+
+/// M7 — compact view of `signal_fidelity_stats` (no misrank lists).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SignalFidelityCompact {
+    pub r_all: f64,
+    pub r_touched: f64,
+    pub n_touched: u64,
+    /// "noise" / "weak" / "moderate" / "strong" per
+    /// `signal_fidelity_stats` verdict thresholds (|r| < 0.2 = noise,
+    /// < 0.4 = weak, < 0.6 = moderate, ≥ 0.6 = strong).
+    pub verdict: String,
+}
+
 /// Reorder memories so `kind == "session_handoff"` rows appear first.
 ///
 /// Session bootstrap and similar call sites use importance-based SQL ordering;
@@ -2139,6 +2255,24 @@ pub trait StateStore: Send + Sync {
         let _ = (root_path, top_n);
         Err(ab_core::Error::Backend(
             "codebase_call_stats not implemented".into(),
+        ))
+    }
+
+    /// P-ε — Substrate-Readiness Audit. Composes M1-M8 metric families
+    /// from existing trait methods + raw SQL on coactivation /
+    /// embedding_backend / edge_coverage. Pure read; no writes.
+    ///
+    /// `window_secs` controls lookback for M3 / M8 / RetireDelta.
+    /// Default-safe to pass `7 * 86400` (7 days).
+    ///
+    /// Default impl errors so non-sqlite backends opt in explicitly.
+    async fn memory_substrate_audit(
+        &self,
+        window_secs: u64,
+    ) -> Result<SubstrateAuditReport> {
+        let _ = window_secs;
+        Err(ab_core::Error::Backend(
+            "memory_substrate_audit not implemented".into(),
         ))
     }
 }
