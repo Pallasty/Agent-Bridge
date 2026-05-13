@@ -11423,6 +11423,175 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
+    // Phase 2 #3 third slice — codebase_call_stats aggregate over a
+    // seeded calls + symbols table. Verifies:
+    //   - per_language groups by language
+    //   - hot_callees sorts by call_count desc
+    //   - hot_callers + fan_out_files compute distinct callees correctly
+    //   - orphan detection uses last-segment match (so `Foo::bar` is NOT
+    //     orphan when callee `bar` exists, but `unused_fn` IS orphan)
+    //   - root_path scoping keeps repoA and repoB stats separate
+    #[tokio::test]
+    async fn codebase_call_stats_aggregates_over_seeded_table() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-codebase-call-stats-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                // 6 calls in /repoA: 4 rust, 2 python, distributed across
+                // 3 files. `helper` is the hot callee (3 hits from 2 callers).
+                let mut call_stmt = c.prepare(
+                    "INSERT INTO codebase_calls
+                       (file_path, line, language, caller, callee, root_path, indexed_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+                )?;
+                call_stmt.execute(params!["/repoA/a.rs", 10_i64, "rust", "main", "helper", "/repoA"])?;
+                call_stmt.execute(params!["/repoA/a.rs", 12_i64, "rust", "main", "helper", "/repoA"])?;
+                call_stmt.execute(params!["/repoA/b.rs", 5_i64, "rust", "Foo::bar", "helper", "/repoA"])?;
+                call_stmt.execute(params!["/repoA/b.rs", 6_i64, "rust", "Foo::bar", "println", "/repoA"])?;
+                call_stmt.execute(params!["/repoA/c.py", 1_i64, "python", "do_work", "logger.info", "/repoA"])?;
+                call_stmt.execute(params!["/repoA/c.py", 2_i64, "python", "do_work", "logger.info", "/repoA"])?;
+                // 1 call in /repoB — separate root, must not bleed into A's stats.
+                call_stmt.execute(params!["/repoB/main.rs", 1_i64, "rust", "main", "noop", "/repoB"])?;
+
+                // Symbols: 4 function-like in /repoA.
+                //   `main` (fn) — called via `main` (last seg matches),
+                //                 BUT it's a caller, not a callee — STILL ORPHAN.
+                //   `helper` (fn) — called, NOT orphan.
+                //   `Foo::bar` (fn) — last-seg `bar` not called, so ORPHAN.
+                //   `unused_fn` (fn) — never called, ORPHAN.
+                let mut sym_stmt = c.prepare(
+                    "INSERT INTO codebase_symbols
+                       (root_path, file_path, line, kind, name, signature, language, indexed_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+                )?;
+                sym_stmt.execute(params!["/repoA", "/repoA/a.rs", 1_i64, "fn", "main", "fn main()", "rust"])?;
+                sym_stmt.execute(params!["/repoA", "/repoA/b.rs", 1_i64, "fn", "helper", "fn helper()", "rust"])?;
+                sym_stmt.execute(params!["/repoA", "/repoA/b.rs", 20_i64, "fn", "Foo::bar", "fn bar()", "rust"])?;
+                sym_stmt.execute(params!["/repoA", "/repoA/b.rs", 30_i64, "fn", "unused_fn", "fn unused_fn()", "rust"])?;
+                Ok(())
+            })
+            .await
+            .expect("seed rows");
+
+        let stats = store
+            .codebase_call_stats("/repoA", 20)
+            .await
+            .expect("call_stats");
+        assert_eq!(stats.root_path, "/repoA");
+        assert_eq!(stats.total_calls, 6, "/repoB row must not bleed in");
+        assert_eq!(stats.distinct_caller_files, 3);
+
+        // Per-language: rust 4, python 2.
+        let rust = stats
+            .per_language
+            .iter()
+            .find(|l| l.language == "rust")
+            .expect("rust lang");
+        assert_eq!(rust.call_count, 4);
+        assert_eq!(rust.distinct_files, 2);
+        let py = stats
+            .per_language
+            .iter()
+            .find(|l| l.language == "python")
+            .expect("python lang");
+        assert_eq!(py.call_count, 2);
+        assert_eq!(py.distinct_files, 1);
+
+        // Hot callees: `helper` is #1 with 3 hits from 2 distinct callers.
+        let top = stats.hot_callees.first().expect("at least one hot callee");
+        assert_eq!(top.callee, "helper");
+        assert_eq!(top.call_count, 3);
+        assert_eq!(top.distinct_callers, 2);
+        assert_eq!(top.languages, vec!["rust".to_string()]);
+
+        // Fan-out callers: `Foo::bar` in /repoA/b.rs has 2 distinct callees
+        // (helper + println). `do_work` in c.py has 1 distinct callee.
+        let foo_bar = stats
+            .hot_callers
+            .iter()
+            .find(|c| c.caller == "Foo::bar")
+            .expect("Foo::bar caller row");
+        assert_eq!(foo_bar.distinct_callees, 2);
+        assert_eq!(foo_bar.total_calls, 2);
+
+        // Fan-out files: /repoA/b.rs has 2 distinct callees (helper, println).
+        let b_rs = stats
+            .fan_out_files
+            .iter()
+            .find(|f| f.file_path == "/repoA/b.rs")
+            .expect("b.rs fan-out row");
+        assert_eq!(b_rs.distinct_callees, 2);
+        assert_eq!(b_rs.total_calls, 2);
+
+        // Orphan check:
+        //   `helper` is called → not orphan
+        //   `main` is NOT in callee column (only as caller) → orphan? Yes, by
+        //          last-segment match: no callee anywhere == `main`. So it IS orphan.
+        //   `Foo::bar` last-seg `bar` not in any callee → orphan.
+        //   `unused_fn` last-seg `unused_fn` not in any callee → orphan.
+        let names: std::collections::HashSet<String> = stats
+            .orphan_functions
+            .iter()
+            .map(|o| o.name.clone())
+            .collect();
+        assert!(!names.contains("helper"), "helper is called, must not be orphan");
+        assert!(names.contains("Foo::bar"), "Foo::bar last-seg bar not called, must be orphan");
+        assert!(names.contains("unused_fn"), "unused_fn never called, must be orphan");
+        assert!(names.contains("main"), "main is not a callee anywhere, must be orphan");
+
+        // /repoB scope check — total_calls should be 1 in repoB.
+        let b_stats = store
+            .codebase_call_stats("/repoB", 20)
+            .await
+            .expect("repoB stats");
+        assert_eq!(b_stats.total_calls, 1);
+        assert_eq!(b_stats.distinct_caller_files, 1);
+        assert_eq!(b_stats.orphan_functions.len(), 0, "no symbols seeded for repoB");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // codebase_call_stats over an empty table returns zero counts and
+    // empty vecs — verifies the SELECT COUNT path and the
+    // unwrap_or(0) defaults for query_row failures on empty tables.
+    #[tokio::test]
+    async fn codebase_call_stats_handles_empty_table() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-codebase-call-stats-empty-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        let stats = store
+            .codebase_call_stats("/nothing", 20)
+            .await
+            .expect("call_stats on empty");
+        assert_eq!(stats.total_calls, 0);
+        assert_eq!(stats.distinct_caller_files, 0);
+        assert!(stats.per_language.is_empty());
+        assert!(stats.hot_callees.is_empty());
+        assert!(stats.hot_callers.is_empty());
+        assert!(stats.fan_out_files.is_empty());
+        assert!(stats.orphan_functions.is_empty());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
     // Verify `codebase_index` writes calls alongside symbols + imports
     // for a real Rust file. Closes the third-slice plumbing.
     #[tokio::test]
