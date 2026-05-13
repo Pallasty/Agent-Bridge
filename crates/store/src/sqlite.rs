@@ -6388,6 +6388,57 @@ impl StateStore for SqliteStore {
         })
     }
 
+    async fn decay_coactivation_once(
+        &self,
+        tau_secs: i64,
+        now: i64,
+        max_iterations: u32,
+    ) -> Result<crate::DecayCoactivationStats> {
+        // Clamp inputs to sane bounds. Negative tau or now collapses to
+        // "no work"; max_iterations < 1 means "no work"; >100 is wasteful.
+        let tau = tau_secs.max(1);
+        let now_clamped = now.max(0);
+        let max_iter = max_iterations.clamp(1, 100);
+
+        self.conn
+            .call(move |c| -> RusqliteResult<crate::DecayCoactivationStats> {
+                let mut swept_total: u64 = 0;
+                let mut iters: u32 = 0;
+                let tx = c.unchecked_transaction()?;
+                for _ in 0..max_iter {
+                    let n: usize = tx.execute(
+                        "UPDATE memory_coactivation
+                            SET count   = count / 2,
+                                last_at = last_at + ?1
+                          WHERE last_at + ?1 <= ?2",
+                        rusqlite::params![tau, now_clamped],
+                    )?;
+                    iters += 1;
+                    if n == 0 {
+                        // No more eligible rows; one extra "iters" counted
+                        // for the probe — back it off so callers see exact
+                        // work-done count instead of probe count.
+                        iters = iters.saturating_sub(1).max(1);
+                        break;
+                    }
+                    swept_total = swept_total.saturating_add(n as u64);
+                }
+                // Reap dead rows after all halvings complete.
+                let pruned: usize = tx.execute(
+                    "DELETE FROM memory_coactivation WHERE count < 1",
+                    [],
+                )?;
+                tx.commit()?;
+                Ok(crate::DecayCoactivationStats {
+                    swept: swept_total,
+                    pruned: pruned as u64,
+                    iterations: if swept_total == 0 { 0 } else { iters },
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("decay_coactivation_once: {e}")))
+    }
+
 
     // ─── v8: cloud-run lifecycle (warp-oz) ──────────────────────────────
 
@@ -12003,6 +12054,289 @@ mod tests {
         assert_eq!(r.m6_embedding.unknown, 1, "NULL backend");
         assert_eq!(r.m6_embedding.total, 3);
         assert!((r.m6_embedding.stale_fraction - (2.0 / 3.0)).abs() < 1e-9);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // ── P-α: decay_coactivation_once tests (act phase 1/3) ──
+    //
+    // Schema reminder: memory_coactivation has FK to memories on both
+    // key_a / key_b, and CHECK(key_a < key_b). So seeds must (a) insert
+    // matching memory rows and (b) order the keys lexically.
+
+    async fn seed_pair_for_decay(
+        store: &SqliteStore,
+        a: &str,
+        b: &str,
+        count: i64,
+        last_at: i64,
+    ) {
+        for k in [a, b] {
+            store
+                .memory_save(&crate::MemoryRecord {
+                    key: k.into(),
+                    kind: "lesson".into(),
+                    content: format!("c {k}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: "active".into(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save");
+        }
+        // memory_coactivation enforces key_a < key_b; sort here.
+        let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+        let lo = lo.to_string();
+        let hi = hi.to_string();
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "INSERT INTO memory_coactivation
+                       (key_a, key_b, count, first_at, last_at)
+                     VALUES (?1, ?2, ?3, ?4, ?4)",
+                    params![lo, hi, count, last_at],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed coactivation row");
+    }
+
+    async fn read_pair(store: &SqliteStore, a: &str, b: &str) -> Option<(i64, i64)> {
+        let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+        let lo = lo.to_string();
+        let hi = hi.to_string();
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<Option<(i64, i64)>> {
+                let row = c
+                    .query_row(
+                        "SELECT count, last_at FROM memory_coactivation
+                          WHERE key_a = ?1 AND key_b = ?2",
+                        params![lo, hi],
+                        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+                    )
+                    .ok();
+                Ok(row)
+            })
+            .await
+            .ok()
+            .flatten()
+    }
+
+    #[tokio::test]
+    async fn decay_coactivation_empty_store_returns_zeros() {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-decay-empty-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let s = store
+            .decay_coactivation_once(86_400, 1_000_000, 10)
+            .await
+            .expect("decay");
+
+        assert_eq!(s.swept, 0);
+        assert_eq!(s.pruned, 0);
+        assert_eq!(s.iterations, 0, "empty store reports 0 iterations");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_coactivation_halves_eligible_row_one_iteration() {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-decay-half-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+        let tau = 7 * 86_400_i64; // 7 days
+        let last_at = 1_000_000_i64;
+        let now = last_at + tau; // exactly one half-life elapsed
+
+        // count=8 row, eligible.
+        seed_pair_for_decay(&store, "a", "b", 8, last_at).await;
+
+        let s = store
+            .decay_coactivation_once(tau, now, 10)
+            .await
+            .expect("decay");
+
+        assert_eq!(s.swept, 1, "one row decayed");
+        assert_eq!(s.pruned, 0);
+        assert_eq!(s.iterations, 1, "one halving sufficed");
+
+        let (count, last) = read_pair(&store, "a", "b").await.expect("row present");
+        assert_eq!(count, 4, "8 / 2 = 4");
+        assert_eq!(last, last_at + tau, "last_at advanced by tau");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_coactivation_skips_ineligible_row() {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-decay-skip-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+        let tau = 7 * 86_400_i64;
+        let last_at = 1_000_000_i64;
+        let now = last_at + tau - 1; // one second short of eligibility
+
+        seed_pair_for_decay(&store, "a", "b", 8, last_at).await;
+
+        let s = store
+            .decay_coactivation_once(tau, now, 10)
+            .await
+            .expect("decay");
+
+        assert_eq!(s.swept, 0);
+        assert_eq!(s.pruned, 0);
+        assert_eq!(s.iterations, 0);
+
+        let (count, last) = read_pair(&store, "a", "b").await.expect("row present");
+        assert_eq!(count, 8, "untouched");
+        assert_eq!(last, last_at, "untouched");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_coactivation_prunes_when_count_reaches_zero() {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-decay-prune-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+        let tau = 7 * 86_400_i64;
+        let last_at = 1_000_000_i64;
+        let now = last_at + tau; // one half-life
+
+        // count=1 row: 1/2 = 0 → prune.
+        seed_pair_for_decay(&store, "a", "b", 1, last_at).await;
+
+        let s = store
+            .decay_coactivation_once(tau, now, 10)
+            .await
+            .expect("decay");
+
+        assert_eq!(s.swept, 1, "row was halved");
+        assert_eq!(s.pruned, 1, "row was then DELETEd");
+
+        assert!(read_pair(&store, "a", "b").await.is_none(), "row gone");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_coactivation_multi_iteration_catchup_for_stale_row() {
+        // Row last_at = now - 3τ → three half-lives behind. One sweep
+        // with max_iterations=10 should catch up all three halvings.
+        let dir = std::env::temp_dir().join(format!(
+            "ab-decay-catchup-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+        let tau = 7 * 86_400_i64;
+        let now = 4_000_000_i64;
+        let last_at = now - 3 * tau;
+
+        // count=16 → 8 → 4 → 2 across three iterations.
+        seed_pair_for_decay(&store, "a", "b", 16, last_at).await;
+
+        let s = store
+            .decay_coactivation_once(tau, now, 10)
+            .await
+            .expect("decay");
+
+        assert_eq!(s.swept, 3, "three halvings happened");
+        assert_eq!(s.pruned, 0);
+        assert_eq!(s.iterations, 3);
+
+        let (count, last) = read_pair(&store, "a", "b").await.expect("row present");
+        assert_eq!(count, 2, "16 → 8 → 4 → 2");
+        assert_eq!(last, last_at + 3 * tau, "advanced 3τ");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_coactivation_idempotent_when_now_unchanged() {
+        // First call decays once; second call with same `now` is a no-op.
+        let dir = std::env::temp_dir().join(format!(
+            "ab-decay-idempotent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+        let tau = 7 * 86_400_i64;
+        let last_at = 1_000_000_i64;
+        let now = last_at + tau;
+
+        seed_pair_for_decay(&store, "a", "b", 4, last_at).await;
+
+        let s1 = store
+            .decay_coactivation_once(tau, now, 10)
+            .await
+            .expect("decay 1");
+        let s2 = store
+            .decay_coactivation_once(tau, now, 10)
+            .await
+            .expect("decay 2");
+
+        assert_eq!(s1.swept, 1, "first call decayed");
+        assert_eq!(s1.iterations, 1);
+        assert_eq!(s2.swept, 0, "second call no-op");
+        assert_eq!(s2.iterations, 0);
+
+        let (count, _) = read_pair(&store, "a", "b").await.expect("row present");
+        assert_eq!(count, 2, "decayed exactly once across two calls");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

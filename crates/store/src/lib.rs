@@ -892,6 +892,30 @@ pub fn prioritize_session_handoff(rows: Vec<MemoryRecord>) -> Vec<MemoryRecord> 
 /// Distinct from `memory_decay_importance` (which decays by `updated_at`,
 /// i.e. "hasn't evolved"); this one captures "hasn't been useful" via
 /// `last_accessed_at`. Together they cover both edges of memory hygiene:
+/// P-α — Stats returned by a single `decay_coactivation_once` sweep.
+///
+/// The decay rule (integer half-life) halves `count` and advances
+/// `last_at` by `tau_secs` for every row where `last_at + tau ≤ now`.
+/// Rows that drop to `count < 1` are DELETEd. One sweep applies one
+/// half-life advance per eligible row; very stale tables (last_at far
+/// in the past) need multiple iterations within the same tick to catch
+/// up. The impl caps iterations at `max_iterations` (default 10).
+///
+/// Caller (bg task or CLI) injects `now` for deterministic testability.
+/// See `docs/DESIGN-P-alpha-always-warm-coactivation-tick.md`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct DecayCoactivationStats {
+    /// Total UPDATE-eligible rows touched across all iterations of this
+    /// sweep. Counts each iteration's affected rows (so if 5 rows decayed
+    /// twice in one sweep, `swept = 10`).
+    pub swept: u64,
+    /// Rows DELETEd because their `count` dropped to `< 1` this sweep.
+    pub pruned: u64,
+    /// How many UPDATE/DELETE rounds ran in this sweep (1..=max).
+    /// Returns `0` only when the table is empty or no row is eligible.
+    pub iterations: u32,
+}
+
 /// stale-write (compact target) and stale-read (Palace C7/C8 target).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct DecayUnusedStats {
@@ -2273,6 +2297,29 @@ pub trait StateStore: Send + Sync {
         let _ = window_secs;
         Err(ab_core::Error::Backend(
             "memory_substrate_audit not implemented".into(),
+        ))
+    }
+
+    /// P-α — Always-Warm Coactivation Tick: one sweep over
+    /// `memory_coactivation` applying integer half-life decay. For every
+    /// row where `last_at + tau_secs ≤ now`, halves `count` and advances
+    /// `last_at` by `tau_secs`. Iterates within a single call up to
+    /// `max_iterations` so multiple half-lives can be caught up on
+    /// stale tables. Rows with `count < 1` after decay are DELETEd.
+    ///
+    /// Caller injects `now` for deterministic testing. Default
+    /// `max_iterations` should be 10 (bounds the per-tick wall time).
+    ///
+    /// See `docs/DESIGN-P-alpha-always-warm-coactivation-tick.md`.
+    async fn decay_coactivation_once(
+        &self,
+        tau_secs: i64,
+        now: i64,
+        max_iterations: u32,
+    ) -> Result<DecayCoactivationStats> {
+        let _ = (tau_secs, now, max_iterations);
+        Err(ab_core::Error::Backend(
+            "decay_coactivation_once not implemented".into(),
         ))
     }
 }
