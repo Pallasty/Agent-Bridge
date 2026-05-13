@@ -6074,6 +6074,320 @@ impl StateStore for SqliteStore {
             .map_err(|e| Error::Backend(format!("codebase_call_stats: {e}")))
     }
 
+    async fn memory_substrate_audit(
+        &self,
+        window_secs: u64,
+    ) -> Result<crate::SubstrateAuditReport> {
+        // ── M1 — components (reuse hebbian_clusters) ──
+        let clusters = self
+            .hebbian_clusters(2)
+            .await
+            .map_err(|e| Error::Backend(format!("substrate_audit M1 clusters: {e}")))?;
+        let mut distribution: Vec<u64> = clusters.iter().map(|c| c.size).collect();
+        distribution.sort_unstable_by(|a, b| b.cmp(a));
+        let m1 = crate::SubstrateComponents {
+            min_size: 2,
+            components: clusters.len() as u64,
+            total_clustered_nodes: distribution.iter().sum(),
+            largest_size: distribution.first().copied().unwrap_or(0),
+            distribution,
+        };
+
+        // ── M4/M7/M8 — reuse existing trait methods ──
+        let mem_stats = self
+            .memory_stats()
+            .await
+            .map_err(|e| Error::Backend(format!("substrate_audit M4 memory_stats: {e}")))?;
+        let signal = self
+            .signal_fidelity_stats(0)
+            .await
+            .map_err(|e| Error::Backend(format!("substrate_audit M7 signal_fidelity: {e}")))?;
+        let query_stats = self
+            .memory_query_stats(window_secs as i64)
+            .await
+            .map_err(|e| Error::Backend(format!("substrate_audit M8 query_stats: {e}")))?;
+
+        let active_total = *mem_stats.counts_by_status.get("active").unwrap_or(&0);
+        let archived = *mem_stats.counts_by_status.get("archived").unwrap_or(&0);
+        let superseded = *mem_stats.counts_by_status.get("superseded").unwrap_or(&0);
+        let tombstoned = *mem_stats.counts_by_status.get("tombstoned").unwrap_or(&0);
+
+        // ── M2 — edges per_type via raw SQL ──
+        let m2 = {
+            let active_for_density = active_total as f64;
+            let per_type_rows: Vec<(String, u64)> = self
+                .conn
+                .call(|c| -> RusqliteResult<Vec<(String, u64)>> {
+                    let mut stmt = c.prepare(
+                        "SELECT edge_type, COUNT(*) FROM memory_edges GROUP BY edge_type",
+                    )?;
+                    let rows = stmt
+                        .query_map([], |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, i64>(1)? as u64,
+                            ))
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(rows)
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("substrate_audit M2 edges: {e}")))?;
+            let per_type: std::collections::HashMap<String, u64> =
+                per_type_rows.into_iter().collect();
+            crate::EdgeBreakdown {
+                total: mem_stats.edge_count,
+                per_type,
+                density_per_active: if active_for_density > 0.0 {
+                    mem_stats.edge_count as f64 / active_for_density
+                } else {
+                    0.0
+                },
+            }
+        };
+
+        // ── M3 — coactivation table growth ──
+        let now = now_secs();
+        let cutoff = now - window_secs as i64;
+        let m3 = {
+            let (total_pairs, recent_active, avg_count, max_count): (u64, u64, f64, u64) = self
+                .conn
+                .call(move |c| -> RusqliteResult<(u64, u64, f64, u64)> {
+                    let total: i64 = c
+                        .query_row("SELECT COUNT(*) FROM memory_coactivation", [], |r| r.get(0))
+                        .unwrap_or(0);
+                    let recent: i64 = c
+                        .query_row(
+                            "SELECT COUNT(*) FROM memory_coactivation WHERE last_at >= ?1",
+                            [cutoff],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    let avg: f64 = c
+                        .query_row(
+                            "SELECT COALESCE(AVG(count), 0.0) FROM memory_coactivation",
+                            [],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0.0);
+                    let maxc: i64 = c
+                        .query_row(
+                            "SELECT COALESCE(MAX(count), 0) FROM memory_coactivation",
+                            [],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    Ok((total as u64, recent as u64, avg, maxc as u64))
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("substrate_audit M3 coactivation: {e}")))?;
+            let est_daily = if window_secs > 0 {
+                (recent_active as f64) / (window_secs as f64 / 86_400.0)
+            } else {
+                0.0
+            };
+            crate::CoactivationGrowth {
+                total_pairs,
+                recent_active,
+                avg_count,
+                max_count,
+                est_daily_new_pairs: est_daily,
+            }
+        };
+
+        // ── M4 — retire balance + 7d delta via row timestamps (path-b
+        //         fallback per memo §6; path-a snapshot diff is a later
+        //         refinement once daily snapshot history exists) ──
+        let m4 = {
+            let total = active_total + archived + superseded + tombstoned;
+            let archived_fraction = if total > 0 {
+                archived as f64 / total as f64
+            } else {
+                0.0
+            };
+            // Row-timestamp fallback: count rows whose updated_at crossed
+            // into the current status during the window (approximate).
+            let delta_active: i64 = self
+                .conn
+                .call(move |c| -> RusqliteResult<i64> {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM memories WHERE status='active' AND created_at >= ?1",
+                        [cutoff],
+                        |r| r.get(0),
+                    )
+                    .or(Ok(0))
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("substrate_audit M4 delta_active: {e}")))?;
+            let delta_archived: i64 = self
+                .conn
+                .call(move |c| -> RusqliteResult<i64> {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM memories WHERE status='archived' AND updated_at >= ?1",
+                        [cutoff],
+                        |r| r.get(0),
+                    )
+                    .or(Ok(0))
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("substrate_audit M4 delta_archived: {e}")))?;
+            let delta_tombstoned: i64 = self
+                .conn
+                .call(move |c| -> RusqliteResult<i64> {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM memories WHERE status='tombstoned' AND updated_at >= ?1",
+                        [cutoff],
+                        |r| r.get(0),
+                    )
+                    .or(Ok(0))
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("substrate_audit M4 delta_tombstoned: {e}")))?;
+            let delta_superseded: i64 = self
+                .conn
+                .call(move |c| -> RusqliteResult<i64> {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM memories WHERE status='superseded' AND updated_at >= ?1",
+                        [cutoff],
+                        |r| r.get(0),
+                    )
+                    .or(Ok(0))
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("substrate_audit M4 delta_superseded: {e}")))?;
+            crate::RetireBalance {
+                active: active_total,
+                archived,
+                superseded,
+                tombstoned,
+                archived_fraction,
+                delta: crate::RetireDelta {
+                    active: delta_active,
+                    archived: delta_archived,
+                    superseded: delta_superseded,
+                    tombstoned: delta_tombstoned,
+                    is_approximate: true,
+                },
+            }
+        };
+
+        // ── M5 — edge coverage of active memories ──
+        let m5 = {
+            let active_with_edge: i64 = self
+                .conn
+                .call(|c| -> RusqliteResult<i64> {
+                    c.query_row(
+                        "SELECT COUNT(DISTINCT key) FROM (
+                           SELECT from_key AS key FROM memory_edges
+                             WHERE edge_type IN ('cofires','co_referenced')
+                           UNION
+                           SELECT to_key   AS key FROM memory_edges
+                             WHERE edge_type IN ('cofires','co_referenced')
+                         ) AS touched
+                         WHERE key IN (SELECT key FROM memories WHERE status='active')",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .or(Ok(0))
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("substrate_audit M5 edge_coverage: {e}")))?;
+            let active_with_edge = active_with_edge as u64;
+            crate::EdgeCoverage {
+                active_with_l2_edge: active_with_edge,
+                active_total,
+                fraction: if active_total > 0 {
+                    active_with_edge as f64 / active_total as f64
+                } else {
+                    0.0
+                },
+            }
+        };
+
+        // ── M6 — embedding backend distribution ──
+        let m6 = {
+            let rows: Vec<(Option<String>, u64)> = self
+                .conn
+                .call(|c| -> RusqliteResult<Vec<(Option<String>, u64)>> {
+                    let mut stmt = c.prepare(
+                        "SELECT embedding_backend, COUNT(*) FROM memories
+                           WHERE status='active'
+                           GROUP BY embedding_backend",
+                    )?;
+                    let rows = stmt
+                        .query_map([], |row| {
+                            Ok((
+                                row.get::<_, Option<String>>(0)?,
+                                row.get::<_, i64>(1)? as u64,
+                            ))
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(rows)
+                })
+                .await
+                .map_err(|e| Error::Backend(format!("substrate_audit M6 embedding: {e}")))?;
+            let mut onnx = 0u64;
+            let mut hash = 0u64;
+            let mut unknown = 0u64;
+            for (backend, n) in rows {
+                match backend.as_deref() {
+                    Some(b) if b.starts_with("onnx") || b.contains("MiniLM") => onnx += n,
+                    Some(b) if b.starts_with("hash") || b.contains("fnv") => hash += n,
+                    _ => unknown += n,
+                }
+            }
+            let total = onnx + hash + unknown;
+            let stale_fraction = if total > 0 {
+                (hash + unknown) as f64 / total as f64
+            } else {
+                0.0
+            };
+            crate::EmbeddingBackendDist {
+                onnx,
+                hash,
+                unknown,
+                total,
+                stale_fraction,
+            }
+        };
+
+        // ── M7 — compact signal fidelity (no misrank rows) ──
+        let m7 = {
+            let r = signal.spearman_r_touched;
+            let verdict = if r.is_nan() {
+                "n/a".to_string()
+            } else if r.abs() < 0.2 {
+                "noise".to_string()
+            } else if r.abs() < 0.4 {
+                "weak".to_string()
+            } else if r.abs() < 0.6 {
+                "moderate".to_string()
+            } else {
+                "strong".to_string()
+            };
+            crate::SignalFidelityCompact {
+                r_all: signal.spearman_r,
+                r_touched: signal.spearman_r_touched,
+                n_touched: signal.n_touched,
+                verdict,
+            }
+        };
+
+        Ok(crate::SubstrateAuditReport {
+            version: 1,
+            generated_at_secs: now,
+            window_secs,
+            m1_components: m1,
+            m2_edges: m2,
+            m3_coactivation: m3,
+            m4_retire: m4,
+            m5_edge_coverage: m5,
+            m6_embedding: m6,
+            m7_signal_fidelity: m7,
+            m8_query: query_stats,
+        })
+    }
+
 
     // ─── v8: cloud-run lifecycle (warp-oz) ──────────────────────────────
 
