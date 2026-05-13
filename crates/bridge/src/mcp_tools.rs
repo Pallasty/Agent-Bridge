@@ -8581,6 +8581,145 @@ impl McpTool for MemoryQueryStatsTool {
 }
 
 // ===========================================================================
+//        memory_substrate_audit — P-ε substrate-readiness aggregate
+// ===========================================================================
+
+pub struct MemorySubstrateAuditTool {
+    hub: Hub,
+}
+impl MemorySubstrateAuditTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemorySubstrateAuditTool {
+    fn name(&self) -> &'static str {
+        "memory_substrate_audit"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "P-ε — Substrate-Readiness Audit. Read-only aggregate of 7 metric \
+                 families relevant to L1+L2 substrate state: M1 connected components of \
+                 cofires/co_referenced edges (hairball detection), M2 edges per type, \
+                 M3 coactivation table growth, M4 retire-state balance + 7d delta, \
+                 M5 fraction of active memories with ≥1 L2 edge, M6 embedding backend \
+                 distribution, M7 signal-fidelity Spearman + verdict, M8 query-side \
+                 health. Pure composition over existing trait methods; no schema or \
+                 write paths. See `docs/DESIGN-P-epsilon-substrate-readiness-audit.md`."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31_536_000,
+                        "default": 604_800,
+                        "description": "Lookback window for M3 recent_active / M4 delta / M8 query stats. Default 7 days."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(604_800)
+            .clamp(60, 31_536_000) as u64;
+
+        let r = store.memory_substrate_audit(window_secs).await?;
+
+        let per_type_json: serde_json::Map<String, Value> = r
+            .m2_edges
+            .per_type
+            .iter()
+            .map(|(k, v)| (k.clone(), json!(v)))
+            .collect();
+        let by_kind_json: Vec<Value> = r
+            .m8_query
+            .by_kind
+            .iter()
+            .map(|(k, n)| json!({ "kind": k, "count": n }))
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "version": r.version,
+            "generated_at_secs": r.generated_at_secs,
+            "window_secs": r.window_secs,
+            "m1_components": {
+                "min_size": r.m1_components.min_size,
+                "components": r.m1_components.components,
+                "total_clustered_nodes": r.m1_components.total_clustered_nodes,
+                "largest_size": r.m1_components.largest_size,
+                "distribution": r.m1_components.distribution,
+            },
+            "m2_edges": {
+                "total": r.m2_edges.total,
+                "per_type": per_type_json,
+                "density_per_active": (r.m2_edges.density_per_active * 1000.0).round() / 1000.0,
+            },
+            "m3_coactivation": {
+                "total_pairs": r.m3_coactivation.total_pairs,
+                "recent_active": r.m3_coactivation.recent_active,
+                "avg_count": (r.m3_coactivation.avg_count * 100.0).round() / 100.0,
+                "max_count": r.m3_coactivation.max_count,
+                "est_daily_new_pairs":
+                    (r.m3_coactivation.est_daily_new_pairs * 100.0).round() / 100.0,
+            },
+            "m4_retire": {
+                "active": r.m4_retire.active,
+                "archived": r.m4_retire.archived,
+                "superseded": r.m4_retire.superseded,
+                "tombstoned": r.m4_retire.tombstoned,
+                "archived_fraction": (r.m4_retire.archived_fraction * 1000.0).round() / 1000.0,
+                "delta": {
+                    "active": r.m4_retire.delta.active,
+                    "archived": r.m4_retire.delta.archived,
+                    "superseded": r.m4_retire.delta.superseded,
+                    "tombstoned": r.m4_retire.delta.tombstoned,
+                    "is_approximate": r.m4_retire.delta.is_approximate,
+                },
+            },
+            "m5_edge_coverage": {
+                "active_with_l2_edge": r.m5_edge_coverage.active_with_l2_edge,
+                "active_total": r.m5_edge_coverage.active_total,
+                "fraction": (r.m5_edge_coverage.fraction * 1000.0).round() / 1000.0,
+            },
+            "m6_embedding": {
+                "onnx": r.m6_embedding.onnx,
+                "hash": r.m6_embedding.hash,
+                "unknown": r.m6_embedding.unknown,
+                "total": r.m6_embedding.total,
+                "stale_fraction": (r.m6_embedding.stale_fraction * 1000.0).round() / 1000.0,
+            },
+            "m7_signal_fidelity": {
+                "r_all": (r.m7_signal_fidelity.r_all * 1000.0).round() / 1000.0,
+                "r_touched": (r.m7_signal_fidelity.r_touched * 1000.0).round() / 1000.0,
+                "n_touched": r.m7_signal_fidelity.n_touched,
+                "verdict": r.m7_signal_fidelity.verdict,
+            },
+            "m8_query": {
+                "hit_rate": (r.m8_query.hit_rate * 1000.0).round() / 1000.0,
+                "p50_us": r.m8_query.p50_duration_us,
+                "p95_us": r.m8_query.p95_duration_us,
+                "total_queries": r.m8_query.total_queries,
+                "avg_top_hit_age_days":
+                    (r.m8_query.avg_top_hit_age_secs / 86_400.0 * 100.0).round() / 100.0,
+                "by_kind": by_kind_json,
+            },
+        })))
+    }
+}
+
+// ===========================================================================
 //             memory_link_audit — Phase 0 dead-link probe over bodies
 // ===========================================================================
 
@@ -12762,6 +12901,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryStatsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryQueryStatsTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySubstrateAuditTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkAuditTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySuggestTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkOrphansTool::new(hub.clone())));

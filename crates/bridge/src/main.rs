@@ -700,6 +700,26 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **P-ε — Substrate-Readiness Audit.** Read-only aggregate of 7
+    /// metric families (M1-M8) covering L1+L2 substrate state: connected
+    /// components, edges per type, coactivation growth, retire balance,
+    /// edge coverage of active memories, embedding backend distribution,
+    /// signal-fidelity Spearman, query-side health. CLI mirror of the
+    /// `memory_substrate_audit` MCP tool.
+    ///
+    /// Pure composition; no schema, no writes. Use as ongoing baseline
+    /// before v22 substrate ships; continues to be useful after as
+    /// substrate observability surface. See
+    /// `docs/DESIGN-P-epsilon-substrate-readiness-audit.md`.
+    SubstrateAudit {
+        /// Lookback window for M3 recent_active / M4 delta / M8 query
+        /// stats. Default 7 days.
+        #[arg(long, default_value_t = 7)]
+        window_days: u32,
+        /// Emit raw JSON of `SubstrateAuditReport` instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1208,6 +1228,9 @@ async fn main() -> Result<()> {
                     *json,
                 )
                 .await
+            }
+            DreamOp::SubstrateAudit { window_days, json } => {
+                run_dream_substrate_audit(*window_days, *json).await
             }
         };
     }
@@ -4667,6 +4690,152 @@ fn truncate_chars(s: &str, n: usize) -> String {
         let prefix: String = s.chars().take(n.saturating_sub(1)).collect();
         format!("{prefix}…")
     }
+}
+
+/// P-ε — Substrate-Readiness Audit CLI. Calls the same trait method as
+/// the `memory_substrate_audit` MCP tool; pretty text in terminal mode,
+/// JSON via `--json`. Pure read.
+async fn run_dream_substrate_audit(window_days: u32, as_json: bool) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+    let db_path = default_db_path();
+    let store = SqliteStore::open(&db_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
+    let window_secs = (window_days as u64) * 86_400;
+    let r = store
+        .memory_substrate_audit(window_secs)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_substrate_audit: {e}"))?;
+
+    if as_json {
+        let s = serde_json::to_string_pretty(&r)
+            .map_err(|e| anyhow::anyhow!("serialize report: {e}"))?;
+        println!("{s}");
+        return Ok(());
+    }
+
+    println!("# Substrate-Readiness Audit (P-ε)");
+    println!("DB: {}", db_path.display());
+    println!("window: {} days", window_days);
+    println!();
+
+    // M1
+    println!("M1 components (cofires + co_referenced):");
+    println!(
+        "  components: {}  largest_size: {}  total_clustered: {}",
+        r.m1_components.components,
+        r.m1_components.largest_size,
+        r.m1_components.total_clustered_nodes
+    );
+    let m1_verdict = if r.m1_components.components == 0 {
+        "(empty)"
+    } else if r.m1_components.components == 1 {
+        "⚠ hairball regime"
+    } else if r.m1_components.components < 3 {
+        "partially modular"
+    } else {
+        "✓ modular"
+    };
+    println!("  verdict: {m1_verdict}");
+
+    // M2
+    println!();
+    println!("M2 edges by type:");
+    let mut pairs: Vec<(&String, &u64)> = r.m2_edges.per_type.iter().collect();
+    pairs.sort_by(|a, b| b.1.cmp(a.1));
+    for (t, n) in pairs {
+        println!("  {:<14} {:>5}", t, n);
+    }
+    println!(
+        "  total: {} · density/active: {:.3}",
+        r.m2_edges.total, r.m2_edges.density_per_active
+    );
+
+    // M3
+    println!();
+    println!("M3 coactivation:");
+    println!(
+        "  total_pairs: {}  recent_active({}d): {}  avg_count: {:.2}  max_count: {}",
+        r.m3_coactivation.total_pairs,
+        window_days,
+        r.m3_coactivation.recent_active,
+        r.m3_coactivation.avg_count,
+        r.m3_coactivation.max_count,
+    );
+    println!(
+        "  est_daily_new_pairs: {:.2}",
+        r.m3_coactivation.est_daily_new_pairs
+    );
+
+    // M4
+    println!();
+    println!("M4 retire-state balance:");
+    println!(
+        "  active: {}  archived: {}  superseded: {}  tombstoned: {}",
+        r.m4_retire.active,
+        r.m4_retire.archived,
+        r.m4_retire.superseded,
+        r.m4_retire.tombstoned,
+    );
+    println!(
+        "  archived_fraction: {:.3}  delta_7d (approx={}): a={:+} archived={:+} t={:+} s={:+}",
+        r.m4_retire.archived_fraction,
+        r.m4_retire.delta.is_approximate,
+        r.m4_retire.delta.active,
+        r.m4_retire.delta.archived,
+        r.m4_retire.delta.tombstoned,
+        r.m4_retire.delta.superseded,
+    );
+
+    // M5
+    println!();
+    println!("M5 edge coverage of active:");
+    println!(
+        "  active_with_l2_edge: {} / {} · fraction: {:.3}",
+        r.m5_edge_coverage.active_with_l2_edge,
+        r.m5_edge_coverage.active_total,
+        r.m5_edge_coverage.fraction,
+    );
+
+    // M6
+    println!();
+    println!("M6 embedding backend:");
+    println!(
+        "  onnx: {}  hash: {}  unknown: {}  total: {}  stale_fraction: {:.3}",
+        r.m6_embedding.onnx,
+        r.m6_embedding.hash,
+        r.m6_embedding.unknown,
+        r.m6_embedding.total,
+        r.m6_embedding.stale_fraction,
+    );
+
+    // M7
+    println!();
+    println!("M7 signal fidelity:");
+    println!(
+        "  r_all: {:.3}  r_touched: {:.3} (n={})  verdict: {}",
+        r.m7_signal_fidelity.r_all,
+        r.m7_signal_fidelity.r_touched,
+        r.m7_signal_fidelity.n_touched,
+        r.m7_signal_fidelity.verdict,
+    );
+
+    // M8
+    println!();
+    println!("M8 query health ({}d window):", window_days);
+    println!(
+        "  total: {}  hit_rate: {:.3}  p50: {}µs  p95: {}µs",
+        r.m8_query.total_queries,
+        r.m8_query.hit_rate,
+        r.m8_query.p50_duration_us,
+        r.m8_query.p95_duration_us,
+    );
+    println!(
+        "  avg_top_hit_age: {:.2}d",
+        r.m8_query.avg_top_hit_age_secs / 86_400.0
+    );
+
+    Ok(())
 }
 
 /// Build a kind→count map from a JSON array of `{kind, count}` objects.
