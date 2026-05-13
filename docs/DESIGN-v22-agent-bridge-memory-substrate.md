@@ -378,6 +378,46 @@ Zero-init then learn online (Hebbian-like)? Or zero-shot SVD over historical eve
 
 Tentatively recommend zero-init to preserve mechanistic purity. Document and let dogfood data decide.
 
+### Q7 — Perception source subscription scope (RESOLVED post 52)
+
+Which `source` values in `record_memory_query` should feed substrate?
+
+**Subscribed (Layer 2 perception)**:
+- `mcp:memory_save` — write events (highest signal)
+- `mcp:memory_get` — read events (attention signal)
+- `mcp:memory_search` — query events (intent signal)
+
+**Opt-out** (these are L3 phenomena, not raw perception):
+- `palace_viewer:click` — UI navigation; already redundantly invokes `memory_get` inside `api_memory`, so substrate sees the underlying get not the click
+- `mcp:memory_link` / `mcp:memory_consolidate` / `mcp:memory_compact` — meta-operations on graph structure, not first-class events
+- Background tasks: `dream replay`, `dream promote`, `dream snapshot` — these READ memory but are internal hygiene, not user-driven perception
+
+**Subscription is an axis (§3.2)**: per-source filter is configurable, default subscribes the 3-source set above. Future multi-grid setups may have different grids subscribe different source subsets (one grid for user perception, another for hygiene events) without architectural change.
+
+### Q8 — Quantitative threshold for P3 (cold-start improvement) (RESOLVED — sharpened from earlier draft)
+
+P3's original phrasing was qualitative: "expected: substrate's `neighbors_of(query_centroid)` surfaces the recently-ingested 3rd-slice key in top-K". Need a concrete success bar.
+
+**Refined P3**:
+
+Re-run the cold-start probe `research_drosophila_cold_start_misses_frontier_20260512` after 14 days substrate uptime. Define a fixed query set Q = {5 manual cold-start probes pulled from research memos}, where for each q ∈ Q, we know the "frontier hit" ground-truth key.
+
+Substrate baseline: vanilla semantic search, no substrate bias.
+
+Substrate-biased: re-rank top-50 semantic hits by `score' = score × (1 + α · substrate.neighbors_of(q, 50).contains_weight)` with α ∈ {0.2, 0.5}.
+
+**Success criteria** (any one suffices):
+
+| Metric | Baseline (today) | Substrate-biased threshold | Outcome |
+|---|---|---|---|
+| MRR@10 (mean reciprocal rank of frontier hit) | < 0.30 | ≥ 0.50 | P3 PASS |
+| Recall@5 (frontier hit lands in top-5) | < 40% (2/5) | ≥ 60% (3/5) | P3 PASS |
+| Time-to-frontier (cycles until any frontier hit fires) | unmeasured | < 3 cycles avg | secondary signal |
+
+**Failure rule**: if both MRR@10 stays < 0.40 AND Recall@5 stays < 60% on substrate-biased after 14d uptime, **P3 FAILS** → §4 P6 null-result path activates, redirect to L3 pattern completion v0.
+
+**Why 14d not 30d**: Q5 audit shows working event rate is ~57/day not 244/day. At lower rate, substrate needs ~14d to accumulate `n_alive ≈ 200` meaningful neurons. P1/P2 (structural) still measure at 30d; P3 (behavioral) measures earlier.
+
 ---
 
 ## 12 · File map (implementation reference — not yet code)
