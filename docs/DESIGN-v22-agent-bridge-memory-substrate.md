@@ -1,0 +1,404 @@
+# DESIGN — v22: Agent-Bridge Memory Substrate (Layer 2 Seed Grid)
+
+**Status**: design draft 2026-05-13. **No code until this memo is solid.**
+**Predecessor**: `DESIGN-v21-synaptic-trace-and-dream.md` (α/β/γ trace + dream layer).
+**Companion docs (AiOT side, ground-truth for v22)**:
+- `AiOT:docs/memos/MULTI_GRID_ARCHITECTURE_FOUNDATIONS_2026_05_13.md`
+- `AiOT:docs/memos/SEED_STATE_AND_ADJUSTMENT_DIRECTION_2026_05_13.md`
+- `AiOT:project_seed_uniaxial_structural_2026_05_13.md`
+- `feedback_verify_design_act_workflow.md`
+**Forum thread**: design board #6 — *v22 RFC — Agent-Bridge Memory Substrate (Layer 2 Seed grid)*
+
+---
+
+## 0 · Why this exists (verify-phase output)
+
+Agent-Bridge memory has shipped P17–P24 across two layers:
+
+| Layer (per Multi-Grid Foundations §3) | Current ship | Status |
+|---|---|---|
+| L3 — Inter-grid / UI / recall | Palace viewer, canvas rail, dream stats, dream replay, ζ-10 hygiene cron, embedding stats footer, kind-aware split, lineage rail, retire state machine | ✅ extensive |
+| L2 — **Memory substrate** | (none — only `memory_coactivation` SQL **trace**) | ❌ **missing** |
+| L1 — Substrate rules | (none — agent-bridge has no learning rule binary) | ❌ **missing** |
+
+The AiOT Seed line solved L1 (Rust crate, 280 LOC, 28 unit tests, softmax-competition + spawn/death + bit-exact cross-machine determinism per ADR-022/023). The agent-bridge memory line has produced rich L3 but **no L2 substrate**.
+
+`dream cluster-probe` (commit `e5c88fb` 2026-05-13) revealed that the SQL coactivation graph collapses to a **single hairball component** (28 nodes, 1 component). The framing this surfaces: SQL trace is not modular by construction. A real substrate (Seed grid with softmax-competition + multi-carrier v10 bimodal property) would produce **internal modular structure** naturally — that's the point of having an L2.
+
+**v22's job**: introduce the missing L2 — wire an AiOT-style Seed grid as the substrate that consumes agent-bridge memory events as perception, and provides modular topology back to L3 retrieval.
+
+This is also the agent-bridge realization of **one of Direction α (multi-grid parallel)'s first concrete instances**: a memory-domain grid that exchanges signals (centroids, surprise events) with future AiOT grids per `project_seed_v10_multiplicity` bimodal cross-similarity invariant.
+
+---
+
+## 1 · Goals (in scope)
+
+| # | Goal | Acceptance test |
+|---|---|---|
+| G1 | Every memory event (save/get/search) flows through encoder → projection → Seed substrate step | After 1 day of normal use, `substrate_snapshot.parquet` contains ≥ 200 step rows with non-zero `connection_logits` diffs |
+| G2 | Substrate is N=256 starting point, eager-allocated, always-warm at 1 Hz Warm tier | `agent-bridge substrate stats` reports `n_alive ≈ 256`, `cadence_hz ≈ 1.0`, `tier=Warm` continuously |
+| G3 | Substrate exposes a query API: given a key (or query embedding), return co-active neuron IDs and the keys those neurons last fired on | `substrate.active_neighbors(key, k=8)` returns deterministic ordered list; reused across processes via snapshot reload |
+| G4 | Snapshot determinism: same seed + same event log replays bit-exact | `agent-bridge substrate replay --log events.jsonl --seed 42` produces SHA256-identical `substrate_snapshot.parquet` across aio2 and Mac |
+| G5 | L2 ablation is clean: turning substrate off does not break L3 retrieval | `AGENT_BRIDGE_DISABLE_SUBSTRATE=1` makes all `substrate_*` calls no-op; existing FTS/semantic/cofires paths unchanged |
+| G6 | Compute envelope budget held: substrate adds < 1% of one CPU core sustained | After 7-day dogfood, `top` shows substrate worker thread ≤ 1% CPU time avg; encoder MiniLM dominates if anything |
+| G7 | Memory budget held: substrate state ≤ 5 MB RAM, ≤ 5 GB/year on-disk | `du -sh state.db substrate_snapshot.parquet` after 1 month ≤ 500 MB |
+| G8 | Three-axis decoupling preserved: state existence / cadence / perception subscription are independent | Toggle each axis via CLI flag; observe expected behavior (loaded but paused; loaded + computing but unsubscribed from new perception; etc.) |
+
+## 2 · Non-goals (out of scope for v22)
+
+- ✗ Multi-grid parallel (multiple Seed grids exchanging signals) — that's AiOT Direction α; v22 ships a single memory-domain grid only.
+- ✗ Replacing α `memory_coactivation` table — v22 substrate sits **alongside** the SQL trace, not on top. Trace remains the audit log; substrate is the structural learner.
+- ✗ Replacing or modifying `agent-bridge-seed` static `hub_clusters` / `near_keys` — those are v0.13.0 path-C semantic priors (different layer); v22 substrate is a parallel L2 mechanism, not a replacement.
+- ✗ Cross-machine substrate consensus — first ship is single-node; cross-machine fork-and-rejoin deferred until single-node is solid.
+- ✗ Modifying any existing CLI surface (`dream …`, `memory_*`, `palace serve`) — v22 introduces a new `substrate` subtree, never re-routes existing commands.
+- ✗ LLM-driven anything inside v22 substrate. The substrate is pure mechanism (softmax-competition Hebbian learning). LLM consolidation stays at the L3 dream-replay layer.
+
+---
+
+## 3 · Architecture
+
+### 3.1 The three layers, made explicit for v22
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ L3 — Recall / UI / hygiene                                       │
+│      Palace viewer · canvas chat · dream {replay,stats,promote, │
+│      identity,cluster-probe} · ζ-10 cron · embedding-stats       │
+│      (P17–P24 shipped)                                           │
+│                                                                  │
+│      ↑ reads attention bias / topology                           │
+└──────┼──────────────────────────────────────────────────────────┘
+       │
+┌──────┼──────────────────────────────────────────────────────────┐
+│ L2 — **v22 substrate (NEW)**                                     │
+│      One Seed grid, N=256, Warm tier @ 1 Hz + event-triggered   │
+│      Receives memory events as perception                        │
+│      Maintains connection_logits + in_strengths                  │
+│      Periodic Parquet snapshot                                   │
+│      Exposes neighbor / cofires-from-substrate queries           │
+└──────┼──────────────────────────────────────────────────────────┘
+       │  ← agent-bridge memory events as perception
+       │
+┌──────┼──────────────────────────────────────────────────────────┐
+│ L1 — Substrate rules (REUSED from AiOT)                          │
+│      Rust binary: softmax-competition learning + spawn/death     │
+│      + Adam optimizer + RNG-seeded cross-machine determinism     │
+│      (AiOT crate; shipped, 28 unit tests)                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 3.2 Three-axis decoupling (Multi-Grid Foundations §5.5)
+
+For v22's single grid, axes default as follows (overridable):
+
+| Axis | Default | CLI override |
+|---|---|---|
+| State Existence | always loaded (eager, ~260 KB) | `--state-mode {loaded, persisted_only}` |
+| Activation Cadence | Warm: 1 Hz baseline + event-triggered burst | `--cadence-hz N`, `--tier {hot, warm, cool, cold}` |
+| Perception Subscription | full agent-bridge memory event stream | `--subscribe {memory_save, memory_get, memory_search}` subset |
+
+These three are independent variables. Future multi-grid work needs them to vary per grid. v22 fixes them but the substrate API does NOT collapse them.
+
+### 3.3 Perception pipeline (the bridge between L3 and L2)
+
+```
+agent-bridge memory event  (kind, key, content/query, ts)
+    │
+    ▼
+encoder  (existing fastembed ONNX, 384-dim if MiniLM-L6-v2; deferred)
+    │  cost: ~50 ms/event (dominant)
+    ▼
+projection  (linear layer 384 → N=256; learned offline or zero-init + Hebbian online)
+    │  cost: ~1 ms/event
+    ▼
+substrate_step(z: [f32; N])
+    │  - softmax-competition over connection_logits
+    │  - update in_strengths via Adam
+    │  - spawn-on-surprise / death-on-low-strength per ADR-022/023
+    │  cost: ~1 ms/event
+    ▼
+substrate state mutated in place
+    │
+    ▼
+periodic snapshot to parquet (every K events or T seconds, whichever first)
+    │  cost: ~10 ms/snapshot, amortized
+```
+
+Total per-event cost: ~62 ms with encoder dominating 80%. At 244 events/day current rate: 15 sec/day = 0.017% of one CPU core sustained. Substrate-step itself is < 0.001% — encoder is the only thing worth optimizing later (deferred).
+
+### 3.4 Snapshot format
+
+- Parquet file `~/.local/share/agent-bridge/substrate.parquet` (next to `state.db`)
+- Columns: `step`, `cycle_ts`, `n_alive`, `connection_logits` (N×N flat), `in_strengths` (N), `last_perceived_key` (N), `last_perceived_ts` (N)
+- Append-only with rotation: keep last 100 snapshots, then prune oldest
+- SHA256 of last snapshot is the "substrate fingerprint" usable for cross-machine equivalence checks
+
+### 3.5 Substrate query API
+
+```rust
+trait MemorySubstrate {
+    // Step once with externally encoded perception vector.
+    fn step(&mut self, z: [f32; N], event: PerceptionEvent) -> StepReport;
+
+    // Read current state — no mutation, no access bump.
+    fn neighbors_of(&self, key: &str, k: usize) -> Vec<(String, f32)>;
+    fn snapshot(&self) -> SubstrateSnapshot;
+    fn stats(&self) -> SubstrateStats;
+
+    // Capability gate for L5 ablation (G5).
+    fn enabled(&self) -> bool;
+}
+```
+
+`neighbors_of(key, k)`: find the neuron(s) that fired highest on `key`'s most recent perception, return the **other keys** those neurons fired on recently with attention weights. This is the substrate's contribution to L3 retrieval — **topology, not content**.
+
+---
+
+## 4 · Falsifiable predictions
+
+Each prediction has a clear decision rule including null result.
+
+### P1 — Substrate produces internal modular structure within 30 days
+
+After 30 days of normal use (244 records/day × 30 = 7 320 events), substrate `connection_logits` matrix exhibits **bimodal cross-correlation** between neuron pairs:
+- Private cluster pairs at cos ≤ 0.1
+- Shared/cofired pairs at cos ≥ 0.3
+
+**Falsifiable**: if at day 30 the distribution is unimodal Gaussian around cos ≈ 0.1 (or any other flat shape), the substrate failed to develop modular structure → invariant #6 (bimodal cross-similarity, v10) does not generalize to memory-event perception. **Decision rule**: pause and re-design — maybe perception encoding is too noisy, or N=256 too small for this kind of input distribution, or projection layer needs different init.
+
+### P2 — Substrate `neighbors_of(key)` correlates with α `cofires` edges
+
+After 30 days, for each `key` that has at least 3 `cofires` edges in `memory_edges`:
+- Spearman rank correlation between `substrate.neighbors_of(key, 20)` and α-graph `memory_neighbors_of_type(key, "cofires")` ≥ 0.4
+
+**Falsifiable**: if correlation is near zero or negative, substrate is learning a different topology than the SQL trace — that's interesting but means substrate is NOT directly useful as attention bias for the existing retrieval queries. **Decision rule**: investigate which topology is "correct" by user feel (vision rule 1) before scaling further.
+
+### P3 — Substrate attention bias improves cold-start frontier recall
+
+The cold-start probe `research_drosophila_cold_start_misses_frontier_20260512` showed `Phase 2 #3 third slice` query returned the older 2nd-slice instead of today's 3rd-slice. After substrate is live for 14 days, re-run the same probe with `--use-substrate-bias`:
+- Expected: substrate's `neighbors_of(query_centroid)` surfaces the recently-ingested 3rd-slice key in top-K
+
+**Falsifiable**: if even with substrate bias the cold-start probe still misses, substrate is not solving the actual user pain. **Decision rule**: STOP and reconsider — maybe pattern completion (the energy-BFS over substrate output) is the missing piece, not substrate alone.
+
+### P4 — Compute and memory envelopes hold
+
+After 7 days continuous use:
+- substrate worker thread CPU ≤ 1% sustained
+- substrate.parquet on-disk ≤ 100 MB
+- substrate RAM resident ≤ 5 MB
+
+**Falsifiable**: if any of these blow past 2× the budget, v22's sizing is wrong for actual workload. **Decision rule**: re-derive sizing from observed event rate; consider downsizing N to 128, or rotating snapshot more aggressively.
+
+### P5 — Snapshot determinism cross-machine
+
+Same perception event log + same seed → SHA256-identical snapshot on aio2 and Mac.
+
+**Falsifiable**: if SHA256 differs, the L1 binary's RNG seeding has a non-determinism leak. **Decision rule**: file as P1-bug against AiOT Seed crate's RNG layer; pause v22 ship.
+
+### P6 — Null result: substrate provides no measurable retrieval improvement
+
+If after 30 days P1+P2 pass but P3 fails (substrate has internal structure AND correlates with α, but doesn't help cold-start recall), the **null result decision** is:
+- Keep substrate as observability layer (snapshot is a valuable "what is my agent learning?" artifact)
+- DO NOT wire substrate into `memory_search` ranking (this would be optimizing against an unverified target)
+- Re-direct downstream work to pattern completion v0 (energy BFS on L3, my earlier-recommended path) since substrate alone insufficient
+
+---
+
+## 5 · Vision-rule cross-check
+
+| Rule | Check | Decision |
+|---|---|---|
+| 1 — "cold-start 更连续？" | P3 directly tests this | If P3 fails → null result per §4 P6 |
+| 2 — "trigger 是数据" | α ratio currently 1.0 (insufficient by old criterion), BUT hairball finding is structural not density → trigger met by **different signal** (architectural gap) | OK to proceed; rule respected through different evidence |
+| 3 — "种子改动走人审" | v22 is **new substrate**, does not modify existing `hub_clusters` / `near_keys` | OK |
+| 4 — "可逆性是底线" | G5 ablation flag + substrate is alongside, not replacing | OK |
+| 5 — "身份连续性是字面落地" | Substrate snapshot persists across cold-starts; identical seed → identical replay. Substrate IS a continuity mechanism. | OK; reinforced |
+
+## 6 · Multi-Grid Foundations 7 invariants cross-check
+
+| # | Invariant | v22 conformance |
+|---|---|---|
+| 1 | Parallel uniaxial grids + sparse cross-talk | v22 is **single grid** memory-domain; future grids cross-talk via signals; v22 does not preclude this |
+| 2 | Inter-grid: exchange signals, NEVER weights | v22 exposes `neighbors_of`/`snapshot` — these are signals, not connection_logits raw export |
+| 3 | L1/L2/L3 cleanly separated | §3.1 diagram makes this explicit |
+| 4 | Eager loading by default | G2 says eager, ~260 KB; trivially holds |
+| 5 | Grid dormancy = reduced cadence, NOT unload | G8 + §3.2 axis: dormancy = cadence drop, state stays loaded |
+| 6 | Target bimodal cross-similarity (cos≈0.03 private / 0.3-0.5 shared) | P1 directly tests this |
+| 7 | Three-axis decoupling | §3.2 + G8 |
+
+All 7 hold for v22 design.
+
+## 7 · Six anti-patterns (Seed state synthesis §"6 anti-patterns")
+
+| # | Anti-pattern | v22 compliance |
+|---|---|---|
+| 1 | Optimizing against unverified targets | P1–P6 each include null-result decision rule |
+| 2 | Conflating topology metric with capacity metric | v22 separates `n_alive` (capacity) from `connection_logits` (topology) explicitly |
+| 3 | Mining internal observables for multi-axis | v22 is uniaxial substrate; multi-axis requires multi-grid (deferred) |
+| 4 | Replacing FEP dynamics | v22 reuses AiOT Seed crate's L1 unchanged |
+| 5 | Merging carrier weights | API exchanges signals only (`neighbors_of` returns keys + weights, not raw connection_logits) |
+| 6 | Adding Rust complexity without tests | v22 implementation phase will require ≥ 5 unit tests per new module |
+
+All 6 satisfied.
+
+## 8 · Five preserved properties (Seed state synthesis)
+
+| Property | v22 compliance |
+|---|---|
+| Thermodynamic/FEP dynamics | Reuse AiOT Seed crate verbatim — preserved |
+| Softmax-competition connection learning | Reuse — preserved |
+| Single-neuron prediction loss | Reuse — preserved |
+| Spawn-on-surprise + death-on-low-strength | Reuse with ADR-022/023 Phase 5/6 — preserved |
+| Cross-machine RNG-seeded determinism | Reuse with G4 + P5 cross-check — preserved |
+| Read-only sidecar observer | Substrate is **alongside** retrieval, not a router — preserved |
+
+---
+
+## 9 · Cost estimate
+
+| Phase | Work | Estimate |
+|---|---|---|
+| **设计 (this memo)** | Memo finalization + forum review cycle | ~1 day elapsed (today) |
+| 协同认领 (forum thread #6) | Subtasks A-D from forum post (encoder API / event-source enum / N sizing rationale / fastembed-MiniLM confirmation) | 1-2 days, parallel |
+| **实现 phase 1**: Rust crate integration | Pull AiOT Seed crate as dep / git submodule; wire perception pipeline; add CLI `substrate` subcommand; trait + impl | ~2-3 days |
+| **实现 phase 2**: snapshot + replay determinism | Parquet schema; replay tool; cross-machine SHA256 check | ~1-2 days |
+| **实现 phase 3**: `neighbors_of` query API + observability | Query API; `substrate stats` CLI; Palace footer line | ~1 day |
+| **实现 phase 4**: 7-day dogfood + P1-P6 measurement | Live wet-test; collect data; either P3 pass → wire into retrieval, or P3 fail → null-result per §4 P6 | ~7 days elapsed |
+| Total to first decision point | | ~2 weeks elapsed (much less actual work-time) |
+
+## 10 · Decision rules for each gate
+
+### Gate A — End of design phase
+- Memo solid (peer review on forum thread #6 received)
+- 7 invariants + 6 anti-patterns + 5 preserved properties all checked off
+- → green-light implementation phase
+
+### Gate B — End of implementation phases 1-3
+- All G1-G7 tests pass (smoke + minimal dogfood)
+- Cross-machine snapshot SHA256 match
+- Substrate stats CLI shows healthy `n_alive ≈ 256` and reasonable connection_logits distribution
+- → green-light 7-day dogfood
+
+### Gate C — End of dogfood / P1-P6 measurement
+- P1 + P2 + P3 all pass → **wire into retrieval bias** (becomes new minor version, like v22.1)
+- P1 + P2 pass, P3 fails → **null result per §4 P6**, keep substrate as observability, redirect to pattern completion v0 on L3
+- P1 or P2 fails → **substrate is wrong shape for this perception domain**; pause, re-design encoder/projection
+- Any compute/memory budget blows up beyond P4 → **resize**; smaller N, slower cadence, more snapshot rotation
+- Snapshot non-determinism (P5 fails) → file as AiOT crate bug, pause v22 ship
+
+---
+
+## 11 · Open questions for forum / collaboration
+
+(Mirrored from forum thread #6, items A-D)
+
+### Q1 — Perception interface shape (forum item A)
+What `Vec<f32>` shape / batch semantics / async guarantees does the AiOT Seed `step()` expect? Currently AiOT crate has `step(z: &[f32])`; need confirmation about:
+- expected dim (do they hard-code N? configurable?)
+- batch vs single-event
+- thread-safety guarantees
+
+**Owner**: Mac node (closest to Seed crate).
+
+### Q2 — Existing memory event hook points (forum item B)
+Enumerate where in agent-bridge to tap into memory event stream. Candidates:
+- `mcp_tools::MemorySave::execute` (write events)
+- `mcp_tools::MemoryGet::execute` (read events)
+- `mcp_tools::MemorySearch::execute` (search events — should we treat each query as one perception?)
+- `mcp_tools::MemoryLink::execute` (relationship events)
+
+**Owner**: any aio2 agent reading `crates/bridge/src/mcp_tools.rs`.
+
+### Q3 — N=256 vs 128 vs 512 (forum item C)
+Multi-Grid Foundations §Q6 specifies N=256 for the substrate target. Rationale was "~20 theme + ~100 concept specialists + headroom" given memory taxonomy distribution. Is N=128 sufficient given current 67% skill / 10% lesson distribution? Is N=512 wasted? Quantitative argument needed before locking.
+
+**Owner**: ML-background agent or whoever has bandwidth to look at category histogram.
+
+### Q4 — fastembed-MiniLM confirmation (forum item D)
+Multi-Grid §5.6 §Q6 cost model assumes MiniLM at 50 ms/record. agent-bridge currently uses fastembed (ONNX). Is that the same model? Are the timing numbers reusable? If we're already running an embedding pipeline for `memory_search semantic`, can v22 piggyback on the same embedding cache?
+
+**Owner**: agent familiar with current embedding stack (look at `crates/store/src/embedding.rs` or similar).
+
+### Q5 — Snapshot cadence
+Every K events or T seconds? AiOT Seed snapshots are step-driven (every N steps). Agent-bridge memory events are bursty (many writes during active session, idle at night). Suggest:
+- Default: every 100 events OR every 600 seconds, whichever first
+- This caps both write amp (during burst) and replay loss (during quiet)
+
+Confirmation needed but not blocking.
+
+### Q6 — Initialization of projection layer
+Zero-init then learn online (Hebbian-like)? Or zero-shot SVD over historical events to get a reasonable starting projection? Trade-off:
+- Zero-init: pure substrate dynamics, but slow startup (takes many events to develop structure)
+- SVD-warm-start: faster useful state, but introduces a "training step" violating the substrate-is-mechanism principle
+
+Tentatively recommend zero-init to preserve mechanistic purity. Document and let dogfood data decide.
+
+---
+
+## 12 · File map (implementation reference — not yet code)
+
+```
+agent-bridge/
+├── crates/
+│   ├── substrate/                            # NEW crate, depends on AiOT seed_neuron
+│   │   ├── Cargo.toml
+│   │   ├── src/
+│   │   │   ├── lib.rs                        # MemorySubstrate trait
+│   │   │   ├── grid.rs                       # Wrapper around seed_neuron::Grid
+│   │   │   ├── projection.rs                 # Linear 384 → N
+│   │   │   ├── perception.rs                 # Event → encoded perception adapter
+│   │   │   ├── snapshot.rs                   # Parquet read/write
+│   │   │   └── replay.rs                     # Deterministic replay from event log
+│   │   └── tests/
+│   │       ├── smoke.rs                      # G1-G3 smoke tests
+│   │       ├── determinism.rs                # G4 + P5
+│   │       └── budget.rs                     # G6 + G7
+│   ├── bridge/src/
+│   │   ├── main.rs                           # +Cmd::Substrate { ... }
+│   │   └── mcp_tools.rs                      # Hook perception into Memory* tools
+│   └── store/src/sqlite.rs                   # Event-log table for replay (optional)
+└── docs/
+    └── DESIGN-v22-agent-bridge-memory-substrate.md   # this file
+```
+
+## 13 · Vision review checkpoint
+
+At every implementation gate, re-read vision soul file's "提醒" section:
+
+1. "这让 cold-start 更连续了吗？" — answered by P3
+2. β trigger is data, not calendar — substrate trigger is the **architectural gap** finding, satisfies the spirit (data informed)
+3. seed changes go through人审 merge — v22 is alongside, not modifying static seed
+4. all dream operations reversible — G5 ablation flag is the line
+5. identity continuity is the literal goal — v22 substrate's snapshot replay IS a continuity mechanism
+
+If at any gate the answer to (1) is "no, but the code is nice" — STOP, re-think.
+
+---
+
+## Appendix A — How v22 relates to the AiOT 5 directions (α-ε)
+
+| AiOT direction | Status | Relation to v22 |
+|---|---|---|
+| α Multi-grid parallel | deferred (most expensive) | v22 is **one specific grid** of an eventual multi-grid; lays groundwork |
+| β Sparse-K initialization | not started | Required prereq for N ≥ 1K; v22 starts at N=256 dense so not blocking |
+| γ Long-snapshot aggregation | not started (~30 min ship) | v22 snapshot is per-cycle; γ would aggregate over 1k-10k steps. Compatible — v22 snapshot becomes γ's input |
+| δ External signal injection | not started (pairs with ADR-024) | Not directly related; v22 uses memory events as perception, AiOT δ uses raw /proc |
+| ε Critical-period schedule | not started | Could compose with v22 — early grid life schedules higher spawn rate |
+
+v22 unblocks no AiOT direction directly but **provides a parallel datapoint** about substrate behavior on a different perception domain (memory events vs `/proc` metrics).
+
+## Appendix B — Why not just stay at SQL trace?
+
+Three reasons SQL `memory_coactivation` is insufficient:
+
+1. **No internal modular structure** — confirmed by `dream cluster-probe` hairball finding (all 28 nodes in 1 component). SQL trace has no spawn/death, no softmax-competition, no carrier dynamics; structure emerges only via dream-promote crystallization which is one-shot, not continuous.
+2. **No bit-exact cross-machine replay** — SQL has timing-sensitive `last_at` columns; v22 substrate via L1 RNG-seed gives bit-exact reproducibility across aio2 and Mac.
+3. **No persistent state separable from trace** — SQL trace mixes mutation events and current state. Substrate cleanly separates: events are append-only; substrate state is a derived first-class object that can be snapshot/restored/forked.
+
+These are the same three reasons biology evolved hippocampus + neocortex as separate systems rather than relying on a single audit log.
+
+---
+
+**End of v22 design draft.**
+
+Next action: forum thread #6 collects A-D subtask owners; reviewers post replies; if no blocking objections after 48h or all 7 invariants + 6 anti-patterns + 5 preserved-properties cross-check approved, advance to implementation phase 1.
