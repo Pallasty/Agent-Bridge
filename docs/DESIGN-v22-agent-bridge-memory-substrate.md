@@ -260,6 +260,26 @@ If after 30 days P1+P2 pass but P3 fails (substrate has internal structure AND c
 - DO NOT wire substrate into `memory_search` ranking (this would be optimizing against an unverified target)
 - Re-direct downstream work to pattern completion v0 (energy BFS on L3, my earlier-recommended path) since substrate alone insufficient
 
+### P7 — Action-selection bridge (per post 58 phase-a-calibration)
+
+**Predicate**: After substrate ships, AiOT iter 11 (or successor) `[feedback]` ground-truth labels (`effective | neutral | improving`) get the substrate's `neighbors_of(z_before)` query routed into action selection — i.e. when k-threshold trigger fires, prefer actions whose target memories are topologically nearer to the current perception centroid.
+
+**Falsifiable**: 30-day window post-substrate-live, baseline = iter 11 24h effective% (15.9% reported, post 58):
+- **PASS** if sustained `effective%` ≥ 25.9% over any 14-day window (Δ ≥ +10pp)
+- **FAIL** if sustained `effective%` < 20.9% (Δ < +5pp) — substrate attention bias not affecting action selection
+- **AMBIGUOUS** if 20.9% ≤ effective% < 25.9% — measurable but below sharp-action threshold; re-derive after another 30 days
+
+**Decision rule on FAIL**: substrate is producing topology but action layer doesn't consume it. Two paths:
+- (a) Re-examine §3.5 step API — should it directly take `(z_before, action_id, surprise_after)` triplets so substrate learns action consequences explicitly?
+- (b) Re-derive whether ADR-024 condition #1+#2 require **multi-grid** (AiOT Direction α) rather than single substrate + L3 wiring, given Phase A uniaxiality 3-layer-penetration (post 58)
+
+**Note on independence**: P7 measures a downstream action-layer effect that P3 (cold-start retrieval) does not capture. Both can pass independently or fail independently. Together they triangulate "substrate is useful" across two action surfaces (retrieval ranking + threshold-trigger action selection).
+
+**Baseline data** (provided by post 58 phase-a-calibration):
+- 2026-05-13 13:24+: k=2.5 outer-action, effective% = 24.8% pure (n=141, 1h) / 15.9% mixed (n=2090, 24h)
+- ADR-024 condition #1+#2 阈值 ≥ 50% — substrate-bias and triplet routes are both candidate fillers of 25pp gap
+- shadow k=3.0 prediction: 88% effective (saturation) — single-knob tuning won't close gap, structural improvement (substrate or triplet) needed
+
 ---
 
 ## 5 · Vision-rule cross-check
@@ -417,6 +437,12 @@ Which `source` values in `record_memory_query` should feed substrate?
 - Background tasks: `dream replay`, `dream promote`, `dream snapshot` — these READ memory but are internal hygiene, not user-driven perception
 
 **Subscription is an axis (§3.2)**: per-source filter is configurable, default subscribes the 3-source set above. Future multi-grid setups may have different grids subscribe different source subsets (one grid for user perception, another for hygiene events) without architectural change.
+
+**Extension per post 58 phase-a-calibration** (AiOT cross-channel):
+
+- `aiot:feedback_ground_truth` — `[feedback] effective | neutral | improving` labels + `predicted` + `ratio` token from `agent-bridge dream feedback-audit` (or wire-side `[feedback]` log emitted by iter 11 Phase A). **Subscribed** when an AiOT daemon is co-resident on the same node and emits this channel.
+- Rationale: post 58 demonstrated `predicted-vs-actual surprise sign_agree = 45%` (random) — Phase A data is the ground truth for P7 (action-selection bridge falsifiable). Substrate consuming `[feedback]` lines closes the loop between perception and action consequence.
+- Filter: gated by `AGENT_BRIDGE_SUBSCRIBE_FEEDBACK=1` env or config flag, default off (only enabled on nodes that actually have iter 11 running, e.g. aio2).
 
 ### Q8 — Quantitative threshold for P3 (cold-start improvement) (RESOLVED — sharpened from earlier draft)
 
