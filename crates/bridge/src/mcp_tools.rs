@@ -11428,7 +11428,7 @@ impl McpTool for CodebaseImportsTool {
             description: "Query the codebase imports table built by codebase_index. \
                  Returns one row per `use`/`import` statement matching `target` \
                  (substring LIKE). Use to answer 'who imports X' without re-walking \
-                 source. Currently Rust only — Python/TS/Go importers ship later. \
+                 source. Supports Rust, Python, TypeScript/JavaScript, and Go. \
                  Run codebase_index first if no results appear."
                 .into(),
             input_schema: json!({
@@ -11524,9 +11524,9 @@ impl McpTool for CodebaseCallsTool {
                  answer 'who calls X' (set `callee`) or 'what does Y call' \
                  (set `caller`) without re-walking source. At least one of \
                  `callee` / `caller` is required. Method calls appear with \
-                 a leading dot (e.g. `.collect`). Currently Rust only — \
-                 Python/TS/Go call extractors ship later. Run codebase_index \
-                 first if no results appear."
+                 a leading dot (e.g. `.collect`). Supports Rust, Python, \
+                 TypeScript/JavaScript, and Go. Run codebase_index first if \
+                 no results appear."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -11640,8 +11640,8 @@ impl McpTool for CodebaseCallersTool {
                  `use crate::store`. Each row carries the as-written \
                  `callee`, the resolved `resolved_callee` (= target), and \
                  the `via_alias` / `via_import` that produced the match. \
-                 Currently Rust only — when Python/TS/Go call extractors \
-                 ship their imports already work via the same v24 table."
+                 Supports Rust, Python, TypeScript/JavaScript, and Go — \
+                 all four resolve aliases via the shared v24 imports table."
                 .into(),
             input_schema: json!({
                 "type": "object",
