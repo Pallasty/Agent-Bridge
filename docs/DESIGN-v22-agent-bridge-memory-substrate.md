@@ -124,14 +124,48 @@ periodic snapshot to parquet (every K events or T seconds, whichever first)
     │  cost: ~10 ms/snapshot, amortized
 ```
 
-Total per-event cost: ~62 ms with encoder dominating 80%. At 244 events/day current rate: 15 sec/day = 0.017% of one CPU core sustained. Substrate-step itself is < 0.001% — encoder is the only thing worth optimizing later (deferred).
+Total per-event cost: ~62 ms with encoder dominating 80%. **Real event rate measured: ~57/day working (post-Q5 audit, forum post 50)**, much lower than the 244/day in Multi-Grid Foundations §Q6 (that figure was inflated by 2026-05-06 484-row skill bulk-import).
 
-### 3.4 Snapshot format
+Refined cost calculation:
+- ~57 events/day × (assume 30% fresh embed, 70% cache hit via existing `memory_embed_cache`) × 50ms = **~0.86 sec/day** encoder cost
+- Substrate-step itself: 57 × 1 ms = 57 ms/day
+- Snapshot writes: ~7/day × ~10 ms = 70 ms/day
+- **Total CPU sustained**: < 1 sec/day = ~0.001% of one core
+
+This is an order of magnitude under the §Q6 envelope. Substrate ship has zero compute risk at current event rate; even 10× growth stays trivially within budget.
+
+**Cache reuse note**: substrate perception SHOULD share `memory_embed_cache` (already in `crates/bridge/src/hub.rs:32`, record-keyed `Vec<(MemoryRecord, Vec<f32>)>`). Reuse avoids duplicate ONNX inference for save/get events that already invoked semantic search.
+
+### 3.4 Snapshot format (multi-window per γ finding 2026-05-13)
+
+Per **AiOT γ audit** (forum #6 post 49, commit `775c341`): SVD on 5-feature `(instantaneous, derivative, window_{100,1k,10k})` gave effective rank=5 (σ_2/σ_1 = 0.78, well above 0.05 threshold). Although the deep reading attributes most independence to non-stationary drift rather than substrate-mechanism multi-axis, **both readings recommend the same v22 action**: snapshot at multiple timescales.
+
+Final snapshot schema:
 
 - Parquet file `~/.local/share/agent-bridge/substrate.parquet` (next to `state.db`)
-- Columns: `step`, `cycle_ts`, `n_alive`, `connection_logits` (N×N flat), `in_strengths` (N), `last_perceived_key` (N), `last_perceived_ts` (N)
+- Columns per row (one row per snapshot cycle):
+  - `step` (i64)
+  - `cycle_ts` (i64 unix secs)
+  - `n_alive` (i32)
+  - `connection_logits` (flat f32 array, N×N, **only on multi-cadence "long-window" snapshots**, see below)
+  - `in_strengths` (f32 array, N)
+  - `last_perceived_key` (string array, N)
+  - `last_perceived_ts` (i64 array, N)
+  - **`trailing_surprise_mean_short`** (f32, mean over last 100 events) — new
+  - **`trailing_surprise_mean_long`** (f32, mean over last 1000 events) — new
 - Append-only with rotation: keep last 100 snapshots, then prune oldest
 - SHA256 of last snapshot is the "substrate fingerprint" usable for cross-machine equivalence checks
+
+**Multi-cadence write strategy** (synthesis of memo §11 Q5 + γ finding):
+
+| Cadence tier | Trigger | What's written |
+|---|---|---|
+| Hot | Every 20 events (or per substrate step config) | metadata + `in_strengths` + `last_perceived_*` + trailing means (cheap row, no N×N matrix) |
+| Long | Every 100-event multiple OR every 6h, whichever first | full row incl. `connection_logits` (the expensive N×N flat) |
+
+Cost: hot row ≈ N×4 bytes + 2 floats ≈ 1 KB; long row ≈ N²×4 bytes ≈ 260 KB. At our event rate (~57/day working), hot snapshots fire ≈ 3/day; long snapshots fire ≈ 4/day max (6h floor dominates). Total disk ≈ 1 MB/day = 365 MB/year (still well under the 5 GB/year G7 budget).
+
+The two-cadence design fulfills γ's "drift detection on long window" + Hot's "per-event responsiveness", giving the actuator/retrieval layer access to both timescales without paying N² storage per event.
 
 ### 3.5 Substrate query API
 
@@ -319,12 +353,23 @@ Multi-Grid §5.6 §Q6 cost model assumes MiniLM at 50 ms/record. agent-bridge cu
 
 **Owner**: agent familiar with current embedding stack (look at `crates/store/src/embedding.rs` or similar).
 
-### Q5 — Snapshot cadence
-Every K events or T seconds? AiOT Seed snapshots are step-driven (every N steps). Agent-bridge memory events are bursty (many writes during active session, idle at night). Suggest:
-- Default: every 100 events OR every 600 seconds, whichever first
-- This caps both write amp (during burst) and replay loss (during quiet)
+### Q5 — Snapshot cadence (RESOLVED 2026-05-13)
 
-Confirmation needed but not blocking.
+**Final answer** (per forum #6 post 49 γ-finding + post 50 event-rate measurement):
+
+```
+Hot tier   : every 20 events OR every 1800 seconds (30 min), whichever first
+             — writes lightweight row (metadata + in_strengths + trailing means)
+Long tier  : every 100-event multiple OR every 21600 seconds (6 h), whichever first
+             — writes full row with N×N connection_logits
+```
+
+Two-cadence design is **directly informed by γ multi-window SVD result**: per-event snapshot alone misses ~80% of independent surprise variance discoverable at long windows. See §3.4 final schema.
+
+Settled inputs:
+- Real working event rate: **~57/day** (45 saves + 12 queries; bulk-skill-import excluded per Q5 audit post 50)
+- Burst peak: 15 events/min over 7d window; 20-event hot trigger captures bursts naturally
+- Long-tier 6h floor + 100-event multiple ensures drift detection regardless of burst timing
 
 ### Q6 — Initialization of projection layer
 Zero-init then learn online (Hebbian-like)? Or zero-shot SVD over historical events to get a reasonable starting projection? Trade-off:
@@ -381,7 +426,7 @@ If at any gate the answer to (1) is "no, but the code is nice" — STOP, re-thin
 |---|---|---|
 | α Multi-grid parallel | deferred (most expensive) | v22 is **one specific grid** of an eventual multi-grid; lays groundwork |
 | β Sparse-K initialization | not started | Required prereq for N ≥ 1K; v22 starts at N=256 dense so not blocking |
-| γ Long-snapshot aggregation | not started (~30 min ship) | v22 snapshot is per-cycle; γ would aggregate over 1k-10k steps. Compatible — v22 snapshot becomes γ's input |
+| γ Long-snapshot aggregation | **SUPPORTED (drift-dominated)** — shipped commit `775c341` 2026-05-13 (forum #6 post 49); SVD effective rank=5 (σ_2/σ_1=0.78 ≫ 0.05); long-window means carry independent variance (drift-attributed but actionable) | v22 §3.4 snapshot schema **updated** to record `trailing_surprise_mean_{short,long}`; §11 Q5 **resolved** as multi-cadence (Hot 20-event/30min + Long 100-event/6h); cross-fed |
 | δ External signal injection | not started (pairs with ADR-024) | Not directly related; v22 uses memory events as perception, AiOT δ uses raw /proc |
 | ε Critical-period schedule | not started | Could compose with v22 — early grid life schedules higher spawn rate |
 
