@@ -5658,6 +5658,97 @@ impl McpTool for MemoryRestoreArchivedTool {
 }
 
 // ===========================================================================
+//   memory_tombstone_aged_archived (ζ-19 — archive→tombstone GC, retire end)
+// ===========================================================================
+
+/// ζ-19 — Time-based downgrade of stale `archived` rows to `tombstoned`.
+/// Closes the hygiene state machine:
+///
+///   active → ζ-14 → archived → ζ-19 → tombstoned → purge_tombstones (7d) → DELETE
+///
+/// `tombstoned` (not direct DELETE) is required so the `dedupe_key` slot
+/// is held until the 7-day purge window — protects against NewerWins
+/// import or same-content re-save resurrecting an already-retired row.
+pub struct MemoryTombstoneAgedArchivedTool {
+    hub: Hub,
+}
+impl MemoryTombstoneAgedArchivedTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryTombstoneAgedArchivedTool {
+    fn name(&self) -> &'static str {
+        "memory_tombstone_aged_archived"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "ζ-19 (graph-hygiene retire-end GC). Downgrade stale archived rows \
+                to tombstoned: criterion is status='archived' AND updated_at ≤ now-N*86400. \
+                The 14-day default leaves a generous restore window for ζ-18. tombstoned \
+                rows still hold their dedupe_key slot, so the existing 7-day purge_tombstones \
+                cycle gives a final undo before physical DELETE. dry_run=true previews. \
+                Returns {tombstoned_count}."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "older_than_days": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 14,
+                        "description": "Rows whose updated_at is at least this many days old \
+                            are eligible. `updated_at` is the timestamp ζ-14 bumps on archive, \
+                            so this measures how long the row has been sitting in archived \
+                            state. Default 14 — comfortably outside ζ-18 restore window."
+                    },
+                    "max_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5000,
+                        "default": 500,
+                        "description": "Hard cap on tombstones per run. Bounds runaway and \
+                            keeps the transaction small."
+                    },
+                    "dry_run": { "type": "boolean", "default": false }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let older_than_days = args
+            .get("older_than_days")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(14)
+            .max(0);
+        let max_count = args
+            .get("max_count")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(500)
+            .clamp(1, 5000);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let tombstoned = store
+            .memory_tombstone_aged_archived(older_than_days, max_count, dry_run)
+            .await?;
+        Ok(ToolResult::json_text(&json!({
+            "dry_run": dry_run,
+            "older_than_days": older_than_days,
+            "max_count": max_count,
+            "tombstoned_count": tombstoned,
+        })))
+    }
+}
+
+// ===========================================================================
 //                  memory_decay_unused (Phase 2.x #8 — read-recency decay)
 // ===========================================================================
 
@@ -12664,6 +12755,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPruneDegenerateRelatesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryArchiveOrphanStubsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryRestoreArchivedTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryTombstoneAgedArchivedTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryDecayUnusedTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));

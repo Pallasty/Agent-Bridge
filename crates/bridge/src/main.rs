@@ -3012,6 +3012,56 @@ async fn run_dream_restore_archived(key: &str, as_json: bool) -> Result<()> {
     Ok(())
 }
 
+/// **ζ-19** — CLI mirror of `memory_tombstone_aged_archived` MCP tool.
+/// Time-based downgrade of stale `archived` rows to `tombstoned`. Pair
+/// with the existing 7-day `dream purge-tombstones` to drive the full
+/// retire chain in the ζ-10 daily service.
+async fn run_dream_tombstone_aged_archived(
+    older_than_days: i64,
+    max_count: i64,
+    dry_run: bool,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+    let older_than_days = older_than_days.max(0);
+    let max_count = max_count.clamp(1, 5000);
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let tombstoned = store
+        .memory_tombstone_aged_archived(older_than_days, max_count, dry_run)
+        .await
+        .map_err(|e| anyhow::anyhow!("memory_tombstone_aged_archived: {e}"))?;
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "dry_run": dry_run,
+                "older_than_days": older_than_days,
+                "max_count": max_count,
+                "tombstoned_count": tombstoned,
+            }))?
+        );
+        return Ok(());
+    }
+    println!("# ζ-19 — tombstone aged archived");
+    println!("DB: {}", path.display());
+    println!(
+        "older_than_days: {older_than_days} · max_count: {max_count} · dry_run: {dry_run}"
+    );
+    println!();
+    let label = if dry_run { "would tombstone" } else { "tombstoned" };
+    println!("{label:18} : {tombstoned}");
+    if tombstoned == 0 {
+        println!();
+        println!(
+            "(no archived rows aged past --older-than-days; lower the threshold or check `memory_list` after archive-orphan-stubs)"
+        );
+    }
+    Ok(())
+}
+
 /// **Phase 2.x #6 — sync-window GC for tombstones.** CLI mirror of the
 /// `memory_purge_tombstones` MCP tool. Hard-DELETEs rows that have been
 /// tombstoned for at least `older_than_days`. Designed to ride the ζ-10
