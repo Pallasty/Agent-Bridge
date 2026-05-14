@@ -1911,7 +1911,11 @@ impl StateStore for SqliteStore {
             }
             _ => {
                 let backend = crate::embedding::default_backend();
-                let vec = backend.embed(&content);
+                // P-γ: pass key alongside content so substrate-aware
+                // backends record `last_perceived = key` (not content).
+                // HashBackend/OnnxBackend default impl ignores the key
+                // and behaves identically to pre-P-γ `embed()`.
+                let vec = backend.perceive(&content, &key);
                 (crate::vector::encode_embedding(&vec), Some(backend.name().to_string()))
             }
         };
@@ -4170,8 +4174,15 @@ impl StateStore for SqliteStore {
                 .iter()
                 .map(|&i| clamped_contents[i].as_str())
                 .collect();
+            // P-γ: parallel keys slice so substrate-aware backends record
+            // each row's memory_key as the perception identifier. Default
+            // perceive_batch impl on non-substrate backends ignores keys.
+            let to_embed_keys: Vec<&str> = to_embed_idx
+                .iter()
+                .map(|&i| parsed[i].key.as_str())
+                .collect();
             let backend = crate::embedding::default_backend();
-            let vecs = backend.embed_batch(&to_embed_refs);
+            let vecs = backend.perceive_batch(&to_embed_refs, &to_embed_keys);
             for (k, &i) in to_embed_idx.iter().enumerate() {
                 embeddings[i] = Some(crate::vector::encode_embedding(&vecs[k]));
             }
@@ -5215,7 +5226,10 @@ impl StateStore for SqliteStore {
         let pairs: Vec<(String, Vec<u8>)> = to_update
             .into_iter()
             .map(|(key, content)| {
-                let emb = backend_now.embed(&content);
+                // P-γ: pass key so substrate-aware backends record
+                // last_perceived = key during reindex (rebuilds the
+                // substrate from existing memory store).
+                let emb = backend_now.perceive(&content, &key);
                 let bytes = crate::vector::encode_embedding(&emb);
                 (key, bytes)
             })

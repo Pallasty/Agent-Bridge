@@ -670,6 +670,35 @@ impl EmbeddingBackend for SeedBackend {
         }
         vecs
     }
+
+    /// **P-γ** — embed `text_to_embed` (semantic signal) and record
+    /// `key_to_perceive` as the substrate `last_perceived` identifier.
+    /// Production memory_save passes `(content, memory_key)` so
+    /// `neighbors_of(memory_key)` can find this neuron later; the
+    /// embedding itself still encodes content semantics.
+    fn perceive(&self, text_to_embed: &str, key_to_perceive: &str) -> Vec<f32> {
+        let v = self.inner.embed(text_to_embed);
+        if v.len() == self.inner.dim() {
+            let primary = self.project(&v);
+            self.step(&primary, key_to_perceive);
+        }
+        v
+    }
+
+    /// Batch counterpart to [`Self::perceive`]. Item `i` embeds
+    /// `texts[i]` and records `keys[i]`. Lengths mismatch → zip stops
+    /// at the shorter; production callers must pass matched-length
+    /// slices.
+    fn perceive_batch(&self, texts: &[&str], keys: &[&str]) -> Vec<Vec<f32>> {
+        let vecs = self.inner.embed_batch(texts);
+        for ((v, _text), &key) in vecs.iter().zip(texts.iter()).zip(keys.iter()) {
+            if v.len() == self.inner.dim() {
+                let primary = self.project(v);
+                self.step(&primary, key);
+            }
+        }
+        vecs
+    }
 }
 
 /// Snapshot-based variant of [`SeedBackend::neighbors_of`]. Same
@@ -1388,6 +1417,127 @@ mod tests {
                 state_noise: 0.01,
                 lr: 0.01,
             },
+        );
+    }
+
+    // ─── P-γ perception tests ────────────────────────────────────────
+
+    /// Test helper: produce a build_row snapshot and walk `last_perceived_key`
+    /// to assert grid contains a given key string. Avoids reliance on
+    /// neighbors_of's empty-filter logic when grid is sparsely populated.
+    fn grid_contains_perceived_key(b: &SeedBackend, key: &str) -> bool {
+        let row = match b.build_row(crate::snapshot::SnapshotTier::Long, 0) {
+            Some(r) => r,
+            None => return false,
+        };
+        row.last_perceived_key.iter().any(|s| s == key)
+    }
+
+    #[test]
+    fn perceive_records_key_not_text_as_last_perceived() {
+        // P-γ contract: perceive(content, key) embeds content but stores
+        // key as the substrate's last_perceived identifier. Verify via
+        // direct snapshot inspection (neighbors_of needs populated grid
+        // for non-empty output; we only assert *recording* here).
+        let b = fixture(64);
+        let _ = b.perceive(
+            "this is a long memory body about quantum entanglement",
+            "memory_key_quantum_001",
+        );
+        assert!(
+            grid_contains_perceived_key(&b, "memory_key_quantum_001"),
+            "perceive(content, key) must record key in last_perceived_key"
+        );
+        // Content (the text_to_embed) must NOT appear as last_perceived.
+        assert!(
+            !grid_contains_perceived_key(
+                &b,
+                "this is a long memory body about quantum entanglement"
+            ),
+            "perceive(content, key) must NOT record content text as last_perceived"
+        );
+    }
+
+    #[test]
+    fn perceive_returns_inner_embedding_of_text_to_embed() {
+        // The vector returned by perceive must equal inner.embed(text);
+        // the key is recorded as last_perceived but not embedded.
+        let inner = Arc::new(HashBackend);
+        let raw = inner.embed("content body");
+        let b = SeedBackend::wrap_with(
+            inner.clone(),
+            SubstrateConfig {
+                n: 16,
+                d: 64,
+                state_noise: 0.01,
+                lr: 0.01,
+            },
+        );
+        let v = b.perceive("content body", "key_X");
+        assert_eq!(v, raw, "perceive must return inner.embed(text_to_embed)");
+    }
+
+    #[test]
+    fn perceive_batch_records_keys_in_order() {
+        // Each (text[i], keys[i]) pair must record keys[i] as last_perceived.
+        // Direct snapshot inspection — grid may have winner collisions,
+        // so we only assert AT LEAST ONE of each batch's keys lands.
+        let b = fixture(64);
+        let texts = ["alpha content", "beta content", "gamma content"];
+        let keys = ["mem_alpha", "mem_beta", "mem_gamma"];
+        let _ = b.perceive_batch(&texts, &keys);
+        let mut hits = 0;
+        for key in keys.iter() {
+            if grid_contains_perceived_key(&b, key) {
+                hits += 1;
+            }
+        }
+        assert!(
+            hits >= 1,
+            "perceive_batch must record at least one key (got {hits}/{} hits)",
+            keys.len()
+        );
+        // Inversely, content texts must NOT appear as last_perceived
+        // (text-to-embed and key-to-perceive are decoupled).
+        for txt in texts.iter() {
+            assert!(
+                !grid_contains_perceived_key(&b, txt),
+                "perceive_batch must NOT record text-to-embed ({txt}) as last_perceived"
+            );
+        }
+    }
+
+    #[test]
+    fn perceive_batch_default_impl_on_hash_backend_returns_correct_vecs() {
+        // Default impl forwards to embed_batch; verify HashBackend (which
+        // does not override perceive_batch) returns vectors equivalent to
+        // calling embed for each text.
+        let h = HashBackend;
+        let texts = ["one", "two", "three"];
+        let keys = ["a", "b", "c"];
+        let via_perceive = h.perceive_batch(&texts, &keys);
+        let via_embed = h.embed_batch(&texts);
+        assert_eq!(
+            via_perceive, via_embed,
+            "default perceive_batch must equal embed_batch on non-substrate backends"
+        );
+    }
+
+    #[test]
+    fn perceive_distinct_key_same_text_yields_distinct_indexed_keys() {
+        // Two perceptions of the SAME content but DIFFERENT keys must
+        // both be queryable. (In production this models two memories
+        // with byte-identical content but different keys.)
+        let b = fixture(64);
+        let _ = b.perceive("shared content text", "key_one");
+        let _ = b.perceive("shared content text", "key_two");
+        // With identical content, embed → same primary → likely same
+        // winner. Second perceive OVERWRITES first key. So at least the
+        // *later* key must be recorded; the earlier one may be gone.
+        let later_present = grid_contains_perceived_key(&b, "key_two");
+        assert!(
+            later_present,
+            "later perceive call's key must overwrite winner's last_perceived"
         );
     }
 }

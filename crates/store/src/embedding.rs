@@ -58,6 +58,31 @@ pub trait EmbeddingBackend: Send + Sync {
     fn embed_batch(&self, texts: &[&str]) -> Vec<Vec<f32>> {
         texts.iter().map(|t| self.embed(t)).collect()
     }
+
+    /// **P-γ perception** — embed `text_to_embed` for semantic signal but
+    /// record `key_to_perceive` as the identifier under which substrate
+    /// (if any) indexes this perception event. Decouples *what is embedded*
+    /// (long semantic content) from *what queries return* (short opaque
+    /// memory key).
+    ///
+    /// Default impl forwards to [`Self::embed`], discarding the key, so
+    /// `HashBackend`/`OnnxBackend` semantics are unchanged. Substrate-
+    /// aware backends (`SeedBackend`) override this to call
+    /// `step(primary, key_to_perceive)` instead of
+    /// `step(primary, text_to_embed)`, so `substrate.neighbors_of(key)`
+    /// can find perceived neurons by their memory key.
+    fn perceive(&self, text_to_embed: &str, _key_to_perceive: &str) -> Vec<f32> {
+        self.embed(text_to_embed)
+    }
+
+    /// Batch counterpart to [`Self::perceive`]. `texts` and `keys` must
+    /// have the same length; for substrate-aware backends, item `i`
+    /// records `keys[i]` as the perception identifier after embedding
+    /// `texts[i]`. Default impl forwards to [`Self::embed_batch`],
+    /// discarding `keys`.
+    fn perceive_batch(&self, texts: &[&str], _keys: &[&str]) -> Vec<Vec<f32>> {
+        self.embed_batch(texts)
+    }
 }
 
 // ── Built-in: hash ────────────────────────────────────────────────────────

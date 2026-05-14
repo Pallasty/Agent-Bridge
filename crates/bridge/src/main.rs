@@ -2106,13 +2106,20 @@ async fn run_substrate_replay(
     use std::sync::Arc;
 
     // --- 1. Parse event log ---
+    // P-γ: each event is (text_to_embed, key_to_perceive_opt). When key
+    // is None we fall back to text (backward-compat with pre-P-γ replay
+    // JSONL that only carried `text`). Production-style replays should
+    // include `key` so substrate.neighbors_of(memory_key) is queryable.
     let raw = std::fs::read_to_string(&log_path)
         .with_context(|| format!("read event log {}", log_path.display()))?;
-    let mut events: Vec<String> = Vec::new();
+    let mut events: Vec<(String, String)> = Vec::new();
     let mut parse_skips = 0u64;
     for line in raw.lines() {
         match parse_event_line(line) {
-            Some(text) => events.push(text),
+            Some((text, key_opt)) => {
+                let key = key_opt.unwrap_or_else(|| text.clone());
+                events.push((text, key));
+            }
             None => parse_skips += 1,
         }
     }
@@ -2151,8 +2158,11 @@ async fn run_substrate_replay(
     backend.set_snapshot_path(Some(output.clone()));
 
     // --- 4. Replay ---
-    for text in &events {
-        let _ = backend.embed(text);
+    // P-γ: perceive(text, key) lets the substrate index by key while
+    // embedding text — falls back to embed-equivalent behaviour when
+    // event omitted `key` (key=text via the parse step above).
+    for (text, key) in &events {
+        let _ = backend.perceive(text, key);
     }
     let stats = backend.stats();
 
@@ -2227,11 +2237,17 @@ async fn run_substrate_replay(
     Ok(())
 }
 
-/// Parse one JSONL event line. Returns `Some(text)` when the line is a
-/// JSON object with a non-empty `text` string field; `None` for blank
-/// lines, parse errors, or missing-field lines. Pure helper, used by
-/// `run_substrate_replay`.
-fn parse_event_line(line: &str) -> Option<String> {
+/// Parse one JSONL event line. Returns `Some((text, key_opt))` when the
+/// line is a JSON object with a non-empty `text` string field; `None`
+/// for blank lines, parse errors, or missing-field lines.
+///
+/// **P-γ** — optional `key` field carries the perception identifier
+/// (memory key in production semantics). When absent, falls back to
+/// `text` as both embedded content AND perceived identifier, matching
+/// pre-P-γ replay behaviour for backward compat.
+///
+/// Pure helper, used by `run_substrate_replay`.
+fn parse_event_line(line: &str) -> Option<(String, Option<String>)> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return None;
@@ -2241,7 +2257,12 @@ fn parse_event_line(line: &str) -> Option<String> {
     if text.is_empty() {
         return None;
     }
-    Some(text.to_string())
+    let key = v
+        .get("key")
+        .and_then(|k| k.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    Some((text.to_string(), key))
 }
 
 /// **v22 Phase 2.2 read side** — `substrate snapshot` CLI. Reads the
@@ -6363,13 +6384,13 @@ mod tests {
     #[test]
     fn parse_event_line_happy_path_returns_text() {
         let got = parse_event_line(r#"{"text":"hello world"}"#);
-        assert_eq!(got.as_deref(), Some("hello world"));
+        assert_eq!(got, Some(("hello world".to_string(), None)));
     }
 
     #[test]
     fn parse_event_line_with_ts_and_kind_ignores_extras() {
         let got = parse_event_line(r#"{"text":"foo","ts":1700000000,"kind":"save"}"#);
-        assert_eq!(got.as_deref(), Some("foo"));
+        assert_eq!(got, Some(("foo".to_string(), None)));
     }
 
     #[test]
@@ -6387,6 +6408,23 @@ mod tests {
         assert!(parse_event_line(r#"{"text":""}"#).is_none());
         // text not a string
         assert!(parse_event_line(r#"{"text":42}"#).is_none());
+    }
+
+    // P-γ: optional `key` field carries perception identifier.
+    #[test]
+    fn parse_event_line_with_key_returns_text_and_key() {
+        let got = parse_event_line(r#"{"text":"content body","key":"memory_key_42"}"#);
+        assert_eq!(
+            got,
+            Some(("content body".to_string(), Some("memory_key_42".to_string())))
+        );
+    }
+
+    #[test]
+    fn parse_event_line_empty_key_falls_back_to_none() {
+        // Empty key string is treated as absent so caller defaults to text.
+        let got = parse_event_line(r#"{"text":"hello","key":""}"#);
+        assert_eq!(got, Some(("hello".to_string(), None)));
     }
 
     #[test]
