@@ -784,6 +784,43 @@ enum SubstrateOp {
         #[arg(long)]
         json: bool,
     },
+    /// **v22 Phase 3 (B)** — Replay a JSONL event log against a fresh
+    /// in-process substrate, write the resulting `substrate.parquet`, and
+    /// emit the SHA256 fingerprint of the latest Long row. Tool for v22
+    /// §4 P5 (cross-machine determinism) — note that `NeuronGrid` currently
+    /// uses `rand::thread_rng()` internally, so fingerprints differ across
+    /// machines until the AiOT crate ships a seeded variant; `--seed` is
+    /// reserved + logged but not yet effective.
+    ///
+    /// Event log: one JSON object per line, e.g.
+    /// `{"text": "hello", "ts": 1700000000}`. Only `text` is required.
+    /// `ts` and `kind` are informational; parse errors / empty lines are
+    /// skipped with a warning.
+    Replay {
+        /// JSONL event log file. Each line `{text, ts?, kind?}`.
+        #[arg(long)]
+        log: PathBuf,
+        /// RNG seed (reserved; logged but not yet effective — pending
+        /// upstream AiOT seed_neuron::NeuronGrid::new_seeded support).
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// Grid size N. Default 256 (memo §3.3).
+        #[arg(long, default_value_t = 256)]
+        n: usize,
+        /// Substrate dim D. Default 192 (memo §3.3 + post 56 PCA).
+        #[arg(long, default_value_t = 192)]
+        d: usize,
+        /// Force HashBackend (deterministic encoder, no ONNX load).
+        /// Default false → ONNX (encoder is deterministic on same hw).
+        #[arg(long)]
+        use_hash: bool,
+        /// Output path for substrate.parquet. Default temp file.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit JSON summary instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// **v22 Phase 3 (A)** — Query substrate topology: for `--key K`,
     /// return up to `--k` other keys that the substrate's neuron(s)
     /// which fired on K connect to most strongly. Reads the latest Long
@@ -1149,6 +1186,26 @@ async fn main() -> Result<()> {
             SubstrateOp::Stats { json } => run_substrate_stats(*json).await,
             SubstrateOp::Neighbors { key, k, path, json } => {
                 run_substrate_neighbors(key.clone(), *k, path.clone(), *json).await
+            }
+            SubstrateOp::Replay {
+                log,
+                seed,
+                n,
+                d,
+                use_hash,
+                output,
+                json,
+            } => {
+                run_substrate_replay(
+                    log.clone(),
+                    *seed,
+                    *n,
+                    *d,
+                    *use_hash,
+                    output.clone(),
+                    *json,
+                )
+                .await
             }
             SubstrateOp::Snapshot {
                 path,
@@ -1878,6 +1935,169 @@ async fn run_substrate_neighbors(
         }
     }
     Ok(())
+}
+
+/// **v22 Phase 3 (B)** — `substrate replay` CLI. Reads a JSONL event log,
+/// runs each event through a fresh in-process `SeedBackend`, force-writes
+/// a final Long-tier snapshot, and emits the SHA256 fingerprint of that
+/// row. Tool for v22 §4 P5 cross-machine determinism.
+///
+/// **Determinism caveat**: `seed_neuron::NeuronGrid::new` and `step` both
+/// use `rand::thread_rng()`, so fingerprints will differ across runs (and
+/// across machines) until the AiOT crate exposes a seeded variant.
+/// `--seed` is reserved and emitted in the JSON output so once the
+/// upstream supports it, this CLI becomes a true determinism gate.
+async fn run_substrate_replay(
+    log_path: PathBuf,
+    seed: u64,
+    n: usize,
+    d: usize,
+    use_hash: bool,
+    output_override: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    use ab_seed_bridge::snapshot::{self, SnapshotTier};
+    use ab_seed_bridge::{SeedBackend, SubstrateConfig};
+    use ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend};
+    use std::sync::Arc;
+
+    // --- 1. Parse event log ---
+    let raw = std::fs::read_to_string(&log_path)
+        .with_context(|| format!("read event log {}", log_path.display()))?;
+    let mut events: Vec<String> = Vec::new();
+    let mut parse_skips = 0u64;
+    for line in raw.lines() {
+        match parse_event_line(line) {
+            Some(text) => events.push(text),
+            None => parse_skips += 1,
+        }
+    }
+
+    // --- 2. Prepare output path ---
+    let output: PathBuf = match output_override {
+        Some(p) => p,
+        None => {
+            let mut p = std::env::temp_dir();
+            p.push(format!(
+                "agent-bridge-replay-{}.parquet",
+                std::process::id()
+            ));
+            p
+        }
+    };
+    if output.exists() {
+        std::fs::remove_file(&output).with_context(|| {
+            format!("clearing prior replay output at {}", output.display())
+        })?;
+    }
+
+    // --- 3. Build SeedBackend on chosen inner backend ---
+    let inner: Arc<dyn EmbeddingBackend> = if use_hash {
+        Arc::new(HashBackend)
+    } else {
+        Arc::new(OnnxBackend)
+    };
+    let cfg = SubstrateConfig {
+        n,
+        d,
+        state_noise: 0.01,
+        lr: 0.01,
+    };
+    let backend = SeedBackend::wrap_with(inner, cfg);
+    backend.set_snapshot_path(Some(output.clone()));
+
+    // --- 4. Replay ---
+    for text in &events {
+        let _ = backend.embed(text);
+    }
+    let stats = backend.stats();
+
+    // --- 5. Force a final Long snapshot (so cross-machine compare always has a target) ---
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let final_fp = match backend.build_row(SnapshotTier::Long, now) {
+        Some(row) => match snapshot::append_row(&output, row) {
+            Ok(fp) => Some(fp),
+            Err(e) => {
+                eprintln!("warn: forced Long snapshot append failed: {e}");
+                None
+            }
+        },
+        None => None,
+    };
+
+    // --- 6. Re-read snapshot to count rows + latest fingerprint ---
+    let rows = snapshot::read_all(&output).unwrap_or_default();
+    let latest_long = rows.iter().rev().find(|r| matches!(r.tier, SnapshotTier::Long));
+    let latest_long_fp = latest_long.map(snapshot::fingerprint);
+
+    let warnings = vec![
+        "NeuronGrid::new / step use rand::thread_rng() — cross-machine sha256 will differ".to_string(),
+        format!("--seed {seed} logged but not yet effective (AiOT crate pending)"),
+    ];
+
+    if as_json {
+        let payload = serde_json::json!({
+            "log_path": log_path.to_string_lossy(),
+            "events_parsed": events.len(),
+            "events_skipped": parse_skips,
+            "step_count_final": stats.step_count,
+            "seed": seed,
+            "n": n,
+            "d": d,
+            "encoder": if use_hash { "hash" } else { "onnx" },
+            "snapshot_path": output.to_string_lossy(),
+            "snapshot_rows": rows.len(),
+            "latest_long_fingerprint": latest_long_fp,
+            "forced_final_fingerprint": final_fp,
+            "rng_determinism": false,
+            "warnings": warnings,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# v22 Phase 3 (B) — substrate replay");
+    println!("log              : {}", log_path.display());
+    println!("events           : parsed={} skipped={}", events.len(), parse_skips);
+    println!(
+        "config           : n={n}  d={d}  encoder={}",
+        if use_hash { "hash" } else { "onnx" }
+    );
+    println!("seed (reserved)  : {seed}");
+    println!("snapshot         : {}", output.display());
+    println!("snapshot rows    : {}", rows.len());
+    match (&latest_long_fp, &final_fp) {
+        (Some(fp), _) => println!("latest Long fp   : {}", fp),
+        (None, Some(fp)) => println!("forced final fp  : {}", fp),
+        (None, None) => println!("(no Long row produced)"),
+    }
+    println!("step_count       : {}", stats.step_count);
+    println!();
+    println!("Warnings:");
+    for w in &warnings {
+        println!("  - {w}");
+    }
+    Ok(())
+}
+
+/// Parse one JSONL event line. Returns `Some(text)` when the line is a
+/// JSON object with a non-empty `text` string field; `None` for blank
+/// lines, parse errors, or missing-field lines. Pure helper, used by
+/// `run_substrate_replay`.
+fn parse_event_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(trimmed).ok()?;
+    let text = v.get("text")?.as_str()?;
+    if text.is_empty() {
+        return None;
+    }
+    Some(text.to_string())
 }
 
 /// **v22 Phase 2.2 read side** — `substrate snapshot` CLI. Reads the
@@ -5906,6 +6126,37 @@ async fn build_hub() -> Result<Hub> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Phase 3 (B): parse_event_line unit tests ─────────────────────────
+
+    #[test]
+    fn parse_event_line_happy_path_returns_text() {
+        let got = parse_event_line(r#"{"text":"hello world"}"#);
+        assert_eq!(got.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn parse_event_line_with_ts_and_kind_ignores_extras() {
+        let got = parse_event_line(r#"{"text":"foo","ts":1700000000,"kind":"save"}"#);
+        assert_eq!(got.as_deref(), Some("foo"));
+    }
+
+    #[test]
+    fn parse_event_line_blank_returns_none() {
+        assert!(parse_event_line("").is_none());
+        assert!(parse_event_line("   \t  ").is_none());
+    }
+
+    #[test]
+    fn parse_event_line_malformed_returns_none() {
+        // Garbage JSON, missing text field, text=null, text="" all → None.
+        assert!(parse_event_line("not json").is_none());
+        assert!(parse_event_line(r#"{"ts":1}"#).is_none());
+        assert!(parse_event_line(r#"{"text":null}"#).is_none());
+        assert!(parse_event_line(r#"{"text":""}"#).is_none());
+        // text not a string
+        assert!(parse_event_line(r#"{"text":42}"#).is_none());
+    }
 
     #[test]
     fn settings_with_memory_hook_is_wired() {
