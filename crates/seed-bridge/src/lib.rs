@@ -17,11 +17,17 @@
 //! Phase 1 only needs to show G1-G3 from v22 §1: events flow through →
 //! `connection_logits` change → `stats()` reports `n_alive` & `step_count`.
 
+use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend};
 use seed_neuron::NeuronGrid;
 use serde::{Deserialize, Serialize};
+
+pub mod snapshot;
+pub use snapshot::{SnapshotRow, SnapshotTier};
 
 /// Env var that opts the process into substrate. Set to `1` / `true` to
 /// install [`SeedBackend`] as the default embedding backend at startup.
@@ -60,6 +66,9 @@ pub fn env_enabled() -> bool {
 pub fn install_default() -> Result<(), &'static str> {
     let inner = build_inner_backend();
     let backend = Arc::new(SeedBackend::wrap(inner));
+    // Phase 2.2 — auto-wire snapshot persistence at install time. Tests
+    // that don't want IO simply don't call `install_default`.
+    backend.set_snapshot_path(snapshot::default_snapshot_path());
     INSTANCE
         .set(backend.clone())
         .map_err(|_| "seed-bridge already installed")?;
@@ -168,6 +177,15 @@ pub struct SeedBackend {
     config: SubstrateConfig,
     grid: Mutex<NeuronGrid>,
     last_surprise: Mutex<(f32, f32)>, // (mean, max)
+    // Phase 2.2 — trailing surprise rings + last_perceived per neuron + snapshot path.
+    surprise_short: Mutex<VecDeque<f32>>,
+    surprise_long: Mutex<VecDeque<f32>>,
+    last_perceived: Mutex<Vec<(String, i64)>>,
+    last_long_snapshot_ts: Mutex<i64>,
+    /// Phase 2.2 snapshot file path. `None` disables snapshot writes
+    /// (used by tests and ablation). Defaults to
+    /// [`snapshot::default_snapshot_path`] when [`install_default`] runs.
+    snapshot_path: Mutex<Option<PathBuf>>,
 }
 
 impl SeedBackend {
@@ -192,12 +210,32 @@ impl SeedBackend {
             /*secondary_carrier=*/ 1,
             config.state_noise,
         );
+        let last_perceived = vec![(String::new(), 0i64); config.n];
         Self {
             inner,
             config,
             grid: Mutex::new(grid),
             last_surprise: Mutex::new((0.0, 0.0)),
+            surprise_short: Mutex::new(VecDeque::with_capacity(snapshot::SHORT_WINDOW + 1)),
+            surprise_long: Mutex::new(VecDeque::with_capacity(snapshot::LONG_WINDOW + 1)),
+            last_perceived: Mutex::new(last_perceived),
+            last_long_snapshot_ts: Mutex::new(0),
+            snapshot_path: Mutex::new(None),
         }
+    }
+
+    /// Set or clear the snapshot file path. `install_default` calls this
+    /// with [`snapshot::default_snapshot_path`]; tests pass a `tempdir`
+    /// path; passing `None` disables snapshot writes entirely.
+    pub fn set_snapshot_path(&self, path: Option<PathBuf>) {
+        if let Ok(mut p) = self.snapshot_path.lock() {
+            *p = path;
+        }
+    }
+
+    /// Snapshot file path currently configured.
+    pub fn snapshot_path(&self) -> Option<PathBuf> {
+        self.snapshot_path.lock().ok().and_then(|g| g.clone())
     }
 
     /// Phase 1 projection: linear-bucket average pool inner → D.
@@ -227,17 +265,148 @@ impl SeedBackend {
 
     /// Perception step. Called once per outer `embed()`. `primary` is the
     /// projected vector; `secondary` is the zero vector in phase 1 (the
-    /// rolling-mean second carrier is a phase 2 feature).
-    fn step(&self, primary: &[f32]) {
+    /// rolling-mean second carrier is a phase 2 feature). `perceived_text`
+    /// is the original input text — used to populate per-neuron
+    /// `last_perceived_key` for the winning neuron (argmin surprise).
+    fn step(&self, primary: &[f32], perceived_text: &str) {
         let secondary = vec![0.0f32; self.config.d];
-        let mut grid = match self.grid.lock() {
-            Ok(g) => g,
-            Err(_) => return, // poisoned; degrade silently
+        let (surprises, step_count) = {
+            let mut grid = match self.grid.lock() {
+                Ok(g) => g,
+                Err(_) => return, // poisoned; degrade silently
+            };
+            let s = grid.step(primary, &secondary, self.config.lr);
+            let sc = grid.step_count;
+            (s, sc)
         };
-        let surprises = grid.step(primary, &secondary, self.config.lr);
         let (mean, max) = surprise_stats(&surprises);
         if let Ok(mut s) = self.last_surprise.lock() {
             *s = (mean, max);
+        }
+
+        // Phase 2.2 — trailing surprise rings.
+        let now = unix_secs_now();
+        if let Ok(mut short) = self.surprise_short.lock() {
+            short.push_back(mean);
+            while short.len() > snapshot::SHORT_WINDOW {
+                short.pop_front();
+            }
+        }
+        if let Ok(mut long_ring) = self.surprise_long.lock() {
+            long_ring.push_back(mean);
+            while long_ring.len() > snapshot::LONG_WINDOW {
+                long_ring.pop_front();
+            }
+        }
+
+        // Phase 2.2 — per-neuron last_perceived. Winner = argmin surprise
+        // (the neuron whose Hebbian prediction was closest to the input).
+        if !perceived_text.is_empty() {
+            if let Some(winner) = argmin(&surprises) {
+                if let Ok(mut lp) = self.last_perceived.lock() {
+                    if winner < lp.len() {
+                        lp[winner] = (perceived_text.to_string(), now);
+                    }
+                }
+            }
+        }
+
+        // Phase 2.2 — cadence check + snapshot write.
+        self.maybe_snapshot(step_count, now);
+    }
+
+    /// Trailing surprise mean over the last [`snapshot::SHORT_WINDOW`]
+    /// events. Returns 0.0 when the ring is empty.
+    fn trailing_short(&self) -> f32 {
+        ring_mean(&self.surprise_short)
+    }
+
+    /// Trailing surprise mean over the last [`snapshot::LONG_WINDOW`]
+    /// events. Returns 0.0 when the ring is empty.
+    fn trailing_long(&self) -> f32 {
+        ring_mean(&self.surprise_long)
+    }
+
+    /// Build a snapshot row from current substrate state. `tier` controls
+    /// whether the expensive `connection_logits` is filled (Long) or left
+    /// empty (Hot).
+    pub fn build_row(&self, tier: SnapshotTier, now: i64) -> Option<SnapshotRow> {
+        let (n, step_count, conn, in_strengths) = {
+            let grid = self.grid.lock().ok()?;
+            let matrix = grid.connection_matrix();
+            // in_strengths proxy: sum of absolute connection weights INTO
+            // each neuron (column-wise). Hebbian "how strongly does the
+            // grid attend to me?" signal.
+            let in_strengths = column_abs_sums(&matrix);
+            let logits = if matches!(tier, SnapshotTier::Long) {
+                flatten_off_diagonal(&matrix)
+            } else {
+                Vec::new()
+            };
+            (grid.n, grid.step_count, logits, in_strengths)
+        };
+        let (keys, ts) = {
+            let lp = self.last_perceived.lock().ok()?;
+            let keys: Vec<String> = lp.iter().map(|(s, _)| s.clone()).collect();
+            let tss: Vec<i64> = lp.iter().map(|(_, t)| *t).collect();
+            (keys, tss)
+        };
+        Some(SnapshotRow {
+            step: step_count as i64,
+            cycle_ts: now,
+            tier,
+            n_alive: n as i32,
+            in_strengths,
+            last_perceived_key: keys,
+            last_perceived_ts: ts,
+            trailing_surprise_mean_short: self.trailing_short(),
+            trailing_surprise_mean_long: self.trailing_long(),
+            connection_logits: conn,
+        })
+    }
+
+    /// Cadence dispatcher: at most one snapshot write per step. Long tier
+    /// takes precedence when both fire (it strictly subsumes Hot data).
+    fn maybe_snapshot(&self, step_count: u64, now: i64) {
+        let last_long_ts = self
+            .last_long_snapshot_ts
+            .lock()
+            .map(|g| *g)
+            .unwrap_or(0);
+        let do_long = snapshot::should_write_long(step_count, last_long_ts, now);
+        let do_hot = snapshot::should_write_hot(step_count);
+        if !(do_long || do_hot) {
+            return;
+        }
+        let tier = if do_long {
+            SnapshotTier::Long
+        } else {
+            SnapshotTier::Hot
+        };
+        let path = match self.snapshot_path() {
+            Some(p) => p,
+            None => return, // snapshot disabled
+        };
+        let row = match self.build_row(tier, now) {
+            Some(r) => r,
+            None => return,
+        };
+        match snapshot::append_row(&path, row) {
+            Ok(fp) => tracing::debug!(
+                "substrate snapshot tier={} step={} fp={}",
+                tier.as_str(),
+                step_count,
+                &fp[..16]
+            ),
+            Err(e) => tracing::warn!(
+                "substrate snapshot write failed: {}",
+                e
+            ),
+        }
+        if do_long {
+            if let Ok(mut ts) = self.last_long_snapshot_ts.lock() {
+                *ts = now;
+            }
         }
     }
 
@@ -302,21 +471,86 @@ impl EmbeddingBackend for SeedBackend {
         // rather than panic.
         if v.len() == self.inner.dim() {
             let primary = self.project(&v);
-            self.step(&primary);
+            self.step(&primary, text);
         }
         v
     }
 
     fn embed_batch(&self, texts: &[&str]) -> Vec<Vec<f32>> {
         let vecs = self.inner.embed_batch(texts);
-        for v in &vecs {
+        for (v, &text) in vecs.iter().zip(texts.iter()) {
             if v.len() == self.inner.dim() {
                 let primary = self.project(v);
-                self.step(&primary);
+                self.step(&primary, text);
             }
         }
         vecs
     }
+}
+
+fn unix_secs_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn argmin(s: &[f32]) -> Option<usize> {
+    let mut best: Option<(usize, f32)> = None;
+    for (i, &v) in s.iter().enumerate() {
+        if !v.is_finite() {
+            continue;
+        }
+        match best {
+            None => best = Some((i, v)),
+            Some((_, bv)) if v < bv => best = Some((i, v)),
+            _ => {}
+        }
+    }
+    best.map(|(i, _)| i)
+}
+
+fn ring_mean(m: &Mutex<VecDeque<f32>>) -> f32 {
+    let g = match m.lock() {
+        Ok(g) => g,
+        Err(_) => return 0.0,
+    };
+    if g.is_empty() {
+        return 0.0;
+    }
+    let sum: f64 = g.iter().map(|x| *x as f64).sum();
+    (sum / g.len() as f64) as f32
+}
+
+/// Flatten an [n][n] connection matrix to a flat Vec of length N×(N-1),
+/// skipping the diagonal (neurons have no self-logit, per memo §3.4).
+fn flatten_off_diagonal(m: &[Vec<f32>]) -> Vec<f32> {
+    let n = m.len();
+    let mut out = Vec::with_capacity(n * n.saturating_sub(1));
+    for (i, row) in m.iter().enumerate() {
+        for (j, &v) in row.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            out.push(v);
+        }
+    }
+    out
+}
+
+/// Sum of absolute column-j values in [n][n] matrix m — the in-strength
+/// proxy "how strongly does the grid attend to neuron j?".
+fn column_abs_sums(m: &[Vec<f32>]) -> Vec<f32> {
+    let n = m.len();
+    let mut out = vec![0.0f32; n];
+    for row in m {
+        for (j, &v) in row.iter().enumerate() {
+            if j < out.len() {
+                out[j] += v.abs();
+            }
+        }
+    }
+    out
 }
 
 fn surprise_stats(s: &[f32]) -> (f32, f32) {
@@ -494,6 +728,72 @@ mod tests {
         if let Some(v) = prev {
             std::env::set_var(ABSTORE_BACKEND_ENV, v);
         }
+    }
+
+    #[test]
+    fn no_snapshot_path_means_no_writes() {
+        // Phase 2.2 ablation: with `snapshot_path == None`, even at the
+        // 20-event cadence boundary, nothing should write to disk.
+        let b = fixture(64);
+        assert!(b.snapshot_path().is_none());
+        for _ in 0..25 {
+            let _ = b.embed("event");
+        }
+        // No panic, no error — just no-op writes. step_count advances.
+        assert_eq!(b.stats().step_count, 25);
+    }
+
+    #[test]
+    fn cadence_step20_writes_hot_tier() {
+        // Phase 2.2 integration: 20 embed() calls trigger one Hot snapshot.
+        // We use a tempdir to avoid writing to ~/.local/share.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("substrate.parquet");
+        let b = fixture(64);
+        b.set_snapshot_path(Some(path.clone()));
+
+        // Vary input so surprise is non-degenerate.
+        for i in 0..20 {
+            let _ = b.embed(&format!("event-{i}"));
+        }
+        let rows = snapshot::read_all(&path).unwrap();
+        assert_eq!(rows.len(), 1, "exactly one snapshot at step=20");
+        assert_eq!(rows[0].step, 20);
+        assert_eq!(rows[0].tier, SnapshotTier::Hot);
+        assert!(rows[0].connection_logits.is_empty(),
+            "Hot tier should NOT carry connection_logits");
+        // Per-neuron in_strengths populated.
+        assert_eq!(rows[0].in_strengths.len(), 32);
+        // At least one last_perceived_key should be set (winner has fired).
+        let any_set = rows[0].last_perceived_key.iter().any(|s| !s.is_empty());
+        assert!(any_set, "at least one neuron should have last_perceived after 20 events");
+    }
+
+    #[test]
+    fn cadence_step100_writes_long_tier_with_logits() {
+        // Phase 2.2 integration: 100 embed() calls → long-tier snapshot
+        // carrying the full N×(N-1) connection_logits flat. Note that
+        // step=20/40/60/80 all also fire as Hot, so we expect 5 rows total.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("substrate.parquet");
+        let b = fixture(64);
+        b.set_snapshot_path(Some(path.clone()));
+
+        for i in 0..100 {
+            let _ = b.embed(&format!("e{i}"));
+        }
+        let rows = snapshot::read_all(&path).unwrap();
+        // Hot fires at 20/40/60/80, Long at 100 (Long subsumes Hot at
+        // step=100 — we picked it over Hot in the dispatcher).
+        assert_eq!(rows.len(), 5);
+        let last = &rows[rows.len() - 1];
+        assert_eq!(last.step, 100);
+        assert_eq!(last.tier, SnapshotTier::Long);
+        // N=32 → N*(N-1) = 992 entries.
+        assert_eq!(last.connection_logits.len(), 32 * 31);
+        // Trailing means should be populated (we just ran 100 events).
+        assert!(last.trailing_surprise_mean_short.is_finite());
+        assert!(last.trailing_surprise_mean_long.is_finite());
     }
 
     #[test]
