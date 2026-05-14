@@ -567,17 +567,19 @@ impl SeedBackend {
         if k == 0 || key.is_empty() {
             return Vec::new();
         }
-        let winners: Vec<usize> = {
-            let lp = match self.last_perceived.lock() {
-                Ok(g) => g,
-                Err(_) => return Vec::new(),
-            };
-            lp.iter()
-                .enumerate()
-                .filter(|(_, (k_text, _))| k_text == key)
-                .map(|(i, _)| i)
-                .collect()
+        // Post 89 Minor #3: clone last_perceived once instead of locking
+        // twice. At N=256 this is ~256 short String clones — negligible
+        // vs reacquiring the mutex.
+        let lp_snapshot: Vec<(String, i64)> = match self.last_perceived.lock() {
+            Ok(g) => g.clone(),
+            Err(_) => return Vec::new(),
         };
+        let winners: Vec<usize> = lp_snapshot
+            .iter()
+            .enumerate()
+            .filter(|(_, (k_text, _))| k_text == key)
+            .map(|(i, _)| i)
+            .collect();
         if winners.is_empty() {
             return Vec::new();
         }
@@ -601,22 +603,24 @@ impl SeedBackend {
                 if j == w || j >= scores.len() {
                     continue;
                 }
+                // Post 89 Minor #2: `connection_matrix()` returns softmax
+                // values (≥0), so `.abs()` is a no-op here. Kept as
+                // defensive guard for any future signed-weight variant
+                // of the underlying matrix (e.g. raw logits or
+                // covariance-style topology) without changing this call
+                // site.
                 scores[j] += weight.abs();
             }
         }
         let mut ranked: Vec<(usize, f32)> = scores.iter().copied().enumerate().collect();
         ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
-        let lp = match self.last_perceived.lock() {
-            Ok(g) => g,
-            Err(_) => return Vec::new(),
-        };
         let mut seen: HashSet<String> = HashSet::new();
         let mut out: Vec<(String, f32)> = Vec::with_capacity(k);
         for (i, score) in ranked {
             if score <= 0.0 {
                 break;
             }
-            let cand = match lp.get(i) {
+            let cand = match lp_snapshot.get(i) {
                 Some((s, _)) => s,
                 None => continue,
             };
