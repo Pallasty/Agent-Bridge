@@ -1,0 +1,46 @@
+# systemd user unit — one-shot Day-2 P-α audit reminder (2026-05-15).
+#
+# Pinned to the verify-design-act eval calendar from
+# `project_p_alpha_p_epsilon_baseline_locked_20260514`:
+#   Day-2  2026-05-15  ← THIS UNIT
+#   Day-7  2026-05-20  (P-α tick first real sweep)
+#   Day-14 2026-05-27  (P-α-1..4 prediction window)
+#   Day-28 2026-06-10  (P-ε P1..3 prediction window)
+#
+# Steps (idempotent, all pure SQL / file IO, no LLM, no network):
+#   1. `dream substrate-audit --json` → snapshot today's M1..M8 to a
+#      stable file under ~/.cache/agent-bridge/baselines/
+#   2. `diff` the JSON against the 2026-05-14 baseline so the day's
+#      delta is visible in the log without manual jq juggling.
+#
+# After it fires once, disable the timer so it doesn't reschedule:
+#   systemctl --user disable --now agent-bridge-day2-audit.timer
+# (Timer is .OnCalendar to a single date — re-firing is impossible
+#  unless the machine clock is set back, but disable for hygiene.)
+#
+# Install (oneshot, manual disable after fire):
+#   cp scripts/systemd/agent-bridge-day2-audit.{service,timer} \
+#      ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agent-bridge-day2-audit.timer
+#
+# Manual run (don't wait for the calendar):
+#   systemctl --user start agent-bridge-day2-audit.service
+#
+# Logs:
+#   tail -f ~/.cache/agent-bridge/day2-audit.log
+#   ls    ~/.cache/agent-bridge/baselines/
+
+[Unit]
+Description=Day-2 P-α substrate-audit snapshot + diff vs 2026-05-14 baseline
+Documentation=file://%h/.claude/projects/-Data-CascadeProjects-agent-bridge/memory/project_p_alpha_p_epsilon_baseline_locked_20260514.md
+
+[Service]
+Type=oneshot
+# `.real` skips the wrapper — substrate-audit is pure SQL.
+ExecStart=/bin/sh -c 'mkdir -p %h/.cache/agent-bridge/baselines && %h/.local/bin/agent-bridge.real dream substrate-audit --json > %h/.cache/agent-bridge/baselines/substrate-audit-2026-05-15.json'
+# diff: -u for context, '|| true' so a non-zero (= changes detected) doesn't fail the unit.
+ExecStart=/bin/sh -c 'echo "===== diff vs 2026-05-14 baseline =====" && diff -u %h/.cache/agent-bridge/baselines/substrate-audit-2026-05-14.json %h/.cache/agent-bridge/baselines/substrate-audit-2026-05-15.json || true'
+StandardOutput=append:%h/.cache/agent-bridge/day2-audit.log
+StandardError=append:%h/.cache/agent-bridge/day2-audit.log
+TimeoutStartSec=120

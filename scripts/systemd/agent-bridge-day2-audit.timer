@@ -1,0 +1,18 @@
+# systemd user timer — fires once at 2026-05-15 09:00:00 UTC.
+# See the .service file for context (Day-2 P-α audit reminder).
+
+[Unit]
+Description=One-shot trigger for Day-2 P-α substrate-audit (2026-05-15 09:00 UTC)
+Requires=agent-bridge-day2-audit.service
+
+[Timer]
+# Single fixed calendar — fires once and never repeats.
+# Persistent=true so if the box is asleep at 09:00 UTC the audit still
+# runs on next boot (we want this — missing the snapshot defeats the
+# purpose of the eval calendar).
+OnCalendar=2026-05-15 09:00:00 UTC
+Persistent=true
+Unit=agent-bridge-day2-audit.service
+
+[Install]
+WantedBy=timers.target
