@@ -196,4 +196,20 @@ fi
 # Always-on flags
 export AGENT_BRIDGE_TOOL_PROFILE="${AGENT_BRIDGE_TOOL_PROFILE:-all}"
 
+# v22 Phase 2.4 — α-α SVD warm-start projection defaults.
+# When AB_SUBSTRATE is opted in (manually or by future wrapper change),
+# every wrapper-launched process auto-picks SVD instead of bucket-pool.
+# We deliberately do NOT default AB_SUBSTRATE: substrate install pays
+# NeuronGrid init (~1ms) per process, and short-lived dream/sync calls
+# don't need it. Both vars use `${VAR:-}` guard so per-call overrides
+# (`AB_SUBSTRATE_PROJECTION=bucket_pool agent-bridge ...`) keep working.
+#
+# Path resolves to the aio2 artifact location. Mac / hosts without the
+# AiOT checkout silently hit `load_svd` IO error and the resolver falls
+# back to bucket-pool via tracing::warn — no panic, no behavior change
+# vs Phase 1. Cross-machine artifact distribution is AiOT memo §6 Open
+# Q #3 follow-up (forum #6).
+export AB_SUBSTRATE_PROJECTION="${AB_SUBSTRATE_PROJECTION:-svd}"
+export AB_SUBSTRATE_SVD_PATH="${AB_SUBSTRATE_SVD_PATH:-/Data/CascadeProjects/AiOT/build/svd_projection_v1.bin}"
+
 exec "$real_bin" "$@"
