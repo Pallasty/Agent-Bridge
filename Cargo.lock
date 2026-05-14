@@ -103,6 +103,7 @@ version = "0.1.0"
 dependencies = [
  "ab-store",
  "arrow",
+ "base64 0.22.1",
  "parquet",
  "seed_neuron",
  "serde",

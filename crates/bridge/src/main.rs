@@ -1618,6 +1618,7 @@ async fn run_substrate_stats(as_json: bool) -> Result<()> {
     match stats {
         Some(s) => {
             println!("backend (inner) : {}", s.backend_name);
+            println!("projection      : {}", s.projection);
             println!("N (neurons)     : {}", s.n);
             println!("D (substrate)   : {}", s.d);
             println!("outer_dim       : {}", s.outer_dim);

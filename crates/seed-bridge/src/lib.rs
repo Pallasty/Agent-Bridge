@@ -27,6 +27,7 @@ use ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend};
 use seed_neuron::NeuronGrid;
 use serde::{Deserialize, Serialize};
 
+pub mod projection;
 pub mod snapshot;
 pub use snapshot::{SnapshotRow, SnapshotTier};
 
@@ -66,7 +67,15 @@ pub fn env_enabled() -> bool {
 /// late install silently inert.
 pub fn install_default() -> Result<(), &'static str> {
     let inner = build_inner_backend();
-    let backend = Arc::new(SeedBackend::wrap(inner));
+    // Phase 2.4 — opt into SVD warm-start projection iff env opts in AND
+    // load succeeds. Any failure logs and falls back to bucket-pool so
+    // mis-deployment never panics the daemon.
+    let proj = resolve_install_projection();
+    let backend = Arc::new(SeedBackend::wrap_with_projection(
+        inner,
+        SubstrateConfig::default(),
+        proj,
+    ));
     // Phase 2.2 — auto-wire snapshot persistence at install time. Tests
     // that don't want IO simply don't call `install_default`.
     backend.set_snapshot_path(snapshot::default_snapshot_path());
@@ -75,6 +84,47 @@ pub fn install_default() -> Result<(), &'static str> {
         .map_err(|_| "seed-bridge already installed")?;
     ab_store::embedding::set_default_backend(backend)?;
     Ok(())
+}
+
+/// Decide which [`projection::Projection`] to install based on env vars.
+/// Returns `BucketPool` when SVD is not opted into OR when the load
+/// fails. Failure path is logged to `tracing::warn` so deployment
+/// surfaces still tell the operator why bucket-pool is in effect.
+fn resolve_install_projection() -> projection::Projection {
+    if !projection::svd_env_enabled() {
+        return projection::Projection::BucketPool;
+    }
+    let path = match projection::svd_path_from_env() {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                env = projection::SVD_PATH_ENV,
+                "AB_SUBSTRATE_PROJECTION=svd but {} unset — falling back to bucket-pool",
+                projection::SVD_PATH_ENV
+            );
+            return projection::Projection::BucketPool;
+        }
+    };
+    match projection::load_svd(&path) {
+        Ok(svd) => {
+            tracing::info!(
+                path = %path.display(),
+                sha256 = %svd.sha256,
+                encoder_dim = svd.encoder_dim,
+                perception_dim = svd.perception_dim,
+                "substrate-projection: loaded SVD warm-start"
+            );
+            projection::Projection::Svd(svd)
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "substrate-projection: SVD load failed — falling back to bucket-pool"
+            );
+            projection::Projection::BucketPool
+        }
+    }
 }
 
 /// Env var ab-store uses to pick the default backend. We mirror its
@@ -164,6 +214,16 @@ pub struct SubstrateStats {
     /// proxy for "topology has structure"; should drift from initial
     /// 1/(N-1) toward bimodal extremes as learning proceeds.
     pub connection_mean_abs: f32,
+    /// Phase 2.4 — active outer→D projection ("bucket_pool" | "svd").
+    /// `bucket_pool` is Phase 1 default; `svd` confirms a successful
+    /// SVD warm-start load via env opt-in. Surfaced so the operator
+    /// knows at a glance which path is in effect.
+    #[serde(default = "default_projection_tag")]
+    pub projection: String,
+}
+
+fn default_projection_tag() -> String {
+    "bucket_pool".to_string()
 }
 
 /// v22 substrate backend.
@@ -187,6 +247,12 @@ pub struct SeedBackend {
     /// (used by tests and ablation). Defaults to
     /// [`snapshot::default_snapshot_path`] when [`install_default`] runs.
     snapshot_path: Mutex<Option<PathBuf>>,
+    /// Phase 2.4 — outer→D projection. Installed once at construct time
+    /// so the hot-path `project()` is a borrow + dispatch with no lock.
+    /// Defaults to [`projection::Projection::BucketPool`] (Phase 1
+    /// behaviour); SVD warm-start activated by `install_default` when
+    /// env opts in and the artifact loads cleanly.
+    projection: projection::Projection,
 }
 
 impl SeedBackend {
@@ -198,12 +264,46 @@ impl SeedBackend {
     /// Wrap with explicit config. Panics if `config.d > inner.dim()` —
     /// the truncate projection requires the substrate dim be ≤ outer dim.
     pub fn wrap_with(inner: Arc<dyn EmbeddingBackend>, config: SubstrateConfig) -> Self {
+        Self::wrap_with_projection(inner, config, projection::Projection::default())
+    }
+
+    /// Wrap with explicit config + caller-supplied projection. Used by
+    /// [`install_default`] to swap in Phase 2.4 SVD warm-start. Panics
+    /// if `config.d > inner.dim()` (same invariant as [`wrap_with`]).
+    /// SVD projections additionally require `svd.encoder_dim ==
+    /// inner.dim()` — caller is responsible for matching the artifact
+    /// to the running encoder; mismatched SVD is degraded to bucket-pool
+    /// with a warning rather than panicking the daemon.
+    pub fn wrap_with_projection(
+        inner: Arc<dyn EmbeddingBackend>,
+        config: SubstrateConfig,
+        projection: projection::Projection,
+    ) -> Self {
         assert!(
             config.d <= inner.dim(),
             "substrate D={} must not exceed inner backend dim {}",
             config.d,
             inner.dim()
         );
+        let projection = match &projection {
+            projection::Projection::Svd(svd) if svd.encoder_dim != inner.dim() => {
+                tracing::warn!(
+                    svd_encoder_dim = svd.encoder_dim,
+                    inner_dim = inner.dim(),
+                    "substrate-projection: SVD encoder_dim != inner.dim — falling back to bucket-pool"
+                );
+                projection::Projection::BucketPool
+            }
+            projection::Projection::Svd(svd) if svd.perception_dim != config.d => {
+                tracing::warn!(
+                    svd_perception_dim = svd.perception_dim,
+                    substrate_d = config.d,
+                    "substrate-projection: SVD perception_dim != config.d — falling back to bucket-pool"
+                );
+                projection::Projection::BucketPool
+            }
+            _ => projection,
+        };
         let grid = NeuronGrid::new(
             config.n,
             config.d,
@@ -222,7 +322,15 @@ impl SeedBackend {
             last_perceived: Mutex::new(last_perceived),
             last_long_snapshot_ts: Mutex::new(0),
             snapshot_path: Mutex::new(None),
+            projection,
         }
+    }
+
+    /// Stable kind tag for the active projection ("bucket_pool" | "svd").
+    /// Surfaced in [`SubstrateStats`] + the `substrate stats` CLI so the
+    /// operator can confirm Phase 2.4 wire-up at a glance.
+    pub fn projection_kind(&self) -> &'static str {
+        self.projection.kind()
     }
 
     /// Set or clear the snapshot file path. `install_default` calls this
@@ -239,29 +347,13 @@ impl SeedBackend {
         self.snapshot_path.lock().ok().and_then(|g| g.clone())
     }
 
-    /// Phase 1 projection: linear-bucket average pool inner → D.
-    /// Each outer index `i` maps to bucket `i*D/outer`. Preserves L1
-    /// mass and survives sparse-input backends (e.g. HashBackend with
-    /// short text would zero out under naive truncate; this does not).
-    /// Phase 2 swaps in learned linear projection. Returns unit-norm.
+    /// Outer→D projection. Dispatches on the installed
+    /// [`projection::Projection`]: Phase 1 bucket-pool by default; Phase
+    /// 2.4 SVD warm-start when the operator opts in via
+    /// `AB_SUBSTRATE_PROJECTION=svd` + `AB_SUBSTRATE_SVD_PATH`. Returns
+    /// unit-norm in either case.
     fn project(&self, v: &[f32]) -> Vec<f32> {
-        let d = self.config.d;
-        let outer = v.len();
-        let mut out = vec![0.0f32; d];
-        if outer == 0 || d == 0 {
-            return out;
-        }
-        for (i, &x) in v.iter().enumerate() {
-            let bucket = (i * d / outer).min(d - 1);
-            out[bucket] += x;
-        }
-        let norm: f32 = out.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm > 1e-9 {
-            for x in out.iter_mut() {
-                *x /= norm;
-            }
-        }
-        out
+        self.projection.project(v, self.config.d)
     }
 
     /// Perception step. Called once per outer `embed()`. `primary` is the
@@ -444,6 +536,7 @@ impl SeedBackend {
             .unwrap_or((0.0, 0.0));
         SubstrateStats {
             backend_name: self.inner.name().to_string(),
+            projection: self.projection_kind().to_string(),
             n,
             d,
             outer_dim: self.inner.dim(),
