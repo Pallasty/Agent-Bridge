@@ -106,13 +106,14 @@ enum Cmd {
         #[command(subcommand)]
         op: DreamOp,
     },
-    /// **v22 phase 1** — Memory substrate Layer 2 introspection.
+    /// **v22** — Memory substrate Layer 2 introspection.
     ///
-    /// Substrate is opt-in via `AB_SUBSTRATE=1` and lives only inside the
-    /// running MCP server / palace serve process. CLI introspection
-    /// reads the in-process global if this binary was the one that
-    /// installed it; otherwise reports config + "not installed" state.
-    /// Phase 2 will add snapshot persistence enabling cross-process query.
+    /// Substrate is opt-in via `AB_SUBSTRATE=1` and lives inside the running
+    /// MCP server / palace serve process. CLI introspection reads the
+    /// in-process global if this binary was the one that installed it;
+    /// otherwise reports config + "not installed" state. Phase 2.2 ships
+    /// Parquet snapshot persistence at `$HOME/.local/share/agent-bridge/
+    /// substrate.parquet` for cross-process state inspection.
     Substrate {
         #[command(subcommand)]
         op: SubstrateOp,
@@ -1023,14 +1024,16 @@ async fn main() -> Result<()> {
     // overwrites the shell wrapper. See `creds.rs` for resolution order.
     ab_bridge::creds::load_at_startup();
 
-    // v22 phase 1 — opt-in substrate install. Must precede any embedding
-    // touch so the OnceLock in ab-store::embedding lands on SeedBackend.
-    // Env-gated: `AB_SUBSTRATE=1`. Silent + ablation-safe when unset.
+    // v22 — opt-in substrate install. Must precede any embedding touch so
+    // the OnceLock in ab-store::embedding lands on SeedBackend. Env-gated:
+    // `AB_SUBSTRATE=1`. Silent + ablation-safe when unset. Phase 2.2 wires
+    // snapshot persistence inside install_default; tests/ablation that
+    // don't want IO simply don't call install_default.
     if ab_seed_bridge::env_enabled() {
         if let Err(e) = ab_seed_bridge::install_default() {
             tracing::warn!("seed-bridge install_default failed: {e}");
         } else {
-            tracing::info!("seed-bridge installed (v22 phase 1)");
+            tracing::info!("seed-bridge installed (v22 phase 2.2)");
         }
     }
 
@@ -1429,14 +1432,18 @@ async fn main() -> Result<()> {
     }
 }
 
-/// **v22 phase 1** — Substrate stats CLI. Reads the in-process global
-/// installed by `ab_seed_bridge::install_default()`. If substrate is not
-/// installed (env not set, or process didn't install), reports config
-/// + the disabled state — useful for confirming env var spelling.
+/// **v22** — Substrate stats CLI. Reads the in-process global installed by
+/// `ab_seed_bridge::install_default()`. If substrate is not installed (env
+/// not set, or process didn't install), reports config + the disabled state
+/// — useful for confirming env var spelling.
 async fn run_substrate_stats(as_json: bool) -> Result<()> {
     let env_on = ab_seed_bridge::env_enabled();
     let installed = ab_seed_bridge::current();
     let stats = installed.as_ref().map(|s| s.stats());
+    let snapshot_path = installed
+        .as_ref()
+        .and_then(|s| s.snapshot_path())
+        .map(|p| p.to_string_lossy().to_string());
 
     if as_json {
         let payload = json!({
@@ -1444,12 +1451,13 @@ async fn run_substrate_stats(as_json: bool) -> Result<()> {
             "env_enabled": env_on,
             "installed": stats.is_some(),
             "stats": stats,
+            "snapshot_path": snapshot_path,
         });
         println!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(());
     }
 
-    println!("# v22 substrate stats (phase 1)");
+    println!("# v22 substrate stats");
     println!(
         "env: {var}={state}",
         var = ab_seed_bridge::SUBSTRATE_ENV_VAR,
@@ -1467,11 +1475,16 @@ async fn run_substrate_stats(as_json: bool) -> Result<()> {
                 s.last_surprise_mean, s.last_surprise_max
             );
             println!("|conn| mean     : {:.6}", s.connection_mean_abs);
+            match &snapshot_path {
+                Some(p) => println!("snapshot path   : {}", p),
+                None => println!("snapshot path   : (disabled)"),
+            }
             if s.step_count == 0 {
                 println!();
                 println!("(no perception events yet — substrate is opt-in to this process only;");
                 println!(" trigger via memory_save / memory_search inside an MCP session with");
-                println!(" `AB_SUBSTRATE=1` in env)");
+                println!(" `AB_SUBSTRATE=1` in env — phase 2.2 will append snapshot rows once");
+                println!(" the cadence triggers (every 20 events / every 100 events or 6h))");
             }
         }
         None => {
@@ -1479,7 +1492,8 @@ async fn run_substrate_stats(as_json: bool) -> Result<()> {
             println!();
             println!(
                 "(set `AB_SUBSTRATE=1` in env and re-launch the long-lived process;");
-            println!(" stats are in-process only in phase 1 — phase 2 will persist to disk)");
+            println!(" phase 2.2 ships snapshot persistence to");
+            println!(" `$HOME/.local/share/agent-bridge/substrate.parquet`)");
         }
     }
     Ok(())
