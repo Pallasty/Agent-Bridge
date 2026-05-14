@@ -6334,7 +6334,7 @@ mod tests {
     }
 
     #[test]
-    fn summarize_snapshot_rows_picks_LAST_per_tier_not_first() {
+    fn summarize_snapshot_rows_picks_last_per_tier_not_first() {
         // Two Long rows; latest_long must be the later one (rev iteration).
         let p = Path::new("/tmp/y.parquet");
         let rows = vec![
