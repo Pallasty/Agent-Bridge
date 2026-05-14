@@ -672,24 +672,27 @@ impl EmbeddingBackend for SeedBackend {
     }
 }
 
-/// Snapshot-based variant of [`SeedBackend::neighbors_of`]. Same **shape**
-/// applied to a serialized [`SnapshotRow`] read from `substrate.parquet`,
-/// so short-lived CLI / cross-process queries can answer without
-/// installing a live substrate. Only `Long`-tier rows carry the
-/// `connection_logits` field this needs; Hot rows always return `[]`.
+/// Snapshot-based variant of [`SeedBackend::neighbors_of`]. Same
+/// algorithm applied to a serialized [`SnapshotRow`] read from
+/// `substrate.parquet`, so short-lived CLI / cross-process queries can
+/// answer without installing a live substrate. Only `Long`-tier rows
+/// carry the `connection_logits` field this needs; Hot rows always
+/// return `[]`.
 ///
-/// **Semantic asymmetry vs live** (Phase 3 A review post 89 Minor #1):
-/// the live `SeedBackend::neighbors_of` weights neighbors by
-/// `grid.connection_matrix()` which is **softmax(logits)** per
-/// `seed_neuron::dynamic`, while this function weights by **raw logits**
-/// straight out of the SnapshotRow. The two are rank-preserving for the
-/// typical low-variance distributions we expect at N=256, but **not
-/// bit-exact** when logits are bimodal — softmax squashes the middle
-/// tail and can re-order keys whose scores are close. Trend-tracking
-/// (Day-7/14/28 P2 audit) is unaffected because both pipelines are
-/// self-consistent; cross-pipeline diff is the failure mode to watch.
-/// Phase 3.1 candidate: apply per-winner-row softmax here too for
-/// strict equivalence.
+/// **Strict-equivalence with live** (Phase 3.1 finding 2026-05-14):
+/// `connection_logits` is a misnomer — [`SeedBackend::build_row`]
+/// stores `flatten_off_diagonal(connection_matrix())`, i.e. the
+/// **softmax weights** matrix from `seed_neuron::dynamic`, not raw
+/// logits. Live `neighbors_of` reads the same `connection_matrix()`
+/// matrix directly. Both pipelines therefore accumulate identical
+/// softmax values in identical visit order, so output is bit-exact
+/// equal when the snapshot row is built immediately before the
+/// snapshot query (no intervening grid mutation). The earlier post-89
+/// review and `d25920e` doc claimed "live=softmax vs snapshot=raw
+/// logits" — that was a misreading; see test
+/// `neighbors_strict_equivalence_live_vs_snapshot`. Any cross-pipeline
+/// diff in practice is purely **temporal**: the grid evolved between
+/// snapshot write and query.
 pub fn neighbors_from_snapshot(
     row: &SnapshotRow,
     key: &str,
@@ -1310,6 +1313,65 @@ mod tests {
             connection_logits: vec![0.1, 0.2, 0.3], // 3 != 4*3=12
         };
         assert!(neighbors_from_snapshot(&row, "k0", 5).is_empty());
+    }
+
+    #[test]
+    fn neighbors_strict_equivalence_live_vs_snapshot() {
+        // Phase 3.1 (2026-05-14): prove `neighbors_of` (live) and
+        // `neighbors_from_snapshot` are algorithmically **bit-exact**
+        // when the snapshot is built with no intervening grid
+        // mutation. The field name `connection_logits` is a misnomer:
+        // `build_row()` stores `flatten_off_diagonal(connection_matrix())`,
+        // which is softmax weights, not raw logits. The post 89 review
+        // claim of "live=softmax / snapshot=raw" was a misreading;
+        // this test pins down the actual contract.
+        let b = fixture(64);
+        for i in 0..40 {
+            let _ = b.embed(&format!("filler-{i}"));
+        }
+        // Two perceptions of the same anchor widen its winner footprint
+        // so we exercise the multi-winner accumulation path.
+        let _ = b.embed("anchor");
+        let _ = b.embed("anchor");
+
+        // Snapshot AFTER last embed; query before any further embed.
+        let row = b
+            .build_row(SnapshotTier::Long, 1_000_000)
+            .expect("build_row must succeed on a live SeedBackend");
+
+        let live = b.neighbors_of("anchor", 10);
+        let snap = neighbors_from_snapshot(&row, "anchor", 10);
+
+        assert_eq!(
+            live.len(),
+            snap.len(),
+            "length mismatch: live={} snap={}",
+            live.len(),
+            snap.len()
+        );
+        for (i, (l, s)) in live.iter().zip(snap.iter()).enumerate() {
+            assert_eq!(
+                l.0, s.0,
+                "rank {} key mismatch: live={:?} snap={:?}",
+                i, l, s
+            );
+            // Both pipelines accumulate identical softmax values from
+            // the same `connection_matrix()` call in identical order,
+            // so scores must match bit-exactly. No float epsilon: any
+            // diff here would mean we got the semantics wrong.
+            assert_eq!(
+                l.1.to_bits(),
+                s.1.to_bits(),
+                "rank {} score bit-mismatch on key {:?}: live={} snap={}",
+                i, l.0, l.1, s.1
+            );
+        }
+        // Sanity: substrate should have actually produced neighbors,
+        // otherwise the equivalence claim is vacuous.
+        assert!(
+            !live.is_empty(),
+            "test setup defect: substrate produced no neighbors for anchor"
+        );
     }
 
     #[test]
