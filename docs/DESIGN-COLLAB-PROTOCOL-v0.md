@@ -27,6 +27,7 @@ Collab Protocol v0 = 这三条 root cause 各对应一个 falsifiable proposal (
 | F4 | commit msg / diff 错配 | `978a310` "substrate_stats" 实落 P-α main.rs（[[lesson_sibling_sweep_window_commit_mismatch]]）；`f88e5ef`+`8963a4b` sibling 三 commit 把我 P22 工作打包进 ζ-19 |
 | F5 | 被动 alarm | daemon FD 变 `(deleted)` → audit M2=0 / M6=stale=1.0 → 没自动通报，user 跑 ps 才发现 PID 换 |
 | F6 | review 不读 impl | post 89 把 `SnapshotRow.connection_logits` 字段名当真，没读 `build_row()` 看真存的是 softmax（[[lesson_verify_code_semantics_not_field_names]]）|
+| F7 | single-source framework→evidence chain | thread 6 #112 wipe → #115 transient → #118 cross-system，三层各基于上一层 sibling claim 当 ground truth，#116 (`/proc/PID/fd` check) 才止链。**已被 sibling 主动 mitigate** via thread 6 #116/#119/#121 retraction chain — 教科书 cross-verify 流程；C0 prompt rule "downstream post 必须 cross-verify upstream claim 一次" 是落地路径 |
 
 ---
 
@@ -144,6 +145,8 @@ agent-bridge rescue-snapshot --canonical
 cargo fmt-sweep / multi-file commit 不在 v0 范围，待 C2 落地后再扩。
 
 ### 3.4 · C3 — Alert-on-Drift in daemon
+
+**Reactive baseline today** (thread 6): 17:25 swap → 18:11 sibling 发现 inverse split-brain (#123) → 18:21 kill+respawn (#124) = ~56 min from event to mitigation by human-in-loop。C3 目标把这条延迟从 56 min 压到 <5 min via daemon-self detection。今天的事件 = C3 必要性的现成 case study。
 
 **Rule**: daemon background tick 每 30s 跑 self-check；异常 → forum_post(kind=alert) + notify MCP。
 
@@ -271,12 +274,17 @@ Open questions 在 forum 公告时 ping sibling 一起决。
 - [[project_state_db_rescue_event_2026_05_14]] — 触发本 memo 的事件
 - [[lesson_sibling_sweep_window_commit_mismatch]] — F4 案例
 - [[lesson_verify_code_semantics_not_field_names]] — F6 案例
+- [[lesson_forum_hypothesis_cross_session_errata_chain]] — F7 案例 + sibling 已自然 mitigate
+- [[lesson_state_db_deleted_inode_vs_phantom_diagnosis]] — C3 detection 路径模板
+- [[reference_forum_author_session_id_convention]] — author tag `#sid8` proposal
 - [[feedback_cargo_fmt_sweeps_protected_files]] — sibling fmt-sweep 模式
 - [[feedback_sibling_overwrites_during_edit_window]] — F2 同形
 - [[feedback_sibling_commit_bundles_dropped_deps]] — F4 同形
 - [[lesson_codebase_index_delete_then_walk_footgun]] — 历史 wipe-recover dance
 - DESIGN-P-alpha 本 memo 的"daemon tick host"
 - DESIGN-P-epsilon 本 memo 的"observability primitive"
+- forum thread 10 post 126 — 本 memo 公告 + Q-1..Q-6 sibling sync entry
+- forum thread 6 #122-#125 — sibling 同期 ship/diagnose 链 (P-γ gap / kill+respawn / Day-2 replay)
 
 ---
 
