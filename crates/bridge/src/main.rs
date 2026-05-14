@@ -8,7 +8,7 @@ use ab_mcp::server::serve_stdio;
 use ab_store::{default_db_path, SqliteStore, StateStore};
 use ab_bridge::warp_scheme;
 use ab_terminal::{auto_backend, TerminalBackend};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::json;
 use std::path::PathBuf;
@@ -721,6 +721,32 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **v22 Phase 3 (A) — substrate ↔ α cofires correlation audit.**
+    /// For each memory key with `≥ min_cofires` α `cofires` edges, compute
+    /// Spearman rank correlation between
+    ///   A = `substrate.neighbors_of(key, k)` (from latest Long snapshot)
+    ///   B = `memory_neighbors(key)` filtered to edge_type=cofires
+    /// over the union of candidate keys. Reports median Spearman across
+    /// qualifying keys — the falsifiability metric for v22 §4 P2
+    /// (median ≥ 0.4 → P2 PASS → unlock P3 cold-start probe).
+    ///
+    /// Pure read; no schema, no writes. Writes JSON snapshot under
+    /// `~/.cache/agent-bridge/baselines/substrate-corr-YYYY-MM-DD.json`
+    /// when `--json` is set, for Day-7/14/28 trend diff.
+    SubstrateCorrAudit {
+        /// k for substrate.neighbors_of(key, k). Default 20 per memo §4 P2.
+        #[arg(long, default_value_t = 20)]
+        k: usize,
+        /// Min cofires edge count for a key to qualify. Default 3 per memo.
+        #[arg(long, default_value_t = 3)]
+        min_cofires: u32,
+        /// Override snapshot file path.
+        #[arg(long)]
+        snapshot_path: Option<PathBuf>,
+        /// Emit raw JSON of `SubstrateCorrReport` instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// **P-α — Always-Warm Coactivation Tick (manual mirror).** One
     /// sweep of `memory_coactivation` decay with integer half-life:
     /// every row where `last_at + tau ≤ now` gets `count /= 2` and
@@ -755,6 +781,48 @@ enum SubstrateOp {
     /// integration.
     Stats {
         /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// **v22 Phase 3 (A)** — Query substrate topology: for `--key K`,
+    /// return up to `--k` other keys that the substrate's neuron(s)
+    /// which fired on K connect to most strongly. Reads the latest Long
+    /// snapshot row from `substrate.parquet` (no live install_default
+    /// required) so short-lived CLI invocations get useful answers.
+    Neighbors {
+        /// Memory key to look up (must have been perceived by the
+        /// substrate process that wrote the snapshot file).
+        #[arg(long)]
+        key: String,
+        /// Max number of distinct neighbor keys to return.
+        #[arg(long, default_value_t = 20)]
+        k: usize,
+        /// Override file path (default: `$HOME/.local/share/agent-bridge/substrate.parquet`).
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Emit raw JSON `[{"key":..., "score":...}]` for scripts.
+        #[arg(long)]
+        json: bool,
+    },
+    /// **Phase 2.2 read side** — Read rows from `substrate.parquet`
+    /// without touching the in-process substrate (no install_default
+    /// required). Useful for cross-process inspection, forum/dream
+    /// pipeline, and G4 fingerprint comparisons across machines.
+    Snapshot {
+        /// Override file path (default: `$HOME/.local/share/agent-bridge/substrate.parquet`).
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Number of trailing rows to show (0 = all). Default 5.
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+        /// Filter by tier (`hot` or `long`).
+        #[arg(long)]
+        tier: Option<String>,
+        /// Print only the SHA256 fingerprint per row (one per line) —
+        /// for cross-machine determinism compare (G4).
+        #[arg(long)]
+        fingerprint_only: bool,
+        /// Emit JSON summary (omits bulk per-neuron arrays).
         #[arg(long)]
         json: bool,
     },
@@ -1079,6 +1147,25 @@ async fn main() -> Result<()> {
     if let Cmd::Substrate { op } = &cmd {
         return match op {
             SubstrateOp::Stats { json } => run_substrate_stats(*json).await,
+            SubstrateOp::Neighbors { key, k, path, json } => {
+                run_substrate_neighbors(key.clone(), *k, path.clone(), *json).await
+            }
+            SubstrateOp::Snapshot {
+                path,
+                limit,
+                tier,
+                fingerprint_only,
+                json,
+            } => {
+                run_substrate_snapshot(
+                    path.clone(),
+                    *limit,
+                    tier.clone(),
+                    *fingerprint_only,
+                    *json,
+                )
+                .await
+            }
         };
     }
 
@@ -1261,6 +1348,14 @@ async fn main() -> Result<()> {
             }
             DreamOp::DecayCoactivation { tau_days, max_iterations, dry_run, json } => {
                 run_dream_decay_coactivation(*tau_days, *max_iterations, *dry_run, *json).await
+            }
+            DreamOp::SubstrateCorrAudit {
+                k,
+                min_cofires,
+                snapshot_path,
+                json,
+            } => {
+                run_dream_substrate_corr_audit(*k, *min_cofires, snapshot_path.clone(), *json).await
             }
         };
     }
@@ -1497,6 +1592,399 @@ async fn run_substrate_stats(as_json: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// **v22 §4 P2 measurement** — Spearman rank correlation between the
+/// substrate's `neighbors_of(key, k)` (from the latest Long snapshot row)
+/// and the α-graph's `cofires` neighbors of the same key. Aggregates
+/// across all keys with ≥ `min_cofires` cofires degree and reports the
+/// median Spearman.
+///
+/// **Decision rule (memo §4 P2)**: median ≥ 0.4 → P2 PASS → unlock the
+/// Phase 3 cold-start probe (P3). Below 0.4 → null-result per §4 P6,
+/// substrate stays as observability only, retrieval-bias wiring deferred.
+///
+/// Pure read; no schema, no writes.
+async fn run_dream_substrate_corr_audit(
+    k: usize,
+    min_cofires: u32,
+    snapshot_path_override: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    use ab_seed_bridge::snapshot::{self, SnapshotTier};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use std::collections::HashMap;
+
+    let snap_path = snapshot_path_override.or_else(snapshot::default_snapshot_path);
+    let snap_row = match &snap_path {
+        Some(p) if p.exists() => {
+            let rows = snapshot::read_all(p)
+                .with_context(|| format!("read substrate snapshot {}", p.display()))?;
+            rows.into_iter().rev().find(|r| matches!(r.tier, SnapshotTier::Long))
+        }
+        _ => None,
+    };
+
+    let db_path = default_db_path();
+    let store = SqliteStore::open(&db_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
+    let qualifying = store
+        .cofires_keys_with_min_degree(min_cofires)
+        .await
+        .map_err(|e| anyhow::anyhow!("cofires_keys_with_min_degree: {e}"))?;
+
+    let mut per_key: Vec<serde_json::Value> = Vec::new();
+    let mut spearmans: Vec<f64> = Vec::new();
+    let mut substrate_misses = 0u64;
+    let mut bilateral_pairs = 0u64;
+    for (key, deg) in &qualifying {
+        let edges = store
+            .memory_neighbors(key)
+            .await
+            .map_err(|e| anyhow::anyhow!("memory_neighbors({key}): {e}"))?;
+        let mut cofires_pairs: Vec<(String, f64)> = edges
+            .iter()
+            .filter(|e| e.edge_type == "cofires")
+            .map(|e| {
+                let other = if e.from_key == *key {
+                    e.to_key.clone()
+                } else {
+                    e.from_key.clone()
+                };
+                (other, e.weight)
+            })
+            .collect();
+        cofires_pairs.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let mut seen_co = std::collections::HashSet::new();
+        cofires_pairs.retain(|(k, _)| seen_co.insert(k.clone()));
+
+        let substrate_pairs: Vec<(String, f64)> = match snap_row.as_ref() {
+            Some(row) => ab_seed_bridge::neighbors_from_snapshot(row, key, k)
+                .into_iter()
+                .map(|(k_text, s)| (k_text, s as f64))
+                .collect(),
+            None => Vec::new(),
+        };
+        if substrate_pairs.is_empty() {
+            substrate_misses += 1;
+        }
+
+        let mut rank_co: HashMap<&str, f64> = HashMap::new();
+        for (i, (k_text, _)) in cofires_pairs.iter().enumerate() {
+            rank_co.insert(k_text.as_str(), (i + 1) as f64);
+        }
+        let mut rank_sub: HashMap<&str, f64> = HashMap::new();
+        for (i, (k_text, _)) in substrate_pairs.iter().enumerate() {
+            rank_sub.insert(k_text.as_str(), (i + 1) as f64);
+        }
+        let mut union: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for (k_text, _) in &cofires_pairs {
+            union.insert(k_text.as_str());
+        }
+        for (k_text, _) in &substrate_pairs {
+            union.insert(k_text.as_str());
+        }
+        let n_union = union.len();
+        let last_co = (cofires_pairs.len() + 1) as f64;
+        let last_sub = (substrate_pairs.len() + 1) as f64;
+        let spearman_opt: Option<f64> = if n_union < 3 {
+            None
+        } else {
+            let mut sum_d_sq = 0.0_f64;
+            for k_text in &union {
+                let ra = *rank_co.get(*k_text).unwrap_or(&last_co);
+                let rb = *rank_sub.get(*k_text).unwrap_or(&last_sub);
+                sum_d_sq += (ra - rb).powi(2);
+            }
+            let n_f = n_union as f64;
+            let denom = n_f * (n_f * n_f - 1.0);
+            if denom > 0.0 {
+                Some(1.0 - 6.0 * sum_d_sq / denom)
+            } else {
+                None
+            }
+        };
+        if let Some(rho) = spearman_opt {
+            spearmans.push(rho);
+            bilateral_pairs += 1;
+        }
+        per_key.push(serde_json::json!({
+            "key": key,
+            "cofires_degree": deg,
+            "cofires_neighbors": cofires_pairs.iter()
+                .map(|(k, w)| serde_json::json!({"key": k, "weight": w}))
+                .collect::<Vec<_>>(),
+            "substrate_neighbors": substrate_pairs.iter()
+                .map(|(k, w)| serde_json::json!({"key": k, "score": w}))
+                .collect::<Vec<_>>(),
+            "union_size": n_union,
+            "spearman": spearman_opt,
+        }));
+    }
+
+    let median_spearman = if spearmans.is_empty() {
+        None
+    } else {
+        let mut v = spearmans.clone();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mid = v.len() / 2;
+        Some(if v.len() % 2 == 0 {
+            (v[mid - 1] + v[mid]) / 2.0
+        } else {
+            v[mid]
+        })
+    };
+
+    let snap_step = snap_row.as_ref().map(|r| r.step);
+    let snap_ts = snap_row.as_ref().map(|r| r.cycle_ts);
+    let verdict = match median_spearman {
+        Some(m) if m >= 0.4 => "P2 PASS (>=0.4)",
+        Some(_) => "P2 not yet PASS (<0.4)",
+        None => "no bilateral pairs — insufficient overlap",
+    };
+
+    if as_json {
+        let payload = serde_json::json!({
+            "k": k,
+            "min_cofires": min_cofires,
+            "snapshot_path": snap_path.as_ref().map(|p| p.to_string_lossy()),
+            "snapshot_step": snap_step,
+            "snapshot_ts": snap_ts,
+            "qualifying_keys": qualifying.len(),
+            "bilateral_pairs": bilateral_pairs,
+            "substrate_misses": substrate_misses,
+            "median_spearman": median_spearman,
+            "verdict": verdict,
+            "per_key": per_key,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# v22 §4 P2 — substrate <-> α cofires correlation audit");
+    println!("DB             : {}", db_path.display());
+    match (&snap_path, snap_row.as_ref()) {
+        (Some(p), Some(r)) => println!(
+            "Snapshot       : {} (step={} ts={})",
+            p.display(),
+            r.step,
+            r.cycle_ts
+        ),
+        (Some(p), None) => println!("Snapshot       : {} (no Long row yet)", p.display()),
+        (None, _) => println!("Snapshot       : (no path configured)"),
+    }
+    println!("Params         : k={}  min_cofires={}", k, min_cofires);
+    println!();
+    println!(
+        "qualifying keys (>= {} cofires) : {}",
+        min_cofires,
+        qualifying.len()
+    );
+    println!("bilateral pairs (>= 3 union)    : {}", bilateral_pairs);
+    println!("substrate-empty keys            : {}", substrate_misses);
+    match median_spearman {
+        Some(m) => println!("median Spearman                 : {:.4}", m),
+        None => println!("median Spearman                 : (n/a)"),
+    }
+    println!("verdict                         : {}", verdict);
+    if bilateral_pairs > 0 {
+        println!();
+        println!("(per-key detail available via --json)");
+    }
+    Ok(())
+}
+
+/// **v22 Phase 3 (A)** — `substrate neighbors` CLI. Loads the most recent
+/// Long-tier row from `substrate.parquet` and runs
+/// [`ab_seed_bridge::neighbors_from_snapshot`] against it. Pure disk read,
+/// no `install_default()` — CLI is short-lived so a fresh in-process grid
+/// would always be empty; reading the snapshot is the only way to answer.
+///
+/// When the snapshot file is missing or has no Long row yet, output is
+/// empty (still exit 0). MCP `substrate_neighbors_of` is the live-grid
+/// counterpart for in-daemon queries.
+async fn run_substrate_neighbors(
+    key: String,
+    k: usize,
+    path_override: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    use ab_seed_bridge::snapshot::{self, SnapshotTier};
+    let path = match path_override.or_else(snapshot::default_snapshot_path) {
+        Some(p) => p,
+        None => {
+            if as_json {
+                println!("{}", serde_json::json!({"neighbors": [], "reason": "no snapshot path"}));
+            } else {
+                println!("# v22 substrate neighbors");
+                println!("(no snapshot path configured; rerun with --path)");
+            }
+            return Ok(());
+        }
+    };
+    if !path.exists() {
+        if as_json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "neighbors": [],
+                    "reason": "snapshot file missing",
+                    "path": path.to_string_lossy(),
+                })
+            );
+        } else {
+            println!("# v22 substrate neighbors");
+            println!("(snapshot file not found at {})", path.to_string_lossy());
+        }
+        return Ok(());
+    }
+    let rows = snapshot::read_all(&path)
+        .with_context(|| format!("read substrate snapshot {}", path.display()))?;
+    let latest_long = rows.iter().rev().find(|r| matches!(r.tier, SnapshotTier::Long));
+    let neighbors = match latest_long {
+        Some(row) => ab_seed_bridge::neighbors_from_snapshot(row, &key, k),
+        None => Vec::new(),
+    };
+    if as_json {
+        let payload: Vec<_> = neighbors
+            .iter()
+            .map(|(k_text, score)| serde_json::json!({"key": k_text, "score": score}))
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "key": key,
+                "k": k,
+                "row_step": latest_long.map(|r| r.step),
+                "row_ts": latest_long.map(|r| r.cycle_ts),
+                "neighbors": payload,
+            }))?
+        );
+        return Ok(());
+    }
+    println!("# v22 substrate neighbors of {}", key);
+    match latest_long {
+        Some(row) => println!("(source: snapshot step={} ts={})", row.step, row.cycle_ts),
+        None => println!("(no Long-tier snapshot row yet — substrate needs ≥100 perception events)"),
+    }
+    if neighbors.is_empty() {
+        println!("(no neighbors)");
+    } else {
+        for (i, (k_text, score)) in neighbors.iter().enumerate() {
+            println!("{:>3}. {:.6}  {}", i + 1, score, k_text);
+        }
+    }
+    Ok(())
+}
+
+/// **v22 Phase 2.2 read side** — `substrate snapshot` CLI. Reads the
+/// Parquet file written by long-lived substrate-enabled processes. Pure
+/// disk read, no `install_default()` needed — this is the asymmetric
+/// counterpart to `substrate stats` (which queries the in-process global).
+///
+/// Use cases:
+/// 1. Inspect what a *different* process has been learning ("forum
+///    pipeline can read what MCP saw").
+/// 2. Cross-machine fingerprint compare for G4 determinism gate
+///    (`--fingerprint-only` then `diff` two outputs).
+/// 3. Forum/dream offline analysis of trailing surprise trends.
+async fn run_substrate_snapshot(
+    path_override: Option<PathBuf>,
+    limit: usize,
+    tier_filter: Option<String>,
+    fingerprint_only: bool,
+    as_json: bool,
+) -> Result<()> {
+    use anyhow::anyhow;
+
+    let path = path_override
+        .or_else(ab_seed_bridge::snapshot::default_snapshot_path)
+        .ok_or_else(|| anyhow!("no $HOME — pass --path explicitly"))?;
+
+    let mut rows = ab_seed_bridge::snapshot::read_all(&path)
+        .map_err(|e| anyhow!("read {}: {}", path.display(), e))?;
+
+    if let Some(t) = tier_filter.as_deref() {
+        let want = ab_seed_bridge::snapshot::SnapshotTier::from_str(t)
+            .ok_or_else(|| anyhow!("unknown tier '{t}' — expected hot|long"))?;
+        rows.retain(|r| r.tier == want);
+    }
+
+    if limit > 0 && rows.len() > limit {
+        let skip = rows.len() - limit;
+        rows = rows.into_iter().skip(skip).collect();
+    }
+
+    if fingerprint_only {
+        for row in &rows {
+            println!("{}", ab_seed_bridge::snapshot::fingerprint(row));
+        }
+        return Ok(());
+    }
+
+    if as_json {
+        let payload: Vec<_> = rows
+            .iter()
+            .map(|r| {
+                json!({
+                    "step": r.step,
+                    "cycle_ts": r.cycle_ts,
+                    "tier": r.tier.as_str(),
+                    "n_alive": r.n_alive,
+                    "trailing_surprise_mean_short": r.trailing_surprise_mean_short,
+                    "trailing_surprise_mean_long": r.trailing_surprise_mean_long,
+                    "connection_logits_len": r.connection_logits.len(),
+                    "in_strengths_mean": mean_f32(&r.in_strengths),
+                    "fingerprint": ab_seed_bridge::snapshot::fingerprint(r),
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "path": path.display().to_string(),
+                "rows_shown": payload.len(),
+                "rows": payload,
+            }))?
+        );
+        return Ok(());
+    }
+
+    println!("# v22 substrate snapshot");
+    println!("path : {}", path.display());
+    if rows.is_empty() {
+        println!("(no rows yet — file absent or empty)");
+        return Ok(());
+    }
+    println!("rows : {} shown", rows.len());
+    println!();
+    for r in &rows {
+        let fp = ab_seed_bridge::snapshot::fingerprint(r);
+        let fp_short = if fp.len() >= 16 { &fp[..16] } else { fp.as_str() };
+        println!(
+            "step={:<6} ts={} tier={:<4} n_alive={:<4} surprise(s/l)={:.4}/{:.4} logits={:<6} fp={}",
+            r.step,
+            r.cycle_ts,
+            r.tier.as_str(),
+            r.n_alive,
+            r.trailing_surprise_mean_short,
+            r.trailing_surprise_mean_long,
+            r.connection_logits.len(),
+            fp_short,
+        );
+    }
+    Ok(())
+}
+
+fn mean_f32(xs: &[f32]) -> f32 {
+    if xs.is_empty() {
+        0.0
+    } else {
+        xs.iter().sum::<f32>() / xs.len() as f32
+    }
 }
 
 /// OSC 133 shell-integration snippets. Source-of-truth lives here; the

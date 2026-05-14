@@ -7841,6 +7841,43 @@ impl SqliteStore {
 
         Ok(scored.into_iter().map(|(_, sym)| sym).collect())
     }
+
+    /// v22 §4 P2 support — return active memory keys with at least
+    /// `min_count` `cofires` edges incident on them. Each key is paired
+    /// with its cofires degree. Ordered by degree DESC then key ASC for
+    /// deterministic audit reporting. Used by `dream substrate-corr-audit`
+    /// to enumerate the keys it must score.
+    pub async fn cofires_keys_with_min_degree(
+        &self,
+        min_count: u32,
+    ) -> Result<Vec<(String, u32)>> {
+        let min = min_count as i64;
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<(String, u32)>> {
+                let mut stmt = c.prepare(
+                    "SELECT k, COUNT(*) AS n FROM (
+                         SELECT from_key AS k FROM memory_edges WHERE edge_type = 'cofires'
+                         UNION ALL
+                         SELECT to_key   AS k FROM memory_edges WHERE edge_type = 'cofires'
+                     )
+                     GROUP BY k
+                     HAVING n >= ?1
+                     ORDER BY n DESC, k ASC",
+                )?;
+                let rows = stmt
+                    .query_map(params![min], |row| {
+                        let k: String = row.get(0)?;
+                        let n: i64 = row.get(1)?;
+                        Ok((k, n.max(0) as u32))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("cofires_keys_with_min_degree: {e}")))?;
+        Ok(rows)
+    }
 }
 
 #[cfg(test)]
@@ -10322,6 +10359,70 @@ mod tests {
             clusters.is_empty(),
             "coactivation edges must not form clusters"
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn cofires_keys_with_min_degree_returns_endpoints_with_threshold() {
+        // v22 §4 P2 enumeration: each cofires edge contributes +1 to
+        // both endpoints' degree. Anchored hub `a` connects to b/c/d
+        // (degree 3); periphery node `z` has only one cofires edge
+        // (degree 1). With min_count=2, only `a`/`b`/`c`/`d` qualify
+        // — wait, b/c/d each have degree 1 from the hub edges. Let me
+        // build a star + a couple of triangle edges so the test has
+        // varying degrees.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-cofires-deg-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open");
+
+        // a—b, a—c, a—d  (hub a has deg 3)
+        // b—c                  (b/c gain one more → deg 2 each; d stays 1)
+        // z—w (single periphery edge, deg 1 each)
+        store.memory_link("a", "b", "cofires", 0.7).await.expect("ab");
+        store.memory_link("a", "c", "cofires", 0.7).await.expect("ac");
+        store.memory_link("a", "d", "cofires", 0.7).await.expect("ad");
+        store.memory_link("b", "c", "cofires", 0.7).await.expect("bc");
+        store.memory_link("z", "w", "cofires", 0.7).await.expect("zw");
+
+        // Add a non-cofires edge that must NOT count.
+        store
+            .memory_link("a", "z", "relates", 0.5)
+            .await
+            .expect("relates");
+
+        let with_min_3 = store
+            .cofires_keys_with_min_degree(3)
+            .await
+            .expect("query min=3");
+        // Only `a` has degree ≥ 3 (a—b, a—c, a—d).
+        assert_eq!(with_min_3.len(), 1, "{:?}", with_min_3);
+        assert_eq!(with_min_3[0].0, "a");
+        assert_eq!(with_min_3[0].1, 3);
+
+        let with_min_2 = store
+            .cofires_keys_with_min_degree(2)
+            .await
+            .expect("query min=2");
+        // a (3), b (2), c (2). d/z/w (1 each) excluded.
+        let names: Vec<&str> = with_min_2.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(names.contains(&"a"), "{:?}", with_min_2);
+        assert!(names.contains(&"b"), "{:?}", with_min_2);
+        assert!(names.contains(&"c"), "{:?}", with_min_2);
+        assert!(!names.contains(&"z"), "{:?}", with_min_2);
+        assert!(!names.contains(&"w"), "{:?}", with_min_2);
+        assert!(!names.contains(&"d"), "{:?}", with_min_2);
+        // First entry should be the highest-degree key.
+        assert_eq!(with_min_2[0].0, "a");
+        assert_eq!(with_min_2[0].1, 3);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

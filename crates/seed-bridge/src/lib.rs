@@ -17,7 +17,8 @@
 //! Phase 1 only needs to show G1-G3 from v22 §1: events flow through →
 //! `connection_logits` change → `stats()` reports `n_alive` & `step_count`.
 
-use std::collections::VecDeque;
+use std::cmp::Ordering;
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -452,6 +453,92 @@ impl SeedBackend {
             connection_mean_abs: conn_abs,
         }
     }
+
+    /// v22 §3.5 substrate query API. Phase 3 (A).
+    ///
+    /// Find neurons whose most recent winning perception was `key`, then
+    /// return up to `k` distinct *other* keys those neurons connect to
+    /// most strongly, weighted by summed absolute `connection_logits`.
+    ///
+    /// Read-only — no mutation, no access bump (vision rule 5). Returns
+    /// empty when:
+    /// - `key` is empty or unknown to any neuron's `last_perceived`
+    /// - `k == 0`
+    /// - substrate has had zero perception steps
+    ///
+    /// Known lossiness: `last_perceived` keeps one slot per neuron, so a
+    /// key whose winner-neuron later fires on a different text is lost
+    /// from this query. v0 accepts this — matches snapshot persistence.
+    /// Phase 3.1 candidate: explicit `recent_winners` reverse index.
+    pub fn neighbors_of(&self, key: &str, k: usize) -> Vec<(String, f32)> {
+        if k == 0 || key.is_empty() {
+            return Vec::new();
+        }
+        let winners: Vec<usize> = {
+            let lp = match self.last_perceived.lock() {
+                Ok(g) => g,
+                Err(_) => return Vec::new(),
+            };
+            lp.iter()
+                .enumerate()
+                .filter(|(_, (k_text, _))| k_text == key)
+                .map(|(i, _)| i)
+                .collect()
+        };
+        if winners.is_empty() {
+            return Vec::new();
+        }
+        let matrix = {
+            let grid = match self.grid.lock() {
+                Ok(g) => g,
+                Err(_) => return Vec::new(),
+            };
+            grid.connection_matrix()
+        };
+        let n = matrix.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        let mut scores = vec![0.0f32; n];
+        for &w in &winners {
+            if w >= n {
+                continue;
+            }
+            for (j, &weight) in matrix[w].iter().enumerate() {
+                if j == w || j >= scores.len() {
+                    continue;
+                }
+                scores[j] += weight.abs();
+            }
+        }
+        let mut ranked: Vec<(usize, f32)> = scores.iter().copied().enumerate().collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+        let lp = match self.last_perceived.lock() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut out: Vec<(String, f32)> = Vec::with_capacity(k);
+        for (i, score) in ranked {
+            if score <= 0.0 {
+                break;
+            }
+            let cand = match lp.get(i) {
+                Some((s, _)) => s,
+                None => continue,
+            };
+            if cand.is_empty() || cand == key {
+                continue;
+            }
+            if seen.insert(cand.clone()) {
+                out.push((cand.clone(), score));
+                if out.len() >= k {
+                    break;
+                }
+            }
+        }
+        out
+    }
 }
 
 impl EmbeddingBackend for SeedBackend {
@@ -486,6 +573,82 @@ impl EmbeddingBackend for SeedBackend {
         }
         vecs
     }
+}
+
+/// Snapshot-based variant of [`SeedBackend::neighbors_of`]. Same algorithm
+/// applied to a serialized [`SnapshotRow`] read from `substrate.parquet`,
+/// so short-lived CLI / cross-process queries can answer without
+/// installing a live substrate. Only `Long`-tier rows carry the
+/// `connection_logits` field this needs; Hot rows always return `[]`.
+pub fn neighbors_from_snapshot(
+    row: &SnapshotRow,
+    key: &str,
+    k: usize,
+) -> Vec<(String, f32)> {
+    if k == 0 || key.is_empty() {
+        return Vec::new();
+    }
+    if !matches!(row.tier, SnapshotTier::Long) {
+        return Vec::new();
+    }
+    let lp = &row.last_perceived_key;
+    let n = lp.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let logits = &row.connection_logits;
+    let expected = n * n.saturating_sub(1);
+    if logits.len() != expected {
+        return Vec::new();
+    }
+    let winners: Vec<usize> = lp
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.as_str() == key)
+        .map(|(i, _)| i)
+        .collect();
+    if winners.is_empty() {
+        return Vec::new();
+    }
+    let mut scores = vec![0.0f32; n];
+    for &w in &winners {
+        if w >= n {
+            continue;
+        }
+        let base = w * (n - 1);
+        for off in 0..(n - 1) {
+            // Off-diagonal layout: row w skips column w; off-index `off`
+            // maps to column `off` when `off < w` else `off + 1`.
+            let j = if off < w { off } else { off + 1 };
+            if j == w || j >= scores.len() {
+                continue;
+            }
+            scores[j] += logits[base + off].abs();
+        }
+    }
+    let mut ranked: Vec<(usize, f32)> = scores.iter().copied().enumerate().collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out: Vec<(String, f32)> = Vec::with_capacity(k);
+    for (i, score) in ranked {
+        if score <= 0.0 {
+            break;
+        }
+        let cand = match lp.get(i) {
+            Some(s) => s.as_str(),
+            None => continue,
+        };
+        if cand.is_empty() || cand == key {
+            continue;
+        }
+        if seen.insert(cand.to_string()) {
+            out.push((cand.to_string(), score));
+            if out.len() >= k {
+                break;
+            }
+        }
+    }
+    out
 }
 
 fn unix_secs_now() -> i64 {
@@ -794,6 +957,249 @@ mod tests {
         // Trailing means should be populated (we just ran 100 events).
         assert!(last.trailing_surprise_mean_short.is_finite());
         assert!(last.trailing_surprise_mean_long.is_finite());
+    }
+
+    // ---- Phase 3 (A): neighbors_of tests ----
+
+    #[test]
+    fn neighbors_of_empty_key_returns_empty() {
+        // v22 §3.5: empty key is meaningless; never returns spurious matches.
+        let b = fixture(64);
+        let _ = b.embed("seeded text");
+        let out = b.neighbors_of("", 5);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn neighbors_of_zero_k_returns_empty() {
+        // k==0 short-circuits before any work.
+        let b = fixture(64);
+        let _ = b.embed("alpha");
+        let out = b.neighbors_of("alpha", 0);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn neighbors_of_no_perception_returns_empty() {
+        // step_count==0 → no neuron has last_perceived set → []
+        let b = fixture(64);
+        assert_eq!(b.stats().step_count, 0);
+        let out = b.neighbors_of("anything", 5);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn neighbors_of_unknown_key_returns_empty() {
+        // Key that no neuron ever won on → [], even if substrate has
+        // perception history.
+        let b = fixture(64);
+        let _ = b.embed("alpha");
+        let _ = b.embed("beta");
+        let out = b.neighbors_of("gamma-never-perceived", 5);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn neighbors_of_self_excluded() {
+        // Queried key MUST NOT appear in its own neighbors output.
+        let b = fixture(64);
+        for i in 0..30 {
+            let _ = b.embed(&format!("event-{i}"));
+        }
+        let _ = b.embed("query-key");
+        let _ = b.embed("partner-1");
+        let _ = b.embed("query-key");
+        let _ = b.embed("partner-2");
+        let out = b.neighbors_of("query-key", 10);
+        assert!(
+            out.iter().all(|(k, _)| k != "query-key"),
+            "self key leaked into neighbors: {:?}",
+            out
+        );
+    }
+
+    #[test]
+    fn neighbors_of_respects_k_cap() {
+        // Output length must be ≤ k regardless of substrate state.
+        let b = fixture(64);
+        for i in 0..40 {
+            let _ = b.embed(&format!("text-{i}"));
+        }
+        let _ = b.embed("anchor");
+        let out = b.neighbors_of("anchor", 2);
+        assert!(out.len() <= 2);
+    }
+
+    #[test]
+    fn neighbors_of_sorted_descending() {
+        // Scores must be monotonically non-increasing — ranking contract.
+        let b = fixture(64);
+        for i in 0..40 {
+            let _ = b.embed(&format!("seed-{i}"));
+        }
+        let _ = b.embed("hub");
+        let out = b.neighbors_of("hub", 10);
+        let scores: Vec<f32> = out.iter().map(|(_, s)| *s).collect();
+        for w in scores.windows(2) {
+            assert!(
+                w[0] >= w[1],
+                "neighbors not sorted descending: {:?}",
+                scores
+            );
+        }
+    }
+
+    #[test]
+    fn neighbors_of_dedupes_keys_across_neurons() {
+        // If `target` happens to win on multiple neurons (e.g. because
+        // it was perceived many times with varying grid state), the
+        // SAME other-key may appear in multiple neurons' last_perceived.
+        // We must dedupe so it surfaces at most once.
+        let b = fixture(64);
+        // Variety so many neurons get populated.
+        for i in 0..60 {
+            let _ = b.embed(&format!("filler-{i}"));
+        }
+        // Perceive the same anchor twice to widen its winner footprint.
+        let _ = b.embed("repeat-anchor");
+        let _ = b.embed("repeat-anchor");
+        let out = b.neighbors_of("repeat-anchor", 50);
+        let mut seen: HashSet<&str> = HashSet::new();
+        for (k_text, _) in &out {
+            assert!(
+                seen.insert(k_text.as_str()),
+                "duplicate key in neighbors output: {}",
+                k_text
+            );
+        }
+    }
+
+    #[test]
+    fn neighbors_of_returns_format_valid_after_two_perceptions() {
+        // Format contract: each entry has non-empty key and finite score.
+        // Doesn't assert specific keys (substrate state is grid-dependent),
+        // just that we get a well-formed Vec.
+        let b = fixture(64);
+        let _ = b.embed("alpha");
+        let _ = b.embed("beta");
+        let out = b.neighbors_of("alpha", 5);
+        for (k_text, score) in &out {
+            assert!(!k_text.is_empty(), "empty key leaked: {:?}", out);
+            assert!(score.is_finite(), "non-finite score: {}", score);
+            assert!(*score > 0.0, "non-positive score leaked: {}", score);
+        }
+    }
+
+    // ---- Phase 3 (A): neighbors_from_snapshot tests ----
+
+    #[test]
+    fn neighbors_from_snapshot_hot_tier_returns_empty() {
+        // Hot tier rows ship without connection_logits — any query
+        // against them must return [] rather than reading 0 weights.
+        let row = SnapshotRow {
+            step: 20,
+            cycle_ts: 1_000_000,
+            tier: SnapshotTier::Hot,
+            n_alive: 4,
+            in_strengths: vec![0.1, 0.2, 0.3, 0.4],
+            last_perceived_key: vec![
+                "k0".into(),
+                "k1".into(),
+                "k2".into(),
+                "k3".into(),
+            ],
+            last_perceived_ts: vec![1, 2, 3, 4],
+            trailing_surprise_mean_short: 0.5,
+            trailing_surprise_mean_long: 0.5,
+            connection_logits: Vec::new(),
+        };
+        assert!(neighbors_from_snapshot(&row, "k0", 5).is_empty());
+    }
+
+    #[test]
+    fn neighbors_from_snapshot_long_with_winners_returns_others() {
+        // Synthesize a 4×3 off-diagonal connection_logits block where
+        // neuron 0 (the "k0" winner) has its strongest |weight| toward
+        // neuron 2. With last_perceived_key[2] = "k2", the query
+        // neighbors_from_snapshot(row, "k0", 5) should rank "k2" first.
+        // Off-diag flat layout for N=4: row i has 3 slots (cols !=i),
+        // ordered ascending.
+        let logits = vec![
+            // row 0 (cols 1,2,3): weights 0.1, 0.9, 0.2
+            0.1, 0.9, 0.2,
+            // row 1 (cols 0,2,3): weights 0.0, 0.0, 0.0
+            0.0, 0.0, 0.0,
+            // row 2 (cols 0,1,3): weights 0.0, 0.0, 0.0
+            0.0, 0.0, 0.0,
+            // row 3 (cols 0,1,2): weights 0.0, 0.0, 0.0
+            0.0, 0.0, 0.0,
+        ];
+        let row = SnapshotRow {
+            step: 100,
+            cycle_ts: 1_000_000,
+            tier: SnapshotTier::Long,
+            n_alive: 4,
+            in_strengths: vec![0.1, 0.2, 0.3, 0.4],
+            last_perceived_key: vec![
+                "k0".into(),
+                "k1".into(),
+                "k2".into(),
+                "k3".into(),
+            ],
+            last_perceived_ts: vec![1, 2, 3, 4],
+            trailing_surprise_mean_short: 0.5,
+            trailing_surprise_mean_long: 0.5,
+            connection_logits: logits,
+        };
+        let out = neighbors_from_snapshot(&row, "k0", 5);
+        assert!(!out.is_empty(), "expected non-empty output, got {:?}", out);
+        // Strongest from row 0 is col 2 (0.9) → first entry must be "k2".
+        assert_eq!(out[0].0, "k2");
+        assert!(out[0].1 >= 0.85, "k2 score should be ~0.9, got {}", out[0].1);
+        // "k0" (self) MUST NOT appear.
+        assert!(out.iter().all(|(k, _)| k != "k0"));
+    }
+
+    #[test]
+    fn neighbors_from_snapshot_unknown_key_returns_empty() {
+        let row = SnapshotRow {
+            step: 100,
+            cycle_ts: 1_000_000,
+            tier: SnapshotTier::Long,
+            n_alive: 2,
+            in_strengths: vec![0.5, 0.5],
+            last_perceived_key: vec!["alpha".into(), "beta".into()],
+            last_perceived_ts: vec![1, 2],
+            trailing_surprise_mean_short: 0.0,
+            trailing_surprise_mean_long: 0.0,
+            // N=2 → off-diag = 2 entries.
+            connection_logits: vec![0.5, 0.5],
+        };
+        assert!(neighbors_from_snapshot(&row, "gamma", 5).is_empty());
+    }
+
+    #[test]
+    fn neighbors_from_snapshot_malformed_logits_returns_empty() {
+        // Defensive: if logits length doesn't match n*(n-1), we
+        // return [] rather than panic on out-of-bounds indexing.
+        let row = SnapshotRow {
+            step: 100,
+            cycle_ts: 1_000_000,
+            tier: SnapshotTier::Long,
+            n_alive: 4,
+            in_strengths: vec![0.1, 0.2, 0.3, 0.4],
+            last_perceived_key: vec![
+                "k0".into(),
+                "k1".into(),
+                "k2".into(),
+                "k3".into(),
+            ],
+            last_perceived_ts: vec![1, 2, 3, 4],
+            trailing_surprise_mean_short: 0.0,
+            trailing_surprise_mean_long: 0.0,
+            connection_logits: vec![0.1, 0.2, 0.3], // 3 != 4*3=12
+        };
+        assert!(neighbors_from_snapshot(&row, "k0", 5).is_empty());
     }
 
     #[test]

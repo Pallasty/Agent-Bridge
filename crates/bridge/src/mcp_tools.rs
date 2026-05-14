@@ -8794,6 +8794,104 @@ impl McpTool for SubstrateStatsTool {
 }
 
 // ===========================================================================
+//             substrate_neighbors_of — v22 Phase 3 (A) topology query
+// ===========================================================================
+
+/// v22 §3.5 Phase 3 (A) — read-only topology query over the in-process
+/// Seed substrate. Returns up to `k` other keys that the neuron(s) which
+/// fired on `key` connect to most strongly (summed absolute connection
+/// weight). Substrate must be installed (`AB_SUBSTRATE=1`); when not
+/// installed, returns `{installed: false, neighbors: []}` — same
+/// ablation contract as `SubstrateStatsTool`.
+pub struct SubstrateNeighborsTool;
+
+impl SubstrateNeighborsTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for SubstrateNeighborsTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for SubstrateNeighborsTool {
+    fn name(&self) -> &'static str {
+        "substrate_neighbors_of"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "v22 Phase 3 (A) — substrate-topology neighbors. \
+                 For `key`, return up to `k` other keys that the in-process Seed \
+                 substrate's neuron(s) which most recently won on `key` connect \
+                 to most strongly. Read-only over the live grid; no mutation, no \
+                 access bump. Substrate is opt-in via `AB_SUBSTRATE=1`; when not \
+                 installed, returns `{installed: false, neighbors: []}`. Use to \
+                 measure v22 §4 P2 (Spearman vs α cofires ≥ 0.4); do NOT use as \
+                 default retrieval bias yet — that's gated on P2 PASS."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string", "description": "Memory key to query." },
+                    "k": { "type": "integer", "minimum": 0, "default": 20,
+                           "description": "Max number of distinct neighbor keys to return." }
+                },
+                "required": ["key"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let key = args.get("key").and_then(|v| v.as_str()).unwrap_or("");
+        let k = args
+            .get("k")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize)
+            .unwrap_or(20);
+        let env_enabled = ab_seed_bridge::env_enabled();
+        let backend = ab_seed_bridge::current();
+        let payload = match backend.as_ref() {
+            Some(b) => {
+                let pairs = b.neighbors_of(key, k);
+                let neighbors: Vec<Value> = pairs
+                    .into_iter()
+                    .map(|(k_text, score)| {
+                        let s = (score as f64 * 1_000_000.0).round() / 1_000_000.0;
+                        json!({ "key": k_text, "score": s })
+                    })
+                    .collect();
+                json!({
+                    "env_var": ab_seed_bridge::SUBSTRATE_ENV_VAR,
+                    "env_enabled": env_enabled,
+                    "installed": true,
+                    "key": key,
+                    "k": k,
+                    "neighbors": neighbors,
+                })
+            }
+            None => json!({
+                "env_var": ab_seed_bridge::SUBSTRATE_ENV_VAR,
+                "env_enabled": env_enabled,
+                "installed": false,
+                "key": key,
+                "k": k,
+                "neighbors": [],
+                "hint": if env_enabled {
+                    "env set but substrate not installed — process likely started before install_default() ran"
+                } else {
+                    "set AB_SUBSTRATE=1 in env and relaunch the long-lived MCP process to enable"
+                },
+            }),
+        };
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //             memory_link_audit — Phase 0 dead-link probe over bodies
 // ===========================================================================
 
@@ -12977,6 +13075,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryQueryStatsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySubstrateAuditTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SubstrateStatsTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SubstrateNeighborsTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkAuditTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySuggestTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkOrphansTool::new(hub.clone())));
@@ -15275,5 +15374,55 @@ mod tests {
         assert_eq!(t1.name(), t2.name());
         assert_eq!(t2.name(), t3.name());
         assert_eq!(t1.name(), "substrate_stats");
+    }
+
+    // ── substrate_neighbors_of MCP tool tests (v22 Phase 3 A) ────────────
+
+    #[tokio::test]
+    async fn substrate_neighbors_reports_disabled_when_no_install() {
+        // Mirror SubstrateStatsTool ablation: with no install_default()
+        // the tool returns installed=false + neighbors=[] + hint,
+        // not an error. G5 ablation contract.
+        let tool = SubstrateNeighborsTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(json!({"key": "anything", "k": 5}), &ctx)
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["installed"], json!(false));
+        assert_eq!(v["env_var"], json!(ab_seed_bridge::SUBSTRATE_ENV_VAR));
+        assert!(v["neighbors"].as_array().map(|a| a.is_empty()).unwrap_or(false));
+        assert!(v.get("hint").is_some());
+        assert_eq!(v["key"], json!("anything"));
+        assert_eq!(v["k"], json!(5));
+    }
+
+    #[tokio::test]
+    async fn substrate_neighbors_schema_requires_key() {
+        let tool = SubstrateNeighborsTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "substrate_neighbors_of");
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("schema must declare required");
+        let req_strs: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        assert!(req_strs.contains(&"key"), "key must be required");
+    }
+
+    #[test]
+    fn substrate_neighbors_tool_default_constructs() {
+        let t1 = SubstrateNeighborsTool::new();
+        let t2 = SubstrateNeighborsTool;
+        let t3 = SubstrateNeighborsTool::default();
+        assert_eq!(t1.name(), t2.name());
+        assert_eq!(t2.name(), t3.name());
+        assert_eq!(t1.name(), "substrate_neighbors_of");
     }
 }
