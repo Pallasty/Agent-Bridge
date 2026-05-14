@@ -575,11 +575,24 @@ impl EmbeddingBackend for SeedBackend {
     }
 }
 
-/// Snapshot-based variant of [`SeedBackend::neighbors_of`]. Same algorithm
+/// Snapshot-based variant of [`SeedBackend::neighbors_of`]. Same **shape**
 /// applied to a serialized [`SnapshotRow`] read from `substrate.parquet`,
 /// so short-lived CLI / cross-process queries can answer without
 /// installing a live substrate. Only `Long`-tier rows carry the
 /// `connection_logits` field this needs; Hot rows always return `[]`.
+///
+/// **Semantic asymmetry vs live** (Phase 3 A review post 89 Minor #1):
+/// the live `SeedBackend::neighbors_of` weights neighbors by
+/// `grid.connection_matrix()` which is **softmax(logits)** per
+/// `seed_neuron::dynamic`, while this function weights by **raw logits**
+/// straight out of the SnapshotRow. The two are rank-preserving for the
+/// typical low-variance distributions we expect at N=256, but **not
+/// bit-exact** when logits are bimodal — softmax squashes the middle
+/// tail and can re-order keys whose scores are close. Trend-tracking
+/// (Day-7/14/28 P2 audit) is unaffected because both pipelines are
+/// self-consistent; cross-pipeline diff is the failure mode to watch.
+/// Phase 3.1 candidate: apply per-winner-row softmax here too for
+/// strict equivalence.
 pub fn neighbors_from_snapshot(
     row: &SnapshotRow,
     key: &str,
