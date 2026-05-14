@@ -779,7 +779,18 @@ enum SubstrateOp {
     /// shows N / D / outer_dim / step_count / surprise / connection
     /// mean. JSON mode is machine-readable for forum / dream pipeline
     /// integration.
+    ///
+    /// **Phase 3 (C)**: also reads `substrate.parquet` when available
+    /// (installed-substrate's configured path, or `--snapshot-path`
+    /// override, or `default_snapshot_path()`) and reports total rows,
+    /// hot vs long counts, latest Long/Hot step + ts + fingerprint, and
+    /// file size — useful for cross-process determinism / freshness
+    /// checks without needing `AB_SUBSTRATE=1` in the inspecting process.
     Stats {
+        /// Override snapshot file path. Default: installed substrate's
+        /// path, falling back to `default_snapshot_path()`.
+        #[arg(long)]
+        snapshot_path: Option<PathBuf>,
         /// Emit raw JSON instead of pretty text.
         #[arg(long)]
         json: bool,
@@ -1183,7 +1194,9 @@ async fn main() -> Result<()> {
     // in-process seed-bridge global. No state.db touched.
     if let Cmd::Substrate { op } = &cmd {
         return match op {
-            SubstrateOp::Stats { json } => run_substrate_stats(*json).await,
+            SubstrateOp::Stats { snapshot_path, json } => {
+                run_substrate_stats(snapshot_path.clone(), *json).await
+            }
             SubstrateOp::Neighbors { key, k, path, json } => {
                 run_substrate_neighbors(key.clone(), *k, path.clone(), *json).await
             }
@@ -1588,14 +1601,38 @@ async fn main() -> Result<()> {
 /// `ab_seed_bridge::install_default()`. If substrate is not installed (env
 /// not set, or process didn't install), reports config + the disabled state
 /// — useful for confirming env var spelling.
-async fn run_substrate_stats(as_json: bool) -> Result<()> {
+///
+/// **Phase 3 (C)**: in addition, attempts to read `substrate.parquet`
+/// from `path_override` → installed-substrate's path →
+/// `default_snapshot_path()`, and reports row counts / latest fingerprints
+/// / file size. Snapshot section appears in both pretty and JSON output
+/// when a readable file is found.
+async fn run_substrate_stats(
+    path_override: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    use ab_seed_bridge::snapshot;
     let env_on = ab_seed_bridge::env_enabled();
     let installed = ab_seed_bridge::current();
     let stats = installed.as_ref().map(|s| s.stats());
-    let snapshot_path = installed
-        .as_ref()
-        .and_then(|s| s.snapshot_path())
-        .map(|p| p.to_string_lossy().to_string());
+
+    let resolved_path: Option<PathBuf> = path_override
+        .or_else(|| installed.as_ref().and_then(|s| s.snapshot_path()))
+        .or_else(snapshot::default_snapshot_path);
+
+    let snapshot_summary = match resolved_path.as_ref() {
+        Some(p) if p.exists() => match snapshot::read_all(p) {
+            Ok(rows) => {
+                let bytes = std::fs::metadata(p).ok().map(|m| m.len());
+                Some(summarize_snapshot_rows(p, bytes, &rows))
+            }
+            Err(e) => {
+                eprintln!("warn: read substrate snapshot {}: {}", p.display(), e);
+                None
+            }
+        },
+        _ => None,
+    };
 
     if as_json {
         let payload = json!({
@@ -1603,7 +1640,8 @@ async fn run_substrate_stats(as_json: bool) -> Result<()> {
             "env_enabled": env_on,
             "installed": stats.is_some(),
             "stats": stats,
-            "snapshot_path": snapshot_path,
+            "snapshot_path": resolved_path.as_ref().map(|p| p.to_string_lossy()),
+            "snapshot": snapshot_summary,
         });
         println!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(());
@@ -1628,9 +1666,9 @@ async fn run_substrate_stats(as_json: bool) -> Result<()> {
                 s.last_surprise_mean, s.last_surprise_max
             );
             println!("|conn| mean     : {:.6}", s.connection_mean_abs);
-            match &snapshot_path {
-                Some(p) => println!("snapshot path   : {}", p),
-                None => println!("snapshot path   : (disabled)"),
+            match resolved_path.as_ref() {
+                Some(p) => println!("snapshot path   : {}", p.display()),
+                None => println!("snapshot path   : (no path configured)"),
             }
             if s.step_count == 0 {
                 println!();
@@ -1642,14 +1680,119 @@ async fn run_substrate_stats(as_json: bool) -> Result<()> {
         }
         None => {
             println!("not installed");
-            println!();
-            println!(
-                "(set `AB_SUBSTRATE=1` in env and re-launch the long-lived process;");
-            println!(" phase 2.2 ships snapshot persistence to");
-            println!(" `$HOME/.local/share/agent-bridge/substrate.parquet`)");
+            match resolved_path.as_ref() {
+                Some(p) => println!("(snapshot probe path: {})", p.display()),
+                None => println!(),
+            }
+            if snapshot_summary.is_none() {
+                println!(
+                    "(set `AB_SUBSTRATE=1` in env and re-launch the long-lived process;");
+                println!(" phase 2.2 ships snapshot persistence to");
+                println!(" `$HOME/.local/share/agent-bridge/substrate.parquet`)");
+            }
+        }
+    }
+    if let Some(sum) = &snapshot_summary {
+        println!();
+        println!("# snapshot file");
+        println!("file size       : {}", human_bytes(sum.file_bytes));
+        println!(
+            "rows            : total={} hot={} long={}",
+            sum.total_rows, sum.hot_rows, sum.long_rows
+        );
+        match &sum.latest_long {
+            Some(li) => println!(
+                "latest Long     : step={} ts={} fp={}",
+                li.step, li.cycle_ts, li.fingerprint
+            ),
+            None => println!("latest Long     : (none)"),
+        }
+        match &sum.latest_hot {
+            Some(hi) => println!(
+                "latest Hot      : step={} ts={} fp={}",
+                hi.step, hi.cycle_ts, hi.fingerprint
+            ),
+            None => println!("latest Hot      : (none)"),
         }
     }
     Ok(())
+}
+
+/// Phase 3 (C) snapshot summary returned from `summarize_snapshot_rows`.
+/// Exposed as serde for the JSON payload of `substrate stats`.
+#[derive(Debug, Clone, serde::Serialize)]
+struct SnapshotSummary {
+    path: String,
+    file_bytes: Option<u64>,
+    total_rows: usize,
+    hot_rows: usize,
+    long_rows: usize,
+    latest_hot: Option<SnapshotEntry>,
+    latest_long: Option<SnapshotEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct SnapshotEntry {
+    step: i64,
+    cycle_ts: i64,
+    fingerprint: String,
+}
+
+/// Build a [`SnapshotSummary`] from `read_all` rows. Pure helper, tested.
+fn summarize_snapshot_rows(
+    path: &std::path::Path,
+    file_bytes: Option<u64>,
+    rows: &[ab_seed_bridge::SnapshotRow],
+) -> SnapshotSummary {
+    use ab_seed_bridge::{snapshot, SnapshotTier};
+    let mut hot_rows = 0usize;
+    let mut long_rows = 0usize;
+    for r in rows {
+        match r.tier {
+            SnapshotTier::Hot => hot_rows += 1,
+            SnapshotTier::Long => long_rows += 1,
+        }
+    }
+    let latest_hot = rows
+        .iter()
+        .rev()
+        .find(|r| matches!(r.tier, SnapshotTier::Hot))
+        .map(|r| SnapshotEntry {
+            step: r.step,
+            cycle_ts: r.cycle_ts,
+            fingerprint: snapshot::fingerprint(r),
+        });
+    let latest_long = rows
+        .iter()
+        .rev()
+        .find(|r| matches!(r.tier, SnapshotTier::Long))
+        .map(|r| SnapshotEntry {
+            step: r.step,
+            cycle_ts: r.cycle_ts,
+            fingerprint: snapshot::fingerprint(r),
+        });
+    SnapshotSummary {
+        path: path.to_string_lossy().to_string(),
+        file_bytes,
+        total_rows: rows.len(),
+        hot_rows,
+        long_rows,
+        latest_hot,
+        latest_long,
+    }
+}
+
+/// Human-readable byte size for `Option<u64>`. Returns `"(unknown)"` for None.
+fn human_bytes(b: Option<u64>) -> String {
+    match b {
+        None => "(unknown)".to_string(),
+        Some(n) if n < 1024 => format!("{} B", n),
+        Some(n) if n < 1024 * 1024 => format!("{:.1} KiB", n as f64 / 1024.0),
+        Some(n) if n < 1024 * 1024 * 1024 => {
+            format!("{:.1} MiB", n as f64 / (1024.0 * 1024.0))
+        }
+        Some(n) => format!("{:.2} GiB", n as f64 / (1024.0 * 1024.0 * 1024.0)),
+    }
 }
 
 /// **v22 §4 P2 measurement** — Spearman rank correlation between the
@@ -6127,6 +6270,93 @@ async fn build_hub() -> Result<Hub> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Phase 3 (C): summarize_snapshot_rows + human_bytes ──────────────
+
+    use ab_seed_bridge::{SnapshotRow, SnapshotTier};
+    use std::path::Path;
+
+    fn make_row(step: i64, ts: i64, tier: SnapshotTier) -> SnapshotRow {
+        SnapshotRow {
+            step,
+            cycle_ts: ts,
+            tier,
+            n_alive: 2,
+            in_strengths: vec![0.1, 0.2],
+            last_perceived_key: vec!["a".into(), "b".into()],
+            last_perceived_ts: vec![ts, ts],
+            trailing_surprise_mean_short: 0.5,
+            trailing_surprise_mean_long: 0.5,
+            connection_logits: if matches!(tier, SnapshotTier::Long) {
+                vec![0.0, 0.0]
+            } else {
+                Vec::new()
+            },
+        }
+    }
+
+    #[test]
+    fn summarize_snapshot_rows_empty_returns_zero_counts() {
+        let p = Path::new("/tmp/none.parquet");
+        let sum = summarize_snapshot_rows(p, Some(0), &[]);
+        assert_eq!(sum.total_rows, 0);
+        assert_eq!(sum.hot_rows, 0);
+        assert_eq!(sum.long_rows, 0);
+        assert!(sum.latest_hot.is_none());
+        assert!(sum.latest_long.is_none());
+        assert_eq!(sum.path, "/tmp/none.parquet");
+    }
+
+    #[test]
+    fn summarize_snapshot_rows_mixed_counts_and_latest_per_tier() {
+        // 5 rows interleaved hot/long. Latest hot at step=80; latest long at step=100.
+        let p = Path::new("/tmp/x.parquet");
+        let rows = vec![
+            make_row(20, 1000, SnapshotTier::Hot),
+            make_row(40, 2000, SnapshotTier::Hot),
+            make_row(60, 3000, SnapshotTier::Hot),
+            make_row(80, 4000, SnapshotTier::Hot),
+            make_row(100, 5000, SnapshotTier::Long),
+        ];
+        let sum = summarize_snapshot_rows(p, Some(12345), &rows);
+        assert_eq!(sum.total_rows, 5);
+        assert_eq!(sum.hot_rows, 4);
+        assert_eq!(sum.long_rows, 1);
+        assert_eq!(sum.file_bytes, Some(12345));
+        let latest_hot = sum.latest_hot.expect("latest hot");
+        assert_eq!(latest_hot.step, 80);
+        assert_eq!(latest_hot.cycle_ts, 4000);
+        assert_eq!(latest_hot.fingerprint.len(), 64); // sha256 hex
+        let latest_long = sum.latest_long.expect("latest long");
+        assert_eq!(latest_long.step, 100);
+        assert_eq!(latest_long.cycle_ts, 5000);
+        assert_eq!(latest_long.fingerprint.len(), 64);
+    }
+
+    #[test]
+    fn summarize_snapshot_rows_picks_LAST_per_tier_not_first() {
+        // Two Long rows; latest_long must be the later one (rev iteration).
+        let p = Path::new("/tmp/y.parquet");
+        let rows = vec![
+            make_row(100, 5000, SnapshotTier::Long),
+            make_row(200, 6000, SnapshotTier::Long),
+        ];
+        let sum = summarize_snapshot_rows(p, None, &rows);
+        assert_eq!(sum.long_rows, 2);
+        let latest = sum.latest_long.expect("latest");
+        assert_eq!(latest.step, 200);
+    }
+
+    #[test]
+    fn human_bytes_renders_units_correctly() {
+        assert_eq!(human_bytes(None), "(unknown)");
+        assert_eq!(human_bytes(Some(0)), "0 B");
+        assert_eq!(human_bytes(Some(512)), "512 B");
+        assert_eq!(human_bytes(Some(1024)), "1.0 KiB");
+        assert_eq!(human_bytes(Some(2048)), "2.0 KiB");
+        assert_eq!(human_bytes(Some(1024 * 1024)), "1.0 MiB");
+        assert_eq!(human_bytes(Some(3 * 1024 * 1024 * 1024)), "3.00 GiB");
+    }
 
     // ── Phase 3 (B): parse_event_line unit tests ─────────────────────────
 
