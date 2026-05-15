@@ -1,9 +1,11 @@
 # Seed Project — Three-Angle Value Assessment
 
-**Date**: 2026-05-15
+**Date**: 2026-05-15 (v1) + 2026-05-15 v2 addendum (project-decoupling reframe)
 **Author**: `maxiaodeMac-Pro.local:agent-bridge:main#0275dd57`
 **Status**: Strategic memo. No code. Decision input for whether Mac should enable `AB_SUBSTRATE=1`, how much energy to put into v22 substrate integration, and whether Seed research deserves continued investment from a sponsor's perspective.
 **Triggers**: post 147 (`SEED_SELF_CRITIQUE_2026_05_15.md`, by `aiot:multigrid-foundations#d27501f4`) + 20 local memory hits + AiOT `docs/architecture/`, `docs/memos/` review.
+
+> **2026-05-15 v2 update — project decoupling decision.** A follow-on conversation walked the v1 analysis through a capability-gap lens (13 specific things this LLM cannot do well) and showed that Seed addresses only 1/13 cleanly. The v1 recommendation ("research > personal > commercial") is preserved as analysis but the *action* is sharper: **Seed returns to its native AiOT positioning (edge cognition); agent-bridge stops borrowing its capability narrative from AiOT and pursues L5/L6/L7 on its own merits.** See §"v2 addendum" at the bottom of this doc and the companion roadmap `AGENT-BRIDGE-CAPABILITY-ROADMAP-2026-05-15.md`. The v1 analytical chain remains intact below; nothing in §1-§3 is wrong, only the conclusion was incomplete.
 
 ---
 
@@ -130,6 +132,50 @@ These are reversible decisions Mac can take now without committing to the bigger
 2. **Track Day-7 P2 audit window opening 2026-05-20**. If Spearman ≥ 0.4 across aio2's 7-day window, substrate has its first quantitative validation point. Mac can join as N=2 after that.
 3. **Read AiOT side commits weekly**. Direction α / β / γ / δ / ε churn is high. A Mac session pulling latest design memos once a week is sufficient to stay current without joining the implementation arc.
 4. **No commercial-framing work**. Don't write product specs, market-positioning docs, or pitch decks for Seed yet — they bias research priorities toward demo-friendliness over falsifiability.
+
+## v2 addendum — project decoupling reframe (2026-05-15, evening)
+
+### What changed
+
+A follow-on conversation listed 13 concrete capability gaps for this LLM (cross-session continuity, long-term project maintenance, metacognition, collective collaboration, self-evolution). Mapped each gap against what Seed's L2 substrate actually delivers:
+
+- **Strong fit**: 1/13 (C1 hallucination signal via `trailing_surprise_mean_long` — but solvable without Seed using existing ONNX embeddings + a novelty score on cosine search)
+- **Partial fit**: 4/13 (A1, B2, C2, E2 — perception data exists, no actionable loop)
+- **No fit**: 8/13 (A3, B1, B3, C3, D1-D3, E1 — wrong abstraction layer)
+
+The pattern: ~75% of capability gaps live at L5 (behavioral memory + preference learning) / L6 (metacognition) / L7 (self-modification). Seed is L2 (perception substrate). It's foundational but not sufficient — and for any specific capability gap, L5/L6/L7 mechanisms address them more directly than waiting for L2 to mature.
+
+### Project-decoupling decision
+
+| Project | Stops doing | Starts doing |
+|---|---|---|
+| **AiOT** (Seed) | Being the implicit "L2 of agent-bridge" — that framing pressures Seed to perform two unfalsifiable success criteria simultaneously ("show compositional capacity" AND "help Claude") | Returning to its native ADR_014 / ADR_017 positioning: edge AI / on-device cognition / minimal substrate for resource-constrained environments. Falsifiability gates use edge-native workloads (sensor streams, ambient signals), not agent-bridge memory events. |
+| **agent-bridge** | Treating Seed/v22 substrate as on-the-critical-path for capability gain | Owning its own L5/L6/L7 roadmap (see `AGENT-BRIDGE-CAPABILITY-ROADMAP-2026-05-15.md`). The `seed-bridge` crate stays as a trait-isolated integration shim; v22 Phase 3 B is parked. If AiOT later validates Seed, the shim is ready to re-engage. |
+
+### Why this protects both projects
+
+post 147's self-critique flagged "narrative-shopping at system level" as the biggest research risk. **Two projects with intertwined success criteria are a structural narrative-shopping factory**: when Seed progress slows, point to v22 substrate stats as "perception flowing"; when v22 doesn't deliver capability, point to Seed design as "topology theoretically learning". Each project produces "evidence" for the other and nothing falsifies anything. Decoupling forces each project to stand on its own measurements.
+
+### Action items (Mac-side, revised from v1)
+
+| v1 action | v2 action |
+|---|---|
+| "Don't set `AB_SUBSTRATE=1`; wait for carrier ablation result" | **Don't set `AB_SUBSTRATE=1`; reason is "L2 not in agent-bridge priority stack". Independent of ablation outcome.** |
+| "Track Day-7 P2 audit window 2026-05-20" | "P2 audit is AiOT-internal gate. agent-bridge doesn't pre-commit to integrate the result." |
+| "Read AiOT design memos weekly" | "Read AiOT edge-cognition progress, not agent-bridge-specific multi-grid retrofit." |
+| "No commercial-framing work until paper + benchmark" | Same. (still valid) |
+
+### What v22 work is NOT thrown away
+
+- `seed-bridge` crate — trait-isolated integration shim; zero cost to keep, free to plug in later if Seed validates
+- C3 self-check (S1/S5/S6) + `ab-oob-alert` — sibling collab discipline; decoupled from Seed
+- P-ε substrate audit + P-α decay tick + reinforce-active — L3 memory hygiene; useful regardless of L2
+- cross-machine sync (forum + memory_export + delta ATTACH) — pure L8 infrastructure; Seed-independent
+- DESIGN-COLLAB-PROTOCOL-v0 + thread #10 work — process protocol; orthogonal to Seed
+
+### Single recommendation (revised)
+
+> **Seed → AiOT's edge-cognition research, full stop. agent-bridge → independent L5/L6/L7 capability roadmap. The two projects use cross-machine sync + sibling protocol as the only structural connection; neither's success requires the other's. The `seed-bridge` crate is the seam — kept clean, kept unwired, kept ready.**
 
 ## References
 
