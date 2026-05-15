@@ -2322,6 +2322,14 @@ pub trait StateStore: Send + Sync {
             "decay_coactivation_once not implemented".into(),
         ))
     }
+
+    /// C3 §3.4 S5 — current value of `schema_meta.version` (or
+    /// equivalent migration cursor). Returns `Ok(None)` when no version
+    /// row is present. Default impl returns `Ok(None)` so non-SQLite
+    /// backends silently no-op the daemon's S5 schema-change watch.
+    async fn schema_meta_version(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

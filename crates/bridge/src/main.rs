@@ -1557,8 +1557,8 @@ async fn main() -> Result<()> {
             // OOB alert to ~/.cache/agent-bridge/alerts/ + tracing
             // error on target agent_bridge::sync_safety.
             //
-            // v0 ships S1 only; S2-S6 unit-tested but pending trait
-            // extensions / handler retrofits (follow-up commits).
+            // S5 schema_meta.version watch shares the same tick when a
+            // store is configured. S2-S4/S6 still pending follow-ups.
             if ab_bridge::c3_self_check::c3_disabled_via_env() {
                 tracing::info!(
                     "c3-self-check: disabled by env (AB_C3_DISABLE=1)"
@@ -1569,9 +1569,11 @@ async fn main() -> Result<()> {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(30)
                     .clamp(5, 300);
+                let c3_store = hub.store.clone();
                 tracing::info!(
                     tick_secs = c3_tick_secs,
-                    "c3-self-check: spawning S1 multi-process FD scan tick"
+                    s5_enabled = c3_store.is_some(),
+                    "c3-self-check: spawning S1+S5 tick"
                 );
                 tokio::spawn(async move {
                     let mut interval = tokio::time::interval(
@@ -1591,6 +1593,28 @@ async fn main() -> Result<()> {
                                 pids = inv.len(),
                                 "c3-self-check: S1 detected state.db (deleted) fds"
                             );
+                        }
+                        if let Some(store) = c3_store.as_ref() {
+                            match store.schema_meta_version().await {
+                                Ok(Some(v)) => {
+                                    if ab_bridge::c3_self_check::s5_check_and_alert(&v) {
+                                        tracing::warn!(
+                                            version = %v,
+                                            "c3-self-check: S5 schema_meta.version change fired alert"
+                                        );
+                                    }
+                                }
+                                Ok(None) => {
+                                    // Backend has no schema_meta row — nothing to
+                                    // compare against. Quiet by design.
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "c3-self-check: S5 schema_meta_version error"
+                                    );
+                                }
+                            }
                         }
                     }
                 });

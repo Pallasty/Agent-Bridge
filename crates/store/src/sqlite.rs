@@ -7782,6 +7782,22 @@ impl StateStore for SqliteStore {
             },
         ))
     }
+
+    async fn schema_meta_version(&self) -> Result<Option<String>> {
+        let v = self
+            .conn
+            .call(|c| -> RusqliteResult<Option<String>> {
+                c.query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("schema_meta_version: {e}")))?;
+        Ok(v)
+    }
 }
 
 impl SqliteStore {
@@ -14630,6 +14646,59 @@ mod tests {
             .expect("two valid daily snapshots remain");
         assert_eq!(pair.0, "snapshot_daily_a");
         assert_eq!(pair.1, "snapshot_daily_b");
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    fn schema_meta_temp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "ab-schema-meta-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    #[tokio::test]
+    async fn schema_meta_version_returns_current_after_open() {
+        // Fresh open runs all migrations; the value should match the
+        // latest UPDATE in `SqliteStore::open`. Hard-coding the literal
+        // here is intentional — a schema bump that forgets to UPDATE
+        // schema_meta.version will trip this test, which is exactly
+        // what S5 needs to be able to detect at runtime.
+        let temp_dir = schema_meta_temp_dir("after_open");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let v = store.schema_meta_version().await.expect("query");
+        assert_eq!(
+            v.as_deref(),
+            Some("26"),
+            "if schema bumped, update both this assertion and S5 docs"
+        );
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn schema_meta_version_returns_none_after_row_deleted() {
+        // S5 must distinguish "value missing" (Ok(None) → no-op) from
+        // "value present but unchanged" (no alert) from "value changed"
+        // (alert). This pins down the first case.
+        let temp_dir = schema_meta_temp_dir("none_after_delete");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        store
+            .conn
+            .call(|c| -> RusqliteResult<usize> {
+                c.execute("DELETE FROM schema_meta WHERE key='version'", [])
+            })
+            .await
+            .expect("delete");
+        let v = store.schema_meta_version().await.expect("query");
+        assert!(v.is_none(), "expected None after row delete, got {v:?}");
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 }
