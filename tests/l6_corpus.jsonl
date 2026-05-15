@@ -1,0 +1,50 @@
+{"id":"g01","label":"grounded","query":"Why was crates/seed-bridge/Cargo.toml's seed_neuron path changed from /Data/CascadeProjects to a relative path?","rationale":"commit 883d7ce + post 150 cover this exactly"}
+{"id":"g02","label":"grounded","query":"What does C3 S6 forum_post post-write verify check after INSERT?","rationale":"commit 8666119 + post 150/154"}
+{"id":"g03","label":"grounded","query":"What did the SEED self-critique post 147 list as the single highest-leverage experiment?","rationale":"research_seed_self_critique_post147_implications memory"}
+{"id":"g04","label":"grounded","query":"Why does ab-oob-alert use atomic temp+rename for writing JSON alert files?","rationale":"DESIGN-COLLAB-PROTOCOL-v0 §3.4.1 OOB writer + crates/oob-alert/src/lib.rs"}
+{"id":"g05","label":"grounded","query":"How does the deleted-inode incident on aio2 relate to sync-handoff.sh?","rationale":"state.db.SUSPECT-INTRUDER.note + thread 10 #126"}
+{"id":"g06","label":"grounded","query":"What does the wrapper warn about when AB_SUBSTRATE_SVD_PATH points at a missing file?","rationale":"scripts/wrapper/agent-bridge-wrapper.sh lines 199-213"}
+{"id":"g07","label":"grounded","query":"How is sid8 derived for the author convention in forum posts?","rationale":"post 126 + decision_project_decoupling_seed_agent_bridge memory"}
+{"id":"g08","label":"grounded","query":"What's the rate_limiter dedupe window for C3 OOB alerts?","rationale":"crates/bridge/src/c3_self_check.rs RateLimiter — 3600s"}
+{"id":"g09","label":"grounded","query":"Why did the dedupe_key_v23 migration test fail on macOS after pulling sibling commits?","rationale":"commit 8666119 fix + sqlite.rs rollback simulation"}
+{"id":"g10","label":"grounded","query":"What's the v22 Phase 3 predict-weighted neighbors_of design weighting formula?","rationale":"post 102 design memo with score[j] = topology * quality formula"}
+{"id":"g11","label":"grounded","query":"Why does the agent-bridge wrapper not default AB_SUBSTRATE=1?","rationale":"wrapper line 200-205 comment 'substrate install pays NeuronGrid init...'"}
+{"id":"g12","label":"grounded","query":"What is the L6 introspect_recall novelty score formula and threshold meaning?","rationale":"new tool I just wrote — should match on the doc content I'm writing"}
+{"id":"g13","label":"grounded","query":"What's the agent-bridge L5/L6/L7 capability roadmap week-by-week sequencing?","rationale":"AGENT-BRIDGE-CAPABILITY-ROADMAP-2026-05-15.md §6"}
+{"id":"g14","label":"grounded","query":"How does P-ε substrate-readiness audit measure M1 through M8?","rationale":"project_p_epsilon_design_memo + research_v22_perception_coverage_audit"}
+{"id":"g15","label":"grounded","query":"What did the Forge migration thread #5 resolve about GitLab versus GitHub remotes?","rationale":"context_two_node_workflow_pattern + decision_forge_migration_gitlab_primary"}
+{"id":"g16","label":"grounded","query":"What does the Mac vs aio2 sibling-layout convention allow for portable Cargo path deps?","rationale":"commit 883d7ce reasoning + Projects/Data parallel convention"}
+{"id":"g17","label":"grounded","query":"How does P-α coactivation decay tick handle half-life pruning?","rationale":"project_p_alpha_shipped_act_phase + project_p_alpha_design_memo_shipped"}
+{"id":"g18","label":"grounded","query":"What was the verified path for sync-handoff.sh push from aio2 to 192.168.1.99?","rationale":"docs/CROSS-MACHINE-SYNC.md + project_sync_handoff_script_shipped"}
+{"id":"g19","label":"grounded","query":"What does cmdline_argv0_self_returns_test_runner depend on that breaks on Mac?","rationale":"commit 8666119 + F9-a finding — /proc/self/cmdline Linux-only"}
+{"id":"g20","label":"grounded","query":"Why was the Seed three-angle valuation v1 superseded by the project-decoupling decision?","rationale":"v2 addendum + decision memory files"}
+{"id":"g21","label":"grounded","query":"What does the .githooks/pre-commit hook check and how was it bootstrapped?","rationale":"commit 54c2ece + scripts/install-githooks.sh"}
+{"id":"g22","label":"grounded","query":"How does the surgical SQL ATTACH delta sync avoid the deleted-inode failure mode?","rationale":"Mac-side delta push pattern documented in chat session itself"}
+{"id":"g23","label":"grounded","query":"What does memory_substrate_audit M5 and M6 measure about the substrate?","rationale":"project_p_epsilon_shipped_act_phase + substrate_audit tool"}
+{"id":"g24","label":"grounded","query":"What's the launchctl bootout vs kickstart difference for restarting agent-bridge daemon?","rationale":"this chat session used both repeatedly + launchd plist"}
+{"id":"g25","label":"grounded","query":"What does the macOS arm64 codesign --force --sign - workaround prevent?","rationale":"this chat + sediment in post 150 — SIGKILL on unsigned replacement"}
+{"id":"f01","label":"fictional","query":"What's the YAML config schema for the multimodal_sentinel daemon's redaction pipeline?","rationale":"no such daemon"}
+{"id":"f02","label":"fictional","query":"How does the Buckhannon-Diaz reranker reduce memory_search latency at scale?","rationale":"no such reranker"}
+{"id":"f03","label":"fictional","query":"What's the role of the karst_index module in codebase_search semantic mode?","rationale":"no such module"}
+{"id":"f04","label":"fictional","query":"How does the seasonality_predictor adjust dream cycle scheduling?","rationale":"no such component"}
+{"id":"f05","label":"fictional","query":"What's the difference between Helios and Hyperion daemon-http modes?","rationale":"no such mode"}
+{"id":"f06","label":"fictional","query":"What's the schema of the synapse_decay_archive table and which migration adds it?","rationale":"no such table"}
+{"id":"f07","label":"fictional","query":"How does the polynomial_blackbox handler intercept MCP tool calls?","rationale":"no such handler"}
+{"id":"f08","label":"fictional","query":"What's the BLEU-12 ranking threshold for memory_search rerank?","rationale":"no such metric or threshold"}
+{"id":"f09","label":"fictional","query":"How does chaotic_attractor calibration influence Hebbian weight updates?","rationale":"no such calibration"}
+{"id":"f10","label":"fictional","query":"What does the marshmallow_ack message type signal in agent_inbox flow?","rationale":"no such message type"}
+{"id":"f11","label":"fictional","query":"How does the pinball_cli scaffold cross-machine sibling spawning?","rationale":"no such CLI"}
+{"id":"f12","label":"fictional","query":"What's the role of the firewatch sentinel inside the C3 daemon tick?","rationale":"no such component"}
+{"id":"f13","label":"fictional","query":"How does Stratosphere routing affect daemon-http tailnet calls?","rationale":"no such routing layer"}
+{"id":"f14","label":"fictional","query":"What's the Cohen-Sebald protocol for sibling spawning handshake?","rationale":"no such protocol"}
+{"id":"f15","label":"fictional","query":"How does the Yukon embedding backend differ from ONNX for cold-start memories?","rationale":"no such backend"}
+{"id":"f16","label":"fictional","query":"What's the structure and TTL of the .agent_bridge_lockfile coordination file?","rationale":"no such file (C2 is design, not shipped)"}
+{"id":"f17","label":"fictional","query":"How does Macedonia-style consensus apply to forum_post conflict resolution?","rationale":"no such consensus"}
+{"id":"f18","label":"fictional","query":"What's the format of the chrysalis_telemetry JSONL log shipped by the daemon?","rationale":"no such log"}
+{"id":"f19","label":"fictional","query":"How does ribosome injection update the seed-bridge inner backend at runtime?","rationale":"no such mechanism"}
+{"id":"f20","label":"fictional","query":"What's the role of the lattice_walker in dream snapshot rotation?","rationale":"no such component"}
+{"id":"f21","label":"fictional","query":"How does the Picard-Norton retrieval bias rank coactivation edges?","rationale":"no such bias"}
+{"id":"f22","label":"fictional","query":"What does the cinnabar_check probe report about memory edges?","rationale":"no such probe"}
+{"id":"f23","label":"fictional","query":"How does Lazaridis encoding compress memory.embedding blobs for sync?","rationale":"no such encoding"}
+{"id":"f24","label":"fictional","query":"What does the magnetar_pulse event trigger in P-α coactivation decay?","rationale":"no such event type"}
+{"id":"f25","label":"fictional","query":"How is the Borealis index used during dream replay-audit waypoint passes?","rationale":"no such index"}

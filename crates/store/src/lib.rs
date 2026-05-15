@@ -177,6 +177,20 @@ pub struct MemorySearchHit {
     pub score: f64,
 }
 
+/// One memory ranked purely by cosine similarity to a query, **without**
+/// the importance / recency / access-count blending that `MemorySearchHit`
+/// applies. Used by L6 introspection probes (e.g. `introspect_recall`'s
+/// novelty score = `1 - max(cosine)`) where the raw geometric distance
+/// is the signal of interest, not "best result for the user".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryCosineHit {
+    pub record: MemoryRecord,
+    /// Raw cosine ∈ [-1, 1] (typically [0, 1] for non-negative text
+    /// embeddings). 1.0 = identical direction. 0.0 = orthogonal. Negative
+    /// happens with signed embeddings (rare for hash / ONNX MiniLM).
+    pub cosine: f32,
+}
+
 /// One co-activation edge — Hebbian "fire together, wire together" trace
 /// between two memories that surfaced in the same `memory_search` result.
 ///
@@ -1779,6 +1793,22 @@ pub trait StateStore: Send + Sync {
         limit: u32,
         threshold: f32,
     ) -> Result<Vec<MemorySearchHit>>;
+
+    /// Pure-cosine top-K — embed `query` and return the K active memories
+    /// whose stored embeddings have the highest cosine similarity to it,
+    /// **without** the importance/recency/access blending that
+    /// `memory_search_semantic` applies. Used by L6 introspection (e.g.
+    /// `introspect_recall` novelty = `1 - max(cosine)`) where the raw
+    /// geometric signal is the point. Default impl returns empty (back-
+    /// compat — non-SQLite stores quietly produce no novelty signal).
+    async fn memory_top_k_cosine(
+        &self,
+        query: &str,
+        k: u32,
+    ) -> Result<Vec<MemoryCosineHit>> {
+        let _ = (query, k);
+        Ok(Vec::new())
+    }
 
     /// v21 α — Synaptic Trace: record co-activation between memories that
     /// surfaced together in one `memory_search` result.

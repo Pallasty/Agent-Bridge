@@ -62,9 +62,9 @@ use crate::{
     ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
     ForumThreadExport, ForumThreadRecord, GraphTopology, IdentityWindow, ImportConflictPolicy,
     ImportReport,
-    McpToolCallStats, McpToolErrorRecord, MemoryEdge, MemoryEdgeExport, MemoryExportFilter,
-    MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats, MemoryRecord,
-    MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep,
+    McpToolCallStats, McpToolErrorRecord, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
+    MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats,
+    MemoryRecord, MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep,
     OverlapPair, ReplayAuditRow, ReplayAuditStats, SessionFilter, StateStore, StoredSession,
     WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
     MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
@@ -4544,6 +4544,79 @@ impl StateStore for SqliteStore {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         hits.truncate(limit_usize);
+        Ok(hits)
+    }
+
+    async fn memory_top_k_cosine(
+        &self,
+        query: &str,
+        k: u32,
+    ) -> Result<Vec<MemoryCosineHit>> {
+        if query.trim().is_empty() || k == 0 {
+            return Ok(Vec::new());
+        }
+        let query_vec = crate::vector::embed_text(query);
+        let k_usize = k as usize;
+
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<(MemoryRecord, Vec<u8>)>> {
+                let mut stmt = c.prepare(
+                    "SELECT key, kind, content, tags, related_keys, scope,
+                            created_at, updated_at, last_accessed_at, access_count,
+                            importance, status, trigger_pattern, superseded_by, embedding
+                     FROM memories
+                     WHERE status = 'active' AND embedding IS NOT NULL",
+                )?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        let tags_s: String = row.get(3)?;
+                        let related_s: String = row.get(4)?;
+                        let rec = MemoryRecord {
+                            key: row.get(0)?,
+                            kind: row.get(1)?,
+                            content: row.get(2)?,
+                            tags: parse_str_array(&tags_s),
+                            related_keys: parse_str_array(&related_s),
+                            scope: row.get(5)?,
+                            created_at: row.get(6)?,
+                            updated_at: row.get(7)?,
+                            last_accessed_at: row.get(8)?,
+                            access_count: row.get::<_, i64>(9)? as u64,
+                            importance: row.get::<_, f64>(10).unwrap_or(0.5),
+                            status: row
+                                .get::<_, String>(11)
+                                .unwrap_or_else(|_| "active".to_string()),
+                            trigger_pattern: row.get::<_, Option<String>>(12)?,
+                            superseded_by: row.get::<_, Option<String>>(13)?,
+                        };
+                        let emb_bytes: Vec<u8> = row.get(14)?;
+                        Ok((rec, emb_bytes))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_top_k_cosine: {e}")))?;
+
+        let mut hits: Vec<MemoryCosineHit> = rows
+            .into_iter()
+            .filter_map(|(rec, emb_bytes)| {
+                let stored_vec = crate::vector::decode_embedding(&emb_bytes);
+                if stored_vec.is_empty() {
+                    return None;
+                }
+                let cosine = crate::vector::cosine_similarity(&query_vec, &stored_vec);
+                Some(MemoryCosineHit { record: rec, cosine })
+            })
+            .collect();
+
+        hits.sort_by(|a, b| {
+            b.cosine
+                .partial_cmp(&a.cosine)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        hits.truncate(k_usize);
         Ok(hits)
     }
 

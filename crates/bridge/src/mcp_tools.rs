@@ -8961,6 +8961,161 @@ impl McpTool for SubstrateNeighborsTool {
 }
 
 // ===========================================================================
+//   introspect_recall — L6 metacognition: novelty / hallucination signal
+// ===========================================================================
+//
+// Maps to `docs/AGENT-BRIDGE-CAPABILITY-ROADMAP-2026-05-15.md` §3 L6 first
+// ship. Returns the top-K pure-cosine matches for a query (no importance/
+// recency blending) plus a `novelty_score = 1 - max(cosine)` and a boolean
+// `likely_unsupported` warning when the score crosses the threshold. The
+// design choice matters: a high novelty score does NOT mean "you will
+// hallucinate" — it means "you have no nearby memory to support a
+// confident answer". The caller decides what to do with that signal
+// (down-rank, refuse, force-search-tool, ask user). This tool is the
+// metric, not the policy.
+//
+// Implementation is Seed-independent: uses existing ONNX/hash embeddings
+// + cosine. If AiOT later validates Seed substrate and we want to swap
+// the novelty source to `trailing_surprise_mean_long`, the MCP surface
+// stays identical and only the internal computation changes.
+
+pub struct IntrospectRecallTool {
+    hub: Hub,
+}
+
+impl IntrospectRecallTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for IntrospectRecallTool {
+    fn name(&self) -> &'static str {
+        "introspect_recall"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "L6 metacognition probe — given a `query`, return the top-K active \
+                          memories ranked by pure cosine similarity (no importance/recency \
+                          blending) and a `novelty_score = 1 - max(cosine)`. When \
+                          `novelty_score >= threshold` (default 0.7), `likely_unsupported = \
+                          true` signals the caller has no nearby memory to ground a \
+                          confident answer on — useful for hallucination self-checks before \
+                          an opinionated reply. Reads from the local store only; never \
+                          writes. Returns `{novelty_score, likely_unsupported, threshold, \
+                          top_k_count, hits:[{key, kind, cosine, content_preview}]}`. \
+                          Designed to be cheap (one embed + cosine sweep over active rows). \
+                          Backend-agnostic: today uses the same embeddings as memory_search \
+                          semantic mode; future Seed-substrate surprise integration is a \
+                          drop-in replacement of the internal score source."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural-language question or claim to probe. Required, non-empty."
+                    },
+                    "k": {
+                        "type": "integer",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 50,
+                        "description": "Top-K cosine matches to inspect. Default 5 (max-of-top-K becomes the novelty anchor)."
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "default": 0.7,
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": "Novelty cutoff. likely_unsupported = (novelty_score >= threshold)."
+                    },
+                    "content_preview_chars": {
+                        "type": "integer",
+                        "default": 160,
+                        "minimum": 0,
+                        "maximum": 2000,
+                        "description": "Per-hit content preview length. 0 disables the preview field."
+                    }
+                },
+                "required": ["query"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let query = match args.get("query").and_then(|v| v.as_str()) {
+            Some(s) if !s.trim().is_empty() => s.trim().to_string(),
+            _ => return Ok(ToolResult::error("missing or empty 'query'")),
+        };
+        let k = args
+            .get("k")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5)
+            .clamp(1, 50) as u32;
+        let threshold = args
+            .get("threshold")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.7)
+            .clamp(0.0, 1.0) as f32;
+        let preview_chars = args
+            .get("content_preview_chars")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(160)
+            .min(2000) as usize;
+
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+
+        let hits = store
+            .memory_top_k_cosine(&query, k)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("introspect_recall: {e}")))?;
+
+        let max_cosine = hits.iter().map(|h| h.cosine).fold(f32::NEG_INFINITY, f32::max);
+        // Treat "no hits at all" (empty store / no embeddings) as max-novelty.
+        let novelty_score = if hits.is_empty() {
+            1.0_f32
+        } else {
+            (1.0 - max_cosine).clamp(0.0, 1.0)
+        };
+        let likely_unsupported = novelty_score >= threshold;
+
+        let hits_json: Vec<Value> = hits
+            .iter()
+            .map(|h| {
+                let preview = if preview_chars == 0 {
+                    Value::Null
+                } else {
+                    let s: String = h.record.content.chars().take(preview_chars).collect();
+                    Value::String(s)
+                };
+                json!({
+                    "key": h.record.key,
+                    "kind": h.record.kind,
+                    "cosine": h.cosine,
+                    "content_preview": preview,
+                })
+            })
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "query": query,
+            "novelty_score": novelty_score,
+            "likely_unsupported": likely_unsupported,
+            "threshold": threshold,
+            "top_k_count": hits.len(),
+            "hits": hits_json,
+        })))
+    }
+}
+
+// ===========================================================================
 //             memory_link_audit — Phase 0 dead-link probe over bodies
 // ===========================================================================
 
@@ -13145,6 +13300,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySubstrateAuditTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SubstrateStatsTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SubstrateNeighborsTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(IntrospectRecallTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkAuditTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySuggestTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkOrphansTool::new(hub.clone())));
@@ -15579,6 +15735,132 @@ mod tests {
         assert!(
             !verify_forum_post_write(&store, out.post_id, "cc-X", "different body", "msg").await,
             "mismatched body must yield false"
+        );
+    }
+
+    // ── L6 introspect_recall — schema + novelty algebra ───────────────────
+
+    #[test]
+    fn introspect_recall_schema_requires_query() {
+        let hub = crate::hub::Hub::builder().build();
+        let tool = IntrospectRecallTool::new(hub);
+        let schema = tool.schema();
+        assert_eq!(schema.name, "introspect_recall");
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("schema must declare required");
+        let req_strs: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        assert!(req_strs.contains(&"query"), "query must be required");
+        assert_eq!(req_strs.len(), 1, "only query should be required");
+    }
+
+    async fn l6_test_store() -> std::sync::Arc<dyn ab_store::StateStore> {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-l6-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&dir).await.expect("mkdir");
+        let store = ab_store::SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open");
+        std::sync::Arc::new(store) as std::sync::Arc<dyn ab_store::StateStore>
+    }
+
+    #[tokio::test]
+    async fn introspect_recall_empty_store_returns_max_novelty() {
+        // With no embeddings at all, novelty must hit the ceiling (1.0)
+        // so callers see a clear "I have no grounding here" signal rather
+        // than spurious low novelty from an uninitialised state.
+        let store = l6_test_store().await;
+        let hits = store
+            .memory_top_k_cosine("anything", 5)
+            .await
+            .expect("ok");
+        assert!(hits.is_empty(), "fresh store must have no embeddings");
+        let novelty = if hits.is_empty() {
+            1.0_f32
+        } else {
+            1.0 - hits[0].cosine
+        };
+        assert!((novelty - 1.0).abs() < 1e-6, "empty store ⇒ novelty=1");
+    }
+
+    #[tokio::test]
+    async fn introspect_recall_strong_match_yields_low_novelty() {
+        let store = l6_test_store().await;
+        // Save a memory with distinctive content; the same query against
+        // that store should land in the cosine top-K with high similarity.
+        let rec = ab_store::MemoryRecord {
+            key: "k_match".into(),
+            kind: "lesson".into(),
+            content: "Hebbian wire-together fire-together coactivation \
+                      Hebbian wire-together fire-together coactivation".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+        let hits = store
+            .memory_top_k_cosine(
+                "Hebbian wire-together fire-together coactivation",
+                5,
+            )
+            .await
+            .expect("ok");
+        assert!(!hits.is_empty(), "exact-content query must hit");
+        let max_cos = hits.iter().map(|h| h.cosine).fold(0.0_f32, f32::max);
+        let novelty = 1.0 - max_cos;
+        assert!(
+            novelty < 0.4,
+            "near-identical content should yield novelty <0.4, got {novelty}"
+        );
+    }
+
+    #[tokio::test]
+    async fn introspect_recall_orthogonal_query_yields_high_novelty() {
+        let store = l6_test_store().await;
+        let rec = ab_store::MemoryRecord {
+            key: "k_topic_a".into(),
+            kind: "lesson".into(),
+            content: "rust ownership borrow checker lifetimes traits async tokio".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+        let hits = store
+            .memory_top_k_cosine("quantum chromodynamics flavor symmetry", 5)
+            .await
+            .expect("ok");
+        // Hash backend can still produce non-zero cosine on incidental
+        // token collisions, so the bar here is "novelty above the
+        // strong-match test's 0.4 floor" rather than "near 1.0".
+        let max_cos = hits.iter().map(|h| h.cosine).fold(0.0_f32, f32::max);
+        let novelty = 1.0 - max_cos;
+        assert!(
+            novelty > 0.4,
+            "orthogonal topic should yield novelty >0.4, got {novelty}"
         );
     }
 }
