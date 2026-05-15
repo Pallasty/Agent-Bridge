@@ -1551,6 +1551,50 @@ async fn main() -> Result<()> {
             } else {
                 tracing::info!("substrate-tick: no store configured, skipping");
             }
+
+            // C3 — daemon self-check tick (Collab Protocol v0 §3.4).
+            // S1 multi-process FD enum runs every 30s; on hit, writes
+            // OOB alert to ~/.cache/agent-bridge/alerts/ + tracing
+            // error on target agent_bridge::sync_safety.
+            //
+            // v0 ships S1 only; S2-S6 unit-tested but pending trait
+            // extensions / handler retrofits (follow-up commits).
+            if ab_bridge::c3_self_check::c3_disabled_via_env() {
+                tracing::info!(
+                    "c3-self-check: disabled by env (AB_C3_DISABLE=1)"
+                );
+            } else {
+                let c3_tick_secs: u64 = std::env::var("AB_C3_TICK_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(30)
+                    .clamp(5, 300);
+                tracing::info!(
+                    tick_secs = c3_tick_secs,
+                    "c3-self-check: spawning S1 multi-process FD scan tick"
+                );
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(
+                        std::time::Duration::from_secs(c3_tick_secs),
+                    );
+                    interval.set_missed_tick_behavior(
+                        tokio::time::MissedTickBehavior::Delay,
+                    );
+                    // Skip the t=0 immediate fire — startup may race
+                    // with the daemon installing its own fds.
+                    interval.tick().await;
+                    loop {
+                        interval.tick().await;
+                        let inv = ab_bridge::c3_self_check::s1_check_and_alert();
+                        if !inv.is_empty() {
+                            tracing::warn!(
+                                pids = inv.len(),
+                                "c3-self-check: S1 detected state.db (deleted) fds"
+                            );
+                        }
+                    }
+                });
+            }
             serve(&socket, Router::new(hub)).await
         }
         Cmd::Mcp => {

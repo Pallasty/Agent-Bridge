@@ -1,0 +1,32 @@
+[package]
+name = "ab-oob-alert"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+description = """
+**C3 — Out-of-Band alert channel** for agent-bridge daemon self-checks
+(Collab Protocol v0, design §3.4).
+
+When state.db itself is the anomaly object (FD unlinked, schema_meta
+version change, forum_post post-write race miss), writing the alert back
+into state.db has race risk. This crate writes alerts to a flat-file
+JSON sink under `~/.cache/agent-bridge/alerts/<unix_ts>-<kind>.json`
+plus `tracing::error!(target = "agent_bridge::sync_safety", ...)` which
+the daemon's systemd journal scrapes.
+
+No SQLite dependency — designed to keep working when state.db is the
+broken thing.
+"""
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

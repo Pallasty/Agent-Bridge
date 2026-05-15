@@ -25,6 +25,7 @@ dependencies = [
  "ab-core",
  "ab-mcp",
  "ab-notifier",
+ "ab-oob-alert",
  "ab-seed-bridge",
  "ab-store",
  "ab-terminal",
@@ -95,6 +96,17 @@ dependencies = [
  "tokio",
  "tracing",
  "zbus",
+]
+
+[[package]]
+name = "ab-oob-alert"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]

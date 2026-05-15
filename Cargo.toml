@@ -10,6 +10,7 @@ members = [
     "crates/mcp",
     "crates/bridge",
     "crates/seed-bridge",
+    "crates/oob-alert",
     "bin/agent-cli",
 ]
 
@@ -62,6 +63,7 @@ ab-agent = { path = "crates/agent" }
 ab-store = { path = "crates/store", default-features = false }
 ab-mcp = { path = "crates/mcp" }
 ab-bridge = { path = "crates/bridge" }
+ab-oob-alert = { path = "crates/oob-alert" }
 
 [profile.dev]
 opt-level = 0
