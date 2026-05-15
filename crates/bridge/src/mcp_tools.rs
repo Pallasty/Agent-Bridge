@@ -2712,6 +2712,46 @@ impl McpTool for ForumPostTool {
             )
             .await
             .map_err(|e| ab_core::Error::Backend(format!("forum_post: {e}")))?;
+
+        // C3 S6 — post-write race-detection. Re-SELECT the row we just
+        // claimed to insert, retrying up to 3× with 50ms gap to tolerate
+        // read-replica lag (per DESIGN-COLLAB-PROTOCOL-v0.md §3.4.4). On
+        // miss/mismatch fire an OOB alert (no SQLite writes — write path
+        // is itself the suspect channel) and return an error to the
+        // client. Misses are global-rate-limited 1h to avoid spam.
+        if !verify_forum_post_write(&store, outcome.post_id, author, body, kind).await {
+            let sig = format!("post_id={}", outcome.post_id);
+            let fire = match crate::c3_self_check::rate_limiter().lock() {
+                Ok(mut g) => g.check_and_record(format!("s6:{sig}"), std::time::Instant::now()),
+                Err(_) => true,
+            };
+            if fire {
+                let alert = ab_oob_alert::Alert::new(ab_oob_alert::AlertKind::PostWriteRaceMiss)
+                    .with_evidence(json!({
+                        "post_id": outcome.post_id,
+                        "thread_id": outcome.thread_id,
+                        "author": author,
+                        "kind": kind,
+                        "body_len": body.len(),
+                    }))
+                    .with_suggested_action(
+                        "inspect /proc/<PID>/fd/* for state.db inode divergence; \
+                         run `agent-bridge rescue-snapshot --canonical` if split-brain"
+                            .to_string(),
+                    )
+                    .with_next_steps(vec![
+                        "see lesson_split_brain_forum_id_collision".into(),
+                        "see thread 10 #136 — original S6 case".into(),
+                    ]);
+                let _ = ab_oob_alert::write_alert(&alert);
+            }
+            return Err(ab_core::Error::Backend(format!(
+                "forum_post: S6 post-write verify failed (post_id={} not found or content mismatch after 3 retries — likely split-brain state.db). Alert: {}.",
+                outcome.post_id,
+                if fire { "fired" } else { "rate-limited" }
+            )));
+        }
+
         Ok(ToolResult::json_text(&json!({
             "status": "ok",
             "thread_id": outcome.thread_id,
@@ -2719,6 +2759,35 @@ impl McpTool for ForumPostTool {
             "created_thread": outcome.created_thread
         })))
     }
+}
+
+/// C3 S6 — verify a freshly inserted forum_post row is readable with the
+/// content we claimed to write. Retries up to 3× with 50ms gaps to absorb
+/// SQLite read-replica lag (per design §3.4.4). Returns `true` on match,
+/// `false` on miss-or-mismatch after all retries.
+async fn verify_forum_post_write(
+    store: &std::sync::Arc<dyn ab_store::StateStore>,
+    post_id: i64,
+    expected_author: &str,
+    expected_body: &str,
+    expected_kind: &str,
+) -> bool {
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        if let Ok(Some(rec)) = store.forum_post_get(post_id).await {
+            if rec.author == expected_author
+                && rec.body == expected_body
+                && rec.kind == expected_kind
+            {
+                return true;
+            }
+            // Found row but content mismatched — split-brain. No point retrying.
+            return false;
+        }
+    }
+    false
 }
 
 pub struct ForumReadTool {
@@ -15424,5 +15493,92 @@ mod tests {
         assert_eq!(t1.name(), t2.name());
         assert_eq!(t2.name(), t3.name());
         assert_eq!(t1.name(), "substrate_neighbors_of");
+    }
+
+    // ── C3 S6 — verify_forum_post_write ───────────────────────────────────
+    //
+    // Happy path: a fresh forum_post is immediately re-SELECTable via
+    // forum_post_get and verify_forum_post_write returns true. Miss path:
+    // a bogus post_id never finds a row → returns false after 3 retries.
+    // We exercise the helper directly (no MCP plumbing) so the assertion
+    // is on the verifier's correctness, not on tool-context wiring.
+
+    async fn s6_test_store() -> std::sync::Arc<dyn ab_store::StateStore> {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-s6-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&dir).await.expect("mkdir");
+        let store = ab_store::SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open");
+        std::sync::Arc::new(store) as std::sync::Arc<dyn ab_store::StateStore>
+    }
+
+    #[tokio::test]
+    async fn s6_verify_returns_true_when_row_matches() {
+        let store = s6_test_store().await;
+        let out = store
+            .forum_post(
+                None,
+                Some("design"),
+                Some("S6 happy"),
+                "cc-X",
+                "msg",
+                "verbatim body",
+                None,
+                None,
+            )
+            .await
+            .expect("create");
+        assert!(
+            verify_forum_post_write(&store, out.post_id, "cc-X", "verbatim body", "msg").await,
+            "fresh insert must verify"
+        );
+    }
+
+    #[tokio::test]
+    async fn s6_verify_returns_false_when_row_missing() {
+        let store = s6_test_store().await;
+        // Never inserted — post_id 999_999 cannot match. Retries cost
+        // ~150ms total which is the bound clients should expect on miss.
+        let start = std::time::Instant::now();
+        assert!(
+            !verify_forum_post_write(&store, 999_999, "cc-X", "any", "msg").await,
+            "missing row must yield false"
+        );
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= std::time::Duration::from_millis(95),
+            "3 retries × 50ms ≥ 100ms (allowing scheduler slop, got {elapsed:?})"
+        );
+    }
+
+    #[tokio::test]
+    async fn s6_verify_returns_false_on_content_mismatch() {
+        // Split-brain shape: row exists but body differs from what we
+        // claim we inserted. Verifier returns false without retrying
+        // (no point — the row is firmly the wrong content).
+        let store = s6_test_store().await;
+        let out = store
+            .forum_post(
+                None,
+                Some("design"),
+                Some("S6 mismatch"),
+                "cc-X",
+                "msg",
+                "actual stored body",
+                None,
+                None,
+            )
+            .await
+            .expect("create");
+        assert!(
+            !verify_forum_post_write(&store, out.post_id, "cc-X", "different body", "msg").await,
+            "mismatched body must yield false"
+        );
     }
 }

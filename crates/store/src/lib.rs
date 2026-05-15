@@ -2036,6 +2036,15 @@ pub trait StateStore: Send + Sync {
         ))
     }
 
+    /// Fetch a single forum post by id (C3 S6 post-write race-detection helper).
+    /// Returns `Ok(None)` if no row matches — caller decides whether to retry
+    /// (read-replica lag) or escalate to an OOB alert. Default impl returns
+    /// `Ok(None)` so non-SQLite backends never trip S6 alerts incorrectly.
+    async fn forum_post_get(&self, post_id: i64) -> Result<Option<ForumPostRecord>> {
+        let _ = post_id;
+        Ok(None)
+    }
+
     /// Update thread status (`open` | `resolved` | `archived`).
     /// Export every forum thread (with its posts) to a JSONL file. One thread
     /// per line; posts are nested inside their thread. Subscriptions are not

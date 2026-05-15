@@ -102,7 +102,7 @@ fn enum_deleted_state_db_fds_for_pid(pid: u32) -> Vec<ProcessFd> {
 
 /// State for rate-limiting per (alert_kind, signal-fingerprint).
 /// Per design §3.4.4, same signal max 1 alert per 1h window.
-struct RateLimiter {
+pub(crate) struct RateLimiter {
     /// Map `(kind, signature)` → last fired `Instant`. Kept tiny —
     /// O(1) signals per tick.
     seen: Vec<(String, Instant)>,
@@ -119,7 +119,7 @@ impl RateLimiter {
 
     /// Returns `true` if `key` was last seen >`window` ago (or never)
     /// — caller should fire the alert. Also records the new sighting.
-    fn check_and_record(&mut self, key: String, now: Instant) -> bool {
+    pub(crate) fn check_and_record(&mut self, key: String, now: Instant) -> bool {
         // Garbage-collect entries outside the window.
         self.seen.retain(|(_, t)| now.duration_since(*t) <= self.window);
         if self.seen.iter().any(|(k, _)| k == &key) {
@@ -131,7 +131,10 @@ impl RateLimiter {
 }
 
 /// Process-wide rate limiter. 1h window per design §3.4.4.
-fn rate_limiter() -> &'static Mutex<RateLimiter> {
+/// `pub(crate)` so siblings like S6 in `mcp_tools::ForumPostTool` can dedupe
+/// against the same window — one fire-and-forget alert per (kind, signature)
+/// across the whole bridge process.
+pub(crate) fn rate_limiter() -> &'static Mutex<RateLimiter> {
     static LIM: std::sync::OnceLock<Mutex<RateLimiter>> = std::sync::OnceLock::new();
     LIM.get_or_init(|| Mutex::new(RateLimiter::new(Duration::from_secs(3600))))
 }
@@ -286,6 +289,11 @@ mod tests {
     }
 
     #[test]
+    // `/proc/self/cmdline` only exists on Linux; on macOS there's no `/proc`
+    // at all. S1's runtime path already returns Vec::new() gracefully when
+    // /proc is missing, so the helper degrades correctly — this test is a
+    // Linux-only sanity check.
+    #[cfg(target_os = "linux")]
     fn cmdline_argv0_self_returns_test_runner() {
         // /proc/self/cmdline is readable in normal test env. The token
         // we get back depends on cargo's harness; just assert non-empty.

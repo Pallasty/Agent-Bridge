@@ -6990,6 +6990,51 @@ impl StateStore for SqliteStore {
         Ok(posts)
     }
 
+    async fn forum_post_get(&self, post_id: i64) -> Result<Option<ForumPostRecord>> {
+        let row = self
+            .conn
+            .call(
+                move |c| -> RusqliteResult<Option<(i64, i64, String, String, String, Option<String>, i64)>> {
+                    let mut stmt = c.prepare(
+                        "SELECT id, thread_id, author, kind, body, refs_json, created_at \
+                         FROM forum_posts WHERE id = ?1",
+                    )?;
+                    let mut q = stmt.query(params![post_id])?;
+                    if let Some(r) = q.next()? {
+                        Ok(Some((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                            r.get(6)?,
+                        )))
+                    } else {
+                        Ok(None)
+                    }
+                },
+            )
+            .await
+            .map_err(|e| Error::Backend(format!("forum_post_get: {e}")))?;
+
+        Ok(row.map(|(id, thread_id, author, kind, body, refs_json, created_at)| {
+            let refs = match refs_json {
+                Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::Null),
+                None => serde_json::Value::Null,
+            };
+            ForumPostRecord {
+                id,
+                thread_id,
+                author,
+                kind,
+                body,
+                refs,
+                created_at,
+            }
+        }))
+    }
+
     async fn forum_subscribe(
         &self,
         session_id: &str,
@@ -9102,6 +9147,16 @@ mod tests {
                 .expect("drop dedupe_key index");
             raw.execute("ALTER TABLE memories DROP COLUMN dedupe_key", [])
                 .expect("drop dedupe_key column");
+            // Also strip the post-v23 columns the test doesn't care about so
+            // a fresh v22→current migration walk doesn't trip
+            // `duplicate column name` on re-open. v26 added `embedding_backend`
+            // unconditionally (no IF NOT EXISTS for ADD COLUMN), so it MUST
+            // be removed before rollback completes. SQLite refuses DROP COLUMN
+            // while an index references it, so drop the index first.
+            raw.execute("DROP INDEX IF EXISTS idx_memories_embedding_backend", [])
+                .expect("drop embedding_backend index");
+            raw.execute("ALTER TABLE memories DROP COLUMN embedding_backend", [])
+                .expect("drop embedding_backend column");
             raw.execute(
                 "UPDATE schema_meta SET value = '22' WHERE key = 'version'",
                 [],
@@ -10927,6 +10982,49 @@ mod tests {
             .await
             .expect_err("missing thread");
         assert!(format!("{err}").contains("not found"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn forum_post_get_roundtrip_and_missing_id_returns_none() {
+        // C3 S6 post-write verify helper. Round-trip identity for the happy
+        // path; `None` for an id that was never inserted.
+        let (dir, store) = fresh_store("s6_get").await;
+        let refs = serde_json::json!({"memory_keys": ["m1"]});
+        let out = store
+            .forum_post(
+                None,
+                Some("design"),
+                Some("S6 round-trip"),
+                "cc-S6",
+                "finding",
+                "the body we expect to read back verbatim",
+                Some(&refs),
+                None,
+            )
+            .await
+            .expect("create");
+
+        let got = store
+            .forum_post_get(out.post_id)
+            .await
+            .expect("get ok")
+            .expect("row present");
+        assert_eq!(got.id, out.post_id);
+        assert_eq!(got.thread_id, out.thread_id);
+        assert_eq!(got.author, "cc-S6");
+        assert_eq!(got.kind, "finding");
+        assert_eq!(got.body, "the body we expect to read back verbatim");
+        assert_eq!(got.refs, refs);
+
+        // Nonexistent id is a clean None, never an error — caller (S6) treats
+        // Ok(None) as the miss signal and decides whether to escalate.
+        let missing = store
+            .forum_post_get(out.post_id + 999_999)
+            .await
+            .expect("get ok");
+        assert!(missing.is_none());
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
