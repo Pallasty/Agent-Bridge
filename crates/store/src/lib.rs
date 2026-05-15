@@ -1259,6 +1259,23 @@ pub struct MemoryStats {
     pub db_size_bytes: Option<u64>,
 }
 
+/// Snapshot of the three counts feeding C3 §3.4 S2-S4 drop detection
+/// (`memories.count` active / `forum_threads.count` / `memory_edges.count`).
+/// Light-weight — three `SELECT COUNT(*)` calls, designed to be safe
+/// to read on a 30s tick.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct S234Counts {
+    /// Memories with `status='active'`. Excludes archived + tombstoned
+    /// so dream-tier GC bulk-status-change doesn't trigger S2 false
+    /// positives.
+    pub memories_active: u64,
+    /// Total `forum_threads` rows (status-agnostic — archive/resolve
+    /// don't delete rows so this is stable).
+    pub forum_threads: u64,
+    /// Total `memory_edges` rows.
+    pub memory_edges: u64,
+}
+
 /// Filters for `memory_export` (v0.6). All None = export everything.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryExportFilter {
@@ -2368,6 +2385,13 @@ pub trait StateStore: Send + Sync {
     /// backends silently no-op the daemon's S5 schema-change watch.
     async fn schema_meta_version(&self) -> Result<Option<String>> {
         Ok(None)
+    }
+
+    /// C3 §3.4 S2-S4 — read the three drop-detection counts in one
+    /// call. Default returns zeroed [`S234Counts`] so non-SQLite
+    /// backends silently no-op the daemon's S2-S4 forum-channel alerts.
+    async fn s234_counts(&self) -> Result<S234Counts> {
+        Ok(S234Counts::default())
     }
 }
 

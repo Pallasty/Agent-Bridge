@@ -1615,6 +1615,71 @@ async fn main() -> Result<()> {
                                     );
                                 }
                             }
+
+                            // S2-S4 — 5-min anchor metric drops. Cheap (3 SELECT
+                            // COUNT) so we let the check sample every tick; the
+                            // helper internally guards against returning anything
+                            // before the 5-min window elapses.
+                            match store.s234_counts().await {
+                                Ok(counts) => {
+                                    let now = std::time::SystemTime::now();
+                                    let events =
+                                        ab_bridge::c3_self_check::s234_check_against_snapshot(
+                                            counts, now,
+                                        );
+                                    if !events.is_empty() {
+                                        let ts_unix = now
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .map(|d| d.as_secs() as i64)
+                                            .unwrap_or(0);
+                                        for ev in events {
+                                            let title = format!(
+                                                "[C3 alert] {}: {} -> {}",
+                                                ev.signal.as_str(),
+                                                ev.before,
+                                                ev.after,
+                                            );
+                                            let body =
+                                                ab_bridge::c3_self_check::format_s234_alert_body(
+                                                    &ev, ts_unix,
+                                                );
+                                            if let Err(e) = store
+                                                .forum_post(
+                                                    None,
+                                                    Some("incidents"),
+                                                    Some(&title),
+                                                    "agent-bridge:daemon:c3-s234",
+                                                    "finding",
+                                                    &body,
+                                                    None,
+                                                    None,
+                                                )
+                                                .await
+                                            {
+                                                tracing::warn!(
+                                                    error = %e,
+                                                    signal = ev.signal.as_str(),
+                                                    "c3-self-check: S2-S4 forum_post failed"
+                                                );
+                                            } else {
+                                                tracing::warn!(
+                                                    signal = ev.signal.as_str(),
+                                                    before = ev.before,
+                                                    after = ev.after,
+                                                    drop_pct = ev.drop_pct,
+                                                    "c3-self-check: S2-S4 drop posted to incidents"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "c3-self-check: s234_counts error"
+                                    );
+                                }
+                            }
                         }
                     }
                 });

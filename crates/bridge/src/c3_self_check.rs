@@ -5,14 +5,18 @@
 //! - **S1** any `agent-bridge.real`-binary process holding a state.db
 //!   FD that readlink-resolves to `... (deleted)` (F8 multi-process
 //!   partial-swap mitigation).
-//! - **S2-S4** DB metric drops (memories.count / forum_threads.count /
-//!   memory_edges.count) — implemented in [`db_metric_check`].
+//! - **S2-S4** DB metric drops (memories.count active / forum_threads.count /
+//!   memory_edges.count) — implemented in [`s234_check_against_snapshot`].
+//!   Forum-post channel (non-DB-anomaly tier per §3.4.1).
 //! - **S5** schema_meta.version change — implemented in
-//!   [`db_metric_check`].
+//!   [`s5_schema_meta_change_check`].
+//! - **S6** forum_post post-write race-miss — wired in `mcp_tools.rs`
+//!   directly via [`ab_oob_alert`].
 //!
 //! DB-anomaly findings (S1, S5, S6) fire through [`ab_oob_alert`]
-//! (file + tracing), bypassing SQLite. Non-DB findings (S2-S4) go via
-//! `forum_post` (TODO: wire when storeAdapter exposes it).
+//! (file + tracing), bypassing SQLite. Non-DB findings (S2-S4) post
+//! into the `incidents` board via the store's `forum_post` so the
+//! signal lands somewhere human-reviewable.
 //!
 //! Env gate: `AB_C3_DISABLE=1` skips the tick entirely (escape hatch
 //! for tests / pathological loops).
@@ -20,9 +24,17 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use ab_oob_alert::{write_alert, Alert, AlertKind, ProcessFd};
+use ab_store::S234Counts;
+
+/// Window between consecutive S2-S4 anchor snapshots (per §3.4.2 "5min").
+pub const S234_WINDOW_SECS: u64 = 300;
+/// S2 fires when active-memories count drops by more than this fraction.
+pub const S2_DROP_THRESHOLD: f64 = 0.05;
+/// S4 fires when memory_edges count drops by more than this fraction.
+pub const S4_DROP_THRESHOLD: f64 = 0.05;
 
 /// Process whose `cmdline` first token must match one of these path
 /// suffixes for us to inspect its fd table. We match on suffix so both
@@ -276,6 +288,188 @@ pub fn s5_check_and_alert(current_version: &str) -> bool {
     }
 }
 
+/// Which of the three count series tripped. Stable as a kebab-case
+/// string for forum_post titles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum S234Signal {
+    /// S2 — `memories` active count dropped > 5% in one 5-min window.
+    S2Memories,
+    /// S3 — `forum_threads` total count dropped at all in one 5-min
+    /// window (threshold = drop > 0; threads only retire via status,
+    /// they shouldn't disappear).
+    S3ForumThreads,
+    /// S4 — `memory_edges` total count dropped > 5% in one 5-min
+    /// window.
+    S4MemoryEdges,
+}
+
+impl S234Signal {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            S234Signal::S2Memories => "s2-memories-drop",
+            S234Signal::S3ForumThreads => "s3-forum-threads-drop",
+            S234Signal::S4MemoryEdges => "s4-memory-edges-drop",
+        }
+    }
+}
+
+/// One drop the §3.4.2 check would have alerted on. Caller decides
+/// where to post (forum vs. local log).
+#[derive(Debug, Clone, PartialEq)]
+pub struct S234DropEvent {
+    pub signal: S234Signal,
+    pub before: u64,
+    pub after: u64,
+    /// Fraction of `before` lost (0.0..=1.0). For S3 the threshold is
+    /// "any drop" but we still report the percentage for the alert body.
+    pub drop_pct: f64,
+}
+
+/// Per-process anchor snapshot for S2-S4. `None` until the first tick
+/// observes a value; `Some((ts, counts))` once seeded. Rotated to the
+/// current sample once `now - ts >= S234_WINDOW_SECS` (per §3.4.2).
+fn s234_last_snapshot() -> &'static Mutex<Option<(SystemTime, S234Counts)>> {
+    static C: std::sync::OnceLock<Mutex<Option<(SystemTime, S234Counts)>>> =
+        std::sync::OnceLock::new();
+    C.get_or_init(|| Mutex::new(None))
+}
+
+/// Pure logic for the three drop checks. Exposed for testability —
+/// the anchor management lives in [`s234_check_against_snapshot`].
+pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234DropEvent> {
+    let mut out = Vec::new();
+    // S2 — memories_active drop > 5%
+    if prev.memories_active > 0 && current.memories_active < prev.memories_active {
+        let drop = prev.memories_active - current.memories_active;
+        let pct = drop as f64 / prev.memories_active as f64;
+        if pct > S2_DROP_THRESHOLD {
+            out.push(S234DropEvent {
+                signal: S234Signal::S2Memories,
+                before: prev.memories_active,
+                after: current.memories_active,
+                drop_pct: pct,
+            });
+        }
+    }
+    // S3 — forum_threads drop > 0 (threads should never disappear)
+    if current.forum_threads < prev.forum_threads {
+        let drop = prev.forum_threads - current.forum_threads;
+        let pct = if prev.forum_threads > 0 {
+            drop as f64 / prev.forum_threads as f64
+        } else {
+            0.0
+        };
+        out.push(S234DropEvent {
+            signal: S234Signal::S3ForumThreads,
+            before: prev.forum_threads,
+            after: current.forum_threads,
+            drop_pct: pct,
+        });
+    }
+    // S4 — memory_edges drop > 5%
+    if prev.memory_edges > 0 && current.memory_edges < prev.memory_edges {
+        let drop = prev.memory_edges - current.memory_edges;
+        let pct = drop as f64 / prev.memory_edges as f64;
+        if pct > S4_DROP_THRESHOLD {
+            out.push(S234DropEvent {
+                signal: S234Signal::S4MemoryEdges,
+                before: prev.memory_edges,
+                after: current.memory_edges,
+                drop_pct: pct,
+            });
+        }
+    }
+    out
+}
+
+/// **S2-S4** — compare `current` counts against the 5-min anchor,
+/// returning the drops that fired AND passed the shared rate limiter.
+/// Caller is responsible for emitting each event to its channel
+/// (forum_post per §3.4.1).
+///
+/// Snapshot lifecycle:
+/// - first call seeds the anchor with `(now, current)` and returns
+///   empty (no comparison possible).
+/// - subsequent calls within `< S234_WINDOW_SECS` of anchor return
+///   empty (still in window).
+/// - calls at `>= S234_WINDOW_SECS` compare current vs anchor, rotate
+///   anchor to `(now, current)`, and return the drop set.
+pub fn s234_check_against_snapshot(
+    current: S234Counts,
+    now: SystemTime,
+) -> Vec<S234DropEvent> {
+    let mut guard = match s234_last_snapshot().lock() {
+        Ok(g) => g,
+        Err(_) => return Vec::new(),
+    };
+
+    let (prev_ts, prev_counts) = match *guard {
+        Some(snap) => snap,
+        None => {
+            *guard = Some((now, current));
+            return Vec::new();
+        }
+    };
+
+    let age = now.duration_since(prev_ts).unwrap_or(Duration::ZERO);
+    if age.as_secs() < S234_WINDOW_SECS {
+        return Vec::new();
+    }
+
+    let events = compute_s234_drops(prev_counts, current);
+    *guard = Some((now, current));
+    drop(guard);
+
+    // Rate-limit each event via the shared rate_limiter (1h window).
+    let limit_now = Instant::now();
+    let mut out = Vec::new();
+    for ev in events {
+        let sig = format!(
+            "{}:{}->{}",
+            ev.signal.as_str(),
+            ev.before,
+            ev.after
+        );
+        let allow = match rate_limiter().lock() {
+            Ok(mut g) => g.check_and_record(sig, limit_now),
+            Err(_) => true,
+        };
+        if allow {
+            out.push(ev);
+        }
+    }
+    out
+}
+
+/// Format an S2-S4 alert body per design §3.4.5. The forum_post tool
+/// receives this as the body; the title is built separately by the
+/// caller to keep the heading short.
+pub fn format_s234_alert_body(ev: &S234DropEvent, ts_unix: i64) -> String {
+    format!(
+        "[ALERT] {} at ts_unix={}\n\
+         [evidence] {} → {} ({:.1}% drop in <={}s window)\n\
+         [fd_state] state.db = live (non-DB-anomaly tier)\n\
+         [suggested action] inspect dream-tier output / GC logs / \
+         recent retire ops; see docs/DESIGN-COLLAB-PROTOCOL-v0.md §3.4.4 \
+         for false-positive mitigations",
+        ev.signal.as_str(),
+        ts_unix,
+        ev.before,
+        ev.after,
+        ev.drop_pct * 100.0,
+        S234_WINDOW_SECS,
+    )
+}
+
+/// Test-only: clear the S2-S4 anchor so a fresh test run isn't biased
+/// by previous tests in the same process.
+#[cfg(test)]
+pub(crate) fn _reset_s234_snapshot_for_tests() {
+    if let Ok(mut g) = s234_last_snapshot().lock() {
+        *g = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,5 +640,133 @@ mod tests {
         let ev = &alert.evidence;
         assert_eq!(ev["before"], "v26");
         assert_eq!(ev["after"], "v27");
+    }
+
+    // ─── S2-S4 — drop-detection ────────────────────────────────────────
+
+    // The four s234_* tests share the module-level `s234_last_snapshot`
+    // Mutex; serialize them with this lock so a sibling test can't see
+    // stale state from a previous run within the same process.
+    static S234_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn mk_counts(memories: u64, threads: u64, edges: u64) -> S234Counts {
+        S234Counts {
+            memories_active: memories,
+            forum_threads: threads,
+            memory_edges: edges,
+        }
+    }
+
+    #[test]
+    fn compute_s234_drops_no_change_no_events() {
+        let prev = mk_counts(100, 5, 200);
+        let cur = mk_counts(100, 5, 200);
+        assert!(compute_s234_drops(prev, cur).is_empty());
+    }
+
+    #[test]
+    fn compute_s234_drops_s2_below_threshold_no_event() {
+        // 5% drop is the threshold (exclusive >). Drop to 95 from 100 = 5%,
+        // which is NOT strictly greater than 5% → no event.
+        let prev = mk_counts(100, 5, 200);
+        let cur = mk_counts(95, 5, 200);
+        assert!(compute_s234_drops(prev, cur).is_empty());
+    }
+
+    #[test]
+    fn compute_s234_drops_s2_above_threshold_fires() {
+        let prev = mk_counts(100, 5, 200);
+        let cur = mk_counts(80, 5, 200); // 20% drop
+        let events = compute_s234_drops(prev, cur);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signal, S234Signal::S2Memories);
+        assert_eq!(events[0].before, 100);
+        assert_eq!(events[0].after, 80);
+        assert!((events[0].drop_pct - 0.20).abs() < 1e-9);
+    }
+
+    #[test]
+    fn compute_s234_drops_s3_any_drop_fires() {
+        // S3 threshold is strictly drop > 0 (threads should never
+        // disappear under normal operation).
+        let prev = mk_counts(100, 5, 200);
+        let cur = mk_counts(100, 4, 200);
+        let events = compute_s234_drops(prev, cur);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signal, S234Signal::S3ForumThreads);
+    }
+
+    #[test]
+    fn compute_s234_drops_s4_above_threshold_fires() {
+        let prev = mk_counts(100, 5, 200);
+        let cur = mk_counts(100, 5, 170); // 15% drop
+        let events = compute_s234_drops(prev, cur);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signal, S234Signal::S4MemoryEdges);
+    }
+
+    #[test]
+    fn compute_s234_drops_growth_never_fires() {
+        // Adding memories / threads / edges is normal and must never
+        // alert (the signal is one-sided).
+        let prev = mk_counts(100, 5, 200);
+        let cur = mk_counts(200, 10, 400);
+        assert!(compute_s234_drops(prev, cur).is_empty());
+    }
+
+    #[test]
+    fn s234_check_first_call_seeds_returns_empty() {
+        let _g = S234_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        _reset_s234_snapshot_for_tests();
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let out = s234_check_against_snapshot(mk_counts(100, 5, 200), now);
+        assert!(out.is_empty(), "first call must seed, return empty");
+    }
+
+    #[test]
+    fn s234_check_within_window_returns_empty_even_on_drop() {
+        let _g = S234_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        _reset_s234_snapshot_for_tests();
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let _ = s234_check_against_snapshot(mk_counts(100, 5, 200), t0); // seed
+        // 60s later (well within the 5-min window); even with a clear
+        // drop, the helper must wait for the window to elapse.
+        let t1 = t0 + Duration::from_secs(60);
+        let out = s234_check_against_snapshot(mk_counts(50, 5, 200), t1);
+        assert!(out.is_empty(), "within-window must not fire (got {out:?})");
+    }
+
+    #[test]
+    fn s234_check_past_window_with_drop_fires_event() {
+        let _g = S234_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        _reset_s234_snapshot_for_tests();
+        // Use a high base time to avoid sig collision across tests that
+        // share the same rate limiter.
+        let base = 9_000_000 + (std::process::id() as u64);
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(base);
+        let _ = s234_check_against_snapshot(mk_counts(1000, 100, 5000), t0);
+        let t1 = t0 + Duration::from_secs(S234_WINDOW_SECS + 5);
+        let out = s234_check_against_snapshot(mk_counts(800, 100, 5000), t1);
+        assert_eq!(out.len(), 1, "expected one drop event (got {out:?})");
+        assert_eq!(out[0].signal, S234Signal::S2Memories);
+        assert_eq!(out[0].before, 1000);
+        assert_eq!(out[0].after, 800);
+    }
+
+    #[test]
+    fn format_s234_alert_body_contains_signal_and_evidence() {
+        let ev = S234DropEvent {
+            signal: S234Signal::S4MemoryEdges,
+            before: 500,
+            after: 400,
+            drop_pct: 0.20,
+        };
+        let body = format_s234_alert_body(&ev, 1_700_000_000);
+        assert!(body.contains("s4-memory-edges-drop"), "signal in body");
+        assert!(body.contains("500"), "before in body");
+        assert!(body.contains("400"), "after in body");
+        assert!(body.contains("20"), "percent in body");
+        assert!(body.contains("ts_unix=1700000000"), "ts in body");
+        assert!(body.contains("non-DB-anomaly"), "tier annotation present");
     }
 }

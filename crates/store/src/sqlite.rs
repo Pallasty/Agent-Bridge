@@ -65,7 +65,7 @@ use crate::{
     McpToolCallStats, McpToolErrorRecord, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
     MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats,
     MemoryRecord, MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep,
-    OverlapPair, ReplayAuditRow, ReplayAuditStats, SessionFilter, StateStore, StoredSession,
+    OverlapPair, ReplayAuditRow, ReplayAuditStats, S234Counts, SessionFilter, StateStore, StoredSession,
     WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
     MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
 };
@@ -7916,6 +7916,30 @@ impl StateStore for SqliteStore {
             .map_err(|e| Error::Backend(format!("schema_meta_version: {e}")))?;
         Ok(v)
     }
+
+    async fn s234_counts(&self) -> Result<S234Counts> {
+        let counts = self
+            .conn
+            .call(|c| -> RusqliteResult<S234Counts> {
+                let memories_active: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM memories WHERE status='active'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let forum_threads: i64 =
+                    c.query_row("SELECT COUNT(*) FROM forum_threads", [], |r| r.get(0))?;
+                let memory_edges: i64 =
+                    c.query_row("SELECT COUNT(*) FROM memory_edges", [], |r| r.get(0))?;
+                Ok(S234Counts {
+                    memories_active: memories_active.max(0) as u64,
+                    forum_threads: forum_threads.max(0) as u64,
+                    memory_edges: memory_edges.max(0) as u64,
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("s234_counts: {e}")))?;
+        Ok(counts)
+    }
 }
 
 impl SqliteStore {
@@ -14870,6 +14894,76 @@ mod tests {
             .expect("delete");
         let v = store.schema_meta_version().await.expect("query");
         assert!(v.is_none(), "expected None after row delete, got {v:?}");
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn s234_counts_zero_on_empty_store_and_reflects_state() {
+        // Empty store should report all zeros. After writing a memory,
+        // a forum thread, and an edge, each count should bump by one.
+        // S2 uses status='active' so any non-active memory must not
+        // inflate memories_active.
+        use crate::MemoryRecord;
+        let temp_dir = schema_meta_temp_dir("s234_counts");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let z = store.s234_counts().await.expect("counts");
+        assert_eq!(z, crate::S234Counts::default());
+
+        let mem_a = MemoryRecord {
+            key: "tests:s234_a".into(),
+            kind: "fact".into(),
+            content: "first memory".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_000_000,
+            updated_at: 1_000_000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&mem_a).await.expect("save mem");
+
+        // Also write an archived memory; must NOT count in memories_active.
+        let mut mem_b = mem_a.clone();
+        mem_b.key = "tests:s234_b_archived".into();
+        mem_b.status = "archived".into();
+        store.memory_save(&mem_b).await.expect("save archived");
+
+        let _outcome = store
+            .forum_post(
+                None,
+                Some("general"),
+                Some("s234 test thread"),
+                "tests:s234",
+                "msg",
+                "post body",
+                None,
+                None,
+            )
+            .await
+            .expect("forum_post");
+
+        store
+            .memory_link("tests:s234_a", "tests:s234_b_archived", "relates", 1.0)
+            .await
+            .expect("link");
+
+        let c = store.s234_counts().await.expect("counts");
+        assert_eq!(
+            c.memories_active, 1,
+            "active count must skip archived (got {c:?})"
+        );
+        assert!(c.forum_threads >= 1, "thread created (got {c:?})");
+        assert!(c.memory_edges >= 1, "edge created (got {c:?})");
+
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 }
