@@ -1339,6 +1339,36 @@ fn importance_for_kind(kind: &str) -> f64 {
     }
 }
 
+/// **L5 P1** — kind-based retrieval boost. Behavioral feedback memories
+/// (corrections, preferences, lessons-about-our-own-behavior) need to
+/// surface earlier than generic notes so future sessions act on them
+/// rather than repeat the same mistake. Roadmap: see
+/// `docs/AGENT-BRIDGE-CAPABILITY-ROADMAP-2026-05-15.md` §2 (L5).
+///
+/// Magnitudes are calibrated against each search path's typical score
+/// range; tune via L5-P1 measurement over 30 days. Returned value is
+/// **additive** to the path's composite score.
+///
+/// - `fts_score_boost`: typical FTS path score 1.5..7.5 → +1.0 = 13-67%
+///   promotion (visible but not overwhelming)
+/// - `semantic_score_boost`: typical semantic path score 0.5..1.5 →
+///   +0.2 = same proportional range, scaled to that path's units
+fn feedback_kind_boost_fts(kind: &str) -> f64 {
+    if kind == "feedback" {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+fn feedback_kind_boost_semantic(kind: &str) -> f64 {
+    if kind == "feedback" {
+        0.2
+    } else {
+        0.0
+    }
+}
+
 /// Tokenise content for contradiction-overlap detection.
 /// Returns lowercase alpha-numeric tokens of length >= 4.
 fn overlap_tokens(text: &str) -> std::collections::HashSet<String> {
@@ -2221,7 +2251,8 @@ impl StateStore for SqliteStore {
                         let match_strength = (-bm25).max(0.0);
                         let score = match_strength
                             + memory_score(r.last_accessed_at, r.access_count, now, &r.kind)
-                            + 0.5 * r.importance;
+                            + 0.5 * r.importance
+                            + feedback_kind_boost_fts(&r.kind);
                         MemorySearchHit { record: r, score }
                     })
                     .collect();
@@ -2275,7 +2306,8 @@ impl StateStore for SqliteStore {
                         // deterministic order beats coin flip).
                         let score = 1_000_000.0
                             + memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind)
-                            + 0.5 * rec.importance;
+                            + 0.5 * rec.importance
+                            + feedback_kind_boost_fts(&rec.kind);
                         hits.push(MemorySearchHit { record: rec, score });
                     }
                 }
@@ -4531,9 +4563,12 @@ impl StateStore for SqliteStore {
                     return None;
                 }
                 // Blend cosine similarity with recency / importance bonus.
+                // L5 P1 — feedback boost (additive, magnitude matched to
+                // semantic path's score range; see [`feedback_kind_boost_semantic`]).
                 let score = cosine as f64
                     + 0.2 * rec.importance
-                    + 0.1 * memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind);
+                    + 0.1 * memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind)
+                    + feedback_kind_boost_semantic(&rec.kind);
                 Some(MemorySearchHit { record: rec, score })
             })
             .collect();
@@ -14963,6 +14998,93 @@ mod tests {
         );
         assert!(c.forum_threads >= 1, "thread created (got {c:?})");
         assert!(c.memory_edges >= 1, "edge created (got {c:?})");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn feedback_kind_boost_only_fires_for_feedback() {
+        // Pin the contract: any non-"feedback" kind returns 0 (no boost),
+        // "feedback" returns the path-specific magnitude. If we ever
+        // expand the boost to other behavioral kinds, this test changes
+        // intentionally — silent expansion is what hides regressions.
+        assert_eq!(feedback_kind_boost_fts("feedback"), 1.0);
+        assert_eq!(feedback_kind_boost_fts("lesson"), 0.0);
+        assert_eq!(feedback_kind_boost_fts("fact"), 0.0);
+        assert_eq!(feedback_kind_boost_fts(""), 0.0);
+        assert_eq!(feedback_kind_boost_semantic("feedback"), 0.2);
+        assert_eq!(feedback_kind_boost_semantic("decision"), 0.0);
+    }
+
+    #[tokio::test]
+    async fn memory_search_ranks_feedback_above_fact_for_same_content() {
+        // L5 P1 integration: two memories with shared search tokens but
+        // different kinds. After the L5 boost, kind="feedback" must
+        // outrank kind="fact" even when the fact has nominally identical
+        // importance. Companion to memory_search_fts_rank_respects_importance.
+        use crate::MemoryRecord;
+        let temp_dir = fidelity_temp_dir("feedback_boost");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        // Disjoint distinguishing suffixes to escape memory_save's
+        // overlap-supersede trigger (same trick as the importance test).
+        let make = |key: &str, kind: &str, body: &str| MemoryRecord {
+            key: key.into(),
+            kind: kind.into(),
+            content: body.into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store
+            .memory_save(&make(
+                "tests:plain_fact",
+                "fact",
+                "shared probe phrase alpha beta gamma delta epsilon zeta",
+            ))
+            .await
+            .expect("save fact");
+        store
+            .memory_save(&make(
+                "tests:plain_feedback",
+                "feedback",
+                "shared probe phrase iota kappa lambda mu nu xi omicron",
+            ))
+            .await
+            .expect("save feedback");
+
+        let hits = store
+            .memory_search("shared probe phrase", &[], 10)
+            .await
+            .expect("search");
+        assert!(hits.len() >= 2, "expected ≥2 hits, got {}", hits.len());
+        assert_eq!(
+            hits[0].record.kind, "feedback",
+            "feedback row should rank first; got {:?}",
+            hits
+                .iter()
+                .map(|h| (&h.record.key, &h.record.kind))
+                .collect::<Vec<_>>()
+        );
+        // The L5 boost is +1.0; account for bm25 + importance noise on
+        // the two slightly different bodies. Score gap should be at
+        // least notable but well under twice the boost.
+        let gap = hits[0].score - hits[1].score;
+        assert!(
+            gap > 0.4 && gap < 2.0,
+            "expected score gap dominated by feedback boost (~1.0), got {gap}"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
