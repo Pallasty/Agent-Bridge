@@ -148,10 +148,26 @@ Total ~4-5 weeks to L5/L6/L7 v0. Each layer ships independently and is independe
 
 ---
 
+## 6.5 · Per-ship 13-gap attach discipline (anti-narrative-shopping)
+
+The decoupling decision (§v2 addendum of `SEED-VALUE-ASSESSMENT-2026-05-15.md`) was triggered by post-147's narrative-shopping diagnosis: when two projects with intertwined success criteria can each provide cover for the other's slow gates, falsification disappears. **The same pattern can re-form within agent-bridge at L6 or L7** if individual ships are framed loosely ("this contributes to introspection") rather than attached to specific gap IDs.
+
+To prevent this:
+
+1. **Every ship in §2 / §3 / §4 commit messages must reference the closed gap set** `{A1, A3, B1, B2, B3, C1, C2, C3, D1, D2, D3, E1, E2}` (13 entries, defined in `SEED-VALUE-ASSESSMENT-2026-05-15.md` §v2 addendum). A ship may address multiple gaps. A ship that addresses *none* is either (a) infrastructure work (mark as such explicitly) or (b) suspect of scope drift and worth a sibling cross-check before landing.
+2. **Falsifiability thresholds in §2 / §3 / §4 tables cannot be revised downward post-ship** without a forum post documenting why. Downward revision of `L6-P1 ≥ 60%` to "the test was unrealistic" is the most likely failure mode.
+3. **Negative results count as evidence and conclude the round.** `f9551b6` (introspect_recall v0 FALSIFIED) is the canonical example: the L6-P1 gate fired, the ship was logged as a clean negative, the design is being redone. This is healthy. The trap to avoid is *"FALSIFIED → just keep iterating without revising the underlying hypothesis"* — when the same gap takes 3 + FALSIFIED ships with zero positive attempts, the next move is to question whether it's the right gap or the right approach, not to ship a fourth.
+4. **Monthly gap-coverage audit** (composes with `dream weekly`). Tabulate which of the 13 gaps have shipped material and what their latest gate-result is. Gaps stuck at FALSIFIED through 3 attempts go on an explicit "re-frame or shelve" review.
+
+This discipline is the within-agent-bridge analogue of what cross-project decoupling does at the system level: forces each piece of work to attach to a falsifiable gap rather than to "the layer is making progress."
+
+---
+
 ## 7 · What this roadmap does NOT do
 
 - **Does not depend on Seed** — every concrete first ship uses existing ONNX embeddings / SQLite / FTS / tool_invocations. If Seed is later validated by AiOT and someone wants to plug it into L6's novelty source via `seed-bridge`, the trait-isolated shim is ready. But that's optional, not on the critical path.
 - **Does not over-commit to v22 substrate Phase 3 B** — predict-weighted neighbors_of is interesting if you believe substrate has compositional capacity. With the project decoupling, agent-bridge waits for AiOT-side validation before committing.
+  - **Park-decision review deadline: 2026-06-15.** If AiOT-side carrier ablation result is not posted by that date, agent-bridge unilaterally decides among (a) archive `seed-bridge`, (b) keep it as passive trait shim with no integration work, or (c) re-engage Phase 3 B independently of Seed validation. Default if no decision is recorded: (b). The deadline exists so the question goes on the table on a known date rather than the work bit-rotting indefinitely. Set forum reminder via `dream weekly` on the 2026-06-08 run.
 - **Does not displace L4 work** — MCP tool quality, daemon stability, cross-machine sync stay normal-priority. L5-L7 work is additive, not a refactor.
 - **Does not lock down L8 protocol** — Collab Protocol v0 has a 4-week review window ending 2026-06-11. This roadmap doesn't pre-empt that.
 
@@ -159,7 +175,7 @@ Total ~4-5 weeks to L5/L6/L7 v0. Each layer ships independently and is independe
 
 ## 8 · Single recommendation
 
-> **agent-bridge's capability story is its own — L5 behavioral memory + L6 metacognition + L7 self-modification, sequenced over ~4-5 weeks, each layer independently falsifiable, none depending on Seed substrate validation. The seed-bridge crate stays as a reusable integration shim; v22 phase 3 B is parked until AiOT-side carrier ablation result determines whether Seed is the right L2 backend at all. From this point, agent-bridge stops borrowing its capability narrative from AiOT.**
+> **agent-bridge's capability story is its own — L5 behavioral memory + L6 metacognition + L7 self-modification, sequenced over ~4-5 weeks, each layer independently falsifiable, none depending on Seed substrate validation. The seed-bridge crate stays as a reusable integration shim; v22 phase 3 B is parked until AiOT-side carrier ablation result determines whether Seed is the right L2 backend at all — with a hard review deadline of 2026-06-15 so the decision stops bit-rotting. Every ship in §2 / §3 / §4 must attach to the closed 13-gap set or be marked infrastructure, so narrative-shopping cannot re-form one layer up. From this point, agent-bridge stops borrowing its capability narrative from AiOT.**
 
 ## 9 · References
 
