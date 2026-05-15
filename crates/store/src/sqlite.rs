@@ -27,6 +27,7 @@ const EDGE_WEIGHT_PART_OF: f64 = 0.8; // structural containment
 const EDGE_WEIGHT_DERIVED_FROM: f64 = 0.8; // loose derivation
 const EDGE_WEIGHT_CONTRADICTS: f64 = 0.5; // known conflict
 const EDGE_WEIGHT_INVALIDATES: f64 = 0.5; // explicit invalidation
+const EDGE_WEIGHT_CORRECTS: f64 = 1.4; // L5 — feedback correcting a memory's prior content
 
 /// Return the canonical base weight for a known edge type.
 /// Unknown types default to 1.0 (generic relation).
@@ -41,6 +42,7 @@ pub fn weight_for_edge_type(edge_type: &str) -> f64 {
         "derived_from" => EDGE_WEIGHT_DERIVED_FROM,
         "contradicts" => EDGE_WEIGHT_CONTRADICTS,
         "invalidates" => EDGE_WEIGHT_INVALIDATES,
+        "corrects" => EDGE_WEIGHT_CORRECTS,
         _ => 1.0,
     }
 }
@@ -49,7 +51,7 @@ pub fn weight_for_edge_type(edge_type: &str) -> f64 {
 /// causal edges get ×1.2, recall-penalty edges get ×0.85, others ×1.0.
 pub fn temporal_bonus(edge_type: &str) -> f64 {
     match edge_type {
-        "updates" | "caused_by" | "supersedes" | "implements" => 1.2,
+        "updates" | "caused_by" | "supersedes" | "implements" | "corrects" => 1.2,
         "contradicts" | "invalidates" => 0.85,
         _ => 1.0,
     }

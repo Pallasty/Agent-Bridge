@@ -6310,6 +6310,177 @@ impl McpTool for MemoryLinkTool {
     }
 }
 
+/// L5 P2 — first-class correction API.
+///
+/// "I learned X about target_key; bias future retrieval accordingly."
+/// Writes a `kind=feedback` memory + a `corrects` edge to the target.
+/// The feedback memory inherits the L5 P1 retrieval boost in
+/// `memory_search`, so the next session searching for `target_key`'s
+/// topic will surface the correction earlier than vanilla notes.
+///
+/// Roadmap: `docs/AGENT-BRIDGE-CAPABILITY-ROADMAP-2026-05-15.md` §2.
+pub struct MemoryCorrectionTool {
+    hub: Hub,
+}
+impl MemoryCorrectionTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+/// FNV-1a 64-bit hash, formatted as 16 hex chars. Same approach as
+/// `sha256_file` above — collision risk is fine for content-addressed
+/// dedupe keys (multiple corrections with the same body to the same
+/// target collapse to one row; different bodies are different keys).
+fn fnv1a_hex16(s: &str) -> String {
+    let mut h: u64 = 14_695_981_039_346_656_037;
+    for byte in s.as_bytes() {
+        h ^= *byte as u64;
+        h = h.wrapping_mul(1_099_511_628_211);
+    }
+    format!("{h:016x}")
+}
+
+/// Sanitise a target key for safe inclusion in a derived key:
+/// keep [A-Za-z0-9_-:], replace others with `_`, clamp length so the
+/// derived key stays under the storage cap with margin.
+fn sanitise_target_for_key(target: &str) -> String {
+    let cleaned: String = target
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ':' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    cleaned.chars().take(96).collect()
+}
+
+#[async_trait]
+impl McpTool for MemoryCorrectionTool {
+    fn name(&self) -> &'static str {
+        "memory_correction"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Record a behavioral correction targeting an existing memory. \
+                 Writes a kind=feedback memory + a corrects edge from the new memory \
+                 to target_key. The feedback memory inherits the L5 retrieval boost \
+                 so future memory_search calls surface it earlier than generic notes. \
+                 Idempotent: same target+body produces the same derived key, so \
+                 re-recording the same correction is a no-op. target_key must already \
+                 exist (errors if not)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "target_key":       { "type": "string", "description": "Key of the memory being corrected. Must exist." },
+                    "correction_body":  { "type": "string", "description": "The correction content. Free-form text." },
+                    "importance":       { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.7, "description": "Override importance for the feedback memory (default 0.7; behavioral signal). Clamped to [0,1]." }
+                },
+                "required": ["target_key", "correction_body"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let target_key = match args
+            .get("target_key")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+        {
+            Some(s) => s.trim().to_string(),
+            None => return Ok(ToolResult::error("missing or empty 'target_key'")),
+        };
+        let correction_body = match args
+            .get("correction_body")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+        {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing or empty 'correction_body'")),
+        };
+        let importance = args
+            .get("importance")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.7)
+            .clamp(0.0, 1.0);
+
+        // Target must exist — corrections without anchor are noise.
+        match store.memory_get(&target_key).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return Ok(ToolResult::error(format!(
+                    "memory_correction: target_key '{target_key}' not found"
+                )))
+            }
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "memory_correction: lookup error for '{target_key}': {e}"
+                )))
+            }
+        }
+
+        // Derived key — content-addressed for idempotent re-correction.
+        let correction_key = format!(
+            "correction:{}:{}",
+            sanitise_target_for_key(&target_key),
+            fnv1a_hex16(&correction_body)
+        );
+
+        let mem = MemoryRecord {
+            key: correction_key.clone(),
+            kind: "feedback".into(),
+            content: correction_body,
+            tags: vec!["correction".into(), "l5".into()],
+            related_keys: vec![target_key.clone()],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+
+        if let Err(e) = store.memory_save(&mem).await {
+            return Ok(ToolResult::error(format!(
+                "memory_correction: save failed: {e}"
+            )));
+        }
+
+        // Link new feedback memory → target. weight=1.0 is the
+        // "auto-assign from type" sentinel; the store resolves it to
+        // EDGE_WEIGHT_CORRECTS (1.4) via weight_for_edge_type.
+        if let Err(e) = store
+            .memory_link(&correction_key, &target_key, "corrects", 1.0)
+            .await
+        {
+            return Ok(ToolResult::error(format!(
+                "memory_correction: link failed (memory saved as {correction_key}): {e}"
+            )));
+        }
+
+        let edge_weight = ab_store::weight_for_edge_type("corrects");
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "correction_key": correction_key,
+            "target_key": target_key,
+            "edge_type": "corrects",
+            "edge_weight": edge_weight,
+            "importance": importance,
+        })))
+    }
+}
+
 pub struct MemoryNeighborsTool {
     hub: Hub,
 }
@@ -13295,6 +13466,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCorrectionTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryStatsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryQueryStatsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySubstrateAuditTool::new(hub.clone())));
@@ -15861,6 +16033,203 @@ mod tests {
         assert!(
             novelty > 0.4,
             "orthogonal topic should yield novelty >0.4, got {novelty}"
+        );
+    }
+
+    // ── L5 P2 memory_correction MCP tool ─────────────────────────────────
+
+    #[test]
+    fn fnv1a_hex16_is_deterministic_and_16_chars() {
+        let a = fnv1a_hex16("hello world");
+        let b = fnv1a_hex16("hello world");
+        let c = fnv1a_hex16("hello worlc");
+        assert_eq!(a, b, "same input → same hash");
+        assert_eq!(a.len(), 16, "16 hex chars");
+        assert_ne!(a, c, "different input → different hash (overwhelmingly)");
+    }
+
+    #[test]
+    fn sanitise_target_for_key_keeps_safe_chars_and_clamps() {
+        assert_eq!(sanitise_target_for_key("good_key:123"), "good_key:123");
+        assert_eq!(
+            sanitise_target_for_key("bad/path with spaces!"),
+            "bad_path_with_spaces_"
+        );
+        // 200-char input clamps to 96.
+        let long: String = "x".repeat(200);
+        let out = sanitise_target_for_key(&long);
+        assert_eq!(out.len(), 96, "clamp to 96, got {} chars", out.len());
+    }
+
+    #[tokio::test]
+    async fn memory_correction_happy_path_creates_feedback_memory_and_corrects_edge() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+
+        // Seed the target memory.
+        let target = MemoryRecord {
+            key: "tests:target_for_correction".into(),
+            kind: "fact".into(),
+            content: "the original (about to be corrected) fact".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&target).await.expect("seed target");
+
+        let tool = MemoryCorrectionTool::new(hub.clone());
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "target_key": "tests:target_for_correction",
+                    "correction_body": "actually the correction says X holds",
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+
+        assert_eq!(v["status"], json!("ok"));
+        let correction_key = v["correction_key"].as_str().expect("correction_key").to_string();
+        assert!(
+            correction_key.starts_with("correction:tests:target_for_correction:"),
+            "key derived from target + body hash, got {correction_key}"
+        );
+        assert_eq!(v["target_key"], json!("tests:target_for_correction"));
+        assert_eq!(v["edge_type"], json!("corrects"));
+        assert!(
+            (v["edge_weight"].as_f64().unwrap_or(0.0) - 1.4).abs() < 1e-9,
+            "edge_weight should be canonical EDGE_WEIGHT_CORRECTS=1.4"
+        );
+        assert!(
+            (v["importance"].as_f64().unwrap_or(0.0) - 0.7).abs() < 1e-9,
+            "default importance 0.7"
+        );
+
+        // Verify the feedback memory was created with the right shape.
+        let saved = store
+            .memory_get(&correction_key)
+            .await
+            .expect("get correction")
+            .expect("correction exists");
+        assert_eq!(saved.kind, "feedback");
+        assert!(saved.tags.contains(&"correction".to_string()));
+        assert!(saved.tags.contains(&"l5".to_string()));
+        assert!(saved.related_keys.contains(&"tests:target_for_correction".to_string()));
+
+        // Verify the edge.
+        let edges = store
+            .memory_neighbors(&correction_key)
+            .await
+            .expect("neighbors");
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.edge_type == "corrects" && e.to_key == "tests:target_for_correction"),
+            "expected corrects edge to target, got {edges:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_correction_errors_when_target_missing() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let tool = MemoryCorrectionTool::new(hub.clone());
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "target_key": "tests:nonexistent_target",
+                    "correction_body": "any body",
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        assert!(res.is_error, "missing target must produce ToolResult::error");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(
+            text.contains("not found"),
+            "error message should mention not-found, got {text}"
+        );
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_correction_is_idempotent_for_same_body() {
+        // Same target + same correction_body → same derived key. The
+        // second call must not error (memory_save replaces, memory_link
+        // upserts).
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+
+        let target = MemoryRecord {
+            key: "tests:idemp_target".into(),
+            kind: "fact".into(),
+            content: "anchor".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&target).await.expect("seed");
+
+        let tool = MemoryCorrectionTool::new(hub.clone());
+        let ctx = ToolContext::default();
+        let args = json!({
+            "target_key": "tests:idemp_target",
+            "correction_body": "same correction text twice",
+        });
+
+        let r1 = tool.execute(args.clone(), &ctx).await.expect("call 1");
+        let r2 = tool.execute(args.clone(), &ctx).await.expect("call 2");
+        let extract = |r: &ab_mcp::ToolResult| -> String {
+            match r.content.first() {
+                Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+                _ => panic!("expected text content"),
+            }
+        };
+        let v1: Value = serde_json::from_str(&extract(&r1)).unwrap();
+        let v2: Value = serde_json::from_str(&extract(&r2)).unwrap();
+        assert_eq!(v1["correction_key"], v2["correction_key"]);
+        assert_eq!(v1["status"], json!("ok"));
+        assert_eq!(v2["status"], json!("ok"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn corrects_edge_type_resolves_to_canonical_weight() {
+        // Pin the canonical weight so tests fail loudly if the constant
+        // is bumped without a coordinated calibration commit.
+        assert!(
+            (ab_store::weight_for_edge_type("corrects") - 1.4).abs() < 1e-9,
+            "EDGE_WEIGHT_CORRECTS should be 1.4 (L5 calibration v0)"
         );
     }
 }
