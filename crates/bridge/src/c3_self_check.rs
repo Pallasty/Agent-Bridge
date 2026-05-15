@@ -214,7 +214,12 @@ pub fn s5_schema_meta_change_check(current_version: &str) -> Option<Alert> {
         .with_next_steps(vec![
             "git log --all -- crates/store/src/sqlite.rs | head -20".into(),
         ]);
-    let _ = write_alert(&alert);
+    // NOTE: this function used to call `write_alert` inline. That leaked
+    // test literals (`v26`→`v27`) into the production alert dir whenever
+    // unit tests exercised the check — see `~/.cache/agent-bridge/alerts/`
+    // pollution observed on Mac dogfood 2026-05-15. The pure shape now
+    // returns the constructed Alert; only `s5_check_and_alert` (the
+    // production wrapper) persists it.
     Some(alert)
 }
 
@@ -262,7 +267,13 @@ pub fn s1_check_and_alert() -> Vec<ProcessFd> {
 /// for daemon tick. The alert was already written inside; this returns
 /// `bool` for caller telemetry.
 pub fn s5_check_and_alert(current_version: &str) -> bool {
-    s5_schema_meta_change_check(current_version).is_some()
+    match s5_schema_meta_change_check(current_version) {
+        Some(alert) => {
+            let _ = write_alert(&alert);
+            true
+        }
+        None => false,
+    }
 }
 
 #[cfg(test)]
@@ -349,6 +360,7 @@ mod tests {
 
     #[test]
     fn s5_first_call_seeds_without_firing() {
+        let _g = S5_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Reset the per-process cache so tests are deterministic; the
         // module-level static can't be reset post-init, so this test
         // uses a stable, unlikely-to-collide version string.
@@ -383,8 +395,47 @@ mod tests {
         }
     }
 
+    // The three s5_* tests below share the module-level
+    // `s5_last_schema_version` Mutex. Without serialization, a sibling
+    // test can race in between Test A's seed call and its assertion
+    // call, leaving stale global state. This in-mod lock is cheap and
+    // avoids pulling in `serial_test` as a workspace dep.
+    static S5_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn s5_pure_check_does_not_write_to_alert_dir() {
+        // Regression: until 2026-05-15 the pure check inlined
+        // `write_alert`, so every test that exercised it leaked
+        // `v26→v27` JSON into the production alert dir
+        // (`~/.cache/agent-bridge/alerts/`). After this refactor the
+        // pure shape is side-effect-free; only `s5_check_and_alert`
+        // persists. Point AB_OOB_ALERT_DIR at a fresh tempdir and
+        // assert it stays empty after a transition.
+        let _g = S5_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tag = format!(
+            "ab-s5-pure-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(&tag);
+        std::env::set_var("AB_OOB_ALERT_DIR", &dir);
+        let v_seed = format!("PURE_SEED_{tag}");
+        let v_change = format!("PURE_CHANGE_{tag}");
+        let _ = s5_schema_meta_change_check(&v_seed);
+        let alert = s5_schema_meta_change_check(&v_change);
+        assert!(alert.is_some(), "transition must still produce Alert");
+        assert!(
+            !dir.exists(),
+            "pure check leaked into AB_OOB_ALERT_DIR={dir:?}"
+        );
+        std::env::remove_var("AB_OOB_ALERT_DIR");
+    }
+
     #[test]
     fn s5_change_returns_some_with_evidence() {
+        let _g = S5_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Seed (may or may not be first call in the test run; either
         // way we just need a known prior).
         let _ = s5_schema_meta_change_check("v26");
