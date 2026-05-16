@@ -8007,6 +8007,330 @@ impl McpTool for McpCallStatsTool {
 }
 
 // ===========================================================================
+//                       mcp_dispatch_audit — tool-surface tuning
+// ===========================================================================
+
+pub struct McpDispatchAuditTool {
+    hub: Hub,
+}
+impl McpDispatchAuditTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for McpDispatchAuditTool {
+    fn name(&self) -> &'static str {
+        "mcp_dispatch_audit"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Summarize Agent-Bridge MCP tool dispatch telemetry for profile tuning. \
+                 Shows hot tools, cold currently-exposed tools, failed tools, and optimization \
+                 candidates over a recent window. Use this to decide which tools Codex should \
+                 keep exposed, optimize, demote, or move behind skills/profile gates."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_days": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 365,
+                        "default": 7,
+                        "description": "Look-back window in days. Default 7."
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 20,
+                        "description": "Max hot/failing/optimization rows to return. Default 20."
+                    },
+                    "cold_limit": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 200,
+                        "default": 50,
+                        "description": "Max currently-exposed zero-call tools to return. Use 0 to hide cold tools."
+                    },
+                    "recent_errors": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "default": 10,
+                        "description": "Max recent error rows to include. Use 0 to hide raw recent errors."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_days = args
+            .get("window_days")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(7)
+            .clamp(1, 365);
+        let top_n = args
+            .get("top_n")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 50) as usize;
+        let cold_limit = args
+            .get("cold_limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .clamp(0, 200) as usize;
+        let recent_errors_limit = args
+            .get("recent_errors")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10)
+            .clamp(0, 100) as u32;
+
+        let profile = ToolProfile::from_env();
+        let current_tools: Vec<String> = build_registry(self.hub.clone())
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect();
+        let current_tool_count = current_tools.len();
+
+        // Ask for enough rows to cover the full current surface. The store clamps
+        // to 200, which is enough for today's registry profiles.
+        let stats_limit = current_tool_count.max(top_n).min(200) as u32;
+        let stats = match store
+            .mcp_tool_call_stats(window_days * 86_400, stats_limit)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
+        };
+        let stats_by_tool: HashMap<String, ab_store::McpToolCallStats> = stats
+            .iter()
+            .cloned()
+            .map(|s| (s.tool_name.clone(), s))
+            .collect();
+
+        let total_calls: u64 = stats.iter().map(|s| s.call_count).sum();
+        let total_errors: u64 = stats.iter().map(|s| s.error_count).sum();
+
+        let hot_tools: Vec<Value> = stats
+            .iter()
+            .take(top_n)
+            .map(dispatch_stat_json)
+            .collect();
+
+        let failing_tools: Vec<Value> = stats
+            .iter()
+            .filter(|s| s.error_count > 0)
+            .take(top_n)
+            .map(|s| {
+                let mut v = dispatch_stat_json(s);
+                if let Some(obj) = v.as_object_mut() {
+                    obj.insert(
+                        "error_rate".to_string(),
+                        json!(dispatch_error_rate(s.error_count, s.call_count)),
+                    );
+                }
+                v
+            })
+            .collect();
+
+        let optimization_candidates: Vec<Value> = stats
+            .iter()
+            .filter_map(|s| {
+                let reasons = dispatch_optimization_reasons(s);
+                if reasons.is_empty() {
+                    None
+                } else {
+                    Some(json!({
+                        "tool_name": s.tool_name,
+                        "call_count": s.call_count,
+                        "error_count": s.error_count,
+                        "p95_duration_ms": s.p95_duration_ms,
+                        "avg_result_size": s.avg_result_size,
+                        "reasons": reasons,
+                    }))
+                }
+            })
+            .take(top_n)
+            .collect();
+
+        let cold_tools: Vec<Value> = if cold_limit == 0 {
+            Vec::new()
+        } else {
+            current_tools
+                .iter()
+                .filter(|name| !stats_by_tool.contains_key(*name))
+                .take(cold_limit)
+                .map(|name| {
+                    json!({
+                        "tool_name": name,
+                        "codex_native_overlap": dispatch_codex_native_overlap(name),
+                        "suggestion": dispatch_cold_tool_suggestion(name),
+                    })
+                })
+                .collect()
+        };
+
+        let recent_errors = if recent_errors_limit == 0 {
+            Vec::new()
+        } else {
+            store
+                .recent_mcp_tool_errors(recent_errors_limit)
+                .await
+                .unwrap_or_default()
+        };
+
+        let profile_suggestions = dispatch_profile_suggestions(&stats, &cold_tools);
+
+        Ok(ToolResult::json_text(&json!({
+            "profile": profile.label(),
+            "window_days": window_days,
+            "current_exposed_tool_count": current_tool_count,
+            "observed_tool_count": stats.len(),
+            "total_calls": total_calls,
+            "total_errors": total_errors,
+            "hot_tools": hot_tools,
+            "failing_tools": failing_tools,
+            "optimization_candidates": optimization_candidates,
+            "cold_tools": cold_tools,
+            "recent_errors": recent_errors,
+            "profile_suggestions": profile_suggestions,
+            "limits": {
+                "top_n": top_n,
+                "cold_limit": cold_limit,
+                "recent_errors": recent_errors_limit,
+                "stats_limit": stats_limit
+            },
+            "note": "Telemetry covers Agent-Bridge MCP tools/call traffic only; Codex native shell/browser/GitHub tool use is outside this table. The current audit call itself is recorded after this response, so it appears on the next audit."
+        })))
+    }
+}
+
+fn dispatch_stat_json(s: &ab_store::McpToolCallStats) -> Value {
+    json!({
+        "tool_name": s.tool_name,
+        "call_count": s.call_count,
+        "error_count": s.error_count,
+        "avg_duration_ms": s.avg_duration_ms,
+        "p95_duration_ms": s.p95_duration_ms,
+        "max_duration_ms": s.max_duration_ms,
+        "avg_result_size": s.avg_result_size,
+    })
+}
+
+fn dispatch_error_rate(errors: u64, calls: u64) -> f64 {
+    if calls == 0 {
+        0.0
+    } else {
+        errors as f64 / calls as f64
+    }
+}
+
+fn dispatch_optimization_reasons(s: &ab_store::McpToolCallStats) -> Vec<&'static str> {
+    let mut reasons = Vec::new();
+    if s.error_count > 0 {
+        reasons.push("has_errors");
+    }
+    if s.call_count >= 3 && s.p95_duration_ms >= 1_000 {
+        reasons.push("slow_p95");
+    }
+    if s.call_count >= 3 && s.avg_result_size >= 24_000.0 {
+        reasons.push("large_average_result");
+    }
+    if s.call_count >= 10 && dispatch_error_rate(s.error_count, s.call_count) >= 0.20 {
+        reasons.push("high_error_rate");
+    }
+    reasons
+}
+
+fn dispatch_codex_native_overlap(tool_name: &str) -> bool {
+    tool_name == "shell_exec"
+        || tool_name.starts_with("terminal_")
+        || tool_name.starts_with("browser_")
+        || tool_name.starts_with("github_")
+        || tool_name.starts_with("gitlab_")
+        || tool_name.starts_with("notion_")
+        || tool_name.starts_with("cloudflare_")
+        || tool_name.starts_with("brave_")
+        || tool_name.starts_with("worktree_")
+        || tool_name.starts_with("codebase_")
+}
+
+fn dispatch_cold_tool_suggestion(tool_name: &str) -> &'static str {
+    if dispatch_codex_native_overlap(tool_name) {
+        "candidate_for_profile_demotion_if_still_cold"
+    } else if tool_name.starts_with("memory_")
+        || tool_name.starts_with("session_")
+        || tool_name == "skills_recommend"
+    {
+        "keep_exposed_for_agent_bridge_core_value"
+    } else {
+        "watch_before_demoting"
+    }
+}
+
+fn dispatch_profile_suggestions(
+    stats: &[ab_store::McpToolCallStats],
+    cold_tools: &[Value],
+) -> Vec<String> {
+    let mut suggestions = Vec::new();
+    if stats.is_empty() {
+        suggestions.push(
+            "No Agent-Bridge MCP calls were observed in the selected window; keep the current profile until hooks and skills have produced enough traffic."
+                .to_string(),
+        );
+        return suggestions;
+    }
+
+    let hot_core = stats.iter().any(|s| {
+        s.tool_name.starts_with("memory_")
+            || s.tool_name.starts_with("session_")
+            || s.tool_name == "skills_recommend"
+    });
+    if hot_core {
+        suggestions.push(
+            "Memory/session/skill tools are receiving traffic; keep them in the Codex-facing profile."
+                .to_string(),
+        );
+    }
+
+    let cold_overlap = cold_tools
+        .iter()
+        .filter(|v| {
+            v.get("codex_native_overlap")
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false)
+        })
+        .count();
+    if cold_overlap > 0 {
+        suggestions.push(format!(
+            "{cold_overlap} cold exposed tools overlap Codex native surfaces; if they remain cold, move them behind a broader profile or skill-triggered path."
+        ));
+    }
+
+    if stats
+        .iter()
+        .any(|s| !dispatch_optimization_reasons(s).is_empty())
+    {
+        suggestions.push(
+            "At least one observed tool has errors, slow p95 latency, or large results; inspect optimization_candidates before changing profile exposure."
+                .to_string(),
+        );
+    }
+
+    suggestions
+}
+
+// ===========================================================================
 //                              capabilities
 // ===========================================================================
 
@@ -14085,6 +14409,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(SessionFinalizeTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionReflectTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CapabilitiesTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(McpDispatchAuditTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ProjectDetectTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ChangesDigestTool::new(hub.clone())));
     // Plans + worktrees + codebase search.
@@ -15959,6 +16284,34 @@ mod tests {
         assert!(p.includes(Tier::Essential));
         assert!(p.includes(Tier::Standard));
         assert!(p.includes(Tier::Niche));
+    }
+
+    #[test]
+    fn dispatch_audit_marks_codex_native_overlap() {
+        assert!(dispatch_codex_native_overlap("shell_exec"));
+        assert!(dispatch_codex_native_overlap("terminal_read_output"));
+        assert!(dispatch_codex_native_overlap("github_pr_list"));
+        assert!(dispatch_codex_native_overlap("codebase_search"));
+        assert!(!dispatch_codex_native_overlap("memory_search"));
+        assert!(!dispatch_codex_native_overlap("skills_recommend"));
+    }
+
+    #[test]
+    fn dispatch_audit_optimization_reasons_flag_actionable_stats() {
+        let s = ab_store::McpToolCallStats {
+            tool_name: "slow_tool".to_string(),
+            call_count: 12,
+            error_count: 3,
+            avg_duration_ms: 900.0,
+            p95_duration_ms: 1_500,
+            max_duration_ms: 2_000,
+            avg_result_size: 30_000.0,
+        };
+        let reasons = dispatch_optimization_reasons(&s);
+        assert!(reasons.contains(&"has_errors"));
+        assert!(reasons.contains(&"slow_p95"));
+        assert!(reasons.contains(&"large_average_result"));
+        assert!(reasons.contains(&"high_error_rate"));
     }
 
     // ── agent_spawn policy → backend mapping ──────────────────────────────
