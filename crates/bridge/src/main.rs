@@ -165,6 +165,39 @@ enum Cmd {
         #[command(subcommand)]
         op: WorktreeSessionOp,
     },
+    /// **C2 — Canonical state.db rescue snapshot** (Collab Protocol v0 §3.3).
+    ///
+    /// Reads `state.db{,-wal,-shm}` directly from the running daemon's
+    /// FD table (`/proc/<daemon-pid>/fd/`) so the snapshot captures the
+    /// inode the daemon is actually using — immune to the unlink+replace
+    /// race that produced phantoms during the 2026-05-14 incident.
+    ///
+    /// Coordinated by a first-writer-wins lockfile under
+    /// `~/.cache/agent-bridge/locks/state.db.rescue.lock`. A sibling
+    /// racing in on the same op sees the lock and exits 1 with the
+    /// existing artifact's path rather than producing a divergent
+    /// snapshot.
+    ///
+    /// Exit codes: 0 = own snapshot completed, 1 = attached to existing.
+    RescueSnapshot {
+        /// Required for v0 — explicit acknowledgement that the caller
+        /// wants the canonical (FD-based) rescue. Reserved for future
+        /// `--path` mode that would explicitly accept the path-based
+        /// race; we don't want that path used implicitly.
+        #[arg(long)]
+        canonical: bool,
+        /// TTL for the lockfile. Default 300s gives a slow rescue
+        /// plenty of room. Past this age a sibling will force-break.
+        #[arg(long, default_value_t = 300)]
+        ttl_secs: u64,
+        /// Override the daemon PID. Default: scan /proc for the
+        /// canonical `agent-bridge.real daemon` process.
+        #[arg(long)]
+        pid: Option<u32>,
+        /// Emit raw JSON of [`ab_bridge::rescue::RescueReport`].
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -1528,6 +1561,18 @@ async fn main() -> Result<()> {
         };
     }
 
+    // C2: state.db rescue-snapshot. No Hub — reads /proc + writes
+    // recovery dir + lockfile. Pure (well, IO-bound) function.
+    if let Cmd::RescueSnapshot {
+        canonical,
+        ttl_secs,
+        pid,
+        json,
+    } = &cmd
+    {
+        return run_rescue_snapshot(*canonical, *ttl_secs, *pid, *json).await;
+    }
+
     // Palace viewer: short-lived HTTP server, opens store directly (no Hub).
     if let Cmd::Palace { op } = &cmd {
         return match op {
@@ -1807,7 +1852,8 @@ async fn main() -> Result<()> {
         | Cmd::Substrate { .. }
         | Cmd::Palace { .. }
         | Cmd::ShellInit { .. }
-        | Cmd::WorktreeSession { .. } => unreachable!(),
+        | Cmd::WorktreeSession { .. }
+        | Cmd::RescueSnapshot { .. } => unreachable!(),
     }
 }
 
@@ -7235,6 +7281,76 @@ async fn run_dream_skill_retro(days: u32, as_json: bool) -> Result<()> {
          ~/.cache/agent-bridge/baselines/skill-retro-$(date -I).json"
     );
     Ok(())
+}
+
+/// C2 dispatch wrapper. Translates RescueError → exit code per §3.3
+/// spec: 0 = own snapshot, 1 = attached, anything else = hard fail.
+async fn run_rescue_snapshot(
+    canonical: bool,
+    ttl_secs: u64,
+    pid_override: Option<u32>,
+    as_json: bool,
+) -> Result<()> {
+    if !canonical {
+        anyhow::bail!(
+            "rescue-snapshot v0 requires --canonical (only FD-based mode is implemented)"
+        );
+    }
+
+    let daemon_pid = match pid_override.or_else(ab_bridge::rescue::find_daemon_pid) {
+        Some(p) => p,
+        None => {
+            anyhow::bail!(
+                "no agent-bridge daemon found (scan /proc for `agent-bridge.real daemon`); \
+                 pass --pid <PID> to override"
+            );
+        }
+    };
+
+    match ab_bridge::rescue::rescue_snapshot(daemon_pid, ttl_secs) {
+        Ok(report) => {
+            if as_json {
+                let s = serde_json::to_string_pretty(&report)
+                    .map_err(|e| anyhow::anyhow!("serialize report: {e}"))?;
+                println!("{s}");
+            } else {
+                println!("# C2 Rescue Snapshot");
+                println!("status         : {}", report.status);
+                println!("daemon pid     : {}", report.daemon_pid);
+                println!("recovery dir   : {}", report.recovery_dir.display());
+                println!("lock file      : {}", report.lock_path.display());
+                println!("combined sha256: {}", report.combined_sha256);
+                println!();
+                println!("Copied artifacts:");
+                for c in &report.copied {
+                    println!(
+                        "  fd={:>3} {:>11} bytes  sha256={}  →  {}",
+                        c.fd,
+                        c.bytes,
+                        c.sha256,
+                        c.dest_path.display()
+                    );
+                    println!("      source: {}", c.source_readlink);
+                }
+            }
+            Ok(())
+        }
+        Err(ab_bridge::rescue::RescueError::Attached(existing)) => {
+            if as_json {
+                println!(
+                    "{{\"status\":\"attached\",\"existing_artifact\":\"{}\"}}",
+                    existing.display()
+                );
+            } else {
+                println!(
+                    "Another rescue in progress; attaching to existing snapshot at {}",
+                    existing.display()
+                );
+            }
+            std::process::exit(1);
+        }
+        Err(e) => Err(anyhow::anyhow!("rescue-snapshot failed: {e}")),
+    }
 }
 
 /// Construct the shared backend bundle used by both modes.

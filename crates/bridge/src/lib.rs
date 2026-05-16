@@ -7,6 +7,8 @@ pub mod bootstrap_transitions;
 pub mod c3_self_check;
 pub mod context_budget;
 pub mod creds;
+pub mod locks;
+pub mod rescue;
 pub mod curate;
 pub mod daemon_http;
 pub mod dream_replay;

@@ -44,6 +44,11 @@ axum = "0.7"
 # for the Tailscale REST API (api.tailscale.com over HTTPS — see
 # tailscale_api.rs); peer-to-peer tailnet calls themselves are plain HTTP.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# C2 lockfile primitive (kill(pid, 0) liveness probe).
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
 
 [[bin]]
 name = "agent-bridge"
