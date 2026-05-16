@@ -7,8 +7,8 @@
 //!   Stop / PreCompact` entries into `~/.claude/settings.json`.
 //! - `Frontend::Codex`: copies the binary and merges an
 //!   `[mcp_servers.agent-bridge]` entry into `~/.codex/config.toml`.
-//!   Codex does not expose Claude Code hook events, so hook scripts are
-//!   skipped and session lifecycle tools are called manually.
+//!   It also enables Codex hooks and merges the Agent-Bridge lifecycle
+//!   hooks into `~/.codex/hooks.json`.
 //! - `Frontend::GeminiCli`: copies the binary and merges an
 //!   `mcpServers.agent-bridge` entry into `~/.gemini/settings.json`.
 //! - `Frontend::LocalCli`: copies the binary and installs MCP config
@@ -71,7 +71,7 @@ pub fn run(frontend: Frontend) -> Result<()> {
         Frontend::ClaudeCode => install_claude_code(&home, &bin_dir),
         Frontend::Warp => install_warp(&bin_dst),
         Frontend::Auggie => install_auggie(&bin_dst),
-        Frontend::Codex => install_codex(&home, &bin_dst),
+        Frontend::Codex => install_codex(&home, &bin_dir, &bin_dst),
         Frontend::GeminiCli => install_gemini_cli(&home, &bin_dst),
         Frontend::LocalCli => install_local_cli(&home, &bin_dst),
     }
@@ -159,18 +159,20 @@ fn install_warp(bin_dst: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Codex profile: binary plus `~/.codex/config.toml` MCP registration.
+/// Codex profile: binary plus MCP and lifecycle hook registration.
 ///
 /// Codex reads MCP server definitions from the `[mcp_servers]` table in
-/// `config.toml`. It does not have Claude Code hook events, so this
-/// profile deliberately skips:
-///   - writing the three `ab-*-hook` shell scripts,
-///   - rewriting `~/.claude/settings.json`.
-fn install_codex(home: &Path, bin_dst: &Path) -> Result<()> {
-    println!("  ·  hook scripts skipped (Codex has no equivalent hook events)");
+/// `config.toml`. Recent Codex builds expose a hooks.json lifecycle file,
+/// so this profile installs the same hook scripts as Claude Code and wires
+/// them into Codex without touching `~/.claude/settings.json`.
+fn install_codex(home: &Path, bin_dir: &Path, bin_dst: &Path) -> Result<()> {
+    write_script(&bin_dir.join("ab-memory-hook"), HOOK_MEMORY)?;
+    write_script(&bin_dir.join("ab-precompact-hook"), HOOK_PRECOMPACT)?;
+    write_script(&bin_dir.join("ab-session-end-hook"), HOOK_SESSION_END)?;
     println!("  ·  ~/.claude/settings.json skipped (claude-code only)");
 
-    merge_codex_config(home, bin_dst)?;
+    merge_codex_config(home, bin_dst, true)?;
+    merge_codex_hooks(home, bin_dir)?;
 
     println!();
     println!("Setup complete (codex profile).");
@@ -178,13 +180,7 @@ fn install_codex(home: &Path, bin_dst: &Path) -> Result<()> {
     println!("Next steps in Codex:");
     println!("  1. Restart Codex or open a new Codex session so MCP servers reload.");
     println!("  2. Check the MCP/tools panel for the `agent-bridge` server.");
-    println!();
-    println!("For session lifecycle (Codex has no PreCompact/Stop hooks),");
-    println!("have the agent call these MCP tools manually:");
-    println!("  • At session start  →  read agent-bridge://session/bootstrap");
-    println!("                        (or call the session_bootstrap tool)");
-    println!("  • Before summarising →  call session_curate(conversation_text=...)");
-    println!("  • At session end    →  call session_finalize()");
+    println!("  3. If Codex asks to trust new hooks, approve the Agent-Bridge entries.");
     println!();
     println!("Optional: start the long-lived daemon for Unix-socket access:");
     println!("  agent-bridge daemon &");
@@ -215,7 +211,7 @@ fn install_local_cli(home: &Path, bin_dst: &Path) -> Result<()> {
     println!("  ·  hook scripts skipped (local CLI profile uses MCP config only)");
     println!("  ·  ~/.claude/settings.json skipped (claude-code hooks only)");
 
-    merge_codex_config(home, bin_dst)?;
+    merge_codex_config(home, bin_dst, false)?;
     merge_gemini_settings(home, bin_dst)?;
     let claude_registered = try_register_claude_mcp(bin_dst);
 
@@ -388,10 +384,8 @@ fn write_script(path: &Path, content: &str) -> Result<()> {
 /// Read `~/.codex/config.toml`, replace or append the
 /// `[mcp_servers.agent-bridge]` table, then write back while preserving
 /// unrelated Codex settings.
-fn merge_codex_config(home: &Path, bin_dst: &Path) -> Result<()> {
-    let codex_home = std::env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".codex"));
+fn merge_codex_config(home: &Path, bin_dst: &Path, enable_hooks: bool) -> Result<()> {
+    let codex_home = codex_home(home);
     let config_path = codex_home.join("config.toml");
 
     let raw = if config_path.exists() {
@@ -417,6 +411,11 @@ AGENT_BRIDGE_TOOL_PROFILE = "essential"
     );
 
     let updated = replace_toml_table(&raw, "mcp_servers.agent-bridge", &block);
+    let updated = if enable_hooks {
+        ensure_toml_bool(&updated, "features", "codex_hooks", true)
+    } else {
+        updated
+    };
 
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent).context("create Codex config directory")?;
@@ -428,6 +427,141 @@ AGENT_BRIDGE_TOOL_PROFILE = "essential"
     );
 
     Ok(())
+}
+
+/// Read `~/.codex/hooks.json`, add Agent-Bridge lifecycle hooks if absent,
+/// and preserve unrelated hooks such as cmux or plugin-installed entries.
+fn merge_codex_hooks(home: &Path, bin_dir: &Path) -> Result<()> {
+    let hooks_path = codex_home(home).join("hooks.json");
+    let mut settings: Value = if hooks_path.exists() {
+        let raw = fs::read_to_string(&hooks_path)
+            .with_context(|| format!("read {}", hooks_path.display()))?;
+        serde_json::from_str(&raw).unwrap_or(json!({}))
+    } else {
+        json!({})
+    };
+
+    let root = settings
+        .as_object_mut()
+        .context("Codex hooks.json is not an object")?;
+    let hooks_obj = root
+        .entry("hooks")
+        .or_insert(json!({}))
+        .as_object_mut()
+        .context("Codex hooks is not an object")?;
+
+    let bin = bin_dir.to_string_lossy();
+    let session_end_command = format!("AB_SESSION_END_CURATE=1 \"{}/ab-session-end-hook\"", bin);
+    let new_hooks: &[(&str, Option<&str>, Value)] = &[
+        (
+            "UserPromptSubmit",
+            None,
+            json!({
+                "hooks": [{
+                    "type": "command",
+                    "command": format!("{}/ab-memory-hook", bin),
+                    "timeout": 5
+                }]
+            }),
+        ),
+        (
+            "PreCompact",
+            Some("manual"),
+            json!({
+                "matcher": "manual",
+                "hooks": [{
+                    "type": "command",
+                    "command": format!("{}/ab-precompact-hook", bin),
+                    "timeout": 120,
+                    "statusMessage": "Memory curator: saving insights before compact..."
+                }]
+            }),
+        ),
+        (
+            "PreCompact",
+            Some("auto"),
+            json!({
+                "matcher": "auto",
+                "hooks": [{
+                    "type": "command",
+                    "command": format!("{}/ab-precompact-hook", bin),
+                    "timeout": 120,
+                    "statusMessage": "Memory curator: saving insights before compact..."
+                }]
+            }),
+        ),
+        (
+            "Stop",
+            None,
+            json!({
+                "hooks": [{
+                    "type": "command",
+                    "command": format!("{}/ab-session-end-hook", bin),
+                    "timeout": 30
+                }]
+            }),
+        ),
+        (
+            "SessionEnd",
+            None,
+            json!({
+                "hooks": [{
+                    "type": "command",
+                    "command": session_end_command,
+                    "timeout": 150,
+                    "statusMessage": "Agent-Bridge: saving session memories..."
+                }]
+            }),
+        ),
+    ];
+
+    for (event, matcher, entry) in new_hooks {
+        let arr = hooks_obj
+            .entry(*event)
+            .or_insert(json!([]))
+            .as_array_mut()
+            .context("Codex hook event entry is not an array")?;
+        let script_name = script_name_for_event(event);
+        let already = arr.iter().any(|item| {
+            let item_matcher = item.get("matcher").and_then(|m| m.as_str());
+            if item_matcher != *matcher {
+                return false;
+            }
+            item.get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hooks| {
+                    hooks.iter().any(|h| {
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.contains(script_name))
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        });
+
+        if !already {
+            arr.push(entry.clone());
+        }
+    }
+
+    let out = serde_json::to_string_pretty(&settings).context("re-serialize Codex hooks")?;
+    if let Some(parent) = hooks_path.parent() {
+        fs::create_dir_all(parent).context("create Codex hooks directory")?;
+    }
+    fs::write(&hooks_path, out).with_context(|| format!("write {}", hooks_path.display()))?;
+    println!(
+        "  ✓  hooks        → {} (Agent-Bridge hooks merged)",
+        hooks_path.display()
+    );
+
+    Ok(())
+}
+
+fn codex_home(home: &Path) -> PathBuf {
+    std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"))
 }
 
 /// Read `~/.gemini/settings.json`, replace or append the
@@ -533,6 +667,62 @@ fn replace_toml_table(raw: &str, table: &str, block: &str) -> String {
     }
     out.push_str(block.trim_end());
     out.push('\n');
+    out
+}
+
+fn ensure_toml_bool(raw: &str, table: &str, key: &str, value: bool) -> String {
+    let header = format!("[{table}]");
+    let assignment = format!("{key} = {value}");
+    let mut out = String::new();
+    let mut in_table = false;
+    let mut table_seen = false;
+    let mut key_written = false;
+
+    for line in raw.lines() {
+        if let Some(next_table) = toml_table_name(line) {
+            if in_table && !key_written {
+                out.push_str(&assignment);
+                out.push('\n');
+                key_written = true;
+            }
+            in_table = next_table == table;
+            table_seen |= in_table;
+        }
+
+        if in_table {
+            let trimmed = line.trim_start();
+            if trimmed
+                .strip_prefix(key)
+                .and_then(|rest| rest.trim_start().strip_prefix('='))
+                .is_some()
+            {
+                out.push_str(&assignment);
+                out.push('\n');
+                key_written = true;
+                continue;
+            }
+        }
+
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    if in_table && !key_written {
+        out.push_str(&assignment);
+        out.push('\n');
+    } else if !table_seen {
+        if !out.trim().is_empty() && !out.ends_with("\n\n") {
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+        out.push_str(&header);
+        out.push('\n');
+        out.push_str(&assignment);
+        out.push('\n');
+    }
+
     out
 }
 
@@ -673,6 +863,7 @@ fn script_name_for_event(event: &str) -> &'static str {
     match event {
         "UserPromptSubmit" => "ab-memory-hook",
         "Stop" => "ab-session-end-hook",
+        "SessionEnd" => "ab-session-end-hook",
         "PreCompact" => "ab-precompact-hook",
         _ => "",
     }
@@ -680,7 +871,7 @@ fn script_name_for_event(event: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{merge_gemini_settings, replace_toml_table};
+    use super::{ensure_toml_bool, merge_codex_hooks, merge_gemini_settings, replace_toml_table};
     use std::fs;
 
     #[test]
@@ -724,6 +915,54 @@ AGENT_BRIDGE_TOOL_PROFILE = \"essential\"
         assert!(!out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"all\""));
         assert!(out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"essential\""));
         assert!(out.contains("[plugins.example]\nenabled = true"));
+    }
+
+    #[test]
+    fn enables_codex_hooks_feature_when_missing() {
+        let raw = "model = \"gpt-5.5\"\n\n[features]\nmulti_agent = true\n";
+
+        let out = ensure_toml_bool(raw, "features", "codex_hooks", true);
+
+        assert!(out.contains("[features]\nmulti_agent = true\ncodex_hooks = true"));
+    }
+
+    #[test]
+    fn replaces_existing_codex_hooks_feature() {
+        let raw = "[features]\ncodex_hooks = false\nmulti_agent = true\n";
+
+        let out = ensure_toml_bool(raw, "features", "codex_hooks", true);
+
+        assert!(out.contains("codex_hooks = true"));
+        assert!(!out.contains("codex_hooks = false"));
+        assert!(out.contains("multi_agent = true"));
+    }
+
+    #[test]
+    fn merges_codex_hooks_while_preserving_existing_entries() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agent-bridge-codex-hooks-test-{}",
+            std::process::id()
+        ));
+        let codex_dir = tmp.join(".codex");
+        let bin_dir = tmp.join(".local/bin");
+        fs::create_dir_all(&codex_dir).unwrap();
+        fs::create_dir_all(&bin_dir).unwrap();
+        fs::write(
+            codex_dir.join("hooks.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"cmux codex-hook stop","timeout":10}]}]}}"#,
+        )
+        .unwrap();
+
+        merge_codex_hooks(&tmp, &bin_dir).unwrap();
+
+        let raw = fs::read_to_string(codex_dir.join("hooks.json")).unwrap();
+        assert!(raw.contains("cmux codex-hook stop"));
+        assert!(raw.contains("ab-memory-hook"));
+        assert!(raw.contains("ab-precompact-hook"));
+        assert!(raw.contains("AB_SESSION_END_CURATE=1"));
+        assert!(raw.contains("\"SessionEnd\""));
+
+        fs::remove_dir_all(tmp).unwrap();
     }
 
     #[test]

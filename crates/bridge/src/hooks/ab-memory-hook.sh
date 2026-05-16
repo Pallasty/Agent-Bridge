@@ -15,9 +15,20 @@
 # v2.0: semantic re-ranking (broken after 512→384 dim migration; reverted).
 # v1.0: pure-SQL static sort.
 
-DB="$HOME/.local/share/agent-bridge/state.db"
+_ab_state_dir() {
+    if [[ -n "${XDG_DATA_HOME:-}" ]]; then
+        printf '%s/agent-bridge' "$XDG_DATA_HOME"
+    elif [[ "$(uname -s 2>/dev/null || echo "")" == "Darwin" ]]; then
+        printf '%s/Library/Application Support/agent-bridge' "$HOME"
+    else
+        printf '%s/.local/share/agent-bridge' "$HOME"
+    fi
+}
 
-_AB_HOOK_LOG="$HOME/.local/share/agent-bridge/hook-runs.jsonl"
+_AB_STATE_DIR="$(_ab_state_dir)"
+DB="${AGENT_BRIDGE_DB:-$_AB_STATE_DIR/state.db}"
+
+_AB_HOOK_LOG="$_AB_STATE_DIR/hook-runs.jsonl"
 _AB_HOOK_START=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
 _ab_log_hook_run() {
     local exit_code="$1" output_bytes="$2"

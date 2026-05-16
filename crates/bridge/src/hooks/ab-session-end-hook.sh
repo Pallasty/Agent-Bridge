@@ -5,20 +5,45 @@
 # (AB_MEMORY_CURATOR=1 is set by ab-precompact-hook).
 [[ -n "$AB_MEMORY_CURATOR" ]] && exit 0
 
+_ab_state_dir() {
+    if [[ -n "${XDG_DATA_HOME:-}" ]]; then
+        printf '%s/agent-bridge' "$XDG_DATA_HOME"
+    elif [[ "$(uname -s 2>/dev/null || echo "")" == "Darwin" ]]; then
+        printf '%s/Library/Application Support/agent-bridge' "$HOME"
+    else
+        printf '%s/.local/share/agent-bridge' "$HOME"
+    fi
+}
+
+_AB_STATE_DIR="$(_ab_state_dir)"
+HOOK_PAYLOAD=$(cat 2>/dev/null || true)
+_AB_HOOK_EVENT="stop"
+if [[ "${AB_SESSION_END_CURATE:-}" == "1" ]]; then
+    _AB_HOOK_EVENT="sessionEnd"
+fi
+
 # Log this hook run to the shared hook-runs.jsonl file (read by hook_status MCP tool).
-_AB_HOOK_LOG="$HOME/.local/share/agent-bridge/hook-runs.jsonl"
+_AB_HOOK_LOG="$_AB_STATE_DIR/hook-runs.jsonl"
 _AB_HOOK_START=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
 _ab_log_hook_run() {
     mkdir -p "$(dirname "$_AB_HOOK_LOG")"
-    printf '{"event":"stop","ts":"%s","exit_code":%d,"output_bytes":0}\n' \
-        "$_AB_HOOK_START" "$1" >> "$_AB_HOOK_LOG" 2>/dev/null || true
+    printf '{"event":"%s","ts":"%s","exit_code":%d,"output_bytes":0}\n' \
+        "$_AB_HOOK_EVENT" "$_AB_HOOK_START" "$1" >> "$_AB_HOOK_LOG" 2>/dev/null || true
 }
 trap '_ab_log_hook_run $?' EXIT
 
-DB="$HOME/.local/share/agent-bridge/state.db"
+DB="${AGENT_BRIDGE_DB:-$_AB_STATE_DIR/state.db}"
 [[ -f "$DB" ]] || exit 0
 
 AB=$(command -v agent-bridge 2>/dev/null || echo "$HOME/.local/bin/agent-bridge")
+PRECOMPACT=$(command -v ab-precompact-hook 2>/dev/null || echo "$HOME/.local/bin/ab-precompact-hook")
+
+# Codex has a real SessionEnd hook in addition to Stop. For that event, run
+# the same transcript curator used by PreCompact before pruning/syncing.
+if [[ "${AB_SESSION_END_CURATE:-}" == "1" && -x "$PRECOMPACT" ]]; then
+    printf '%s' "$HOOK_PAYLOAD" \
+        | AB_HOOK_EVENT=sessionEndCurate "$PRECOMPACT" >/dev/null 2>&1 || true
+fi
 
 # Compact: time-only policy — remove memories not accessed in 90 days.
 # min_uses is intentionally omitted: new memories start at access_count=0

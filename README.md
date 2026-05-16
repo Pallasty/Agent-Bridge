@@ -220,7 +220,7 @@ configuration when a new session starts.
 git clone git@gitlab.com:pallasting/agent-bridge.git ~/agent-bridge
 cd ~/agent-bridge && cargo build --release
 
-# 2. Install — Codex profile copies the binary and merges MCP config.
+# 2. Install — Codex profile copies the binary and merges MCP + hook config.
 ./target/release/agent-bridge setup --frontend codex
 # (Or rely on auto-detect when ~/.codex/config.toml exists:
 #   ./target/release/agent-bridge setup)
@@ -253,17 +253,18 @@ The Codex profile defaults `AGENT_BRIDGE_TOOL_PROFILE` to `essential`
 so GPT/Codex sees a compact high-signal tool surface; set it to
 `standard` or `all` manually when you need the full registry.
 
-Codex does not have analogues for the Claude Code `UserPromptSubmit /
-Stop / PreCompact` hook events, so the `setup --frontend codex`
-profile skips writing the three `ab-*-hook` scripts and the
-`~/.claude/settings.json` rewrite. Instead, the agent should call the
-equivalent MCP tools directly:
+The Codex profile also enables `features.codex_hooks`, writes the three
+`ab-*-hook` scripts to `~/.local/bin`, and merges Agent-Bridge entries
+into `~/.codex/hooks.json` while preserving existing hooks. If Codex asks
+you to trust the new hook commands after setup, approve the Agent-Bridge
+entries.
 
-| Lifecycle moment | What to call instead of a hook |
-|------------------|--------------------------------|
-| Session start    | Read `agent-bridge://session/bootstrap` resource, or call `session_bootstrap` |
-| Before summarising / compacting context | `session_curate(conversation_text=...)` |
-| Session end      | `session_finalize()` |
+| Codex lifecycle moment | Agent-Bridge hook |
+|------------------------|-------------------|
+| First prompt submit | `ab-memory-hook` injects a compact memory primer once per session |
+| `/compact` / context compaction | `ab-precompact-hook` reads Codex JSONL and calls `session_lifecycle_step(precompact)` |
+| Stop | `ab-session-end-hook` compacts stale memories and syncs |
+| SessionEnd | `ab-session-end-hook` first runs the transcript curator, then compacts and syncs |
 
 ---
 
@@ -303,9 +304,9 @@ Gemini CLI uses this JSON shape in `~/.gemini/settings.json`:
 }
 ```
 
-Claude Code is still the only profile with automatic hook scripts.
-Codex, Gemini CLI, Warp, and Auggie should use the lifecycle MCP tools
-directly: `session_bootstrap`, `session_curate`, and `session_finalize`.
+Claude Code and Codex have automatic lifecycle hook installation. Gemini
+CLI, Warp, and Auggie should use the lifecycle MCP tools directly:
+`session_bootstrap`, `session_curate`, and `session_finalize`.
 
 ---
 
@@ -384,8 +385,8 @@ Codex profile (`--frontend codex`):
 | Step | What happens |
 |------|-------------|
 | Binary | Copies itself to `~/.local/bin/agent-bridge` |
-| Hook scripts | **Skipped** — Codex has no equivalent hook events |
-| Curator settings | **Skipped** — only consumed by `ab-precompact-hook.sh` |
+| Hook scripts | Writes three scripts to `~/.local/bin/` |
+| Codex hooks | Enables `features.codex_hooks` and merges Agent-Bridge entries into `~/.codex/hooks.json` |
 | Settings file | Merges `[mcp_servers.agent-bridge]` into `~/.codex/config.toml` with `AGENT_BRIDGE_TOOL_PROFILE=essential` |
 
 Gemini CLI profile (`--frontend gemini-cli`):
@@ -408,11 +409,11 @@ Local CLI profile (`--frontend local-cli`):
 
 ### Hook scripts
 
-| Script | Claude Code event | Purpose |
-|--------|------------------|---------|
+| Script | Hook events | Purpose |
+|--------|-------------|---------|
 | `ab-memory-hook` | `UserPromptSubmit` | Inject scope-aware memory index at session start (once per session) |
-| `ab-precompact-hook` | `PreCompact` (manual + auto) | Reads the transcript, calls `session_lifecycle_step(precompact)` over MCP (runs `session_curate` then `session_finalize`; no sub-agent) |
-| `ab-session-end-hook` | `Stop` | Compact memories older than 90 days; sync to git remote |
+| `ab-precompact-hook` | `PreCompact` (manual + auto) | Reads Claude/Cursor/Codex transcript JSONL, calls `session_lifecycle_step(precompact)` over MCP (runs `session_curate` then `session_finalize`; no sub-agent) |
+| `ab-session-end-hook` | `Stop`, Codex `SessionEnd` | Compact memories older than 90 days; sync to git remote. On Codex `SessionEnd`, first runs the transcript curator. |
 
 ### Memory lifecycle
 

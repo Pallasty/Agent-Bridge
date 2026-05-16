@@ -7662,17 +7662,27 @@ impl HookStatusTool {
 
 /// Path of the hook run log file.
 fn hook_run_log_path() -> PathBuf {
-    dirs_home()
-        .join(".local")
-        .join("share")
-        .join("agent-bridge")
-        .join("hook-runs.jsonl")
+    agent_bridge_state_dir().join("hook-runs.jsonl")
 }
 
 fn dirs_home() -> PathBuf {
     std::env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/tmp"))
+}
+
+fn agent_bridge_state_dir() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        return PathBuf::from(xdg).join("agent-bridge");
+    }
+    let home = dirs_home();
+    if cfg!(target_os = "macos") {
+        return home
+            .join("Library")
+            .join("Application Support")
+            .join("agent-bridge");
+    }
+    home.join(".local").join("share").join("agent-bridge")
 }
 
 /// Parse the most recent hook run entry from the JSONL log for a given event name.
@@ -7695,7 +7705,9 @@ fn known_hooks() -> Vec<(&'static str, &'static str)> {
     vec![
         ("beforeSubmitPrompt", "ab-memory-hook"),
         ("preCompact", "ab-precompact-hook"),
+        ("sessionEndCurate", "ab-precompact-hook"),
         ("stop", "ab-session-end-hook"),
+        ("sessionEnd", "ab-session-end-hook"),
     ]
 }
 
@@ -7704,7 +7716,9 @@ fn hook_source_paths() -> HashMap<&'static str, &'static str> {
     let mut m = HashMap::new();
     m.insert("beforeSubmitPrompt", "ab-memory-hook.sh");
     m.insert("preCompact", "ab-precompact-hook.sh");
+    m.insert("sessionEndCurate", "ab-precompact-hook.sh");
     m.insert("stop", "ab-session-end-hook.sh");
+    m.insert("sessionEnd", "ab-session-end-hook.sh");
     m
 }
 

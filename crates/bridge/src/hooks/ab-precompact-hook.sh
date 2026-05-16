@@ -15,12 +15,24 @@
 #   5. Return systemMessage summary for the IDE.
 
 # ── Logging ────────────────────────────────────────────────────────────────────
-_AB_HOOK_LOG="$HOME/.local/share/agent-bridge/hook-runs.jsonl"
+_ab_state_dir() {
+    if [[ -n "${XDG_DATA_HOME:-}" ]]; then
+        printf '%s/agent-bridge' "$XDG_DATA_HOME"
+    elif [[ "$(uname -s 2>/dev/null || echo "")" == "Darwin" ]]; then
+        printf '%s/Library/Application Support/agent-bridge' "$HOME"
+    else
+        printf '%s/.local/share/agent-bridge' "$HOME"
+    fi
+}
+
+_AB_STATE_DIR="$(_ab_state_dir)"
+_AB_HOOK_EVENT="${AB_HOOK_EVENT:-preCompact}"
+_AB_HOOK_LOG="$_AB_STATE_DIR/hook-runs.jsonl"
 _AB_HOOK_START=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
 _ab_log_hook_run() {
     mkdir -p "$(dirname "$_AB_HOOK_LOG")"
-    printf '{"event":"preCompact","ts":"%s","exit_code":%d,"output_bytes":0}\n' \
-        "$_AB_HOOK_START" "$1" >> "$_AB_HOOK_LOG" 2>/dev/null || true
+    printf '{"event":"%s","ts":"%s","exit_code":%d,"output_bytes":0}\n' \
+        "$_AB_HOOK_EVENT" "$_AB_HOOK_START" "$1" >> "$_AB_HOOK_LOG" 2>/dev/null || true
 }
 trap '_ab_log_hook_run $?' EXIT
 
@@ -42,8 +54,8 @@ SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
 [[ -z "$SESSION_ID" ]] && exit 0
 
 # ── Locate transcript ─────────────────────────────────────────────────────────
-TRANSCRIPT=$(find "$HOME/.claude/projects" "$HOME/.cursor/projects" \
-    -name "${SESSION_ID}.jsonl" 2>/dev/null | head -1)
+TRANSCRIPT=$(find "$HOME/.claude/projects" "$HOME/.cursor/projects" "$HOME/.codex/sessions" \
+    \( -name "${SESSION_ID}.jsonl" -o -name "*${SESSION_ID}*.jsonl" \) 2>/dev/null | head -1)
 [[ -f "$TRANSCRIPT" ]] || exit 0
 
 # ── Temp workspace ────────────────────────────────────────────────────────────
@@ -101,6 +113,19 @@ def strip_bullet(line: str):
 path = sys.argv[1]
 out_path = sys.argv[2]
 
+def extract_text(content):
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for c in content:
+        if not isinstance(c, dict):
+            continue
+        if c.get("type") in ("text", "input_text", "output_text") and c.get("text", "").strip():
+            parts.append(c.get("text", ""))
+    return "\n".join(parts).strip()
+
 turns = []
 with open(path, 'r', encoding='utf-8') as f:
     for raw in f:
@@ -111,23 +136,20 @@ with open(path, 'r', encoding='utf-8') as f:
             d = json.loads(raw)
         except Exception:
             continue
-        if d.get('isSidechain'):
-            continue
-        msg = d.get('message', {})
-        role = msg.get('role', '') or d.get('role', '')
+        if d.get('type') == 'response_item':
+            payload = d.get('payload') or {}
+            if payload.get('type') != 'message':
+                continue
+            role = payload.get('role', '')
+            text = extract_text(payload.get('content', ''))
+        else:
+            if d.get('isSidechain'):
+                continue
+            msg = d.get('message', {})
+            role = msg.get('role', '') or d.get('role', '')
+            text = extract_text(msg.get('content', ''))
         if role not in ('user', 'assistant'):
             continue
-        content = msg.get('content', '')
-        text = ''
-        if isinstance(content, str):
-            text = content.strip()
-        elif isinstance(content, list):
-            parts = [
-                c.get('text', '')
-                for c in content
-                if isinstance(c, dict) and c.get('type') == 'text' and c.get('text', '').strip()
-            ]
-            text = '\n'.join(parts).strip()
         if not text:
             continue
         skip = (
@@ -217,7 +239,7 @@ with open(out_path, 'w') as f:
 PY
 
 # ── Run agent-bridge MCP ──────────────────────────────────────────────────────
-DB="$HOME/.local/share/agent-bridge/state.db"
+DB="${AGENT_BRIDGE_DB:-$_AB_STATE_DIR/state.db}"
 COUNT_BEFORE=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo 0)
 
 timeout 25 "$AB" mcp < "$MCP_IN" > "$MCP_OUT" 2>/dev/null
