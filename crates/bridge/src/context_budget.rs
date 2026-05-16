@@ -102,6 +102,29 @@ pub fn estimated_usage_tokens(text_sample: &str, conversation_turns: u64) -> u64
         .saturating_add(conversation_turns.saturating_mul(PER_TURN_TOKEN_GUESS))
 }
 
+/// **L6 P3** — categorical fatigue tier from context-window pct utilization.
+///
+/// Bands per roadmap §3.3:
+/// - `fresh`    — `< 30%` used
+/// - `engaged`  — `30% .. 60%`
+/// - `strained` — `60% .. 85%`
+/// - `saturated`— `≥ 85%`
+///
+/// Boundaries are exclusive at the upper edge so `30.0` falls in
+/// `engaged`, not `fresh` — chosen to bias toward the more cautious
+/// tier at exact-boundary inputs.
+pub fn fatigue_tier(pct_used: f64) -> &'static str {
+    if pct_used < 30.0 {
+        "fresh"
+    } else if pct_used < 60.0 {
+        "engaged"
+    } else if pct_used < 85.0 {
+        "strained"
+    } else {
+        "saturated"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +181,17 @@ mod tests {
     #[test]
     fn model_defaults_claude_family() {
         assert_eq!(model_context_limit("claude-sonnet-4-20250514"), 200_000);
+    }
+
+    #[test]
+    fn fatigue_tier_bands_cover_full_range() {
+        assert_eq!(fatigue_tier(0.0), "fresh");
+        assert_eq!(fatigue_tier(29.99), "fresh");
+        assert_eq!(fatigue_tier(30.0), "engaged");
+        assert_eq!(fatigue_tier(59.99), "engaged");
+        assert_eq!(fatigue_tier(60.0), "strained");
+        assert_eq!(fatigue_tier(84.99), "strained");
+        assert_eq!(fatigue_tier(85.0), "saturated");
+        assert_eq!(fatigue_tier(150.0), "saturated", "out-of-range clamps to last tier");
     }
 }

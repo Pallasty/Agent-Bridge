@@ -12631,6 +12631,118 @@ impl McpTool for ContextBudgetTool {
 }
 
 // ===========================================================================
+//        context_pressure_estimate — L6 P3 metacognition probe
+// ===========================================================================
+
+/// L6 P3 — `context_pressure_estimate` MCP tool.
+///
+/// Companion to `context_budget` but framed for **introspection**: the
+/// assistant reads its own context-window pressure as a categorical
+/// fatigue tier (`fresh|engaged|strained|saturated`) plus distance to
+/// compaction. Roadmap §3 L6 P3 (~0.3d).
+///
+/// Backed entirely by the existing offline `context_budget` heuristic —
+/// no API calls, no LLM judge. Cheap enough to call at session
+/// bootstrap + per-turn if desired.
+pub struct ContextPressureEstimateTool;
+
+impl ContextPressureEstimateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for ContextPressureEstimateTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for ContextPressureEstimateTool {
+    fn name(&self) -> &'static str {
+        "context_pressure_estimate"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "L6 P3 metacognition probe — read the assistant's own \
+                 context-window pressure as a categorical fatigue tier (fresh / \
+                 engaged / strained / saturated) plus distance-to-compaction. \
+                 Backed by the same offline heuristic as `context_budget` but \
+                 surfaced for introspective decisions (\"should I compact \
+                 before starting another long task?\"). No API calls."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "model": {
+                        "type": "string",
+                        "description": "Model name hint for context window size (default: claude-sonnet-4).",
+                        "default": "claude-sonnet-4"
+                    },
+                    "conversation_turns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Turn count for coarse-overhead estimate when no transcript is available.",
+                        "default": 0
+                    },
+                    "text_sample": {
+                        "type": "string",
+                        "description": "Optional transcript / excerpt sample for token-estimation (mixed EN/CJK heuristic)."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        use crate::context_budget::{
+            budget_recommendation, estimated_usage_tokens, fatigue_tier, model_context_limit,
+        };
+        let model = args
+            .get("model")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("claude-sonnet-4");
+        let turns = args
+            .get("conversation_turns")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let text = args
+            .get("text_sample")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let limit = model_context_limit(model);
+        let estimated = estimated_usage_tokens(text, turns);
+        let pct_raw = if limit == 0 {
+            0.0
+        } else {
+            (estimated as f64 / limit as f64) * 100.0
+        };
+        let pct_used = (pct_raw * 10.0).round() / 10.0;
+        let tier = fatigue_tier(pct_raw);
+        let recommendation = budget_recommendation(pct_raw);
+        // Distance to soft compaction trigger (urgent_handoff at 80%).
+        // Clamped at 0 — we never report "negative distance" since past
+        // the threshold the model has already overrun the safe zone.
+        let soft_trigger = (limit as f64 * 0.80) as u64;
+        let distance_to_compaction = soft_trigger.saturating_sub(estimated);
+
+        Ok(ToolResult::json_text(&json!({
+            "model_hint": model,
+            "model_limit": limit,
+            "estimated_tokens_used": estimated,
+            "pct_used": pct_used,
+            "fatigue_tier": tier,
+            "distance_to_compaction_tokens": distance_to_compaction,
+            "recommendation": recommendation,
+            "heuristic_note": "Offline estimate; actual tokenizer usage varies. Tier bands per roadmap §3 L6 P3.",
+        })))
+    }
+}
+
+// ===========================================================================
 //                  Warp URI tools (W4 — DESIGN-warp-first-agent-shell)
 // ===========================================================================
 
@@ -14541,6 +14653,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(McpCallStatsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(McpConfigAuditTool::new()));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(ContextBudgetTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ContextPressureEstimateTool::new()));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(HookStatusTool::new(hub.clone())));
     // Memory admin / visualisation.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryExportTool::new(hub.clone())));
@@ -17485,6 +17598,74 @@ mod tests {
         assert_eq!(skipped.len(), 2);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // ── L6 P3 — context_pressure_estimate ──────────────────────────────
+
+    #[tokio::test]
+    async fn context_pressure_estimate_returns_fresh_tier_for_empty_input() {
+        let tool = ContextPressureEstimateTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(json!({"model": "claude-sonnet-4"}), &ctx)
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["model_hint"], json!("claude-sonnet-4"));
+        assert_eq!(v["model_limit"], json!(200_000));
+        assert_eq!(v["estimated_tokens_used"], json!(0));
+        assert_eq!(v["fatigue_tier"], json!("fresh"));
+        assert_eq!(v["recommendation"], json!("nominal"));
+        // Distance to 80% trigger from 0 used = 80% of 200k = 160k.
+        assert_eq!(v["distance_to_compaction_tokens"], json!(160_000));
+    }
+
+    #[tokio::test]
+    async fn context_pressure_estimate_saturated_when_turns_exceed_limit() {
+        // 200_000 / 2_000 = 100 turns to hit limit. Push 120.
+        let tool = ContextPressureEstimateTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({"model": "claude-sonnet-4", "conversation_turns": 120}),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["fatigue_tier"], json!("saturated"));
+        assert_eq!(v["recommendation"], json!("urgent_handoff_or_compact"));
+        assert_eq!(v["distance_to_compaction_tokens"], json!(0), "clamps at zero past trigger");
+    }
+
+    #[tokio::test]
+    async fn context_pressure_estimate_engaged_mid_range() {
+        // 200_000 * 0.45 ≈ 90_000 tokens; 90_000 / 2_000 = 45 turns.
+        let tool = ContextPressureEstimateTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({"model": "claude-sonnet-4", "conversation_turns": 45}),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["fatigue_tier"], json!("engaged"));
+        // Distance: 80% trigger = 160k; used = 90k → 70k remaining.
+        assert_eq!(v["distance_to_compaction_tokens"], json!(70_000));
     }
 
     #[tokio::test]
