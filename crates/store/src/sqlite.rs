@@ -64,7 +64,7 @@ use crate::{
     ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
     ForumThreadExport, ForumThreadRecord, GraphTopology, IdentityWindow, ImportConflictPolicy,
     ImportReport,
-    McpToolCallStats, McpToolErrorRecord, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
+    McpToolCallRow, McpToolCallStats, McpToolErrorRecord, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
     MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats,
     MemoryRecord, MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep,
     OverlapPair, ReplayAuditRow, ReplayAuditStats, S234Counts, SessionFilter, StateStore, StoredSession,
@@ -1879,6 +1879,41 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("mcp_tool_call_stats: {e}")))?;
+        Ok(rows)
+    }
+
+    async fn recent_mcp_tool_calls(
+        &self,
+        window_secs: i64,
+        limit: u32,
+    ) -> Result<Vec<McpToolCallRow>> {
+        let cutoff = now_secs() - window_secs.max(0);
+        let lim = limit.min(2000).max(1) as i64;
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<McpToolCallRow>> {
+                let mut stmt = c.prepare(
+                    "SELECT ts, tool_name, duration_ms, ok, args_size, result_size
+                     FROM mcp_tool_calls
+                     WHERE ts >= ?1
+                     ORDER BY ts ASC, id ASC
+                     LIMIT ?2",
+                )?;
+                let iter = stmt.query_map(params![cutoff, lim], |row| {
+                    Ok(McpToolCallRow {
+                        ts: row.get(0)?,
+                        tool_name: row.get(1)?,
+                        duration_ms: row.get::<_, i64>(2)? as u32,
+                        ok: row.get::<_, i64>(3)? != 0,
+                        args_size: row.get::<_, Option<i64>>(4)?.map(|v| v.max(0) as u32),
+                        result_size: row.get::<_, Option<i64>>(5)?.map(|v| v.max(0) as u32),
+                    })
+                })?;
+                let collected: std::result::Result<Vec<_>, _> = iter.collect();
+                collected
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("recent_mcp_tool_calls: {e}")))?;
         Ok(rows)
     }
 

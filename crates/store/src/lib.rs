@@ -75,6 +75,23 @@ pub struct McpToolCallStats {
     pub avg_result_size: f64,
 }
 
+/// Row-level MCP tool-call telemetry for `tool_call_attention_report`
+/// (L6 P2). Carries enough fields for in-process time-window analysis
+/// (which calls were high-yield, which had follow-up activity within
+/// K minutes, which were never referenced).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct McpToolCallRow {
+    pub ts: i64,
+    pub tool_name: String,
+    pub duration_ms: u32,
+    pub ok: bool,
+    /// Argument JSON payload size at MCP entry (`None` when not
+    /// recorded by the caller).
+    pub args_size: Option<u32>,
+    /// Result payload size at MCP exit (`None` when not recorded).
+    pub result_size: Option<u32>,
+}
+
 /// Max rows retained in `mcp_tool_errors` after each insert (oldest pruned).
 pub const MCP_TOOL_ERROR_RING_CAP: u32 = 100;
 
@@ -1394,6 +1411,21 @@ pub trait StateStore: Send + Sync {
         top_n: u32,
     ) -> Result<Vec<McpToolCallStats>> {
         let _ = (window_secs, top_n);
+        Ok(Vec::new())
+    }
+
+    /// L6 P2 — Row-level MCP tool-call telemetry within the last
+    /// `window_secs` seconds, sorted by `ts ASC` so callers can do
+    /// in-order time-window analysis (e.g. detect follow-up activity
+    /// after a high-yield call). Capped at `limit` rows. Default impl
+    /// returns empty so non-SQLite backends silently no-op the L6 P2
+    /// `tool_call_attention_report` MCP tool.
+    async fn recent_mcp_tool_calls(
+        &self,
+        window_secs: i64,
+        limit: u32,
+    ) -> Result<Vec<McpToolCallRow>> {
+        let _ = (window_secs, limit);
         Ok(Vec::new())
     }
 

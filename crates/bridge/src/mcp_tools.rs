@@ -12743,6 +12743,227 @@ impl McpTool for ContextPressureEstimateTool {
 }
 
 // ===========================================================================
+//        tool_call_attention_report — L6 P2 metacognition probe
+// ===========================================================================
+
+/// L6 P2 — Result of `tool_call_attention_report`. Pure data; the
+/// MCP tool wraps this in a JSON response. Exposed `pub` (not just
+/// crate-local) so cron jobs and integration tests can use the same
+/// aggregator from outside this module.
+#[derive(Debug, serde::Serialize)]
+pub struct AttentionReport {
+    pub window_secs: i64,
+    pub high_yield_threshold_bytes: u32,
+    pub followup_window_secs: i64,
+    pub total_calls: usize,
+    pub high_yield_calls: usize,
+    pub followed_up_calls: usize,
+    pub ignored_calls: usize,
+    pub followed_up_ratio: f64,
+    pub ignored: Vec<AttentionIgnoredRow>,
+    pub top_yield: Vec<AttentionYieldRow>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct AttentionIgnoredRow {
+    pub ts: i64,
+    pub tool_name: String,
+    pub result_size: u32,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct AttentionYieldRow {
+    pub ts: i64,
+    pub tool_name: String,
+    pub result_size: u32,
+    pub followed_up: bool,
+}
+
+/// **L6 P2** — pure aggregator for the attention report.
+///
+/// Given a chronologically-sorted `calls` vector + thresholds, returns
+/// a structured report. Pure for testability; the MCP tool wires this
+/// to live store data.
+///
+/// Heuristic for "follow-up": after a high-yield call at time `t`, did
+/// ANY other tool call appear in the same call list within
+/// `followup_window_secs`? This is a structural proxy for "the agent
+/// did something after seeing the result"; it doesn't prove the result
+/// was *used*, but a missing follow-up strongly suggests the result
+/// was ignored.
+pub fn compute_attention_report(
+    calls: &[ab_store::McpToolCallRow],
+    window_secs: i64,
+    high_yield_threshold_bytes: u32,
+    followup_window_secs: i64,
+) -> AttentionReport {
+    // Filter to high-yield successful calls (errors are pre-filtered out
+    // by spec: ignored-but-failed is a different signal).
+    let high_yield: Vec<&ab_store::McpToolCallRow> = calls
+        .iter()
+        .filter(|c| c.ok)
+        .filter(|c| {
+            c.result_size
+                .map(|s| s >= high_yield_threshold_bytes)
+                .unwrap_or(false)
+        })
+        .collect();
+
+    let mut followed_up_count = 0usize;
+    let mut ignored: Vec<AttentionIgnoredRow> = Vec::new();
+    let mut top_yield_rows: Vec<AttentionYieldRow> = Vec::new();
+
+    for hy in &high_yield {
+        // Did any DIFFERENT call (different ts OR different tool name)
+        // appear in (hy.ts, hy.ts + followup_window_secs]? "Different"
+        // protects against the same call counting itself when ts ties.
+        let cutoff_end = hy.ts + followup_window_secs;
+        let has_followup = calls.iter().any(|c| {
+            c.ts > hy.ts
+                && c.ts <= cutoff_end
+                && (c.ts != hy.ts || c.tool_name != hy.tool_name)
+        });
+        let result_size = hy.result_size.unwrap_or(0);
+        if has_followup {
+            followed_up_count += 1;
+        } else {
+            ignored.push(AttentionIgnoredRow {
+                ts: hy.ts,
+                tool_name: hy.tool_name.clone(),
+                result_size,
+            });
+        }
+        top_yield_rows.push(AttentionYieldRow {
+            ts: hy.ts,
+            tool_name: hy.tool_name.clone(),
+            result_size,
+            followed_up: has_followup,
+        });
+    }
+
+    // Sort top_yield by result_size DESC (most ROI-bearing first); take
+    // top 20 for the report payload.
+    top_yield_rows.sort_by(|a, b| b.result_size.cmp(&a.result_size));
+    top_yield_rows.truncate(20);
+    // Sort ignored by result_size DESC — biggest unused payload first.
+    ignored.sort_by(|a, b| b.result_size.cmp(&a.result_size));
+    ignored.truncate(20);
+
+    let total = high_yield.len();
+    let followed_up_ratio = if total == 0 {
+        0.0
+    } else {
+        followed_up_count as f64 / total as f64
+    };
+
+    AttentionReport {
+        window_secs,
+        high_yield_threshold_bytes,
+        followup_window_secs,
+        total_calls: calls.len(),
+        high_yield_calls: total,
+        followed_up_calls: followed_up_count,
+        ignored_calls: total - followed_up_count,
+        followed_up_ratio,
+        ignored,
+        top_yield: top_yield_rows,
+    }
+}
+
+/// L6 P2 — MCP tool that surfaces the attention report.
+pub struct ToolCallAttentionReportTool {
+    hub: Hub,
+}
+
+impl ToolCallAttentionReportTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for ToolCallAttentionReportTool {
+    fn name(&self) -> &'static str {
+        "tool_call_attention_report"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "L6 P2 metacognition probe — for the recent window, \
+                 summarize which high-yield (≥N bytes result) tool calls had \
+                 follow-up activity within K seconds (proxy for 'I used the \
+                 answer') vs which had none (proxy for 'I asked for X then \
+                 ignored the answer'). Backed by mcp_tool_calls telemetry; \
+                 no LLM, no transcript access. Tuning targets: \
+                 `high_yield_threshold_bytes` (default 2500 ≈ 10KB) + \
+                 `followup_window_secs` (default 600 = 10min)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 86400,
+                        "default": 7200,
+                        "description": "Lookback for tool-call telemetry. Default 7200s (2h ≈ recent session)."
+                    },
+                    "high_yield_threshold_bytes": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "default": 2500,
+                        "description": "result_size >= this is considered high-yield (worth following up on)."
+                    },
+                    "followup_window_secs": {
+                        "type": "integer",
+                        "minimum": 30,
+                        "maximum": 3600,
+                        "default": 600,
+                        "description": "After a high-yield call, look for ANY other call within this window. None → 'ignored'."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(7200)
+            .clamp(60, 86_400);
+        let threshold = args
+            .get("high_yield_threshold_bytes")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(2500)
+            .min(u32::MAX as u64) as u32;
+        let followup = args
+            .get("followup_window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(600)
+            .clamp(30, 3600);
+
+        // Fetch row-level telemetry. Cap at 2000 to bound report cost
+        // even on noisy sessions; matches the trait's hard cap.
+        let calls = match store.recent_mcp_tool_calls(window_secs, 2000).await {
+            Ok(c) => c,
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "recent_mcp_tool_calls failed: {e}"
+                )));
+            }
+        };
+
+        let report = compute_attention_report(&calls, window_secs, threshold, followup);
+        let payload = serde_json::to_value(&report).unwrap_or_else(|_| json!({}));
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //                  Warp URI tools (W4 — DESIGN-warp-first-agent-shell)
 // ===========================================================================
 
@@ -14654,6 +14875,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(McpConfigAuditTool::new()));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(ContextBudgetTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(ContextPressureEstimateTool::new()));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ToolCallAttentionReportTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(HookStatusTool::new(hub.clone())));
     // Memory admin / visualisation.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryExportTool::new(hub.clone())));
@@ -17644,6 +17866,111 @@ mod tests {
         assert_eq!(v["fatigue_tier"], json!("saturated"));
         assert_eq!(v["recommendation"], json!("urgent_handoff_or_compact"));
         assert_eq!(v["distance_to_compaction_tokens"], json!(0), "clamps at zero past trigger");
+    }
+
+    // ── L6 P2 — tool_call_attention_report (pure aggregator) ──────────
+
+    fn mk_call(ts: i64, name: &str, ok: bool, result_size: u32) -> ab_store::McpToolCallRow {
+        ab_store::McpToolCallRow {
+            ts,
+            tool_name: name.into(),
+            duration_ms: 10,
+            ok,
+            args_size: Some(100),
+            result_size: Some(result_size),
+        }
+    }
+
+    #[test]
+    fn attention_report_empty_input_returns_zero_metrics() {
+        let r = compute_attention_report(&[], 7200, 2500, 600);
+        assert_eq!(r.total_calls, 0);
+        assert_eq!(r.high_yield_calls, 0);
+        assert_eq!(r.followed_up_calls, 0);
+        assert_eq!(r.ignored_calls, 0);
+        assert!(r.followed_up_ratio.abs() < 1e-9);
+        assert!(r.ignored.is_empty());
+        assert!(r.top_yield.is_empty());
+    }
+
+    #[test]
+    fn attention_report_filters_failed_calls_from_high_yield() {
+        // Two calls: one ok+big, one failed+big. Only ok one counts as
+        // high-yield. Failed call ALSO counts as a follow-up signal for
+        // the first call (≠self).
+        let calls = vec![
+            mk_call(1000, "browser_extract_text", true, 50_000),
+            mk_call(1100, "browser_extract_text", false, 50_000),
+        ];
+        let r = compute_attention_report(&calls, 7200, 2500, 600);
+        assert_eq!(r.high_yield_calls, 1, "failed call must not enter high-yield");
+        assert_eq!(r.followed_up_calls, 1);
+        assert_eq!(r.ignored_calls, 0);
+    }
+
+    #[test]
+    fn attention_report_marks_ignored_when_no_followup_within_window() {
+        // Call at t=0 with big result; next call at t=10000 (far past
+        // 600s window) → ignored.
+        let calls = vec![
+            mk_call(0, "memory_search", true, 50_000),
+            mk_call(10_000, "browser_navigate", true, 500),
+        ];
+        let r = compute_attention_report(&calls, 7200, 2500, 600);
+        assert_eq!(r.high_yield_calls, 1);
+        assert_eq!(r.ignored_calls, 1);
+        assert_eq!(r.ignored[0].tool_name, "memory_search");
+        assert_eq!(r.ignored[0].result_size, 50_000);
+    }
+
+    #[test]
+    fn attention_report_followed_up_when_any_call_in_window() {
+        // High-yield at t=0; small follow-up at t=120 (well within 600s).
+        let calls = vec![
+            mk_call(0, "memory_search", true, 50_000),
+            mk_call(120, "memory_get", true, 200),
+        ];
+        let r = compute_attention_report(&calls, 7200, 2500, 600);
+        assert_eq!(r.high_yield_calls, 1);
+        assert_eq!(r.followed_up_calls, 1);
+        assert_eq!(r.ignored_calls, 0);
+        assert!((r.followed_up_ratio - 1.0).abs() < 1e-9);
+        assert!(r.ignored.is_empty());
+    }
+
+    #[test]
+    fn attention_report_top_yield_sorted_by_size_desc() {
+        // Mix small + huge + medium high-yield calls; verify top_yield
+        // is sorted desc by result_size.
+        let calls = vec![
+            mk_call(0, "small_tool", true, 100),    // below threshold
+            mk_call(10, "huge_tool", true, 100_000),
+            mk_call(20, "medium_tool", true, 5_000),
+            mk_call(30, "follow_up", true, 50),     // within 600s of all
+        ];
+        let r = compute_attention_report(&calls, 7200, 2500, 600);
+        assert_eq!(r.high_yield_calls, 2, "huge + medium qualify, small below threshold");
+        // huge_tool > medium_tool by size.
+        assert_eq!(r.top_yield[0].tool_name, "huge_tool");
+        assert_eq!(r.top_yield[1].tool_name, "medium_tool");
+        // Both should be marked followed_up (the small + follow_up calls are within 600s).
+        assert!(r.top_yield.iter().all(|c| c.followed_up));
+    }
+
+    #[test]
+    fn attention_report_handles_missing_result_size() {
+        // result_size=None → not high-yield (heuristic: unknown size
+        // is conservative no-signal).
+        let calls = vec![ab_store::McpToolCallRow {
+            ts: 0,
+            tool_name: "weird_tool".into(),
+            duration_ms: 10,
+            ok: true,
+            args_size: Some(100),
+            result_size: None,
+        }];
+        let r = compute_attention_report(&calls, 7200, 2500, 600);
+        assert_eq!(r.high_yield_calls, 0);
     }
 
     #[tokio::test]
