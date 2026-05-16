@@ -10536,6 +10536,209 @@ impl McpTool for SessionHandoffBriefTool {
 }
 
 // ===========================================================================
+//   session_reflect — L7 P1 (structured lesson capture at session end)
+// ===========================================================================
+
+/// Map a `low | medium | high` severity string to the canonical
+/// importance score for a `kind=lesson` memory. v0 mapping; tune via
+/// L7-P1 30d measurement (proposed-update accept rate).
+fn severity_to_importance(severity: &str) -> f64 {
+    match severity {
+        "low" => 0.5,
+        "high" => 0.9,
+        // "medium" is the default and the unknown-bucket — biased toward
+        // mid so an unsupplied severity still surfaces in retrieval.
+        _ => 0.7,
+    }
+}
+
+/// **L7 P1** — structured session-end reflection.
+///
+/// At session end, the agent calls this with 1..N lessons in
+/// structured form (`title`, `body`, `severity`, `applicability`).
+/// Each lesson is persisted as a `kind=lesson` memory with derived
+/// stable key, tag set, and severity-mapped importance. Companion to
+/// the AGENT.md drift detector (L7 P2, separate ship) which compares
+/// these lessons to the durable preamble.
+///
+/// Roadmap: `docs/AGENT-BRIDGE-CAPABILITY-ROADMAP-2026-05-15.md` §4.
+pub struct SessionReflectTool {
+    hub: Hub,
+}
+impl SessionReflectTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for SessionReflectTool {
+    fn name(&self) -> &'static str {
+        "session_reflect"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Session-end structured reflection (L7 P1). Capture 1..10 \
+                 lessons learned in this session as kind=lesson memories with severity \
+                 and applicability metadata. Each lesson gets a stable derived key \
+                 (idempotent re-run = no-op). Tags include 'l7', 'session_reflect', \
+                 the focus, and the severity. Companion to the AGENT.md drift \
+                 detector (L7 P2). Synthesize lessons before calling — this tool \
+                 does not infer them."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "focus": {
+                        "type": "string",
+                        "enum": ["decisions", "process", "tooling"],
+                        "description": "Reflection focus area. Decisions: choices that shaped output. Process: how-we-worked patterns. Tooling: tool/workflow observations."
+                    },
+                    "lessons": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 10,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title":         { "type": "string", "description": "Short distinctive name. Becomes part of the derived key." },
+                                "body":          { "type": "string", "description": "Full lesson content. Markdown encouraged." },
+                                "severity":      { "type": "string", "enum": ["low", "medium", "high"], "default": "medium", "description": "low=0.5 importance, medium=0.7, high=0.9." },
+                                "applicability": { "type": "string", "description": "When/where this lesson kicks in (one short sentence). Forces explicit scope vs vague 'always'." }
+                            },
+                            "required": ["title", "body"]
+                        }
+                    }
+                },
+                "required": ["focus", "lessons"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+
+        let focus = match args
+            .get("focus")
+            .and_then(|v| v.as_str())
+            .filter(|s| matches!(*s, "decisions" | "process" | "tooling"))
+        {
+            Some(s) => s.to_string(),
+            None => {
+                return Ok(ToolResult::error(
+                    "missing or invalid 'focus' (must be decisions | process | tooling)",
+                ))
+            }
+        };
+
+        let lessons_arr = match args.get("lessons").and_then(|v| v.as_array()) {
+            Some(a) if !a.is_empty() => a.clone(),
+            _ => return Ok(ToolResult::error("missing or empty 'lessons' (need 1..10)")),
+        };
+        if lessons_arr.len() > 10 {
+            return Ok(ToolResult::error("'lessons' exceeds max 10 per call"));
+        }
+
+        let mut written: Vec<Value> = Vec::with_capacity(lessons_arr.len());
+        let mut skipped: Vec<String> = Vec::new();
+
+        for (idx, lesson_v) in lessons_arr.iter().enumerate() {
+            let title = lesson_v
+                .get("title")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let body = lesson_v
+                .get("body")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let (Some(title), Some(body)) = (title, body) else {
+                skipped.push(format!("lesson[{idx}]: missing title or body"));
+                continue;
+            };
+            let severity = lesson_v
+                .get("severity")
+                .and_then(|v| v.as_str())
+                .filter(|s| matches!(*s, "low" | "medium" | "high"))
+                .unwrap_or("medium")
+                .to_string();
+            let applicability = lesson_v
+                .get("applicability")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+
+            // Derived key — content-addressed for idempotent re-reflection.
+            // hash over body keeps key stable while title can be lightly
+            // edited (e.g. capitalisation) without spawning a duplicate row.
+            let derived_key = format!(
+                "lesson:{}:{}:{}",
+                focus,
+                sanitise_target_for_key(title),
+                fnv1a_hex16(body)
+            );
+
+            // Compose stored content: body verbatim + applicability footer
+            // (parsable later by drift detector or signal-fidelity readers).
+            let stored_content = match &applicability {
+                Some(app) => format!("{body}\n\nApplicability: {app}"),
+                None => body.to_string(),
+            };
+
+            let importance = severity_to_importance(&severity);
+            let mut tags = vec![
+                "l7".to_string(),
+                "session_reflect".to_string(),
+                format!("focus:{focus}"),
+                format!("severity:{severity}"),
+            ];
+            tags.sort();
+            tags.dedup();
+
+            let mem = MemoryRecord {
+                key: derived_key.clone(),
+                kind: "lesson".into(),
+                content: stored_content,
+                tags,
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            };
+            if let Err(e) = store.memory_save(&mem).await {
+                skipped.push(format!("lesson[{idx}] '{title}': save failed: {e}"));
+                continue;
+            }
+            written.push(json!({
+                "key": derived_key,
+                "title": title,
+                "severity": severity,
+                "importance": importance,
+                "has_applicability": applicability.is_some(),
+            }));
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "status": if written.is_empty() { "no_writes" } else { "ok" },
+            "focus": focus,
+            "written": written,
+            "written_count": written.len(),
+            "skipped": skipped,
+        })))
+    }
+}
+
+// ===========================================================================
 //                    session_lifecycle_step (W3 dispatcher)
 // ===========================================================================
 
@@ -13513,6 +13716,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ShellExecTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(SessionBootstrapTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(SessionFinalizeTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionReflectTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CapabilitiesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ProjectDetectTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ChangesDigestTool::new(hub.clone())));
@@ -16418,5 +16622,178 @@ mod tests {
         // Both modes include at least: header, blank, row, blank.
         assert!(full.len() >= 4);
         assert!(compact.len() >= 4);
+    }
+
+    // ── L7 P1 — session_reflect ─────────────────────────────────────────
+
+    #[test]
+    fn severity_to_importance_maps_three_buckets() {
+        assert!((severity_to_importance("low") - 0.5).abs() < 1e-9);
+        assert!((severity_to_importance("medium") - 0.7).abs() < 1e-9);
+        assert!((severity_to_importance("high") - 0.9).abs() < 1e-9);
+        // Unknown / empty defaults to medium so an unsupplied severity
+        // still surfaces in retrieval.
+        assert!((severity_to_importance("") - 0.7).abs() < 1e-9);
+        assert!((severity_to_importance("urgent") - 0.7).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn session_reflect_writes_lessons_with_metadata() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+
+        let tool = SessionReflectTool::new(hub.clone());
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "focus": "process",
+                    "lessons": [
+                        {
+                            "title": "fetch before long impl",
+                            "body": "always git fetch before starting >30min implementation work",
+                            "severity": "high",
+                            "applicability": "any solo work session expected to run >30min"
+                        },
+                        {
+                            "title": "default low boost",
+                            "body": "magnitudes for new boosts should be conservative v0",
+                            "severity": "medium"
+                        }
+                    ]
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("ok"));
+        assert_eq!(v["focus"], json!("process"));
+        assert_eq!(v["written_count"], json!(2));
+        let written = v["written"].as_array().expect("written array");
+        assert_eq!(written.len(), 2);
+
+        // Verify first lesson on disk.
+        let key1 = written[0]["key"].as_str().expect("key").to_string();
+        let saved = store
+            .memory_get(&key1)
+            .await
+            .expect("get")
+            .expect("exists");
+        assert_eq!(saved.kind, "lesson");
+        assert!((saved.importance - 0.9).abs() < 1e-9, "high → 0.9");
+        assert!(saved.tags.iter().any(|t| t == "l7"));
+        assert!(saved.tags.iter().any(|t| t == "session_reflect"));
+        assert!(saved.tags.iter().any(|t| t == "focus:process"));
+        assert!(saved.tags.iter().any(|t| t == "severity:high"));
+        // applicability appended as a footer in content.
+        assert!(saved.content.contains("Applicability:"));
+        assert!(saved
+            .content
+            .contains("any solo work session expected to run >30min"));
+
+        // Second lesson — no applicability → no footer.
+        let key2 = written[1]["key"].as_str().expect("key").to_string();
+        let saved2 = store.memory_get(&key2).await.expect("get").expect("exists");
+        assert!((saved2.importance - 0.7).abs() < 1e-9, "medium → 0.7");
+        assert!(
+            !saved2.content.contains("Applicability:"),
+            "no applicability → no footer"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn session_reflect_rejects_invalid_focus_and_empty_lessons() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let tool = SessionReflectTool::new(hub.clone());
+        let ctx = ToolContext::default();
+
+        let r1 = tool
+            .execute(
+                json!({"focus": "wrong", "lessons": [{"title":"t","body":"b"}]}),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        assert!(r1.is_error, "invalid focus must produce error");
+
+        let r2 = tool
+            .execute(json!({"focus": "decisions", "lessons": []}), &ctx)
+            .await
+            .expect("execute ok");
+        assert!(r2.is_error, "empty lessons must produce error");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn session_reflect_skips_malformed_lessons_but_keeps_good_ones() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let tool = SessionReflectTool::new(hub.clone());
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "focus": "tooling",
+                    "lessons": [
+                        {"title": "valid", "body": "good content"},
+                        {"title": "", "body": "missing title"},
+                        {"title": "good title", "body": ""},
+                        {"title": "second valid", "body": "more good content"}
+                    ]
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("ok"));
+        assert_eq!(v["written_count"], json!(2), "2 valid wrote, 2 skipped");
+        let skipped = v["skipped"].as_array().expect("skipped");
+        assert_eq!(skipped.len(), 2);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn session_reflect_is_idempotent_for_same_body_and_focus() {
+        // Same focus + same title + same body → identical derived key,
+        // so re-running is a memory_save-replace not a duplicate row.
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let tool = SessionReflectTool::new(hub.clone());
+        let ctx = ToolContext::default();
+
+        let args = json!({
+            "focus": "decisions",
+            "lessons": [
+                {"title": "go with cautious v0", "body": "ship conservative magnitudes; calibrate later"}
+            ]
+        });
+        let r1 = tool.execute(args.clone(), &ctx).await.expect("call 1");
+        let r2 = tool.execute(args, &ctx).await.expect("call 2");
+        let extract = |r: &ab_mcp::ToolResult| -> Value {
+            let text = match r.content.first() {
+                Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+                _ => panic!("expected text content"),
+            };
+            serde_json::from_str(&text).unwrap()
+        };
+        let v1 = extract(&r1);
+        let v2 = extract(&r2);
+        let k1 = v1["written"][0]["key"].as_str().unwrap().to_string();
+        let k2 = v2["written"][0]["key"].as_str().unwrap().to_string();
+        assert_eq!(k1, k2, "same input → same derived key");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 }
