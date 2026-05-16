@@ -3,7 +3,10 @@
 #
 # Guard: skip when running inside a memory-curator sub-agent
 # (AB_MEMORY_CURATOR=1 is set by ab-precompact-hook).
-[[ -n "$AB_MEMORY_CURATOR" ]] && exit 0
+if [[ -n "$AB_MEMORY_CURATOR" ]]; then
+    printf '{}\n'
+    exit 0
+fi
 
 _ab_state_dir() {
     if [[ -n "${XDG_DATA_HOME:-}" ]]; then
@@ -25,15 +28,19 @@ fi
 # Log this hook run to the shared hook-runs.jsonl file (read by hook_status MCP tool).
 _AB_HOOK_LOG="$_AB_STATE_DIR/hook-runs.jsonl"
 _AB_HOOK_START=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+_AB_HOOK_OUTPUT_BYTES=3
 _ab_log_hook_run() {
     mkdir -p "$(dirname "$_AB_HOOK_LOG")"
-    printf '{"event":"%s","ts":"%s","exit_code":%d,"output_bytes":0}\n' \
-        "$_AB_HOOK_EVENT" "$_AB_HOOK_START" "$1" >> "$_AB_HOOK_LOG" 2>/dev/null || true
+    printf '{"event":"%s","ts":"%s","exit_code":%d,"output_bytes":%d}\n' \
+        "$_AB_HOOK_EVENT" "$_AB_HOOK_START" "$1" "$_AB_HOOK_OUTPUT_BYTES" >> "$_AB_HOOK_LOG" 2>/dev/null || true
 }
 trap '_ab_log_hook_run $?' EXIT
 
 DB="${AGENT_BRIDGE_DB:-$_AB_STATE_DIR/state.db}"
-[[ -f "$DB" ]] || exit 0
+if [[ ! -f "$DB" ]]; then
+    printf '{}\n'
+    exit 0
+fi
 
 AB=$(command -v agent-bridge 2>/dev/null || echo "$HOME/.local/bin/agent-bridge")
 PRECOMPACT=$(command -v ab-precompact-hook 2>/dev/null || echo "$HOME/.local/bin/ab-precompact-hook")
@@ -54,7 +61,7 @@ fi
 # mcp child returns "unknown tool: memory_compact" and the call silently
 # fails — so 90-day pruning would never run. Force the all profile here.
 if [[ -x "$AB" ]]; then
-    AGENT_BRIDGE_TOOL_PROFILE=all "$AB" mcp 2>/dev/null <<'JSONRPC'
+    AGENT_BRIDGE_TOOL_PROFILE=all "$AB" mcp >/dev/null 2>/dev/null <<'JSONRPC'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"stop-hook","version":"1"},"capabilities":{}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_compact","arguments":{"older_than_days":90,"dry_run":false}}}
 JSONRPC
@@ -67,4 +74,5 @@ if [[ -x "$AB" ]]; then
     "$AB" sync >/dev/null 2>&1 &
 fi
 
+printf '{}\n'
 exit 0

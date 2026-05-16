@@ -137,7 +137,12 @@ block = (
     + "\n".join(lines)
     + "\n=== End Memory ==="
 )
-print(json.dumps({"additionalContext": block}))
+print(json.dumps({
+    "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit",
+        "additionalContext": block,
+    }
+}))
 PY
 )
 
