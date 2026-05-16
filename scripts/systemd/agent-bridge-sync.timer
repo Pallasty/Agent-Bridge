@@ -1,0 +1,21 @@
+# systemd user timer for 15-min cross-machine sync. See the .service
+# file for install + log paths + design rationale.
+
+[Unit]
+Description=15-min trigger for agent-bridge cross-machine memory + forum sync
+Requires=agent-bridge-sync.service
+
+[Timer]
+# First fire 60s after boot/install (lets the daemon settle); then every
+# 15 min on the dot from the prior completion. Matches D2-G1 ≤30 min
+# p95 propagation target with comfortable margin.
+OnBootSec=60
+OnUnitInactiveSec=15min
+Unit=agent-bridge-sync.service
+# Persistent=false — missed intervals during sleep/off aren't re-played;
+# next live cycle catches up via the same git pull-rebase that handles
+# any gap.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

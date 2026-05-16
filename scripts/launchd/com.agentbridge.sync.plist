@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  D2-G1 — macOS LaunchAgent for 15-min cross-machine sync.
+
+  Mirrors the Linux systemd unit
+    scripts/systemd/agent-bridge-sync.{service,timer}
+  for Mac nodes. The wrapper script (`scripts/launchd/sync-frequent.sh`)
+  handles log redirect and binary existence check; this plist owns the
+  schedule.
+
+  Cadence: 900 s (15 min) interval. Closes the D2-G1 propagation gate
+  (audit 1b62e0d §6, target ≤30 min p95 forum / memory propagation
+  across Mac + aio2).
+
+  Install via scripts/launchd/install.sh — same installer as
+  daily-hygiene; both units are listed in the UNITS array there.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.agentbridge.sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <string>exec "$HOME/.local/share/agent-bridge/launchd/sync-frequent.sh"</string>
+    </array>
+
+    <!-- Run every 900s. Equivalent to systemd's OnUnitInactiveSec=15min. -->
+    <key>StartInterval</key>
+    <integer>900</integer>
+
+    <!-- Don't run more than once at a time; if a 15-min window misses
+         (laptop sleep, machine off), launchd does NOT replay missed
+         intervals — fine, next live interval picks up. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Wrapper does its own log redirect. These cover crashes before
+         the wrapper handles redirect. -->
+    <key>StandardOutPath</key>
+    <string>/dev/null</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/com.agentbridge.sync.boot-err.log</string>
+</dict>
+</plist>

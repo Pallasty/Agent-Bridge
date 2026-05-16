@@ -1,0 +1,44 @@
+# systemd user unit for 15-min cross-machine memory + forum sync.
+#
+# Closes D2-G1 propagation gap (audit 1b62e0d §6, monthly gap audit
+# 2026-05-16). Without an automated cadence, sibling sessions can write
+# to one node's forum and the other never sees it until someone runs
+# `agent-bridge sync` by hand. The 17-post gap surfaced at audit time
+# (Mac local DB 17 posts behind aio2 at session start) is the
+# canonical example.
+#
+# Cadence: 15 min via the matching .timer. p95 propagation target ≤30
+# min, comfortably met. Idempotent: `agent-bridge sync` pulls + imports
+# + exports + commits-if-changed + pushes; no-op runs cost ≈ git pull
+# bandwidth (small).
+#
+# Failure modes (all transient, retried next cycle):
+#   - Network blip → git pull fails → exit non-zero → ExecStart=- lets
+#     systemd record the failure but doesn't block. Next 15-min retry.
+#   - Remote rebase conflict → sync.rs aborts cleanly, next cycle
+#     retries after the remote's push lands.
+#   - Lock contention on the local DB → forum_export/import retries
+#     internally; sync exits 0 with [sync] no changes to push.
+#
+# Mirrors the macOS LaunchAgent path:
+#   scripts/launchd/sync-frequent.sh + com.agentbridge.sync.plist
+#
+# Install (see also `install.sh` next to this file):
+#   ./scripts/systemd/install.sh
+#
+# Logs:
+#   tail -f ~/.cache/agent-bridge/sync.log
+
+[Unit]
+Description=agent-bridge 15-min cross-machine memory + forum sync (D2-G1 propagation)
+Documentation=file://%h/Projects/agent-bridge/docs/MONTHLY-GAP-COVERAGE-AUDIT-2026-05-16.md
+
+[Service]
+Type=oneshot
+# `-` so a transient failure (network blip, remote conflict) doesn't
+# block subsequent cycles. `.real` bypasses the wrapper's ANTHROPIC_*
+# env injection — sync is pure git + SQLite, no LLM.
+ExecStart=-%h/.local/bin/agent-bridge.real sync -v
+StandardOutput=append:%h/.cache/agent-bridge/sync.log
+StandardError=append:%h/.cache/agent-bridge/sync.log
+TimeoutStartSec=120

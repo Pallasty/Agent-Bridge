@@ -3,6 +3,7 @@
 #
 # Currently installs:
 #   - agent-bridge-memory-decay-unused.timer (Phase 2.x #8 daily decay)
+#   - agent-bridge-sync.timer (D2-G1 — 15-min cross-machine sync)
 #
 # Usage:
 #   ./scripts/systemd/install.sh           # copy + reload + enable timers
@@ -17,10 +18,13 @@ TARGET_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNITS=(
   agent-bridge-memory-decay-unused.service
   agent-bridge-memory-decay-unused.timer
+  agent-bridge-sync.service
+  agent-bridge-sync.timer
 )
 
 TIMERS=(
   agent-bridge-memory-decay-unused.timer
+  agent-bridge-sync.timer
 )
 
 DRY=0
