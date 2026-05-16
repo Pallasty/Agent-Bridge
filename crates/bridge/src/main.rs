@@ -797,6 +797,23 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **L7 P3 — Weekly skill-rating retro.** Lists `kind=lesson`
+    /// memories captured in the last N days and reports how many
+    /// were consulted post-creation (`access_count > 0`). Designed
+    /// to be diffed week-over-week as a JSON time series: feeding
+    /// the cross-week Spearman trend that L7-P2 falsifiability needs
+    /// ("improving trend over 8 weeks").
+    ///
+    /// Roadmap: `docs/AGENT-BRIDGE-CAPABILITY-ROADMAP-2026-05-15.md` §4.
+    SkillRetro {
+        /// Lookback window. Default 7 days (weekly).
+        #[arg(long, default_value_t = 7)]
+        days: u32,
+        /// Emit raw JSON of `SkillRetroReport` (suitable for
+        /// `tee ~/.cache/agent-bridge/baselines/skill-retro-YYYY-MM-DD.json`).
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1466,6 +1483,9 @@ async fn main() -> Result<()> {
                     *json,
                 )
                 .await
+            }
+            DreamOp::SkillRetro { days, json } => {
+                run_dream_skill_retro(*days, *json).await
             }
         };
     }
@@ -6576,6 +6596,144 @@ async fn run_dream_agent_md_drift(
     Ok(())
 }
 
+// ─── L7 P3 — Weekly skill-rating retro ──────────────────────────────
+
+#[derive(Debug, serde::Serialize)]
+struct SkillRetroLessonRow {
+    key: String,
+    created_at: i64,
+    last_accessed_at: i64,
+    access_count: u64,
+    importance: f64,
+    consulted: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SkillRetroReport {
+    window_days: u32,
+    cutoff_unix: i64,
+    now_unix: i64,
+    lessons_total: usize,
+    lessons_consulted: usize,
+    consulted_ratio: f64,
+    mean_access_count: f64,
+    rows: Vec<SkillRetroLessonRow>,
+}
+
+/// Pure aggregator for [`run_dream_skill_retro`]. `now` and `cutoff`
+/// are caller-injected for deterministic testing.
+fn aggregate_skill_retro(
+    lessons: Vec<ab_store::MemoryRecord>,
+    window_days: u32,
+    now: i64,
+    cutoff: i64,
+) -> SkillRetroReport {
+    let mut rows: Vec<SkillRetroLessonRow> = lessons
+        .into_iter()
+        .map(|m| SkillRetroLessonRow {
+            consulted: m.access_count > 0,
+            key: m.key,
+            created_at: m.created_at,
+            last_accessed_at: m.last_accessed_at,
+            access_count: m.access_count,
+            importance: m.importance,
+        })
+        .collect();
+    // Order by access_count DESC (most-consulted first) for readable
+    // text output; JSON consumers can re-sort.
+    rows.sort_by(|a, b| b.access_count.cmp(&a.access_count));
+    let total = rows.len();
+    let consulted = rows.iter().filter(|r| r.consulted).count();
+    let mean_access = if total == 0 {
+        0.0
+    } else {
+        rows.iter().map(|r| r.access_count as f64).sum::<f64>() / total as f64
+    };
+    let consulted_ratio = if total == 0 {
+        0.0
+    } else {
+        consulted as f64 / total as f64
+    };
+    SkillRetroReport {
+        window_days,
+        cutoff_unix: cutoff,
+        now_unix: now,
+        lessons_total: total,
+        lessons_consulted: consulted,
+        consulted_ratio,
+        mean_access_count: mean_access,
+        rows,
+    }
+}
+
+async fn run_dream_skill_retro(days: u32, as_json: bool) -> Result<()> {
+    use ab_store::{default_db_path, MemoryListSort, MemoryRecord, SqliteStore, StateStore};
+
+    let db_path = default_db_path();
+    let store = SqliteStore::open(&db_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let cutoff = now_secs - (days as i64) * 86_400;
+
+    let all = store
+        .list_memories(Some("lesson"), MemoryListSort::Newest, 500)
+        .await
+        .map_err(|e| anyhow::anyhow!("list_memories: {e}"))?;
+    let lessons: Vec<MemoryRecord> = all
+        .into_iter()
+        .filter(|r| r.status == "active" && r.created_at >= cutoff)
+        .collect();
+
+    let report = aggregate_skill_retro(lessons, days, now_secs, cutoff);
+
+    if as_json {
+        let s = serde_json::to_string_pretty(&report)
+            .map_err(|e| anyhow::anyhow!("serialize report: {e}"))?;
+        println!("{s}");
+        return Ok(());
+    }
+
+    println!("# Skill-Rating Retro (L7 P3)");
+    println!("window: {} days  cutoff_unix={}  now_unix={}", report.window_days, report.cutoff_unix, report.now_unix);
+    println!("lessons in window: {}", report.lessons_total);
+    println!(
+        "  consulted post-creation: {} ({:.0}%)",
+        report.lessons_consulted,
+        report.consulted_ratio * 100.0
+    );
+    println!("  mean access_count: {:.2}", report.mean_access_count);
+    if report.rows.is_empty() {
+        println!();
+        println!("(no lessons captured in window)");
+    } else {
+        println!();
+        println!("Per-lesson (sorted by access_count DESC):");
+        for row in &report.rows {
+            let badge = if row.consulted { "✓" } else { "·" };
+            println!(
+                "  {} {} access={} imp={:.2} created_at={}",
+                badge, row.key, row.access_count, row.importance, row.created_at
+            );
+        }
+    }
+    println!();
+    println!(
+        "L7-P2 falsifiability: this snapshot is one weekly datapoint. \
+         Cross-week Spearman trend is computed by diffing JSON outputs \
+         over 8+ weeks; ship the JSON form via:"
+    );
+    println!(
+        "  agent-bridge dream skill-retro --json | tee \\\n    \
+         ~/.cache/agent-bridge/baselines/skill-retro-$(date -I).json"
+    );
+    Ok(())
+}
+
 /// Construct the shared backend bundle used by both modes.
 ///
 /// Relevant env vars:
@@ -6967,5 +7125,71 @@ mod tests {
         // Pin the v0 threshold — bumping it changes report semantics
         // and should be a coordinated commit, not a silent drift.
         assert!((AGENT_MD_DRIFT_COVERAGE_THRESHOLD - 0.30).abs() < 1e-9);
+    }
+
+    // ── L7 P3 — skill-retro aggregator (pure) ─────────────────────────
+
+    fn mk_lesson(key: &str, importance: f64, access_count: u64, created_at: i64) -> ab_store::MemoryRecord {
+        ab_store::MemoryRecord {
+            key: key.into(),
+            kind: "lesson".into(),
+            content: format!("body of {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at,
+            updated_at: created_at,
+            last_accessed_at: if access_count > 0 { created_at + 3600 } else { 0 },
+            access_count,
+            importance,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    #[test]
+    fn aggregate_skill_retro_empty_input_zero_metrics_no_div_by_zero() {
+        let r = aggregate_skill_retro(vec![], 7, 1_700_000_000, 1_700_000_000 - 7 * 86_400);
+        assert_eq!(r.lessons_total, 0);
+        assert_eq!(r.lessons_consulted, 0);
+        assert!(r.consulted_ratio.abs() < 1e-9);
+        assert!(r.mean_access_count.abs() < 1e-9);
+        assert!(r.rows.is_empty());
+    }
+
+    #[test]
+    fn aggregate_skill_retro_counts_consulted_and_mean_access() {
+        let now: i64 = 1_700_000_000;
+        let cutoff = now - 7 * 86_400;
+        let lessons = vec![
+            mk_lesson("l_hot", 0.9, 5, now - 86_400),
+            mk_lesson("l_warm", 0.7, 2, now - 2 * 86_400),
+            mk_lesson("l_cold", 0.5, 0, now - 3 * 86_400),
+        ];
+        let r = aggregate_skill_retro(lessons, 7, now, cutoff);
+        assert_eq!(r.lessons_total, 3);
+        assert_eq!(r.lessons_consulted, 2, "two had access_count>0");
+        assert!((r.consulted_ratio - 2.0 / 3.0).abs() < 1e-9);
+        assert!((r.mean_access_count - 7.0 / 3.0).abs() < 1e-9);
+        // Order by access DESC: hot, warm, cold.
+        assert_eq!(r.rows[0].key, "l_hot");
+        assert_eq!(r.rows[1].key, "l_warm");
+        assert_eq!(r.rows[2].key, "l_cold");
+        assert!(!r.rows[2].consulted, "cold row marked not consulted");
+    }
+
+    #[test]
+    fn aggregate_skill_retro_all_consulted() {
+        let now: i64 = 1_700_000_000;
+        let cutoff = now - 7 * 86_400;
+        let lessons = vec![
+            mk_lesson("a", 0.5, 1, now - 86_400),
+            mk_lesson("b", 0.5, 1, now - 2 * 86_400),
+        ];
+        let r = aggregate_skill_retro(lessons, 7, now, cutoff);
+        assert_eq!(r.lessons_total, 2);
+        assert_eq!(r.lessons_consulted, 2);
+        assert!((r.consulted_ratio - 1.0).abs() < 1e-9);
     }
 }
