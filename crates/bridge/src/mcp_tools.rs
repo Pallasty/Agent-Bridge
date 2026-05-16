@@ -6672,6 +6672,57 @@ fn format_bootstrap_memory_rows(rows: &[MemoryRecord], snippet_len: usize) -> Ve
         .collect()
 }
 
+/// **L5 P3** — composite "preamble fitness" score for feedback memories.
+/// Blends static importance with a 30d half-life recency factor so the
+/// session-start preamble surfaces both freshly-written corrections and
+/// long-standing high-importance feedback. Pure for testability.
+fn feedback_preamble_score(importance: f64, updated_at: i64, now: i64) -> f64 {
+    let age_days = ((now - updated_at).max(0) as f64) / 86_400.0;
+    let recency = (-age_days / 30.0).exp(); // 30d half-life
+    importance + 0.3 * recency
+}
+
+/// **L5 P3** — pick the top-K feedback memories for the session-start
+/// preamble. Re-ranks by [`feedback_preamble_score`] then truncates.
+/// Pure (no IO); caller sources `rows` from `list_memories_in_scope`.
+fn pick_top_feedback(rows: Vec<MemoryRecord>, k: usize, now: i64) -> Vec<MemoryRecord> {
+    let mut scored: Vec<(f64, MemoryRecord)> = rows
+        .into_iter()
+        .filter(|r| r.status == "active" && r.kind == "feedback")
+        .map(|r| {
+            let score = feedback_preamble_score(r.importance, r.updated_at, now);
+            (score, r)
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored.into_iter().take(k).map(|(_, r)| r).collect()
+}
+
+/// **L5 P3** — format the feedback preamble block. Returns `None` when
+/// `rows` is empty so the caller can skip the section header entirely
+/// (no visual noise on fresh sessions). Pure for testability.
+fn format_feedback_preamble_block(
+    rows: &[MemoryRecord],
+    is_compact: bool,
+    snippet_len: usize,
+) -> Option<Vec<String>> {
+    if rows.is_empty() {
+        return None;
+    }
+    let header = if is_compact {
+        format!("=== Feedback preamble ({}) ===", rows.len())
+    } else {
+        format!(
+            "=== Behavioral Feedback Preamble ({} top recent + important) ===",
+            rows.len()
+        )
+    };
+    let mut out = vec![header, String::new()];
+    out.extend(format_bootstrap_memory_rows(rows, snippet_len));
+    out.push(String::new());
+    Some(out)
+}
+
 pub struct SessionBootstrapTool {
     hub: Hub,
 }
@@ -6938,6 +6989,27 @@ impl McpTool for SessionBootstrapTool {
                 lines.push(body.trim().to_string());
                 lines.push("=== End Letter ===".to_string());
                 lines.push(String::new());
+            }
+        }
+
+        // L5 P3 — feedback preamble. Surface top-K behavioral feedback
+        // memories (recent + high-importance) at session start so the
+        // assistant lands with corrections in awareness before any
+        // search query. Companion to L5 P1 (FTS retrieval boost) and
+        // L5 P2 (memory_correction MCP tool). K=5 is the v0 default;
+        // tune via L5-P1 30d measurement.
+        {
+            let now_ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            let feedback_pool = store
+                .list_memories_in_scope(&cwd, Some("feedback"), MemoryListSort::ByImportance, 30)
+                .await
+                .unwrap_or_default();
+            let picked = pick_top_feedback(feedback_pool, 5, now_ts);
+            if let Some(block) = format_feedback_preamble_block(&picked, is_compact, snippet_len) {
+                lines.extend(block);
             }
         }
 
@@ -16231,5 +16303,120 @@ mod tests {
             (ab_store::weight_for_edge_type("corrects") - 1.4).abs() < 1e-9,
             "EDGE_WEIGHT_CORRECTS should be 1.4 (L5 calibration v0)"
         );
+    }
+
+    // ── L5 P3 — session-start feedback preamble ────────────────────────
+
+    fn mk_feedback(key: &str, importance: f64, updated_at: i64) -> MemoryRecord {
+        MemoryRecord {
+            key: key.into(),
+            kind: "feedback".into(),
+            content: format!("body of {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: updated_at,
+            updated_at,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    #[test]
+    fn feedback_preamble_score_today_high_importance_beats_old_high_importance() {
+        let now: i64 = 1_700_000_000;
+        let one_day = 86_400;
+        // Both importance 0.7; one written today, one 90d ago.
+        let fresh = feedback_preamble_score(0.7, now, now);
+        let old = feedback_preamble_score(0.7, now - 90 * one_day, now);
+        assert!(
+            fresh > old,
+            "fresh feedback must outrank 90d-old at equal importance ({fresh} vs {old})"
+        );
+        // Recency contribution capped at 0.3 (multiplier × max recency 1.0).
+        assert!(
+            fresh - old <= 0.3 + 1e-9,
+            "recency delta capped at 0.3 (got {})",
+            fresh - old
+        );
+    }
+
+    #[test]
+    fn feedback_preamble_score_high_importance_beats_low_importance_at_equal_age() {
+        let now: i64 = 1_700_000_000;
+        let high = feedback_preamble_score(0.9, now, now);
+        let low = feedback_preamble_score(0.3, now, now);
+        assert!(high > low);
+        assert!(
+            (high - low - 0.6).abs() < 1e-9,
+            "importance delta must dominate at zero age"
+        );
+    }
+
+    #[test]
+    fn pick_top_feedback_filters_non_feedback_and_non_active() {
+        let now: i64 = 1_700_000_000;
+        let mut rows = vec![
+            mk_feedback("fb1", 0.9, now),
+            mk_feedback("fb2", 0.5, now),
+        ];
+        // Add a non-feedback row → must be filtered.
+        let mut wrong_kind = mk_feedback("not_fb", 1.0, now);
+        wrong_kind.kind = "fact".into();
+        rows.push(wrong_kind);
+        // Add an archived feedback row → must be filtered.
+        let mut archived = mk_feedback("fb_archived", 1.0, now);
+        archived.status = "archived".into();
+        rows.push(archived);
+
+        let picked = pick_top_feedback(rows, 5, now);
+        assert_eq!(picked.len(), 2, "only active feedback survives");
+        assert_eq!(picked[0].key, "fb1", "highest importance first");
+        assert_eq!(picked[1].key, "fb2");
+    }
+
+    #[test]
+    fn pick_top_feedback_truncates_to_k() {
+        let now: i64 = 1_700_000_000;
+        let rows: Vec<_> = (0..10)
+            .map(|i| mk_feedback(&format!("fb{i}"), 0.5 + (i as f64) * 0.01, now))
+            .collect();
+        let picked = pick_top_feedback(rows, 3, now);
+        assert_eq!(picked.len(), 3);
+        // Highest importance (i=9, imp=0.59) wins.
+        assert_eq!(picked[0].key, "fb9");
+        assert_eq!(picked[1].key, "fb8");
+        assert_eq!(picked[2].key, "fb7");
+    }
+
+    #[test]
+    fn format_feedback_preamble_block_returns_none_on_empty() {
+        let out = format_feedback_preamble_block(&[], false, 80);
+        assert!(out.is_none(), "empty input → no section (avoids visual noise)");
+    }
+
+    #[test]
+    fn format_feedback_preamble_block_header_changes_with_compact_flag() {
+        let now: i64 = 1_700_000_000;
+        let rows = vec![mk_feedback("fb1", 0.7, now)];
+        let full = format_feedback_preamble_block(&rows, false, 80).expect("non-empty");
+        let compact = format_feedback_preamble_block(&rows, true, 80).expect("non-empty");
+        assert!(
+            full[0].contains("Behavioral Feedback Preamble"),
+            "full header has long form, got {}",
+            full[0]
+        );
+        assert!(
+            compact[0].contains("Feedback preamble"),
+            "compact header has short form, got {}",
+            compact[0]
+        );
+        // Both modes include at least: header, blank, row, blank.
+        assert!(full.len() >= 4);
+        assert!(compact.len() >= 4);
     }
 }
