@@ -65,9 +65,9 @@ Capture *behavioral feedback signals* (corrections, preferences, satisfaction pr
 
 ### Gap
 
-- **C1**: hallucination self-awareness (the one strong Seed fit, but solvable without Seed)
-- C2: which tool results I actually attended to
-- C3: fatigue / context-pressure tracking
+- **C1**: hallucination self-awareness — **SHELVED 2026-05-16** per §6.5 rule 3 (3/3 FALSIFIED). See `docs/L6-OPTION-E-RESULT-2026-05-16.md`. `introspect_recall` ships as raw observability mode; `likely_unsupported` boolean retained for backward-compat but **deprecated as authoritative gate**. L5/L7 explicitly non-dependent per §7.
+- C2: which tool results I actually attended to — *pending*
+- C3: fatigue / context-pressure tracking — *pending*
 
 ### Design intent
 
@@ -75,20 +75,23 @@ A small set of *introspective probes* that I (or any session) can call to read o
 
 ### Concrete first ships
 
-1. **`introspect_recall(query, k=5)`** MCP tool — runs `memory_search(query, mode=semantic)` and reports the top-K cosine distances + a "novelty score" = 1 − max(cosine). If novelty > 0.7, return a hallucination warning. Doesn't require Seed; uses existing ONNX embeddings. ~0.5 day.
-   - If/when AiOT delivers a validated Seed substrate, swap the novelty source to `trailing_surprise_mean_long` from substrate.parquet. The MCP tool surface stays identical.
-2. **`tool_call_attention_report()`** — summarize for the current session: which tool calls returned ≥ N tokens, which got searched within K turns after the call, which were never referenced. Backed by existing `tool_invocations` table. ~1 day.
-3. **`context_pressure_estimate()`** — return turn count, estimated tokens used, distance-to-compaction, and a categorical "fatigue tier" (fresh / engaged / strained / saturated). Backed by existing `context_budget` heuristic. ~0.3 day.
+1. ~~**`introspect_recall(query, k=5)`** MCP tool — runs `memory_search(query, mode=semantic)` and reports the top-K cosine distances + a "novelty score" = 1 − max(cosine).~~ **SHELVED**. Tool still runs and returns the same structure plus Option E `per_doc[]` semantic relevance scores + `quote_verified` flags, but the binary `likely_unsupported` gate is now diagnostic data, not an authoritative signal. C1 closure attempts:
+   - v0 cosine-novelty (`f9551b6`) — FALSIFIED on token dim, J=+0.12
+   - v2 entity-presence + content-overlap (`7fa9ff5`) — FALSIFIED on token dim, all J ≤ +0.24
+   - Option E LLM-as-relevance with verbatim quote (`0ced487`) — FALSIFIED on semantic dim, J=+0.000
+   - 3/3 → §6.5 rule 3 *shelve*. Discipline first execution clean.
+2. **`tool_call_attention_report()`** — summarize for the current session: which tool calls returned ≥ N tokens, which got searched within K turns after the call, which were never referenced. Backed by existing `tool_invocations` table. ~1 day. **Pending.**
+3. **`context_pressure_estimate()`** — return turn count, estimated tokens used, distance-to-compaction, and a categorical "fatigue tier" (fresh / engaged / strained / saturated). Backed by existing `context_budget` heuristic. ~0.3 day. **Pending.**
 
 ### Falsifiability
 
-| ID | Predicate | Threshold |
-|---|---|---|
-| L6-P1 | On a held-out set of 50 known-hallucination prompts, `introspect_recall` novelty > 0.7 detection rate | ≥ 60% (baseline coin-flip = 50%) |
-| L6-P2 | False-positive rate on a 50-prompt sample of grounded answers | ≤ 25% |
-| L6-P3 | `tool_call_attention_report` correctly flags ≥ 80% of "I asked for X then ignored the answer" cases on a synthetic test corpus | — |
+| ID | Predicate | Threshold | Status |
+|---|---|---|---|
+| L6-P1 | On a held-out set of 50 known-hallucination prompts, `introspect_recall` detect rate | ≥ 60% (baseline coin-flip = 50%) | ❌ **SHELVED 2026-05-16** (3/3 FALSIFIED) |
+| L6-P2 | False-positive rate on a 50-prompt sample of grounded answers | ≤ 25% | ❌ **SHELVED 2026-05-16** (3/3 FALSIFIED) |
+| L6-P3 | `tool_call_attention_report` correctly flags ≥ 80% of "I asked for X then ignored the answer" cases on a synthetic test corpus | ≥ 80% | ⏳ Pending P2 ship |
 
-L6-P1+P2 are the **single highest-leverage capability test for agent-bridge in this roadmap** — they decide whether L6 introspection is a real signal or noise, *without* depending on Seed.
+L6-P1+P2 were the single highest-leverage capability test for agent-bridge — they decided whether *cheap* L6 introspection is a real signal or noise, *without* depending on Seed. They concluded with a clean negative across both token-level and semantic-level dimensions. C2 and C3 ship independent of C1 outcome (different probes, different tables).
 
 ---
 
@@ -133,6 +136,8 @@ These don't need a new doc; they're in `docs/DESIGN-COLLAB-PROTOCOL-v0.md` alrea
 
 ## 6 · Sequencing
 
+Original plan (preserved for trace):
+
 ```
 Week 1   L6 introspect_recall + falsifiability test (L6-P1/P2 on 50-prompt held-out)
          → highest leverage; minimal scope; testable
@@ -144,7 +149,20 @@ Week 4   L7 skill-rating retro + weekly cycle entrenchment
 Week 5+  L5 session-start preference preamble + closing the loop
 ```
 
-Total ~4-5 weeks to L5/L6/L7 v0. Each layer ships independently and is independently falsifiable.
+Actual execution as of 2026-05-16 (~2 calendar days after plan):
+
+```
+Day 1    L5 v0 closed (P1+P2+P3) — sibling shipped during my away window
+Day 1    L7 v0 closed (P1+P2+P3) — sibling shipped during my away window
+Day 1-2  L6 P1 (C1) — v0 + v2 + Option E all FALSIFIED → SHELVED per §6.5 rule 3
+Day 2    First monthly gap-coverage audit (§6.5 rule 4 first execution)
+```
+
+L5 / L7 explicitly do NOT depend on L6 C1 — the "L6 as gating signal" sequencing assumption from the original plan was eliminated when v0 falsified on Day 1, and L5 / L7 shipped independently anyway. **§7 NOT-doing #3 was already correct.**
+
+Remaining open work: C2 (`tool_call_attention_report`) + C3 (`context_pressure_estimate`) + L8 C2 lockfile + cross-machine forum sync. None depend on C1.
+
+Total to L5/L6/L7 v0: 2 days. Faster than 4-5 week plan because L5/L7 turned out indep of L6 and sibling parallelism compressed the schedule.
 
 ---
 

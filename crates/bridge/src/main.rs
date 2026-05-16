@@ -814,6 +814,24 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **§6.5 rule 4 — Monthly gap-coverage audit (CLI surface).** Prints
+    /// the 13-gap coverage matrix from the canonical monthly audit doc +
+    /// a git-log delta since `--since`. The audit doc remains the source
+    /// of truth for status; this CLI surfaces it cheaply. Designed to
+    /// compose with `dream weekly` as a Monday-morning health pulse.
+    ///
+    /// Pure read; no SQL writes. `git log` subprocess only, controlled
+    /// arg-list. See `docs/DESIGN-DREAM-GAP-AUDIT-2026-05-16.md`.
+    GapAudit {
+        /// Lookback for the sectional commit delta. Default 7 days.
+        /// Accepts any value `git log --since` understands (e.g.
+        /// "7 days ago", "2026-05-09", "2 weeks ago").
+        #[arg(long, default_value = "7 days ago")]
+        since: String,
+        /// Emit raw JSON of `GapAuditReport` for piping into other tools.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1486,6 +1504,9 @@ async fn main() -> Result<()> {
             }
             DreamOp::SkillRetro { days, json } => {
                 run_dream_skill_retro(*days, *json).await
+            }
+            DreamOp::GapAudit { since, json } => {
+                run_dream_gap_audit(since, *json).await
             }
         };
     }
@@ -5821,11 +5842,493 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
         }
     }
 
+    // ── §6.5 rule 4 — gap-audit one-liner ─────────────────────────────
+    // Cheap pure-Rust + git log; surfaces the 13-gap baseline + sectional
+    // delta count at the end of the weekly pulse. Full table on explicit
+    // `dream gap-audit` invocation.
+    println!();
+    println!("[bonus #2] gap-audit (§6.5 rule 4)");
+    println!("─────────────────────────────────────────");
+    match gap_audit_baseline_report("7 days ago") {
+        Ok(rep) => {
+            let total_delta: usize = rep.sectional_delta.iter().map(|s| s.commit_count).sum();
+            let next_gate = rep
+                .outstanding_gates
+                .iter()
+                .min_by_key(|g| g.days_until.max(0));
+            println!(
+                "  {} closed / {} shelved / {} partial / {} planned / {} untouched",
+                rep.counts.closed,
+                rep.counts.shelved,
+                rep.counts.partial,
+                rep.counts.planned,
+                rep.counts.untouched,
+            );
+            println!(
+                "  delta since 7d: {total_delta} in-scope ships ({} layers touched)",
+                rep.sectional_delta.iter().filter(|s| s.commit_count > 0).count(),
+            );
+            match next_gate {
+                Some(g) if g.days_until >= 0 => println!(
+                    "  next outstanding gate: {} opens in {} days",
+                    g.gate_label, g.days_until,
+                ),
+                Some(g) => println!(
+                    "  next outstanding gate: {} opens {} days AGO (overdue)",
+                    g.gate_label, -g.days_until,
+                ),
+                None => println!("  no future-dated outstanding gates"),
+            }
+            println!("  (run `dream gap-audit` for full table)");
+        }
+        Err(e) => {
+            eprintln!("  gap-audit skipped: {e}");
+        }
+    }
+
     println!();
     println!(
         "next: re-run `dream weekly` in 7 days; \
          compare via `dream diff <prev_key> <this_key>` for drift."
     );
+    Ok(())
+}
+
+// ─── §6.5 rule 4 — gap-audit ────────────────────────────────────────────
+//
+// CLI surface for the monthly gap-coverage audit. Source of truth =
+// docs/MONTHLY-GAP-COVERAGE-AUDIT-YYYY-MM-DD.md + L4/L8 audit-layer memo
+// memory_l4_l8_gap_audit_mapping_*. The 13-gap table is hardcoded against
+// the latest published audit; future audits add a new constant
+// `GAPS_AS_OF_YYYY_MM_DD` so git log preserves audit-state evolution.
+// Design memo: docs/DESIGN-DREAM-GAP-AUDIT-2026-05-16.md.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum GapStatus {
+    Closed,
+    Shelved,
+    Partial,
+    Planned,
+    Untouched,
+}
+
+impl GapStatus {
+    fn icon(self) -> &'static str {
+        match self {
+            Self::Closed => "✅",
+            Self::Shelved => "🛑",
+            Self::Partial => "⚠",
+            Self::Planned => "⏳",
+            Self::Untouched => "⚪",
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct GapEntry {
+    id: &'static str,
+    layer: &'static str,
+    status: GapStatus,
+    text: &'static str,
+    last_touch: &'static str,
+    gate_opens: Option<&'static str>,
+    notes: &'static str,
+}
+
+/// Snapshot from the 2026-05-16 monthly audit + L4/L8 audit-layer memo.
+/// Update by adding a new constant + bumping `current_gap_baseline()`.
+const GAPS_AS_OF_2026_05_16: &[GapEntry] = &[
+    GapEntry {
+        id: "A1",
+        layer: "L5?",
+        status: GapStatus::Untouched,
+        text: "Forget what we worked on last week without explicit memory_save/search",
+        last_touch: "—",
+        gate_opens: None,
+        notes: "no ship attempted; def working",
+    },
+    GapEntry {
+        id: "A3",
+        layer: "L5",
+        status: GapStatus::Closed,
+        text: "User corrected me ten times; new session makes same mistake",
+        last_touch: "9383ca4 0f9ea7e a3af97a",
+        gate_opens: Some("2026-06-14"),
+        notes: "L5 v0 closed; L5-P1 30d window",
+    },
+    GapEntry {
+        id: "B1",
+        layer: "?",
+        status: GapStatus::Untouched,
+        text: "Lose track of multi-week project state (phase, open RFC, blocked-on-whom)",
+        last_touch: "—",
+        gate_opens: None,
+        notes: "no ship attempted; def working",
+    },
+    GapEntry {
+        id: "B2",
+        layer: "L5",
+        status: GapStatus::Closed,
+        text: "Judgment standards drift over months without me noticing",
+        last_touch: "9383ca4 0f9ea7e a3af97a",
+        gate_opens: Some("2026-06-14"),
+        notes: "L5 v0 closed (same ships as A3); long-window gate",
+    },
+    GapEntry {
+        id: "B3",
+        layer: "?",
+        status: GapStatus::Untouched,
+        text: "Redo design work that was already settled — can't locate prior decision",
+        last_touch: "—",
+        gate_opens: None,
+        notes: "no ship attempted; def working",
+    },
+    GapEntry {
+        id: "C1",
+        layer: "L6",
+        status: GapStatus::Shelved,
+        text: "Hallucination self-awareness — am I making things up?",
+        last_touch: "f9551b6 7fa9ff5 0ced487",
+        gate_opens: None,
+        notes: "3/3 FALSIFIED; §6.5 rule 3 shelve; raw observability mode",
+    },
+    GapEntry {
+        id: "C2",
+        layer: "L6",
+        status: GapStatus::Planned,
+        text: "Which tool results did I actually attend to vs ignore?",
+        last_touch: "—",
+        gate_opens: None,
+        notes: "P2 tool_call_attention_report ~1d; indep of C1; defer #7a37d28e",
+    },
+    GapEntry {
+        id: "C3",
+        layer: "L6",
+        status: GapStatus::Planned,
+        text: "Fatigue / context-pressure tracking — am I saturated?",
+        last_touch: "—",
+        gate_opens: None,
+        notes: "P3 context_pressure_estimate ~0.3d; indep of C1; defer #7a37d28e",
+    },
+    GapEntry {
+        id: "D1",
+        layer: "L8",
+        status: GapStatus::Closed,
+        text: "Don't reliably know what sibling sessions are doing in parallel",
+        last_touch: "0fac0f4 2b2e47b 8666119 3f71212 484e376",
+        gate_opens: None,
+        notes: "Closed via L8 C3 self-check set (audit-layer mapping)",
+    },
+    GapEntry {
+        id: "D2",
+        layer: "L8",
+        status: GapStatus::Partial,
+        text: "Decisions made by one session don't propagate without explicit forum post",
+        last_touch: "484e376 316193e",
+        gate_opens: None,
+        notes: "D2-G1 VIOLATED — cross-machine forum sync 17-post gap; peer-query workaround",
+    },
+    GapEntry {
+        id: "D3",
+        layer: "L8",
+        status: GapStatus::Closed,
+        text: "Concurrent edits collide — no coordination protocol",
+        last_touch: "0fac0f4 8666119 3f71212 484e376",
+        gate_opens: None,
+        notes: "Closed via L8 C3 S2-S6 self-checks",
+    },
+    GapEntry {
+        id: "E1",
+        layer: "L7",
+        status: GapStatus::Closed,
+        text: "Lessons-learned don't update behavior",
+        last_touch: "a7756bf e1911ad 35f34c5",
+        gate_opens: Some("2026-06-15"),
+        notes: "L7 v0 closed; L7-P1 30d window",
+    },
+    GapEntry {
+        id: "E2",
+        layer: "L7",
+        status: GapStatus::Closed,
+        text: "No \"getting better\" trajectory measurable across weeks",
+        last_touch: "a7756bf e1911ad 35f34c5",
+        gate_opens: Some("2026-07-11"),
+        notes: "L7 v0 closed; L7-P2 8-week Spearman gate",
+    },
+];
+
+fn current_gap_baseline() -> (&'static str, &'static [GapEntry]) {
+    ("2026-05-16", GAPS_AS_OF_2026_05_16)
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+struct GapStatusCounts {
+    closed: usize,
+    shelved: usize,
+    partial: usize,
+    planned: usize,
+    untouched: usize,
+}
+
+impl GapStatusCounts {
+    fn from_entries(entries: &[GapEntry]) -> Self {
+        let mut c = Self::default();
+        for e in entries {
+            match e.status {
+                GapStatus::Closed => c.closed += 1,
+                GapStatus::Shelved => c.shelved += 1,
+                GapStatus::Partial => c.partial += 1,
+                GapStatus::Planned => c.planned += 1,
+                GapStatus::Untouched => c.untouched += 1,
+            }
+        }
+        c
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct SectionalDelta {
+    prefix: String,
+    commit_count: usize,
+    commits: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct OutstandingGate {
+    gap_id: &'static str,
+    gate_label: String,
+    opens_iso: &'static str,
+    days_until: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct GapAuditReport {
+    generated_at_unix: u64,
+    baseline_date: &'static str,
+    since: String,
+    counts: GapStatusCounts,
+    gaps: Vec<GapEntry>,
+    sectional_delta: Vec<SectionalDelta>,
+    outstanding_gates: Vec<OutstandingGate>,
+}
+
+/// Days between an ISO `YYYY-MM-DD` date and `now`. Negative = past.
+fn iso_days_until_now(iso: &str, now_unix: u64) -> Option<i64> {
+    // Minimal ISO date parse — guards against bad input but doesn't
+    // depend on chrono.
+    let parts: Vec<&str> = iso.split('-').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let y: i64 = parts[0].parse().ok()?;
+    let m: i64 = parts[1].parse().ok()?;
+    let d: i64 = parts[2].parse().ok()?;
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    // Days-from-civil-epoch (Howard Hinnant's algorithm).
+    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let doy = (153 * m + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days_since_civil_epoch = era * 146097 + doe - 719468; // 1970-01-01
+    let target_unix = days_since_civil_epoch * 86400;
+    let now_days = (now_unix as i64) / 86400;
+    Some(days_since_civil_epoch - now_days)
+        .map(|d| {
+            // Recompute target days for cleaner reporting.
+            let _ = target_unix;
+            d
+        })
+}
+
+/// Build the gap-audit report against the canonical baseline. Pure aside
+/// from the `git log` subprocess (controlled args, no shell interp).
+fn gap_audit_baseline_report(since: &str) -> std::result::Result<GapAuditReport, String> {
+    let (baseline_date, entries) = current_gap_baseline();
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let counts = GapStatusCounts::from_entries(entries);
+    let gaps: Vec<GapEntry> = entries.to_vec();
+
+    // Sectional commit delta — parse `git log --since=<x> --oneline`.
+    let sectional_delta = git_log_sectional_delta(since)?;
+
+    // Outstanding gates: any entry with gate_opens in the future.
+    let mut outstanding: Vec<OutstandingGate> = Vec::new();
+    for e in entries {
+        if let Some(iso) = e.gate_opens {
+            if let Some(days) = iso_days_until_now(iso, now_unix) {
+                // Always include for visibility (negative => overdue).
+                let label = match (e.id, iso) {
+                    ("A3" | "B2", _) => format!("L5-P1 ({})", e.id),
+                    ("E1", _) => "L7-P1".to_string(),
+                    ("E2", _) => "L7-P2".to_string(),
+                    (id, _) => format!("{id}-Gate"),
+                };
+                outstanding.push(OutstandingGate {
+                    gap_id: e.id,
+                    gate_label: label,
+                    opens_iso: iso,
+                    days_until: days,
+                });
+            }
+        }
+    }
+    outstanding.sort_by_key(|g| g.days_until);
+
+    Ok(GapAuditReport {
+        generated_at_unix: now_unix,
+        baseline_date,
+        since: since.to_string(),
+        counts,
+        gaps,
+        sectional_delta,
+        outstanding_gates: outstanding,
+    })
+}
+
+/// Run `git log --since=<x> --oneline --no-decorate` in the current
+/// repo and group results by the conventional commit subject prefix
+/// (`feat(...)`, `docs(...)`, `chore(...)`, etc.). Errors if `git`
+/// isn't available or the cwd isn't a repo.
+fn git_log_sectional_delta(since: &str) -> std::result::Result<Vec<SectionalDelta>, String> {
+    use std::process::Command;
+    let out = Command::new("git")
+        .args(["log", "--no-decorate", "--oneline", "--since"])
+        .arg(since)
+        .output()
+        .map_err(|e| format!("spawn git log: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("git log non-zero: {}", err.trim()));
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    Ok(group_oneline_by_prefix(&stdout))
+}
+
+/// Group `git log --oneline` output by the `type(scope):` prefix.
+/// Pure — testable in isolation.
+fn group_oneline_by_prefix(oneline: &str) -> Vec<SectionalDelta> {
+    use std::collections::BTreeMap;
+    let mut buckets: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for line in oneline.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // <sha> <subject>
+        let Some((_sha, subject)) = line.split_once(' ') else {
+            continue;
+        };
+        // Extract `type(scope):` or `type:` prefix; fallback "uncategorized".
+        let prefix = extract_conventional_prefix(subject)
+            .unwrap_or_else(|| "uncategorized".to_string());
+        buckets
+            .entry(prefix)
+            .or_default()
+            .push(subject.to_string());
+    }
+    buckets
+        .into_iter()
+        .map(|(prefix, commits)| SectionalDelta {
+            prefix,
+            commit_count: commits.len(),
+            commits,
+        })
+        .collect()
+}
+
+/// Extract the `type(scope):` (or `type:`) prefix of a conventional
+/// commit subject. Returns `None` for free-form subjects.
+fn extract_conventional_prefix(subject: &str) -> Option<String> {
+    let colon = subject.find(':')?;
+    let head = &subject[..colon];
+    // Reject if `head` has spaces (no convention prefix).
+    if head.contains(' ') {
+        return None;
+    }
+    Some(format!("{head}:"))
+}
+
+async fn run_dream_gap_audit(since: &str, as_json: bool) -> Result<()> {
+    let report = gap_audit_baseline_report(since)
+        .map_err(|e| anyhow::anyhow!("gap_audit_baseline_report: {e}"))?;
+
+    if as_json {
+        let s = serde_json::to_string_pretty(&report)
+            .map_err(|e| anyhow::anyhow!("serde gap-audit json: {e}"))?;
+        println!("{s}");
+        return Ok(());
+    }
+
+    println!("════════════════════════════════════════════════════════════");
+    println!("  dream gap-audit — §6.5 rule 4 monthly cadence");
+    println!(
+        "  baseline: {} · since: {}",
+        report.baseline_date, report.since
+    );
+    println!("════════════════════════════════════════════════════════════");
+    println!();
+    println!("13-gap status (from monthly audit baseline):");
+    println!();
+    println!("| Gap | Layer | Status | Notes |");
+    println!("|---|---|---|---|");
+    for g in &report.gaps {
+        println!(
+            "| {} | {} | {} {:<9} | {} |",
+            g.id,
+            g.layer,
+            g.status.icon(),
+            format!("{:?}", g.status).to_lowercase(),
+            g.notes,
+        );
+    }
+    println!();
+    println!(
+        "Status counts: {} closed / {} shelved / {} partial / {} planned / {} untouched (total {})",
+        report.counts.closed,
+        report.counts.shelved,
+        report.counts.partial,
+        report.counts.planned,
+        report.counts.untouched,
+        report.gaps.len(),
+    );
+    println!();
+    println!("Sectional commit delta since {}:", report.since);
+    if report.sectional_delta.is_empty() {
+        println!("  (no commits in window)");
+    } else {
+        for s in &report.sectional_delta {
+            if s.commit_count == 0 {
+                continue;
+            }
+            println!("  {:<18} {:>3} commits", s.prefix, s.commit_count);
+        }
+        let total: usize = report.sectional_delta.iter().map(|s| s.commit_count).sum();
+        println!("  total: {total} in-scope ships");
+    }
+    println!();
+    println!("Outstanding falsifiability gates:");
+    if report.outstanding_gates.is_empty() {
+        println!("  (no future-dated gates registered)");
+    } else {
+        for g in &report.outstanding_gates {
+            let when = if g.days_until >= 0 {
+                format!("in {} days", g.days_until)
+            } else {
+                format!("{} days AGO (overdue)", -g.days_until)
+            };
+            println!("  {:<12} {:<12} {when}", g.gate_label, g.opens_iso);
+        }
+    }
+    println!();
+    println!("next monthly audit: 2026-06-15");
+
     Ok(())
 }
 
@@ -7191,5 +7694,120 @@ mod tests {
         assert_eq!(r.lessons_total, 2);
         assert_eq!(r.lessons_consulted, 2);
         assert!((r.consulted_ratio - 1.0).abs() < 1e-9);
+    }
+
+    // ── §6.5 rule 4 — gap-audit ───────────────────────────────────────
+
+    #[test]
+    fn gap_audit_table_has_13_entries() {
+        let (_, entries) = super::current_gap_baseline();
+        assert_eq!(entries.len(), 13, "13-gap inventory must have exactly 13 entries");
+        let mut ids: Vec<&str> = entries.iter().map(|e| e.id).collect();
+        ids.sort();
+        let expected = ["A1", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "D3", "E1", "E2"];
+        assert_eq!(ids, expected, "gap IDs must match canonical 13-set");
+    }
+
+    #[test]
+    fn gap_audit_status_counts_sum_to_13() {
+        let (_, entries) = super::current_gap_baseline();
+        let c = super::GapStatusCounts::from_entries(entries);
+        let total = c.closed + c.shelved + c.partial + c.planned + c.untouched;
+        assert_eq!(total, 13, "counts must sum to total entries");
+    }
+
+    #[test]
+    fn gap_audit_2026_05_16_snapshot_matches_audit_doc() {
+        // Pin the snapshot constants against the published monthly audit
+        // (commit 1b62e0d) so a future edit to the constants doesn't
+        // silently drift from the doc without a corresponding audit refresh.
+        let (_, entries) = super::current_gap_baseline();
+        let c = super::GapStatusCounts::from_entries(entries);
+        assert_eq!(c.closed, 6, "audit memo §revised tally: 6 closed (A3 B2 D1 D3 E1 E2)");
+        assert_eq!(c.shelved, 1, "1 shelved (C1)");
+        assert_eq!(c.partial, 1, "1 partial (D2 — sync gap)");
+        assert_eq!(c.planned, 2, "2 planned (C2 C3)");
+        assert_eq!(c.untouched, 3, "3 untouched (A1 B1 B3)");
+    }
+
+    #[test]
+    fn gap_audit_group_oneline_by_prefix_simple() {
+        let log = "\
+abc1234 feat(l5): P1 — boost
+def5678 feat(l5): P2 — correction
+ghi9012 feat(l7): P1 — reflect
+jkl3456 docs(infra): audit
+mno7890 chore(infra): cleanup
+pqr1357 random free-form subject without prefix
+";
+        let groups = super::group_oneline_by_prefix(log);
+        let by_prefix: std::collections::HashMap<String, usize> = groups
+            .iter()
+            .map(|g| (g.prefix.clone(), g.commit_count))
+            .collect();
+        assert_eq!(by_prefix.get("feat(l5):"), Some(&2));
+        assert_eq!(by_prefix.get("feat(l7):"), Some(&1));
+        assert_eq!(by_prefix.get("docs(infra):"), Some(&1));
+        assert_eq!(by_prefix.get("chore(infra):"), Some(&1));
+        // The free-form subject without `:` is grouped under "uncategorized".
+        // Subject "random free-form subject without prefix" has no colon
+        // before whitespace → falls through to uncategorized.
+        assert!(
+            by_prefix.contains_key("uncategorized"),
+            "free-form subject must be grouped under uncategorized"
+        );
+    }
+
+    #[test]
+    fn gap_audit_extract_prefix_handles_variants() {
+        assert_eq!(
+            super::extract_conventional_prefix("feat(l5): P1 boost").as_deref(),
+            Some("feat(l5):")
+        );
+        assert_eq!(
+            super::extract_conventional_prefix("docs: simple no-scope").as_deref(),
+            Some("docs:")
+        );
+        assert_eq!(
+            super::extract_conventional_prefix("no prefix at all"),
+            None,
+            "free-form (no colon before whitespace) must be None"
+        );
+        assert_eq!(
+            super::extract_conventional_prefix("Free form: not conventional"),
+            None,
+            "human prose containing colon must be rejected (head has space)"
+        );
+    }
+
+    #[test]
+    fn gap_audit_outstanding_gates_future_only_with_today_anchor() {
+        // Use a fixed `now` from the canonical audit baseline date to make
+        // this deterministic across CI clock drift. 2026-05-16 UTC midnight.
+        let now_unix: u64 = 1_778_975_200; // approx 2026-05-16 03:46 UTC
+        // L5-P1 opens 2026-06-14 → ~29 days from now (anchor day).
+        let days = super::iso_days_until_now("2026-06-14", now_unix).expect("valid iso");
+        assert!(
+            (28..=30).contains(&days),
+            "2026-06-14 should be ~29 days from 2026-05-16, got {days}"
+        );
+        // L7-P2 opens 2026-07-11 → ~56 days.
+        let d2 = super::iso_days_until_now("2026-07-11", now_unix).expect("valid iso");
+        assert!(
+            (54..=58).contains(&d2),
+            "2026-07-11 should be ~56 days from 2026-05-16, got {d2}"
+        );
+        // A past date → negative.
+        let d3 = super::iso_days_until_now("2026-01-01", now_unix).expect("valid iso");
+        assert!(d3 < 0, "past date must be negative, got {d3}");
+    }
+
+    #[test]
+    fn gap_audit_iso_parse_rejects_bad_input() {
+        let now: u64 = 1_700_000_000;
+        assert!(super::iso_days_until_now("not-a-date", now).is_none());
+        assert!(super::iso_days_until_now("2026-13-01", now).is_none(), "month 13 invalid");
+        assert!(super::iso_days_until_now("2026-05-32", now).is_none(), "day 32 invalid");
+        assert!(super::iso_days_until_now("2026-05", now).is_none(), "wrong arity");
     }
 }
