@@ -6344,7 +6344,7 @@ fn fnv1a_hex16(s: &str) -> String {
 /// Sanitise a target key for safe inclusion in a derived key:
 /// keep [A-Za-z0-9_-:], replace others with `_`, clamp length so the
 /// derived key stays under the storage cap with margin.
-fn sanitise_target_for_key(target: &str) -> String {
+pub fn sanitise_target_for_key(target: &str) -> String {
     let cleaned: String = target
         .chars()
         .map(|c| {
@@ -13882,7 +13882,7 @@ fn user_profile_path() -> PathBuf {
 /// Long-term destination for AiOT Seed `SelfModel` initialization (see
 /// `decision_aiot_seed_as_agent_continuity_substrate_20260503`); for now it
 /// is a plain Markdown file the agent maintains itself.
-fn agent_profile_path() -> PathBuf {
+pub fn agent_profile_path() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
         return PathBuf::from(xdg).join("agent-bridge").join("AGENT.md");
     }

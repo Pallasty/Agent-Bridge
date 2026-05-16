@@ -771,6 +771,32 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **L7 P2 — AGENT.md drift detector.** Scan recent `kind=lesson`
+    /// memories (last N days) and compare each to the current
+    /// `AGENT.md`. Lessons that aren't already substantially covered
+    /// by the durable preamble become `kind=l7_proposed_update`
+    /// memories so they surface in the next session's bootstrap as
+    /// review candidates. **Never auto-edits AGENT.md** — that stays
+    /// user-gated per the L7 design safety rule.
+    ///
+    /// Roadmap: `docs/AGENT-BRIDGE-CAPABILITY-ROADMAP-2026-05-15.md` §4.
+    AgentMdDrift {
+        /// Lookback window for the lesson scan. Default 14 days per
+        /// roadmap §4 spec.
+        #[arg(long, default_value_t = 14)]
+        window_days: u32,
+        /// Skip writing `l7_proposed_update` memories; print decisions
+        /// only. Useful for cron preview / inspection.
+        #[arg(long)]
+        dry_run: bool,
+        /// Override the AGENT.md path. Default
+        /// `~/.local/share/agent-bridge/AGENT.md`.
+        #[arg(long)]
+        agent_md_path: Option<PathBuf>,
+        /// Emit raw JSON of `AgentMdDriftReport` instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1426,6 +1452,20 @@ async fn main() -> Result<()> {
                 json,
             } => {
                 run_dream_substrate_corr_audit(*k, *min_cofires, snapshot_path.clone(), *json).await
+            }
+            DreamOp::AgentMdDrift {
+                window_days,
+                dry_run,
+                agent_md_path,
+                json,
+            } => {
+                run_dream_agent_md_drift(
+                    *window_days,
+                    *dry_run,
+                    agent_md_path.clone(),
+                    *json,
+                )
+                .await
             }
         };
     }
@@ -6326,6 +6366,216 @@ fn print_identity_section(cur: &ab_store::IdentityWindow, prior: &ab_store::Iden
     );
 }
 
+// ─── L7 P2 — AGENT.md drift detector ────────────────────────────────
+
+/// One drift candidate emitted by [`run_dream_agent_md_drift`].
+#[derive(Debug, serde::Serialize)]
+struct AgentMdDriftProposal {
+    lesson_key: String,
+    coverage_ratio: f64,
+    snippet: String,
+    proposal_key: String,
+    skipped: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct AgentMdDriftReport {
+    agent_md_path: String,
+    agent_md_bytes: usize,
+    window_days: u32,
+    lessons_scanned: usize,
+    covered: usize,
+    proposed: usize,
+    proposals: Vec<AgentMdDriftProposal>,
+    dry_run: bool,
+}
+
+/// L7 P2 — coverage threshold below which a lesson is considered NOT
+/// represented in AGENT.md. 0.30 means: if fewer than 30% of the
+/// lesson's distinctive tokens appear in AGENT.md, propose an update.
+const AGENT_MD_DRIFT_COVERAGE_THRESHOLD: f64 = 0.30;
+
+/// Tokenise text into lowercase alphanumeric tokens of length >= 4.
+/// Pure, no allocation beyond the returned set.
+fn drift_tokens(text: &str) -> std::collections::HashSet<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.chars().count() >= 4)
+        .map(|t| t.to_lowercase())
+        .collect()
+}
+
+/// Fraction of `lesson_tokens` that also appear in `preamble_tokens`.
+/// Returns 0.0 when `lesson_tokens` is empty (no signal to compare).
+fn drift_coverage_ratio(
+    lesson_tokens: &std::collections::HashSet<String>,
+    preamble_tokens: &std::collections::HashSet<String>,
+) -> f64 {
+    if lesson_tokens.is_empty() {
+        return 0.0;
+    }
+    let covered = lesson_tokens
+        .iter()
+        .filter(|t| preamble_tokens.contains(*t))
+        .count();
+    covered as f64 / lesson_tokens.len() as f64
+}
+
+async fn run_dream_agent_md_drift(
+    window_days: u32,
+    dry_run: bool,
+    agent_md_path_override: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    use ab_store::{default_db_path, MemoryListSort, MemoryRecord, SqliteStore, StateStore};
+
+    let agent_md_path = agent_md_path_override
+        .unwrap_or_else(ab_bridge::mcp_tools::agent_profile_path);
+    let agent_md_content = std::fs::read_to_string(&agent_md_path).unwrap_or_default();
+    let agent_md_bytes = agent_md_content.len();
+    let preamble_tokens = drift_tokens(&agent_md_content);
+
+    let db_path = default_db_path();
+    let store = SqliteStore::open(&db_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let cutoff = now_secs - (window_days as i64) * 86_400;
+
+    let all = store
+        .list_memories(Some("lesson"), MemoryListSort::Newest, 500)
+        .await
+        .map_err(|e| anyhow::anyhow!("list_memories: {e}"))?;
+    let recent: Vec<MemoryRecord> = all
+        .into_iter()
+        .filter(|r| r.status == "active" && r.created_at >= cutoff)
+        .collect();
+
+    let mut proposals: Vec<AgentMdDriftProposal> = Vec::new();
+    let mut covered = 0usize;
+    let mut proposed = 0usize;
+
+    for lesson in &recent {
+        let lesson_tokens = drift_tokens(&lesson.content);
+        let ratio = drift_coverage_ratio(&lesson_tokens, &preamble_tokens);
+        if ratio >= AGENT_MD_DRIFT_COVERAGE_THRESHOLD {
+            covered += 1;
+            continue;
+        }
+        // Stable derived key — same lesson → same proposal row (idempotent
+        // re-run = memory_save replaces). Stamp the rounded coverage so a
+        // newly-edited lesson body re-triggers without spamming the bucket.
+        let coverage_bucket = (ratio * 100.0).round() as i64;
+        let proposal_key = format!(
+            "l7_proposal:{}:cov{}",
+            ab_bridge::mcp_tools::sanitise_target_for_key(&lesson.key),
+            coverage_bucket
+        );
+        let snippet: String = lesson.content.chars().take(140).collect();
+
+        let written = if dry_run {
+            true // pretend; nothing actually persisted
+        } else {
+            let stored_content = format!(
+                "AGENT.md drift candidate (coverage {:.0}%): lesson `{}` is not yet \
+                 substantially represented in AGENT.md. Review and integrate by hand if \
+                 the behavior should become durable.\n\nLesson snippet:\n{}\n\n\
+                 Source key: {}",
+                ratio * 100.0,
+                lesson.key,
+                snippet,
+                lesson.key,
+            );
+            let mem = ab_store::MemoryRecord {
+                key: proposal_key.clone(),
+                kind: "l7_proposed_update".into(),
+                content: stored_content,
+                tags: vec![
+                    "l7".into(),
+                    "drift_proposal".into(),
+                    "needs_review".into(),
+                ],
+                related_keys: vec![lesson.key.clone()],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.7,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            };
+            store.memory_save(&mem).await.is_ok()
+        };
+        if !written {
+            continue;
+        }
+        proposed += 1;
+        proposals.push(AgentMdDriftProposal {
+            lesson_key: lesson.key.clone(),
+            coverage_ratio: ratio,
+            snippet,
+            proposal_key,
+            skipped: false,
+        });
+    }
+
+    let report = AgentMdDriftReport {
+        agent_md_path: agent_md_path.display().to_string(),
+        agent_md_bytes,
+        window_days,
+        lessons_scanned: recent.len(),
+        covered,
+        proposed,
+        proposals,
+        dry_run,
+    };
+
+    if as_json {
+        let s = serde_json::to_string_pretty(&report)
+            .map_err(|e| anyhow::anyhow!("serialize report: {e}"))?;
+        println!("{s}");
+        return Ok(());
+    }
+
+    println!("# AGENT.md Drift Report (L7 P2)");
+    println!("AGENT.md: {} ({} bytes)", report.agent_md_path, report.agent_md_bytes);
+    println!("window: {} days", report.window_days);
+    println!("lessons scanned: {}", report.lessons_scanned);
+    println!("  covered (≥{:.0}% token overlap): {}", AGENT_MD_DRIFT_COVERAGE_THRESHOLD * 100.0, report.covered);
+    println!(
+        "  proposed updates: {}{}",
+        report.proposed,
+        if report.dry_run { " (DRY RUN)" } else { "" }
+    );
+    if report.proposals.is_empty() {
+        println!();
+        println!("(no drift detected in window)");
+    } else {
+        println!();
+        for p in &report.proposals {
+            println!(
+                "  - {}  coverage={:.0}%  →  {}",
+                p.lesson_key,
+                p.coverage_ratio * 100.0,
+                p.proposal_key
+            );
+            println!("      {}", p.snippet);
+        }
+    }
+    println!();
+    println!(
+        "NOTE: proposals are surfaced via kind=l7_proposed_update memories. \
+         AGENT.md is NEVER auto-edited; review proposals and integrate by hand \
+         via session_finalize(agent_profile=...)."
+    );
+    Ok(())
+}
+
 /// Construct the shared backend bundle used by both modes.
 ///
 /// Relevant env vars:
@@ -6660,5 +6910,62 @@ mod tests {
         // `--alarm-threshold -10` shouldn't silently re-enable.
         assert!(!archive_alarm_should_fire(9999, 0, false));
         assert!(!archive_alarm_should_fire(9999, -1, false));
+    }
+
+    // ── L7 P2 — AGENT.md drift helpers (pure) ──────────────────────────
+
+    #[test]
+    fn drift_tokens_keeps_alnum_words_of_length_4_or_more() {
+        let s = "foo, bar! Buckhannon a be tail42 dot.path snake_case";
+        let toks = drift_tokens(s);
+        // Keeps: buckhannon, tail42, snake, case, path (≥4 chars,
+        // alphanumeric, lowercased). Drops: foo, bar (3 chars), a/be
+        // (<4), `dot.path` split on `.` then both halves checked
+        // individually (`path` keeps, `dot` drops). `snake_case` splits
+        // on `_` → snake + case.
+        assert!(toks.contains("buckhannon"));
+        assert!(toks.contains("tail42"));
+        assert!(toks.contains("snake"));
+        assert!(toks.contains("case"));
+        assert!(toks.contains("path"));
+        assert!(!toks.contains("foo"));
+        assert!(!toks.contains("bar"));
+        assert!(!toks.contains("dot"));
+    }
+
+    #[test]
+    fn drift_coverage_ratio_full_partial_zero_empty() {
+        use std::collections::HashSet;
+        let make = |words: &[&str]| -> HashSet<String> {
+            words.iter().map(|s| s.to_string()).collect()
+        };
+        // Full coverage: every lesson token appears in preamble.
+        let full = drift_coverage_ratio(
+            &make(&["alpha", "beta"]),
+            &make(&["alpha", "beta", "gamma"]),
+        );
+        assert!((full - 1.0).abs() < 1e-9);
+        // Half coverage.
+        let half = drift_coverage_ratio(
+            &make(&["alpha", "delta"]),
+            &make(&["alpha", "beta"]),
+        );
+        assert!((half - 0.5).abs() < 1e-9);
+        // Zero coverage.
+        let zero = drift_coverage_ratio(
+            &make(&["epsilon"]),
+            &make(&["alpha", "beta"]),
+        );
+        assert!(zero.abs() < 1e-9);
+        // Empty lesson → 0 by convention.
+        let empty = drift_coverage_ratio(&HashSet::new(), &make(&["x"]));
+        assert!(empty.abs() < 1e-9);
+    }
+
+    #[test]
+    fn drift_coverage_threshold_constant_is_30_percent() {
+        // Pin the v0 threshold — bumping it changes report semantics
+        // and should be a coordinated commit, not a silent drift.
+        assert!((AGENT_MD_DRIFT_COVERAGE_THRESHOLD - 0.30).abs() < 1e-9);
     }
 }
