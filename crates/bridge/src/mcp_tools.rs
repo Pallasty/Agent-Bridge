@@ -9,6 +9,7 @@ use ab_store::{
     // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
     CompactPolicy,
     ImportConflictPolicy,
+    MemoryCosineHit,
     MemoryExportFilter,
     MemoryListSort,
     MemoryQueryRecord,
@@ -9222,19 +9223,268 @@ impl McpTool for SubstrateNeighborsTool {
 // ===========================================================================
 //
 // Maps to `docs/AGENT-BRIDGE-CAPABILITY-ROADMAP-2026-05-15.md` §3 L6 first
-// ship. Returns the top-K pure-cosine matches for a query (no importance/
-// recency blending) plus a `novelty_score = 1 - max(cosine)` and a boolean
-// `likely_unsupported` warning when the score crosses the threshold. The
-// design choice matters: a high novelty score does NOT mean "you will
-// hallucinate" — it means "you have no nearby memory to support a
-// confident answer". The caller decides what to do with that signal
-// (down-rank, refuse, force-search-tool, ask user). This tool is the
-// metric, not the policy.
+// ship. Returns the top-K pure-cosine matches for a query plus, when an
+// LLM is configured, a Stage-2 semantic relevance probe ("Option E") that
+// produces a continuous `probability_grounded` in [0, 1]. The v0 fields
+// (`novelty_score`, `likely_unsupported`) remain in the response for
+// backward compatibility; `likely_unsupported` now means
+// `probability_grounded < threshold`.
 //
-// Implementation is Seed-independent: uses existing ONNX/hash embeddings
-// + cosine. If AiOT later validates Seed substrate and we want to swap
-// the novelty source to `trailing_surprise_mean_long`, the MCP surface
-// stays identical and only the internal computation changes.
+// Option E design — `docs/L6-OPTION-E-DESIGN-2026-05-16.md` (commit `d7b112b`).
+// Pre-conditions for the reframe are documented at thread 11 posts #160
+// (proposal), #170 (sibling buy-in), #178 (owner claim), #180 (design memo).
+//
+// Implementation is Seed-independent: uses existing ONNX/hash embeddings +
+// cosine for Stage 1. Stage 2 is one batched LLM call rating each top-K
+// hit {0,1,2} with required verbatim quotes; quote presence is verified
+// via substring match against the doc body. Aggregated score is
+// `sum(verified_score) / (k * 2)`.
+
+const OPTION_E_DEFAULT_THRESHOLD: f32 = 0.4;
+const OPTION_E_DEFAULT_MAX_PER_HOUR: u32 = 30;
+const OPTION_E_DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";
+const OPTION_E_MAX_OUTPUT_TOKENS: u32 = 400;
+const OPTION_E_DOC_BODY_TRUNCATE: usize = 1200;
+
+#[derive(Debug, Clone)]
+pub struct OptionEDocBreakdown {
+    pub key: String,
+    pub kind: String,
+    pub cosine: f32,
+    pub score_raw: u8,
+    pub quote: Option<String>,
+    pub quote_verified: bool,
+    pub score_after_verify: u8,
+}
+
+#[derive(Debug, Clone)]
+pub struct OptionEResult {
+    pub probability_grounded: f32,
+    pub per_doc: Vec<OptionEDocBreakdown>,
+    pub llm_input_tokens: u32,
+    pub llm_output_tokens: u32,
+    pub llm_latency_ms: u128,
+    pub model_used: String,
+    pub provider_used: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct OptionELlmDocsBlob {
+    docs: Vec<OptionELlmDocScore>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct OptionELlmDocScore {
+    #[allow(dead_code)]
+    id: u32,
+    score: u8,
+    quote: Option<String>,
+}
+
+/// Build (system, user) prompts for the Stage-2 relevance probe.
+/// Pure — no I/O; testable in isolation.
+pub(crate) fn option_e_build_prompt(query: &str, hits: &[MemoryCosineHit]) -> (String, String) {
+    let system = "You judge how directly each document addresses a query. \
+You do NOT verify facts; you score topical and content relevance only.\n\n\
+For each document, output:\n\
+- score: 0 (unrelated), 1 (tangential), 2 (directly addresses)\n\
+- quote: REQUIRED if score >= 1. Copy a verbatim span from that specific \
+document that demonstrates the relevance. The span must be present in the \
+document text exactly. If you cannot find a verbatim span that justifies \
+score >= 1, set score to 0.\n\n\
+Output strict JSON only, no prose: \
+{\"docs\": [{\"id\": 1, \"score\": 0|1|2, \"quote\": \"...\"|null}, ...]}".to_string();
+
+    let mut user = format!("Query: {query}\n\nDocuments:\n");
+    for (i, h) in hits.iter().enumerate() {
+        let key_trunc: String = h.record.key.chars().take(32).collect();
+        let body_trunc: String = h
+            .record
+            .content
+            .chars()
+            .take(OPTION_E_DOC_BODY_TRUNCATE)
+            .collect();
+        user.push_str(&format!(
+            "\n[{}] (kind={}, key={})\n{}\n",
+            i + 1,
+            h.record.kind,
+            key_trunc,
+            body_trunc
+        ));
+    }
+    user.push_str("\nReturn JSON now.");
+    (system, user)
+}
+
+/// Parse the LLM relevance response. Strips ```json fences. Returns an
+/// error if JSON is malformed, count doesn't match, or any score > 2.
+/// Pure — testable in isolation.
+pub(crate) fn option_e_parse_response(
+    text: &str,
+    expected_count: usize,
+) -> std::result::Result<Vec<(u8, Option<String>)>, String> {
+    let cleaned = text.trim();
+    let cleaned = cleaned
+        .strip_prefix("```json")
+        .or_else(|| cleaned.strip_prefix("```"))
+        .unwrap_or(cleaned);
+    let cleaned = cleaned.strip_suffix("```").unwrap_or(cleaned).trim();
+
+    let blob: OptionELlmDocsBlob = serde_json::from_str(cleaned)
+        .map_err(|e| format!("parse JSON: {e}"))?;
+    if blob.docs.len() != expected_count {
+        return Err(format!(
+            "expected {expected_count} doc scores, got {}",
+            blob.docs.len()
+        ));
+    }
+    for d in &blob.docs {
+        if d.score > 2 {
+            return Err(format!("doc {} has invalid score {}", d.id, d.score));
+        }
+    }
+    Ok(blob.docs.into_iter().map(|d| (d.score, d.quote)).collect())
+}
+
+/// Substring presence check (case-sensitive). Empty quote → not verified.
+/// Pure — testable in isolation.
+pub(crate) fn option_e_verify_quote(quote: &str, doc_body: &str) -> bool {
+    let q = quote.trim();
+    if q.is_empty() {
+        return false;
+    }
+    doc_body.contains(q)
+}
+
+/// Aggregate `probability_grounded = sum(score_after_verify) / (k * 2)`.
+/// Empty input → 0.0. Pure.
+pub(crate) fn option_e_aggregate(per_doc: &[OptionEDocBreakdown]) -> f32 {
+    if per_doc.is_empty() {
+        return 0.0;
+    }
+    let sum: u32 = per_doc.iter().map(|d| d.score_after_verify as u32).sum();
+    let max_possible = (per_doc.len() as u32) * 2;
+    if max_possible == 0 {
+        return 0.0;
+    }
+    sum as f32 / max_possible as f32
+}
+
+#[derive(Default, Debug)]
+struct OptionERateState {
+    bucket_start_unix: u64,
+    bucket_count: u32,
+}
+
+static OPTION_E_RATE_LIMITER: std::sync::OnceLock<std::sync::Mutex<OptionERateState>> =
+    std::sync::OnceLock::new();
+
+/// Returns `true` if a call is allowed and the counter has been
+/// incremented; `false` if the per-hour ceiling has been hit. Reads the
+/// env var on each call so tests can override.
+pub(crate) fn option_e_rate_check_and_bump() -> bool {
+    let max_per_hour = std::env::var("AB_INTROSPECT_LLM_MAX_PER_HOUR")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(OPTION_E_DEFAULT_MAX_PER_HOUR);
+    let lock = OPTION_E_RATE_LIMITER
+        .get_or_init(|| std::sync::Mutex::new(OptionERateState::default()));
+    let mut state = lock.lock().expect("rate state mutex poisoned");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if now.saturating_sub(state.bucket_start_unix) >= 3600 {
+        state.bucket_start_unix = now;
+        state.bucket_count = 0;
+    }
+    if state.bucket_count >= max_per_hour {
+        return false;
+    }
+    state.bucket_count += 1;
+    true
+}
+
+/// Reset the rate limiter — test-only helper.
+#[cfg(test)]
+pub(crate) fn option_e_rate_reset() {
+    let lock = OPTION_E_RATE_LIMITER
+        .get_or_init(|| std::sync::Mutex::new(OptionERateState::default()));
+    let mut state = lock.lock().expect("rate state mutex poisoned");
+    *state = OptionERateState::default();
+}
+
+/// Run the Stage-2 relevance probe against an LLM. Returns
+/// `OptionEResult` on success. Caller should treat any error as
+/// "degraded — fall back to v0 novelty path".
+pub async fn option_e_run(
+    query: &str,
+    hits: &[MemoryCosineHit],
+    llm_client: &crate::llm_client::LlmClient,
+) -> Result<OptionEResult> {
+    // Model precedence: AB_INTROSPECT_LLM_MODEL (explicit) → provider default
+    // from LlmClient (portable across protocols). The hardcoded
+    // OPTION_E_DEFAULT_MODEL is documentation only — actual default is
+    // whatever LlmClient picks for its primary provider.
+    let _ = OPTION_E_DEFAULT_MODEL;
+    let model_env = std::env::var("AB_INTROSPECT_LLM_MODEL").ok();
+    let model_owned = model_env
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| llm_client.default_model());
+    let model = model_owned.as_str();
+
+    let (system, user) = option_e_build_prompt(query, hits);
+    let messages = vec![crate::llm_client::Message {
+        role: "user".to_string(),
+        content: user,
+    }];
+
+    let t0 = std::time::Instant::now();
+    let resp = llm_client
+        .messages_create(model, Some(&system), &messages, OPTION_E_MAX_OUTPUT_TOKENS)
+        .await
+        .map_err(|e| ab_core::Error::Backend(format!("option_e LLM call: {e}")))?;
+    let latency_ms = t0.elapsed().as_millis();
+
+    let scores = option_e_parse_response(&resp.text, hits.len())
+        .map_err(|e| ab_core::Error::Backend(format!("option_e parse: {e}")))?;
+
+    let mut per_doc = Vec::with_capacity(hits.len());
+    for (i, h) in hits.iter().enumerate() {
+        let (score_raw, quote) = scores[i].clone();
+        let (score_after_verify, quote_verified) = if score_raw == 0 {
+            (0u8, false)
+        } else {
+            // claimed score >= 1: requires a verbatim, substring-verified quote
+            let has_q = quote.as_ref().map(|q| !q.trim().is_empty()).unwrap_or(false);
+            if has_q && option_e_verify_quote(quote.as_ref().unwrap(), &h.record.content) {
+                (score_raw, true)
+            } else {
+                (1, false) // cap to 1 if quote missing or substring miss
+            }
+        };
+        per_doc.push(OptionEDocBreakdown {
+            key: h.record.key.clone(),
+            kind: h.record.kind.clone(),
+            cosine: h.cosine,
+            score_raw,
+            quote,
+            quote_verified,
+            score_after_verify,
+        });
+    }
+
+    let probability_grounded = option_e_aggregate(&per_doc);
+    Ok(OptionEResult {
+        probability_grounded,
+        per_doc,
+        llm_input_tokens: resp.input_tokens,
+        llm_output_tokens: resp.output_tokens,
+        llm_latency_ms: latency_ms,
+        model_used: model.to_string(),
+        provider_used: llm_client.provider().to_string(),
+    })
+}
 
 pub struct IntrospectRecallTool {
     hub: Hub,
@@ -9255,19 +9505,25 @@ impl McpTool for IntrospectRecallTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "L6 metacognition probe — given a `query`, return the top-K active \
-                          memories ranked by pure cosine similarity (no importance/recency \
-                          blending) and a `novelty_score = 1 - max(cosine)`. When \
-                          `novelty_score >= threshold` (default 0.7), `likely_unsupported = \
-                          true` signals the caller has no nearby memory to ground a \
-                          confident answer on — useful for hallucination self-checks before \
-                          an opinionated reply. Reads from the local store only; never \
-                          writes. Returns `{novelty_score, likely_unsupported, threshold, \
-                          top_k_count, hits:[{key, kind, cosine, content_preview}]}`. \
-                          Designed to be cheap (one embed + cosine sweep over active rows). \
-                          Backend-agnostic: today uses the same embeddings as memory_search \
-                          semantic mode; future Seed-substrate surprise integration is a \
-                          drop-in replacement of the internal score source."
+            description: "L6 metacognition probe with Option E semantic relevance scoring. \
+                          Stage 1: returns top-K active memories ranked by pure cosine \
+                          similarity (no importance/recency blending) plus `novelty_score \
+                          = 1 - max(cosine)` (v0 backward-compat). Stage 2 (when an LLM is \
+                          configured via ANTHROPIC_API_KEY / OPENAI_API_KEY): one batched \
+                          LLM call rates each top-K doc {0,1,2} with required verbatim \
+                          quotes (substring-verified against doc body); `probability_grounded \
+                          = sum(verified_score) / (k * 2)` continuous in [0,1]. \
+                          `likely_unsupported = probability_grounded < threshold` (default \
+                          0.4) when Stage 2 succeeds, else falls back to `novelty_score >= \
+                          threshold`. `degraded: true` indicates the LLM probe failed or \
+                          was rate-limited (env `AB_INTROSPECT_LLM_MAX_PER_HOUR`, default \
+                          30). Returns `{query, probability_grounded?, novelty_score, \
+                          likely_unsupported, threshold, top_k_count, degraded, per_doc?: \
+                          [{key, kind, cosine, score, quote, quote_verified, \
+                          score_after_verify}], llm?: {model, provider, input_tokens, \
+                          output_tokens, latency_ms}, hits:[{key, kind, cosine, \
+                          content_preview}]}`. Reads only; never writes. See \
+                          docs/L6-OPTION-E-DESIGN-2026-05-16.md."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -9281,14 +9537,14 @@ impl McpTool for IntrospectRecallTool {
                         "default": 5,
                         "minimum": 1,
                         "maximum": 50,
-                        "description": "Top-K cosine matches to inspect. Default 5 (max-of-top-K becomes the novelty anchor)."
+                        "description": "Top-K cosine matches to inspect. Default 5."
                     },
                     "threshold": {
                         "type": "number",
-                        "default": 0.7,
+                        "default": 0.4,
                         "minimum": 0.0,
                         "maximum": 1.0,
-                        "description": "Novelty cutoff. likely_unsupported = (novelty_score >= threshold)."
+                        "description": "Grounding cutoff. With Option E: likely_unsupported = (probability_grounded < threshold). v0 fallback: likely_unsupported = (novelty_score >= threshold) — default flips from 0.7 (v0 novelty) to 0.4 (v0.5 grounded). Pass explicit threshold for v0 backward-compat semantics."
                     },
                     "content_preview_chars": {
                         "type": "integer",
@@ -9296,6 +9552,11 @@ impl McpTool for IntrospectRecallTool {
                         "minimum": 0,
                         "maximum": 2000,
                         "description": "Per-hit content preview length. 0 disables the preview field."
+                    },
+                    "skip_llm_probe": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, skip the Option E LLM relevance call and only return Stage-1 cosine results. Useful for cheap repeated probes or when an LLM is not configured."
                     }
                 },
                 "required": ["query"]
@@ -9313,16 +9574,22 @@ impl McpTool for IntrospectRecallTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(5)
             .clamp(1, 50) as u32;
+        // Default threshold flipped from v0 (0.7 novelty cutoff) to 0.4
+        // (Option E grounding cutoff). Caller can pass explicit value.
         let threshold = args
             .get("threshold")
             .and_then(|v| v.as_f64())
-            .unwrap_or(0.7)
+            .unwrap_or(OPTION_E_DEFAULT_THRESHOLD as f64)
             .clamp(0.0, 1.0) as f32;
         let preview_chars = args
             .get("content_preview_chars")
             .and_then(|v| v.as_u64())
             .unwrap_or(160)
             .min(2000) as usize;
+        let skip_llm_probe = args
+            .get("skip_llm_probe")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let store = match &self.hub.store {
             Some(s) => s.clone(),
@@ -9334,14 +9601,67 @@ impl McpTool for IntrospectRecallTool {
             .await
             .map_err(|e| ab_core::Error::Backend(format!("introspect_recall: {e}")))?;
 
-        let max_cosine = hits.iter().map(|h| h.cosine).fold(f32::NEG_INFINITY, f32::max);
+        let max_cosine = hits
+            .iter()
+            .map(|h| h.cosine)
+            .fold(f32::NEG_INFINITY, f32::max);
         // Treat "no hits at all" (empty store / no embeddings) as max-novelty.
         let novelty_score = if hits.is_empty() {
             1.0_f32
         } else {
             (1.0 - max_cosine).clamp(0.0, 1.0)
         };
-        let likely_unsupported = novelty_score >= threshold;
+
+        // Stage-2 Option E LLM relevance probe.
+        let mut option_e_result: Option<OptionEResult> = None;
+        let mut degraded = false;
+        let mut degraded_reason: Option<String> = None;
+        if !skip_llm_probe && !hits.is_empty() {
+            if !option_e_rate_check_and_bump() {
+                degraded = true;
+                degraded_reason = Some("rate_limit".to_string());
+            } else {
+                match crate::llm_client::LlmClient::from_env() {
+                    Err(e) => {
+                        degraded = true;
+                        degraded_reason = Some(format!("llm_client_from_env: {e}"));
+                    }
+                    Ok(client) => match option_e_run(&query, &hits, &client).await {
+                        Ok(r) => {
+                            option_e_result = Some(r);
+                        }
+                        Err(e) => {
+                            degraded = true;
+                            degraded_reason = Some(format!("option_e_run: {e}"));
+                            tracing::warn!(
+                                target: "introspect_recall",
+                                error = %e,
+                                "Option E probe failed; falling back to v0 novelty signal"
+                            );
+                        }
+                    },
+                }
+            }
+        } else if skip_llm_probe {
+            degraded = true;
+            degraded_reason = Some("skip_llm_probe".to_string());
+        } else if hits.is_empty() {
+            degraded = true;
+            degraded_reason = Some("no_hits".to_string());
+        }
+
+        // Compose `likely_unsupported` from whichever signal is available.
+        let (probability_grounded_v, likely_unsupported) = match &option_e_result {
+            Some(r) => (Some(r.probability_grounded), r.probability_grounded < threshold),
+            None => (
+                None,
+                // v0 fallback semantics: caller may have passed a v0-style
+                // novelty threshold (0.7); treat threshold-as-novelty here.
+                // For default 0.4, that fires more often → degraded callers
+                // are urged to set explicit threshold for v0 semantics.
+                novelty_score >= threshold,
+            ),
+        };
 
         let hits_json: Vec<Value> = hits
             .iter()
@@ -9361,14 +9681,48 @@ impl McpTool for IntrospectRecallTool {
             })
             .collect();
 
-        Ok(ToolResult::json_text(&json!({
+        let mut out = json!({
             "query": query,
             "novelty_score": novelty_score,
             "likely_unsupported": likely_unsupported,
             "threshold": threshold,
             "top_k_count": hits.len(),
+            "degraded": degraded,
             "hits": hits_json,
-        })))
+        });
+        if let Some(prob) = probability_grounded_v {
+            out["probability_grounded"] = json!(prob);
+        }
+        if let Some(reason) = degraded_reason {
+            out["degraded_reason"] = json!(reason);
+        }
+        if let Some(r) = &option_e_result {
+            let per_doc: Vec<Value> = r
+                .per_doc
+                .iter()
+                .map(|d| {
+                    json!({
+                        "key": d.key,
+                        "kind": d.kind,
+                        "cosine": d.cosine,
+                        "score": d.score_raw,
+                        "quote": d.quote,
+                        "quote_verified": d.quote_verified,
+                        "score_after_verify": d.score_after_verify,
+                    })
+                })
+                .collect();
+            out["per_doc"] = json!(per_doc);
+            out["llm"] = json!({
+                "model": r.model_used,
+                "provider": r.provider_used,
+                "input_tokens": r.llm_input_tokens,
+                "output_tokens": r.llm_output_tokens,
+                "latency_ms": r.llm_latency_ms,
+            });
+        }
+
+        Ok(ToolResult::json_text(&out))
     }
 }
 
@@ -16810,5 +17164,155 @@ mod tests {
         assert_eq!(k1, k2, "same input → same derived key");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // ── L6 Option E — pure helpers + rate limiter ────────────────────────
+
+    fn option_e_test_hit(key: &str, content: &str, cosine: f32) -> MemoryCosineHit {
+        MemoryCosineHit {
+            record: ab_store::MemoryRecord {
+                key: key.into(),
+                kind: "lesson".into(),
+                content: content.into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            },
+            cosine,
+        }
+    }
+
+    #[test]
+    fn option_e_prompt_includes_all_k_docs_and_query() {
+        let hits = vec![
+            option_e_test_hit("k1", "alpha body content", 0.9),
+            option_e_test_hit("k2", "bravo body content", 0.7),
+            option_e_test_hit("k3", "charlie body content", 0.5),
+        ];
+        let (system, user) = option_e_build_prompt("how does X work", &hits);
+        assert!(system.contains("score"), "system must mention scoring");
+        assert!(system.contains("verbatim"), "system must require quote");
+        assert!(user.contains("how does X work"), "user must echo query");
+        for h in &hits {
+            assert!(
+                user.contains(&h.record.key),
+                "user prompt must include doc key {}",
+                h.record.key
+            );
+            // We only assert the first identifying token of the body shows up.
+            let first_word = h.record.content.split_whitespace().next().unwrap();
+            assert!(
+                user.contains(first_word),
+                "user prompt must include doc body token {first_word}"
+            );
+        }
+    }
+
+    #[test]
+    fn option_e_parser_happy_path() {
+        let txt = r#"{"docs":[{"id":1,"score":2,"quote":"foo bar"},{"id":2,"score":0,"quote":null}]}"#;
+        let parsed = option_e_parse_response(txt, 2).expect("happy parse");
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].0, 2);
+        assert_eq!(parsed[0].1.as_deref(), Some("foo bar"));
+        assert_eq!(parsed[1].0, 0);
+        assert!(parsed[1].1.is_none());
+    }
+
+    #[test]
+    fn option_e_parser_strips_code_fence() {
+        let txt = "```json\n{\"docs\":[{\"id\":1,\"score\":1,\"quote\":\"x\"}]}\n```";
+        let parsed = option_e_parse_response(txt, 1).expect("fenced parse");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].0, 1);
+    }
+
+    #[test]
+    fn option_e_parser_count_mismatch_errors() {
+        let txt = r#"{"docs":[{"id":1,"score":2,"quote":"x"}]}"#;
+        let err = option_e_parse_response(txt, 3).expect_err("count mismatch");
+        assert!(err.contains("expected 3"), "must report expected count, got: {err}");
+    }
+
+    #[test]
+    fn option_e_parser_invalid_score_errors() {
+        let txt = r#"{"docs":[{"id":1,"score":5,"quote":"x"}]}"#;
+        let err = option_e_parse_response(txt, 1).expect_err("invalid score");
+        assert!(err.contains("invalid score"), "must flag invalid score, got: {err}");
+    }
+
+    #[test]
+    fn option_e_parser_malformed_json_errors() {
+        let err = option_e_parse_response("not json at all", 1).expect_err("garbage");
+        assert!(err.contains("parse JSON"), "must report parse err, got: {err}");
+    }
+
+    #[test]
+    fn option_e_quote_verify_substring_present() {
+        let body = "the quick brown fox jumps over the lazy dog";
+        assert!(option_e_verify_quote("brown fox", body), "substring present");
+        assert!(option_e_verify_quote("the lazy dog", body), "tail substring");
+    }
+
+    #[test]
+    fn option_e_quote_verify_substring_miss() {
+        let body = "the quick brown fox jumps over the lazy dog";
+        assert!(!option_e_verify_quote("purple elephant", body), "absent substring");
+        assert!(!option_e_verify_quote("", body), "empty quote");
+        assert!(!option_e_verify_quote("   ", body), "whitespace-only quote");
+    }
+
+    #[test]
+    fn option_e_aggregate_math() {
+        // Empty → 0.
+        assert_eq!(option_e_aggregate(&[]), 0.0);
+
+        let mk = |s: u8| OptionEDocBreakdown {
+            key: "k".into(),
+            kind: "lesson".into(),
+            cosine: 0.5,
+            score_raw: s,
+            quote: None,
+            quote_verified: false,
+            score_after_verify: s,
+        };
+
+        // 5 docs all max (2) → sum=10, max=10, p=1.0
+        let all_2: Vec<_> = (0..5).map(|_| mk(2)).collect();
+        assert!((option_e_aggregate(&all_2) - 1.0).abs() < 1e-6, "all 2 → 1.0");
+
+        // 5 docs all 0 → 0
+        let all_0: Vec<_> = (0..5).map(|_| mk(0)).collect();
+        assert_eq!(option_e_aggregate(&all_0), 0.0);
+
+        // Mixed: scores [2, 1, 0, 1, 0] → sum=4, max=10, p=0.4
+        let mixed = vec![mk(2), mk(1), mk(0), mk(1), mk(0)];
+        let p = option_e_aggregate(&mixed);
+        assert!((p - 0.4).abs() < 1e-6, "mixed must aggregate to 0.4, got {p}");
+    }
+
+    #[test]
+    fn option_e_rate_limit_first_n_allowed_then_blocks() {
+        // Run with an isolated low ceiling, exercising the per-hour bucket
+        // limit. We use env_var override to set the ceiling to 3, reset the
+        // bucket, then verify 3 calls succeed and the 4th is blocked.
+        std::env::set_var("AB_INTROSPECT_LLM_MAX_PER_HOUR", "3");
+        option_e_rate_reset();
+        assert!(option_e_rate_check_and_bump(), "1st allowed");
+        assert!(option_e_rate_check_and_bump(), "2nd allowed");
+        assert!(option_e_rate_check_and_bump(), "3rd allowed");
+        assert!(!option_e_rate_check_and_bump(), "4th blocked");
+        assert!(!option_e_rate_check_and_bump(), "5th blocked");
+        // Cleanup so other tests don't observe the override.
+        std::env::remove_var("AB_INTROSPECT_LLM_MAX_PER_HOUR");
+        option_e_rate_reset();
     }
 }
