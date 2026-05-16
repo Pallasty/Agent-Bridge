@@ -409,6 +409,9 @@ enabled = true
 startup_timeout_sec = 20
 tool_timeout_sec = 300
 supports_parallel_tool_calls = false
+
+[mcp_servers.agent-bridge.env]
+AGENT_BRIDGE_TOOL_PROFILE = "essential"
 "#,
         escape_toml_basic_string(&bin_dst.display().to_string())
     );
@@ -501,8 +504,10 @@ fn replace_toml_table(raw: &str, table: &str, block: &str) -> String {
             replaced = true;
 
             for next in lines.by_ref() {
-                let trimmed = next.trim_start();
-                if trimmed.starts_with('[') {
+                if let Some(next_table) = toml_table_name(next) {
+                    if next_table == table || next_table.starts_with(&format!("{table}.")) {
+                        continue;
+                    }
                     out.push('\n');
                     out.push_str(next);
                     out.push('\n');
@@ -529,6 +534,15 @@ fn replace_toml_table(raw: &str, table: &str, block: &str) -> String {
     out.push_str(block.trim_end());
     out.push('\n');
     out
+}
+
+fn toml_table_name(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let inner = trimmed.strip_prefix('[')?.strip_suffix(']')?.trim();
+    if inner.is_empty() || inner.starts_with('[') || inner.ends_with(']') {
+        return None;
+    }
+    Some(inner)
 }
 
 /// Read `~/.claude/settings.json`, add our three hooks if absent, write back.
@@ -689,15 +703,26 @@ model = \"gpt-5.5\"
 command = \"old\"
 args = [\"mcp\"]
 
+[mcp_servers.agent-bridge.env]
+AGENT_BRIDGE_TOOL_PROFILE = \"all\"
+
 [plugins.example]
 enabled = true
 ";
-        let block = "[mcp_servers.agent-bridge]\ncommand = \"new\"\n";
+        let block = "\
+[mcp_servers.agent-bridge]
+command = \"new\"
+
+[mcp_servers.agent-bridge.env]
+AGENT_BRIDGE_TOOL_PROFILE = \"essential\"
+";
 
         let out = replace_toml_table(raw, "mcp_servers.agent-bridge", block);
 
         assert!(out.contains("[mcp_servers.agent-bridge]\ncommand = \"new\""));
         assert!(!out.contains("command = \"old\""));
+        assert!(!out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"all\""));
+        assert!(out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"essential\""));
         assert!(out.contains("[plugins.example]\nenabled = true"));
     }
 

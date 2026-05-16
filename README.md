@@ -238,6 +238,9 @@ enabled = true
 startup_timeout_sec = 20
 tool_timeout_sec = 300
 supports_parallel_tool_calls = false
+
+[mcp_servers.agent-bridge.env]
+AGENT_BRIDGE_TOOL_PROFILE = "essential"
 ```
 
 The command path is written as the expanded absolute path on your
@@ -246,6 +249,9 @@ macOS.
 
 `supports_parallel_tool_calls` is deliberately false because
 agent-bridge tools share SQLite, browser, and terminal state.
+The Codex profile defaults `AGENT_BRIDGE_TOOL_PROFILE` to `essential`
+so GPT/Codex sees a compact high-signal tool surface; set it to
+`standard` or `all` manually when you need the full registry.
 
 Codex does not have analogues for the Claude Code `UserPromptSubmit /
 Stop / PreCompact` hook events, so the `setup --frontend codex`
@@ -380,7 +386,7 @@ Codex profile (`--frontend codex`):
 | Binary | Copies itself to `~/.local/bin/agent-bridge` |
 | Hook scripts | **Skipped** — Codex has no equivalent hook events |
 | Curator settings | **Skipped** — only consumed by `ab-precompact-hook.sh` |
-| Settings file | Merges `[mcp_servers.agent-bridge]` into `~/.codex/config.toml` |
+| Settings file | Merges `[mcp_servers.agent-bridge]` into `~/.codex/config.toml` with `AGENT_BRIDGE_TOOL_PROFILE=essential` |
 
 Gemini CLI profile (`--frontend gemini-cli`):
 

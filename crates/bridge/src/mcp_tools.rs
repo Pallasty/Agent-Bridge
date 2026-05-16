@@ -13489,16 +13489,15 @@ impl McpTool for BraveWebSearchTool {
 
 /// Per-tool surface-area tier for `AGENT_BRIDGE_TOOL_PROFILE` filtering.
 ///
-/// Claude Code (and similar MCP clients) cap the live tool list at ~64
-/// across *all* configured MCP servers. With agent-bridge alone registering
-/// 69 tools today, that cap was getting hit and clients silently dropped
-/// 5–20 tools at startup. Tiers let us keep the most-used 40-ish in the
-/// default registration and gate the rest behind an env flag.
+/// Some MCP clients cap or defer large live tool lists. Tiers let constrained
+/// clients choose the small "essential" surface while richer frontends keep
+/// the broader standard registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
     /// Always registered. The smallest set that lets a typical interactive
     /// Claude session work end-to-end (memory navigation, terminal control,
-    /// agent_spawn, plan, shell_exec, session lifecycle bootstrap/finalize).
+    /// agent_spawn, plan/worktree basics, shell_exec, session lifecycle
+    /// bootstrap/finalize).
     Essential,
     /// Default-on. Adds hook-friendly + multi-agent + maintenance ops:
     /// memory consolidation, session curation, agent inbox, codebase index,
@@ -13724,6 +13723,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(PlanSaveTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(PlanLoadTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(PlanUpdateTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(WorktreeListTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(WorktreeCreateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseSearchTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseImportsTool::new(hub.clone())));
@@ -13793,14 +13793,15 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(WorktreeListTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(WorktreeRemoveTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseIndexTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(TerminalReadBlocksTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotifyTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotificationsRecentTool::new(hub.clone())));
     // Skill library (Phase C): in-loop recommendation over the local skill index.
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SkillsRecommendTool::new(hub.clone())));
+    // Keep this in Essential for Codex/GPT-style deferred tool discovery: it is
+    // the gateway that lets the model find more specialized skills on demand.
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(SkillsRecommendTool::new(hub.clone())));
 
     // ── NICHE (opt-in via AGENT_BRIDGE_TOOL_PROFILE=all) ───────────────
     // Browser automation surface.
