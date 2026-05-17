@@ -13722,6 +13722,129 @@ impl McpTool for CodebaseCallersTool {
 }
 
 // ===========================================================================
+//   codebase_impact — N-hop transitive caller blast-radius (composes
+//   codebase_callers; pure read; closes the change-impact preview gap
+//   noted in `reference_codegraph_external_3_borrowable_patterns_20260517`)
+// ===========================================================================
+
+pub struct CodebaseImpactTool {
+    hub: Hub,
+}
+impl CodebaseImpactTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for CodebaseImpactTool {
+    fn name(&self) -> &'static str {
+        "codebase_impact"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Multi-hop transitive caller closure for a \
+                 symbol — answers 'what's the blast-radius if I change \
+                 X?'. BFS over the alias-resolved callers graph up to \
+                 `max_depth` hops. Each result node carries its \
+                 `qualified_name`, the `file_path` of an introducing \
+                 call site, `hop_distance` (1 = direct caller), and \
+                 `via_callee` (the intermediate symbol that brought \
+                 this caller into the closure). The original `target` \
+                 is NOT included in the output. Visited-set keys on \
+                 caller text so each caller appears at most once at \
+                 its shortest hop. Supports Rust, Python, \
+                 TypeScript/JavaScript, and Go via the shared v24 \
+                 imports + v25 calls tables. Use before refactors / \
+                 deprecations to preview affected surface."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Fully-qualified path to compute impact for, same format as codebase_callers (e.g. 'crate::store::SqliteStore::new')."
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 3,
+                        "description": "BFS depth cap. 1 = direct callers only. >5 explodes on hub functions."
+                    },
+                    "per_hop_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50,
+                        "description": "Caps fan-out per frontier node when looking up callers."
+                    },
+                    "file_filter": {
+                        "type": "string",
+                        "description": "Optional substring matched against file_path at every hop."
+                    },
+                    "root_path": {
+                        "type": "string",
+                        "description": "Optional root directory to restrict results to a specific index."
+                    }
+                },
+                "required": ["target"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let target = args
+            .get("target")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if target.is_empty() {
+            return Ok(ToolResult::error("'target' is required"));
+        }
+        let max_depth = args
+            .get("max_depth")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(3)
+            .clamp(1, 10) as u32;
+        let per_hop_limit = args
+            .get("per_hop_limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .clamp(1, 500) as u32;
+        let file_filter = args
+            .get("file_filter")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let root_path = args
+            .get("root_path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
+        match store
+            .codebase_impact(
+                &target,
+                max_depth,
+                per_hop_limit,
+                file_filter.as_deref(),
+                root_path.as_deref(),
+            )
+            .await
+        {
+            Ok(hits) => Ok(ToolResult::json_text(
+                &serde_json::to_value(hits).unwrap_or(Value::Null),
+            )),
+            Err(e) => Ok(ToolResult::error(&format!("codebase_impact failed: {e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                       tailscale REST API — ACL editing
 // ===========================================================================
 
@@ -14755,6 +14878,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseImportsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseCallsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseCallersTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseImpactTool::new(hub.clone())));
 
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));

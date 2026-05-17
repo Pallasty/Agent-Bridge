@@ -685,6 +685,50 @@ pub struct ResolvedCall {
     pub via_import: String,
 }
 
+/// One node in the transitive caller closure of a symbol. Output of
+/// [`StateStore::codebase_impact`]. Each entry is a function reachable
+/// from the original target by following `caller → target` edges
+/// backwards up to `max_depth` hops.
+///
+/// `hop_distance` = 1 for direct callers of the original target, 2 for
+/// callers-of-callers, and so on up to the requested `max_depth`.
+///
+/// Closure semantics:
+///   • Visited set keys on the `caller` text returned by
+///     [`StateStore::codebase_callers`] (qualified name of the enclosing
+///     function as recorded in the calls table). A caller is emitted at
+///     most once — at its **shortest** hop distance from the target.
+///   • Cycles are handled by the visited set; the BFS terminates on the
+///     first re-visit attempt.
+///   • Per-hop fan-out is capped by the underlying `codebase_callers`
+///     limit so a hub function with thousands of callers doesn't
+///     explode the closure size.
+///
+/// Caveat: BFS uses the caller's `caller` field verbatim as the next
+/// `target` for the recursive lookup. When that field is not a
+/// fully-qualified path (e.g. an intra-module function recorded as the
+/// bare name `bar` rather than `crate::foo::bar`), the recursive lookup
+/// may miss cross-module continuations. v0 accepts this as a known
+/// underreport-rather-than-overreport bound. A future v1 could join
+/// against `codebase_symbols` to resolve to qualified names.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImpactNode {
+    /// Fully-qualified name of the caller as recorded in the calls
+    /// table. Used as the visited-set key.
+    pub qualified_name: String,
+    /// File containing the call site that brought this caller into
+    /// the closure (the earliest such file when multiple call sites
+    /// exist at the same hop).
+    pub file_path: String,
+    /// 1 for direct callers of the original target, N for callers
+    /// reached after N-1 intermediate hops.
+    pub hop_distance: u32,
+    /// The fully-qualified callee that this node calls — for hop=1
+    /// this is the original `target`; for hop=N>1 it is whichever
+    /// intermediate node introduced this caller into the BFS frontier.
+    pub via_callee: String,
+}
+
 /// β v0 — A connected component on the subgraph defined by `cofires` +
 /// `co_referenced` edges. Output of [`StateStore::hebbian_clusters`];
 /// the foundational data structure for vision §5 β "seed self-evolution":
@@ -2348,6 +2392,92 @@ pub trait StateStore: Send + Sync {
         Err(ab_core::Error::Backend(
             "codebase_callers not implemented".into(),
         ))
+    }
+
+    /// Multi-hop transitive caller closure — answers "what's the
+    /// blast-radius if I change symbol X?". BFS over the alias-resolved
+    /// callers graph up to `max_depth` hops. Composes
+    /// [`StateStore::codebase_callers`] iteratively; any backend that
+    /// implements `codebase_callers` gets this for free via the default
+    /// impl below.
+    ///
+    /// Arguments:
+    ///   • `target` — same format as `codebase_callers`, e.g.
+    ///     `crate::store::SqliteStore::new`.
+    ///   • `max_depth` — BFS depth cap (1 = direct callers only).
+    ///     Default-safe at 3 for human-readable closures. Higher values
+    ///     blow up quickly on hub functions.
+    ///   • `per_hop_limit` — passed to each nested `codebase_callers`
+    ///     call. Caps fan-out per frontier node.
+    ///   • `root_path` / `file_filter` — passed through to each lookup.
+    ///
+    /// Returns nodes sorted by `(hop_distance ASC, qualified_name ASC)`.
+    /// The original `target` itself is **not** included in the output
+    /// (only its transitive callers).
+    ///
+    /// Default impl works on any backend that supports `codebase_callers`.
+    /// Backends that want to optimize (e.g. closed-form recursive CTE)
+    /// can override.
+    async fn codebase_impact(
+        &self,
+        target: &str,
+        max_depth: u32,
+        per_hop_limit: u32,
+        file_filter: Option<&str>,
+        root_path: Option<&str>,
+    ) -> Result<Vec<ImpactNode>> {
+        let max_depth = max_depth.max(1);
+        let per_hop_limit = per_hop_limit.clamp(1, 500);
+
+        let mut closure: Vec<ImpactNode> = Vec::new();
+        let mut visited: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        // Frontier of (callee_to_lookup, hop_to_record) — hop=1 for
+        // direct callers of `target`, hop=N+1 after one BFS expansion.
+        let mut frontier: Vec<(String, u32)> = vec![(target.to_string(), 1)];
+
+        while !frontier.is_empty() {
+            let mut next_frontier: Vec<(String, u32)> = Vec::new();
+            for (callee, hop) in std::mem::take(&mut frontier) {
+                if hop > max_depth {
+                    continue;
+                }
+                let hits = self
+                    .codebase_callers(&callee, file_filter, root_path, per_hop_limit)
+                    .await?;
+                for hit in hits {
+                    // visited-set keys on caller text (not file:line) so
+                    // multiple call sites from the same caller dedupe.
+                    if hit.caller.is_empty() {
+                        // File-scope call without an enclosing fn — skip;
+                        // can't continue BFS without a function key, and
+                        // it would pollute the closure with non-callable
+                        // synthetic nodes.
+                        continue;
+                    }
+                    if visited.insert(hit.caller.clone()) {
+                        closure.push(ImpactNode {
+                            qualified_name: hit.caller.clone(),
+                            file_path: hit.file_path.clone(),
+                            hop_distance: hop,
+                            via_callee: callee.clone(),
+                        });
+                        if hop < max_depth {
+                            next_frontier.push((hit.caller, hop + 1));
+                        }
+                    }
+                }
+            }
+            frontier = next_frontier;
+        }
+
+        // Stable sort by (hop ASC, qualified_name ASC).
+        closure.sort_by(|a, b| {
+            a.hop_distance
+                .cmp(&b.hop_distance)
+                .then_with(|| a.qualified_name.cmp(&b.qualified_name))
+        });
+        Ok(closure)
     }
 
     /// Phase 2 #3 third slice — aggregate stats for a single `root_path`,

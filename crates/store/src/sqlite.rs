@@ -13821,6 +13821,168 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
+    // codebase_impact — 2026-05-17. Multi-hop BFS over codebase_callers.
+    // Seeds a 3-link chain target_fn ← caller_a ← caller_b ← caller_c
+    // plus a 2-cycle (caller_x ↔ caller_y) and verifies:
+    //   • max_depth=1 returns only direct callers
+    //   • max_depth=3 returns the full chain at correct hops
+    //   • cycle visited-set terminates BFS
+    //   • file_filter passes through
+    //   • original target is NOT in the closure
+    #[tokio::test]
+    async fn codebase_impact_traverses_caller_chain() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-codebase-impact-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        // Seed: 5 files. Direct full-path calls (no aliases) so codebase_callers
+        // resolves via the "<direct>" fallback for simplicity.
+        //   /repo/a.rs : caller_a calls target_fn
+        //   /repo/b.rs : caller_b calls caller_a
+        //   /repo/c.rs : caller_c calls caller_b
+        //   /repo/x.rs : caller_x calls caller_y   (cycle leg 1)
+        //   /repo/y.rs : caller_y calls caller_x   (cycle leg 2; also calls target_fn)
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                let mut call_stmt = c.prepare(
+                    "INSERT INTO codebase_calls
+                       (file_path, line, language, caller, callee, root_path, indexed_at)
+                     VALUES (?1, ?2, 'rust', ?3, ?4, '/repo', 1)",
+                )?;
+                // Chain
+                call_stmt.execute(params![
+                    "/repo/a.rs", 5_i64, "caller_a", "target_fn",
+                ])?;
+                call_stmt.execute(params![
+                    "/repo/b.rs", 5_i64, "caller_b", "caller_a",
+                ])?;
+                call_stmt.execute(params![
+                    "/repo/c.rs", 5_i64, "caller_c", "caller_b",
+                ])?;
+                // Cycle + entry-point to target
+                call_stmt.execute(params![
+                    "/repo/x.rs", 5_i64, "caller_x", "caller_y",
+                ])?;
+                call_stmt.execute(params![
+                    "/repo/y.rs", 5_i64, "caller_y", "caller_x",
+                ])?;
+                call_stmt.execute(params![
+                    "/repo/y.rs", 7_i64, "caller_y", "target_fn",
+                ])?;
+                Ok(())
+            })
+            .await
+            .expect("seed rows");
+
+        // max_depth=1: only direct callers of target_fn (caller_a, caller_y).
+        let h1 = store
+            .codebase_impact("target_fn", 1, 50, None, Some("/repo"))
+            .await
+            .expect("impact h=1");
+        let mut names: Vec<&str> = h1.iter().map(|n| n.qualified_name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, vec!["caller_a", "caller_y"], "h=1 closure: {h1:#?}");
+        assert!(h1.iter().all(|n| n.hop_distance == 1));
+        assert!(h1.iter().all(|n| n.via_callee == "target_fn"));
+
+        // max_depth=3: full chain caller_a (h=1) → caller_b (h=2) → caller_c (h=3),
+        // plus caller_y (h=1), caller_x (h=2 via caller_y), and cycle stops
+        // (caller_x's lookup would otherwise enqueue caller_y at h=3 but
+        // visited-set blocks).
+        let h3 = store
+            .codebase_impact("target_fn", 3, 50, None, Some("/repo"))
+            .await
+            .expect("impact h=3");
+        let mut by_name: std::collections::HashMap<&str, &crate::ImpactNode> =
+            std::collections::HashMap::new();
+        for n in &h3 {
+            by_name.insert(n.qualified_name.as_str(), n);
+        }
+        assert_eq!(
+            by_name.get("caller_a").map(|n| n.hop_distance),
+            Some(1),
+            "caller_a at h=1: {h3:#?}"
+        );
+        assert_eq!(
+            by_name.get("caller_b").map(|n| n.hop_distance),
+            Some(2),
+            "caller_b at h=2"
+        );
+        assert_eq!(
+            by_name.get("caller_c").map(|n| n.hop_distance),
+            Some(3),
+            "caller_c at h=3"
+        );
+        assert_eq!(
+            by_name.get("caller_y").map(|n| n.hop_distance),
+            Some(1),
+            "caller_y at h=1"
+        );
+        assert_eq!(
+            by_name.get("caller_x").map(|n| n.hop_distance),
+            Some(2),
+            "caller_x at h=2 (via caller_y)"
+        );
+        // target_fn must NOT appear in the closure.
+        assert!(
+            !by_name.contains_key("target_fn"),
+            "original target leaked into closure: {h3:#?}"
+        );
+        // Closure size is exactly 5 (caller_a/b/c/x/y).
+        assert_eq!(h3.len(), 5, "closure size: {h3:#?}");
+        // Verify sort: (hop ASC, name ASC).
+        let order: Vec<(u32, &str)> = h3
+            .iter()
+            .map(|n| (n.hop_distance, n.qualified_name.as_str()))
+            .collect();
+        let mut want = order.clone();
+        want.sort();
+        assert_eq!(order, want, "result not sorted by (hop, name): {order:?}");
+
+        // file_filter passes through — restrict to /repo/y.rs only.
+        let y_only = store
+            .codebase_impact("target_fn", 3, 50, Some("y.rs"), Some("/repo"))
+            .await
+            .expect("impact y.rs");
+        assert!(
+            y_only.iter().all(|n| n.file_path.contains("y.rs")),
+            "file_filter not applied: {y_only:#?}"
+        );
+        // From y.rs alone: caller_y at h=1 (calls target_fn), and via caller_y
+        // the BFS would reach caller_x (defined in x.rs, not y.rs) — but the
+        // file_filter applies at EVERY hop, so caller_x is dropped because
+        // its emitting call site is in /repo/x.rs not /repo/y.rs. Closure
+        // here is just {caller_y}.
+        assert_eq!(
+            y_only.iter().map(|n| n.qualified_name.as_str()).collect::<Vec<_>>(),
+            vec!["caller_y"],
+            "y.rs filter closure: {y_only:#?}"
+        );
+
+        // max_depth=10 on cycle does not hang.
+        let _h10 = store
+            .codebase_impact("target_fn", 10, 50, None, Some("/repo"))
+            .await
+            .expect("impact h=10 with cycle");
+
+        // Unknown target → empty closure.
+        let empty = store
+            .codebase_impact("nonexistent_fn", 3, 50, None, Some("/repo"))
+            .await
+            .expect("impact unknown");
+        assert!(empty.is_empty(), "unknown target should be empty: {empty:#?}");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
     // Phase 2.x #8: read-recency decay (memory_decay_unused_importance).
     // Sets up rows via memory_import so last_accessed_at can be backdated
     // — memory_save would force it to `now`. The tests cover the four
