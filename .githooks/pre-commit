@@ -1,41 +1,83 @@
 #!/usr/bin/env bash
-# Repo-level pre-commit hook — catch broken-HEAD commits before they
-# land on master. Triggered by `git commit` once `core.hooksPath` is
-# set to `.githooks` (see scripts/install-githooks.sh).
+# Repo-level pre-commit hook — two jobs:
 #
-# Lesson behind this hook: commit `f88e5ef` (2026-05-13) shipped a
-# `TombstoneAgedArchived` enum variant + match-arm dispatch but missed
-# the `run_dream_tombstone_aged_archived` fn definition. HEAD didn't
-# compile until a fixup commit (`8963a4b`) landed the missing fn. Any
-# contributor pulling between the two saw a broken workspace.
+#   1. Print `git diff --cached --stat` so the author can eyeball what
+#      is actually about to be committed. Closes the add→commit gap
+#      where sibling sweeps, stash re-applies, or accidental
+#      `git add .` can mutate the staged set without changing exit
+#      codes. Lessons sediment:
+#        - lesson_sibling_sweep_window_commit_mismatch (canonical, 2026-05-13)
+#        - feedback_sibling_overwrites_during_edit_window
+#        - feedback_sibling_sweeps_mcp_wrapper_only
+#        - feedback_sibling_commit_bundles_dropped_deps
+#        - feedback_sibling_worktree_merge_reverts_unstaged
+#        - feedback_cargo_fmt_sweeps_protected_files
+#      The stat is informational — it never blocks. The discipline is
+#      "you see what's staged at commit time, every commit", so a
+#      sibling-sweep that drops your real edits AND brings in someone
+#      else's is visible before the commit reaches origin.
 #
-# What we check:
-#   `cargo check -p ab-bridge --all-targets --quiet`
+#   2. Run `cargo check -p ab-bridge --all-targets --quiet` on commits
+#      that touch Rust (broken-HEAD guard from P23, 2026-05-13). The
+#      original trigger: commit `f88e5ef` shipped a
+#      `TombstoneAgedArchived` enum variant + match-arm dispatch but
+#      missed `run_dream_tombstone_aged_archived` fn definition. HEAD
+#      didn't compile until fixup `8963a4b` landed. Anyone pulling in
+#      between saw a broken workspace.
 #
-# Why this scope (not `--workspace`):
+# Why `-p ab-bridge` (not `--workspace`):
 #   ab-bridge transitively pulls every other crate in the workspace,
 #   so its check covers downstream breakage from `ab-store` /
 #   `ab-mcp` / `ab-agent`. `--workspace` is slower (re-checks each
 #   crate independently) for no extra coverage in practice. ~30-40s
 #   warm, comparable to a normal save → check loop.
 #
-# How to bypass (emergencies only):
+# Bypasses:
+#   AGENT_BRIDGE_SKIP_PRECOMMIT=1 git commit ...
+#     → skip everything (stat + cargo). Emergency use.
+#   AGENT_BRIDGE_PRECOMMIT_QUIET=1 git commit ...
+#     → keep cargo check, silence the stat. For scripted/automated
+#       commits where the stat would be log noise.
 #   git commit --no-verify -m "..."
+#     → bypass the whole hook (git-native, equivalent to SKIP=1).
 #
-# How to skip on CI / known-WIP branches:
-#   Set AGENT_BRIDGE_SKIP_PRECOMMIT=1 in the environment, e.g.
-#   AGENT_BRIDGE_SKIP_PRECOMMIT=1 git commit -m "wip: split later"
+# Triggered by `git commit` once `core.hooksPath` is set to
+# `.githooks` (see scripts/install-githooks.sh).
 
 set -euo pipefail
 
 if [[ "${AGENT_BRIDGE_SKIP_PRECOMMIT:-0}" == "1" ]]; then
-    echo "[pre-commit] AGENT_BRIDGE_SKIP_PRECOMMIT=1 → skipping cargo check" >&2
+    echo "[pre-commit] AGENT_BRIDGE_SKIP_PRECOMMIT=1 → skipping all checks" >&2
     exit 0
 fi
 
-# Skip when there are no rust changes — saves time on docs-only or
-# memory-only commits. Use the staged diff so unstaged sibling work
-# doesn't trigger a needless check.
+# 1) Staged-diff stat — print before any cargo work so it always lands
+#    even for doc-only / memory-only commits (which is where the
+#    msg/content mismatch failure mode `978a310` originated). Cheap:
+#    `git diff --cached --stat` is purely metadata, sub-100ms.
+if [[ "${AGENT_BRIDGE_PRECOMMIT_QUIET:-0}" != "1" ]]; then
+    STAGED_COUNT=$(git diff --cached --name-only --diff-filter=ACMRD | wc -l)
+    if [[ "$STAGED_COUNT" -gt 0 ]]; then
+        echo "[pre-commit] staging $STAGED_COUNT file(s) — verify before commit:" >&2
+        # Cap at 40 stat lines so a giant commit (rare but it happens
+        # during ζ-cron sweeps) doesn't flood the terminal. The
+        # trailing `... N more` line keeps the truth that there is
+        # more.
+        STAT_OUTPUT=$(git diff --cached --stat)
+        STAT_LINES=$(printf '%s\n' "$STAT_OUTPUT" | wc -l)
+        if [[ "$STAT_LINES" -gt 40 ]]; then
+            printf '%s\n' "$STAT_OUTPUT" | sed -n '1,40p' >&2
+            echo "  ... ($((STAT_LINES - 40)) more lines; run \`git diff --cached --stat\` for full)" >&2
+        else
+            printf '%s\n' "$STAT_OUTPUT" >&2
+        fi
+        echo >&2
+    fi
+fi
+
+# 2) Skip cargo check when no rust changes — saves time on docs-only
+#    or memory-only commits. Use the staged diff so unstaged sibling
+#    work doesn't trigger a needless check.
 STAGED_RUST=$(git diff --cached --name-only --diff-filter=ACMR \
     | grep -E '\.rs$|^Cargo\.(toml|lock)$' || true)
 if [[ -z "$STAGED_RUST" ]]; then
