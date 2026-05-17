@@ -73,6 +73,30 @@ pub struct McpToolCallStats {
     pub p95_duration_ms: u32,
     pub max_duration_ms: u32,
     pub avg_result_size: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+/// Optional attribution filter for MCP tool-call telemetry.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct McpToolCallFilter {
+    pub client_name: Option<String>,
+    pub profile: Option<String>,
+    pub source: Option<String>,
+}
+
+/// Grouped MCP tool-call telemetry by attributed caller/source.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpToolSourceStats {
+    pub source: String,
+    pub client_name: String,
+    pub profile: String,
+    pub call_count: u64,
+    pub error_count: u64,
 }
 
 /// Row-level MCP tool-call telemetry for `tool_call_attention_report`
@@ -1442,8 +1466,20 @@ pub trait StateStore: Send + Sync {
         ok: bool,
         args_size: Option<u32>,
         result_size: Option<u32>,
+        client_name: Option<String>,
+        profile: Option<String>,
+        source: Option<String>,
     ) -> Result<()> {
-        let _ = (tool_name, duration_ms, ok, args_size, result_size);
+        let _ = (
+            tool_name,
+            duration_ms,
+            ok,
+            args_size,
+            result_size,
+            client_name,
+            profile,
+            source,
+        );
         Ok(())
     }
 
@@ -1470,6 +1506,28 @@ pub trait StateStore: Send + Sync {
         limit: u32,
     ) -> Result<Vec<McpToolCallRow>> {
         let _ = (window_secs, limit);
+        Ok(Vec::new())
+    }
+
+    /// Aggregate stats over `mcp_tool_calls`, optionally narrowed by caller
+    /// attribution. Default impl falls back to the unfiltered aggregate.
+    async fn mcp_tool_call_stats_filtered(
+        &self,
+        window_secs: i64,
+        top_n: u32,
+        filter: McpToolCallFilter,
+    ) -> Result<Vec<McpToolCallStats>> {
+        let _ = filter;
+        self.mcp_tool_call_stats(window_secs, top_n).await
+    }
+
+    /// Group recent MCP traffic by source/client/profile attribution.
+    async fn mcp_tool_source_stats(
+        &self,
+        window_secs: i64,
+        top_n: u32,
+    ) -> Result<Vec<McpToolSourceStats>> {
+        let _ = (window_secs, top_n);
         Ok(Vec::new())
     }
 

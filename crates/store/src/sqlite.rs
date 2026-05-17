@@ -64,11 +64,12 @@ use crate::{
     ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
     ForumThreadExport, ForumThreadRecord, GraphTopology, IdentityWindow, ImportConflictPolicy,
     ImportReport,
-    McpToolCallRow, McpToolCallStats, McpToolErrorRecord, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
-    MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats,
-    MemoryRecord, MemorySearchHit, MemoryStats, NotificationRecord, PlanRecord, PlanStep,
-    OverlapPair, ReplayAuditRow, ReplayAuditStats, S234Counts, SessionFilter, StateStore, StoredSession,
-    WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
+    McpToolCallFilter, McpToolCallRow, McpToolCallStats, McpToolErrorRecord, McpToolSourceStats,
+    MemoryCosineHit, MemoryEdge, MemoryEdgeExport, MemoryExportFilter, MemoryExportResult,
+    MemoryListSort, MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit,
+    MemoryStats, NotificationRecord, OverlapPair, PlanRecord, PlanStep, ReplayAuditRow,
+    ReplayAuditStats, S234Counts, SessionFilter, StateStore, StoredSession, WaypointRow,
+    WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
     MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
@@ -450,6 +451,18 @@ CREATE INDEX IF NOT EXISTS idx_ccall_file ON codebase_calls(file_path);
 const SCHEMA_V26: &str = r#"
 ALTER TABLE memories ADD COLUMN embedding_backend TEXT;
 CREATE INDEX IF NOT EXISTS idx_memories_embedding_backend ON memories(embedding_backend);
+"#;
+
+// v27 — MCP dispatch telemetry attribution. Separates active client traffic
+// from lifecycle hook/sync/background traffic so profile tuning is not skewed
+// by automation-heavy tools.
+const SCHEMA_V27_INDEXES: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_source
+    ON mcp_tool_calls(source, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_client
+    ON mcp_tool_calls(client_name, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_profile
+    ON mcp_tool_calls(profile, ts DESC);
 "#;
 
 // v23 — Phase 1 P2 reconsolidation: `superseded_by` foreign key on memories.
@@ -984,6 +997,39 @@ impl SqliteStore {
             if cur.as_str() == "25" {
                 c.execute_batch(SCHEMA_V26)?;
                 let _ = c.execute("UPDATE schema_meta SET value='26' WHERE key='version'", []);
+            }
+
+            // ── v27: MCP dispatch telemetry attribution ───────────────
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "26".to_string());
+            if cur.as_str() == "26" {
+                for (name, ddl_type) in [
+                    ("client_name", "TEXT"),
+                    ("profile", "TEXT"),
+                    ("source", "TEXT"),
+                ] {
+                    let col_exists: i64 = c
+                        .query_row(
+                            "SELECT COUNT(*) FROM pragma_table_info('mcp_tool_calls') \
+                             WHERE name=?1",
+                            params![name],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    if col_exists == 0 {
+                        c.execute(
+                            &format!("ALTER TABLE mcp_tool_calls ADD COLUMN {name} {ddl_type}"),
+                            [],
+                        )?;
+                    }
+                }
+                c.execute_batch(SCHEMA_V27_INDEXES)?;
+                let _ = c.execute("UPDATE schema_meta SET value='27' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -1782,6 +1828,9 @@ impl StateStore for SqliteStore {
         ok: bool,
         args_size: Option<u32>,
         result_size: Option<u32>,
+        client_name: Option<String>,
+        profile: Option<String>,
+        source: Option<String>,
     ) -> Result<()> {
         let ts = now_secs();
         let tn = tool_name.to_string();
@@ -1792,9 +1841,20 @@ impl StateStore for SqliteStore {
             .call(move |c| -> RusqliteResult<()> {
                 c.execute(
                     "INSERT INTO mcp_tool_calls
-                       (ts, tool_name, duration_ms, ok, args_size, result_size)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![ts, tn, duration_ms as i64, ok_int, args_size_i, result_size_i],
+                       (ts, tool_name, duration_ms, ok, args_size, result_size,
+                        client_name, profile, source)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        ts,
+                        tn,
+                        duration_ms as i64,
+                        ok_int,
+                        args_size_i,
+                        result_size_i,
+                        client_name,
+                        profile,
+                        source
+                    ],
                 )?;
                 Ok(())
             })
@@ -1808,8 +1868,28 @@ impl StateStore for SqliteStore {
         window_secs: i64,
         top_n: u32,
     ) -> Result<Vec<McpToolCallStats>> {
+        self.mcp_tool_call_stats_filtered(
+            window_secs,
+            top_n,
+            McpToolCallFilter::default(),
+        )
+        .await
+    }
+
+    async fn mcp_tool_call_stats_filtered(
+        &self,
+        window_secs: i64,
+        top_n: u32,
+        filter: McpToolCallFilter,
+    ) -> Result<Vec<McpToolCallStats>> {
         let cutoff = now_secs() - window_secs.max(0);
         let limit = top_n.min(200).max(1) as i64;
+        let source_filter = filter.source;
+        let client_filter = filter.client_name;
+        let profile_filter = filter.profile;
+        let source_label = source_filter.clone();
+        let client_label = client_filter.clone();
+        let profile_label = profile_filter.clone();
         let rows = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<McpToolCallStats>> {
@@ -1819,20 +1899,26 @@ impl StateStore for SqliteStore {
                     "SELECT tool_name, duration_ms, ok, COALESCE(result_size, 0)
                      FROM mcp_tool_calls
                      WHERE ts >= ?1
+                       AND (?2 IS NULL OR COALESCE(source, 'legacy') = ?2)
+                       AND (?3 IS NULL OR COALESCE(client_name, 'legacy') = ?3)
+                       AND (?4 IS NULL OR COALESCE(profile, 'legacy') = ?4)
                      ORDER BY tool_name",
                 )?;
                 let mut buckets: std::collections::HashMap<
                     String,
                     Vec<(u32, bool, u32)>,
                 > = std::collections::HashMap::new();
-                let iter = stmt.query_map(params![cutoff], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)? as u32,
-                        row.get::<_, i64>(2)? != 0,
-                        row.get::<_, i64>(3)? as u32,
-                    ))
-                })?;
+                let iter = stmt.query_map(
+                    params![cutoff, source_filter, client_filter, profile_filter],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)? as u32,
+                            row.get::<_, i64>(2)? != 0,
+                            row.get::<_, i64>(3)? as u32,
+                        ))
+                    },
+                )?;
                 for r in iter {
                     let (name, dur, ok, sz) = r?;
                     buckets.entry(name).or_default().push((dur, ok, sz));
@@ -1870,6 +1956,9 @@ impl StateStore for SqliteStore {
                             p95_duration_ms: p95_dur,
                             max_duration_ms: max_dur,
                             avg_result_size: avg_sz,
+                            client_name: client_label.clone(),
+                            profile: profile_label.clone(),
+                            source: source_label.clone(),
                         }
                     })
                     .collect();
@@ -1878,7 +1967,47 @@ impl StateStore for SqliteStore {
                 Ok(out)
             })
             .await
-            .map_err(|e| Error::Backend(format!("mcp_tool_call_stats: {e}")))?;
+            .map_err(|e| Error::Backend(format!("mcp_tool_call_stats_filtered: {e}")))?;
+        Ok(rows)
+    }
+
+    async fn mcp_tool_source_stats(
+        &self,
+        window_secs: i64,
+        top_n: u32,
+    ) -> Result<Vec<McpToolSourceStats>> {
+        let cutoff = now_secs() - window_secs.max(0);
+        let limit = top_n.min(200).max(1) as i64;
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<McpToolSourceStats>> {
+                let mut stmt = c.prepare(
+                    "SELECT COALESCE(source, 'legacy'),
+                            COALESCE(client_name, 'legacy'),
+                            COALESCE(profile, 'legacy'),
+                            COUNT(*),
+                            COALESCE(SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END), 0)
+                     FROM mcp_tool_calls
+                     WHERE ts >= ?1
+                     GROUP BY 1, 2, 3
+                     ORDER BY 4 DESC, 5 DESC
+                     LIMIT ?2",
+                )?;
+                let rows = stmt
+                    .query_map(params![cutoff, limit], |row| {
+                        Ok(McpToolSourceStats {
+                            source: row.get::<_, String>(0)?,
+                            client_name: row.get::<_, String>(1)?,
+                            profile: row.get::<_, String>(2)?,
+                            call_count: row.get::<_, i64>(3)? as u64,
+                            error_count: row.get::<_, i64>(4)? as u64,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("mcp_tool_source_stats: {e}")))?;
         Ok(rows)
     }
 
@@ -11074,6 +11203,114 @@ mod tests {
         assert_eq!(recent[0].message, "msg-101");
         assert_eq!(recent[1].message, "msg-100");
         assert_eq!(recent[2].message, "msg-99");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn mcp_tool_call_stats_filter_by_source_and_breakdown() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-mcp-call-attribution-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path)
+            .await
+            .expect("open sqlite store");
+
+        store
+            .record_mcp_tool_call(
+                "memory_search",
+                10,
+                true,
+                Some(12),
+                Some(100),
+                Some("OpenAI Codex".to_string()),
+                Some("essential".to_string()),
+                Some("codex".to_string()),
+            )
+            .await
+            .expect("record codex ok");
+        store
+            .record_mcp_tool_call(
+                "memory_search",
+                20,
+                false,
+                Some(12),
+                Some(200),
+                Some("OpenAI Codex".to_string()),
+                Some("essential".to_string()),
+                Some("codex".to_string()),
+            )
+            .await
+            .expect("record codex error");
+        store
+            .record_mcp_tool_call(
+                "memory_export",
+                5,
+                true,
+                None,
+                Some(50),
+                Some("ab-session-end-hook".to_string()),
+                Some("essential".to_string()),
+                Some("hook".to_string()),
+            )
+            .await
+            .expect("record hook");
+
+        let codex = store
+            .mcp_tool_call_stats_filtered(
+                86_400,
+                10,
+                McpToolCallFilter {
+                    source: Some("codex".to_string()),
+                    ..McpToolCallFilter::default()
+                },
+            )
+            .await
+            .expect("codex stats");
+        assert_eq!(codex.len(), 1);
+        assert_eq!(codex[0].tool_name, "memory_search");
+        assert_eq!(codex[0].call_count, 2);
+        assert_eq!(codex[0].error_count, 1);
+        assert_eq!(codex[0].source.as_deref(), Some("codex"));
+
+        let hook = store
+            .mcp_tool_call_stats_filtered(
+                86_400,
+                10,
+                McpToolCallFilter {
+                    source: Some("hook".to_string()),
+                    ..McpToolCallFilter::default()
+                },
+            )
+            .await
+            .expect("hook stats");
+        assert_eq!(hook.len(), 1);
+        assert_eq!(hook[0].tool_name, "memory_export");
+
+        let source_stats = store
+            .mcp_tool_source_stats(86_400, 10)
+            .await
+            .expect("source stats");
+        assert!(source_stats.iter().any(|s| {
+            s.source == "codex"
+                && s.client_name == "OpenAI Codex"
+                && s.profile == "essential"
+                && s.call_count == 2
+                && s.error_count == 1
+        }));
+        assert!(source_stats.iter().any(|s| {
+            s.source == "hook"
+                && s.client_name == "ab-session-end-hook"
+                && s.profile == "essential"
+                && s.call_count == 1
+                && s.error_count == 0
+        }));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

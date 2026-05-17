@@ -30,6 +30,7 @@ pub async fn serve_stdio(
     info!(server = server_name, "MCP stdio server starting");
     let mut stdin = BufReader::new(tokio::io::stdin()).lines();
     let mut stdout = tokio::io::stdout();
+    let mut telemetry = ConnectionTelemetry::from_env();
 
     while let Ok(Some(line)) = stdin.next_line().await {
         if line.trim().is_empty() {
@@ -67,6 +68,7 @@ pub async fn serve_stdio(
             server_name,
             version,
             tool_backend_id.as_ref(),
+            &mut telemetry,
         )
         .await;
         write_response(&mut stdout, &resp).await;
@@ -100,6 +102,132 @@ async fn record_mcp_tool_failure(store: Option<&dyn StateStore>, tool_name: &str
     }
 }
 
+#[derive(Debug, Clone)]
+struct ConnectionTelemetry {
+    client_name: Option<String>,
+    profile: String,
+    source: String,
+}
+
+impl ConnectionTelemetry {
+    fn from_env() -> Self {
+        let client_name = std::env::var("AGENT_BRIDGE_CLIENT_NAME")
+            .ok()
+            .and_then(nonempty_string);
+        let profile = mcp_profile_label_from_env().to_string();
+        let source = classify_mcp_source_from_client(client_name.as_deref())
+            .or_else(mcp_source_from_env)
+            .unwrap_or("other")
+            .to_string();
+        Self {
+            client_name,
+            profile,
+            source,
+        }
+    }
+
+    fn observe_initialize_params(&mut self, params: Option<&Value>) {
+        if let Some(name) = params
+            .and_then(|p| p.get("clientInfo"))
+            .and_then(|c| c.get("name"))
+            .and_then(|v| v.as_str())
+            .and_then(nonempty_str)
+        {
+            self.client_name = Some(name.to_string());
+        }
+        self.profile = mcp_profile_label_from_env().to_string();
+        self.source = classify_mcp_source_from_client(self.client_name.as_deref())
+            .or_else(mcp_source_from_env)
+            .unwrap_or("other")
+            .to_string();
+    }
+}
+
+fn nonempty_string(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn nonempty_str(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn mcp_profile_label_from_env() -> &'static str {
+    let raw = std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok();
+    mcp_profile_label_from_value(raw.as_deref())
+}
+
+fn mcp_profile_label_from_value(value: Option<&str>) -> &'static str {
+    match value.unwrap_or("standard").trim().to_ascii_lowercase().as_str() {
+        "minimal" | "essential" => "essential",
+        "all" | "full" => "all",
+        _ => "standard",
+    }
+}
+
+fn mcp_source_from_env() -> Option<&'static str> {
+    if let Ok(value) = std::env::var("AGENT_BRIDGE_MCP_SOURCE") {
+        if let Some(source) = normalize_mcp_source(&value) {
+            return Some(source);
+        }
+    }
+    if std::env::vars().any(|(k, _)| k.starts_with("CODEX_")) {
+        return Some("codex");
+    }
+    None
+}
+
+fn classify_mcp_source_from_client(client_name: Option<&str>) -> Option<&'static str> {
+    let name = client_name?.trim().to_ascii_lowercase();
+    if name.is_empty() {
+        return None;
+    }
+    if name.contains("hook")
+        || name.contains("precompact")
+        || name.contains("pre-compact")
+        || name.contains("session-end")
+        || name.contains("sessionend")
+        || name.contains("stop")
+    {
+        return Some("hook");
+    }
+    if name.contains("codex") || name.contains("openai") {
+        return Some("codex");
+    }
+    if name.contains("claude") {
+        return Some("claude");
+    }
+    if name.contains("gemini") {
+        return Some("gemini");
+    }
+    if name.contains("audit") || name.contains("smoke") || name.contains("test") {
+        return Some("manual");
+    }
+    normalize_mcp_source(&name)
+}
+
+fn normalize_mcp_source(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "codex" => Some("codex"),
+        "hook" | "hooks" | "lifecycle" => Some("hook"),
+        "claude" | "claude-code" => Some("claude"),
+        "gemini" => Some("gemini"),
+        "manual" | "smoke" | "audit" | "test" => Some("manual"),
+        "legacy" => Some("legacy"),
+        "other" => Some("other"),
+        _ => None,
+    }
+}
+
 /// v17 telemetry — record every `tools/call` (success + failure) with timing
 /// and size. Fire-and-forget; failures are logged but do not fail the call.
 async fn record_mcp_tool_call_telemetry(
@@ -109,13 +237,23 @@ async fn record_mcp_tool_call_telemetry(
     ok: bool,
     args_size: Option<u32>,
     result_size: Option<u32>,
+    telemetry: &ConnectionTelemetry,
 ) {
     let Some(s) = store else {
         return;
     };
     let duration_ms = call_start.elapsed().as_millis().min(u32::MAX as u128) as u32;
     if let Err(e) = s
-        .record_mcp_tool_call(tool_name, duration_ms, ok, args_size, result_size)
+        .record_mcp_tool_call(
+            tool_name,
+            duration_ms,
+            ok,
+            args_size,
+            result_size,
+            telemetry.client_name.clone(),
+            Some(telemetry.profile.clone()),
+            Some(telemetry.source.clone()),
+        )
         .await
     {
         warn!(tool = %tool_name, error = %e, "record_mcp_tool_call failed");
@@ -129,12 +267,14 @@ async fn handle(
     server_name: &str,
     version: &str,
     tool_backend_id: Option<&Value>,
+    telemetry: &mut ConnectionTelemetry,
 ) -> McpResponse {
     let id = req.id.clone().unwrap_or(Value::Null);
     debug!(method = %req.method, "dispatch");
 
     match req.method.as_str() {
         "initialize" => {
+            telemetry.observe_initialize_params(req.params.as_ref());
             let result = InitializeResult {
                 protocol_version: PROTOCOL_VERSION.into(),
                 capabilities: ServerCapabilities {
@@ -182,7 +322,7 @@ async fn handle(
                     )
                     .await;
                     record_mcp_tool_call_telemetry(
-                        store, "<missing>", &call_start, false, None, None,
+                        store, "<missing>", &call_start, false, None, None, telemetry,
                     )
                     .await;
                     return McpResponse::error(id, INVALID_PARAMS, "missing 'name'");
@@ -197,7 +337,7 @@ async fn handle(
                     let msg = format!("unknown tool: {name}");
                     record_mcp_tool_failure(store, &name, &msg).await;
                     record_mcp_tool_call_telemetry(
-                        store, &name, &call_start, false, args_size, None,
+                        store, &name, &call_start, false, args_size, None, telemetry,
                     )
                     .await;
                     return McpResponse::error(id, METHOD_NOT_FOUND, msg);
@@ -226,6 +366,7 @@ async fn handle(
                                 ok,
                                 args_size,
                                 result_size,
+                                telemetry,
                             )
                             .await;
                             McpResponse::success(id, v)
@@ -238,7 +379,7 @@ async fn handle(
                             )
                             .await;
                             record_mcp_tool_call_telemetry(
-                                store, &name, &call_start, false, args_size, None,
+                                store, &name, &call_start, false, args_size, None, telemetry,
                             )
                             .await;
                             McpResponse::error(id, INTERNAL_ERROR, format!("serialize: {e}"))
@@ -250,7 +391,7 @@ async fn handle(
                     record_mcp_tool_failure(store, &name, &format!("tool '{name}' failed: {e}"))
                         .await;
                     record_mcp_tool_call_telemetry(
-                        store, &name, &call_start, false, args_size, None,
+                        store, &name, &call_start, false, args_size, None, telemetry,
                     )
                     .await;
                     let mut err_result =
@@ -511,4 +652,40 @@ async fn write_response(stdout: &mut tokio::io::Stdout, resp: &McpResponse) {
         return;
     }
     let _ = stdout.flush().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_source_classifier_identifies_common_clients() {
+        assert_eq!(
+            classify_mcp_source_from_client(Some("ab-session-end-hook")),
+            Some("hook")
+        );
+        assert_eq!(
+            classify_mcp_source_from_client(Some("OpenAI Codex")),
+            Some("codex")
+        );
+        assert_eq!(
+            classify_mcp_source_from_client(Some("Claude Code")),
+            Some("claude")
+        );
+        assert_eq!(
+            classify_mcp_source_from_client(Some("agent-bridge-audit")),
+            Some("manual")
+        );
+        assert_eq!(classify_mcp_source_from_client(Some("unknown-client")), None);
+    }
+
+    #[test]
+    fn mcp_profile_label_normalizes_env_values() {
+        assert_eq!(mcp_profile_label_from_value(None), "standard");
+        assert_eq!(mcp_profile_label_from_value(Some("minimal")), "essential");
+        assert_eq!(mcp_profile_label_from_value(Some("essential")), "essential");
+        assert_eq!(mcp_profile_label_from_value(Some("all")), "all");
+        assert_eq!(mcp_profile_label_from_value(Some("full")), "all");
+        assert_eq!(mcp_profile_label_from_value(Some("weird")), "standard");
+    }
 }

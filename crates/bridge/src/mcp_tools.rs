@@ -15,6 +15,7 @@ use ab_store::{
     MemoryQueryRecord,
     MemoryRecord,
     MemorySearchHit,
+    McpToolCallFilter,
     PlanRecord,
     PlanStep,
     SessionFilter,
@@ -8062,6 +8063,20 @@ impl McpTool for McpDispatchAuditTool {
                         "maximum": 100,
                         "default": 10,
                         "description": "Max recent error rows to include. Use 0 to hide raw recent errors."
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["codex", "hook", "claude", "gemini", "manual", "other", "legacy"],
+                        "description": "Optional caller-source filter. Omit for all traffic."
+                    },
+                    "client_name": {
+                        "type": "string",
+                        "description": "Optional exact MCP clientInfo.name filter."
+                    },
+                    "profile": {
+                        "type": "string",
+                        "enum": ["essential", "standard", "all", "legacy"],
+                        "description": "Optional AGENT_BRIDGE_TOOL_PROFILE filter."
                     }
                 }
             }),
@@ -8093,6 +8108,15 @@ impl McpTool for McpDispatchAuditTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(10)
             .clamp(0, 100) as u32;
+        let filter = dispatch_filter_from_args(&args);
+        let cold_basis = if dispatch_filter_is_empty(&filter) {
+            McpToolCallFilter {
+                source: Some("codex".to_string()),
+                ..McpToolCallFilter::default()
+            }
+        } else {
+            filter.clone()
+        };
 
         let profile = ToolProfile::from_env();
         let current_tools: Vec<String> = build_registry(self.hub.clone())
@@ -8106,17 +8130,63 @@ impl McpTool for McpDispatchAuditTool {
         // to 200, which is enough for today's registry profiles.
         let stats_limit = current_tool_count.max(top_n).min(200) as u32;
         let stats = match store
-            .mcp_tool_call_stats(window_days * 86_400, stats_limit)
+            .mcp_tool_call_stats_filtered(window_days * 86_400, stats_limit, filter.clone())
             .await
         {
             Ok(rows) => rows,
             Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
         };
-        let stats_by_tool: HashMap<String, ab_store::McpToolCallStats> = stats
+        let cold_basis_stats = match store
+            .mcp_tool_call_stats_filtered(
+                window_days * 86_400,
+                stats_limit,
+                cold_basis.clone(),
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
+        };
+        let stats_by_tool: HashMap<String, ab_store::McpToolCallStats> = cold_basis_stats
             .iter()
             .cloned()
             .map(|s| (s.tool_name.clone(), s))
             .collect();
+        let source_breakdown = match store.mcp_tool_source_stats(window_days * 86_400, 50).await {
+            Ok(rows) => rows
+                .iter()
+                .map(dispatch_source_stat_json)
+                .collect::<Vec<_>>(),
+            Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
+        };
+        let hot_codex_tools = match store
+            .mcp_tool_call_stats_filtered(
+                window_days * 86_400,
+                top_n as u32,
+                McpToolCallFilter {
+                    source: Some("codex".to_string()),
+                    ..McpToolCallFilter::default()
+                },
+            )
+            .await
+        {
+            Ok(rows) => rows.iter().map(dispatch_stat_json).collect::<Vec<_>>(),
+            Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
+        };
+        let hot_hook_tools = match store
+            .mcp_tool_call_stats_filtered(
+                window_days * 86_400,
+                top_n as u32,
+                McpToolCallFilter {
+                    source: Some("hook".to_string()),
+                    ..McpToolCallFilter::default()
+                },
+            )
+            .await
+        {
+            Ok(rows) => rows.iter().map(dispatch_stat_json).collect::<Vec<_>>(),
+            Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
+        };
 
         let total_calls: u64 = stats.iter().map(|s| s.call_count).sum();
         let total_errors: u64 = stats.iter().map(|s| s.error_count).sum();
@@ -8194,13 +8264,18 @@ impl McpTool for McpDispatchAuditTool {
         Ok(ToolResult::json_text(&json!({
             "profile": profile.label(),
             "window_days": window_days,
+            "filter": dispatch_filter_json(&filter),
             "current_exposed_tool_count": current_tool_count,
             "observed_tool_count": stats.len(),
             "total_calls": total_calls,
             "total_errors": total_errors,
+            "source_breakdown": source_breakdown,
             "hot_tools": hot_tools,
+            "hot_codex_tools": hot_codex_tools,
+            "hot_hook_tools": hot_hook_tools,
             "failing_tools": failing_tools,
             "optimization_candidates": optimization_candidates,
+            "cold_basis": dispatch_filter_json(&cold_basis),
             "cold_tools": cold_tools,
             "recent_errors": recent_errors,
             "profile_suggestions": profile_suggestions,
@@ -8210,13 +8285,51 @@ impl McpTool for McpDispatchAuditTool {
                 "recent_errors": recent_errors_limit,
                 "stats_limit": stats_limit
             },
-            "note": "Telemetry covers Agent-Bridge MCP tools/call traffic only; Codex native shell/browser/GitHub tool use is outside this table. The current audit call itself is recorded after this response, so it appears on the next audit."
+            "note": "Telemetry covers Agent-Bridge MCP tools/call traffic only; Codex native shell/browser/GitHub tool use is outside this table. Rows recorded before telemetry attribution appear as source=legacy. The current audit call itself is recorded after this response, so it appears on the next audit."
         })))
     }
 }
 
-fn dispatch_stat_json(s: &ab_store::McpToolCallStats) -> Value {
+fn dispatch_filter_from_args(args: &Value) -> McpToolCallFilter {
+    McpToolCallFilter {
+        source: dispatch_optional_string_arg(args, "source"),
+        client_name: dispatch_optional_string_arg(args, "client_name"),
+        profile: dispatch_optional_string_arg(args, "profile"),
+    }
+}
+
+fn dispatch_optional_string_arg(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+}
+
+fn dispatch_filter_is_empty(filter: &McpToolCallFilter) -> bool {
+    filter.source.is_none() && filter.client_name.is_none() && filter.profile.is_none()
+}
+
+fn dispatch_filter_json(filter: &McpToolCallFilter) -> Value {
     json!({
+        "source": filter.source.as_deref(),
+        "client_name": filter.client_name.as_deref(),
+        "profile": filter.profile.as_deref(),
+    })
+}
+
+fn dispatch_source_stat_json(s: &ab_store::McpToolSourceStats) -> Value {
+    json!({
+        "source": s.source,
+        "client_name": s.client_name,
+        "profile": s.profile,
+        "call_count": s.call_count,
+        "error_count": s.error_count,
+    })
+}
+
+fn dispatch_stat_json(s: &ab_store::McpToolCallStats) -> Value {
+    let mut out = json!({
         "tool_name": s.tool_name,
         "call_count": s.call_count,
         "error_count": s.error_count,
@@ -8224,7 +8337,19 @@ fn dispatch_stat_json(s: &ab_store::McpToolCallStats) -> Value {
         "p95_duration_ms": s.p95_duration_ms,
         "max_duration_ms": s.max_duration_ms,
         "avg_result_size": s.avg_result_size,
-    })
+    });
+    if let Some(obj) = out.as_object_mut() {
+        if let Some(source) = &s.source {
+            obj.insert("source".to_string(), json!(source));
+        }
+        if let Some(client_name) = &s.client_name {
+            obj.insert("client_name".to_string(), json!(client_name));
+        }
+        if let Some(profile) = &s.profile {
+            obj.insert("profile".to_string(), json!(profile));
+        }
+    }
+    out
 }
 
 fn dispatch_error_rate(errors: u64, calls: u64) -> f64 {
@@ -16765,6 +16890,9 @@ mod tests {
             p95_duration_ms: 1_500,
             max_duration_ms: 2_000,
             avg_result_size: 30_000.0,
+            client_name: None,
+            profile: None,
+            source: None,
         };
         let reasons = dispatch_optimization_reasons(&s);
         assert!(reasons.contains(&"has_errors"));
