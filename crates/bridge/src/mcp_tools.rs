@@ -13406,6 +13406,101 @@ impl McpTool for ToolCallAttentionReportTool {
 }
 
 // ===========================================================================
+//        embed_text — Phase 2.1 raw encoder exposure for external apps
+// ===========================================================================
+
+/// Pure helper — pick raw inner encoder per Phase 2.1 precedence,
+/// independent of `ab_store::default_backend()` (which may be wrapped
+/// by `SeedBackend` when v22 substrate is installed; here we want raw
+/// 384-d MiniLM output with no substrate perception side effect).
+///
+/// Mirrors `seed_bridge::select_inner_kind()` so wrap and raw paths
+/// agree on which encoder produces the vectors.
+fn select_raw_encoder_kind() -> String {
+    std::env::var("AGENT_BRIDGE_EMBED_BACKEND")
+        .ok()
+        .map(|s| s.to_lowercase())
+        .filter(|s| s == "hash" || s == "onnx")
+        .unwrap_or_else(|| "onnx".to_string())
+}
+
+fn build_raw_encoder() -> Arc<dyn ab_store::EmbeddingBackend> {
+    match select_raw_encoder_kind().as_str() {
+        "hash" => Arc::new(ab_store::HashBackend),
+        // "onnx" or fallthrough — OnnxBackend carries its own hash
+        // fallback on model-load failure, so unknown values are
+        // safe-by-default.
+        _ => Arc::new(ab_store::OnnxBackend),
+    }
+}
+
+/// **Phase 2.1 / onsen-hd integration** — `embed_text` MCP tool.
+///
+/// Exposes the raw inner sentence encoder (`all-MiniLM-L6-v2` 384-d via
+/// `fastembed`, hash fallback on model-load failure) so external apps
+/// can build their own grids / indexes without touching v22 substrate
+/// state. Companion HTTP route `POST /embed` ships on daemon-http for
+/// non-MCP clients (Unity / Unreal / Godot / Web).
+///
+/// Returns raw inner output — does NOT feed substrate perception. Use
+/// `memory_save` for substrate-aware embedding flow.
+pub struct EmbedTextTool;
+
+impl EmbedTextTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for EmbedTextTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for EmbedTextTool {
+    fn name(&self) -> &'static str {
+        "embed_text"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Raw sentence-encoder pass-through — returns 384-d \
+                `all-MiniLM-L6-v2` MiniLM embedding (hash fallback on model-load \
+                failure). Exposes Phase 2.1 inner encoder for external apps (e.g. \
+                game NPC AI, custom indexers) that need encoder semantics WITHOUT \
+                feeding v22 substrate perception. Companion HTTP route POST /embed \
+                on daemon-http for non-MCP clients."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to encode. Empty input returns zero/default vector of dim()."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let text = args
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let backend = build_raw_encoder();
+        let vec = backend.embed(text);
+        Ok(ToolResult::json_text(&json!({
+            "embedding": vec,
+            "backend": backend.name(),
+            "dim": backend.dim(),
+        })))
+    }
+}
+
+// ===========================================================================
 //                  Warp URI tools (W4 — DESIGN-warp-first-agent-shell)
 // ===========================================================================
 
@@ -15444,6 +15539,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(ContextBudgetTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(ContextPressureEstimateTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(ToolCallAttentionReportTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(EmbedTextTool::new()));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(HookStatusTool::new(hub.clone())));
     // Memory admin / visualisation.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryExportTool::new(hub.clone())));
@@ -18834,5 +18930,65 @@ mod tests {
         // Cleanup so other tests don't observe the override.
         std::env::remove_var("AB_INTROSPECT_LLM_MAX_PER_HOUR");
         option_e_rate_reset();
+    }
+
+    // ── Phase 2.1 — embed_text MCP (raw encoder pass-through) ─────────
+
+    #[test]
+    fn select_raw_encoder_kind_honors_hash_env() {
+        std::env::set_var("AGENT_BRIDGE_EMBED_BACKEND", "hash");
+        assert_eq!(select_raw_encoder_kind(), "hash");
+        std::env::remove_var("AGENT_BRIDGE_EMBED_BACKEND");
+    }
+
+    #[test]
+    fn select_raw_encoder_kind_unknown_falls_back_to_onnx() {
+        std::env::set_var("AGENT_BRIDGE_EMBED_BACKEND", "weirdvalue");
+        assert_eq!(select_raw_encoder_kind(), "onnx");
+        std::env::remove_var("AGENT_BRIDGE_EMBED_BACKEND");
+    }
+
+    #[tokio::test]
+    async fn embed_text_returns_384_dim_vector() {
+        // Robust to test parallelism: both backends produce 384d, so
+        // assert dim invariant + backend name is one of the known two.
+        let tool = EmbedTextTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(json!({"text": "alpha beta gamma"}), &ctx)
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["dim"], json!(384), "encoder must produce 384-d output");
+        let embedding = v["embedding"].as_array().expect("embedding array");
+        assert_eq!(embedding.len(), 384, "vector length matches dim");
+        let backend = v["backend"].as_str().expect("backend name");
+        assert!(
+            backend == "all-MiniLM-L6-v2" || backend == "fnv1a-hash-384",
+            "unexpected backend name: {backend}"
+        );
+    }
+
+    #[tokio::test]
+    async fn embed_text_empty_input_returns_valid_vector() {
+        // Empty text must still return dim-sized vector — encoder
+        // contract is text → vec[dim()], never panic on empty.
+        let tool = EmbedTextTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(json!({"text": ""}), &ctx)
+            .await
+            .expect("execute ok on empty input");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        let embedding = v["embedding"].as_array().expect("embedding array");
+        assert_eq!(embedding.len(), 384, "empty text must still return dim-sized vec");
     }
 }
