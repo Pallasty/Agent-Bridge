@@ -8,6 +8,11 @@
 //!   - `GET /presence?project=...&role=...&max_idle_secs=...&limit=...`
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
 //!                              (same shape as `dream identity --json`)
+//!   - `POST /embed` — text → 384-d embedding for non-Rust / non-MCP clients
+//!                    (game runtimes, web, scripting). Phase 2.1 encoder
+//!                    decoupled per thread 6 #226 / #228 / #231 split with
+//!                    `embed_text` MCP tool. Returns the raw inner backend's
+//!                    output without substrate side-effects.
 //!
 //! Bind to a tailnet-reachable address (`0.0.0.0:7878` by default). The
 //! tailscale ACL handles peer auth — this daemon trusts whoever can reach
@@ -17,6 +22,7 @@
 //! so daemon-http and stdio MCP can run side-by-side reading/writing the
 //! same SQLite WAL.
 
+use ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend};
 use ab_store::{AgentPresenceRecord, StateStore};
 use anyhow::{Context, Result};
 use axum::{
@@ -33,12 +39,17 @@ use std::sync::Arc;
 #[derive(Clone)]
 struct AppState {
     store: Arc<dyn StateStore>,
+    embed_backend: Arc<dyn EmbeddingBackend>,
 }
 
 /// Run the HTTP daemon on `listen` (e.g. `0.0.0.0:7878`). Blocks until the
 /// listener is dropped or the runtime is cancelled.
 pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
-    let state = AppState { store };
+    let embed_backend = build_raw_embed_backend();
+    let state = AppState {
+        store,
+        embed_backend,
+    };
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/.well-known/agent.json/:session_id", get(agent_card))
@@ -47,6 +58,7 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route("/forum/post", post(forum_post))
         .route("/presence", get(presence_list))
         .route("/identity", get(identity_endpoint))
+        .route("/embed", post(embed_endpoint))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen)
@@ -295,6 +307,54 @@ fn default_identity_days() -> u32 {
     3
 }
 
+/// Request body for `POST /embed`. Single text → single 384-d vector. For
+/// throughput callers we may later add a `batch` variant; v0 keeps the shape
+/// minimal so non-Rust clients (Unity/C#, Unreal/C++, Godot/GDScript, web/JS)
+/// can hit it with one POST per perception event.
+#[derive(Deserialize, Debug)]
+struct EmbedRequest {
+    text: String,
+}
+
+async fn embed_endpoint(
+    State(s): State<AppState>,
+    Json(req): Json<EmbedRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    if req.text.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "missing or empty 'text'".into()));
+    }
+    let backend = s.embed_backend.clone();
+    let text = req.text;
+    let (name, dim, vec) = tokio::task::spawn_blocking(move || {
+        let v = backend.embed(&text);
+        (backend.name().to_string(), backend.dim(), v)
+    })
+    .await
+    .map_err(internal_error)?;
+    Ok(Json(json!({
+        "embedding": vec,
+        "backend": name,
+        "dim": dim,
+    })))
+}
+
+/// Select the raw inner embedding backend for `/embed`. Mirrors the env
+/// precedence used by `ab_store::embedding::select_default` and
+/// `seed_bridge::build_inner_backend`, but always returns the raw inner
+/// backend — never a substrate-wrapped one — so external callers can pull
+/// embeddings without feeding aio2's perception substrate.
+fn build_raw_embed_backend() -> Arc<dyn EmbeddingBackend> {
+    let pick = std::env::var("AGENT_BRIDGE_EMBED_BACKEND")
+        .ok()
+        .map(|s| s.to_lowercase())
+        .filter(|s| s == "hash" || s == "onnx")
+        .unwrap_or_else(|| "onnx".to_string());
+    match pick.as_str() {
+        "hash" => Arc::new(HashBackend),
+        _ => Arc::new(OnnxBackend),
+    }
+}
+
 /// Short hostname for cross-node disambiguation. Mirrors the resolution
 /// rule used by `agent_presence_announce` (env override → /etc/hostname →
 /// `hostname` command → "unknown"), so a single node identifies itself the
@@ -422,5 +482,22 @@ mod tests {
         let obj = card.as_object().unwrap();
         assert_eq!(obj.len(), 1, "only name should remain when others unset");
         assert!(obj.contains_key("name"));
+    }
+
+    #[test]
+    fn embed_backend_factory_returns_384_dim() {
+        let b = build_raw_embed_backend();
+        assert_eq!(b.dim(), 384, "embedding backend must produce 384-d vectors");
+        let name = b.name();
+        assert!(
+            name == "fnv1a-hash-384" || name == "all-MiniLM-L6-v2",
+            "unexpected backend name: {name}"
+        );
+    }
+
+    #[test]
+    fn embed_request_deserializes_text_field() {
+        let req: EmbedRequest = serde_json::from_str(r#"{"text":"hello world"}"#).unwrap();
+        assert_eq!(req.text, "hello world");
     }
 }
