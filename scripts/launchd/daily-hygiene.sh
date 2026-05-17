@@ -34,7 +34,7 @@ echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) ζ-17 daily hygiene begin ==="
 "$BIN" dream decay-unused --window-days 30 --step 0.05 --floor 0.1 || true
 "$BIN" dream prune-coactivation-noise --max-count 1 --older-than-days 30 || true
 "$BIN" dream prune-degenerate-relates || true
-"$BIN" dream archive-orphan-stubs --older-than-days 3 --alarm-threshold 10 || true
+"$BIN" dream archive-orphan-stubs --older-than-days 3 --alarm-threshold 25 || true
 
 # Add pass: reinforce-active. Hebbian wire-strengthen — without this
 # the system is entropy-monotonic (decay only, never reward).

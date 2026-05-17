@@ -128,7 +128,7 @@ Type=oneshot
 ExecStart=-%h/.local/bin/agent-bridge.real dream decay-unused --window-days 30 --step 0.05 --floor 0.1
 ExecStart=-%h/.local/bin/agent-bridge.real dream prune-coactivation-noise --max-count 1 --older-than-days 30
 ExecStart=-%h/.local/bin/agent-bridge.real dream prune-degenerate-relates
-ExecStart=-%h/.local/bin/agent-bridge.real dream archive-orphan-stubs --older-than-days 3 --alarm-threshold 10
+ExecStart=-%h/.local/bin/agent-bridge.real dream archive-orphan-stubs --older-than-days 3 --alarm-threshold 25
 # P20 — Hebbian wire-together. Tier 1 first (count >= 5, weight 0.5-0.95)
 # then tier 2 (count >= 3, weight 0.3-0.5, skips any-edge pairs only).
 # Order matters: tier-1 must run first so tier-2's "skip any existing
