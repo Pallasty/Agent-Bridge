@@ -6,7 +6,10 @@ const path = require("path");
 const vscode = require("vscode");
 
 let timer = undefined;
+let commandTimer = undefined;
 let recentTasks = [];
+const processedCommandIds = new Set();
+let processingCommands = false;
 
 function activate(context) {
   const writeNow = () => writeSnapshot().catch((err) => {
@@ -18,6 +21,9 @@ function activate(context) {
     }
     timer = setTimeout(writeNow, 200);
   };
+  const processCommandsNow = () => processCommandQueue().catch((err) => {
+    console.error("agent-bridge ide command processing failed", err);
+  });
 
   context.subscriptions.push(
     vscode.commands.registerCommand("agentBridge.writeSnapshot", writeNow),
@@ -40,12 +46,25 @@ function activate(context) {
     })
   );
 
+  loadProcessedCommandIds().finally(() => {
+    processCommandsNow();
+    commandTimer = setInterval(processCommandsNow, 500);
+  });
+  context.subscriptions.push(new vscode.Disposable(() => {
+    if (commandTimer) {
+      clearInterval(commandTimer);
+    }
+  }));
+
   schedule();
 }
 
 function deactivate() {
   if (timer) {
     clearTimeout(timer);
+  }
+  if (commandTimer) {
+    clearInterval(commandTimer);
   }
 }
 
@@ -70,6 +89,7 @@ async function writeSnapshot() {
   };
 
   await atomicWriteJson(target, snapshot);
+  return target;
 }
 
 function snapshotPath() {
@@ -95,6 +115,25 @@ function snapshotPath() {
   }
 
   return path.join(os.homedir(), ".local", "share", "agent-bridge", "ide-snapshot.json");
+}
+
+function bridgeDir() {
+  const configured = vscode.workspace
+    .getConfiguration("agentBridge")
+    .get("commandDir", "")
+    .trim();
+  if (configured) {
+    return configured;
+  }
+  return path.dirname(snapshotPath());
+}
+
+function commandQueuePath() {
+  return path.join(bridgeDir(), "ide-commands.jsonl");
+}
+
+function commandResponsePath() {
+  return path.join(bridgeDir(), "ide-responses.jsonl");
 }
 
 function workspaceRoot() {
@@ -242,6 +281,183 @@ async function atomicWriteJson(target, snapshot) {
   const tmp = `${target}.${process.pid}.tmp`;
   await fs.promises.writeFile(tmp, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
   await fs.promises.rename(tmp, target);
+}
+
+async function loadProcessedCommandIds() {
+  const target = commandResponsePath();
+  let raw;
+  try {
+    raw = await fs.promises.readFile(target, "utf8");
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      return;
+    }
+    throw err;
+  }
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    try {
+      const response = JSON.parse(trimmed);
+      if (response && typeof response.id === "string") {
+        processedCommandIds.add(response.id);
+      }
+    } catch (_) {
+      // Ignore malformed historical lines; the bridge only appends JSON.
+    }
+  }
+}
+
+async function processCommandQueue() {
+  if (processingCommands) {
+    return;
+  }
+  processingCommands = true;
+  try {
+    const target = commandQueuePath();
+    let raw;
+    try {
+      raw = await fs.promises.readFile(target, "utf8");
+    } catch (err) {
+      if (err && err.code === "ENOENT") {
+        return;
+      }
+      throw err;
+    }
+
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+      let request;
+      try {
+        request = JSON.parse(trimmed);
+      } catch (err) {
+        continue;
+      }
+      if (!request || typeof request.id !== "string" || processedCommandIds.has(request.id)) {
+        continue;
+      }
+      processedCommandIds.add(request.id);
+      const response = await executeCommandRequest(request);
+      await appendJsonl(commandResponsePath(), response);
+    }
+  } finally {
+    processingCommands = false;
+  }
+}
+
+async function executeCommandRequest(request) {
+  const startedAt = new Date().toISOString();
+  try {
+    const result = await runIdeCommand(request.command, request.args || {});
+    return {
+      schema_version: 1,
+      id: request.id,
+      command: request.command,
+      ok: true,
+      started_at: startedAt,
+      completed_at: new Date().toISOString(),
+      result
+    };
+  } catch (err) {
+    return {
+      schema_version: 1,
+      id: request.id,
+      command: request.command,
+      ok: false,
+      started_at: startedAt,
+      completed_at: new Date().toISOString(),
+      error: err && err.message ? err.message : String(err)
+    };
+  }
+}
+
+async function runIdeCommand(command, args) {
+  switch (command) {
+    case "open_file":
+      return openFile(args);
+    case "reveal_range":
+      return openFile(args);
+    case "run_task":
+      return runTask(args);
+    case "write_snapshot": {
+      const target = await writeSnapshot();
+      return { snapshot_path: target };
+    }
+    default:
+      throw new Error(`unsupported command: ${command}`);
+  }
+}
+
+async function openFile(args) {
+  const filePath = requiredString(args.path, "path");
+  const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+  const editor = await vscode.window.showTextDocument(document, {
+    preview: !!args.preview,
+    preserveFocus: !!args.preserve_focus,
+    viewColumn: viewColumn(args.view_column)
+  });
+  const range = rangeFromInfo(args.range);
+  if (range) {
+    editor.selection = new vscode.Selection(range.start, range.end);
+    editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  }
+  return {
+    file: filePath,
+    language: document.languageId,
+    revealed_range: range ? rangeInfo(range) : null
+  };
+}
+
+async function runTask(args) {
+  const name = requiredString(args.name, "name");
+  const tasks = await vscode.tasks.fetchTasks();
+  const task = tasks.find((candidate) => candidate.name === name);
+  if (!task) {
+    throw new Error(`task not found: ${name}`);
+  }
+  const execution = await vscode.tasks.executeTask(task);
+  return {
+    name: execution.task.name,
+    source: execution.task.source || null
+  };
+}
+
+function requiredString(value, name) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${name} is required`);
+  }
+  return value;
+}
+
+function rangeFromInfo(value) {
+  if (!value || typeof value !== "object" || !value.start || !value.end) {
+    return null;
+  }
+  return new vscode.Range(positionFromInfo(value.start), positionFromInfo(value.end));
+}
+
+function positionFromInfo(value) {
+  const line = clampNumber(value.line, 0, Number.MAX_SAFE_INTEGER);
+  const character = clampNumber(value.character, 0, Number.MAX_SAFE_INTEGER);
+  return new vscode.Position(line, character);
+}
+
+function viewColumn(value) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+}
+
+async function appendJsonl(target, value) {
+  await fs.promises.mkdir(path.dirname(target), { recursive: true });
+  await fs.promises.appendFile(target, `${JSON.stringify(value)}\n`, "utf8");
 }
 
 module.exports = {

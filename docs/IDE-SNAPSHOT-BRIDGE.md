@@ -65,12 +65,71 @@ consistent. The agent treats ranges as hints, not as authoritative byte offsets.
 
 ## Recommended Implementation Path
 
-Phase 1, now landed:
+## Command Bridge
+
+`ide_command` adds the write-side half of the bridge. The MCP tool appends
+requests to:
+
+```text
+<workspace>/.agent-bridge/ide-commands.jsonl
+```
+
+The IDE extension consumes each JSONL request and appends a matching response to:
+
+```text
+<workspace>/.agent-bridge/ide-responses.jsonl
+```
+
+Request shape:
+
+```json
+{
+  "schema_version": 1,
+  "id": "idecmd-...",
+  "created_at_unix_ms": 1780000000000,
+  "command": "open_file",
+  "args": {
+    "path": "/abs/project/src/main.rs",
+    "range": {
+      "start": { "line": 12, "character": 4 },
+      "end": { "line": 12, "character": 9 }
+    }
+  }
+}
+```
+
+Response shape:
+
+```json
+{
+  "schema_version": 1,
+  "id": "idecmd-...",
+  "command": "open_file",
+  "ok": true,
+  "completed_at": "2026-05-17T12:00:00.000Z",
+  "result": { "file": "/abs/project/src/main.rs" }
+}
+```
+
+Supported commands in the VS Code/Cursor example:
+
+- `open_file`: `{ "path": "/abs/file", "range": optional, "preview": false }`
+- `reveal_range`: same args as `open_file`; opens and scrolls to `range`
+- `run_task`: `{ "name": "task name as shown by VS Code" }`
+- `write_snapshot`: `{}`
+
+`ide_command` is intentionally queue-based. If the extension is not running,
+commands remain visible on disk and the MCP call returns `status=queued` or
+`status=timeout` when `wait_ms` is set.
+
+## Implementation Path
+
+Phase 1, landed:
 
 - `ide_snapshot` MCP tool reads, normalizes, truncates, and marks stale snapshots.
 - The tool is editor-agnostic and registered in the Essential profile.
 
-Phase 2, VS Code/Cursor extension:
+Phase 2, landed:
 
 - Minimal dependency-free example lives at
   `examples/vscode-ide-snapshot/`.
@@ -79,10 +138,12 @@ Phase 2, VS Code/Cursor extension:
 - Prefer `<workspace>/.agent-bridge/ide-snapshot.json` for project-local state.
 - Include only diagnostics for the active workspace unless the user opts into a
   global runtime snapshot.
+- The same extension polls `ide-commands.jsonl` and writes command responses.
 
 Phase 3, richer IDE actions:
 
-- Add write-side tools only after the read contract is stable: open file, reveal
-  range, apply workspace edit, run named task, fetch debug/session state.
+- Add guarded `apply_workspace_edit` once review/confirmation semantics are
+  settled.
+- Add debug/session state and test result capture.
 - Keep LSP-derived data separate from editor UI state so headless language
   servers can later feed the same contract.

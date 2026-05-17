@@ -7,7 +7,11 @@
 use ab_core::{Error, Result};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_STALE_AFTER_MS: u128 = 30_000;
@@ -15,6 +19,10 @@ const DEFAULT_MAX_OPEN_FILES: usize = 40;
 const DEFAULT_MAX_DIAGNOSTICS: usize = 200;
 const DEFAULT_MAX_SELECTION_CHARS: usize = 20_000;
 const DEFAULT_MAX_MESSAGE_CHARS: usize = 1_000;
+const COMMANDS_FILE: &str = "ide-commands.jsonl";
+const RESPONSES_FILE: &str = "ide-responses.jsonl";
+
+static COMMAND_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone)]
 pub struct IdeSnapshotOptions {
@@ -41,6 +49,13 @@ struct SnapshotSource {
     source_kind: &'static str,
 }
 
+#[derive(Debug, Clone)]
+pub struct IdeCommandOptions {
+    pub command_dir: Option<PathBuf>,
+    pub cwd: Option<PathBuf>,
+    pub wait_ms: u64,
+}
+
 /// Read the current IDE snapshot from an explicit path, environment variable,
 /// or a project-local `.agent-bridge/ide-snapshot.json`.
 pub fn read_ide_snapshot(
@@ -65,6 +80,78 @@ pub fn read_ide_snapshot(
     let raw = std::fs::read_to_string(&source.path).map_err(Error::Io)?;
     let value: Value = serde_json::from_str(&raw).map_err(Error::Serde)?;
     normalise_snapshot(value, &source, options)
+}
+
+/// Queue an IDE command for an editor extension to execute.
+///
+/// Commands are append-only JSONL records. The VS Code/Cursor example watches
+/// `ide-commands.jsonl` and writes matching responses to `ide-responses.jsonl`.
+pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions) -> Result<Value> {
+    let command = command.trim();
+    if command.is_empty() {
+        return Err(Error::InvalidArgument("command is required".into()));
+    }
+    if !matches!(
+        command,
+        "open_file" | "reveal_range" | "run_task" | "write_snapshot"
+    ) {
+        return Err(Error::InvalidArgument(format!(
+            "unsupported IDE command: {command}"
+        )));
+    }
+    if !args.is_object() {
+        return Err(Error::InvalidArgument(
+            "args must be a JSON object, even when empty".into(),
+        ));
+    }
+
+    let dir = resolve_command_dir(options.command_dir.as_deref(), options.cwd.as_deref())?;
+    std::fs::create_dir_all(&dir).map_err(Error::Io)?;
+    let request_path = dir.join(COMMANDS_FILE);
+    let response_path = dir.join(RESPONSES_FILE);
+    let now_ms = system_time_to_unix_ms(SystemTime::now()).unwrap_or(0);
+    let id = format!(
+        "idecmd-{now_ms}-{}-{}",
+        std::process::id(),
+        COMMAND_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+    let request = json!({
+        "schema_version": 1,
+        "id": id,
+        "created_at_unix_ms": now_ms,
+        "command": command,
+        "args": args,
+    });
+    append_jsonl(&request_path, &request)?;
+
+    let response = if options.wait_ms > 0 {
+        wait_for_response(&response_path, &id, options.wait_ms)?
+    } else {
+        None
+    };
+    let status = if response.is_some() {
+        "completed"
+    } else if options.wait_ms > 0 {
+        "timeout"
+    } else {
+        "queued"
+    };
+
+    Ok(json!({
+        "queued": true,
+        "status": status,
+        "id": id,
+        "command": command,
+        "command_dir": dir.display().to_string(),
+        "request_path": request_path.display().to_string(),
+        "response_path": response_path.display().to_string(),
+        "response": response,
+        "hint": if status == "timeout" {
+            "command was queued but no IDE response arrived before wait_ms elapsed; make sure the IDE extension is running."
+        } else {
+            "IDE extension should consume ide-commands.jsonl and append to ide-responses.jsonl."
+        },
+    }))
 }
 
 fn snapshot_candidates(explicit_path: Option<&str>, cwd: Option<&Path>) -> Vec<SnapshotSource> {
@@ -120,6 +207,81 @@ fn snapshot_candidates(explicit_path: Option<&str>, cwd: Option<&Path>) -> Vec<S
     }
 
     out
+}
+
+fn resolve_command_dir(explicit_dir: Option<&Path>, cwd: Option<&Path>) -> Result<PathBuf> {
+    if let Some(dir) = explicit_dir {
+        return Ok(dir.to_path_buf());
+    }
+    if let Ok(dir) = std::env::var("AGENT_BRIDGE_IDE_COMMAND_DIR") {
+        let dir = dir.trim();
+        if !dir.is_empty() {
+            return Ok(PathBuf::from(dir));
+        }
+    }
+    if let Ok(snapshot) = std::env::var("AGENT_BRIDGE_IDE_SNAPSHOT") {
+        let snapshot = snapshot.trim();
+        if !snapshot.is_empty() {
+            if let Some(parent) = Path::new(snapshot).parent() {
+                return Ok(parent.to_path_buf());
+            }
+        }
+    }
+
+    let base = cwd
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| Error::InvalidArgument("could not resolve cwd".into()))?;
+    let meta = std::fs::metadata(&base).map_err(Error::Io)?;
+    if !meta.is_dir() {
+        return Err(Error::InvalidArgument(format!(
+            "cwd is not a directory: {}",
+            base.display()
+        )));
+    }
+    Ok(base.join(".agent-bridge"))
+}
+
+fn append_jsonl(path: &Path, value: &Value) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(Error::Io)?;
+    let line = serde_json::to_string(value).map_err(Error::Serde)?;
+    writeln!(file, "{line}").map_err(Error::Io)
+}
+
+fn wait_for_response(path: &Path, id: &str, wait_ms: u64) -> Result<Option<Value>> {
+    let deadline = std::time::Instant::now() + Duration::from_millis(wait_ms);
+    loop {
+        if let Some(response) = find_response(path, id)? {
+            return Ok(Some(response));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn find_response(path: &Path, id: &str) -> Result<Option<Value>> {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Ok(None);
+    };
+    for line in raw.lines().rev() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value.get("id").and_then(|v| v.as_str()) == Some(id) {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
 }
 
 fn normalise_snapshot(
@@ -471,5 +633,57 @@ mod tests {
         assert_eq!(v["open_files"]["truncated"], true);
         assert_eq!(v["diagnostic_counts"]["error"], 1);
         assert_eq!(v["diagnostic_counts"]["warning"], 1);
+    }
+
+    #[test]
+    fn ide_command_enqueue_writes_jsonl() {
+        let dir = std::env::temp_dir().join(format!(
+            "agent-bridge-ide-command-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let v = queue_ide_command(
+            "open_file",
+            json!({ "path": "/tmp/project/src/lib.rs" }),
+            IdeCommandOptions {
+                command_dir: Some(dir.clone()),
+                cwd: None,
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let raw = std::fs::read_to_string(dir.join(COMMANDS_FILE)).expect("commands file");
+        let request: Value = serde_json::from_str(raw.lines().next().unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(v["status"], "queued");
+        assert_eq!(request["command"], "open_file");
+        assert_eq!(request["args"]["path"], "/tmp/project/src/lib.rs");
+    }
+
+    #[test]
+    fn ide_command_wait_reads_response() {
+        let dir = std::env::temp_dir().join(format!(
+            "agent-bridge-ide-response-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let response_path = dir.join(RESPONSES_FILE);
+        std::fs::write(
+            &response_path,
+            "{\"id\":\"known\",\"ok\":true,\"result\":{\"done\":true}}\n",
+        )
+        .expect("write response");
+        let found = wait_for_response(&response_path, "known", 1).expect("response");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(found.unwrap()["result"]["done"], true);
     }
 }

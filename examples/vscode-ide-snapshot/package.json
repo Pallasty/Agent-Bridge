@@ -30,6 +30,11 @@
           "default": "",
           "description": "Optional absolute path for ide-snapshot.json. Defaults to <workspace>/.agent-bridge/ide-snapshot.json, then AGENT_BRIDGE_IDE_SNAPSHOT."
         },
+        "agentBridge.commandDir": {
+          "type": "string",
+          "default": "",
+          "description": "Optional directory for ide-commands.jsonl and ide-responses.jsonl. Defaults to the directory containing ide-snapshot.json."
+        },
         "agentBridge.maxSelectionChars": {
           "type": "number",
           "default": 20000,

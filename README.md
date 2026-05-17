@@ -619,6 +619,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `hook_status` | Check installed hook scripts and their last run status |
 | | `mcp_recent_errors` | List recent failed MCP `tools/call` rows from the SQLite ring buffer |
 | ide | `ide_snapshot` | Read editor state from an IDE-written JSON snapshot: active file, selection, open files, diagnostics, recent tasks |
+| | `ide_command` | Queue IDE actions for an extension to execute: open/reveal file, run task, write snapshot |
 | perceive | `project_detect` | Detect languages / build hints / Rust workspace members / git snapshot from manifests (W2) |
 | | `changes_digest` | Structured git diff summary (`working_tree` / `staged` / `last_commit` / `branch_vs_main`) |
 | warp-oz | `oz_run_get` | Fetch status of a Warp cloud agent run by `run_id` or `session_id` |

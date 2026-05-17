@@ -39,7 +39,7 @@ use tokio::process::Command as TokioCommand;
 
 use crate::context_budget::{budget_recommendation, estimated_usage_tokens, model_context_limit};
 use crate::hub::Hub;
-use crate::ide::{read_ide_snapshot, IdeSnapshotOptions};
+use crate::ide::{queue_ide_command, read_ide_snapshot, IdeCommandOptions, IdeSnapshotOptions};
 use crate::project::{changes_digest, detect_project, resolve_cwd};
 use crate::security::Cap;
 use crate::session_handoff::build_handoff_brief;
@@ -11262,6 +11262,107 @@ pub struct ProjectDetectTool {
     hub: Hub,
 }
 
+pub struct IdeCommandTool {
+    #[allow(dead_code)]
+    hub: Hub,
+}
+
+impl IdeCommandTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for IdeCommandTool {
+    fn name(&self) -> &'static str {
+        "ide_command"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Queue a lightweight command for an IDE extension to execute via the \
+                 file bridge. Supported commands: open_file, reveal_range, run_task, \
+                 write_snapshot. Writes JSONL to <workspace>/.agent-bridge/ide-commands.jsonl \
+                 (or command_dir / AGENT_BRIDGE_IDE_COMMAND_DIR) and optionally waits \
+                 for a matching response in ide-responses.jsonl."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "enum": ["open_file", "reveal_range", "run_task", "write_snapshot"],
+                        "description": "IDE action to request."
+                    },
+                    "args": {
+                        "type": "object",
+                        "default": {},
+                        "description": "Command-specific JSON args. open_file/reveal_range use {path, range?, preview?, preserve_focus?}; run_task uses {name}; write_snapshot uses {}."
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Workspace directory used to resolve .agent-bridge command files."
+                    },
+                    "command_dir": {
+                        "type": "string",
+                        "description": "Optional explicit directory containing ide-commands.jsonl and ide-responses.jsonl."
+                    },
+                    "wait_ms": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 30000,
+                        "default": 0,
+                        "description": "Wait for an IDE response before returning. 0 = enqueue only."
+                    }
+                },
+                "required": ["command"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let command = args
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let command_args = args.get("args").cloned().unwrap_or_else(|| json!({}));
+        let command_dir = args
+            .get("command_dir")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(PathBuf::from);
+        let cwd = match args.get("cwd").and_then(|v| v.as_str()) {
+            Some(s) if !s.trim().is_empty() => match resolve_cwd(Some(s)) {
+                Ok(p) => Some(p),
+                Err(e) => return Ok(ToolResult::error(e.to_string())),
+            },
+            _ => None,
+        };
+        let wait_ms = args
+            .get("wait_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            .min(30_000);
+        let options = IdeCommandOptions {
+            command_dir,
+            cwd,
+            wait_ms,
+        };
+
+        let res = tokio::task::spawn_blocking(move || {
+            queue_ide_command(&command, command_args, options)
+        })
+        .await
+        .map_err(|e| ab_core::Error::Backend(format!("ide_command task: {e}")))?;
+        match res {
+            Ok(v) => Ok(ToolResult::json_text(&v)),
+            Err(e) => Ok(ToolResult::error(e.to_string())),
+        }
+    }
+}
+
 impl ProjectDetectTool {
     pub fn new(hub: Hub) -> Self {
         Self { hub }
@@ -15108,6 +15209,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CapabilitiesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(McpDispatchAuditTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(IdeSnapshotTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(IdeCommandTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ProjectDetectTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ChangesDigestTool::new(hub.clone())));
     // Plans + worktrees + codebase search.
