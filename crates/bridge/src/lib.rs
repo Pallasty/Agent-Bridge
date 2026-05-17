@@ -13,6 +13,7 @@ pub mod curate;
 pub mod daemon_http;
 pub mod dream_replay;
 pub mod hub;
+pub mod ide;
 pub mod peer_client;
 pub mod mcp_tools;
 pub mod palace_viewer;

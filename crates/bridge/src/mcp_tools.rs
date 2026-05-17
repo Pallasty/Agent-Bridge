@@ -39,6 +39,7 @@ use tokio::process::Command as TokioCommand;
 
 use crate::context_budget::{budget_recommendation, estimated_usage_tokens, model_context_limit};
 use crate::hub::Hub;
+use crate::ide::{read_ide_snapshot, IdeSnapshotOptions};
 use crate::project::{changes_digest, detect_project, resolve_cwd};
 use crate::security::Cap;
 use crate::session_handoff::build_handoff_brief;
@@ -11141,6 +11142,121 @@ fn tool_result_first_json(tr: &ToolResult) -> Option<Value> {
 //              project_detect + changes_digest (W2 perception)
 // ===========================================================================
 
+pub struct IdeSnapshotTool {
+    #[allow(dead_code)]
+    hub: Hub,
+}
+
+impl IdeSnapshotTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for IdeSnapshotTool {
+    fn name(&self) -> &'static str {
+        "ide_snapshot"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Read a lightweight IDE/editor snapshot for the current workspace: active \
+                 file, selection, open files, diagnostics/problems, and recent task state. \
+                 The snapshot is supplied by an IDE extension or script via \
+                 AGENT_BRIDGE_IDE_SNAPSHOT, <workspace>/.agent-bridge/ide-snapshot.json, \
+                 or $XDG_RUNTIME_DIR/agent-bridge/ide-snapshot.json. Pure read-only; \
+                 returns available=false with the JSON contract when no snapshot exists."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Optional explicit snapshot JSON path. Overrides env and workspace discovery."
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Workspace directory for .agent-bridge/ide-snapshot.json discovery. Defaults to process cwd."
+                    },
+                    "max_open_files": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 40
+                    },
+                    "max_diagnostics": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 200
+                    },
+                    "max_selection_chars": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 50000,
+                        "default": 20000
+                    },
+                    "stale_after_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 3600000,
+                        "default": 30000,
+                        "description": "Mark snapshot stale when the file mtime is older than this."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let explicit_path = args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.to_string());
+        let cwd = match args.get("cwd").and_then(|v| v.as_str()) {
+            Some(s) if !s.trim().is_empty() => match resolve_cwd(Some(s)) {
+                Ok(p) => Some(p),
+                Err(e) => return Ok(ToolResult::error(e.to_string())),
+            },
+            _ => None,
+        };
+        let options = IdeSnapshotOptions {
+            max_open_files: args
+                .get("max_open_files")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(40)
+                .clamp(1, 200) as usize,
+            max_diagnostics: args
+                .get("max_diagnostics")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(200)
+                .clamp(1, 1000) as usize,
+            max_selection_chars: args
+                .get("max_selection_chars")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(20_000)
+                .min(50_000) as usize,
+            stale_after_ms: args
+                .get("stale_after_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30_000)
+                .clamp(1_000, 3_600_000) as u128,
+        };
+
+        let res = tokio::task::spawn_blocking(move || {
+            read_ide_snapshot(explicit_path.as_deref(), cwd.as_deref(), options)
+        })
+        .await
+        .map_err(|e| ab_core::Error::Backend(format!("ide_snapshot task: {e}")))?;
+        match res {
+            Ok(v) => Ok(ToolResult::json_text(&v)),
+            Err(e) => Ok(ToolResult::error(e.to_string())),
+        }
+    }
+}
+
 pub struct ProjectDetectTool {
     #[allow(dead_code)]
     hub: Hub,
@@ -14991,6 +15107,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionReflectTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CapabilitiesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(McpDispatchAuditTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(IdeSnapshotTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ProjectDetectTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ChangesDigestTool::new(hub.clone())));
     // Plans + worktrees + codebase search.

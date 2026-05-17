@@ -1,0 +1,50 @@
+{
+  "name": "agent-bridge-ide-snapshot",
+  "displayName": "Agent Bridge IDE Snapshot",
+  "description": "Writes a lightweight IDE state snapshot for the agent-bridge ide_snapshot MCP tool.",
+  "version": "0.1.0",
+  "publisher": "agent-bridge",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:agentBridge.writeSnapshot"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentBridge.writeSnapshot",
+        "title": "Agent Bridge: Write IDE Snapshot"
+      }
+    ],
+    "configuration": {
+      "title": "Agent Bridge",
+      "properties": {
+        "agentBridge.snapshotPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path for ide-snapshot.json. Defaults to <workspace>/.agent-bridge/ide-snapshot.json, then AGENT_BRIDGE_IDE_SNAPSHOT."
+        },
+        "agentBridge.maxSelectionChars": {
+          "type": "number",
+          "default": 20000,
+          "minimum": 0,
+          "maximum": 50000,
+          "description": "Maximum selected text characters to include in the snapshot."
+        },
+        "agentBridge.maxDiagnostics": {
+          "type": "number",
+          "default": 500,
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "Maximum diagnostics to include in the snapshot."
+        }
+      }
+    }
+  }
+}
