@@ -1346,6 +1346,107 @@ fn pearson(xs: &[f64], ys: &[f64]) -> f64 {
     num / denom
 }
 
+/// **Method A (#204 / #203)** — pure computation of [`SignalFidelityStats`]
+/// from raw `(key, importance, access_count)` rows.
+///
+/// Shared by both [`SqliteStore::signal_fidelity_stats`] (no filter) and
+/// [`SqliteStore::signal_fidelity_stats_excluding`] (kind-filtered)
+/// so the two trait methods stay thin SQL-build + delegate, avoiding
+/// ~80 LOC duplication of the rank/Pearson/misrank math.
+///
+/// Pure; no I/O, no shared state. Bit-exact equivalent to the original
+/// inline path (validated by
+/// `signal_fidelity_stats_excluding_empty_kinds_matches_unfiltered`).
+fn compute_signal_fidelity_from_rows(
+    rows: Vec<(String, f64, i64)>,
+    top_n: usize,
+) -> SignalFidelityStats {
+    let total_active = rows.len() as u64;
+    if total_active < 2 {
+        return SignalFidelityStats {
+            total_active,
+            spearman_r: f64::NAN,
+            spearman_r_touched: f64::NAN,
+            ..Default::default()
+        };
+    }
+
+    let importances: Vec<f64> = rows.iter().map(|(_, i, _)| *i).collect();
+    let accesses: Vec<f64> = rows.iter().map(|(_, _, a)| (*a) as f64).collect();
+
+    let mean_importance = importances.iter().sum::<f64>() / total_active as f64;
+    let mean_access = accesses.iter().sum::<f64>() / total_active as f64;
+
+    let n_zero_access = accesses.iter().filter(|a| **a == 0.0).count() as u64;
+    // Decay-unused's default floor is 0.1; allow ε so a single
+    // post-floor reinforce (0.1 + 0.05 = 0.15) doesn't escape the
+    // "at floor" bucket immediately.
+    let n_floor_importance =
+        importances.iter().filter(|i| **i <= 0.11).count() as u64;
+
+    let rank_importance = avg_tie_ranks(&importances);
+    let rank_access = avg_tie_ranks(&accesses);
+    let spearman_r = pearson(&rank_importance, &rank_access);
+
+    // Touched subset — filter both vectors in lockstep, re-rank.
+    let touched: Vec<(&String, f64, f64)> = rows
+        .iter()
+        .filter(|(_, _, a)| *a > 0)
+        .map(|(k, i, a)| (k, *i, (*a) as f64))
+        .collect();
+    let (spearman_r_touched, n_touched) = if touched.len() >= 2 {
+        let ti: Vec<f64> = touched.iter().map(|(_, i, _)| *i).collect();
+        let ta: Vec<f64> = touched.iter().map(|(_, _, a)| *a).collect();
+        (pearson(&avg_tie_ranks(&ti), &avg_tie_ranks(&ta)), touched.len() as u64)
+    } else {
+        (f64::NAN, touched.len() as u64)
+    };
+
+    let mut all_misranks: Vec<MisrankRow> = rows
+        .iter()
+        .enumerate()
+        .map(|(idx, (key, importance, access_count))| MisrankRow {
+            key: key.clone(),
+            importance: *importance,
+            access_count: (*access_count).max(0) as u64,
+            rank_importance: rank_importance[idx],
+            rank_access: rank_access[idx],
+            rank_diff: rank_importance[idx] - rank_access[idx],
+        })
+        .collect();
+
+    all_misranks
+        .sort_by(|a, b| a.rank_diff.partial_cmp(&b.rank_diff).unwrap_or(std::cmp::Ordering::Equal));
+    let under_reinforced: Vec<MisrankRow> = all_misranks
+        .iter()
+        .take(top_n)
+        .filter(|r| r.rank_diff < 0.0)
+        .cloned()
+        .collect();
+
+    all_misranks
+        .sort_by(|a, b| b.rank_diff.partial_cmp(&a.rank_diff).unwrap_or(std::cmp::Ordering::Equal));
+    let over_promoted: Vec<MisrankRow> = all_misranks
+        .iter()
+        .take(top_n)
+        .filter(|r| r.rank_diff > 0.0)
+        .cloned()
+        .collect();
+
+    SignalFidelityStats {
+        total_active,
+        spearman_r,
+        spearman_r_touched,
+        n_touched,
+        n_zero_access,
+        n_floor_importance,
+        mean_importance,
+        mean_access,
+        under_reinforced,
+        over_promoted,
+    }
+}
+
 /// **Phase 1 P3** — kind-aware decay constant. Faster decay for ephemeral
 /// kinds (observation, todo) because they age out fast in real workflows;
 /// slower for long-lived knowledge (decision, architecture). The current
@@ -4056,95 +4157,67 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("signal_fidelity_stats: {e}")))?;
+        Ok(compute_signal_fidelity_from_rows(rows, top_n))
+    }
 
-        let total_active = rows.len() as u64;
-        if total_active < 2 {
-            return Ok(SignalFidelityStats {
-                total_active,
-                spearman_r: f64::NAN,
-                spearman_r_touched: f64::NAN,
-                ..Default::default()
-            });
-        }
-
-        let importances: Vec<f64> = rows.iter().map(|(_, i, _)| *i).collect();
-        let accesses: Vec<f64> = rows.iter().map(|(_, _, a)| (*a) as f64).collect();
-
-        let mean_importance = importances.iter().sum::<f64>() / total_active as f64;
-        let mean_access = accesses.iter().sum::<f64>() / total_active as f64;
-
-        let n_zero_access = accesses.iter().filter(|a| **a == 0.0).count() as u64;
-        // Decay-unused's default floor is 0.1; allow ε so a single
-        // post-floor reinforce (0.1 + 0.05 = 0.15) doesn't escape the
-        // "at floor" bucket immediately.
-        let n_floor_importance =
-            importances.iter().filter(|i| **i <= 0.11).count() as u64;
-
-        let rank_importance = avg_tie_ranks(&importances);
-        let rank_access = avg_tie_ranks(&accesses);
-        let spearman_r = pearson(&rank_importance, &rank_access);
-
-        // Touched subset — filter both vectors in lockstep, re-rank.
-        let touched: Vec<(&String, f64, f64)> = rows
-            .iter()
-            .filter(|(_, _, a)| *a > 0)
-            .map(|(k, i, a)| (k, *i, (*a) as f64))
-            .collect();
-        let (spearman_r_touched, n_touched) = if touched.len() >= 2 {
-            let ti: Vec<f64> = touched.iter().map(|(_, i, _)| *i).collect();
-            let ta: Vec<f64> = touched.iter().map(|(_, _, a)| *a).collect();
-            (pearson(&avg_tie_ranks(&ti), &avg_tie_ranks(&ta)), touched.len() as u64)
-        } else {
-            (f64::NAN, touched.len() as u64)
-        };
-
-        // Misranks: build per-row records carrying rank-diff. Don't filter
-        // on absolute value yet — we sort and take top/bottom.
-        let mut all_misranks: Vec<MisrankRow> = rows
-            .iter()
-            .enumerate()
-            .map(|(idx, (key, importance, access_count))| MisrankRow {
-                key: key.clone(),
-                importance: *importance,
-                access_count: (*access_count).max(0) as u64,
-                rank_importance: rank_importance[idx],
-                rank_access: rank_access[idx],
-                rank_diff: rank_importance[idx] - rank_access[idx],
+    /// **Method A (#204 / #203)** — variant with kind-exclusion filter.
+    ///
+    /// SQL extends the base `status='active'` predicate with
+    /// `AND kind NOT IN (...)` when `exclude_kinds` is non-empty.
+    /// Empty `exclude_kinds` returns identical result to
+    /// [`Self::signal_fidelity_stats`] (validated by
+    /// `signal_fidelity_stats_excluding_empty_kinds_matches_unfiltered`).
+    async fn signal_fidelity_stats_excluding(
+        &self,
+        top_n: u32,
+        exclude_kinds: &[String],
+    ) -> Result<SignalFidelityStats> {
+        let top_n = top_n.clamp(0, 50) as usize;
+        let exclude_owned: Vec<String> = exclude_kinds.to_vec();
+        let rows: Vec<(String, f64, i64)> = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<(String, f64, i64)>> {
+                if exclude_owned.is_empty() {
+                    let mut stmt = c.prepare(
+                        "SELECT key, importance, access_count
+                           FROM memories
+                          WHERE status = 'active'",
+                    )?;
+                    let mapped = stmt.query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, f64>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    })?;
+                    mapped.collect::<RusqliteResult<Vec<_>>>()
+                } else {
+                    let placeholders: Vec<&str> =
+                        (0..exclude_owned.len()).map(|_| "?").collect();
+                    let sql = format!(
+                        "SELECT key, importance, access_count
+                           FROM memories
+                          WHERE status = 'active'
+                            AND kind NOT IN ({})",
+                        placeholders.join(",")
+                    );
+                    let mut stmt = c.prepare(&sql)?;
+                    let mapped = stmt.query_map(
+                        rusqlite::params_from_iter(exclude_owned.iter()),
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, f64>(1)?,
+                                row.get::<_, i64>(2)?,
+                            ))
+                        },
+                    )?;
+                    mapped.collect::<RusqliteResult<Vec<_>>>()
+                }
             })
-            .collect();
-
-        // Under-reinforced: most-negative rank_diff (high access, low imp).
-        all_misranks
-            .sort_by(|a, b| a.rank_diff.partial_cmp(&b.rank_diff).unwrap_or(std::cmp::Ordering::Equal));
-        let under_reinforced: Vec<MisrankRow> = all_misranks
-            .iter()
-            .take(top_n)
-            .filter(|r| r.rank_diff < 0.0)
-            .cloned()
-            .collect();
-
-        // Over-promoted: most-positive rank_diff.
-        all_misranks
-            .sort_by(|a, b| b.rank_diff.partial_cmp(&a.rank_diff).unwrap_or(std::cmp::Ordering::Equal));
-        let over_promoted: Vec<MisrankRow> = all_misranks
-            .iter()
-            .take(top_n)
-            .filter(|r| r.rank_diff > 0.0)
-            .cloned()
-            .collect();
-
-        Ok(SignalFidelityStats {
-            total_active,
-            spearman_r,
-            spearman_r_touched,
-            n_touched,
-            n_zero_access,
-            n_floor_importance,
-            mean_importance,
-            mean_access,
-            under_reinforced,
-            over_promoted,
-        })
+            .await
+            .map_err(|e| Error::Backend(format!("signal_fidelity_stats_excluding: {e}")))?;
+        Ok(compute_signal_fidelity_from_rows(rows, top_n))
     }
 
     async fn memory_compact(&self, policy: CompactPolicy) -> Result<Vec<String>> {
@@ -6673,6 +6746,7 @@ impl StateStore for SqliteStore {
             m6_embedding: m6,
             m7_signal_fidelity: m7,
             m8_query: query_stats,
+            excluded_kinds: Vec::new(),
         })
     }
 
@@ -15521,6 +15595,148 @@ mod tests {
             gap > 0.4 && gap < 2.0,
             "expected score gap dominated by feedback boost (~1.0), got {gap}"
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // ── Method A (#204 / #203) — signal_fidelity_stats_excluding ─────
+
+    /// Fixture importer that accepts per-row `kind` (the existing
+    /// `import_fidelity_fixture` hard-codes `kind="fact"` for all rows).
+    async fn import_fidelity_fixture_with_kinds(
+        store: &SqliteStore,
+        temp_dir: &std::path::Path,
+        rows: &[(&str, &str, f64, u64)], // key, kind, importance, access_count
+    ) {
+        let jsonl = temp_dir.join("fidelity-excluded-fixture.jsonl");
+        let mut buf = String::new();
+        for (key, kind, importance, access_count) in rows {
+            let line = serde_json::json!({
+                "key": key,
+                "kind": kind,
+                "content": format!("fidelity-fixture:{key}"),
+                "tags": [],
+                "related_keys": [],
+                "scope": null,
+                "created_at": 1_700_000_000_i64,
+                "updated_at": 1_700_000_000_i64,
+                "last_accessed_at": 1_700_000_000_i64,
+                "access_count": access_count,
+                "importance": importance,
+                "status": "active",
+                "trigger_pattern": null,
+            });
+            buf.push_str(&line.to_string());
+            buf.push('\n');
+        }
+        tokio::fs::write(&jsonl, buf).await.expect("write jsonl");
+        store
+            .memory_import(&jsonl, ImportConflictPolicy::Overwrite, None)
+            .await
+            .expect("import");
+    }
+
+    #[tokio::test]
+    async fn signal_fidelity_stats_excluding_empty_kinds_matches_unfiltered() {
+        // Empty exclude_kinds MUST return bit-exact same result as
+        // signal_fidelity_stats — same SQL path (no AND clause) +
+        // same compute helper. This pins the Method A claim that
+        // adding the flag never changes the default behavior.
+        let temp_dir = fidelity_temp_dir("exclude-empty-matches");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        import_fidelity_fixture_with_kinds(
+            &store,
+            &temp_dir,
+            &[
+                ("e_a", "fact", 0.2, 1),
+                ("e_b", "fact", 0.5, 5),
+                ("e_c", "feedback", 0.8, 10),
+                ("e_d", "decision", 0.3, 2),
+            ],
+        )
+        .await;
+
+        let baseline = store.signal_fidelity_stats(5).await.expect("baseline");
+        let excluded_empty = store
+            .signal_fidelity_stats_excluding(5, &[])
+            .await
+            .expect("excluded-empty");
+
+        // Spearman + counts identical.
+        assert_eq!(baseline.total_active, excluded_empty.total_active);
+        assert_eq!(baseline.n_touched, excluded_empty.n_touched);
+        assert_eq!(baseline.n_zero_access, excluded_empty.n_zero_access);
+        // f64 comparison via |Δ| < ε since NaN propagation differs.
+        let r_diff = (baseline.spearman_r - excluded_empty.spearman_r).abs();
+        assert!(
+            r_diff < 1e-12 || (baseline.spearman_r.is_nan() && excluded_empty.spearman_r.is_nan()),
+            "Spearman r diverged: baseline={} vs excluded-empty={}",
+            baseline.spearman_r,
+            excluded_empty.spearman_r,
+        );
+        let rt_diff = (baseline.spearman_r_touched - excluded_empty.spearman_r_touched).abs();
+        assert!(
+            rt_diff < 1e-12
+                || (baseline.spearman_r_touched.is_nan()
+                    && excluded_empty.spearman_r_touched.is_nan()),
+            "r_touched diverged: baseline={} vs excluded-empty={}",
+            baseline.spearman_r_touched,
+            excluded_empty.spearman_r_touched,
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn signal_fidelity_stats_excluding_filters_specified_kinds() {
+        // Insert 4 memories: 2 fact + 2 feedback. Filtering kind=feedback
+        // must reduce total_active from 4 → 2 + recompute correlation
+        // on the fact-only subset (where access pattern differs).
+        //
+        // Specifically: feedback rows have access > fact rows; excluding
+        // them changes the rank distribution + r_touched.
+        let temp_dir = fidelity_temp_dir("exclude-filter");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        import_fidelity_fixture_with_kinds(
+            &store,
+            &temp_dir,
+            &[
+                ("f_fact_low", "fact", 0.2, 1),
+                ("f_fact_mid", "fact", 0.5, 3),
+                ("f_fb_hi", "feedback", 0.4, 50),
+                ("f_fb_top", "feedback", 0.6, 80),
+            ],
+        )
+        .await;
+
+        let unfiltered = store.signal_fidelity_stats(5).await.expect("unfiltered");
+        let filtered = store
+            .signal_fidelity_stats_excluding(5, &["feedback".to_string()])
+            .await
+            .expect("filtered");
+
+        // Headline: total_active drops from 4 to 2.
+        assert_eq!(unfiltered.total_active, 4);
+        assert_eq!(filtered.total_active, 2);
+        // n_touched also drops (both fact rows have access > 0).
+        assert_eq!(filtered.n_touched, 2);
+
+        // With n=2 the rank-Pearson on (0.2, 0.5) vs (1, 3) is +1.0.
+        // Unfiltered all-4 set has mixed sign due to feedback having
+        // high access but variable importance — definitely not +1.0.
+        if !filtered.spearman_r.is_nan() {
+            assert!(
+                (filtered.spearman_r - 1.0).abs() < 1e-9,
+                "filtered set (2 fact rows, imp ↑ with access) should be Spearman=+1.0, got {}",
+                filtered.spearman_r,
+            );
+        }
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

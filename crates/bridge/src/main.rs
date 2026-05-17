@@ -753,6 +753,18 @@ enum DreamOp {
         /// Emit raw JSON of `SubstrateAuditReport` instead of pretty text.
         #[arg(long)]
         json: bool,
+        /// **Method A (#204 / #203)** — exclude rows of these kinds from the
+        /// M7 signal-fidelity computation. Other metrics (M1–M6, M8) are
+        /// computed unchanged on the full active set.
+        ///
+        /// Use for Day-7 (5/20) P-α audit to filter `kind=feedback` rows
+        /// pumped by L5 P3 session-bootstrap preamble (`a3af97a`), yielding
+        /// a pure-P-α r_touched reading. Pair with the unfiltered default
+        /// run for dual-report mode per thread 6 #204.
+        ///
+        /// Comma-separated, e.g. `--exclude-kinds feedback,observation`.
+        #[arg(long, value_delimiter = ',')]
+        exclude_kinds: Vec<String>,
     },
     /// **v22 Phase 3 (A) — substrate ↔ α cofires correlation audit.**
     /// For each memory key with `≥ min_cofires` α `cofires` edges, compute
@@ -1507,8 +1519,8 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
-            DreamOp::SubstrateAudit { window_days, json } => {
-                run_dream_substrate_audit(*window_days, *json).await
+            DreamOp::SubstrateAudit { window_days, json, exclude_kinds } => {
+                run_dream_substrate_audit(*window_days, *json, exclude_kinds.clone()).await
             }
             DreamOp::DecayCoactivation { tau_days, max_iterations, dry_run, json } => {
                 run_dream_decay_coactivation(*tau_days, *max_iterations, *dry_run, *json).await
@@ -6540,17 +6552,52 @@ fn truncate_chars(s: &str, n: usize) -> String {
 /// P-ε — Substrate-Readiness Audit CLI. Calls the same trait method as
 /// the `memory_substrate_audit` MCP tool; pretty text in terminal mode,
 /// JSON via `--json`. Pure read.
-async fn run_dream_substrate_audit(window_days: u32, as_json: bool) -> Result<()> {
+async fn run_dream_substrate_audit(
+    window_days: u32,
+    as_json: bool,
+    exclude_kinds: Vec<String>,
+) -> Result<()> {
     use ab_store::{default_db_path, SqliteStore, StateStore};
     let db_path = default_db_path();
     let store = SqliteStore::open(&db_path)
         .await
         .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
     let window_secs = (window_days as u64) * 86_400;
-    let r = store
+    let mut r = store
         .memory_substrate_audit(window_secs)
         .await
         .map_err(|e| anyhow::anyhow!("memory_substrate_audit: {e}"))?;
+
+    // Method A (#204) — when --exclude-kinds is set, recompute M7 on
+    // the filtered subset and overlay it onto the report. Other metrics
+    // stay on the full active set; only signal-fidelity (the L5 P3
+    // confound target) gets the filter. Report.excluded_kinds populated
+    // so downstream readers tell apart dual-report runs without parsing
+    // file names.
+    if !exclude_kinds.is_empty() {
+        let filtered = store
+            .signal_fidelity_stats_excluding(0, &exclude_kinds)
+            .await
+            .map_err(|e| anyhow::anyhow!("signal_fidelity_stats_excluding: {e}"))?;
+        let verdict = if filtered.spearman_r_touched.is_nan() {
+            "n/a".to_string()
+        } else if filtered.spearman_r_touched.abs() < 0.2 {
+            "noise".to_string()
+        } else if filtered.spearman_r_touched.abs() < 0.4 {
+            "weak".to_string()
+        } else if filtered.spearman_r_touched.abs() < 0.6 {
+            "moderate".to_string()
+        } else {
+            "strong".to_string()
+        };
+        r.m7_signal_fidelity = ab_store::SignalFidelityCompact {
+            r_all: filtered.spearman_r,
+            r_touched: filtered.spearman_r_touched,
+            n_touched: filtered.n_touched,
+            verdict,
+        };
+        r.excluded_kinds = exclude_kinds.clone();
+    }
 
     if as_json {
         let s = serde_json::to_string_pretty(&r)
@@ -6656,7 +6703,14 @@ async fn run_dream_substrate_audit(window_days: u32, as_json: bool) -> Result<()
 
     // M7
     println!();
-    println!("M7 signal fidelity:");
+    if r.excluded_kinds.is_empty() {
+        println!("M7 signal fidelity:");
+    } else {
+        println!(
+            "M7 signal fidelity (Method A — excluded kinds: {}):",
+            r.excluded_kinds.join(", ")
+        );
+    }
     println!(
         "  r_all: {:.3}  r_touched: {:.3} (n={})  verdict: {}",
         r.m7_signal_fidelity.r_all,

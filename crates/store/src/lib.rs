@@ -881,6 +881,13 @@ pub struct SubstrateAuditReport {
     pub m6_embedding: EmbeddingBackendDist,
     pub m7_signal_fidelity: SignalFidelityCompact,
     pub m8_query: MemoryQueryStats,
+    /// **Method A (#204 / #203)** — kinds excluded from M7 `signal_fidelity`
+    /// computation when the audit is run with the `--exclude-kinds` flag.
+    /// Empty for default audits. Populated by CLI handler before output
+    /// so downstream readers (Day-7/14/28 trend diff JSONs) can tell
+    /// apart full-set vs filtered runs without parsing file names.
+    #[serde(default)]
+    pub excluded_kinds: Vec<String>,
 }
 
 /// M1 — connected-component breakdown of crystallized substrate edges.
@@ -1682,6 +1689,28 @@ pub trait StateStore: Send + Sync {
     ///
     /// `top_n` is capped at 50 to keep the result bounded.
     async fn signal_fidelity_stats(&self, top_n: u32) -> Result<SignalFidelityStats>;
+
+    /// **Method A (#204 / #203)** — variant of [`signal_fidelity_stats`]
+    /// that excludes rows whose `kind` is in `exclude_kinds`.
+    ///
+    /// Designed for Day-7 (5/20) P-α audit where L5 P3 session-bootstrap
+    /// preamble (`a3af97a`) systematically pumps `kind=feedback` access,
+    /// confounding the M7 `r_touched` reading. Filtering `["feedback"]`
+    /// yields a pure-P-α subset reading; combined with the unfiltered
+    /// run in dual-report mode, the audit can distinguish P-α signal
+    /// from L5 P3 artifact.
+    ///
+    /// Default no-op: returns empty `SignalFidelityStats`. SQLite impl
+    /// extends the base query with `AND kind NOT IN (...)`. When
+    /// `exclude_kinds` is empty the result MUST match
+    /// [`signal_fidelity_stats`] bit-exact (validated by test).
+    async fn signal_fidelity_stats_excluding(
+        &self,
+        _top_n: u32,
+        _exclude_kinds: &[String],
+    ) -> Result<SignalFidelityStats> {
+        Ok(SignalFidelityStats::default())
+    }
 
     /// Apply [`CompactPolicy`]; returns the keys that were (or would be)
     /// removed. Honours `dry_run`.
