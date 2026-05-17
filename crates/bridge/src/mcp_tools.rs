@@ -37,7 +37,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::process::Command as TokioCommand;
 
-use crate::context_budget::{budget_recommendation, estimated_usage_tokens, model_context_limit};
+use crate::context_budget::{
+    budget_recommendation, estimate_tokens_from_text, estimated_usage_tokens, model_context_limit,
+};
 use crate::hub::Hub;
 use crate::ide::{queue_ide_command, read_ide_snapshot, IdeCommandOptions, IdeSnapshotOptions};
 use crate::project::{changes_digest, detect_project, resolve_cwd};
@@ -6726,6 +6728,83 @@ fn format_feedback_preamble_block(
     Some(out)
 }
 
+// ---------------------------------------------------------------------------
+// session_bootstrap per-block token budgets (v0 — 2026-05-17).
+//
+// Live measurement on 2026-05-17 showed bootstrap output 16,834 chars ≈ 4,810
+// tokens, dominated by `format_bootstrap_memory_rows` (top-60 memories with
+// 120-char snippets ≈ 3,400 tokens) plus 6+ static blocks.
+//
+// Budgets below target total p95 ≈ 2,000 tokens (60% reduction). They cap
+// each block independently so any single block exceeding its budget gets
+// `[...trimmed N more lines for budget]` instead of starving the next block.
+//
+// Inspired by [rtk-ai/icm](https://github.com/rtk-ai/icm)'s 500-token wake-up
+// cap; see `docs/DESIGN-context-lifecycle-edges-2026-05-17.md` §3.6.
+const BUDGET_USER_PROFILE: usize = 300;
+const BUDGET_AGENT_PROFILE: usize = 300;
+const BUDGET_AIOT_SOUL: usize = 200;
+const BUDGET_SEED: usize = 200;
+const BUDGET_PERCEPTION: usize = 150;
+const BUDGET_LETTER_EACH: usize = 150;
+const BUDGET_FEEDBACK_PREAMBLE: usize = 300;
+const BUDGET_DECISIONS_DUE: usize = 200;
+const BUDGET_ERROR_PATTERNS: usize = 200;
+const BUDGET_BOOTSTRAP_ROWS: usize = 500;
+const BUDGET_GAMMA_BFS: usize = 200;
+const BUDGET_DELTA_TRANSITIONS: usize = 150;
+const BUDGET_SIBLING_WARN: usize = 200;
+
+/// Trim a block of lines so the total estimated token count ≤ `budget`.
+///
+/// Appends `[...trimmed N more lines for budget]` marker when truncated.
+/// Keeps the first line (block header) even if the header alone exceeds
+/// budget — the header is informational and the trim marker tells the
+/// reader the block was cut.
+///
+/// Cheap path: if `chars / 3 ≤ budget` we know we're under (chars/3 is a
+/// pessimistic upper bound for any reasonable text), skip the calibrated
+/// estimator entirely.
+fn cap_block_lines(lines: Vec<String>, budget: usize) -> Vec<String> {
+    if lines.is_empty() || budget == 0 {
+        return lines;
+    }
+    // Fast path: pessimistic bound says we're under.
+    let total_chars: usize = lines.iter().map(|s| s.chars().count()).sum();
+    if total_chars / 3 <= budget {
+        return lines;
+    }
+    // Slow path: use calibrated estimator.
+    let joined = lines.join("\n");
+    let est = estimate_tokens_from_text(&joined) as usize;
+    if est <= budget {
+        return lines;
+    }
+    // Truncate from end, keep accumulating until budget exhausted.
+    let mut out: Vec<String> = Vec::with_capacity(lines.len() + 1);
+    let mut running: usize = 0;
+    let mut kept = 0usize;
+    for (i, line) in lines.iter().enumerate() {
+        let line_tokens = estimate_tokens_from_text(line) as usize;
+        // Always keep the first line (header). After that, stop when we'd
+        // exceed budget.
+        if i > 0 && running + line_tokens > budget {
+            break;
+        }
+        running += line_tokens;
+        out.push(line.clone());
+        kept = i + 1;
+    }
+    let trimmed = lines.len() - kept;
+    if trimmed > 0 {
+        out.push(format!(
+            "  [...trimmed {} more lines for budget]",
+            trimmed
+        ));
+    }
+    out
+}
+
 pub struct SessionBootstrapTool {
     hub: Hub,
 }
@@ -6910,10 +6989,13 @@ impl McpTool for SessionBootstrapTool {
         // Inject USER.md profile if present.
         if let Ok(profile) = std::fs::read_to_string(user_profile_path()) {
             if !profile.trim().is_empty() {
-                lines.push("=== User Profile ===".to_string());
-                lines.push(profile.trim().to_string());
-                lines.push("=== End User Profile ===".to_string());
-                lines.push(String::new());
+                let block = vec![
+                    "=== User Profile ===".to_string(),
+                    profile.trim().to_string(),
+                    "=== End User Profile ===".to_string(),
+                    String::new(),
+                ];
+                lines.extend(cap_block_lines(block, BUDGET_USER_PROFILE));
             }
         }
 
@@ -6922,10 +7004,13 @@ impl McpTool for SessionBootstrapTool {
         // Maintained by the agent itself via session_finalize(agent_profile=...).
         if let Ok(profile) = std::fs::read_to_string(agent_profile_path()) {
             if !profile.trim().is_empty() {
-                lines.push("=== Agent Self-Profile ===".to_string());
-                lines.push(profile.trim().to_string());
-                lines.push("=== End Agent Self-Profile ===".to_string());
-                lines.push(String::new());
+                let block = vec![
+                    "=== Agent Self-Profile ===".to_string(),
+                    profile.trim().to_string(),
+                    "=== End Agent Self-Profile ===".to_string(),
+                    String::new(),
+                ];
+                lines.extend(cap_block_lines(block, BUDGET_AGENT_PROFILE));
             }
         }
 
@@ -6935,13 +7020,14 @@ impl McpTool for SessionBootstrapTool {
         // logic stays on AiOT side. This makes the 21-month trajectory
         // tangible at the level of working state, not just memory text.
         if let Some(soul_block) = format_aiot_soul_block() {
-            lines.push(
+            let block = vec![
                 "=== AiOT Soul (read-only carrier identity from /Data/CascadeProjects/AiOT) ==="
                     .to_string(),
-            );
-            lines.push(soul_block);
-            lines.push("=== End AiOT Soul ===".to_string());
-            lines.push(String::new());
+                soul_block,
+                "=== End AiOT Soul ===".to_string(),
+                String::new(),
+            ];
+            lines.extend(cap_block_lines(block, BUDGET_AIOT_SOUL));
         }
 
         // Inject Agent-Bridge Seed sidecar grid state if available — symmetric
@@ -6952,13 +7038,14 @@ impl McpTool for SessionBootstrapTool {
         // markdown / Python EMA / Rust grid. See
         // `plan_seed_integration_gaps_20260504`.
         if let Some(seed_block) = format_agent_bridge_seed_block() {
-            lines.push(
+            let block = vec![
                 "=== Agent-Bridge Seed (self-organized network on memory stream) ==="
                     .to_string(),
-            );
-            lines.push(seed_block);
-            lines.push("=== End Seed ===".to_string());
-            lines.push(String::new());
+                seed_block,
+                "=== End Seed ===".to_string(),
+                String::new(),
+            ];
+            lines.extend(cap_block_lines(block, BUDGET_SEED));
         }
 
         // Inject Perception Filter (path B) state if available — parallel
@@ -6968,13 +7055,14 @@ impl McpTool for SessionBootstrapTool {
         // Model and dim are dynamic (env-overridable in the sidecar) — the
         // body of the block carries the ground-truth `model=... ({dim}d)`.
         if let Some(pf_block) = format_perception_filter_block() {
-            lines.push(
+            let block = vec![
                 "=== Perception Filter (thermodynamic surprisal filter on memory stream) ==="
                     .to_string(),
-            );
-            lines.push(pf_block);
-            lines.push("=== End Perception Filter ===".to_string());
-            lines.push(String::new());
+                pf_block,
+                "=== End Perception Filter ===".to_string(),
+                String::new(),
+            ];
+            lines.extend(cap_block_lines(block, BUDGET_PERCEPTION));
         }
 
         // Inject up to 3 most recent letter-to-future-self entries.
@@ -6988,10 +7076,13 @@ impl McpTool for SessionBootstrapTool {
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("letter");
-                lines.push(format!("=== Letter from past-self ({stem}) ==="));
-                lines.push(body.trim().to_string());
-                lines.push("=== End Letter ===".to_string());
-                lines.push(String::new());
+                let block = vec![
+                    format!("=== Letter from past-self ({stem}) ==="),
+                    body.trim().to_string(),
+                    "=== End Letter ===".to_string(),
+                    String::new(),
+                ];
+                lines.extend(cap_block_lines(block, BUDGET_LETTER_EACH));
             }
         }
 
@@ -7012,7 +7103,7 @@ impl McpTool for SessionBootstrapTool {
                 .unwrap_or_default();
             let picked = pick_top_feedback(feedback_pool, 5, now_ts);
             if let Some(block) = format_feedback_preamble_block(&picked, is_compact, snippet_len) {
-                lines.extend(block);
+                lines.extend(cap_block_lines(block, BUDGET_FEEDBACK_PREAMBLE));
             }
         }
 
@@ -7034,15 +7125,21 @@ impl McpTool for SessionBootstrapTool {
                 .collect::<Vec<_>>();
             if let Some(block) = format_due_review_block(&decision_pool, now_ts) {
                 let count = block.matches("\n- ").count() + 1;
-                lines.push(format!("=== Decisions Due for Review ({count}) ==="));
-                lines.push(block);
-                lines.push("=== End Reviews ===".to_string());
-                lines.push(String::new());
+                let block_lines = vec![
+                    format!("=== Decisions Due for Review ({count}) ==="),
+                    block,
+                    "=== End Reviews ===".to_string(),
+                    String::new(),
+                ];
+                lines.extend(cap_block_lines(block_lines, BUDGET_DECISIONS_DUE));
             }
         }
 
-        lines.extend(error_section);
-        lines.extend(format_bootstrap_memory_rows(&rows, snippet_len));
+        lines.extend(cap_block_lines(error_section, BUDGET_ERROR_PATTERNS));
+        lines.extend(cap_block_lines(
+            format_bootstrap_memory_rows(&rows, snippet_len),
+            BUDGET_BOOTSTRAP_ROWS,
+        ));
         lines.push("=== End Bootstrap ===".to_string());
         lines.push(String::new());
 
@@ -7056,7 +7153,7 @@ impl McpTool for SessionBootstrapTool {
         if let Ok(section) =
             crate::bootstrap_bfs::compute_section(store.as_ref(), &cwd, is_compact).await
         {
-            lines.extend(section);
+            lines.extend(cap_block_lines(section, BUDGET_GAMMA_BFS));
         }
 
         // δ-4 PP-1 lift (2026-05-11) — surface repeated next-step transitions
@@ -7066,7 +7163,7 @@ impl McpTool for SessionBootstrapTool {
         if let Ok(section) =
             crate::bootstrap_transitions::compute_section(store.as_ref(), is_compact).await
         {
-            lines.extend(section);
+            lines.extend(cap_block_lines(section, BUDGET_DELTA_TRANSITIONS));
         }
 
         // ε-5 (2026-05-11) — sibling-presence warning. Two agents in the
@@ -7102,43 +7199,46 @@ impl McpTool for SessionBootstrapTool {
                             .duration_since(std::time::UNIX_EPOCH)
                             .map(|d| d.as_secs() as i64)
                             .unwrap_or(0);
-                        lines.push(if is_compact {
-                            format!(
-                                "=== ⚠ Sibling agents ({}) — risk of sweep ===",
-                                peers.len()
-                            )
-                        } else {
-                            format!(
-                                "=== ⚠ Sibling-Presence Warning ({} other agent{} in '{}') ===",
-                                peers.len(),
-                                if peers.len() == 1 { "" } else { "s" },
-                                project_slug
-                            )
-                        });
-                        lines.push(String::new());
+                        let mut block = vec![
+                            if is_compact {
+                                format!(
+                                    "=== ⚠ Sibling agents ({}) — risk of sweep ===",
+                                    peers.len()
+                                )
+                            } else {
+                                format!(
+                                    "=== ⚠ Sibling-Presence Warning ({} other agent{} in '{}') ===",
+                                    peers.len(),
+                                    if peers.len() == 1 { "" } else { "s" },
+                                    project_slug
+                                )
+                            },
+                            String::new(),
+                        ];
                         for p in peers.iter().take(5) {
                             let age = (now_ts - p.last_heartbeat_at).max(0);
-                            lines.push(format!(
+                            block.push(format!(
                                 "  • {} (heartbeat {}s ago)",
                                 p.session_id, age
                             ));
                         }
-                        lines.push(String::new());
+                        block.push(String::new());
                         if !is_compact {
-                            lines.push(
+                            block.push(
                                 "  Sharing a working tree + git index → `git add/commit` may sweep"
                                     .to_string(),
                             );
-                            lines.push(
+                            block.push(
                                 "  the other agent's unstaged changes (see `lesson_sibling_parallel_commits`)."
                                     .to_string(),
                             );
                         }
-                        lines.push(
+                        block.push(
                             "  Isolate: `agent-bridge worktree-session new --name <slug>`"
                                 .to_string(),
                         );
-                        lines.push(String::new());
+                        block.push(String::new());
+                        lines.extend(cap_block_lines(block, BUDGET_SIBLING_WARN));
                     }
                 }
             }
@@ -18150,6 +18250,94 @@ mod tests {
         // Both modes include at least: header, blank, row, blank.
         assert!(full.len() >= 4);
         assert!(compact.len() >= 4);
+    }
+
+    // ── session_bootstrap per-block token cap (C, 2026-05-17) ───────────
+
+    #[test]
+    fn cap_block_lines_empty_input_returns_empty() {
+        let got = cap_block_lines(vec![], 100);
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn cap_block_lines_under_budget_unchanged() {
+        // Short block well under any reasonable budget — no trim marker.
+        let block = vec![
+            "=== Header ===".to_string(),
+            "short body".to_string(),
+            "=== End ===".to_string(),
+        ];
+        let got = cap_block_lines(block.clone(), 200);
+        assert_eq!(got, block, "under-budget block must be returned verbatim");
+        assert!(
+            !got.iter().any(|l| l.contains("trimmed")),
+            "no trim marker when under budget"
+        );
+    }
+
+    #[test]
+    fn cap_block_lines_over_budget_truncates_with_marker() {
+        // Build a 20-line block where each line is ~30 chars of alpha
+        // (~7-8 tokens each, ~140-160 tokens total).
+        let line_body = "x".repeat(30);
+        let mut block: Vec<String> = vec!["=== Header ===".to_string()];
+        for i in 0..20 {
+            block.push(format!("line {} {}", i, line_body));
+        }
+        // Budget 30 tokens — should keep ~3-4 lines + marker.
+        let got = cap_block_lines(block.clone(), 30);
+        assert!(got.len() < block.len(), "truncated");
+        let last = got.last().unwrap();
+        assert!(
+            last.contains("trimmed") && last.contains("more lines"),
+            "trim marker present, got {:?}",
+            last
+        );
+        // Header is always preserved.
+        assert_eq!(got[0], "=== Header ===");
+    }
+
+    #[test]
+    fn cap_block_lines_preserves_header_even_when_alone_over_budget() {
+        // Header line bigger than budget — still kept because it's the
+        // informational anchor; trim marker follows.
+        let header = format!("=== {} ===", "X".repeat(200));
+        let block = vec![header.clone(), "body line".to_string()];
+        let got = cap_block_lines(block, 5);
+        assert_eq!(got[0], header, "header preserved");
+        // Either the body got dropped and marker added, or the body
+        // fit in (header itself doesn't count toward budget cutoff for
+        // line 0). We just require that the result is no larger than
+        // the input.
+        assert!(got.len() <= 2 || got[1].contains("trimmed"));
+    }
+
+    #[test]
+    fn cap_block_lines_zero_budget_returns_unchanged() {
+        // Defensive: budget=0 means "no cap requested" — pass through.
+        let block = vec!["a".to_string(), "b".to_string()];
+        let got = cap_block_lines(block.clone(), 0);
+        assert_eq!(got, block);
+    }
+
+    #[test]
+    fn cap_block_lines_trim_marker_exit_path_after_first_line() {
+        // Confirm the truncation marker is exactly the trim string we
+        // chose (regression-pin: callers grep this string in audits).
+        let line_body = "y".repeat(40);
+        let mut block: Vec<String> = vec!["=== Header ===".to_string()];
+        for i in 0..10 {
+            block.push(format!("line {} {}", i, line_body));
+        }
+        let got = cap_block_lines(block, 20);
+        let last = got.last().unwrap();
+        assert!(
+            last.starts_with("  [...trimmed ")
+                && last.ends_with(" more lines for budget]"),
+            "exact trim marker shape, got {:?}",
+            last
+        );
     }
 
     // ── L7 P1 — session_reflect ─────────────────────────────────────────
