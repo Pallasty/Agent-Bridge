@@ -253,6 +253,33 @@ mod tests {
     }
 
     #[test]
+    fn write_then_read_state_preserves_behavior_facets() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = pet_state_path_in(dir.path(), "xiao-shu-dev");
+        let value = json!({
+            "pet_id": "xiao-shu-dev",
+            "mode": "working",
+            "activity_state": "verifying",
+            "focus": "cargo-tests",
+            "risk_level": "low",
+            "blocked_reason": null,
+            "evidence": "cargo test -p ab-bridge pet_state passed",
+            "next_action": "sync presence"
+        });
+
+        write_pet_state_path(&path, &value).expect("write pet state");
+        let read = read_pet_state_path(&path)
+            .expect("read pet state")
+            .expect("state exists");
+        assert_eq!(read["activity_state"], "verifying");
+        assert_eq!(read["focus"], "cargo-tests");
+        assert_eq!(read["risk_level"], "low");
+        assert_eq!(read["blocked_reason"], Value::Null);
+        assert_eq!(read["evidence"], "cargo test -p ab-bridge pet_state passed");
+        assert_eq!(read["next_action"], "sync presence");
+    }
+
+    #[test]
     fn unix_secs_to_utc_rfc3339_formats_epoch_boundaries() {
         assert_eq!(unix_secs_to_utc_rfc3339(0), "1970-01-01T00:00:00Z");
         assert_eq!(

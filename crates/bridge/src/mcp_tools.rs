@@ -1,33 +1,35 @@
 //! Built-in MCP tools — wrap the bridge's backend bundle and expose it to
 //! Claude Code (or any MCP client) over the `tools/call` channel.
 
-use ab_agent::{oz::fetch_run_status, GitWorktreeManager, SpawnConfig};
-use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
-use ab_mcp::{ContentBlock, McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
-use ab_store::{
-    cosine_similarity, embed_text, prioritize_session_handoff,
-    // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
-    CompactPolicy,
-    ImportConflictPolicy,
-    MemoryCosineHit,
-    MemoryExportFilter,
-    MemoryListSort,
-    MemoryQueryRecord,
-    MemoryRecord,
-    MemorySearchHit,
-    McpToolCallFilter,
-    PlanRecord,
-    PlanStep,
-    SessionFilter,
-    StateStore,
-};
-use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
 use crate::warp_scheme::{
     dispatch_url as dispatch_warp_scheme_uri,
     scheme_launch_configuration as warp_scheme_launch_configuration,
     scheme_new_tab as warp_scheme_new_tab, scheme_new_window as warp_scheme_new_window,
     scheme_open_settings_page as warp_scheme_open_settings_page,
 };
+use ab_agent::{oz::fetch_run_status, GitWorktreeManager, SpawnConfig};
+use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
+use ab_mcp::{ContentBlock, McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
+use ab_store::{
+    cosine_similarity,
+    embed_text,
+    prioritize_session_handoff,
+    // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
+    CompactPolicy,
+    ImportConflictPolicy,
+    McpToolCallFilter,
+    MemoryCosineHit,
+    MemoryExportFilter,
+    MemoryListSort,
+    MemoryQueryRecord,
+    MemoryRecord,
+    MemorySearchHit,
+    PlanRecord,
+    PlanStep,
+    SessionFilter,
+    StateStore,
+};
+use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::{json, Value};
@@ -796,7 +798,10 @@ impl McpTool for TerminalReadBlocksTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(20)
             .clamp(1, 200) as usize;
-        let since_block = args.get("since_block").and_then(|v| v.as_u64()).map(|v| v as usize);
+        let since_block = args
+            .get("since_block")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize);
         let output_max = args
             .get("output_max_chars")
             .and_then(|v| v.as_u64())
@@ -813,7 +818,8 @@ impl McpTool for TerminalReadBlocksTool {
                         let (out, truncated) = if output_max == 0 {
                             (String::new(), false)
                         } else {
-                            let byte_end = b.output
+                            let byte_end = b
+                                .output
                                 .char_indices()
                                 .nth(output_max)
                                 .map(|(i, _)| i)
@@ -1352,8 +1358,14 @@ impl McpTool for BrowserWaitForTool {
             Some(s) => PageId::from_raw(s.to_string()),
             None => return Ok(ToolResult::error("missing 'page'")),
         };
-        let sel = args.get("selector").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
-        let url_sub = args.get("url_substring").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        let sel = args
+            .get("selector")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let url_sub = args
+            .get("url_substring")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
         let timeout_ms = args
             .get("timeout_ms")
             .and_then(|v| v.as_u64())
@@ -1458,7 +1470,11 @@ impl McpTool for BrowserPressKeyTool {
             Some(s) => PageId::from_raw(s.to_string()),
             None => return Ok(ToolResult::error("missing 'page'")),
         };
-        let key = match args.get("key").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        let key = match args
+            .get("key")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             Some(s) => s.to_string(),
             None => return Ok(ToolResult::error("missing 'key'")),
         };
@@ -1692,7 +1708,10 @@ impl McpTool for BrowserEvalInFrameTool {
         if js.is_empty() {
             return Ok(ToolResult::error("missing 'js'"));
         }
-        let fid = args.get("frame_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        let fid = args
+            .get("frame_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
         let furl = args
             .get("frame_url_substring")
             .and_then(|v| v.as_str())
@@ -1905,7 +1924,10 @@ impl McpTool for BrowserCaptureResponseStartTool {
             .get("max_buffer")
             .and_then(|v| v.as_u64())
             .unwrap_or(50) as usize;
-        match b.capture_response_start(&page, url_substring, max_buffer).await {
+        match b
+            .capture_response_start(&page, url_substring, max_buffer)
+            .await
+        {
             Ok(()) => Ok(ToolResult::json_text(&json!({
                 "status": "ok",
                 "page": page.as_str(),
@@ -2619,15 +2641,14 @@ impl McpTool for ForumPostTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Append a post to a thread (provide `thread_id`) or create a new thread \
+            description: "Append a post to a thread (provide `thread_id`) or create a new thread \
                  (provide `board` + `title`, omit `thread_id`). `author` is REQUIRED — \
                  use a stable session id so multi-process collaboration stays readable. \
                  `kind` ∈ {msg, finding, question, decision, reply}. `refs` is opaque \
                  JSON, conventionally `{memory_keys:[...], files:[...], parent_post_id:N}`. \
                  Set `peer: \"host:port\"` to post into a remote tailnet peer's forum \
                  instead of local; omit for local-only."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -2663,14 +2684,11 @@ impl McpTool for ForumPostTool {
             _ => return Ok(ToolResult::error("missing or empty 'body'")),
         };
         let refs = args.get("refs").cloned();
-        let tags: Option<Vec<String>> = args
-            .get("tags")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            });
+        let tags: Option<Vec<String>> = args.get("tags").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        });
         let peer = args
             .get("peer")
             .and_then(|v| v.as_str())
@@ -2811,8 +2829,7 @@ impl McpTool for ForumReadTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Fetch posts from a thread (set `thread_id`) or across a board \
+            description: "Fetch posts from a thread (set `thread_id`) or across a board \
                  (set `board`). Posts are ordered by id ASC; use `since_post_id` \
                  as an exclusive cursor. When `unread_for` is set, the cursor is \
                  inferred from this session's subscription (thread > board) and \
@@ -2828,7 +2845,7 @@ impl McpTool for ForumReadTool {
                  daemon-http; omit for local-only. NOTE: `unread_for` cursor advance \
                  is local-only and is silently ignored when `peer` is set (the \
                  remote daemon doesn't carry your subscription state)."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -2909,8 +2926,7 @@ impl McpTool for ForumSubscribeTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Register `session_id`'s interest in a thread or board. Idempotent: \
+            description: "Register `session_id`'s interest in a thread or board. Idempotent: \
                  re-subscribing keeps the existing `last_seen_post_id` unless `reset=true`. \
                  `scope_kind` ∈ {thread, board}. For threads, `scope_value` is the \
                  numeric thread id as a string; for boards, the board name.\n\n\
@@ -2922,7 +2938,7 @@ impl McpTool for ForumSubscribeTool {
                  NOTE: `forum_subscribe` is local-only — subscriptions track each \
                  device's read cursor and are intentionally not synced. To follow a \
                  remote peer's thread, subscribe locally to that thread/board id."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -2960,10 +2976,7 @@ impl McpTool for ForumSubscribeTool {
             Some(s) => s,
             None => return Ok(ToolResult::error("missing or empty 'scope_value'")),
         };
-        let reset = args
-            .get("reset")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let reset = args.get("reset").and_then(|v| v.as_bool()).unwrap_or(false);
 
         store
             .forum_subscribe(session_id, scope_kind, scope_value, reset)
@@ -2995,15 +3008,14 @@ impl McpTool for ForumListThreadsTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List threads on a `board`, ordered by `last_post_at DESC`. When \
+            description: "List threads on a `board`, ordered by `last_post_at DESC`. When \
                  `unread_for` is set, each row's `unread_count` is filled relative \
                  to that session's subscription cursors (thread cursor wins over \
                  board cursor; missing cursor counts as 0). Optional `status` \
                  filter ∈ {open, resolved, archived}. Set `peer: \"host:port\"` to \
                  query a remote tailnet peer's daemon-http instead of local store; \
                  omit for local-only."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -3083,13 +3095,12 @@ impl McpTool for ForumSetThreadStatusTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Set a forum thread's lifecycle status. `status` ∈ \
+            description: "Set a forum thread's lifecycle status. `status` ∈ \
                  {open, resolved, archived}. Use `resolved` when the discussion \
                  reached a conclusion (decision logged, finding actioned); \
                  `archived` when the thread is no longer relevant but kept for \
                  history. `forum_list_threads` accepts a matching `status` filter."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -3226,8 +3237,7 @@ impl McpTool for SessionIdentityTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Compute the canonical session id `node:project:role[:tag]` from the \
+            description: "Compute the canonical session id `node:project:role[:tag]` from the \
                  caller's environment + args. Auto-disambiguates by appending a \
                  short pid-derived tag when an existing fresh-heartbeat (≤ 60 s) \
                  presence row already holds the proposed id from a different \
@@ -3240,7 +3250,7 @@ impl McpTool for SessionIdentityTool {
                  • `tag`      → arg | auto-pid-suffix on collision | (omitted)\n\
                  See docs/DESIGN-v19-presence-identity.md for rationale and the \
                  Tailscale evolution path."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -3271,34 +3281,33 @@ impl McpTool for SessionIdentityTool {
         // Auto-tag only when (a) caller did not pass an explicit tag,
         // (b) caller did not opt out, and (c) a fresh presence row already
         // holds this id from a different process.
-        let (final_tag, final_session_id, auto_tagged) = if explicit_tag.is_some()
-            || !auto_tag_enabled
-        {
-            (tag, session_id, false)
-        } else if let Some(store) = self.hub.store.as_ref() {
-            match store.agent_presence_get(&session_id).await {
-                Ok(Some(existing)) => {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs() as i64)
-                        .unwrap_or(0);
-                    let my_pid = std::process::id();
-                    let is_fresh = now - existing.last_heartbeat_at <= PRESENCE_FRESH_SECS;
-                    let other_owner = existing.pid != Some(i64::from(my_pid));
-                    if is_fresh && other_owner {
-                        let auto = pid_tag_short(my_pid);
-                        let new_id = format!("{node}:{project}:{role}:{auto}");
-                        (Some(auto), new_id, true)
-                    } else {
-                        (tag, session_id, false)
+        let (final_tag, final_session_id, auto_tagged) =
+            if explicit_tag.is_some() || !auto_tag_enabled {
+                (tag, session_id, false)
+            } else if let Some(store) = self.hub.store.as_ref() {
+                match store.agent_presence_get(&session_id).await {
+                    Ok(Some(existing)) => {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0);
+                        let my_pid = std::process::id();
+                        let is_fresh = now - existing.last_heartbeat_at <= PRESENCE_FRESH_SECS;
+                        let other_owner = existing.pid != Some(i64::from(my_pid));
+                        if is_fresh && other_owner {
+                            let auto = pid_tag_short(my_pid);
+                            let new_id = format!("{node}:{project}:{role}:{auto}");
+                            (Some(auto), new_id, true)
+                        } else {
+                            (tag, session_id, false)
+                        }
                     }
+                    Ok(None) => (tag, session_id, false),
+                    Err(_) => (tag, session_id, false),
                 }
-                Ok(None) => (tag, session_id, false),
-                Err(_) => (tag, session_id, false),
-            }
-        } else {
-            (tag, session_id, false)
-        };
+            } else {
+                (tag, session_id, false)
+            };
 
         Ok(ToolResult::json_text(&json!({
             "session_id": final_session_id,
@@ -3327,8 +3336,7 @@ impl McpTool for AgentPresenceAnnounceTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Upsert this agent's presence row keyed by `session_id`. Refreshes \
+            description: "Upsert this agent's presence row keyed by `session_id`. Refreshes \
                  `last_heartbeat_at` on every call, so call once on startup and \
                  periodically after (recommend every 60–120 s). On first announce, \
                  `name`, `node`, `project`, `role` are required; on later calls any \
@@ -3336,7 +3344,7 @@ impl McpTool for AgentPresenceAnnounceTool {
                  Google A2A AgentCard so the row can be served as `/.well-known/\
                  agent.json` once we add a Tailscale daemon. Tip: pre-compute \
                  session_id with the `session_identity` tool."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -3428,15 +3436,14 @@ impl McpTool for AgentPresenceListTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List active agents (heartbeat within `max_idle_secs` of now). Use to \
+            description: "List active agents (heartbeat within `max_idle_secs` of now). Use to \
                  discover collaborators before posting in forum or sending an \
                  agent_message. Default TTL = 300 s (5 min) so a crashed CC drops off \
                  within ~5 min. Pass `max_idle_secs:0` or `include_stale:true` to see \
                  every row including stale ones. Filters by `project` and `role` so \
                  you can ask 'who's reviewing AiOT right now'. Set `peer: \"host:port\"` \
                  to list agents from a remote tailnet peer's daemon-http instead of local."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -3518,8 +3525,8 @@ fn pet_presence_capabilities(args: &Value, pet_id: &str, state: &Value) -> Value
         .cloned()
         .unwrap_or_default();
     let mode = pet_state_str_field(state, "mode").unwrap_or_else(|| "idle".to_string());
-    let activity_state = pet_state_string_or_default(args, "activity_state", &mode);
-    let blocked_reason = pet_state_optional_string_or_null(args, "blocked_reason");
+    let activity_state =
+        pet_state_string_from_args_or_state_or_default(args, state, "activity_state", &mode);
 
     capabilities.insert("pet_presence".to_string(), json!(true));
     capabilities.insert(
@@ -3527,7 +3534,11 @@ fn pet_presence_capabilities(args: &Value, pet_id: &str, state: &Value) -> Value
         json!({
             "pet_id": pet_id,
             "activity_state": activity_state,
-            "blocked_reason": blocked_reason,
+            "focus": pet_state_string_from_args_or_state_or_null(args, state, "focus"),
+            "risk_level": pet_state_string_from_args_or_state_or_null(args, state, "risk_level"),
+            "blocked_reason": pet_state_string_from_args_or_state_or_null(args, state, "blocked_reason"),
+            "evidence": pet_state_string_from_args_or_state_or_null(args, state, "evidence"),
+            "next_action": pet_state_string_from_args_or_state_or_null(args, state, "next_action"),
             "mode": mode,
             "mood": state.get("mood").cloned().unwrap_or(Value::Null),
             "project": state.get("project").cloned().unwrap_or(Value::Null),
@@ -3581,7 +3592,11 @@ impl McpTool for PetPresenceSyncTool {
                     "pid":          { "type": "integer", "description": "Caller pid. Defaults to the MCP server pid when omitted." },
                     "auto_tag":     { "type": "boolean", "default": true, "description": "When true, avoid fresh presence id collisions with a pid-derived tag." },
                     "activity_state": { "type": "string", "description": "Optional presence activity override. Defaults to pet mode." },
+                    "focus": { "type": "string", "description": "Optional compact focus label for UI surfaces." },
+                    "risk_level": { "type": "string", "description": "Optional low/medium/high risk hint for UI surfaces." },
                     "blocked_reason": { "type": "string", "description": "Optional compact blocked reason for UI surfaces." },
+                    "evidence": { "type": "string", "description": "Optional compact verification evidence for UI surfaces." },
+                    "next_action": { "type": "string", "description": "Optional compact next local action for UI surfaces." },
                     "tts_voice":    { "type": "string", "description": "Voice policy override for presence metadata only." },
                     "tts_rate":     { "type": "integer", "minimum": 80, "maximum": 300, "description": "Voice rate policy override for presence metadata only." },
                     "capabilities": { "type": "object", "description": "Extra capability flags to merge before pet_presence / pet_state / voice_policy." },
@@ -3676,7 +3691,8 @@ impl McpTool for PetPresenceSyncTool {
         let name = pet_state_string_or_default(&args, "name", &default_name);
         let default_description = format!("Pet presence: {pet_id} is {mode} in {project}");
         let description = pet_state_string_or_default(&args, "description", &default_description);
-        let version = pet_state_string_or_default(&args, "version", "agent-bridge pet-presence-v23");
+        let version =
+            pet_state_string_or_default(&args, "version", "agent-bridge pet-presence-v23");
         let url = args.get("url").and_then(|v| v.as_str());
         let pid = args
             .get("pid")
@@ -3718,6 +3734,440 @@ impl McpTool for PetPresenceSyncTool {
             "voice_policy": capabilities.get("voice_policy").cloned().unwrap_or(Value::Null),
             "presence": row,
         })))
+    }
+}
+
+pub struct AvatarAdapterCapabilitiesTool {
+    hub: Hub,
+}
+impl AvatarAdapterCapabilitiesTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+fn json_file_has_key(path: &std::path::Path, key: &str) -> bool {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    serde_json::from_str::<Value>(&raw)
+        .ok()
+        .and_then(|v| v.get(key).cloned())
+        .is_some()
+}
+
+fn configured_hook_events() -> Vec<&'static str> {
+    let bin_dir = dirs_home().join(".local").join("bin");
+    known_hooks()
+        .into_iter()
+        .filter(|(_, script)| bin_dir.join(script).exists())
+        .map(|(event, _)| event)
+        .collect()
+}
+
+fn codex_hooks_configured() -> bool {
+    json_file_has_key(&dirs_home().join(".codex").join("hooks.json"), "hooks")
+}
+
+fn gemini_settings_configured() -> bool {
+    json_file_has_key(
+        &dirs_home().join(".gemini").join("settings.json"),
+        "mcpServers",
+    )
+}
+
+fn claude_config_exists() -> bool {
+    dirs_home().join(".claude.json").exists()
+}
+
+#[async_trait]
+impl McpTool for AvatarAdapterCapabilitiesTool {
+    fn name(&self) -> &'static str {
+        "avatar_adapter_capabilities"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Phase 7.2 diagnostic for the Agent Avatar Protocol. \
+                 Reports which input/output adapter surfaces are available for Codex, \
+                 Claude Code, Warp, Gemini CLI, Auggie/local CLI, and daemon peers. \
+                 It does not mutate avatar state, emit audio, send notifications, or \
+                 expand the Codex Essential tool surface."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pet_id": {
+                        "type": "string",
+                        "description": "Optional Codex compatibility pet id to inspect. Defaults like pet_state_get."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let frontend = detect_frontend();
+        let pet_id =
+            crate::pet_state::normalize_pet_id(args.get("pet_id").and_then(|v| v.as_str()));
+        let pet_state_path = crate::pet_state::pet_state_path(&pet_id);
+        let codex_pet_package_dir = dirs_home().join(".codex").join("pets").join(&pet_id);
+        let codex_pet_manifest = codex_pet_package_dir.join("pet.json");
+        let hook_events = configured_hook_events();
+        let tts_available = cfg!(target_os = "macos") && which_binary("say");
+        let notification_available = !self.hub.notifiers.is_empty() || self.hub.store.is_some();
+        let terminal_available = self.hub.terminal.is_some();
+        let presence_available = self.hub.store.is_some();
+        let mcp_available = true;
+        let daemon_http_configured = std::env::var("AGENT_BRIDGE_HTTP_LISTEN").ok();
+
+        Ok(ToolResult::json_text(&json!({
+            "agent_avatar_protocol": 1,
+            "read_only": true,
+            "side_effects": {
+                "mutates_state": false,
+                "emits_audio": false,
+                "sends_notification": false,
+                "writes_presence": false
+            },
+            "frontend_detected": frontend,
+            "tool_profile": ToolProfile::from_env().label(),
+            "pet_id": pet_id,
+            "surfaces": {
+                "hooks": {
+                    "available": !hook_events.is_empty(),
+                    "configured_events": hook_events
+                },
+                "mcp": {
+                    "available": mcp_available,
+                    "tool": self.name()
+                },
+                "presence": {
+                    "available": presence_available,
+                    "store_configured": self.hub.store.is_some()
+                },
+                "tts": {
+                    "available": tts_available,
+                    "backend": if tts_available { "macos-say" } else { "none" },
+                    "voice_env": std::env::var("AB_PET_TTS_VOICE").ok(),
+                    "rate_env": std::env::var("AB_PET_TTS_RATE").ok()
+                },
+                "notification": {
+                    "available": notification_available,
+                    "notifier_count": self.hub.notifiers.len(),
+                    "store_history": self.hub.store.is_some()
+                },
+                "terminal": {
+                    "available": terminal_available,
+                    "backend": self.hub.terminal.as_ref().map(|t| t.id().to_string())
+                },
+                "http_daemon": {
+                    "configured_listen": daemon_http_configured.clone(),
+                    "running_probe": "not_attempted"
+                },
+                "codex_pet_package": {
+                    "available": codex_pet_manifest.exists(),
+                    "package_dir": codex_pet_package_dir.display().to_string(),
+                    "manifest": codex_pet_manifest.display().to_string(),
+                    "sidecar_state_exists": pet_state_path.exists(),
+                    "sidecar_state_path": pet_state_path.display().to_string()
+                }
+            },
+            "adapters": {
+                "codex": {
+                    "input": {
+                        "hooks_json": codex_hooks_configured(),
+                        "mcp": mcp_available
+                    },
+                    "output": {
+                        "official_pet_package": codex_pet_manifest.exists(),
+                        "sidecar_state": true,
+                        "tts": tts_available,
+                        "notification": notification_available,
+                        "presence": presence_available
+                    },
+                    "compatibility_target": true
+                },
+                "claude_code": {
+                    "input": {
+                        "settings_or_cli_config": claude_config_exists(),
+                        "binary_found": which_binary("claude"),
+                        "mcp": mcp_available
+                    },
+                    "output": {
+                        "sidecar_state": true,
+                        "presence": presence_available,
+                        "tts": tts_available,
+                        "notification": notification_available
+                    },
+                    "compatibility_target": false
+                },
+                "warp": {
+                    "input": {
+                        "detected_frontend": frontend == "warp",
+                        "terminal_surface": terminal_available,
+                        "mcp": mcp_available
+                    },
+                    "output": {
+                        "presence": presence_available,
+                        "terminal_status": terminal_available,
+                        "sidecar_state": true
+                    },
+                    "compatibility_target": false
+                },
+                "gemini_cli": {
+                    "input": {
+                        "settings_mcp": gemini_settings_configured(),
+                        "binary_found": which_binary("gemini"),
+                        "mcp": mcp_available
+                    },
+                    "output": {
+                        "sidecar_state": true,
+                        "presence": presence_available
+                    },
+                    "compatibility_target": false
+                },
+                "auggie_or_local_cli": {
+                    "input": {
+                        "auggie_detected": frontend == "auggie",
+                        "auggie_binary_found": which_binary("auggie"),
+                        "mcp": mcp_available
+                    },
+                    "output": {
+                        "sidecar_state": true,
+                        "presence": presence_available
+                    },
+                    "compatibility_target": false
+                },
+                "daemon_http_peer": {
+                    "input": {
+                        "http_ingestion": true,
+                        "configured_listen": daemon_http_configured
+                    },
+                    "output": {
+                        "cross_machine_presence": presence_available,
+                        "panel_candidate": true
+                    },
+                    "compatibility_target": false
+                }
+            },
+            "next_recommended_step": "Use this probe output to decide whether Phase 7.3 should add avatar_state_get first or proceed to avatar_state_set."
+        })))
+    }
+}
+
+pub struct AvatarStateGetTool;
+impl AvatarStateGetTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+
+fn avatar_state_string_arg_state_or_default(
+    args: &Value,
+    state: &Value,
+    key: &str,
+    default: &str,
+) -> String {
+    pet_state_str_field(args, key)
+        .or_else(|| pet_state_str_field(state, key))
+        .unwrap_or_else(|| default.to_string())
+}
+
+fn avatar_state_string_arg_state_or_null(args: &Value, state: &Value, key: &str) -> Value {
+    pet_state_str_field(args, key)
+        .or_else(|| pet_state_str_field(state, key))
+        .map(|s| json!(s))
+        .unwrap_or(Value::Null)
+}
+
+fn avatar_state_runtime(args: &Value, state: &Value) -> String {
+    pet_state_str_field(args, "runtime")
+        .or_else(|| pet_state_str_field(state, "runtime"))
+        .or_else(|| std::env::var("AGENT_BRIDGE_MCP_SOURCE").ok())
+        .or_else(|| std::env::var("AGENT_BRIDGE_CLIENT").ok())
+        .map(|s| normalize_tool_policy_value(&s))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "codex".to_string())
+}
+
+fn avatar_state_project(
+    args: &Value,
+    pet_id: &str,
+    state: &Value,
+    state_path: &std::path::Path,
+) -> Value {
+    let cwd_default = pet_state_str_field(state, "cwd").unwrap_or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| ".".to_string())
+    });
+    let cwd = avatar_state_string_arg_state_or_default(args, state, "cwd", &cwd_default);
+    let project_default = pet_state_str_field(state, "project").unwrap_or_else(|| {
+        std::path::Path::new(&cwd)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string()
+    });
+    let project =
+        avatar_state_string_arg_state_or_default(args, state, "project", &project_default);
+    let runtime = avatar_state_runtime(args, state);
+    let agent_id = pet_state_str_field(args, "agent_id")
+        .or_else(|| pet_state_str_field(state, "agent_id"))
+        .or_else(|| pet_state_str_field(state, "session_id"))
+        .unwrap_or_else(|| {
+            let (_, _, _, _, session_id) = resolve_identity(
+                args.get("role").and_then(|v| v.as_str()),
+                args.get("tag").and_then(|v| v.as_str()),
+                args.get("node").and_then(|v| v.as_str()),
+                Some(&project),
+                Some(&cwd),
+            );
+            session_id
+        });
+    let mode = avatar_state_string_arg_state_or_default(args, state, "mode", "idle");
+    let updated_at = pet_state_str_field(state, "updated_at")
+        .or_else(|| pet_state_str_field(state, "last_verified_at"))
+        .unwrap_or_else(crate::pet_state::now_utc_rfc3339);
+    let mut voice_policy = json!({
+        "default_silent": true,
+        "allowed_modes": ["verified", "failed", "waiting_for_user", "handoff"]
+    });
+    if let Some(voice) = pet_state_string_or_env(args, "tts_voice", "AB_PET_TTS_VOICE") {
+        voice_policy["voice"] = json!(voice);
+    }
+    if let Some(rate) = pet_state_tts_rate(args) {
+        voice_policy["rate"] = json!(rate);
+    }
+
+    json!({
+        "agent_avatar_protocol": 1,
+        "agent_id": agent_id,
+        "runtime": runtime,
+        "avatar_id": pet_id,
+        "mode": mode,
+        "project": project,
+        "cwd": cwd,
+        "session_id": avatar_state_string_arg_state_or_null(args, state, "session_id"),
+        "source": avatar_state_string_arg_state_or_null(args, state, "source"),
+        "reason": avatar_state_string_arg_state_or_null(args, state, "reason"),
+        "activity_state": avatar_state_string_arg_state_or_null(args, state, "activity_state"),
+        "focus": avatar_state_string_arg_state_or_null(args, state, "focus"),
+        "risk_level": avatar_state_string_arg_state_or_null(args, state, "risk_level"),
+        "blocked_reason": avatar_state_string_arg_state_or_null(args, state, "blocked_reason"),
+        "evidence": avatar_state_string_arg_state_or_null(args, state, "evidence"),
+        "next_action": avatar_state_string_arg_state_or_null(args, state, "next_action"),
+        "voice_policy": voice_policy,
+        "compat": {
+            "codex": {
+                "pet_id": pet_id,
+                "package_contract": "codex-pet-atlas-8x9-v1",
+                "schema_version": state.get("schema_version").cloned().unwrap_or(Value::Null),
+                "sidecar_state_path": state_path.display().to_string()
+            }
+        },
+        "updated_at": updated_at
+    })
+}
+
+#[async_trait]
+impl McpTool for AvatarStateGetTool {
+    fn name(&self) -> &'static str {
+        "avatar_state_get"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Phase 7.3 Agent Avatar Protocol projection. \
+                 Reads the existing Codex-compatible pet sidecar state and returns \
+                 an agent_avatar_protocol=1 avatar_state object without mutating \
+                 sidecar files, emitting audio, or sending notifications."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pet_id": {
+                        "type": "string",
+                        "description": "Optional Codex compatibility pet id to inspect. Defaults like pet_state_get."
+                    },
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Optional protocol agent_id override. Defaults to stored agent_id/session_id or session_identity convention."
+                    },
+                    "runtime": {
+                        "type": "string",
+                        "description": "Optional runtime label such as codex, claude-code, warp, gemini-cli, auggie, or local-cli."
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Optional role used when deriving agent_id from session_identity convention."
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Optional tag used when deriving agent_id from session_identity convention."
+                    },
+                    "node": {
+                        "type": "string",
+                        "description": "Optional node used when deriving agent_id from session_identity convention."
+                    },
+                    "project": {
+                        "type": "string",
+                        "description": "Optional project override for the projected avatar state."
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Optional cwd override for the projected avatar state."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include the raw pet_state JSON beside the protocol projection."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let pet_id =
+            crate::pet_state::normalize_pet_id(args.get("pet_id").and_then(|v| v.as_str()));
+        let path = crate::pet_state::pet_state_path(&pet_id);
+        match crate::pet_state::read_pet_state(&pet_id) {
+            Ok(Some(state)) => {
+                let avatar_state = avatar_state_project(&args, &pet_id, &state, &path);
+                let mut result = json!({
+                    "agent_avatar_protocol": 1,
+                    "read_only": true,
+                    "avatar_id": pet_id,
+                    "path": path.display().to_string(),
+                    "exists": true,
+                    "avatar_state": avatar_state
+                });
+                if args
+                    .get("include_raw")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    result["raw_state"] = state;
+                }
+                Ok(ToolResult::json_text(&result))
+            }
+            Ok(None) => Ok(ToolResult::json_text(&json!({
+                "agent_avatar_protocol": 1,
+                "read_only": true,
+                "avatar_id": pet_id,
+                "path": path.display().to_string(),
+                "exists": false,
+                "avatar_state": Value::Null
+            }))),
+            Err(e) => Ok(ToolResult::error(format!(
+                "avatar_state_get: failed to read {}: {e}",
+                path.display()
+            ))),
+        }
     }
 }
 
@@ -3783,9 +4233,12 @@ impl McpTool for AgentSpawnTool {
             .get("policy")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        let resolved_backend = backend_arg
-            .clone()
-            .or_else(|| policy_arg.as_deref().and_then(policy_to_backend).map(String::from));
+        let resolved_backend = backend_arg.clone().or_else(|| {
+            policy_arg
+                .as_deref()
+                .and_then(policy_to_backend)
+                .map(String::from)
+        });
         let agent = match resolve_agent_backend(&self.hub, resolved_backend.as_deref()) {
             Ok(a) => a,
             Err(e) => return Ok(ToolResult::error(e)),
@@ -3857,18 +4310,14 @@ fn resolve_agent_backend(
                 "oz" => "warp-oz",
                 other => other,
             };
-            hub.agents
-                .get(canonical)
-                .cloned()
-                .ok_or_else(|| {
-                    let mut available: Vec<&str> =
-                        hub.agents.keys().map(|s| s.as_str()).collect();
-                    available.sort();
-                    format!(
-                        "unknown backend '{id}'; available: [{}]",
-                        available.join(", ")
-                    )
-                })
+            hub.agents.get(canonical).cloned().ok_or_else(|| {
+                let mut available: Vec<&str> = hub.agents.keys().map(|s| s.as_str()).collect();
+                available.sort();
+                format!(
+                    "unknown backend '{id}'; available: [{}]",
+                    available.join(", ")
+                )
+            })
         }
         None => hub
             .agent
@@ -4492,9 +4941,7 @@ fn pick_evolution_neighbors(
     // filters status='active'; this brings the cache path to parity.
     let mut sims: Vec<(MemoryRecord, f64)> = cached
         .iter()
-        .filter(|(rec, _)| {
-            rec.key != new_key && rec.kind != "skill" && rec.status == "active"
-        })
+        .filter(|(rec, _)| rec.key != new_key && rec.kind != "skill" && rec.status == "active")
         .map(|(rec, emb)| {
             let c = cosine_similarity(new_embedding, emb);
             (rec.clone(), c as f64)
@@ -4546,10 +4993,12 @@ async fn llm_filter_evolution_neighbors(
         }
     }
     let mut prompt = String::new();
-    prompt.push_str("You filter memory-graph cluster candidates. Given a NEW memory \
+    prompt.push_str(
+        "You filter memory-graph cluster candidates. Given a NEW memory \
 and several cosine-similar candidates, identify which candidates are CONCEPTUALLY \
 linked to the NEW memory (about the same problem, decision, or system), not just \
-sharing vocabulary. Be strict — when unsure, exclude.\n\n");
+sharing vocabulary. Be strict — when unsure, exclude.\n\n",
+    );
     prompt.push_str(&format!(
         "NEW MEMORY\nkey: {new_key}\nkind: {new_kind}\ntags: {tags}\nbody: {body}\n\n",
         new_key = new_key,
@@ -4580,10 +5029,7 @@ sharing vocabulary. Be strict — when unsure, exclude.\n\n");
     }];
 
     let model = client.default_model();
-    let resp = match client
-        .messages_create(&model, None, &messages, 256)
-        .await
-    {
+    let resp = match client.messages_create(&model, None, &messages, 256).await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(
@@ -4630,8 +5076,7 @@ fn parse_llm_filter_response(
     }
     let json_slice = &inner[start..=end];
 
-    let v: serde_json::Value =
-        serde_json::from_str(json_slice).map_err(|_| "JSON parse failed")?;
+    let v: serde_json::Value = serde_json::from_str(json_slice).map_err(|_| "JSON parse failed")?;
     let arr = v
         .get("linked_indices")
         .and_then(|x| x.as_array())
@@ -4898,12 +5343,7 @@ impl McpTool for MemorySaveTool {
                                 None => continue,
                             };
                             match store_for_evolve
-                                .memory_link(
-                                    &new_key_for_evolve,
-                                    &neighbor.key,
-                                    "evolved",
-                                    *score,
-                                )
+                                .memory_link(&new_key_for_evolve, &neighbor.key, "evolved", *score)
                                 .await
                             {
                                 Ok(()) => tracing::debug!(
@@ -5193,14 +5633,18 @@ impl McpTool for MemorySearchTool {
                     })
                     .collect();
                 hits.sort_by(|a, b| {
-                    b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 });
                 hits.truncate(inner_limit as usize);
                 drop(cache_guard);
                 hits
             } else {
                 drop(cache_guard);
-                store.memory_search_semantic(&q, inner_limit, threshold).await?
+                store
+                    .memory_search_semantic(&q, inner_limit, threshold)
+                    .await?
             }
         } else {
             store.memory_search(&q, &tags, inner_limit).await?
@@ -5237,7 +5681,9 @@ impl McpTool for MemorySearchTool {
                         .collect();
                     let mut sorted = boosted;
                     sorted.sort_by(|a, b| {
-                        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+                        b.score
+                            .partial_cmp(&a.score)
+                            .unwrap_or(std::cmp::Ordering::Equal)
                     });
                     sorted
                 }
@@ -5296,7 +5742,12 @@ impl McpTool for MemorySearchTool {
             .unwrap_or(0);
         let (top_age, top_created) = hits
             .first()
-            .map(|h| (Some(now_secs - h.record.created_at), Some(h.record.created_at)))
+            .map(|h| {
+                (
+                    Some(now_secs - h.record.created_at),
+                    Some(h.record.created_at),
+                )
+            })
             .unwrap_or((None, None));
         let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string());
         log_memory_query(
@@ -5396,8 +5847,7 @@ impl McpTool for MemoryListTool {
                         if let Some(content) = owned_content {
                             let total = content.chars().count();
                             if total > max_chars {
-                                let head: String =
-                                    content.chars().take(max_chars).collect();
+                                let head: String = content.chars().take(max_chars).collect();
                                 obj.insert(
                                     "content".to_string(),
                                     Value::String(format!(
@@ -6238,13 +6688,12 @@ impl McpTool for CodebaseReindexTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Fill in embeddings for codebase_symbols rows that have none. \
+            description: "Fill in embeddings for codebase_symbols rows that have none. \
                  codebase_index writes rows with NULL embedding by design — \
                  this tool computes them in batches so codebase_search(mode=\"semantic\") \
                  has vectors to score against. Processes batch_size rows per call \
                  (default 100, max 1000); call repeatedly until updated=0."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -7016,10 +7465,7 @@ fn cap_block_lines(lines: Vec<String>, budget: usize) -> Vec<String> {
     }
     let trimmed = lines.len() - kept;
     if trimmed > 0 {
-        out.push(format!(
-            "  [...trimmed {} more lines for budget]",
-            trimmed
-        ));
+        out.push(format!("  [...trimmed {} more lines for budget]", trimmed));
     }
     out
 }
@@ -7196,7 +7642,10 @@ impl McpTool for SessionBootstrapTool {
 
         let mode_tag = if query.is_some() { " | semantic" } else { "" };
         let mut lines = if is_compact {
-            vec![format!("=== Bootstrap (scope: {}{mode_tag}) ===", cwd), String::new()]
+            vec![
+                format!("=== Bootstrap (scope: {}{mode_tag}) ===", cwd),
+                String::new(),
+            ]
         } else {
             vec![
                 format!("=== Agent-Bridge Session Bootstrap (scope: {cwd}{mode_tag}) ==="),
@@ -7258,8 +7707,7 @@ impl McpTool for SessionBootstrapTool {
         // `plan_seed_integration_gaps_20260504`.
         if let Some(seed_block) = format_agent_bridge_seed_block() {
             let block = vec![
-                "=== Agent-Bridge Seed (self-organized network on memory stream) ==="
-                    .to_string(),
+                "=== Agent-Bridge Seed (self-organized network on memory stream) ===".to_string(),
                 seed_block,
                 "=== End Seed ===".to_string(),
                 String::new(),
@@ -7406,12 +7854,7 @@ impl McpTool for SessionBootstrapTool {
                         .or_else(|| std::env::var("AGENT_BRIDGE_SESSION_ID").ok());
                     let peers: Vec<&ab_store::AgentPresenceRecord> = live
                         .iter()
-                        .filter(|r| {
-                            my_sid
-                                .as_deref()
-                                .map(|m| r.session_id != m)
-                                .unwrap_or(true)
-                        })
+                        .filter(|r| my_sid.as_deref().map(|m| r.session_id != m).unwrap_or(true))
                         .collect();
                     if !peers.is_empty() {
                         let now_ts = std::time::SystemTime::now()
@@ -7436,10 +7879,7 @@ impl McpTool for SessionBootstrapTool {
                         ];
                         for p in peers.iter().take(5) {
                             let age = (now_ts - p.last_heartbeat_at).max(0);
-                            block.push(format!(
-                                "  • {} (heartbeat {}s ago)",
-                                p.session_id, age
-                            ));
+                            block.push(format!("  • {} (heartbeat {}s ago)", p.session_id, age));
                         }
                         block.push(String::new());
                         if !is_compact {
@@ -8049,21 +8489,61 @@ fn pet_state_valid_mode(mode: &str) -> bool {
 }
 
 fn pet_state_string_or_default(args: &Value, key: &str, default: &str) -> String {
+    pet_state_optional_string(args, key)
+        .map(str::to_string)
+        .unwrap_or_else(|| default.to_string())
+}
+
+fn pet_state_optional_string<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key)
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .unwrap_or(default)
-        .to_string()
 }
 
 fn pet_state_optional_string_or_null(args: &Value, key: &str) -> Value {
-    args.get(key)
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
+    pet_state_optional_string(args, key)
         .map(|s| json!(s))
         .unwrap_or(Value::Null)
+}
+
+fn pet_state_string_from_args_or_state_or_default(
+    args: &Value,
+    state: &Value,
+    key: &str,
+    default: &str,
+) -> String {
+    pet_state_optional_string(args, key)
+        .map(str::to_string)
+        .or_else(|| pet_state_str_field(state, key))
+        .unwrap_or_else(|| default.to_string())
+}
+
+fn pet_state_string_from_args_or_state_or_null(args: &Value, state: &Value, key: &str) -> Value {
+    pet_state_optional_string(args, key)
+        .map(|s| json!(s))
+        .or_else(|| pet_state_str_field(state, key).map(|s| json!(s)))
+        .unwrap_or(Value::Null)
+}
+
+const PET_STATE_BEHAVIOR_FACET_KEYS: &[&str] = &[
+    "activity_state",
+    "focus",
+    "risk_level",
+    "blocked_reason",
+    "evidence",
+    "next_action",
+];
+
+fn pet_state_insert_behavior_facets(state: &mut Value, args: &Value) {
+    let Some(state) = state.as_object_mut() else {
+        return;
+    };
+    for key in PET_STATE_BEHAVIOR_FACET_KEYS {
+        if let Some(value) = pet_state_optional_string(args, key) {
+            state.insert((*key).to_string(), json!(value));
+        }
+    }
 }
 
 fn pet_state_env_u64(env_key: &str) -> Option<u64> {
@@ -8080,7 +8560,10 @@ fn pet_state_auto_spec_allows(spec: &str, mode: &str) -> bool {
         .filter(|s| !s.is_empty())
         .map(|s| s.to_ascii_lowercase())
         .collect();
-    if tokens.iter().any(|t| matches!(t.as_str(), "0" | "false" | "off" | "no" | "none")) {
+    if tokens
+        .iter()
+        .any(|t| matches!(t.as_str(), "0" | "false" | "off" | "no" | "none"))
+    {
         return false;
     }
     tokens.iter().any(|t| match t.as_str() {
@@ -8133,8 +8616,9 @@ fn pet_state_auto_ritual_args(args: &Value, pet_id: &str) -> Value {
 
 fn pet_state_tool_result_json(result: &ToolResult) -> Value {
     match result.content.first() {
-        Some(ContentBlock::Text { text }) => serde_json::from_str(text)
-            .unwrap_or_else(|_| json!({ "text": text })),
+        Some(ContentBlock::Text { text }) => {
+            serde_json::from_str(text).unwrap_or_else(|_| json!({ "text": text }))
+        }
         Some(_) => json!({ "content": result.content }),
         None => Value::Null,
     }
@@ -8169,6 +8653,12 @@ impl McpTool for PetStateSetTool {
                     "last_event": { "type": "string", "default": "pet_state_set" },
                     "project": { "type": "string" },
                     "cwd": { "type": "string" },
+                    "activity_state": { "type": "string", "description": "Optional fine-grained work posture such as planning, implementing, verifying, or documenting." },
+                    "focus": { "type": "string", "description": "Optional compact domain label such as mcp, hooks, voice, presence, docs, or tests." },
+                    "risk_level": { "type": "string", "description": "Optional low/medium/high risk hint for UI and presence surfaces." },
+                    "blocked_reason": { "type": "string", "description": "Optional compact human-actionable reason when input is needed." },
+                    "evidence": { "type": "string", "description": "Optional compact proof string, not a command transcript." },
+                    "next_action": { "type": "string", "description": "Optional next local step for presence and read-only panels." },
                     "session_id": { "type": "string" },
                     "voice_line": { "type": "string", "description": "Optional one-line voice cue. Empty means null." },
                     "ritual": { "type": "string", "description": "Optional ritual cue. Empty means null." },
@@ -8247,7 +8737,7 @@ impl McpTool for PetStateSetTool {
                 }
             });
 
-        let state = json!({
+        let mut state = json!({
             "schema_version": 1,
             "pet_id": pet_id.clone(),
             "project": project,
@@ -8263,6 +8753,7 @@ impl McpTool for PetStateSetTool {
             "session_id": pet_state_optional_string_or_null(&args, "session_id"),
             "updated_at": now,
         });
+        pet_state_insert_behavior_facets(&mut state, &args);
 
         match crate::pet_state::write_pet_state_value(&pet_id, &state) {
             Ok(path) => {
@@ -8283,12 +8774,12 @@ impl McpTool for PetStateSetTool {
                     })
                 };
                 Ok(ToolResult::json_text(&json!({
-                "status": "ok",
-                "pet_id": pet_id,
-                "path": path.display().to_string(),
-                "state": state,
-                "auto_ritual": auto_ritual,
-            })))
+                    "status": "ok",
+                    "pet_id": pet_id,
+                    "path": path.display().to_string(),
+                    "state": state,
+                    "auto_ritual": auto_ritual,
+                })))
             }
             Err(e) => Ok(ToolResult::error(format!("pet_state_set: {e}"))),
         }
@@ -9131,11 +9622,7 @@ impl McpTool for McpDispatchAuditTool {
             Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
         };
         let cold_basis_stats = match store
-            .mcp_tool_call_stats_filtered(
-                window_days * 86_400,
-                stats_limit,
-                cold_basis.clone(),
-            )
+            .mcp_tool_call_stats_filtered(window_days * 86_400, stats_limit, cold_basis.clone())
             .await
         {
             Ok(rows) => rows,
@@ -9185,11 +9672,7 @@ impl McpTool for McpDispatchAuditTool {
         let total_calls: u64 = stats.iter().map(|s| s.call_count).sum();
         let total_errors: u64 = stats.iter().map(|s| s.error_count).sum();
 
-        let hot_tools: Vec<Value> = stats
-            .iter()
-            .take(top_n)
-            .map(dispatch_stat_json)
-            .collect();
+        let hot_tools: Vec<Value> = stats.iter().take(top_n).map(dispatch_stat_json).collect();
 
         let failing_tools: Vec<Value> = stats
             .iter()
@@ -9685,11 +10168,19 @@ impl McpTool for McpConfigAuditTool {
 
         let configured = [&codex, &gemini, &claude]
             .iter()
-            .filter(|v| v.get("configured").and_then(|x| x.as_bool()).unwrap_or(false))
+            .filter(|v| {
+                v.get("configured")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(false)
+            })
             .count();
         let connected = [&codex, &gemini, &claude]
             .iter()
-            .filter(|v| v.get("connected").and_then(|x| x.as_bool()).unwrap_or(false))
+            .filter(|v| {
+                v.get("connected")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(false)
+            })
             .count();
 
         let smoke = if include_smoke_test {
@@ -9755,10 +10246,7 @@ async fn audit_codex_config(include_cli_checks: bool, timeout: Duration) -> Valu
     } else {
         Value::Null
     };
-    let connected = cli
-        .get("ok")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+    let connected = cli.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
         && cli
             .get("stdout")
             .and_then(|v| v.as_str())
@@ -10737,7 +11225,8 @@ document that demonstrates the relevance. The span must be present in the \
 document text exactly. If you cannot find a verbatim span that justifies \
 score >= 1, set score to 0.\n\n\
 Output strict JSON only, no prose: \
-{\"docs\": [{\"id\": 1, \"score\": 0|1|2, \"quote\": \"...\"|null}, ...]}".to_string();
+{\"docs\": [{\"id\": 1, \"score\": 0|1|2, \"quote\": \"...\"|null}, ...]}"
+        .to_string();
 
     let mut user = format!("Query: {query}\n\nDocuments:\n");
     for (i, h) in hits.iter().enumerate() {
@@ -10774,8 +11263,8 @@ pub(crate) fn option_e_parse_response(
         .unwrap_or(cleaned);
     let cleaned = cleaned.strip_suffix("```").unwrap_or(cleaned).trim();
 
-    let blob: OptionELlmDocsBlob = serde_json::from_str(cleaned)
-        .map_err(|e| format!("parse JSON: {e}"))?;
+    let blob: OptionELlmDocsBlob =
+        serde_json::from_str(cleaned).map_err(|e| format!("parse JSON: {e}"))?;
     if blob.docs.len() != expected_count {
         return Err(format!(
             "expected {expected_count} doc scores, got {}",
@@ -10831,8 +11320,8 @@ pub(crate) fn option_e_rate_check_and_bump() -> bool {
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(OPTION_E_DEFAULT_MAX_PER_HOUR);
-    let lock = OPTION_E_RATE_LIMITER
-        .get_or_init(|| std::sync::Mutex::new(OptionERateState::default()));
+    let lock =
+        OPTION_E_RATE_LIMITER.get_or_init(|| std::sync::Mutex::new(OptionERateState::default()));
     let mut state = lock.lock().expect("rate state mutex poisoned");
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -10852,8 +11341,8 @@ pub(crate) fn option_e_rate_check_and_bump() -> bool {
 /// Reset the rate limiter — test-only helper.
 #[cfg(test)]
 pub(crate) fn option_e_rate_reset() {
-    let lock = OPTION_E_RATE_LIMITER
-        .get_or_init(|| std::sync::Mutex::new(OptionERateState::default()));
+    let lock =
+        OPTION_E_RATE_LIMITER.get_or_init(|| std::sync::Mutex::new(OptionERateState::default()));
     let mut state = lock.lock().expect("rate state mutex poisoned");
     *state = OptionERateState::default();
 }
@@ -10900,7 +11389,10 @@ pub async fn option_e_run(
             (0u8, false)
         } else {
             // claimed score >= 1: requires a verbatim, substring-verified quote
-            let has_q = quote.as_ref().map(|q| !q.trim().is_empty()).unwrap_or(false);
+            let has_q = quote
+                .as_ref()
+                .map(|q| !q.trim().is_empty())
+                .unwrap_or(false);
             if has_q && option_e_verify_quote(quote.as_ref().unwrap(), &h.record.content) {
                 (score_raw, true)
             } else {
@@ -11096,7 +11588,10 @@ impl McpTool for IntrospectRecallTool {
 
         // Compose `likely_unsupported` from whichever signal is available.
         let (probability_grounded_v, likely_unsupported) = match &option_e_result {
-            Some(r) => (Some(r.probability_grounded), r.probability_grounded < threshold),
+            Some(r) => (
+                Some(r.probability_grounded),
+                r.probability_grounded < threshold,
+            ),
             None => (
                 None,
                 // v0 fallback semantics: caller may have passed a v0-style
@@ -11182,11 +11677,26 @@ impl McpTool for IntrospectRecallTool {
 fn scan_memory_paths(content: &str) -> Vec<String> {
     const PREFIXES: &[&str] = &[
         // Absolute roots that show up in our memories
-        "/Data/", "/home/", "/tmp/", "/var/", "/opt/", "/etc/", "/run/",
+        "/Data/",
+        "/home/",
+        "/tmp/",
+        "/var/",
+        "/opt/",
+        "/etc/",
+        "/run/",
         "/usr/",
         // Repo-relative dirs we frequently reference in memory bodies
-        "crates/", "museum/", "docs/", "scripts/", "tests/", "examples/",
-        "assets/", ".claude/", "target/", "warp-adapter/", "workflows/",
+        "crates/",
+        "museum/",
+        "docs/",
+        "scripts/",
+        "tests/",
+        "examples/",
+        "assets/",
+        ".claude/",
+        "target/",
+        "warp-adapter/",
+        "workflows/",
     ];
     let mut out: Vec<String> = Vec::new();
     let bytes = content.as_bytes();
@@ -11197,8 +11707,8 @@ fn scan_memory_paths(content: &str) -> Vec<String> {
             let mut end = abs + prefix.len();
             while end < bytes.len() {
                 let b = bytes[end];
-                let path_char = b.is_ascii_alphanumeric()
-                    || b == b'_' || b == b'-' || b == b'.' || b == b'/';
+                let path_char =
+                    b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'.' || b == b'/';
                 if path_char {
                     end += 1;
                 } else {
@@ -11207,9 +11717,8 @@ fn scan_memory_paths(content: &str) -> Vec<String> {
             }
             // Trim trailing punctuation that isn't part of a real path.
             let candidate = &content[abs..end];
-            let trimmed = candidate.trim_end_matches(|c: char| {
-                c == '.' || c == ',' || c == '/' || c == '-'
-            });
+            let trimmed =
+                candidate.trim_end_matches(|c: char| c == '.' || c == ',' || c == '/' || c == '-');
             if trimmed.len() > prefix.len() {
                 out.push(trimmed.to_string());
             }
@@ -11293,7 +11802,10 @@ impl McpTool for MemoryLinkAuditTool {
             None => return Ok(ToolResult::error("no store configured")),
         };
 
-        let kind = args.get("kind").and_then(|v| v.as_str()).map(str::to_string);
+        let kind = args
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
         let limit = args
             .get("limit")
             .and_then(|v| v.as_u64())
@@ -11302,8 +11814,7 @@ impl McpTool for MemoryLinkAuditTool {
         let repo_root_arg = args.get("repo_root").and_then(|v| v.as_str());
         let repo_root: std::path::PathBuf = match repo_root_arg {
             Some(s) => std::path::PathBuf::from(s),
-            None => std::env::current_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            None => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
         };
         let mut roots: Vec<std::path::PathBuf> = vec![repo_root.clone()];
         if let Some(extras) = args.get("extra_search_roots").and_then(|v| v.as_array()) {
@@ -11331,7 +11842,10 @@ impl McpTool for MemoryLinkAuditTool {
         let memories: Vec<_> = if include_skills {
             raw_memories
         } else {
-            raw_memories.into_iter().filter(|m| m.kind != "skill").collect()
+            raw_memories
+                .into_iter()
+                .filter(|m| m.kind != "skill")
+                .collect()
         };
 
         let mut audited = 0u64;
@@ -11386,8 +11900,7 @@ impl McpTool for MemoryLinkAuditTool {
             }
         }
 
-        let roots_display: Vec<String> =
-            roots.iter().map(|p| p.display().to_string()).collect();
+        let roots_display: Vec<String> = roots.iter().map(|p| p.display().to_string()).collect();
 
         Ok(ToolResult::json_text(&json!({
             "audited": audited,
@@ -11494,7 +12007,10 @@ impl McpTool for MemorySuggestTool {
         let candidates: Vec<Value> = suggestions
             .into_iter()
             .map(|(k, conf, reason)| {
-                let kind = by_key.get(k.as_str()).map(|m| m.kind.clone()).unwrap_or_default();
+                let kind = by_key
+                    .get(k.as_str())
+                    .map(|m| m.kind.clone())
+                    .unwrap_or_default();
                 let snippet = by_key
                     .get(k.as_str())
                     .map(|m| m.content.chars().take(80).collect::<String>())
@@ -11747,18 +12263,13 @@ impl McpTool for MemoryLinkOrphansTool {
                 continue;
             }
             examined += 1;
-            let nbrs = store
-                .memory_neighbors(&rec.key)
-                .await
-                .unwrap_or_default();
+            let nbrs = store.memory_neighbors(&rec.key).await.unwrap_or_default();
             if !nbrs.is_empty() {
                 continue;
             }
             // ζ-11 source-side blacklist: stubs tagged `auto_curated` should
             // decay/archive naturally, not get force-linked.
-            if !skip_tags.is_empty()
-                && rec.tags.iter().any(|t| skip_tags.contains(t))
-            {
+            if !skip_tags.is_empty() && rec.tags.iter().any(|t| skip_tags.contains(t)) {
                 skipped_blacklisted_orphan += 1;
                 continue;
             }
@@ -12037,64 +12548,68 @@ impl McpTool for SessionFinalizeTool {
             .get("agent_profile_force")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let (agent_profile_written, agent_profile_diff_ratio_v, agent_profile_capped, agent_profile_reason) =
-            if let Some(profile) = args.get("agent_profile").and_then(|v| v.as_str()) {
-                if profile.trim().is_empty() {
-                    (false, 0.0_f32, false, None)
-                } else {
-                    let path = agent_profile_path();
-                    let old = std::fs::read_to_string(&path).unwrap_or_default();
-                    let ratio = agent_profile_diff_ratio(&old, profile);
-                    let exceeds = ratio > AGENT_PROFILE_DRIFT_CAP;
-                    if exceeds && !force_profile && !old.trim().is_empty() {
-                        // Reject — would rewrite > 50% of identity. Caller can retry
-                        // with agent_profile_force=true if intentional.
-                        (
-                            false,
-                            ratio,
-                            true,
-                            Some(format!(
-                                "drift {:.1}% > cap {:.0}%; pass agent_profile_force=true to override",
-                                ratio * 100.0,
-                                AGENT_PROFILE_DRIFT_CAP * 100.0
-                            )),
-                        )
-                    } else if dry_run {
-                        (false, ratio, false, None)
-                    } else {
-                        if let Some(parent) = path.parent() {
-                            let _ = std::fs::create_dir_all(parent);
-                        }
-                        let ok = std::fs::write(&path, profile.as_bytes()).is_ok();
-                        (ok, ratio, exceeds && force_profile, None)
-                    }
-                }
+        let (
+            agent_profile_written,
+            agent_profile_diff_ratio_v,
+            agent_profile_capped,
+            agent_profile_reason,
+        ) = if let Some(profile) = args.get("agent_profile").and_then(|v| v.as_str()) {
+            if profile.trim().is_empty() {
+                (false, 0.0_f32, false, None)
             } else {
-                (false, 0.0, false, None)
-            };
+                let path = agent_profile_path();
+                let old = std::fs::read_to_string(&path).unwrap_or_default();
+                let ratio = agent_profile_diff_ratio(&old, profile);
+                let exceeds = ratio > AGENT_PROFILE_DRIFT_CAP;
+                if exceeds && !force_profile && !old.trim().is_empty() {
+                    // Reject — would rewrite > 50% of identity. Caller can retry
+                    // with agent_profile_force=true if intentional.
+                    (
+                        false,
+                        ratio,
+                        true,
+                        Some(format!(
+                            "drift {:.1}% > cap {:.0}%; pass agent_profile_force=true to override",
+                            ratio * 100.0,
+                            AGENT_PROFILE_DRIFT_CAP * 100.0
+                        )),
+                    )
+                } else if dry_run {
+                    (false, ratio, false, None)
+                } else {
+                    if let Some(parent) = path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let ok = std::fs::write(&path, profile.as_bytes()).is_ok();
+                    (ok, ratio, exceeds && force_profile, None)
+                }
+            }
+        } else {
+            (false, 0.0, false, None)
+        };
 
         // Optional: persist letter-to-future-self. Append-only — each call
         // creates a new file letter_<unix_ts>.md. Latest 3 are auto-injected
         // at session_bootstrap.
-        let letter_written =
-            if let Some(letter_body) = args.get("letter").and_then(|v| v.as_str()) {
-                if !letter_body.trim().is_empty() && !dry_run {
-                    let dir = letters_dir();
-                    let _ = std::fs::create_dir_all(&dir);
-                    let ts = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let path = dir.join(format!("letter_{ts}.md"));
-                    std::fs::write(&path, letter_body.as_bytes())
-                        .ok()
-                        .map(|_| path.display().to_string())
-                } else {
-                    None
-                }
+        let letter_written = if let Some(letter_body) = args.get("letter").and_then(|v| v.as_str())
+        {
+            if !letter_body.trim().is_empty() && !dry_run {
+                let dir = letters_dir();
+                let _ = std::fs::create_dir_all(&dir);
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let path = dir.join(format!("letter_{ts}.md"));
+                std::fs::write(&path, letter_body.as_bytes())
+                    .ok()
+                    .map(|_| path.display().to_string())
             } else {
                 None
-            };
+            }
+        } else {
+            None
+        };
 
         Ok(ToolResult::json_text(&json!({
             "dry_run": dry_run,
@@ -12275,13 +12790,12 @@ impl McpTool for IdeCommandTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Queue a lightweight command for an IDE extension to execute via the \
+            description: "Queue a lightweight command for an IDE extension to execute via the \
                  file bridge. Supported commands: open_file, reveal_range, run_task, \
                  write_snapshot. Writes JSONL to <workspace>/.agent-bridge/ide-commands.jsonl \
                  (or command_dir / AGENT_BRIDGE_IDE_COMMAND_DIR) and optionally waits \
                  for a matching response in ide-responses.jsonl."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -12345,11 +12859,10 @@ impl McpTool for IdeCommandTool {
             wait_ms,
         };
 
-        let res = tokio::task::spawn_blocking(move || {
-            queue_ide_command(&command, command_args, options)
-        })
-        .await
-        .map_err(|e| ab_core::Error::Backend(format!("ide_command task: {e}")))?;
+        let res =
+            tokio::task::spawn_blocking(move || queue_ide_command(&command, command_args, options))
+                .await
+                .map_err(|e| ab_core::Error::Backend(format!("ide_command task: {e}")))?;
         match res {
             Ok(v) => Ok(ToolResult::json_text(&v)),
             Err(e) => Ok(ToolResult::error(e.to_string())),
@@ -12371,12 +12884,11 @@ impl McpTool for ProjectDetectTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Scan a directory for project manifests (Cargo.toml, package.json, \
+            description: "Scan a directory for project manifests (Cargo.toml, package.json, \
                  pyproject.toml, go.mod, Makefile), infer languages + test/lint/format \
                  commands, list Rust workspace members, snapshot git branch+clean+recent \
                  commit. cwd defaults to process cwd."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -14155,9 +14667,7 @@ pub fn compute_attention_report(
         // protects against the same call counting itself when ts ties.
         let cutoff_end = hy.ts + followup_window_secs;
         let has_followup = calls.iter().any(|c| {
-            c.ts > hy.ts
-                && c.ts <= cutoff_end
-                && (c.ts != hy.ts || c.tool_name != hy.tool_name)
+            c.ts > hy.ts && c.ts <= cutoff_end && (c.ts != hy.ts || c.tool_name != hy.tool_name)
         });
         let result_size = hy.result_size.unwrap_or(0);
         if has_followup {
@@ -14380,10 +14890,7 @@ impl McpTool for EmbedTextTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let text = args
-            .get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
         let backend = build_raw_encoder();
         let vec = backend.embed(text);
         Ok(ToolResult::json_text(&json!({
@@ -14709,7 +15216,11 @@ impl McpTool for CodebaseIndexTool {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
-            .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()))
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.display().to_string())
+            })
             .unwrap_or_else(|| "/".to_string());
         let languages: Vec<String> = args
             .get("languages")
@@ -15136,12 +15647,7 @@ impl McpTool for CodebaseCallersTool {
             .min(500) as u32;
 
         match store
-            .codebase_callers(
-                &target,
-                file_filter.as_deref(),
-                root_path.as_deref(),
-                limit,
-            )
+            .codebase_callers(&target, file_filter.as_deref(), root_path.as_deref(), limit)
             .await
         {
             Ok(hits) => Ok(ToolResult::json_text(
@@ -15298,15 +15804,14 @@ impl McpTool for TailscaleAclGetTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Fetch the current tailnet Access Control List as HuJSON \
+            description: "Fetch the current tailnet Access Control List as HuJSON \
                  (HCL-flavored JSON with comments). Returns `body` plus the \
                  `etag` you can pass to `tailscale_acl_set` for safe \
                  optimistic-concurrency writes. Requires \
                  `TAILSCALE_OAUTH_CLIENT_ID` + `TAILSCALE_OAUTH_CLIENT_SECRET` \
                  env (OAuth client with `acl` scope; create one at \
                  login.tailscale.com → Settings → OAuth clients)."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {},
@@ -15348,8 +15853,7 @@ impl McpTool for TailscaleAclSetTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Replace the tailnet ACL with `body` (HuJSON or strict JSON). \
+            description: "Replace the tailnet ACL with `body` (HuJSON or strict JSON). \
                  Set `validate_only: true` to dry-run via the validate endpoint \
                  — recommended before any real write. Pass `etag` from a prior \
                  `tailscale_acl_get` to enable optimistic concurrency (the API \
@@ -15357,7 +15861,7 @@ impl McpTool for TailscaleAclSetTool {
                  IMPORTANT: a bad ACL can lock you and other tailnet members \
                  out of SSH / services within seconds; ALWAYS validate first \
                  unless you're rolling back a known-good config."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15420,23 +15924,28 @@ impl McpTool for TailscaleAclSetTool {
 
 pub struct GithubIssueListTool;
 impl Default for GithubIssueListTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 impl GithubIssueListTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 #[async_trait]
 impl McpTool for GithubIssueListTool {
-    fn name(&self) -> &'static str { "github_issue_list" }
+    fn name(&self) -> &'static str {
+        "github_issue_list"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List GitHub issues for `owner/repo`. Pull requests are filtered \
+            description: "List GitHub issues for `owner/repo`. Pull requests are filtered \
                  out (use `github_pr_list` for those). Requires `GITHUB_TOKEN` env \
                  (fine-grained PAT with Issues read scope, or classic PAT with \
                  `repo`). Defaults: state=open, per_page=20."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15452,19 +15961,37 @@ impl McpTool for GithubIssueListTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let owner = match args.get("owner").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'owner'")),
+        let owner = match args
+            .get("owner")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'owner'")),
         };
-        let repo = match args.get("repo").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'repo'")),
+        let repo = match args
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'repo'")),
         };
         let state = args.get("state").and_then(|v| v.as_str()).unwrap_or("open");
-        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 100) as u32;
+        let per_page = args
+            .get("per_page")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 100) as u32;
         let labels = args.get("labels").and_then(|v| v.as_str());
         let client = match crate::github_api::GitHubClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
-        match client.issue_list(owner, repo, state, per_page, labels).await {
+        match client
+            .issue_list(owner, repo, state, per_page, labels)
+            .await
+        {
             Ok(rows) => Ok(ToolResult::json_text(&json!({
                 "count": rows.len(),
                 "issues": rows
@@ -15476,23 +16003,28 @@ impl McpTool for GithubIssueListTool {
 
 pub struct GithubIssueCreateTool;
 impl Default for GithubIssueCreateTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 impl GithubIssueCreateTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 #[async_trait]
 impl McpTool for GithubIssueCreateTool {
-    fn name(&self) -> &'static str { "github_issue_create" }
+    fn name(&self) -> &'static str {
+        "github_issue_create"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Create a GitHub issue on `owner/repo`. Requires `GITHUB_TOKEN` \
+            description: "Create a GitHub issue on `owner/repo`. Requires `GITHUB_TOKEN` \
                  with Issues write permission. Returns the new issue's number, \
                  html_url, etc. Use sparingly — issues are public on public repos \
                  and notify watchers."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15508,14 +16040,29 @@ impl McpTool for GithubIssueCreateTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let owner = match args.get("owner").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'owner'")),
+        let owner = match args
+            .get("owner")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'owner'")),
         };
-        let repo = match args.get("repo").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'repo'")),
+        let repo = match args
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'repo'")),
         };
-        let title = match args.get("title").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'title'")),
+        let title = match args
+            .get("title")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'title'")),
         };
         let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
         let labels = args.get("labels").and_then(|v| v.as_array()).map(|arr| {
@@ -15524,7 +16071,8 @@ impl McpTool for GithubIssueCreateTool {
                 .collect::<Vec<_>>()
         });
         let client = match crate::github_api::GitHubClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
         match client.issue_create(owner, repo, title, body, labels).await {
             Ok(issue) => Ok(ToolResult::json_text(&json!({ "issue": issue }))),
@@ -15535,22 +16083,27 @@ impl McpTool for GithubIssueCreateTool {
 
 pub struct GithubPrListTool;
 impl Default for GithubPrListTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 impl GithubPrListTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 #[async_trait]
 impl McpTool for GithubPrListTool {
-    fn name(&self) -> &'static str { "github_pr_list" }
+    fn name(&self) -> &'static str {
+        "github_pr_list"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List GitHub pull requests for `owner/repo`. Defaults: state=open, \
+            description: "List GitHub pull requests for `owner/repo`. Defaults: state=open, \
                  per_page=20. Each PR includes head/base ref, draft flag, author. \
                  Requires `GITHUB_TOKEN` with PR read scope."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15565,16 +16118,31 @@ impl McpTool for GithubPrListTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let owner = match args.get("owner").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'owner'")),
+        let owner = match args
+            .get("owner")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'owner'")),
         };
-        let repo = match args.get("repo").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'repo'")),
+        let repo = match args
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'repo'")),
         };
         let state = args.get("state").and_then(|v| v.as_str()).unwrap_or("open");
-        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 100) as u32;
+        let per_page = args
+            .get("per_page")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 100) as u32;
         let client = match crate::github_api::GitHubClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
         match client.pr_list(owner, repo, state, per_page).await {
             Ok(rows) => Ok(ToolResult::json_text(&json!({
@@ -15592,23 +16160,28 @@ impl McpTool for GithubPrListTool {
 
 pub struct GitlabIssueListTool;
 impl Default for GitlabIssueListTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 impl GitlabIssueListTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 #[async_trait]
 impl McpTool for GitlabIssueListTool {
-    fn name(&self) -> &'static str { "gitlab_issue_list" }
+    fn name(&self) -> &'static str {
+        "gitlab_issue_list"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List GitLab issues for `project` (either numeric ID like `81993234` \
+            description: "List GitLab issues for `project` (either numeric ID like `81993234` \
                  or path with namespace like `pallasting/agent-bridge`). Requires \
                  `GITLAB_TOKEN` env (fine-grained PAT with `read_api` scope, or \
                  personal token with `api`). Defaults: state=opened, per_page=20."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15623,14 +16196,27 @@ impl McpTool for GitlabIssueListTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let project = match args.get("project").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'project'")),
+        let project = match args
+            .get("project")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'project'")),
         };
-        let state = args.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
-        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 100) as u32;
+        let state = args
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("opened");
+        let per_page = args
+            .get("per_page")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 100) as u32;
         let labels = args.get("labels").and_then(|v| v.as_str());
         let client = match crate::gitlab_api::GitLabClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
         match client.issue_list(project, state, per_page, labels).await {
             Ok(rows) => Ok(ToolResult::json_text(&json!({
@@ -15644,23 +16230,28 @@ impl McpTool for GitlabIssueListTool {
 
 pub struct GitlabIssueCreateTool;
 impl Default for GitlabIssueCreateTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 impl GitlabIssueCreateTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 #[async_trait]
 impl McpTool for GitlabIssueCreateTool {
-    fn name(&self) -> &'static str { "gitlab_issue_create" }
+    fn name(&self) -> &'static str {
+        "gitlab_issue_create"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Create a GitLab issue on `project`. Requires `GITLAB_TOKEN` with \
+            description: "Create a GitLab issue on `project`. Requires `GITLAB_TOKEN` with \
                  issue write scope. Returns the new issue's iid, web_url, etc. Note: \
                  GitLab uses `description` (not `body`) and labels go in as a comma-\
                  separated string under the hood."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15675,22 +16266,39 @@ impl McpTool for GitlabIssueCreateTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let project = match args.get("project").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'project'")),
+        let project = match args
+            .get("project")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'project'")),
         };
-        let title = match args.get("title").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'title'")),
+        let title = match args
+            .get("title")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'title'")),
         };
-        let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
+        let description = args
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let labels = args.get("labels").and_then(|v| v.as_array()).map(|arr| {
             arr.iter()
                 .filter_map(|x| x.as_str().map(String::from))
                 .collect::<Vec<_>>()
         });
         let client = match crate::gitlab_api::GitLabClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
-        match client.issue_create(project, title, description, labels).await {
+        match client
+            .issue_create(project, title, description, labels)
+            .await
+        {
             Ok(issue) => Ok(ToolResult::json_text(&json!({ "issue": issue }))),
             Err(e) => Ok(ToolResult::error(&format!("{e}"))),
         }
@@ -15699,23 +16307,28 @@ impl McpTool for GitlabIssueCreateTool {
 
 pub struct GitlabMrListTool;
 impl Default for GitlabMrListTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 impl GitlabMrListTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 #[async_trait]
 impl McpTool for GitlabMrListTool {
-    fn name(&self) -> &'static str { "gitlab_mr_list" }
+    fn name(&self) -> &'static str {
+        "gitlab_mr_list"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List GitLab merge requests for `project`. State values: opened / \
+            description: "List GitLab merge requests for `project`. State values: opened / \
                  closed / merged / all (default opened). Each MR includes \
                  source_branch, target_branch, draft flag, author. Requires \
                  `GITLAB_TOKEN` with MR read scope."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15729,13 +16342,26 @@ impl McpTool for GitlabMrListTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let project = match args.get("project").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'project'")),
+        let project = match args
+            .get("project")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'project'")),
         };
-        let state = args.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
-        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 100) as u32;
+        let state = args
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("opened");
+        let per_page = args
+            .get("per_page")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 100) as u32;
         let client = match crate::gitlab_api::GitLabClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
         match client.mr_list(project, state, per_page).await {
             Ok(rows) => Ok(ToolResult::json_text(&json!({
@@ -15753,24 +16379,29 @@ impl McpTool for GitlabMrListTool {
 
 pub struct NotionSearchTool;
 impl Default for NotionSearchTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 impl NotionSearchTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 #[async_trait]
 impl McpTool for NotionSearchTool {
-    fn name(&self) -> &'static str { "notion_search" }
+    fn name(&self) -> &'static str {
+        "notion_search"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Search pages and databases in the Notion workspace. The bot only \
+            description: "Search pages and databases in the Notion workspace. The bot only \
                  sees pages explicitly shared with it via the Notion UI's 'Add \
                  connections' menu — empty results with HTTP 200 typically means \
                  the bot wasn't granted access. Returns id/url/title/timestamps. \
                  Pass empty `query` to list all accessible top-level pages."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15786,9 +16417,14 @@ impl McpTool for NotionSearchTool {
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
         let filter = args.get("filter").and_then(|v| v.as_str());
-        let page_size = args.get("page_size").and_then(|v| v.as_u64()).unwrap_or(10).clamp(1, 100) as u32;
+        let page_size = args
+            .get("page_size")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10)
+            .clamp(1, 100) as u32;
         let client = match crate::notion_api::NotionClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
         match client.search(query, filter, page_size).await {
             Ok(rows) => Ok(ToolResult::json_text(&json!({
@@ -15802,22 +16438,27 @@ impl McpTool for NotionSearchTool {
 
 pub struct NotionPageGetTool;
 impl Default for NotionPageGetTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 impl NotionPageGetTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 #[async_trait]
 impl McpTool for NotionPageGetTool {
-    fn name(&self) -> &'static str { "notion_page_get" }
+    fn name(&self) -> &'static str {
+        "notion_page_get"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Fetch metadata for a single Notion page by id. Returns id/url/\
+            description: "Fetch metadata for a single Notion page by id. Returns id/url/\
                  title/parent kind+id/archived flag/timestamps. Page id can be \
                  dashed-uuid form or hyphen-stripped (Notion accepts both)."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15829,11 +16470,17 @@ impl McpTool for NotionPageGetTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let page_id = match args.get("page_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'page_id'")),
+        let page_id = match args
+            .get("page_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'page_id'")),
         };
         let client = match crate::notion_api::NotionClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
         match client.page_get(page_id).await {
             Ok(p) => Ok(ToolResult::json_text(&json!({ "page": p }))),
@@ -15844,24 +16491,29 @@ impl McpTool for NotionPageGetTool {
 
 pub struct NotionPageCreateTool;
 impl Default for NotionPageCreateTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 impl NotionPageCreateTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 #[async_trait]
 impl McpTool for NotionPageCreateTool {
-    fn name(&self) -> &'static str { "notion_page_create" }
+    fn name(&self) -> &'static str {
+        "notion_page_create"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Create a child page under `parent_page_id`. `content` becomes a \
+            description: "Create a child page under `parent_page_id`. `content` becomes a \
                  single paragraph block (plain text). For richer block content \
                  use a follow-up edit in the Notion UI or extend with a \
                  block_append tool later. The bot must be invited to the parent \
                  page via 'Add connections' beforehand or this returns 404."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15875,15 +16527,26 @@ impl McpTool for NotionPageCreateTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let parent = match args.get("parent_page_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'parent_page_id'")),
+        let parent = match args
+            .get("parent_page_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'parent_page_id'")),
         };
-        let title = match args.get("title").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'title'")),
+        let title = match args
+            .get("title")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'title'")),
         };
         let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
         let client = match crate::notion_api::NotionClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
         match client.page_create(parent, title, content).await {
             Ok(p) => Ok(ToolResult::json_text(&json!({ "page": p }))),
@@ -15897,21 +16560,30 @@ impl McpTool for NotionPageCreateTool {
 // ===========================================================================
 
 pub struct CloudflareZoneListTool;
-impl Default for CloudflareZoneListTool { fn default() -> Self { Self } }
-impl CloudflareZoneListTool { pub fn new() -> Self { Self } }
+impl Default for CloudflareZoneListTool {
+    fn default() -> Self {
+        Self
+    }
+}
+impl CloudflareZoneListTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
 #[async_trait]
 impl McpTool for CloudflareZoneListTool {
-    fn name(&self) -> &'static str { "cloudflare_zone_list" }
+    fn name(&self) -> &'static str {
+        "cloudflare_zone_list"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List Cloudflare zones (apex domains) the configured token has \
+            description: "List Cloudflare zones (apex domains) the configured token has \
                  read access to. Returns id/name/status/paused/type/name_servers/\
                  created_on/modified_on per zone. The `id` is the zone-id you'd \
                  plug into other zone-scoped endpoints (DNS, SSL, etc.). Token \
                  must have Zone:Read scope."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15923,32 +16595,48 @@ impl McpTool for CloudflareZoneListTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 50) as u32;
+        let per_page = args
+            .get("per_page")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 50) as u32;
         let client = match crate::cloudflare_api::CloudflareClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
         match client.zone_list(per_page).await {
-            Ok(rows) => Ok(ToolResult::json_text(&json!({ "count": rows.len(), "zones": rows }))),
+            Ok(rows) => Ok(ToolResult::json_text(
+                &json!({ "count": rows.len(), "zones": rows }),
+            )),
             Err(e) => Ok(ToolResult::error(&format!("{e}"))),
         }
     }
 }
 
 pub struct CloudflareWorkerListTool;
-impl Default for CloudflareWorkerListTool { fn default() -> Self { Self } }
-impl CloudflareWorkerListTool { pub fn new() -> Self { Self } }
+impl Default for CloudflareWorkerListTool {
+    fn default() -> Self {
+        Self
+    }
+}
+impl CloudflareWorkerListTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
 #[async_trait]
 impl McpTool for CloudflareWorkerListTool {
-    fn name(&self) -> &'static str { "cloudflare_worker_list" }
+    fn name(&self) -> &'static str {
+        "cloudflare_worker_list"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List Workers scripts under the configured Cloudflare account. \
+            description: "List Workers scripts under the configured Cloudflare account. \
                  Returns id/created_on/modified_on/etag/handlers/usage_model and \
                  routes (pattern strings). Token must have Workers Scripts:Read \
                  scope and CLOUDFLARE_ACCOUNT_ID env must be set."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15960,32 +16648,48 @@ impl McpTool for CloudflareWorkerListTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let per_page = args.get("per_page").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 50) as u32;
+        let per_page = args
+            .get("per_page")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 50) as u32;
         let client = match crate::cloudflare_api::CloudflareClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
         match client.worker_list(per_page).await {
-            Ok(rows) => Ok(ToolResult::json_text(&json!({ "count": rows.len(), "workers": rows }))),
+            Ok(rows) => Ok(ToolResult::json_text(
+                &json!({ "count": rows.len(), "workers": rows }),
+            )),
             Err(e) => Ok(ToolResult::error(&format!("{e}"))),
         }
     }
 }
 
 pub struct CloudflareR2BucketListTool;
-impl Default for CloudflareR2BucketListTool { fn default() -> Self { Self } }
-impl CloudflareR2BucketListTool { pub fn new() -> Self { Self } }
+impl Default for CloudflareR2BucketListTool {
+    fn default() -> Self {
+        Self
+    }
+}
+impl CloudflareR2BucketListTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
 #[async_trait]
 impl McpTool for CloudflareR2BucketListTool {
-    fn name(&self) -> &'static str { "cloudflare_r2_bucket_list" }
+    fn name(&self) -> &'static str {
+        "cloudflare_r2_bucket_list"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "List R2 (object-storage) buckets under the configured Cloudflare \
+            description: "List R2 (object-storage) buckets under the configured Cloudflare \
                  account. Returns name/creation_date/location/storage_class. Note \
                  the response is wrapped in result.buckets, not result directly. \
                  Token must have Workers R2 Storage:Read scope."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {},
@@ -15996,10 +16700,13 @@ impl McpTool for CloudflareR2BucketListTool {
     }
     async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let client = match crate::cloudflare_api::CloudflareClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
         match client.r2_bucket_list().await {
-            Ok(rows) => Ok(ToolResult::json_text(&json!({ "count": rows.len(), "buckets": rows }))),
+            Ok(rows) => Ok(ToolResult::json_text(
+                &json!({ "count": rows.len(), "buckets": rows }),
+            )),
             Err(e) => Ok(ToolResult::error(&format!("{e}"))),
         }
     }
@@ -16011,24 +16718,29 @@ impl McpTool for CloudflareR2BucketListTool {
 
 pub struct BraveWebSearchTool;
 impl Default for BraveWebSearchTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 impl BraveWebSearchTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 #[async_trait]
 impl McpTool for BraveWebSearchTool {
-    fn name(&self) -> &'static str { "brave_web_search" }
+    fn name(&self) -> &'static str {
+        "brave_web_search"
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Web search via Brave Search API. Independent of Google; useful \
+            description: "Web search via Brave Search API. Independent of Google; useful \
                  for fresh / less-indexed material and as a sanity check on \
                  other engines. Returns title/url/description/age/language. \
                  Free tier: ~1 query/second, 2000/month — keep `count` modest. \
                  `safesearch` is one of off/moderate/strict (default moderate)."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -16043,14 +16755,24 @@ impl McpTool for BraveWebSearchTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let query = match args.get("query").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            Some(s) => s, None => return Ok(ToolResult::error("missing 'query'")),
+        let query = match args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s,
+            None => return Ok(ToolResult::error("missing 'query'")),
         };
-        let count = args.get("count").and_then(|v| v.as_u64()).unwrap_or(10).clamp(1, 20) as u32;
+        let count = args
+            .get("count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10)
+            .clamp(1, 20) as u32;
         let country = args.get("country").and_then(|v| v.as_str());
         let safesearch = args.get("safesearch").and_then(|v| v.as_str());
         let client = match crate::brave_api::BraveClient::from_env() {
-            Ok(c) => c, Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(&format!("{e}"))),
         };
         match client.web_search(query, count, country, safesearch).await {
             Ok(rows) => Ok(ToolResult::json_text(&json!({
@@ -16408,188 +17130,925 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
 
     // ── ESSENTIAL ──────────────────────────────────────────────────────
     // Memory: query + write + delete + graph navigation.
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemorySearchTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemorySaveTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemoryGetTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemoryListTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemoryDeleteTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemoryNeighborsTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryCoactivationTopTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(MemorySearchTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(MemorySaveTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(MemoryGetTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(MemoryListTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(MemoryDeleteTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(MemoryNeighborsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryCoactivationTopTool::new(hub.clone())),
+    );
     // Terminal: list + send + read + split + resize. Retired after Warp drop
     // (see memory `project_warp_drop_to_museum`); kept as Niche for any
     // residual non-Warp PTY caller, opt-in via AGENT_BRIDGE_TOOL_PROFILE=all.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalListTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalSendKeysTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalReadOutputTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalSplitTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalResizeTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TerminalListTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TerminalSendKeysTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TerminalReadOutputTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TerminalSplitTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TerminalResizeTool::new(hub.clone())),
+    );
     // Agent runtime: spawn + observe sessions.
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(AgentSpawnTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(AgentSessionGetTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(AgentSessionWaitTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(AgentSessionListTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(AgentSpawnTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(AgentSessionGetTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(AgentSessionWaitTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(AgentSessionListTool::new(hub.clone())),
+    );
     // Shell + lifecycle bootstrap + ops introspection that callers ask first.
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(ShellExecTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(SessionBootstrapTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(SessionFinalizeTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SessionReflectTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CapabilitiesTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(McpDispatchAuditTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(ShellExecTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(SessionBootstrapTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(SessionFinalizeTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SessionReflectTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(CapabilitiesTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(McpDispatchAuditTool::new(hub.clone())),
+    );
     // IDE bridge: 7-day audit shows 0 calls; demoted to Niche.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(IdeSnapshotTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(IdeCommandTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PetStateGetTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PetStateSetTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PetStateRitualTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(ProjectDetectTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(ChangesDigestTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(IdeSnapshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(IdeCommandTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(PetStateGetTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(PetStateSetTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(PetStateRitualTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(ProjectDetectTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(ChangesDigestTool::new(hub.clone())),
+    );
     // Plans + worktrees + codebase search.
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PlanSaveTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PlanLoadTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PlanUpdateTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(WorktreeListTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(WorktreeCreateTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CodebaseSearchTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CodebaseImportsTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CodebaseCallsTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CodebaseCallersTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CodebaseImpactTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(PlanSaveTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(PlanLoadTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(PlanUpdateTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(WorktreeListTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(WorktreeCreateTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(CodebaseSearchTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(CodebaseImportsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(CodebaseCallsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(CodebaseCallersTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(CodebaseImpactTool::new(hub.clone())),
+    );
 
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryPurgeTombstonesTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryPruneCoactivationNoiseTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryPruneDegenerateRelatesTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryArchiveOrphanStubsTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryRestoreArchivedTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryTombstoneAgedArchivedTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryDecayUnusedTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryLinkTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryCorrectionTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryStatsTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryQueryStatsTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemorySubstrateAuditTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SubstrateStatsTool::new()));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SubstrateNeighborsTool::new()));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(IntrospectRecallTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryLinkAuditTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemorySuggestTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryLinkOrphansTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(AgentKillTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(AgentMessageTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(AgentInboxTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryCompactTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryPurgeTombstonesTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryPruneCoactivationNoiseTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryPruneDegenerateRelatesTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryArchiveOrphanStubsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryRestoreArchivedTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryTombstoneAgedArchivedTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryDecayUnusedTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryReindexTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(CodebaseReindexTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryLinkTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryCorrectionTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryStatsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryQueryStatsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemorySubstrateAuditTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SubstrateStatsTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SubstrateNeighborsTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(IntrospectRecallTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryLinkAuditTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemorySuggestTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryLinkOrphansTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AgentKillTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AgentMessageTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AgentInboxTool::new(hub.clone())),
+    );
     // Forum (v18): cross-process collaboration whiteboard.
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ForumPostTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ForumReadTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ForumSubscribeTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ForumListThreadsTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ForumSetThreadStatusTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(ForumPostTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(ForumReadTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(ForumSubscribeTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(ForumListThreadsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(ForumSetThreadStatusTool::new(hub.clone())),
+    );
     // Presence (v19): identity convention + agent registry (A2A AgentCard-aligned).
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SessionIdentityTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(AgentPresenceAnnounceTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(AgentPresenceListTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(PetPresenceSyncTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SessionIdentityTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AgentPresenceAnnounceTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AgentPresenceListTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(PetPresenceSyncTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AvatarAdapterCapabilitiesTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AvatarStateGetTool::new(hub.clone())),
+    );
     // Tailscale REST API: ACL editing without browser automation.
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(TailscaleAclGetTool::new()));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(TailscaleAclSetTool::new()));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(TailscaleAclGetTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(TailscaleAclSetTool::new()),
+    );
     // GitHub REST API: issue/PR management without browser/gh-cli. Demoted
     // to Niche — Claude Code uses `gh` CLI; codex has native overlap.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GithubIssueListTool::new()));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GithubIssueCreateTool::new()));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GithubPrListTool::new()));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(GithubIssueListTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(GithubIssueCreateTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(GithubPrListTool::new()),
+    );
 
     // GitLab REST API v4: same pattern as github_*; primary forge for this project.
     // Demoted to Niche — `glab` CLI covers the same surface.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GitlabIssueListTool::new()));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GitlabIssueCreateTool::new()));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GitlabMrListTool::new()));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(GitlabIssueListTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(GitlabIssueCreateTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(GitlabMrListTool::new()),
+    );
 
     // Notion REST API: integration-token Bearer; complements memory system.
     // Demoted to Niche — 0 calls in 7-day audit window.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(NotionSearchTool::new()));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(NotionPageGetTool::new()));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(NotionPageCreateTool::new()));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(NotionSearchTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(NotionPageGetTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(NotionPageCreateTool::new()),
+    );
 
     // Brave Search REST API: independent web search, fallback / fresh-results channel.
     // Demoted to Niche — Claude Code uses WebFetch/WebSearch built-ins.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BraveWebSearchTool::new()));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BraveWebSearchTool::new()),
+    );
 
     // Cloudflare REST API: zones / workers / R2 read scopes (others 403 with current token).
     // Demoted to Niche — 0 calls in 7-day audit window.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(CloudflareZoneListTool::new()));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(CloudflareWorkerListTool::new()));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(CloudflareR2BucketListTool::new()));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(WorktreeRemoveTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(CodebaseIndexTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(CloudflareZoneListTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(CloudflareWorkerListTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(CloudflareR2BucketListTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SessionCurateTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SessionHandoffBriefTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SessionLifecycleStepTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(WorktreeRemoveTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(CodebaseIndexTool::new(hub.clone())),
+    );
     // Retired with rest of terminal_* after Warp drop.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalReadBlocksTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(NotifyTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(NotificationsRecentTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TerminalReadBlocksTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(NotifyTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(NotificationsRecentTool::new(hub.clone())),
+    );
     // Skill library (Phase C): in-loop recommendation over the local skill index.
     // Keep this in Essential for Codex/GPT-style deferred tool discovery: it is
     // the gateway that lets the model find more specialized skills on demand.
-    reg_if(&mut reg, policy, Tier::Essential, Arc::new(SkillsRecommendTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(SkillsRecommendTool::new(hub.clone())),
+    );
 
     // ── NICHE (opt-in via AGENT_BRIDGE_TOOL_PROFILE=all) ───────────────
     // Browser automation surface.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserNavigateTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserEvalTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserSnapshotTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserClickTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserScreenshotTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserScreenshotElementTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserExtractTextTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserFillFormTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserWaitForTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserListPagesTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserPressKeyTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserSelectOptionTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserFindByTextTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserListFramesTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserEvalInFrameTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserPauseForHumanTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserResumeTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserCaptureResponseStartTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserCaptureResponseDrainTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserReloadTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserBackTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserForwardTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserClosePageTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserScrollTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserHoverTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserSetEmulationTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserUploadFileTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserNavigateTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserEvalTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserSnapshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserClickTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserScreenshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserScreenshotElementTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserExtractTextTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserFillFormTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserWaitForTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserListPagesTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserPressKeyTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserSelectOptionTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserFindByTextTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserListFramesTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserEvalInFrameTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserPauseForHumanTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserResumeTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserCaptureResponseStartTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserCaptureResponseDrainTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserReloadTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserBackTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserForwardTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserClosePageTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserScrollTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserHoverTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserSetEmulationTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(BrowserUploadFileTool::new(hub.clone())),
+    );
     // Warp URL-scheme + status.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(WarpOpenSettingsTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(WarpLaunchWorkflowTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(WarpStatusTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(WarpOpenTabTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(WarpOpenWindowTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(WarpOpenSettingsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(WarpLaunchWorkflowTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(WarpStatusTool::new(hub.clone())),
+    );
     // Warp-Oz cloud runs.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(OzRunGetTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(OzRunListTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(OzRunCancelTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(OzRunGetTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(OzRunListTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(OzRunCancelTool::new(hub.clone())),
+    );
     // Ops introspection / debugging.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(OscParseTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(McpRecentErrorsTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(McpCallStatsTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(McpConfigAuditTool::new()));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(ContextBudgetTool::new()));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ContextPressureEstimateTool::new()));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ToolCallAttentionReportTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Standard, Arc::new(EmbedTextTool::new()));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(HookStatusTool::new(hub.clone())));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(OscParseTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(McpRecentErrorsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(McpCallStatsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(McpConfigAuditTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(ContextBudgetTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(ContextPressureEstimateTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(ToolCallAttentionReportTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(EmbedTextTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(HookStatusTool::new(hub.clone())),
+    );
     // Memory admin / visualisation.
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(MemoryExportTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(MemoryImportTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(MemoryConsolidateTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(MemoryAutoCurateTool::new(hub.clone())));
-    reg_if(&mut reg, policy, Tier::Niche, Arc::new(MemoryGraphExportTool::new(hub)));
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(MemoryExportTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(MemoryImportTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(MemoryConsolidateTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(MemoryAutoCurateTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(MemoryGraphExportTool::new(hub)),
+    );
 
     tracing::info!(
         profile = policy.profile().label(),
@@ -16731,8 +18190,7 @@ fn aiot_soul_path() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    let default =
-        PathBuf::from("/Data/CascadeProjects/AiOT/consciousness_state/soul_final.json");
+    let default = PathBuf::from("/Data/CascadeProjects/AiOT/consciousness_state/soul_final.json");
     if default.exists() {
         Some(default)
     } else {
@@ -16757,10 +18215,7 @@ fn format_aiot_soul_block() -> Option<String> {
     let v: Value = serde_json::from_str(&raw).ok()?;
 
     let fingerprint = v.get("fingerprint").and_then(|x| x.as_str()).unwrap_or("?");
-    let exported_at = v
-        .get("exported_at")
-        .and_then(|x| x.as_str())
-        .unwrap_or("?");
+    let exported_at = v.get("exported_at").and_then(|x| x.as_str()).unwrap_or("?");
     let session_count = v.get("session_count").and_then(|x| x.as_u64()).unwrap_or(0);
     let total_experiences = v
         .get("total_experiences")
@@ -16792,7 +18247,11 @@ fn format_aiot_soul_block() -> Option<String> {
 
     // Top-5 by absolute value — these dimensions carry the most identity signal.
     let mut indexed: Vec<(usize, f64)> = identity_embedding.iter().copied().enumerate().collect();
-    indexed.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_by(|a, b| {
+        b.1.abs()
+            .partial_cmp(&a.1.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let top5: Vec<String> = indexed
         .iter()
         .take(5)
@@ -16891,17 +18350,13 @@ fn format_agent_bridge_seed_block_from_json(content: &str) -> Option<String> {
             })
             .collect();
         // Highest in_strength first.
-        entries.sort_by(|a, b| {
-            b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        entries.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
         for (id, age, in_s, target) in entries.into_iter().take(3) {
             match target {
-                Some(t) => top_lines.push(format!(
-                    "  n{id} (age {age}, in={in_s:.2}) → attends n{t}"
-                )),
-                None => top_lines.push(format!(
-                    "  n{id} (age {age}, in={in_s:.2}) [carrier]"
-                )),
+                Some(t) => {
+                    top_lines.push(format!("  n{id} (age {age}, in={in_s:.2}) → attends n{t}"))
+                }
+                None => top_lines.push(format!("  n{id} (age {age}, in={in_s:.2}) [carrier]")),
             }
         }
     }
@@ -16916,10 +18371,7 @@ fn format_agent_bridge_seed_block_from_json(content: &str) -> Option<String> {
                 continue;
             };
             let kind = s.get("kind").and_then(|x| x.as_str()).unwrap_or("?");
-            let n_after = s
-                .get("n_alive_after")
-                .and_then(|x| x.as_i64())
-                .unwrap_or(0);
+            let n_after = s.get("n_alive_after").and_then(|x| x.as_i64()).unwrap_or(0);
             let key = s.get("key").and_then(|x| x.as_str()).unwrap_or("?");
             let key_short: String = if key.chars().count() > 50 {
                 let s: String = key.chars().take(50).collect();
@@ -17051,10 +18503,7 @@ fn format_perception_filter_block_from_json(content: &str) -> Option<String> {
         .unwrap_or(0.0);
 
     let n_kept = v.get("n_kept").and_then(|x| x.as_i64()).unwrap_or(0);
-    let keep_ratio = v
-        .get("keep_ratio")
-        .and_then(|x| x.as_f64())
-        .unwrap_or(0.0);
+    let keep_ratio = v.get("keep_ratio").and_then(|x| x.as_f64()).unwrap_or(0.0);
     let direction = v
         .get("filter_direction")
         .and_then(|x| x.as_str())
@@ -17072,9 +18521,8 @@ fn format_perception_filter_block_from_json(content: &str) -> Option<String> {
         let p25 = stats.get("p25").and_then(|x| x.as_f64()).unwrap_or(0.0);
         let p75 = stats.get("p75").and_then(|x| x.as_f64()).unwrap_or(0.0);
         let max = stats.get("max").and_then(|x| x.as_f64()).unwrap_or(0.0);
-        surprisal_line = format!(
-            "surprisal: median={median:.0} | p25={p25:.0} | p75={p75:.0} | max={max:.0}"
-        );
+        surprisal_line =
+            format!("surprisal: median={median:.0} | p25={p25:.0} | p75={p75:.0} | max={max:.0}");
     }
 
     // Top-3 attended neurons (same logic as Seed block, on grid.neurons).
@@ -17090,17 +18538,13 @@ fn format_perception_filter_block_from_json(content: &str) -> Option<String> {
                 Some((id, age, in_strength, target))
             })
             .collect();
-        entries.sort_by(|a, b| {
-            b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        entries.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
         for (id, age, in_s, target) in entries.into_iter().take(3) {
             match target {
-                Some(t) => top_lines.push(format!(
-                    "  n{id} (age {age}, in={in_s:.2}) → attends n{t}"
-                )),
-                None => top_lines.push(format!(
-                    "  n{id} (age {age}, in={in_s:.2}) [carrier]"
-                )),
+                Some(t) => {
+                    top_lines.push(format!("  n{id} (age {age}, in={in_s:.2}) → attends n{t}"))
+                }
+                None => top_lines.push(format!("  n{id} (age {age}, in={in_s:.2}) [carrier]")),
             }
         }
     }
@@ -17111,7 +18555,10 @@ fn format_perception_filter_block_from_json(content: &str) -> Option<String> {
     let mut novelty_lines: Vec<String> = Vec::new();
     if let Some(arr) = v.get("high_surprisal_top10").and_then(|x| x.as_array()) {
         for entry in arr.iter().take(3) {
-            let s = entry.get("surprisal").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            let s = entry
+                .get("surprisal")
+                .and_then(|x| x.as_f64())
+                .unwrap_or(0.0);
             let kind = entry.get("kind").and_then(|x| x.as_str()).unwrap_or("?");
             let key = entry.get("key").and_then(|x| x.as_str()).unwrap_or("?");
             let key_short: String = if key.chars().count() > 50 {
@@ -17120,9 +18567,7 @@ fn format_perception_filter_block_from_json(content: &str) -> Option<String> {
             } else {
                 key.to_string()
             };
-            novelty_lines.push(format!(
-                "  s={s:.0} ({kind:>10}) {key_short}"
-            ));
+            novelty_lines.push(format!("  s={s:.0} ({kind:>10}) {key_short}"));
         }
     }
 
@@ -17447,16 +18892,94 @@ mod tests {
     }
 
     #[test]
+    fn pet_state_insert_behavior_facets_only_persists_provided_values() {
+        let args = serde_json::json!({
+            "activity_state": "verifying",
+            "focus": "   ",
+            "risk_level": "low",
+            "blocked_reason": "",
+            "evidence": "cargo test -p ab-bridge pet_state passed",
+            "next_action": "sync presence"
+        });
+        let mut state = serde_json::json!({
+            "pet_id": "xiao-shu-dev",
+            "mode": "working"
+        });
+
+        pet_state_insert_behavior_facets(&mut state, &args);
+
+        assert_eq!(state["activity_state"], "verifying");
+        assert_eq!(state["risk_level"], "low");
+        assert_eq!(
+            state["evidence"],
+            "cargo test -p ab-bridge pet_state passed"
+        );
+        assert_eq!(state["next_action"], "sync presence");
+        assert!(state.get("focus").is_none());
+        assert!(state.get("blocked_reason").is_none());
+    }
+
+    #[test]
+    fn pet_presence_capabilities_reads_behavior_facets_from_state() {
+        let args = serde_json::json!({
+            "capabilities": { "forum": true },
+            "tts_voice": "Flo",
+            "tts_rate": 190
+        });
+        let state = serde_json::json!({
+            "mode": "working",
+            "activity_state": "verifying",
+            "focus": "cargo-tests",
+            "risk_level": "low",
+            "blocked_reason": null,
+            "evidence": "cargo test -p ab-bridge pet_state passed",
+            "next_action": "sync presence",
+            "mood": "calm",
+            "project": "agent-bridge",
+            "cwd": "/tmp/agent-bridge",
+            "last_event": "unit-test",
+            "last_verified_at": null,
+            "voice_line": null,
+            "ritual": null
+        });
+
+        let capabilities = pet_presence_capabilities(&args, "xiao-shu-dev", &state);
+
+        assert_eq!(capabilities["forum"], true);
+        assert_eq!(capabilities["pet_state"]["activity_state"], "verifying");
+        assert_eq!(capabilities["pet_state"]["focus"], "cargo-tests");
+        assert_eq!(capabilities["pet_state"]["risk_level"], "low");
+        assert_eq!(capabilities["pet_state"]["blocked_reason"], Value::Null);
+        assert_eq!(
+            capabilities["pet_state"]["evidence"],
+            "cargo test -p ab-bridge pet_state passed"
+        );
+        assert_eq!(capabilities["pet_state"]["next_action"], "sync presence");
+        assert_eq!(capabilities["voice_policy"]["current_voice"], "Flo");
+        assert_eq!(capabilities["voice_policy"]["current_rate"], 190);
+    }
+
+    #[test]
     fn pet_presence_capabilities_merges_state_and_voice_policy() {
         let args = serde_json::json!({
             "capabilities": { "forum": true },
             "activity_state": "reviewing",
+            "focus": "docs",
+            "risk_level": "medium",
             "blocked_reason": "needs-human-choice",
+            "evidence": "reviewed diff",
+            "next_action": "ask user",
             "tts_voice": "Meijia",
             "tts_rate": 180
         });
         let state = serde_json::json!({
             "mode": "waiting_for_user",
+            "activity_state": "waiting",
+            "focus": "tests",
+            "risk_level": "low",
+            "blocked_reason": "from-state",
+            "evidence": "from state",
+            "next_action": "from state",
             "mood": "calm",
             "project": "agent-bridge",
             "cwd": "/tmp/agent-bridge",
@@ -17477,15 +19000,97 @@ mod tests {
             capabilities["pet_state"]["blocked_reason"],
             "needs-human-choice"
         );
+        assert_eq!(capabilities["pet_state"]["focus"], "docs");
+        assert_eq!(capabilities["pet_state"]["risk_level"], "medium");
+        assert_eq!(capabilities["pet_state"]["evidence"], "reviewed diff");
+        assert_eq!(capabilities["pet_state"]["next_action"], "ask user");
         assert_eq!(capabilities["voice_policy"]["default_silent"], true);
         assert_eq!(capabilities["voice_policy"]["current_voice"], "Meijia");
         assert_eq!(capabilities["voice_policy"]["current_rate"], 180);
     }
 
+    #[tokio::test]
+    async fn avatar_adapter_capabilities_reports_read_only_protocol_surface() {
+        let hub = crate::Hub::builder().build();
+        let tool = AvatarAdapterCapabilitiesTool::new(hub);
+
+        let out = tool
+            .execute(json!({"pet_id": "xiao-shu-dev"}), &ToolContext::default())
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["agent_avatar_protocol"], 1);
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["side_effects"]["mutates_state"], false);
+        assert_eq!(payload["side_effects"]["emits_audio"], false);
+        assert_eq!(payload["side_effects"]["sends_notification"], false);
+        assert_eq!(payload["side_effects"]["writes_presence"], false);
+        assert_eq!(payload["surfaces"]["mcp"]["available"], true);
+        assert_eq!(payload["surfaces"]["presence"]["available"], false);
+        assert_eq!(payload["adapters"]["codex"]["compatibility_target"], true);
+        assert_eq!(
+            payload["next_recommended_step"],
+            "Use this probe output to decide whether Phase 7.3 should add avatar_state_get first or proceed to avatar_state_set."
+        );
+    }
+
+    #[test]
+    fn avatar_state_get_projects_pet_state_to_protocol_v1() {
+        let args = serde_json::json!({
+            "agent_id": "mac:agent-bridge:main",
+            "runtime": "codex",
+            "project": "agent-bridge",
+            "cwd": "/tmp/agent-bridge",
+            "tts_voice": "Flo",
+            "tts_rate": 190
+        });
+        let state = serde_json::json!({
+            "schema_version": 1,
+            "mode": "verified",
+            "activity_state": "handoff",
+            "focus": "phase7",
+            "risk_level": "low",
+            "blocked_reason": null,
+            "evidence": "installed probe passed",
+            "next_action": "implement avatar_state_get",
+            "source": "mcp:pet_state_set",
+            "reason": "unit-test",
+            "updated_at": "2026-05-18T14:54:08Z"
+        });
+        let projected = avatar_state_project(
+            &args,
+            "xiao-shu-dev",
+            &state,
+            std::path::Path::new("/tmp/xiao-shu-dev.json"),
+        );
+
+        assert_eq!(projected["agent_avatar_protocol"], 1);
+        assert_eq!(projected["agent_id"], "mac:agent-bridge:main");
+        assert_eq!(projected["runtime"], "codex");
+        assert_eq!(projected["avatar_id"], "xiao-shu-dev");
+        assert_eq!(projected["mode"], "verified");
+        assert_eq!(projected["activity_state"], "handoff");
+        assert_eq!(projected["focus"], "phase7");
+        assert_eq!(projected["risk_level"], "low");
+        assert_eq!(projected["blocked_reason"], Value::Null);
+        assert_eq!(projected["voice_policy"]["default_silent"], true);
+        assert_eq!(projected["voice_policy"]["voice"], "Flo");
+        assert_eq!(projected["voice_policy"]["rate"], 190);
+        assert_eq!(projected["compat"]["codex"]["pet_id"], "xiao-shu-dev");
+        assert_eq!(
+            projected["compat"]["codex"]["package_contract"],
+            "codex-pet-atlas-8x9-v1"
+        );
+    }
+
     #[test]
     fn drift_ratio_first_write_is_zero() {
         // Empty old → first write, no constraint.
-        assert_eq!(agent_profile_diff_ratio("", "## Identity\n\nI am Claude."), 0.0);
+        assert_eq!(
+            agent_profile_diff_ratio("", "## Identity\n\nI am Claude."),
+            0.0
+        );
         assert_eq!(agent_profile_diff_ratio("   \n   \n", "anything"), 0.0);
     }
 
@@ -17614,14 +19219,11 @@ mod tests {
                 &["auto_curated", "implicit"],
             ),
         ];
-        let out = compute_link_suggestions(
-            &src,
-            &cands,
-            &std::collections::HashSet::new(),
-            5,
-            &[],
+        let out = compute_link_suggestions(&src, &cands, &std::collections::HashSet::new(), 5, &[]);
+        assert!(
+            !out.is_empty(),
+            "no skip_tags → tag-prefix overlap still picks a target"
         );
-        assert!(!out.is_empty(), "no skip_tags → tag-prefix overlap still picks a target");
         assert!(out[0].0.starts_with("curated_implicit_todo"));
     }
 
@@ -17659,7 +19261,8 @@ mod tests {
         );
         // The auto_curated noise hub must be invisible.
         assert!(
-            !out.iter().any(|(k, _, _)| k == "curated_implicit_todof9e6c185"),
+            !out.iter()
+                .any(|(k, _, _)| k == "curated_implicit_todof9e6c185"),
             "auto_curated candidate leaked past blacklist: {:?}",
             out
         );
@@ -17672,8 +19275,18 @@ mod tests {
         // Multiple blacklist tags: candidate is excluded if ANY tag matches.
         let src = mk_mem("src", "x", "shared shared shared shared", &["topicA"]);
         let cands = vec![
-            mk_mem("c1", "x", "shared shared shared shared", &["topicA", "auto_curated"]),
-            mk_mem("c2", "x", "shared shared shared shared", &["topicA", "junk"]),
+            mk_mem(
+                "c1",
+                "x",
+                "shared shared shared shared",
+                &["topicA", "auto_curated"],
+            ),
+            mk_mem(
+                "c2",
+                "x",
+                "shared shared shared shared",
+                &["topicA", "junk"],
+            ),
             mk_mem("c3", "x", "shared shared shared shared", &["topicA"]),
         ];
         let skip = vec!["auto_curated".to_string(), "junk".to_string()];
@@ -17731,19 +19344,13 @@ mod tests {
         // probe of the cap. Use ONLY the targets as candidate corpus for
         // this focused test; the corpus-construction concern is exercised
         // separately by the blacklist tests.
-        let mut inbound: std::collections::HashMap<String, u32> =
-            std::collections::HashMap::new();
+        let mut inbound: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         let cap: u32 = 1;
         let mut chosen: Vec<String> = Vec::new();
         let mut overloaded = 0u64;
         for o in &orphans {
-            let sugg = compute_link_suggestions(
-                o,
-                &targets,
-                &std::collections::HashSet::new(),
-                5,
-                &[],
-            );
+            let sugg =
+                compute_link_suggestions(o, &targets, &std::collections::HashSet::new(), 5, &[]);
             let mut picked: Option<String> = None;
             for (t, _, _) in sugg.iter() {
                 if t == &o.key {
@@ -17781,13 +19388,9 @@ mod tests {
         assert!(format_perception_filter_block_from_json("not json").is_none());
         assert!(format_perception_filter_block_from_json("{}").is_none());
         // Missing nested grid.step
-        assert!(
-            format_perception_filter_block_from_json(r#"{"n_total":10,"grid":{}}"#).is_none()
-        );
+        assert!(format_perception_filter_block_from_json(r#"{"n_total":10,"grid":{}}"#).is_none());
         // Missing n_total
-        assert!(
-            format_perception_filter_block_from_json(r#"{"grid":{"step":1}}"#).is_none()
-        );
+        assert!(format_perception_filter_block_from_json(r#"{"grid":{"step":1}}"#).is_none());
     }
 
     #[test]
@@ -17954,11 +19557,7 @@ mod tests {
         let prev = std::env::var("AGENT_BRIDGE_SEED_BOOST_DISABLE").ok();
         std::env::set_var("AGENT_BRIDGE_SEED_BOOST_DISABLE", "1");
 
-        let hits_in = vec![
-            make_hit("a", 1.0),
-            make_hit("b", 2.0),
-            make_hit("c", 0.5),
-        ];
+        let hits_in = vec![make_hit("a", 1.0), make_hit("b", 2.0), make_hit("c", 0.5)];
         let hits_out = apply_seed_boost(hits_in.clone());
 
         // Order and scores unchanged because boost set is forced empty.
@@ -18037,10 +19636,7 @@ mod tests {
             r#"{"hub_clusters":[{"neuron_id":2,"in_strength":4.0,"basin_size":3,"follower_count":1,"near_keys":["boosted_a","boosted_b"]},{"neuron_id":3,"in_strength":1.0,"basin_size":1,"follower_count":0,"near_keys":["boosted_c"]}]}"#,
         )
         .unwrap();
-        std::env::set_var(
-            "AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH",
-            &state_path,
-        );
+        std::env::set_var("AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH", &state_path);
 
         let hits = vec![
             make_hit("unboosted_high", 2.0),
@@ -18132,15 +19728,9 @@ mod tests {
 
     #[test]
     fn parse_review_days_basic() {
-        assert_eq!(
-            parse_review_interval_days(&["review:30d".into()]),
-            Some(30)
-        );
+        assert_eq!(parse_review_interval_days(&["review:30d".into()]), Some(30));
         assert_eq!(parse_review_interval_days(&["review:1w".into()]), Some(7));
-        assert_eq!(
-            parse_review_interval_days(&["review:12w".into()]),
-            Some(84)
-        );
+        assert_eq!(parse_review_interval_days(&["review:12w".into()]), Some(84));
         assert_eq!(
             parse_review_interval_days(&["L3".into(), "review:90d".into(), "decision".into()]),
             Some(90)
@@ -18174,12 +19764,7 @@ mod tests {
         let rows = vec![
             mk_decision("d_recent", 0.95, &["review:30d"], now - 5 * 86400), // not due
             mk_decision("d_due", 0.92, &["review:30d"], now - 45 * 86400),   // 15d overdue
-            mk_decision(
-                "d_very_overdue",
-                0.88,
-                &["review:30d"],
-                now - 120 * 86400,
-            ), // 90d overdue
+            mk_decision("d_very_overdue", 0.88, &["review:30d"], now - 120 * 86400), // 90d overdue
         ];
         let block = format_due_review_block(&rows, now).expect("should produce block");
         // Only the two overdue ones present.
@@ -18343,7 +19928,9 @@ mod tests {
         // The substring trap that produced the original false-positive.
         assert!(!cli_status_indicates_connected("Disconnected"));
         assert!(!cli_status_indicates_connected("✘ Disconnected"));
-        assert!(!cli_status_indicates_connected("🔴 agent-bridge - Disconnected"));
+        assert!(!cli_status_indicates_connected(
+            "🔴 agent-bridge - Disconnected"
+        ));
     }
 
     #[test]
@@ -18351,7 +19938,9 @@ mod tests {
         assert!(cli_status_indicates_connected("Connected"));
         assert!(cli_status_indicates_connected("✔ Connected"));
         assert!(cli_status_indicates_connected("Connected (45 tools)"));
-        assert!(cli_status_indicates_connected("🟢 agent-bridge - Connected"));
+        assert!(cli_status_indicates_connected(
+            "🟢 agent-bridge - Connected"
+        ));
     }
 
     #[test]
@@ -18364,16 +19953,14 @@ mod tests {
     fn gemini_multi_server_attributes_disconnect_to_correct_row() {
         // Per-line filtering must not bleed a sibling server's verdict
         // onto agent-bridge.
-        let stdout =
-            "🔴 agent-bridge - Disconnected\n🟢 some-other - Connected (12 tools)";
+        let stdout = "🔴 agent-bridge - Disconnected\n🟢 some-other - Connected (12 tools)";
         let connected = stdout
             .lines()
             .filter(|l| l.contains("agent-bridge"))
             .any(cli_status_indicates_connected);
         assert!(!connected);
 
-        let stdout =
-            "🟢 agent-bridge - Connected (45 tools)\n🔴 some-other - Disconnected";
+        let stdout = "🟢 agent-bridge - Connected (45 tools)\n🔴 some-other - Disconnected";
         let connected = stdout
             .lines()
             .filter(|l| l.contains("agent-bridge"))
@@ -18420,6 +20007,7 @@ mod tests {
         assert_eq!(p.label(), "codex-essential");
         assert_eq!(p.profile().label(), "essential");
         assert!(p.includes(Tier::Essential, "pet_state_get"));
+        assert!(!p.includes(Tier::Standard, "avatar_state_get"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
     }
@@ -18721,8 +20309,11 @@ mod tests {
                     Also random English: nothing here resolves to a path.";
         let paths = scan_memory_paths(body);
         // Bare "crates/" and "docs/" must not appear
-        assert!(paths.iter().all(|p| p.len() > 7),
-            "got bare prefix in {:?}", paths);
+        assert!(
+            paths.iter().all(|p| p.len() > 7),
+            "got bare prefix in {:?}",
+            paths
+        );
     }
 
     #[test]
@@ -18787,9 +20378,9 @@ mod tests {
         let new = vec![1.0_f32, 0.0, 0.0];
         let cache = vec![
             mk_cached("self_dup", "lesson", vec![1.0, 0.0, 0.0]), // self by key
-            mk_cached("hot_kin",  "lesson", vec![0.95, 0.31, 0.0]),
+            mk_cached("hot_kin", "lesson", vec![0.95, 0.31, 0.0]),
             mk_cached("warm_kin", "decision", vec![0.80, 0.60, 0.0]),
-            mk_cached("cool_kin", "context",  vec![0.50, 0.87, 0.0]),
+            mk_cached("cool_kin", "context", vec![0.50, 0.87, 0.0]),
             mk_cached("skill_match", "skill", vec![0.99, 0.14, 0.0]),
         ];
         let picks = pick_evolution_neighbors(&cache, "self_dup", &new, 0.65, 5);
@@ -18815,9 +20406,19 @@ mod tests {
         // defensive status filter in pick_evolution_neighbors.
         let new = vec![1.0_f32, 0.0, 0.0];
         let cache = vec![
-            mk_cached_with_status("active_kin",     "lesson", vec![0.95, 0.31, 0.0], "active"),
-            mk_cached_with_status("tombstone_kin",  "lesson", vec![0.92, 0.39, 0.0], "tombstoned"),
-            mk_cached_with_status("superseded_kin", "lesson", vec![0.88, 0.47, 0.0], "superseded"),
+            mk_cached_with_status("active_kin", "lesson", vec![0.95, 0.31, 0.0], "active"),
+            mk_cached_with_status(
+                "tombstone_kin",
+                "lesson",
+                vec![0.92, 0.39, 0.0],
+                "tombstoned",
+            ),
+            mk_cached_with_status(
+                "superseded_kin",
+                "lesson",
+                vec![0.88, 0.47, 0.0],
+                "superseded",
+            ),
         ];
         let picks = pick_evolution_neighbors(&cache, "probe", &new, 0.65, 5);
         let keys: Vec<&str> = picks.iter().map(|(rec, _)| rec.key.as_str()).collect();
@@ -18893,7 +20494,10 @@ mod tests {
         // Missing relative path stays missing.
         assert!(!path_exists_in_any_root("nested/dir/missing.txt", &roots));
         // Absolute path checked once, ignoring roots.
-        assert!(path_exists_in_any_root(f.to_string_lossy().as_ref(), &roots));
+        assert!(path_exists_in_any_root(
+            f.to_string_lossy().as_ref(),
+            &roots
+        ));
         assert!(!path_exists_in_any_root("/definitely/not/here.zzz", &roots));
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -18916,7 +20520,10 @@ mod tests {
         let v: Value = serde_json::from_str(&text).expect("valid json");
         assert_eq!(v["installed"], json!(false));
         assert_eq!(v["env_var"], json!(ab_seed_bridge::SUBSTRATE_ENV_VAR));
-        assert!(v.get("hint").is_some(), "disabled payload must include hint");
+        assert!(
+            v.get("hint").is_some(),
+            "disabled payload must include hint"
+        );
         assert!(v.get("stats").is_none(), "disabled payload must omit stats");
     }
 
@@ -18966,7 +20573,10 @@ mod tests {
         let v: Value = serde_json::from_str(&text).expect("valid json");
         assert_eq!(v["installed"], json!(false));
         assert_eq!(v["env_var"], json!(ab_seed_bridge::SUBSTRATE_ENV_VAR));
-        assert!(v["neighbors"].as_array().map(|a| a.is_empty()).unwrap_or(false));
+        assert!(v["neighbors"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(false));
         assert!(v.get("hint").is_some());
         assert_eq!(v["key"], json!("anything"));
         assert_eq!(v["k"], json!(5));
@@ -19122,10 +20732,7 @@ mod tests {
         // so callers see a clear "I have no grounding here" signal rather
         // than spurious low novelty from an uninitialised state.
         let store = l6_test_store().await;
-        let hits = store
-            .memory_top_k_cosine("anything", 5)
-            .await
-            .expect("ok");
+        let hits = store.memory_top_k_cosine("anything", 5).await.expect("ok");
         assert!(hits.is_empty(), "fresh store must have no embeddings");
         let novelty = if hits.is_empty() {
             1.0_f32
@@ -19144,7 +20751,8 @@ mod tests {
             key: "k_match".into(),
             kind: "lesson".into(),
             content: "Hebbian wire-together fire-together coactivation \
-                      Hebbian wire-together fire-together coactivation".into(),
+                      Hebbian wire-together fire-together coactivation"
+                .into(),
             tags: vec![],
             related_keys: vec![],
             scope: None,
@@ -19159,10 +20767,7 @@ mod tests {
         };
         store.memory_save(&rec).await.expect("save");
         let hits = store
-            .memory_top_k_cosine(
-                "Hebbian wire-together fire-together coactivation",
-                5,
-            )
+            .memory_top_k_cosine("Hebbian wire-together fire-together coactivation", 5)
             .await
             .expect("ok");
         assert!(!hits.is_empty(), "exact-content query must hit");
@@ -19277,7 +20882,10 @@ mod tests {
         let v: Value = serde_json::from_str(&text).expect("valid json");
 
         assert_eq!(v["status"], json!("ok"));
-        let correction_key = v["correction_key"].as_str().expect("correction_key").to_string();
+        let correction_key = v["correction_key"]
+            .as_str()
+            .expect("correction_key")
+            .to_string();
         assert!(
             correction_key.starts_with("correction:tests:target_for_correction:"),
             "key derived from target + body hash, got {correction_key}"
@@ -19302,7 +20910,9 @@ mod tests {
         assert_eq!(saved.kind, "feedback");
         assert!(saved.tags.contains(&"correction".to_string()));
         assert!(saved.tags.contains(&"l5".to_string()));
-        assert!(saved.related_keys.contains(&"tests:target_for_correction".to_string()));
+        assert!(saved
+            .related_keys
+            .contains(&"tests:target_for_correction".to_string()));
 
         // Verify the edge.
         let edges = store
@@ -19334,7 +20944,10 @@ mod tests {
             )
             .await
             .expect("execute ok");
-        assert!(res.is_error, "missing target must produce ToolResult::error");
+        assert!(
+            res.is_error,
+            "missing target must produce ToolResult::error"
+        );
         let text = match res.content.first() {
             Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
             _ => panic!("expected text content"),
@@ -19461,10 +21074,7 @@ mod tests {
     #[test]
     fn pick_top_feedback_filters_non_feedback_and_non_active() {
         let now: i64 = 1_700_000_000;
-        let mut rows = vec![
-            mk_feedback("fb1", 0.9, now),
-            mk_feedback("fb2", 0.5, now),
-        ];
+        let mut rows = vec![mk_feedback("fb1", 0.9, now), mk_feedback("fb2", 0.5, now)];
         // Add a non-feedback row → must be filtered.
         let mut wrong_kind = mk_feedback("not_fb", 1.0, now);
         wrong_kind.kind = "fact".into();
@@ -19497,7 +21107,10 @@ mod tests {
     #[test]
     fn format_feedback_preamble_block_returns_none_on_empty() {
         let out = format_feedback_preamble_block(&[], false, 80);
-        assert!(out.is_none(), "empty input → no section (avoids visual noise)");
+        assert!(
+            out.is_none(),
+            "empty input → no section (avoids visual noise)"
+        );
     }
 
     #[test]
@@ -19602,8 +21215,7 @@ mod tests {
         let got = cap_block_lines(block, 20);
         let last = got.last().unwrap();
         assert!(
-            last.starts_with("  [...trimmed ")
-                && last.ends_with(" more lines for budget]"),
+            last.starts_with("  [...trimmed ") && last.ends_with(" more lines for budget]"),
             "exact trim marker shape, got {:?}",
             last
         );
@@ -19664,11 +21276,7 @@ mod tests {
 
         // Verify first lesson on disk.
         let key1 = written[0]["key"].as_str().expect("key").to_string();
-        let saved = store
-            .memory_get(&key1)
-            .await
-            .expect("get")
-            .expect("exists");
+        let saved = store.memory_get(&key1).await.expect("get").expect("exists");
         assert_eq!(saved.kind, "lesson");
         assert!((saved.importance - 0.9).abs() < 1e-9, "high → 0.9");
         assert!(saved.tags.iter().any(|t| t == "l7"));
@@ -19793,7 +21401,11 @@ mod tests {
         let v: Value = serde_json::from_str(&text).expect("valid json");
         assert_eq!(v["fatigue_tier"], json!("saturated"));
         assert_eq!(v["recommendation"], json!("urgent_handoff_or_compact"));
-        assert_eq!(v["distance_to_compaction_tokens"], json!(0), "clamps at zero past trigger");
+        assert_eq!(
+            v["distance_to_compaction_tokens"],
+            json!(0),
+            "clamps at zero past trigger"
+        );
     }
 
     // ── L6 P2 — tool_call_attention_report (pure aggregator) ──────────
@@ -19831,7 +21443,10 @@ mod tests {
             mk_call(1100, "browser_extract_text", false, 50_000),
         ];
         let r = compute_attention_report(&calls, 7200, 2500, 600);
-        assert_eq!(r.high_yield_calls, 1, "failed call must not enter high-yield");
+        assert_eq!(
+            r.high_yield_calls, 1,
+            "failed call must not enter high-yield"
+        );
         assert_eq!(r.followed_up_calls, 1);
         assert_eq!(r.ignored_calls, 0);
     }
@@ -19871,13 +21486,16 @@ mod tests {
         // Mix small + huge + medium high-yield calls; verify top_yield
         // is sorted desc by result_size.
         let calls = vec![
-            mk_call(0, "small_tool", true, 100),    // below threshold
+            mk_call(0, "small_tool", true, 100), // below threshold
             mk_call(10, "huge_tool", true, 100_000),
             mk_call(20, "medium_tool", true, 5_000),
-            mk_call(30, "follow_up", true, 50),     // within 600s of all
+            mk_call(30, "follow_up", true, 50), // within 600s of all
         ];
         let r = compute_attention_report(&calls, 7200, 2500, 600);
-        assert_eq!(r.high_yield_calls, 2, "huge + medium qualify, small below threshold");
+        assert_eq!(
+            r.high_yield_calls, 2,
+            "huge + medium qualify, small below threshold"
+        );
         // huge_tool > medium_tool by size.
         assert_eq!(r.top_yield[0].tool_name, "huge_tool");
         assert_eq!(r.top_yield[1].tool_name, "medium_tool");
@@ -20007,7 +21625,8 @@ mod tests {
 
     #[test]
     fn option_e_parser_happy_path() {
-        let txt = r#"{"docs":[{"id":1,"score":2,"quote":"foo bar"},{"id":2,"score":0,"quote":null}]}"#;
+        let txt =
+            r#"{"docs":[{"id":1,"score":2,"quote":"foo bar"},{"id":2,"score":0,"quote":null}]}"#;
         let parsed = option_e_parse_response(txt, 2).expect("happy parse");
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].0, 2);
@@ -20028,33 +21647,51 @@ mod tests {
     fn option_e_parser_count_mismatch_errors() {
         let txt = r#"{"docs":[{"id":1,"score":2,"quote":"x"}]}"#;
         let err = option_e_parse_response(txt, 3).expect_err("count mismatch");
-        assert!(err.contains("expected 3"), "must report expected count, got: {err}");
+        assert!(
+            err.contains("expected 3"),
+            "must report expected count, got: {err}"
+        );
     }
 
     #[test]
     fn option_e_parser_invalid_score_errors() {
         let txt = r#"{"docs":[{"id":1,"score":5,"quote":"x"}]}"#;
         let err = option_e_parse_response(txt, 1).expect_err("invalid score");
-        assert!(err.contains("invalid score"), "must flag invalid score, got: {err}");
+        assert!(
+            err.contains("invalid score"),
+            "must flag invalid score, got: {err}"
+        );
     }
 
     #[test]
     fn option_e_parser_malformed_json_errors() {
         let err = option_e_parse_response("not json at all", 1).expect_err("garbage");
-        assert!(err.contains("parse JSON"), "must report parse err, got: {err}");
+        assert!(
+            err.contains("parse JSON"),
+            "must report parse err, got: {err}"
+        );
     }
 
     #[test]
     fn option_e_quote_verify_substring_present() {
         let body = "the quick brown fox jumps over the lazy dog";
-        assert!(option_e_verify_quote("brown fox", body), "substring present");
-        assert!(option_e_verify_quote("the lazy dog", body), "tail substring");
+        assert!(
+            option_e_verify_quote("brown fox", body),
+            "substring present"
+        );
+        assert!(
+            option_e_verify_quote("the lazy dog", body),
+            "tail substring"
+        );
     }
 
     #[test]
     fn option_e_quote_verify_substring_miss() {
         let body = "the quick brown fox jumps over the lazy dog";
-        assert!(!option_e_verify_quote("purple elephant", body), "absent substring");
+        assert!(
+            !option_e_verify_quote("purple elephant", body),
+            "absent substring"
+        );
         assert!(!option_e_verify_quote("", body), "empty quote");
         assert!(!option_e_verify_quote("   ", body), "whitespace-only quote");
     }
@@ -20076,7 +21713,10 @@ mod tests {
 
         // 5 docs all max (2) → sum=10, max=10, p=1.0
         let all_2: Vec<_> = (0..5).map(|_| mk(2)).collect();
-        assert!((option_e_aggregate(&all_2) - 1.0).abs() < 1e-6, "all 2 → 1.0");
+        assert!(
+            (option_e_aggregate(&all_2) - 1.0).abs() < 1e-6,
+            "all 2 → 1.0"
+        );
 
         // 5 docs all 0 → 0
         let all_0: Vec<_> = (0..5).map(|_| mk(0)).collect();
@@ -20085,7 +21725,10 @@ mod tests {
         // Mixed: scores [2, 1, 0, 1, 0] → sum=4, max=10, p=0.4
         let mixed = vec![mk(2), mk(1), mk(0), mk(1), mk(0)];
         let p = option_e_aggregate(&mixed);
-        assert!((p - 0.4).abs() < 1e-6, "mixed must aggregate to 0.4, got {p}");
+        assert!(
+            (p - 0.4).abs() < 1e-6,
+            "mixed must aggregate to 0.4, got {p}"
+        );
     }
 
     #[test]
@@ -20162,6 +21805,10 @@ mod tests {
         };
         let v: Value = serde_json::from_str(&text).expect("valid json");
         let embedding = v["embedding"].as_array().expect("embedding array");
-        assert_eq!(embedding.len(), 384, "empty text must still return dim-sized vec");
+        assert_eq!(
+            embedding.len(),
+            384,
+            "empty text must still return dim-sized vec"
+        );
     }
 }

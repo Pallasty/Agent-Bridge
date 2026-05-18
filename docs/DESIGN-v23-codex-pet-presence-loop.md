@@ -1,11 +1,13 @@
 # DESIGN — v23: Codex Pet Presence Loop
 
-Status: design draft, 2026-05-17.
+Status: design draft, 2026-05-18.
 Companion artifact: `/Users/pallasting/Projects/pets/xiao-shu`.
 Predecessors:
 - `DESIGN-v19-presence-identity.md` — presence registry and active-agent semantics.
 - `DESIGN-v22-agent-bridge-memory-substrate.md` — memory substrate as stateful recall layer.
 - Codex hook notes in memory: `UserPromptSubmit`, `PreCompact`, `Stop`, `SessionEnd`, and `sessionEndCurate`.
+Successor:
+- `RFC-v24-agent-avatar-protocol.md` — runtime-neutral Agent Avatar Protocol extracted from Phase 7.
 
 ---
 
@@ -440,6 +442,203 @@ Phase 5.1 helper:
 
 ---
 
+### Phase 6 — Behavior Facets As Product Layer
+
+Goal: make Xiao Shu feel more context-aware without expanding or breaking the official Codex pet package.
+
+Feasibility probe on 2026-05-18:
+
+- The official pet renderer only needs the static pet package. The sidecar JSON can grow optional fields without touching the spritesheet or manifest contract.
+- The current `mode` enum is intentionally coarse: `idle`, `orienting`, `working`, `reviewing`, `waiting_for_user`, `failed`, `verified`, and `handoff`.
+- `pet_state_ritual` only emits for sparse gate modes: `verified`, `failed`, `waiting_for_user`, and `handoff`.
+- Hooks currently write only `orienting` and `handoff`, which is the right safety baseline.
+- `pet_presence_sync` already has an extension point: `activity_state`, `blocked_reason`, `capabilities.pet_state`, and `voice_policy`.
+
+Conclusion: Phase 6 should not add many new top-level `mode` values. Keep `mode` as the stable lifecycle gate, then add optional behavior facets that richer UI, voice, and presence surfaces can consume.
+
+Proposed sidecar shape:
+
+```json
+{
+  "mode": "working",
+  "activity_state": "verifying",
+  "focus": "cargo-tests",
+  "risk_level": "low",
+  "blocked_reason": null,
+  "evidence": "cargo test -p ab-bridge pet_state passed",
+  "next_action": "sync presence"
+}
+```
+
+Field policy:
+
+- `mode`: stable lifecycle gate; keep the enum small.
+- `activity_state`: fine-grained work posture such as `planning`, `reading_diff`, `implementing`, `verifying`, `syncing_presence`, or `documenting`.
+- `focus`: compact domain label such as `mcp`, `hooks`, `voice`, `presence`, `docs`, `tests`, or project-specific labels.
+- `risk_level`: `low`, `medium`, or `high`; used for UI emphasis, not automatic alarm.
+- `blocked_reason`: short human-actionable reason only when the user or another agent is actually needed.
+- `evidence`: one compact proof string, not a transcript.
+- `next_action`: the next local step, used by presence and future panels.
+
+Voice policy:
+
+- Behavior facets must be silent by default.
+- `auto_ritual=true` remains meaningful only at sparse gates.
+- Fine-grained states may change presence/UI, but must not create a voice flood.
+
+Presence policy:
+
+- Reuse `capabilities.pet_state` first.
+- Add `capabilities.pet_behavior` only if the compact state grows too noisy.
+- Keep `pet_presence_sync` in Standard until live telemetry or UI usage proves Essential needs it.
+
+Phase 6 tasks:
+
+1. **Phase 6.1 — Sidecar Optional Facets**
+   - Extend `pet_state_set` schema with optional `activity_state`, `focus`, `risk_level`, `blocked_reason`, `evidence`, and `next_action`.
+   - Persist those fields only when provided.
+   - Keep old state files valid when fields are absent.
+   - Add unit coverage for optional-field write/read.
+
+2. **Phase 6.2 — Presence Projection**
+   - Copy optional behavior facets into `pet_presence_sync`.
+   - Prefer compact `capabilities.pet_state` first.
+   - Add a unit test proving voice policy and behavior facets merge together.
+
+3. **Phase 6.3 — Dogfood Policy**
+   - During real Codex work, use `mode=reviewing` with `activity_state=reading_diff` during diff review.
+   - Use `mode=working` with `activity_state=verifying` during test/build/install work.
+   - Use `mode=verified` only after concrete evidence exists.
+   - Keep `auto_ritual=false` except for explicit gate checks.
+
+4. **Phase 6.4 — Product Surface Later**
+   - After the state contract is stable, build a small read-only panel or presence view that renders the behavior facets.
+   - Do not add new UI before sidecar and presence semantics are verified.
+
+Acceptance:
+
+- No change to official pet package format.
+- Essential tool count does not increase.
+- Existing `pet_state_get`, `pet_state_set`, and `pet_state_ritual` behavior stays backward compatible.
+- `pet_presence_sync` can show `mode`, `activity_state`, `focus`, `risk_level`, `blocked_reason`, and `next_action`.
+- Voice remains sparse and gated.
+- `cargo test -p ab-bridge pet_state -- --nocapture`, `cargo test -p ab-bridge pet_presence -- --nocapture`, and `cargo check -p ab-bridge` pass.
+
+---
+
+### Phase 7 — Cross-Agent Pet Presence Protocol
+
+Goal: make the pet layer Codex-compatible without making it Codex-bound.
+
+Feasibility probe on 2026-05-18:
+
+- The Codex-specific hard dependency is the renderer package contract: `pet.json`, the fixed `1536x1872` atlas, row semantics, and Codex's own avatar selection UI.
+- Codex hooks are an input adapter, not the core protocol. They can update sidecar state, but they must remain JSON-contract safe.
+- Agent-Bridge already supports multiple frontend setup profiles: Codex, Claude Code, Warp, Auggie, Gemini CLI, and local CLI. Only some frontends expose lifecycle hooks.
+- Agent-Bridge already has runtime-neutral primitives: `pet_state` sidecar files, `session_identity`, `agent_presence_announce`, `agent_presence_list`, `pet_presence_sync`, MCP telemetry, and daemon/peer design.
+- The current state path resolver already works outside Codex-specific directories by using the Agent-Bridge state dir.
+
+Conclusion: the product should be a small cross-agent avatar protocol with Codex as one renderer/adapter. The core state should not know how Codex renders a spritesheet; the Codex adapter should translate core state into Codex-compatible assets, hooks, and sidecar writes.
+
+Layer model:
+
+| Layer | Responsibility | Codex dependency |
+|---|---|---|
+| Core protocol | agent/avatar identity, lifecycle mode, behavior facets, voice policy, evidence, next action | none |
+| Input adapters | translate frontend events into protocol updates | per frontend |
+| Output adapters | render/surface state through Codex pet, presence, TTS, notification, panel, or terminal | per surface |
+| Compatibility targets | keep each frontend's native contract valid | yes, but isolated |
+
+Core protocol sketch:
+
+```json
+{
+  "schema_version": 1,
+  "agent_id": "maxiaodeMac-Pro.local:agent-bridge:main",
+  "runtime": "codex",
+  "avatar_id": "xiao-shu-dev",
+  "project": "agent-bridge",
+  "cwd": "/Users/pallasting/Projects/agent-bridge",
+  "mode": "working",
+  "activity_state": "verifying",
+  "focus": "tests",
+  "risk_level": "low",
+  "blocked_reason": null,
+  "evidence": "cargo test -p ab-bridge pet_state passed",
+  "next_action": "sync presence",
+  "voice_policy": {
+    "default_silent": true,
+    "voice": "Flo (中文（中国大陆）)",
+    "rate": 190,
+    "allowed_modes": ["verified", "failed", "waiting_for_user", "handoff"]
+  },
+  "compat": {
+    "codex": {
+      "pet_id": "xiao-shu-dev",
+      "package_contract": "8x9-atlas-v1"
+    }
+  }
+}
+```
+
+Adapter matrix:
+
+| Adapter | Input path | Output path | Product stance |
+|---|---|---|---|
+| Codex | `hooks.json` plus MCP calls | official pet package, sidecar state, TTS/notification | first-class compatibility target |
+| Claude Code | settings hooks plus MCP calls | sidecar state, TTS/notification, presence | no Codex renderer assumption |
+| Warp | terminal/OSC/wrapper events plus MCP | presence, terminal status, optional panel | no lifecycle-hook dependency |
+| Gemini CLI | MCP/config-driven events | sidecar state and presence | adapter is thinner until hooks exist |
+| Auggie/local CLI | MCP or wrapper events | presence and sidecar state | no hook assumption |
+| Daemon/HTTP peer | HTTP/MCP event ingestion | cross-machine presence and panel | future surface, protocol-first |
+
+Compatibility rules:
+
+- Codex compatibility remains a leaf adapter. Never require other agents to implement Codex pet package geometry.
+- Core protocol fields must be optional-forward-compatible: unknown fields are ignored, not rejected.
+- `mode` remains the stable lifecycle gate; richer details live in behavior facets.
+- Input adapters may be lossy. If a frontend cannot provide hooks, it may still update state from explicit MCP calls or session wrapper events.
+- Output adapters must be safe by default: no voice unless sparse gates allow it.
+- Presence is the shared product surface. The official Codex pet is a local visual surface.
+
+Phase 7 tasks:
+
+1. **Phase 7.1 — Protocol RFC**
+   - Extract the core state schema from v23 into a small protocol section or new RFC.
+   - Define required vs optional fields and compatibility semantics.
+   - Define a version marker such as `agent_avatar_protocol=1`.
+   - Status: drafted as `docs/RFC-v24-agent-avatar-protocol.md` on 2026-05-18.
+
+2. **Phase 7.2 — Adapter Capability Probe**
+   - Add a read-only diagnostic that reports which adapter surfaces are available: hooks, MCP, presence, TTS, notification, terminal, HTTP daemon.
+   - Keep it diagnostic-only before adding any mutating behavior.
+   - Status: implemented as Standard-profile `avatar_adapter_capabilities` on 2026-05-18; release and installed-binary stdio probes passed; post-restart Codex audit confirms the default Codex-facing profile remains `essential`, so the new Standard tool does not expand the default tool surface.
+
+3. **Phase 7.3 — Runtime-Neutral State Tools**
+   - Start with read-only `avatar_state_get`, projecting current Codex-shaped `pet_state` into RFC-v24 protocol v1.
+   - Factor the current Codex-shaped `pet_state_set` semantics into a runtime-neutral `avatar_state_set` or keep the old name as a compatibility alias.
+   - `pet_state_set` remains stable for Codex and existing callers.
+   - Status: `avatar_state_get` implemented as a Standard-profile read-only projection on 2026-05-18; debug and installed-binary stdio probes passed; mutating `avatar_state_set` not started.
+
+4. **Phase 7.4 — Cross-Agent Presence Projection**
+   - Project the core protocol into `agent_presence_announce` capabilities consistently across Codex, Claude Code, Warp, Gemini, Auggie, and local CLI.
+   - Use `session_identity` as the canonical agent id when a frontend does not provide one.
+
+5. **Phase 7.5 — Read-Only Multi-Agent Surface**
+   - Build or prototype a read-only view that shows multiple agents with avatar id, mode, activity state, risk, block reason, and next action.
+   - Do not ship auto-control from this panel until the state protocol has survived dogfood.
+
+Acceptance:
+
+- Codex still loads the same official-compatible pet package.
+- Existing Codex MCP tools remain backward compatible.
+- Non-Codex adapters can write/read core avatar state without a Codex package.
+- Presence rows can carry the same avatar protocol across at least two runtime labels.
+- Essential Codex tool exposure does not grow without telemetry.
+- Voice remains sparse and adapter-independent.
+
+---
+
 ## 7 · Safety And Product Boundaries
 
 - Do not make hooks noisy or fragile; hook JSON correctness has priority.
@@ -453,11 +652,13 @@ Phase 5.1 helper:
 
 ## 8 · Near-Term Next Task
 
-Phase 4 is now dogfoodable. Move in this order:
+Phase 6.1 and Phase 6.2 are now live-verified in the current Codex/MCP path.
+Move in this order:
 
-1. Use Phase 4.3 policy during real Codex work for at least one session: silent `working/reviewing`, sparse voice only on `verified/failed/waiting_for_user`.
-2. Keep Codex MCP profile at Essential and continue watching `mcp_dispatch_audit` before exposing Standard presence tools.
-3. Extend the Phase 5 presence convention only if the live multi-agent UI needs it: first reuse `capabilities.pet_state`, then consider a dedicated `pet_presence_announce` helper.
-4. Return to Phase 3 skin switching after the presence loop is stable; do not auto-switch official Codex avatars until app reload behavior is proven.
+1. Review whether `pet_presence_sync` should project `capabilities.avatar_state` in addition to `capabilities.pet_state`.
+2. Verify the combined presence projection against at least one Standard probe.
+3. Keep mutating `avatar_state_set` behind the RFC boundary until adapter availability is proven in at least one non-Codex runtime.
+4. Dogfood Phase 6.3 during real Codex work.
+5. Return to Phase 3 skin switching after the behavior and presence loop is stable; do not auto-switch official Codex avatars until app reload behavior is proven.
 
 This preserves the user's preferred pattern: prove the live mechanism first, then expand capability.
