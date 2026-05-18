@@ -242,7 +242,12 @@ PY
 DB="${AGENT_BRIDGE_DB:-$_AB_STATE_DIR/state.db}"
 COUNT_BEFORE=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo 0)
 
-timeout 25 "$AB" mcp < "$MCP_IN" > "$MCP_OUT" 2>/dev/null
+env \
+    AGENT_BRIDGE_CLIENT=hook \
+    AGENT_BRIDGE_MCP_SOURCE=hook \
+    AGENT_BRIDGE_TOOLSET=hook-lifecycle \
+    AGENT_BRIDGE_TOOL_PROFILE=standard \
+    timeout 25 "$AB" mcp < "$MCP_IN" > "$MCP_OUT" 2>/dev/null
 
 COUNT_AFTER=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo 0)
 SAVED=$(( COUNT_AFTER - COUNT_BEFORE ))

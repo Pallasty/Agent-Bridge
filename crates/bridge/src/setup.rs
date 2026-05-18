@@ -922,7 +922,7 @@ fn script_name_for_event(event: &str) -> &'static str {
 mod tests {
     use super::{
         ensure_toml_bool, merge_codex_config, merge_codex_hooks, merge_gemini_settings,
-        replace_toml_table,
+        replace_toml_table, HOOK_PRECOMPACT, HOOK_SESSION_END,
     };
     use std::fs;
 
@@ -1063,6 +1063,17 @@ enabled = true
         assert!(raw.contains("\"SessionEnd\""));
 
         fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn hook_mcp_children_use_lifecycle_toolset() {
+        assert!(HOOK_PRECOMPACT.contains("AGENT_BRIDGE_TOOLSET=hook-lifecycle"));
+        assert!(HOOK_PRECOMPACT.contains("AGENT_BRIDGE_CLIENT=hook"));
+        assert!(HOOK_PRECOMPACT.contains("AGENT_BRIDGE_MCP_SOURCE=hook"));
+        assert!(HOOK_SESSION_END.contains("AGENT_BRIDGE_TOOLSET=hook-lifecycle"));
+        assert!(HOOK_SESSION_END.contains("AGENT_BRIDGE_CLIENT=hook"));
+        assert!(HOOK_SESSION_END.contains("AGENT_BRIDGE_MCP_SOURCE=hook"));
+        assert!(!HOOK_SESSION_END.contains("AGENT_BRIDGE_TOOL_PROFILE=all"));
     }
 
     #[test]

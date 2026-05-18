@@ -101,7 +101,12 @@ _ab_pet_auto_tts_emit() {
     esac
 
     (
-        AGENT_BRIDGE_TOOL_PROFILE=essential "$ab" mcp <<JSONRPC
+        env \
+            AGENT_BRIDGE_CLIENT=hook \
+            AGENT_BRIDGE_MCP_SOURCE=hook \
+            AGENT_BRIDGE_TOOLSET=hook-lifecycle \
+            AGENT_BRIDGE_TOOL_PROFILE=standard \
+            "$ab" mcp <<JSONRPC
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"pet-auto-tts-hook","version":"1"},"capabilities":{}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pet_state_ritual","arguments":{"channel":"$channel","enabled":true,"cooldown_seconds":$cooldown}}}
 JSONRPC
@@ -208,12 +213,15 @@ fi
 # min_uses is intentionally omitted: new memories start at access_count=0
 # and would be immediately deleted by an OR-based min_uses policy.
 #
-# memory_compact lives in the Niche tool tier (since the profile filter
-# in commit 84c1680). Without AGENT_BRIDGE_TOOL_PROFILE=all the spawned
-# mcp child returns "unknown tool: memory_compact" and the call silently
-# fails — so 90-day pruning would never run. Force the all profile here.
+# The hook only needs lifecycle-safe tools. Keep this child on the
+# hook-lifecycle toolset instead of exposing the full developer registry.
 if [[ -x "$AB" ]]; then
-    AGENT_BRIDGE_TOOL_PROFILE=all "$AB" mcp >/dev/null 2>/dev/null <<'JSONRPC'
+    env \
+        AGENT_BRIDGE_CLIENT=hook \
+        AGENT_BRIDGE_MCP_SOURCE=hook \
+        AGENT_BRIDGE_TOOLSET=hook-lifecycle \
+        AGENT_BRIDGE_TOOL_PROFILE=standard \
+        "$AB" mcp >/dev/null 2>/dev/null <<'JSONRPC'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"stop-hook","version":"1"},"capabilities":{}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_compact","arguments":{"older_than_days":90,"dry_run":false}}}
 JSONRPC

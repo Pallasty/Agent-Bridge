@@ -419,6 +419,10 @@ Local CLI profile (`--frontend local-cli`):
 | `ab-precompact-hook` | `PreCompact` (manual + auto) | Reads Claude/Cursor/Codex transcript JSONL, calls `session_lifecycle_step(precompact)` over MCP (runs `session_curate` then `session_finalize`; no sub-agent) |
 | `ab-session-end-hook` | `Stop`, Codex `SessionEnd` | Compact memories older than 90 days; sync to git remote. On Codex `SessionEnd`, first runs the transcript curator. |
 
+Hook-spawned MCP children use `AGENT_BRIDGE_TOOLSET=hook-lifecycle`,
+which exposes only lifecycle-safe memory/session/pet-state tools instead
+of the full developer registry.
+
 ### Memory lifecycle
 
 ```
