@@ -37,6 +37,11 @@ use std::path::{Path, PathBuf};
 const HOOK_MEMORY: &str = include_str!("hooks/ab-memory-hook.sh");
 const HOOK_PRECOMPACT: &str = include_str!("hooks/ab-precompact-hook.sh");
 const HOOK_SESSION_END: &str = include_str!("hooks/ab-session-end-hook.sh");
+const MANAGED_TOOL_ENV_KEYS: &[&str] = &[
+    "AGENT_BRIDGE_CLIENT",
+    "AGENT_BRIDGE_TOOLSET",
+    "AGENT_BRIDGE_TOOL_PROFILE",
+];
 
 /// Which frontend the setup is targeting. Drives whether hook scripts
 /// and `~/.claude/settings.json` are written.
@@ -68,7 +73,7 @@ pub fn run(frontend: Frontend) -> Result<()> {
     }
 
     match frontend {
-        Frontend::ClaudeCode => install_claude_code(&home, &bin_dir),
+        Frontend::ClaudeCode => install_claude_code(&home, &bin_dir, &bin_dst),
         Frontend::Warp => install_warp(&bin_dst),
         Frontend::Auggie => install_auggie(&bin_dst),
         Frontend::Codex => install_codex(&home, &bin_dir, &bin_dst),
@@ -99,7 +104,7 @@ fn copy_executable_atomically(src: &Path, dst: &Path) -> Result<()> {
 }
 
 /// Claude Code profile: full hook installation.
-fn install_claude_code(home: &Path, bin_dir: &Path) -> Result<()> {
+fn install_claude_code(home: &Path, bin_dir: &Path, bin_dst: &Path) -> Result<()> {
     // ── 2. Write hook scripts ────────────────────────────────────────────
     write_script(&bin_dir.join("ab-memory-hook"), HOOK_MEMORY)?;
     write_script(&bin_dir.join("ab-precompact-hook"), HOOK_PRECOMPACT)?;
@@ -107,6 +112,7 @@ fn install_claude_code(home: &Path, bin_dir: &Path) -> Result<()> {
 
     // ── 3. Merge Claude Code settings ────────────────────────────────────
     merge_claude_settings(home, bin_dir)?;
+    let claude_registered = try_register_claude_mcp(bin_dst);
 
     println!();
     println!("Setup complete (claude-code profile).");
@@ -114,7 +120,12 @@ fn install_claude_code(home: &Path, bin_dir: &Path) -> Result<()> {
     println!("Next steps:");
     println!("  1. Add ~/.local/bin to your PATH if it isn't already.");
     println!("  2. Start the daemon:  agent-bridge daemon &");
-    println!("  3. Register as MCP:   claude mcp add agent-bridge agent-bridge mcp");
+    if claude_registered {
+        println!("  3. MCP server registered with AGENT_BRIDGE_TOOLSET=claude-standard.");
+    } else {
+        println!("  3. Register as MCP:");
+        print_claude_mcp_add_command(bin_dst);
+    }
     println!("  4. (Optional) Bootstrap cross-device memory sync:");
     println!("       gh auth login          # one-time, if not already authenticated");
     println!("       agent-bridge sync init # creates/clones the private memory repo");
@@ -225,10 +236,7 @@ fn install_local_cli(home: &Path, bin_dst: &Path) -> Result<()> {
         println!("  ✓ Claude Code → MCP server registered");
     } else {
         println!("  · Claude Code → register manually if desired:");
-        println!(
-            "      claude mcp add -s user agent-bridge {} mcp",
-            bin_dst.display()
-        );
+        print_claude_mcp_add_command(bin_dst);
     }
     println!();
     println!("Restart each CLI session so MCP servers reload.");
@@ -310,7 +318,8 @@ fn try_register_auggie_mcp(bin_dst: &Path) -> bool {
     }
 }
 
-/// Best-effort: invoke `claude mcp add -s user agent-bridge <bin> mcp`.
+/// Best-effort: invoke `claude mcp add -s user` with the Claude-specific
+/// Agent-Bridge toolset environment.
 ///
 /// Claude Code's CLI owns the exact config format/scope semantics, so
 /// using the CLI is safer than editing Claude's files directly. The
@@ -318,33 +327,39 @@ fn try_register_auggie_mcp(bin_dst: &Path) -> bool {
 /// the current project directory. Failure is non-fatal; setup prints the
 /// manual command.
 fn try_register_claude_mcp(bin_dst: &Path) -> bool {
-    let output = std::process::Command::new("claude")
-        .arg("mcp")
-        .arg("add")
-        .arg("-s")
-        .arg("user")
-        .arg("agent-bridge")
-        .arg(bin_dst)
-        .arg("mcp")
-        .output();
+    let output = claude_mcp_add_agent_bridge(bin_dst);
     match output {
         Ok(o) if o.status.success() => true,
         Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
-            let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            let detail = if !stderr.is_empty() { stderr } else { stdout };
-            if detail.contains("already exists in user config") || claude_mcp_get_agent_bridge() {
-                println!("  ·  Claude Code MCP server already registered");
-                true
+            let detail = command_detail(&o);
+            if detail.contains("already exists") {
+                let _ = std::process::Command::new("claude")
+                    .arg("mcp")
+                    .arg("remove")
+                    .arg("-s")
+                    .arg("user")
+                    .arg("agent-bridge")
+                    .output();
+                match claude_mcp_add_agent_bridge(bin_dst) {
+                    Ok(retry) if retry.status.success() => true,
+                    Ok(retry) => {
+                        println!(
+                            "  ·  `claude mcp add` retry exited with {}; falling back to manual instructions{}",
+                            retry.status,
+                            detail_suffix(&command_detail(&retry))
+                        );
+                        claude_mcp_get_agent_bridge()
+                    }
+                    Err(e) => {
+                        println!("  ·  could not invoke `claude` ({e}); falling back to manual instructions");
+                        claude_mcp_get_agent_bridge()
+                    }
+                }
             } else {
                 println!(
                     "  ·  `claude mcp add` exited with {}; falling back to manual instructions{}",
                     o.status,
-                    if detail.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" ({detail})")
-                    }
+                    detail_suffix(&detail)
                 );
                 false
             }
@@ -354,6 +369,50 @@ fn try_register_claude_mcp(bin_dst: &Path) -> bool {
             false
         }
     }
+}
+
+fn claude_mcp_add_agent_bridge(bin_dst: &Path) -> std::io::Result<std::process::Output> {
+    std::process::Command::new("claude")
+        .arg("mcp")
+        .arg("add")
+        .arg("-s")
+        .arg("user")
+        .arg("-e")
+        .arg("AGENT_BRIDGE_CLIENT=claude")
+        .arg("-e")
+        .arg("AGENT_BRIDGE_TOOLSET=claude-standard")
+        .arg("-e")
+        .arg("AGENT_BRIDGE_TOOL_PROFILE=standard")
+        .arg("--")
+        .arg("agent-bridge")
+        .arg(bin_dst)
+        .arg("mcp")
+        .output()
+}
+
+fn command_detail(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !stderr.is_empty() {
+        stderr
+    } else {
+        stdout
+    }
+}
+
+fn detail_suffix(detail: &str) -> String {
+    if detail.is_empty() {
+        String::new()
+    } else {
+        format!(" ({detail})")
+    }
+}
+
+fn print_claude_mcp_add_command(bin_dst: &Path) {
+    println!(
+        "      claude mcp add -s user -e AGENT_BRIDGE_CLIENT=claude -e AGENT_BRIDGE_TOOLSET=claude-standard -e AGENT_BRIDGE_TOOL_PROFILE=standard -- agent-bridge {} mcp",
+        bin_dst.display()
+    );
 }
 
 fn claude_mcp_get_agent_bridge() -> bool {
@@ -402,11 +461,6 @@ fn merge_codex_config(home: &Path, bin_dst: &Path, enable_hooks: bool) -> Result
         String::new()
     };
 
-    let managed_env_keys = [
-        "AGENT_BRIDGE_CLIENT",
-        "AGENT_BRIDGE_TOOLSET",
-        "AGENT_BRIDGE_TOOL_PROFILE",
-    ];
     let mut env_lines = vec![
         "AGENT_BRIDGE_CLIENT = \"codex\"".to_string(),
         "AGENT_BRIDGE_TOOLSET = \"codex-essential\"".to_string(),
@@ -414,7 +468,7 @@ fn merge_codex_config(home: &Path, bin_dst: &Path, enable_hooks: bool) -> Result
     ];
     for line in toml_table_body_lines(&raw, "mcp_servers.agent-bridge.env") {
         let trimmed = line.trim_start();
-        if managed_env_keys
+        if MANAGED_TOOL_ENV_KEYS
             .iter()
             .any(|key| toml_line_assigns_key(trimmed, key))
         {
@@ -595,6 +649,20 @@ fn codex_home(home: &Path) -> PathBuf {
         .unwrap_or_else(|| home.join(".codex"))
 }
 
+fn merged_tool_env(existing: Option<&Value>, client: &str, toolset: &str, profile: &str) -> Value {
+    let mut env = existing
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_else(serde_json::Map::new);
+    for key in MANAGED_TOOL_ENV_KEYS {
+        env.remove(*key);
+    }
+    env.insert("AGENT_BRIDGE_CLIENT".to_string(), json!(client));
+    env.insert("AGENT_BRIDGE_TOOLSET".to_string(), json!(toolset));
+    env.insert("AGENT_BRIDGE_TOOL_PROFILE".to_string(), json!(profile));
+    Value::Object(env)
+}
+
 /// Read `~/.gemini/settings.json`, replace or append the
 /// `mcpServers.agent-bridge` entry, then write back while preserving
 /// unrelated Gemini CLI settings.
@@ -618,11 +686,18 @@ fn merge_gemini_settings(home: &Path, bin_dst: &Path) -> Result<()> {
         .as_object_mut()
         .context("Gemini mcpServers is not an object")?;
 
+    let agent_bridge_env = merged_tool_env(
+        mcp_servers.get("agent-bridge").and_then(|v| v.get("env")),
+        "gemini",
+        "gemini-lean",
+        "essential",
+    );
     mcp_servers.insert(
         "agent-bridge".to_string(),
         json!({
             "command": bin_dst.display().to_string(),
-            "args": ["mcp"]
+            "args": ["mcp"],
+            "env": agent_bridge_env
         }),
     );
 
@@ -924,6 +999,7 @@ mod tests {
         ensure_toml_bool, merge_codex_config, merge_codex_hooks, merge_gemini_settings,
         replace_toml_table, HOOK_PRECOMPACT, HOOK_SESSION_END,
     };
+    use serde_json::{json, Value};
     use std::fs;
 
     #[test]
@@ -1084,17 +1160,26 @@ enabled = true
         fs::create_dir_all(&settings_dir).unwrap();
         fs::write(
             settings_dir.join("settings.json"),
-            r#"{"ui":{"theme":"Default"},"mcpServers":{"other":{"command":"old"}}}"#,
+            r#"{"ui":{"theme":"Default"},"mcpServers":{"other":{"command":"old"},"agent-bridge":{"command":"old","env":{"AGENT_BRIDGE_TOOLSET":"all-dev","CUSTOM_ENV":"keep"}}}}"#,
         )
         .unwrap();
 
         merge_gemini_settings(&tmp, std::path::Path::new("/tmp/agent-bridge")).unwrap();
         let raw = fs::read_to_string(settings_dir.join("settings.json")).unwrap();
+        let v: Value = serde_json::from_str(&raw).unwrap();
+        let agent_bridge = &v["mcpServers"]["agent-bridge"];
 
         assert!(raw.contains("\"theme\": \"Default\""));
         assert!(raw.contains("\"other\""));
-        assert!(raw.contains("\"agent-bridge\""));
-        assert!(raw.contains("\"/tmp/agent-bridge\""));
+        assert_eq!(agent_bridge["command"], "/tmp/agent-bridge");
+        assert_eq!(agent_bridge["args"], json!(["mcp"]));
+        assert_eq!(agent_bridge["env"]["AGENT_BRIDGE_CLIENT"], "gemini");
+        assert_eq!(agent_bridge["env"]["AGENT_BRIDGE_TOOLSET"], "gemini-lean");
+        assert_eq!(
+            agent_bridge["env"]["AGENT_BRIDGE_TOOL_PROFILE"],
+            "essential"
+        );
+        assert_eq!(agent_bridge["env"]["CUSTOM_ENV"], "keep");
 
         let _ = fs::remove_dir_all(tmp);
     }

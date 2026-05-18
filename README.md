@@ -302,11 +302,19 @@ Gemini CLI uses this JSON shape in `~/.gemini/settings.json`:
   "mcpServers": {
     "agent-bridge": {
       "command": "/home/you/.local/bin/agent-bridge",
-      "args": ["mcp"]
+      "args": ["mcp"],
+      "env": {
+        "AGENT_BRIDGE_CLIENT": "gemini",
+        "AGENT_BRIDGE_TOOLSET": "gemini-lean",
+        "AGENT_BRIDGE_TOOL_PROFILE": "essential"
+      }
     }
   }
 }
 ```
+
+Claude Code registration uses `AGENT_BRIDGE_TOOLSET=claude-standard`;
+Gemini CLI uses `AGENT_BRIDGE_TOOLSET=gemini-lean`.
 
 Claude Code and Codex have automatic lifecycle hook installation. Gemini
 CLI, Warp, and Auggie should use the lifecycle MCP tools directly:
@@ -400,7 +408,7 @@ Gemini CLI profile (`--frontend gemini-cli`):
 | Binary | Copies itself to `~/.local/bin/agent-bridge` |
 | Hook scripts | **Skipped** — Gemini CLI has no equivalent hook events |
 | Curator settings | **Skipped** — only consumed by `ab-precompact-hook.sh` |
-| Settings file | Merges `mcpServers.agent-bridge` into `~/.gemini/settings.json` |
+| Settings file | Merges `mcpServers.agent-bridge` into `~/.gemini/settings.json` with `AGENT_BRIDGE_TOOLSET=gemini-lean` |
 
 Local CLI profile (`--frontend local-cli`):
 
@@ -408,8 +416,8 @@ Local CLI profile (`--frontend local-cli`):
 |------|-------------|
 | Binary | Copies itself to `~/.local/bin/agent-bridge` |
 | Codex | Merges `[mcp_servers.agent-bridge]` into `~/.codex/config.toml` |
-| Gemini CLI | Merges `mcpServers.agent-bridge` into `~/.gemini/settings.json` |
-| Claude Code | Best-effort `claude mcp add -s user`; prints the manual command if unavailable |
+| Gemini CLI | Merges `mcpServers.agent-bridge` into `~/.gemini/settings.json` with `AGENT_BRIDGE_TOOLSET=gemini-lean` |
+| Claude Code | Best-effort `claude mcp add -s user` with `AGENT_BRIDGE_TOOLSET=claude-standard`; prints the manual command if unavailable |
 
 ### Hook scripts
 
