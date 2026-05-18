@@ -162,16 +162,47 @@ fn nonempty_str(value: &str) -> Option<&str> {
 }
 
 fn mcp_profile_label_from_env() -> &'static str {
-    let raw = std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok();
-    mcp_profile_label_from_value(raw.as_deref())
+    let toolset = std::env::var("AGENT_BRIDGE_TOOLSET").ok();
+    let profile = std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok();
+    mcp_profile_label_from_values(toolset.as_deref(), profile.as_deref())
+}
+
+fn mcp_profile_label_from_values(toolset: Option<&str>, profile: Option<&str>) -> &'static str {
+    match toolset.map(normalize_mcp_env_value).as_deref() {
+        Some("codex-essential") | Some("codex") | Some("gemini-lean") | Some("gemini") => {
+            "essential"
+        }
+        Some("all-dev") | Some("dev") | Some("full-dev") => "all",
+        Some("claude-standard")
+        | Some("claude-code")
+        | Some("claude")
+        | Some("hook-lifecycle")
+        | Some("hooks")
+        | Some("hook")
+        | Some("lifecycle") => "standard",
+        _ => mcp_profile_label_from_value(profile),
+    }
 }
 
 fn mcp_profile_label_from_value(value: Option<&str>) -> &'static str {
-    match value.unwrap_or("standard").trim().to_ascii_lowercase().as_str() {
+    match value
+        .unwrap_or("standard")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "minimal" | "essential" => "essential",
         "all" | "full" => "all",
         _ => "standard",
     }
+}
+
+fn normalize_mcp_env_value(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .replace('_', "-")
+        .replace(' ', "-")
 }
 
 fn mcp_source_from_env() -> Option<&'static str> {
@@ -676,7 +707,10 @@ mod tests {
             classify_mcp_source_from_client(Some("agent-bridge-audit")),
             Some("manual")
         );
-        assert_eq!(classify_mcp_source_from_client(Some("unknown-client")), None);
+        assert_eq!(
+            classify_mcp_source_from_client(Some("unknown-client")),
+            None
+        );
     }
 
     #[test]
@@ -687,5 +721,25 @@ mod tests {
         assert_eq!(mcp_profile_label_from_value(Some("all")), "all");
         assert_eq!(mcp_profile_label_from_value(Some("full")), "all");
         assert_eq!(mcp_profile_label_from_value(Some("weird")), "standard");
+    }
+
+    #[test]
+    fn mcp_profile_label_honors_toolset_before_profile() {
+        assert_eq!(
+            mcp_profile_label_from_values(Some("codex-essential"), Some("all")),
+            "essential"
+        );
+        assert_eq!(
+            mcp_profile_label_from_values(Some("all_dev"), Some("essential")),
+            "all"
+        );
+        assert_eq!(
+            mcp_profile_label_from_values(Some("hook-lifecycle"), None),
+            "standard"
+        );
+        assert_eq!(
+            mcp_profile_label_from_values(Some("unknown"), Some("all")),
+            "all"
+        );
     }
 }

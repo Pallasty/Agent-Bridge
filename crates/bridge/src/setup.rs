@@ -384,6 +384,13 @@ fn write_script(path: &Path, content: &str) -> Result<()> {
 /// Read `~/.codex/config.toml`, replace or append the
 /// `[mcp_servers.agent-bridge]` table, then write back while preserving
 /// unrelated Codex settings.
+fn toml_line_assigns_key(line: &str, key: &str) -> bool {
+    line.trim_start()
+        .strip_prefix(key)
+        .and_then(|rest| rest.trim_start().strip_prefix('='))
+        .is_some()
+}
+
 fn merge_codex_config(home: &Path, bin_dst: &Path, enable_hooks: bool) -> Result<()> {
     let codex_home = codex_home(home);
     let config_path = codex_home.join("config.toml");
@@ -395,13 +402,21 @@ fn merge_codex_config(home: &Path, bin_dst: &Path, enable_hooks: bool) -> Result
         String::new()
     };
 
-    let mut env_lines = vec!["AGENT_BRIDGE_TOOL_PROFILE = \"essential\"".to_string()];
+    let managed_env_keys = [
+        "AGENT_BRIDGE_CLIENT",
+        "AGENT_BRIDGE_TOOLSET",
+        "AGENT_BRIDGE_TOOL_PROFILE",
+    ];
+    let mut env_lines = vec![
+        "AGENT_BRIDGE_CLIENT = \"codex\"".to_string(),
+        "AGENT_BRIDGE_TOOLSET = \"codex-essential\"".to_string(),
+        "AGENT_BRIDGE_TOOL_PROFILE = \"essential\"".to_string(),
+    ];
     for line in toml_table_body_lines(&raw, "mcp_servers.agent-bridge.env") {
         let trimmed = line.trim_start();
-        if trimmed
-            .strip_prefix("AGENT_BRIDGE_TOOL_PROFILE")
-            .and_then(|rest| rest.trim_start().strip_prefix('='))
-            .is_some()
+        if managed_env_keys
+            .iter()
+            .any(|key| toml_line_assigns_key(trimmed, key))
         {
             continue;
         }
@@ -942,6 +957,8 @@ enabled = true
 command = \"new\"
 
 [mcp_servers.agent-bridge.env]
+AGENT_BRIDGE_CLIENT = \"codex\"
+AGENT_BRIDGE_TOOLSET = \"codex-essential\"
 AGENT_BRIDGE_TOOL_PROFILE = \"essential\"
 ";
 
@@ -950,6 +967,8 @@ AGENT_BRIDGE_TOOL_PROFILE = \"essential\"
         assert!(out.contains("[mcp_servers.agent-bridge]\ncommand = \"new\""));
         assert!(!out.contains("command = \"old\""));
         assert!(!out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"all\""));
+        assert!(out.contains("AGENT_BRIDGE_CLIENT = \"codex\""));
+        assert!(out.contains("AGENT_BRIDGE_TOOLSET = \"codex-essential\""));
         assert!(out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"essential\""));
         assert!(out.contains("[plugins.example]\nenabled = true"));
     }
@@ -970,6 +989,8 @@ AGENT_BRIDGE_TOOL_PROFILE = \"essential\"
 command = "old"
 
 [mcp_servers.agent-bridge.env]
+AGENT_BRIDGE_CLIENT = "claude-code"
+AGENT_BRIDGE_TOOLSET = "all-dev"
 AGENT_BRIDGE_TOOL_PROFILE = "all"
 AB_PET_TTS_VOICE = "Meijia"
 AB_PET_TTS_RATE = "180"
@@ -983,7 +1004,12 @@ enabled = true
         merge_codex_config(&tmp, &tmp.join(".local/bin/agent-bridge"), true).unwrap();
 
         let out = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+        assert!(out.contains("AGENT_BRIDGE_CLIENT = \"codex\""));
+        assert!(out.contains("AGENT_BRIDGE_TOOLSET = \"codex-essential\""));
         assert!(out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"essential\""));
+        assert!(!out.contains("AGENT_BRIDGE_CLIENT = \"claude-code\""));
+        assert!(!out.contains("AGENT_BRIDGE_TOOLSET = \"all-dev\""));
+        assert!(!out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"all\""));
         assert!(out.contains("AB_PET_TTS_VOICE = \"Meijia\""));
         assert!(out.contains("AB_PET_TTS_RATE = \"180\""));
         assert!(out.contains("[plugins.example]\nenabled = true"));

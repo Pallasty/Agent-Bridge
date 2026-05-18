@@ -9112,7 +9112,7 @@ impl McpTool for McpDispatchAuditTool {
             filter.clone()
         };
 
-        let profile = ToolProfile::from_env();
+        let policy = ToolPolicy::from_env();
         let current_tools: Vec<String> = build_registry(self.hub.clone())
             .list()
             .into_iter()
@@ -9256,7 +9256,8 @@ impl McpTool for McpDispatchAuditTool {
         let profile_suggestions = dispatch_profile_suggestions(&stats, &cold_tools);
 
         Ok(ToolResult::json_text(&json!({
-            "profile": profile.label(),
+            "profile": policy.profile().label(),
+            "toolset": policy.label(),
             "window_days": window_days,
             "filter": dispatch_filter_json(&filter),
             "current_exposed_tool_count": current_tool_count,
@@ -16099,11 +16100,11 @@ pub enum ToolProfile {
 
 impl ToolProfile {
     pub fn from_env() -> Self {
-        match std::env::var("AGENT_BRIDGE_TOOL_PROFILE")
-            .ok()
-            .map(|s| s.trim().to_lowercase())
-            .as_deref()
-        {
+        Self::from_value(std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok().as_deref())
+    }
+
+    fn from_value(value: Option<&str>) -> Self {
+        match value.map(|s| s.trim().to_lowercase()).as_deref() {
             Some("essential") | Some("minimal") => Self::Essential,
             Some("all") | Some("full") => Self::All,
             _ => Self::Standard,
@@ -16129,8 +16130,144 @@ impl ToolProfile {
     }
 }
 
-fn reg_if(reg: &mut ToolRegistry, profile: ToolProfile, tier: Tier, tool: Arc<dyn McpTool>) {
-    if profile.includes(tier) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolSet {
+    Profile,
+    CodexEssential,
+    ClaudeStandard,
+    GeminiLean,
+    HookLifecycle,
+    AllDev,
+}
+
+impl ToolSet {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Profile => "profile",
+            Self::CodexEssential => "codex-essential",
+            Self::ClaudeStandard => "claude-standard",
+            Self::GeminiLean => "gemini-lean",
+            Self::HookLifecycle => "hook-lifecycle",
+            Self::AllDev => "all-dev",
+        }
+    }
+
+    fn from_value(value: Option<&str>) -> Option<Self> {
+        match value.map(normalize_tool_policy_value).as_deref() {
+            Some("profile") | Some("legacy") => Some(Self::Profile),
+            Some("codex-essential") | Some("codex") => Some(Self::CodexEssential),
+            Some("claude-standard") | Some("claude-code") | Some("claude") => {
+                Some(Self::ClaudeStandard)
+            }
+            Some("gemini-lean") | Some("gemini") => Some(Self::GeminiLean),
+            Some("hook-lifecycle") | Some("hooks") | Some("hook") | Some("lifecycle") => {
+                Some(Self::HookLifecycle)
+            }
+            Some("all-dev") | Some("dev") | Some("full-dev") => Some(Self::AllDev),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ToolPolicy {
+    set: ToolSet,
+    profile: ToolProfile,
+}
+
+impl ToolPolicy {
+    fn from_env() -> Self {
+        Self::from_values(
+            std::env::var("AGENT_BRIDGE_TOOLSET").ok().as_deref(),
+            std::env::var("AGENT_BRIDGE_CLIENT").ok().as_deref(),
+            std::env::var("AGENT_BRIDGE_MCP_SOURCE").ok().as_deref(),
+            std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok().as_deref(),
+        )
+    }
+
+    fn from_values(
+        toolset: Option<&str>,
+        client: Option<&str>,
+        source: Option<&str>,
+        profile: Option<&str>,
+    ) -> Self {
+        let set = ToolSet::from_value(toolset)
+            .or_else(|| ToolSet::from_value(client))
+            .or_else(|| ToolSet::from_value(source))
+            .unwrap_or(ToolSet::Profile);
+        let legacy_profile = ToolProfile::from_value(profile);
+        let profile = match set {
+            ToolSet::Profile => legacy_profile,
+            ToolSet::CodexEssential | ToolSet::GeminiLean => ToolProfile::Essential,
+            ToolSet::ClaudeStandard | ToolSet::HookLifecycle => ToolProfile::Standard,
+            ToolSet::AllDev => ToolProfile::All,
+        };
+        Self { set, profile }
+    }
+
+    fn label(self) -> &'static str {
+        self.set.label()
+    }
+
+    fn profile(self) -> ToolProfile {
+        self.profile
+    }
+
+    fn includes(self, tier: Tier, tool_name: &'static str) -> bool {
+        match self.set {
+            ToolSet::Profile
+            | ToolSet::CodexEssential
+            | ToolSet::ClaudeStandard
+            | ToolSet::AllDev => self.profile.includes(tier),
+            ToolSet::GeminiLean => gemini_lean_tool(tool_name),
+            ToolSet::HookLifecycle => hook_lifecycle_tool(tool_name),
+        }
+    }
+}
+
+fn normalize_tool_policy_value(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .replace('_', "-")
+        .replace(' ', "-")
+}
+
+fn gemini_lean_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "capabilities"
+            | "memory_search"
+            | "memory_get"
+            | "memory_list"
+            | "skills_recommend"
+            | "project_detect"
+            | "changes_digest"
+            | "mcp_dispatch_audit"
+            | "session_bootstrap"
+            | "pet_state_get"
+    )
+}
+
+fn hook_lifecycle_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "capabilities"
+            | "mcp_dispatch_audit"
+            | "memory_compact"
+            | "session_bootstrap"
+            | "session_curate"
+            | "session_finalize"
+            | "session_lifecycle_step"
+            | "pet_state_get"
+            | "pet_state_set"
+            | "pet_state_ritual"
+    )
+}
+
+fn reg_if(reg: &mut ToolRegistry, policy: ToolPolicy, tier: Tier, tool: Arc<dyn McpTool>) {
+    let name = tool.name();
+    if policy.includes(tier, name) {
         reg.register(tool);
     }
 }
@@ -16266,198 +16403,199 @@ fn tag_value_in(tags: &[String], prefix: &str) -> Option<String> {
 }
 
 pub fn build_registry(hub: Hub) -> ToolRegistry {
-    let profile = ToolProfile::from_env();
+    let policy = ToolPolicy::from_env();
     let mut reg = ToolRegistry::new();
 
     // ── ESSENTIAL ──────────────────────────────────────────────────────
     // Memory: query + write + delete + graph navigation.
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemorySearchTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemorySaveTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryGetTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryListTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryDeleteTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryNeighborsTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCoactivationTopTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemorySearchTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemorySaveTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemoryGetTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemoryListTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemoryDeleteTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(MemoryNeighborsTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryCoactivationTopTool::new(hub.clone())));
     // Terminal: list + send + read + split + resize. Retired after Warp drop
     // (see memory `project_warp_drop_to_museum`); kept as Niche for any
     // residual non-Warp PTY caller, opt-in via AGENT_BRIDGE_TOOL_PROFILE=all.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalListTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalSendKeysTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalReadOutputTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalSplitTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalResizeTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalListTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalSendKeysTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalReadOutputTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalSplitTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalResizeTool::new(hub.clone())));
     // Agent runtime: spawn + observe sessions.
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(AgentSpawnTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(AgentSessionGetTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(AgentSessionWaitTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(AgentSessionListTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(AgentSpawnTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(AgentSessionGetTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(AgentSessionWaitTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(AgentSessionListTool::new(hub.clone())));
     // Shell + lifecycle bootstrap + ops introspection that callers ask first.
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(ShellExecTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(SessionBootstrapTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(SessionFinalizeTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionReflectTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CapabilitiesTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(McpDispatchAuditTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(ShellExecTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(SessionBootstrapTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(SessionFinalizeTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SessionReflectTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CapabilitiesTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(McpDispatchAuditTool::new(hub.clone())));
     // IDE bridge: 7-day audit shows 0 calls; demoted to Niche.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(IdeSnapshotTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(IdeCommandTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PetStateGetTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PetStateSetTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PetStateRitualTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(ProjectDetectTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(ChangesDigestTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(IdeSnapshotTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(IdeCommandTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PetStateGetTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PetStateSetTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PetStateRitualTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(ProjectDetectTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(ChangesDigestTool::new(hub.clone())));
     // Plans + worktrees + codebase search.
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PlanSaveTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PlanLoadTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PlanUpdateTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(WorktreeListTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(WorktreeCreateTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseSearchTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseImportsTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseCallsTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseCallersTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(CodebaseImpactTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PlanSaveTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PlanLoadTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(PlanUpdateTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(WorktreeListTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(WorktreeCreateTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CodebaseSearchTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CodebaseImportsTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CodebaseCallsTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CodebaseCallersTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(CodebaseImpactTool::new(hub.clone())));
 
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPurgeTombstonesTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPruneCoactivationNoiseTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryPruneDegenerateRelatesTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryArchiveOrphanStubsTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryRestoreArchivedTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryTombstoneAgedArchivedTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryDecayUnusedTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCorrectionTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryStatsTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryQueryStatsTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySubstrateAuditTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SubstrateStatsTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SubstrateNeighborsTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(IntrospectRecallTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkAuditTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemorySuggestTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryLinkOrphansTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentKillTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentMessageTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentInboxTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryCompactTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryPurgeTombstonesTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryPruneCoactivationNoiseTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryPruneDegenerateRelatesTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryArchiveOrphanStubsTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryRestoreArchivedTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryTombstoneAgedArchivedTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryDecayUnusedTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryReindexTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(CodebaseReindexTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryLinkTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryCorrectionTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryStatsTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryQueryStatsTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemorySubstrateAuditTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SubstrateStatsTool::new()));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SubstrateNeighborsTool::new()));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(IntrospectRecallTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryLinkAuditTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemorySuggestTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(MemoryLinkOrphansTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(AgentKillTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(AgentMessageTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(AgentInboxTool::new(hub.clone())));
     // Forum (v18): cross-process collaboration whiteboard.
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumPostTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumReadTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumSubscribeTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumListThreadsTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ForumSetThreadStatusTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ForumPostTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ForumReadTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ForumSubscribeTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ForumListThreadsTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ForumSetThreadStatusTool::new(hub.clone())));
     // Presence (v19): identity convention + agent registry (A2A AgentCard-aligned).
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionIdentityTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentPresenceAnnounceTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentPresenceListTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(PetPresenceSyncTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SessionIdentityTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(AgentPresenceAnnounceTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(AgentPresenceListTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(PetPresenceSyncTool::new(hub.clone())));
     // Tailscale REST API: ACL editing without browser automation.
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(TailscaleAclGetTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(TailscaleAclSetTool::new()));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(TailscaleAclGetTool::new()));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(TailscaleAclSetTool::new()));
     // GitHub REST API: issue/PR management without browser/gh-cli. Demoted
     // to Niche — Claude Code uses `gh` CLI; codex has native overlap.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GithubIssueListTool::new()));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GithubIssueCreateTool::new()));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GithubPrListTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GithubIssueListTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GithubIssueCreateTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GithubPrListTool::new()));
 
     // GitLab REST API v4: same pattern as github_*; primary forge for this project.
     // Demoted to Niche — `glab` CLI covers the same surface.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GitlabIssueListTool::new()));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GitlabIssueCreateTool::new()));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GitlabMrListTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GitlabIssueListTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GitlabIssueCreateTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(GitlabMrListTool::new()));
 
     // Notion REST API: integration-token Bearer; complements memory system.
     // Demoted to Niche — 0 calls in 7-day audit window.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(NotionSearchTool::new()));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(NotionPageGetTool::new()));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(NotionPageCreateTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(NotionSearchTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(NotionPageGetTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(NotionPageCreateTool::new()));
 
     // Brave Search REST API: independent web search, fallback / fresh-results channel.
     // Demoted to Niche — Claude Code uses WebFetch/WebSearch built-ins.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BraveWebSearchTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BraveWebSearchTool::new()));
 
     // Cloudflare REST API: zones / workers / R2 read scopes (others 403 with current token).
     // Demoted to Niche — 0 calls in 7-day audit window.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(CloudflareZoneListTool::new()));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(CloudflareWorkerListTool::new()));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(CloudflareR2BucketListTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(WorktreeRemoveTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseIndexTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(CloudflareZoneListTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(CloudflareWorkerListTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(CloudflareR2BucketListTool::new()));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(WorktreeRemoveTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(CodebaseIndexTool::new(hub.clone())));
     // Retired with rest of terminal_* after Warp drop.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalReadBlocksTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotifyTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotificationsRecentTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(TerminalReadBlocksTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(NotifyTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(NotificationsRecentTool::new(hub.clone())));
     // Skill library (Phase C): in-loop recommendation over the local skill index.
     // Keep this in Essential for Codex/GPT-style deferred tool discovery: it is
     // the gateway that lets the model find more specialized skills on demand.
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(SkillsRecommendTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Essential, Arc::new(SkillsRecommendTool::new(hub.clone())));
 
     // ── NICHE (opt-in via AGENT_BRIDGE_TOOL_PROFILE=all) ───────────────
     // Browser automation surface.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserNavigateTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserEvalTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserSnapshotTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserClickTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserScreenshotTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserScreenshotElementTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserExtractTextTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserFillFormTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserWaitForTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserListPagesTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserPressKeyTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserSelectOptionTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserFindByTextTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserListFramesTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserEvalInFrameTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserPauseForHumanTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserResumeTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserCaptureResponseStartTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserCaptureResponseDrainTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserReloadTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserBackTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserForwardTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserClosePageTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserScrollTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserHoverTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserSetEmulationTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BrowserUploadFileTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserNavigateTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserEvalTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserSnapshotTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserClickTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserScreenshotTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserScreenshotElementTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserExtractTextTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserFillFormTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserWaitForTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserListPagesTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserPressKeyTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserSelectOptionTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserFindByTextTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserListFramesTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserEvalInFrameTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserPauseForHumanTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserResumeTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserCaptureResponseStartTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserCaptureResponseDrainTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserReloadTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserBackTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserForwardTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserClosePageTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserScrollTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserHoverTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserSetEmulationTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(BrowserUploadFileTool::new(hub.clone())));
     // Warp URL-scheme + status.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpOpenSettingsTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpLaunchWorkflowTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(WarpStatusTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(WarpOpenTabTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(WarpOpenWindowTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(WarpOpenSettingsTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(WarpLaunchWorkflowTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(WarpStatusTool::new(hub.clone())));
     // Warp-Oz cloud runs.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(OzRunGetTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(OzRunListTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(OzRunCancelTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(OzRunGetTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(OzRunListTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(OzRunCancelTool::new(hub.clone())));
     // Ops introspection / debugging.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(OscParseTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(McpRecentErrorsTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(McpCallStatsTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(McpConfigAuditTool::new()));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(ContextBudgetTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ContextPressureEstimateTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(ToolCallAttentionReportTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(EmbedTextTool::new()));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(HookStatusTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(OscParseTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(McpRecentErrorsTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(McpCallStatsTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(McpConfigAuditTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(ContextBudgetTool::new()));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ContextPressureEstimateTool::new()));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(ToolCallAttentionReportTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Standard, Arc::new(EmbedTextTool::new()));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(HookStatusTool::new(hub.clone())));
     // Memory admin / visualisation.
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryExportTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryImportTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryConsolidateTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryAutoCurateTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Niche, Arc::new(MemoryGraphExportTool::new(hub)));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(MemoryExportTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(MemoryImportTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(MemoryConsolidateTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(MemoryAutoCurateTool::new(hub.clone())));
+    reg_if(&mut reg, policy, Tier::Niche, Arc::new(MemoryGraphExportTool::new(hub)));
 
     tracing::info!(
-        profile = profile.label(),
+        profile = policy.profile().label(),
+        toolset = policy.label(),
         tools = reg.list().len(),
-        "MCP tool registry built (set AGENT_BRIDGE_TOOL_PROFILE=essential|standard|all)"
+        "MCP tool registry built (set AGENT_BRIDGE_TOOLSET or AGENT_BRIDGE_TOOL_PROFILE)"
     );
     reg
 }
@@ -18264,6 +18402,60 @@ mod tests {
         assert!(p.includes(Tier::Essential));
         assert!(p.includes(Tier::Standard));
         assert!(p.includes(Tier::Niche));
+    }
+
+    #[test]
+    fn tool_policy_preserves_legacy_profile_mode() {
+        let p = ToolPolicy::from_values(None, None, None, Some("all"));
+
+        assert_eq!(p.label(), "profile");
+        assert_eq!(p.profile().label(), "all");
+        assert!(p.includes(Tier::Niche, "browser_navigate"));
+    }
+
+    #[test]
+    fn tool_policy_codex_essential_keeps_compact_surface() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, Some("all"));
+
+        assert_eq!(p.label(), "codex-essential");
+        assert_eq!(p.profile().label(), "essential");
+        assert!(p.includes(Tier::Essential, "pet_state_get"));
+        assert!(!p.includes(Tier::Standard, "embed_text"));
+        assert!(!p.includes(Tier::Niche, "browser_navigate"));
+    }
+
+    #[test]
+    fn tool_policy_hook_lifecycle_is_allowlisted() {
+        let p = ToolPolicy::from_values(Some("hook-lifecycle"), None, None, None);
+
+        assert_eq!(p.label(), "hook-lifecycle");
+        assert_eq!(p.profile().label(), "standard");
+        assert!(p.includes(Tier::Standard, "memory_compact"));
+        assert!(p.includes(Tier::Essential, "pet_state_ritual"));
+        assert!(!p.includes(Tier::Essential, "shell_exec"));
+        assert!(!p.includes(Tier::Essential, "agent_spawn"));
+    }
+
+    #[test]
+    fn tool_policy_gemini_lean_is_allowlisted() {
+        let p = ToolPolicy::from_values(Some("gemini-lean"), None, None, None);
+
+        assert_eq!(p.label(), "gemini-lean");
+        assert_eq!(p.profile().label(), "essential");
+        assert!(p.includes(Tier::Essential, "memory_search"));
+        assert!(p.includes(Tier::Essential, "skills_recommend"));
+        assert!(!p.includes(Tier::Essential, "shell_exec"));
+        assert!(!p.includes(Tier::Essential, "codebase_impact"));
+    }
+
+    #[test]
+    fn tool_policy_infers_known_clients() {
+        let p = ToolPolicy::from_values(None, Some("claude-code"), None, Some("essential"));
+
+        assert_eq!(p.label(), "claude-standard");
+        assert_eq!(p.profile().label(), "standard");
+        assert!(p.includes(Tier::Standard, "memory_compact"));
+        assert!(!p.includes(Tier::Niche, "browser_navigate"));
     }
 
     #[test]
