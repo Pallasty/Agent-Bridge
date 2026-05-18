@@ -34,7 +34,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
 
 use crate::context_budget::{
@@ -3498,6 +3498,225 @@ impl McpTool for AgentPresenceListTool {
             "count": rows.len(),
             "max_idle_secs": max_idle_secs,
             "agents": rows
+        })))
+    }
+}
+
+pub struct PetPresenceSyncTool {
+    hub: Hub,
+}
+impl PetPresenceSyncTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+fn pet_presence_capabilities(args: &Value, pet_id: &str, state: &Value) -> Value {
+    let mut capabilities = args
+        .get("capabilities")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mode = pet_state_str_field(state, "mode").unwrap_or_else(|| "idle".to_string());
+    let activity_state = pet_state_string_or_default(args, "activity_state", &mode);
+    let blocked_reason = pet_state_optional_string_or_null(args, "blocked_reason");
+
+    capabilities.insert("pet_presence".to_string(), json!(true));
+    capabilities.insert(
+        "pet_state".to_string(),
+        json!({
+            "pet_id": pet_id,
+            "activity_state": activity_state,
+            "blocked_reason": blocked_reason,
+            "mode": mode,
+            "mood": state.get("mood").cloned().unwrap_or(Value::Null),
+            "project": state.get("project").cloned().unwrap_or(Value::Null),
+            "cwd": state.get("cwd").cloned().unwrap_or(Value::Null),
+            "last_event": state.get("last_event").cloned().unwrap_or(Value::Null),
+            "last_verified_at": state.get("last_verified_at").cloned().unwrap_or(Value::Null),
+            "voice_line": state.get("voice_line").cloned().unwrap_or(Value::Null),
+            "ritual": state.get("ritual").cloned().unwrap_or(Value::Null),
+        }),
+    );
+    capabilities.insert(
+        "voice_policy".to_string(),
+        json!({
+            "default_silent": true,
+            "auto_ritual_allowed_modes": ["verified", "failed", "waiting_for_user", "handoff"],
+            "current_voice": pet_state_string_or_env(args, "tts_voice", "AB_PET_TTS_VOICE"),
+            "current_rate": pet_state_tts_rate(args),
+        }),
+    );
+    Value::Object(capabilities)
+}
+
+#[async_trait]
+impl McpTool for PetPresenceSyncTool {
+    fn name(&self) -> &'static str {
+        "pet_presence_sync"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Sync the current Codex pet sidecar state into this agent's presence row. \
+                 This is a Standard-profile bridge from pet_state to agent_presence: it \
+                 does not change the pet package, emit audio, or expand the Essential \
+                 tool surface."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pet_id":       { "type": "string", "description": "Pet id to sync. Defaults to AB_PET_ID, current Codex custom avatar, then xiao-shu-v2." },
+                    "session_id":   { "type": "string", "description": "Optional explicit presence session id. If omitted, session_identity conventions are used." },
+                    "name":         { "type": "string", "description": "Presence display name. Defaults to 'Codex <pet_id>'." },
+                    "description":  { "type": "string", "description": "Presence description. Defaults to a compact pet-state summary." },
+                    "version":      { "type": "string", "description": "Presence version label. Defaults to agent-bridge pet-presence-v23." },
+                    "url":          { "type": "string", "description": "Reserved for daemon mode." },
+                    "node":         { "type": "string", "description": "Override hostname." },
+                    "project":      { "type": "string", "description": "Override project slug. Defaults to pet state project or cwd basename." },
+                    "role":         { "type": "string", "default": "main", "description": "Presence role." },
+                    "tag":          { "type": "string", "description": "Optional disambiguator." },
+                    "cwd":          { "type": "string", "description": "Caller cwd. Defaults to pet state cwd or current dir." },
+                    "pid":          { "type": "integer", "description": "Caller pid. Defaults to the MCP server pid when omitted." },
+                    "auto_tag":     { "type": "boolean", "default": true, "description": "When true, avoid fresh presence id collisions with a pid-derived tag." },
+                    "activity_state": { "type": "string", "description": "Optional presence activity override. Defaults to pet mode." },
+                    "blocked_reason": { "type": "string", "description": "Optional compact blocked reason for UI surfaces." },
+                    "tts_voice":    { "type": "string", "description": "Voice policy override for presence metadata only." },
+                    "tts_rate":     { "type": "integer", "minimum": 80, "maximum": 300, "description": "Voice rate policy override for presence metadata only." },
+                    "capabilities": { "type": "object", "description": "Extra capability flags to merge before pet_presence / pet_state / voice_policy." },
+                    "skills":       { "type": "array", "description": "Optional skills array. Defaults to a compact pet-presence skill marker." }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let pet_id =
+            crate::pet_state::normalize_pet_id(args.get("pet_id").and_then(|v| v.as_str()));
+        let state_path = crate::pet_state::pet_state_path(&pet_id);
+        let state = match crate::pet_state::read_pet_state(&pet_id) {
+            Ok(Some(state)) => state,
+            Ok(None) => {
+                return Ok(ToolResult::error(format!(
+                    "pet_presence_sync: no state file at {}",
+                    state_path.display()
+                )))
+            }
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "pet_presence_sync: failed to read {}: {e}",
+                    state_path.display()
+                )))
+            }
+        };
+
+        let cwd_default = pet_state_str_field(&state, "cwd").unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "/".to_string())
+        });
+        let cwd = pet_state_string_or_default(&args, "cwd", &cwd_default);
+        let project_default = pet_state_str_field(&state, "project").unwrap_or_else(|| {
+            std::path::Path::new(&cwd)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(&cwd)
+                .to_string()
+        });
+        let project = pet_state_string_or_default(&args, "project", &project_default);
+        let role = pet_state_string_or_default(&args, "role", "main");
+        let explicit_tag = args.get("tag").and_then(|v| v.as_str());
+        let (node, _, _, tag, base_session_id) = resolve_identity(
+            Some(role.as_str()),
+            explicit_tag,
+            args.get("node").and_then(|v| v.as_str()),
+            Some(project.as_str()),
+            Some(cwd.as_str()),
+        );
+        let explicit_session_id = pet_state_str_field(&args, "session_id");
+        let auto_tag_enabled = args
+            .get("auto_tag")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let (final_tag, session_id, auto_tagged) = if let Some(session_id) = explicit_session_id {
+            (tag, session_id, false)
+        } else if explicit_tag.is_some() || !auto_tag_enabled {
+            (tag, base_session_id, false)
+        } else {
+            match store.agent_presence_get(&base_session_id).await {
+                Ok(Some(existing)) => {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    let my_pid = std::process::id();
+                    let is_fresh = now - existing.last_heartbeat_at <= PRESENCE_FRESH_SECS;
+                    let other_owner = existing.pid != Some(i64::from(my_pid));
+                    if is_fresh && other_owner {
+                        let auto = pid_tag_short(my_pid);
+                        let new_id = format!("{node}:{project}:{role}:{auto}");
+                        (Some(auto), new_id, true)
+                    } else {
+                        (tag, base_session_id, false)
+                    }
+                }
+                Ok(None) | Err(_) => (tag, base_session_id, false),
+            }
+        };
+
+        let mode = pet_state_str_field(&state, "mode").unwrap_or_else(|| "idle".to_string());
+        let default_name = format!("Codex {pet_id}");
+        let name = pet_state_string_or_default(&args, "name", &default_name);
+        let default_description = format!("Pet presence: {pet_id} is {mode} in {project}");
+        let description = pet_state_string_or_default(&args, "description", &default_description);
+        let version = pet_state_string_or_default(&args, "version", "agent-bridge pet-presence-v23");
+        let url = args.get("url").and_then(|v| v.as_str());
+        let pid = args
+            .get("pid")
+            .and_then(|v| v.as_i64())
+            .unwrap_or_else(|| i64::from(std::process::id()));
+        let capabilities = pet_presence_capabilities(&args, &pet_id, &state);
+        let default_skills = json!([{
+            "id": "pet-presence",
+            "name": "Codex pet presence",
+            "tags": ["pet_state", "voice", "agent-bridge"]
+        }]);
+        let skills_v = args.get("skills").cloned().unwrap_or(default_skills);
+
+        let upsert = ab_store::AgentPresenceUpsert {
+            name: Some(name.as_str()),
+            description: Some(description.as_str()),
+            version: Some(version.as_str()),
+            url,
+            node: Some(node.as_str()),
+            project: Some(project.as_str()),
+            role: Some(role.as_str()),
+            tag: final_tag.as_deref(),
+            cwd: Some(cwd.as_str()),
+            pid: Some(pid),
+            capabilities: Some(&capabilities),
+            skills: Some(&skills_v),
+        };
+
+        let row = store
+            .agent_presence_announce(&session_id, upsert)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("pet_presence_sync: {e}")))?;
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "session_id": session_id,
+            "auto_tagged": auto_tagged,
+            "pet_id": pet_id,
+            "pet_state": capabilities.get("pet_state").cloned().unwrap_or(Value::Null),
+            "voice_policy": capabilities.get("voice_policy").cloned().unwrap_or(Value::Null),
+            "presence": row,
         })))
     }
 }
@@ -7748,6 +7967,680 @@ impl McpTool for MemoryConsolidateTool {
                 "active_memories": memories.len(),
                 "kind_groups": by_kind.len(),
             },
+        })))
+    }
+}
+
+// ===========================================================================
+//                              pet_state_get / set
+// ===========================================================================
+
+pub struct PetStateGetTool;
+impl PetStateGetTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for PetStateGetTool {
+    fn name(&self) -> &'static str {
+        "pet_state_get"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read the sidecar JSON state for a Codex custom pet. \
+                 Use this to inspect the current pet presence state written by \
+                 Agent-Bridge hooks without touching the official Codex pet package."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pet_id": {
+                        "type": "string",
+                        "default": crate::pet_state::DEFAULT_PET_ID,
+                        "description": "Pet id to inspect. Defaults to AB_PET_ID, then the current Codex selected custom avatar, then xiao-shu-v2."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let pet_id =
+            crate::pet_state::normalize_pet_id(args.get("pet_id").and_then(|v| v.as_str()));
+        let path = crate::pet_state::pet_state_path(&pet_id);
+        match crate::pet_state::read_pet_state(&pet_id) {
+            Ok(state) => Ok(ToolResult::json_text(&json!({
+                "pet_id": pet_id,
+                "path": path.display().to_string(),
+                "exists": state.is_some(),
+                "state": state,
+            }))),
+            Err(e) => Ok(ToolResult::error(format!(
+                "pet_state_get: failed to read {}: {e}",
+                path.display()
+            ))),
+        }
+    }
+}
+
+pub struct PetStateSetTool {
+    hub: Hub,
+}
+impl PetStateSetTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+fn pet_state_valid_mode(mode: &str) -> bool {
+    matches!(
+        mode,
+        "idle"
+            | "orienting"
+            | "working"
+            | "reviewing"
+            | "waiting_for_user"
+            | "failed"
+            | "verified"
+            | "handoff"
+    )
+}
+
+fn pet_state_string_or_default(args: &Value, key: &str, default: &str) -> String {
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(default)
+        .to_string()
+}
+
+fn pet_state_optional_string_or_null(args: &Value, key: &str) -> Value {
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| json!(s))
+        .unwrap_or(Value::Null)
+}
+
+fn pet_state_env_u64(env_key: &str) -> Option<u64> {
+    std::env::var(env_key)
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
+fn pet_state_auto_spec_allows(spec: &str, mode: &str) -> bool {
+    let mode = mode.to_ascii_lowercase();
+    let tokens: Vec<String> = spec
+        .split(|c: char| c == ',' || c == ';' || c.is_ascii_whitespace())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_lowercase())
+        .collect();
+    if tokens.iter().any(|t| matches!(t.as_str(), "0" | "false" | "off" | "no" | "none")) {
+        return false;
+    }
+    tokens.iter().any(|t| match t.as_str() {
+        "1" | "true" | "yes" | "on" | "all" => true,
+        "completion" | "complete" | "success" => mode == "verified",
+        "wait" | "waiting" | "input" | "input-required" => mode == "waiting_for_user",
+        "handoff" | "sessionend" | "session-end" => mode == "handoff",
+        other => other == mode,
+    })
+}
+
+fn pet_state_auto_ritual_enabled(args: &Value, mode: &str) -> bool {
+    if let Some(auto) = args.get("auto_ritual").and_then(|v| v.as_bool()) {
+        return auto;
+    }
+    std::env::var("AB_PET_AUTO_TTS")
+        .ok()
+        .map(|spec| pet_state_auto_spec_allows(&spec, mode))
+        .unwrap_or(false)
+}
+
+fn pet_state_auto_ritual_args(args: &Value, pet_id: &str) -> Value {
+    let channel = pet_state_str_field(args, "ritual_channel")
+        .or_else(|| {
+            std::env::var("AB_PET_AUTO_TTS_CHANNEL")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
+        .filter(|v| matches!(v.as_str(), "tts" | "notification" | "both"))
+        .unwrap_or_else(|| "tts".to_string());
+    let cooldown_seconds = args
+        .get("ritual_cooldown_seconds")
+        .and_then(|v| v.as_u64())
+        .or_else(|| pet_state_env_u64("AB_PET_AUTO_TTS_COOLDOWN_SECONDS"))
+        .unwrap_or(300)
+        .min(86_400);
+    let force = args
+        .get("force_ritual")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    json!({
+        "pet_id": pet_id,
+        "channel": channel,
+        "enabled": true,
+        "cooldown_seconds": cooldown_seconds,
+        "force": force,
+    })
+}
+
+fn pet_state_tool_result_json(result: &ToolResult) -> Value {
+    match result.content.first() {
+        Some(ContentBlock::Text { text }) => serde_json::from_str(text)
+            .unwrap_or_else(|_| json!({ "text": text })),
+        Some(_) => json!({ "content": result.content }),
+        None => Value::Null,
+    }
+}
+
+#[async_trait]
+impl McpTool for PetStateSetTool {
+    fn name(&self) -> &'static str {
+        "pet_state_set"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Write the sidecar JSON state for a Codex custom pet. \
+                 This updates only Agent-Bridge pet presence state; it does not \
+                 modify the official Codex pet package, memory DB, or user files."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pet_id": {
+                        "type": "string",
+                        "default": crate::pet_state::DEFAULT_PET_ID,
+                        "description": "Defaults to AB_PET_ID, then the current Codex selected custom avatar, then xiao-shu-v2."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["idle", "orienting", "working", "reviewing", "waiting_for_user", "failed", "verified", "handoff"]
+                    },
+                    "mood": { "type": "string", "default": "calm" },
+                    "reason": { "type": "string" },
+                    "last_event": { "type": "string", "default": "pet_state_set" },
+                    "project": { "type": "string" },
+                    "cwd": { "type": "string" },
+                    "session_id": { "type": "string" },
+                    "voice_line": { "type": "string", "description": "Optional one-line voice cue. Empty means null." },
+                    "ritual": { "type": "string", "description": "Optional ritual cue. Empty means null." },
+                    "last_verified_at": {
+                        "type": "string",
+                        "description": "Optional RFC3339 timestamp. Defaults to now when mode=verified, otherwise null."
+                    },
+                    "auto_ritual": {
+                        "type": "boolean",
+                        "description": "When true, immediately runs the ritual gate after writing state. If omitted, AB_PET_AUTO_TTS can enable selected modes."
+                    },
+                    "ritual_channel": {
+                        "type": "string",
+                        "enum": ["tts", "notification", "both"],
+                        "description": "Channel for auto_ritual. Defaults to AB_PET_AUTO_TTS_CHANNEL, then tts."
+                    },
+                    "ritual_cooldown_seconds": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 86400,
+                        "description": "Cooldown for auto_ritual. Defaults to AB_PET_AUTO_TTS_COOLDOWN_SECONDS, then 300."
+                    },
+                    "force_ritual": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Bypass duplicate-event and silence-window checks for auto_ritual."
+                    }
+                },
+                "required": ["mode"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let mode = pet_state_string_or_default(&args, "mode", "");
+        if !pet_state_valid_mode(&mode) {
+            return Ok(ToolResult::error(format!(
+                "pet_state_set: invalid mode '{mode}'"
+            )));
+        }
+
+        let pet_id =
+            crate::pet_state::normalize_pet_id(args.get("pet_id").and_then(|v| v.as_str()));
+        let cwd = args
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "/".to_string())
+            });
+        let project_default = std::path::Path::new(&cwd)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&cwd)
+            .to_string();
+        let project = pet_state_string_or_default(&args, "project", &project_default);
+        let mood = pet_state_string_or_default(&args, "mood", "calm");
+        let reason = pet_state_string_or_default(&args, "reason", "manual pet state update");
+        let last_event = pet_state_string_or_default(&args, "last_event", "pet_state_set");
+        let now = crate::pet_state::now_utc_rfc3339();
+        let last_verified_at = args
+            .get("last_verified_at")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| json!(s))
+            .unwrap_or_else(|| {
+                if mode == "verified" {
+                    json!(now.clone())
+                } else {
+                    Value::Null
+                }
+            });
+
+        let state = json!({
+            "schema_version": 1,
+            "pet_id": pet_id.clone(),
+            "project": project,
+            "cwd": cwd,
+            "mode": mode,
+            "mood": mood,
+            "reason": reason,
+            "last_event": last_event,
+            "last_verified_at": last_verified_at,
+            "voice_line": pet_state_optional_string_or_null(&args, "voice_line"),
+            "ritual": pet_state_optional_string_or_null(&args, "ritual"),
+            "source": "mcp:pet_state_set",
+            "session_id": pet_state_optional_string_or_null(&args, "session_id"),
+            "updated_at": now,
+        });
+
+        match crate::pet_state::write_pet_state_value(&pet_id, &state) {
+            Ok(path) => {
+                let auto_ritual = if pet_state_auto_ritual_enabled(&args, &mode) {
+                    let ritual_args = pet_state_auto_ritual_args(&args, &pet_id);
+                    let result = PetStateRitualTool::new(self.hub.clone())
+                        .execute(ritual_args, ctx)
+                        .await?;
+                    json!({
+                        "enabled": true,
+                        "is_error": result.is_error,
+                        "result": pet_state_tool_result_json(&result),
+                    })
+                } else {
+                    json!({
+                        "enabled": false,
+                        "reason": "not_requested"
+                    })
+                };
+                Ok(ToolResult::json_text(&json!({
+                "status": "ok",
+                "pet_id": pet_id,
+                "path": path.display().to_string(),
+                "state": state,
+                "auto_ritual": auto_ritual,
+            })))
+            }
+            Err(e) => Ok(ToolResult::error(format!("pet_state_set: {e}"))),
+        }
+    }
+}
+
+pub struct PetStateRitualTool {
+    hub: Hub,
+}
+impl PetStateRitualTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+struct PetRitualDefault {
+    line: &'static str,
+    ritual: &'static str,
+    severity: NotifySeverity,
+}
+
+fn pet_state_default_ritual(mode: &str) -> Option<PetRitualDefault> {
+    Some(match mode {
+        "verified" => PetRitualDefault {
+            line: "已验收。",
+            ritual: "seal",
+            severity: NotifySeverity::Success,
+        },
+        "failed" => PetRitualDefault {
+            line: "这里卡住了，需要看一眼。",
+            ritual: "ink_dim",
+            severity: NotifySeverity::Error,
+        },
+        "waiting_for_user" => PetRitualDefault {
+            line: "等你拍板。",
+            ritual: "lantern",
+            severity: NotifySeverity::Attention,
+        },
+        "handoff" => PetRitualDefault {
+            line: "本轮交接已完成。",
+            ritual: "handoff",
+            severity: NotifySeverity::Success,
+        },
+        _ => return None,
+    })
+}
+
+fn pet_state_str_field(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+}
+
+fn pet_state_bool_or_env(args: &Value, key: &str, env_key: &str) -> bool {
+    args.get(key).and_then(|v| v.as_bool()).unwrap_or_else(|| {
+        std::env::var(env_key)
+            .ok()
+            .map(|v| {
+                matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false)
+    })
+}
+
+fn pet_state_string_or_env(args: &Value, key: &str, env_key: &str) -> Option<String> {
+    pet_state_str_field(args, key).or_else(|| {
+        std::env::var(env_key)
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    })
+}
+
+fn pet_state_tts_rate(args: &Value) -> Option<u64> {
+    args.get("tts_rate")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            std::env::var("AB_PET_TTS_RATE")
+                .ok()
+                .and_then(|v| v.trim().parse::<u64>().ok())
+        })
+        .map(|rate| rate.clamp(80, 300))
+}
+
+fn pet_state_now_unix_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn pet_state_ritual_event_key(state: &Value, mode: &str) -> String {
+    let last_event = pet_state_str_field(state, "last_event").unwrap_or_default();
+    let session_id = pet_state_str_field(state, "session_id").unwrap_or_default();
+    let cwd = pet_state_str_field(state, "cwd").unwrap_or_default();
+    format!("{mode}|{last_event}|{session_id}|{cwd}")
+}
+
+#[async_trait]
+impl McpTool for PetStateRitualTool {
+    fn name(&self) -> &'static str {
+        "pet_state_ritual"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Preview or emit a throttled ritual cue for the current Codex pet state. \
+                 By default this only previews. Actual notification/TTS requires enabled=true \
+                 or AB_PET_RITUAL_ENABLE=1, so hooks stay silent and JSON-safe."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pet_id": {
+                        "type": "string",
+                        "default": crate::pet_state::DEFAULT_PET_ID,
+                        "description": "Defaults to AB_PET_ID, then the current Codex selected custom avatar, then xiao-shu-v2."
+                    },
+                    "channel": {
+                        "type": "string",
+                        "enum": ["preview", "notification", "tts", "both"],
+                        "default": "preview"
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "Required for real notification/TTS unless AB_PET_RITUAL_ENABLE=1."
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Bypass duplicate-event and silence-window checks."
+                    },
+                    "cooldown_seconds": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 86400,
+                        "default": 300
+                    },
+                    "voice_line": { "type": "string", "description": "Override the state/default voice line." },
+                    "ritual": { "type": "string", "description": "Override the state/default ritual cue." },
+                    "tts_voice": {
+                        "type": "string",
+                        "description": "Optional macOS say voice, for example Tingting. Can also use AB_PET_TTS_VOICE."
+                    },
+                    "tts_rate": {
+                        "type": "integer",
+                        "minimum": 80,
+                        "maximum": 300,
+                        "description": "Optional macOS say words-per-minute rate. Can also use AB_PET_TTS_RATE."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let pet_id =
+            crate::pet_state::normalize_pet_id(args.get("pet_id").and_then(|v| v.as_str()));
+        let state_path = crate::pet_state::pet_state_path(&pet_id);
+        let state = match crate::pet_state::read_pet_state(&pet_id) {
+            Ok(Some(state)) => state,
+            Ok(None) => {
+                return Ok(ToolResult::error(format!(
+                    "pet_state_ritual: no state file at {}",
+                    state_path.display()
+                )))
+            }
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "pet_state_ritual: failed to read {}: {e}",
+                    state_path.display()
+                )))
+            }
+        };
+
+        let mode = pet_state_str_field(&state, "mode").unwrap_or_else(|| "idle".to_string());
+        let defaults = match pet_state_default_ritual(&mode) {
+            Some(defaults) => defaults,
+            None => {
+                return Ok(ToolResult::json_text(&json!({
+                    "status": "ignored",
+                    "emitted": false,
+                    "reason": "mode has no ritual cue",
+                    "pet_id": pet_id,
+                    "mode": mode,
+                })))
+            }
+        };
+
+        let channel = pet_state_string_or_default(&args, "channel", "preview");
+        if !matches!(
+            channel.as_str(),
+            "preview" | "notification" | "tts" | "both"
+        ) {
+            return Ok(ToolResult::error(format!(
+                "pet_state_ritual: invalid channel '{channel}'"
+            )));
+        }
+        let enabled = pet_state_bool_or_env(&args, "enabled", "AB_PET_RITUAL_ENABLE");
+        let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+        let cooldown_seconds = args
+            .get("cooldown_seconds")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(300)
+            .min(86_400) as i64;
+        let line = pet_state_str_field(&args, "voice_line")
+            .or_else(|| pet_state_str_field(&state, "voice_line"))
+            .unwrap_or_else(|| defaults.line.to_string());
+        let ritual = pet_state_str_field(&args, "ritual")
+            .or_else(|| pet_state_str_field(&state, "ritual"))
+            .unwrap_or_else(|| defaults.ritual.to_string());
+        let tts_voice = pet_state_string_or_env(&args, "tts_voice", "AB_PET_TTS_VOICE");
+        let tts_rate = pet_state_tts_rate(&args);
+        let event_key = pet_state_ritual_event_key(&state, &mode);
+        let now_unix = pet_state_now_unix_secs();
+        let now = crate::pet_state::unix_secs_to_utc_rfc3339(now_unix);
+        let receipt_path = crate::pet_state::pet_ritual_state_path(&pet_id);
+        let last_receipt = crate::pet_state::read_pet_state_path(&receipt_path).unwrap_or(None);
+        let duplicate_event = last_receipt
+            .as_ref()
+            .and_then(|v| v.get("event_key"))
+            .and_then(|v| v.as_str())
+            .map(|v| v == event_key)
+            .unwrap_or(false);
+        let in_silence_window = last_receipt
+            .as_ref()
+            .and_then(|v| v.get("emitted_at_unix"))
+            .and_then(|v| v.as_i64())
+            .map(|then| {
+                cooldown_seconds > 0 && now_unix >= then && now_unix - then < cooldown_seconds
+            })
+            .unwrap_or(false);
+
+        let blocked_reason = if channel == "preview" {
+            Some("preview")
+        } else if !enabled {
+            Some("not_enabled")
+        } else if !force && duplicate_event {
+            Some("duplicate_event")
+        } else if !force && in_silence_window {
+            Some("silence_window")
+        } else {
+            None
+        };
+        let should_emit = blocked_reason.is_none();
+        let mut notification = Value::Null;
+        let mut tts = Value::Null;
+
+        if should_emit && matches!(channel.as_str(), "notification" | "both") {
+            let evt = NotifyEvent {
+                source: NotifySource::Mcp,
+                severity: defaults.severity,
+                title: "小舒".into(),
+                body: line.clone(),
+                session_id: None,
+                context: json!({
+                    "pet_id": pet_id.clone(),
+                    "mode": mode.clone(),
+                    "ritual": ritual.clone(),
+                    "event_key": event_key.clone(),
+                }),
+            };
+            let (delivered, persisted) = self.hub.deliver(&evt).await;
+            notification = json!({
+                "delivered": delivered,
+                "persisted": persisted,
+            });
+        }
+
+        if should_emit && matches!(channel.as_str(), "tts" | "both") {
+            if cfg!(target_os = "macos") {
+                let mut cmd = TokioCommand::new("say");
+                if let Some(voice) = &tts_voice {
+                    cmd.arg("-v").arg(voice);
+                }
+                if let Some(rate) = tts_rate {
+                    cmd.arg("-r").arg(rate.to_string());
+                }
+                match cmd.arg(&line).status().await {
+                    Ok(status) => {
+                        tts = json!({
+                            "ok": status.success(),
+                            "exit_code": status.code(),
+                            "voice": tts_voice,
+                            "rate": tts_rate,
+                        });
+                    }
+                    Err(e) => {
+                        tts = json!({
+                            "ok": false,
+                            "error": e.to_string(),
+                            "voice": tts_voice,
+                            "rate": tts_rate,
+                        });
+                    }
+                }
+            } else {
+                tts = json!({
+                    "ok": false,
+                    "error": "tts channel currently supports macOS 'say' only",
+                });
+            }
+        }
+
+        if should_emit {
+            let receipt = json!({
+                "schema_version": 1,
+                "pet_id": pet_id.clone(),
+                "mode": mode.clone(),
+                "line": line.clone(),
+                "ritual": ritual.clone(),
+                "channel": channel.clone(),
+                "event_key": event_key.clone(),
+                "tts_voice": tts_voice,
+                "tts_rate": tts_rate,
+                "source": "pet_state_ritual",
+                "emitted_at": now,
+                "emitted_at_unix": now_unix,
+            });
+            if let Err(e) = crate::pet_state::write_pet_state_path(&receipt_path, &receipt) {
+                return Ok(ToolResult::error(format!(
+                    "pet_state_ritual: failed to write {}: {e}",
+                    receipt_path.display()
+                )));
+            }
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "status": if should_emit { "emitted" } else { "skipped" },
+            "emitted": should_emit,
+            "blocked_reason": blocked_reason,
+            "pet_id": pet_id,
+            "mode": mode,
+            "line": line,
+            "ritual": ritual,
+            "channel": channel,
+            "tts_voice": tts_voice,
+            "tts_rate": tts_rate,
+            "enabled": enabled,
+            "force": force,
+            "cooldown_seconds": cooldown_seconds,
+            "duplicate_event": duplicate_event,
+            "in_silence_window": in_silence_window,
+            "event_key": event_key,
+            "receipt_path": receipt_path.display().to_string(),
+            "notification": notification,
+            "tts": tts,
         })))
     }
 }
@@ -15408,6 +16301,9 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     // IDE bridge: 7-day audit shows 0 calls; demoted to Niche.
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(IdeSnapshotTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Niche, Arc::new(IdeCommandTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PetStateGetTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PetStateSetTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Essential, Arc::new(PetStateRitualTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ProjectDetectTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ChangesDigestTool::new(hub.clone())));
     // Plans + worktrees + codebase search.
@@ -15457,6 +16353,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionIdentityTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentPresenceAnnounceTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(AgentPresenceListTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Standard, Arc::new(PetPresenceSyncTool::new(hub.clone())));
     // Tailscale REST API: ACL editing without browser automation.
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(TailscaleAclGetTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(TailscaleAclSetTool::new()));
@@ -16371,6 +17268,81 @@ fn unescape_keys(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pet_state_auto_spec_allows_sparse_semantic_modes() {
+        assert!(pet_state_auto_spec_allows(
+            "verified,failed,waiting_for_user",
+            "verified"
+        ));
+        assert!(pet_state_auto_spec_allows(
+            "verified,failed,waiting_for_user",
+            "failed"
+        ));
+        assert!(pet_state_auto_spec_allows(
+            "verified,failed,waiting_for_user",
+            "waiting_for_user"
+        ));
+        assert!(!pet_state_auto_spec_allows(
+            "verified,failed,waiting_for_user",
+            "orienting"
+        ));
+        assert!(pet_state_auto_spec_allows("completion", "verified"));
+        assert!(pet_state_auto_spec_allows("wait", "waiting_for_user"));
+        assert!(pet_state_auto_spec_allows("handoff", "handoff"));
+        assert!(!pet_state_auto_spec_allows("off,verified", "verified"));
+    }
+
+    #[test]
+    fn pet_state_auto_ritual_args_defaults_to_tts_and_clamps_cooldown() {
+        let args = serde_json::json!({
+            "ritual_channel": "invalid",
+            "ritual_cooldown_seconds": 999999,
+            "force_ritual": true
+        });
+        let ritual = pet_state_auto_ritual_args(&args, "xiao-shu-dev");
+        assert_eq!(ritual["pet_id"], "xiao-shu-dev");
+        assert_eq!(ritual["channel"], "tts");
+        assert_eq!(ritual["enabled"], true);
+        assert_eq!(ritual["cooldown_seconds"], 86_400);
+        assert_eq!(ritual["force"], true);
+    }
+
+    #[test]
+    fn pet_presence_capabilities_merges_state_and_voice_policy() {
+        let args = serde_json::json!({
+            "capabilities": { "forum": true },
+            "activity_state": "reviewing",
+            "blocked_reason": "needs-human-choice",
+            "tts_voice": "Meijia",
+            "tts_rate": 180
+        });
+        let state = serde_json::json!({
+            "mode": "waiting_for_user",
+            "mood": "calm",
+            "project": "agent-bridge",
+            "cwd": "/tmp/agent-bridge",
+            "last_event": "unit-test",
+            "last_verified_at": null,
+            "voice_line": null,
+            "ritual": "lantern"
+        });
+
+        let capabilities = pet_presence_capabilities(&args, "xiao-shu-dev", &state);
+
+        assert_eq!(capabilities["forum"], true);
+        assert_eq!(capabilities["pet_presence"], true);
+        assert_eq!(capabilities["pet_state"]["pet_id"], "xiao-shu-dev");
+        assert_eq!(capabilities["pet_state"]["mode"], "waiting_for_user");
+        assert_eq!(capabilities["pet_state"]["activity_state"], "reviewing");
+        assert_eq!(
+            capabilities["pet_state"]["blocked_reason"],
+            "needs-human-choice"
+        );
+        assert_eq!(capabilities["voice_policy"]["default_silent"], true);
+        assert_eq!(capabilities["voice_policy"]["current_voice"], "Meijia");
+        assert_eq!(capabilities["voice_policy"]["current_rate"], 180);
+    }
 
     #[test]
     fn drift_ratio_first_write_is_zero() {

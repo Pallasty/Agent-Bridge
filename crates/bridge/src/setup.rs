@@ -395,6 +395,21 @@ fn merge_codex_config(home: &Path, bin_dst: &Path, enable_hooks: bool) -> Result
         String::new()
     };
 
+    let mut env_lines = vec!["AGENT_BRIDGE_TOOL_PROFILE = \"essential\"".to_string()];
+    for line in toml_table_body_lines(&raw, "mcp_servers.agent-bridge.env") {
+        let trimmed = line.trim_start();
+        if trimmed
+            .strip_prefix("AGENT_BRIDGE_TOOL_PROFILE")
+            .and_then(|rest| rest.trim_start().strip_prefix('='))
+            .is_some()
+        {
+            continue;
+        }
+        if !trimmed.is_empty() {
+            env_lines.push(line.to_string());
+        }
+    }
+
     let block = format!(
         r#"[mcp_servers.agent-bridge]
 command = "{}"
@@ -405,9 +420,10 @@ tool_timeout_sec = 300
 supports_parallel_tool_calls = false
 
 [mcp_servers.agent-bridge.env]
-AGENT_BRIDGE_TOOL_PROFILE = "essential"
+{}
 "#,
-        escape_toml_basic_string(&bin_dst.display().to_string())
+        escape_toml_basic_string(&bin_dst.display().to_string()),
+        env_lines.join("\n")
     );
 
     let updated = replace_toml_table(&raw, "mcp_servers.agent-bridge", &block);
@@ -670,6 +686,24 @@ fn replace_toml_table(raw: &str, table: &str, block: &str) -> String {
     out
 }
 
+fn toml_table_body_lines<'a>(raw: &'a str, table: &str) -> Vec<&'a str> {
+    let mut lines = Vec::new();
+    let mut in_table = false;
+    for line in raw.lines() {
+        if let Some(next_table) = toml_table_name(line) {
+            if in_table {
+                break;
+            }
+            in_table = next_table == table;
+            continue;
+        }
+        if in_table {
+            lines.push(line);
+        }
+    }
+    lines
+}
+
 fn ensure_toml_bool(raw: &str, table: &str, key: &str, value: bool) -> String {
     let header = format!("[{table}]");
     let assignment = format!("{key} = {value}");
@@ -871,7 +905,10 @@ fn script_name_for_event(event: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_toml_bool, merge_codex_hooks, merge_gemini_settings, replace_toml_table};
+    use super::{
+        ensure_toml_bool, merge_codex_config, merge_codex_hooks, merge_gemini_settings,
+        replace_toml_table,
+    };
     use std::fs;
 
     #[test]
@@ -915,6 +952,43 @@ AGENT_BRIDGE_TOOL_PROFILE = \"essential\"
         assert!(!out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"all\""));
         assert!(out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"essential\""));
         assert!(out.contains("[plugins.example]\nenabled = true"));
+    }
+
+    #[test]
+    fn merge_codex_config_preserves_existing_agent_bridge_env() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agent-bridge-codex-config-test-{}",
+            std::process::id()
+        ));
+        let codex_dir = tmp.join(".codex");
+        fs::create_dir_all(&codex_dir).unwrap();
+        fs::write(
+            codex_dir.join("config.toml"),
+            r#"model = "gpt-5.5"
+
+[mcp_servers.agent-bridge]
+command = "old"
+
+[mcp_servers.agent-bridge.env]
+AGENT_BRIDGE_TOOL_PROFILE = "all"
+AB_PET_TTS_VOICE = "Meijia"
+AB_PET_TTS_RATE = "180"
+
+[plugins.example]
+enabled = true
+"#,
+        )
+        .unwrap();
+
+        merge_codex_config(&tmp, &tmp.join(".local/bin/agent-bridge"), true).unwrap();
+
+        let out = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+        assert!(out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"essential\""));
+        assert!(out.contains("AB_PET_TTS_VOICE = \"Meijia\""));
+        assert!(out.contains("AB_PET_TTS_RATE = \"180\""));
+        assert!(out.contains("[plugins.example]\nenabled = true"));
+
+        fs::remove_dir_all(tmp).unwrap();
     }
 
     #[test]

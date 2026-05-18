@@ -18,12 +18,164 @@ _ab_state_dir() {
     fi
 }
 
+_ab_active_pet_id() {
+    python3 - <<'PY' 2>/dev/null || printf '%s\n' 'xiao-shu-v2'
+import json
+import os
+
+def clean(value):
+    value = (value or "").strip()
+    cleaned = "".join(
+        ch for ch in value
+        if ch.isascii() and (ch.isalnum() or ch in "-_")
+    )
+    return cleaned or None
+
+env_pet = clean(os.environ.get("AB_PET_ID"))
+if env_pet:
+    print(env_pet)
+    raise SystemExit(0)
+
+path = os.path.join(os.path.expanduser("~"), ".codex", ".codex-global-state.json")
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        state = json.load(f)
+    selected = (
+        state.get("electron-persisted-atom-state", {})
+        .get("selected-avatar-id", "")
+    )
+    if selected.startswith("custom:"):
+        pet = clean(selected.removeprefix("custom:"))
+        if pet:
+            print(pet)
+            raise SystemExit(0)
+except Exception:
+    pass
+
+print("xiao-shu-v2")
+PY
+}
+
 _AB_STATE_DIR="$(_ab_state_dir)"
 HOOK_PAYLOAD=$(cat 2>/dev/null || true)
 _AB_HOOK_EVENT="stop"
 if [[ "${AB_SESSION_END_CURATE:-}" == "1" ]]; then
     _AB_HOOK_EVENT="sessionEnd"
 fi
+
+_ab_pet_auto_tts_enabled() {
+    local spec="${AB_PET_AUTO_TTS:-}"
+    [[ -n "$spec" ]] || return 1
+
+    local spec_lc event_lc
+    spec_lc=$(printf '%s' "$spec" | tr '[:upper:]' '[:lower:]' | tr '; ' ',,')
+    event_lc=$(printf '%s' "$_AB_HOOK_EVENT" | tr '[:upper:]' '[:lower:]')
+
+    case ",$spec_lc," in
+        *,0,*|*,false,*|*,off,*|*,no,*|*,none,*) return 1 ;;
+        *,1,*|*,true,*|*,yes,*|*,on,*|*,all,*|*,handoff,*) return 0 ;;
+    esac
+    case ",$spec_lc," in
+        *,"$event_lc",*) return 0 ;;
+    esac
+    return 1
+}
+
+_ab_pet_auto_tts_emit() {
+    [[ "${AB_PET_STATE_DISABLE:-}" == "1" ]] && return 0
+    _ab_pet_auto_tts_enabled || return 0
+
+    local ab channel cooldown
+    ab="${AGENT_BRIDGE_BIN:-$(command -v agent-bridge 2>/dev/null || echo "$HOME/.local/bin/agent-bridge")}"
+    [[ -x "$ab" ]] || return 0
+
+    channel="${AB_PET_AUTO_TTS_CHANNEL:-tts}"
+    case "$channel" in
+        tts|notification|both) ;;
+        *) channel="tts" ;;
+    esac
+
+    cooldown="${AB_PET_AUTO_TTS_COOLDOWN_SECONDS:-1800}"
+    case "$cooldown" in
+        ''|*[!0-9]*) cooldown="1800" ;;
+    esac
+
+    (
+        AGENT_BRIDGE_TOOL_PROFILE=essential "$ab" mcp <<JSONRPC
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"pet-auto-tts-hook","version":"1"},"capabilities":{}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pet_state_ritual","arguments":{"channel":"$channel","enabled":true,"cooldown_seconds":$cooldown}}}
+JSONRPC
+    ) >/dev/null 2>&1 &
+}
+
+_ab_pet_state_write() {
+    [[ "${AB_PET_STATE_DISABLE:-}" == "1" ]] && return 0
+    local pet_id
+    pet_id="$(_ab_active_pet_id)"
+    pet_id="${pet_id:-xiao-shu-v2}"
+    local reason="session stop hook launched memory compact/sync"
+    if [[ "$_AB_HOOK_EVENT" == "sessionEnd" ]]; then
+        reason="session end hook launched memory curate/sync"
+    fi
+    AB_HOOK_PAYLOAD="$HOOK_PAYLOAD" python3 - "$_AB_STATE_DIR" "$pet_id" "$_AB_HOOK_EVENT" "${PWD:-/}" "$reason" <<'PY' >/dev/null 2>&1 || true
+import datetime
+import json
+import os
+import tempfile
+import sys
+
+state_dir, pet_id, event, cwd, reason = sys.argv[1:6]
+pet_id = "".join(
+    ch for ch in pet_id
+    if ch.isascii() and (ch.isalnum() or ch in "-_")
+) or "xiao-shu-v2"
+project = os.path.basename(cwd.rstrip(os.sep)) or cwd
+session_id = ""
+try:
+    payload = json.loads(os.environ.get("AB_HOOK_PAYLOAD", "") or "{}")
+    session_id = payload.get("session_id") or payload.get("sessionId") or ""
+except Exception:
+    pass
+
+now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+state = {
+    "schema_version": 1,
+    "pet_id": pet_id,
+    "project": project,
+    "cwd": cwd,
+    "mode": "handoff",
+    "mood": "calm",
+    "reason": reason,
+    "last_event": event,
+    "last_verified_at": None,
+    "voice_line": "本轮交接已完成。",
+    "ritual": "handoff",
+    "source": "ab-session-end-hook",
+    "session_id": session_id,
+    "updated_at": now,
+}
+
+out_dir = os.path.join(state_dir, "pet_state")
+os.makedirs(out_dir, exist_ok=True)
+out_path = os.path.join(out_dir, f"{pet_id}.json")
+fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", suffix=".json", dir=out_dir)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, out_path)
+finally:
+    if os.path.exists(tmp_path):
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+PY
+}
+_ab_pet_state_write
+_ab_pet_auto_tts_emit
 
 # Log this hook run to the shared hook-runs.jsonl file (read by hook_status MCP tool).
 _AB_HOOK_LOG="$_AB_STATE_DIR/hook-runs.jsonl"

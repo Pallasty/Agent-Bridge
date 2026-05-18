@@ -25,6 +25,44 @@ _ab_state_dir() {
     fi
 }
 
+_ab_active_pet_id() {
+    python3 - <<'PY' 2>/dev/null || printf '%s\n' 'xiao-shu-v2'
+import json
+import os
+
+def clean(value):
+    value = (value or "").strip()
+    cleaned = "".join(
+        ch for ch in value
+        if ch.isascii() and (ch.isalnum() or ch in "-_")
+    )
+    return cleaned or None
+
+env_pet = clean(os.environ.get("AB_PET_ID"))
+if env_pet:
+    print(env_pet)
+    raise SystemExit(0)
+
+path = os.path.join(os.path.expanduser("~"), ".codex", ".codex-global-state.json")
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        state = json.load(f)
+    selected = (
+        state.get("electron-persisted-atom-state", {})
+        .get("selected-avatar-id", "")
+    )
+    if selected.startswith("custom:"):
+        pet = clean(selected.removeprefix("custom:"))
+        if pet:
+            print(pet)
+            raise SystemExit(0)
+except Exception:
+    pass
+
+print("xiao-shu-v2")
+PY
+}
+
 _AB_STATE_DIR="$(_ab_state_dir)"
 DB="${AGENT_BRIDGE_DB:-$_AB_STATE_DIR/state.db}"
 
@@ -37,8 +75,6 @@ _ab_log_hook_run() {
         "$_AB_HOOK_START" "$exit_code" "$output_bytes" >> "$_AB_HOOK_LOG" 2>/dev/null || true
 }
 trap '_ab_log_hook_run $? 0' EXIT
-
-[[ -f "$DB" ]] || exit 0
 
 # Skip inside memory-curator sub-agents to avoid recursive context bloat.
 [[ "${AB_MEMORY_CURATOR:-}" == "1" ]] && exit 0
@@ -53,6 +89,75 @@ except Exception:
     pass
 ' 2>/dev/null)
 SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-$$}}"
+
+_ab_pet_state_write() {
+    [[ "${AB_PET_STATE_DISABLE:-}" == "1" ]] && return 0
+    local pet_id
+    pet_id="$(_ab_active_pet_id)"
+    pet_id="${pet_id:-xiao-shu-v2}"
+    local reason="user prompt submitted; agent is orienting"
+    AB_HOOK_PAYLOAD="$HOOK_PAYLOAD" python3 - "$_AB_STATE_DIR" "$pet_id" "$SESSION_ID" "${PWD:-/}" "$reason" <<'PY' >/dev/null 2>&1 || true
+import datetime
+import json
+import os
+import tempfile
+import sys
+
+state_dir, pet_id, session_id, cwd, reason = sys.argv[1:6]
+pet_id = "".join(
+    ch for ch in pet_id
+    if ch.isascii() and (ch.isalnum() or ch in "-_")
+) or "xiao-shu-v2"
+project = os.path.basename(cwd.rstrip(os.sep)) or cwd
+
+# Payload is parsed only to accept session id variants. Prompt text is
+# intentionally not persisted in pet state.
+try:
+    payload = json.loads(os.environ.get("AB_HOOK_PAYLOAD", "") or "{}")
+    session_id = payload.get("session_id") or payload.get("sessionId") or session_id
+except Exception:
+    pass
+
+now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+state = {
+    "schema_version": 1,
+    "pet_id": pet_id,
+    "project": project,
+    "cwd": cwd,
+    "mode": "orienting",
+    "mood": "calm",
+    "reason": reason,
+    "last_event": "UserPromptSubmit",
+    "last_verified_at": None,
+    "voice_line": None,
+    "ritual": None,
+    "source": "ab-memory-hook",
+    "session_id": session_id,
+    "updated_at": now,
+}
+
+out_dir = os.path.join(state_dir, "pet_state")
+os.makedirs(out_dir, exist_ok=True)
+out_path = os.path.join(out_dir, f"{pet_id}.json")
+fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", suffix=".json", dir=out_dir)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, out_path)
+finally:
+    if os.path.exists(tmp_path):
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+PY
+}
+_ab_pet_state_write
+
+[[ -f "$DB" ]] || exit 0
 
 LOCK="/tmp/ab-mem-injected-${SESSION_ID}"
 [[ -f "$LOCK" ]] && exit 0

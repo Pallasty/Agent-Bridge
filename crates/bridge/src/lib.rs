@@ -17,6 +17,7 @@ pub mod ide;
 pub mod peer_client;
 pub mod mcp_tools;
 pub mod palace_viewer;
+pub mod pet_state;
 pub mod project;
 pub mod router;
 pub mod security;
