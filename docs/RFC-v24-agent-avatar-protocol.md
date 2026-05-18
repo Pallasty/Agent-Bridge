@@ -358,6 +358,12 @@ Mutating `avatar_state_set` is intentionally not started yet.
 Project protocol v1 into `capabilities.avatar_state` while continuing to emit
 `capabilities.pet_state` for Codex compatibility.
 
+Implementation status: `pet_presence_sync` now emits both
+`capabilities.avatar_state` and compatibility `capabilities.pet_state` on
+2026-05-18. Debug and installed-binary Standard probes passed. An installed
+`AGENT_BRIDGE_CLIENT=claude-code` runtime-label probe also passed; a real
+non-Codex client-session dogfood pass is still pending.
+
 ### Stage 5 - Read-only multi-agent surface
 
 Build a panel or terminal view that shows avatar id, runtime, mode,
@@ -372,7 +378,7 @@ No auto-control in this stage.
 |---|---|
 | Codex `pet_state_set` with Phase 6 facets | Existing sidecar keeps the new fields |
 | Codex `pet_state_get` after write | Fields round-trip without losing old keys |
-| Standard `pet_presence_sync` | Presence row carries compact behavior state |
+| Standard `pet_presence_sync` | Presence row carries canonical `avatar_state` plus compatibility `pet_state` |
 | Standard `avatar_adapter_capabilities` | Tool reports adapter/surface availability without mutating state |
 | Standard `avatar_state_get` | Existing pet sidecar projects to protocol v1 without mutating state |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |
@@ -390,8 +396,8 @@ No auto-control in this stage.
    adding `avatar_state_set`?
 2. Should `avatar_id` default to `pet_id` for Codex only, or should the default
    be a new runtime-neutral identity?
-3. Should `capabilities.avatar_state` replace `capabilities.pet_state` in one
-   migration, or should both remain indefinitely?
+3. How long should `capabilities.pet_state` remain after `avatar_state` has
+   enough non-Codex readers?
 4. Should `risk_level` stay free-form string with recommended values, or be
    validated to `low|medium|high` in the writer?
 5. Should `agent_id` always be the presence `session_id`, or can a frontend

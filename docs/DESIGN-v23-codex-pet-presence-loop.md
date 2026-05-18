@@ -435,6 +435,7 @@ Phase 5.1 helper:
 
 - Added `pet_presence_sync` as a Standard-profile MCP tool.
 - It reads the current pet state file, computes a presence session id with the v19 identity convention, merges `capabilities.pet_presence=true`, `capabilities.pet_state`, and `capabilities.voice_policy`, then upserts the row through the existing `agent_presence_announce` store path.
+- Phase 7 migration adds canonical `capabilities.avatar_state` while keeping `capabilities.pet_state` as the Codex compatibility projection.
 - It emits no audio and does not modify the official Codex pet package.
 - Debug MCP validation confirmed `pet_presence_sync` is absent from Essential, present in Standard, and syncs `xiao-shu-dev / verified / Meijia / 180` into `agent_presence_list`.
 - Post-install profile probe confirmed Essential exposes 36 tools with `pet_state_get`, `pet_state_set`, and `pet_state_ritual`, while Standard exposes 96 tools and includes `pet_presence_sync`.
@@ -488,7 +489,7 @@ Voice policy:
 
 Presence policy:
 
-- Reuse `capabilities.pet_state` first.
+- Emit canonical `capabilities.avatar_state` for protocol v1 readers and keep `capabilities.pet_state` for Codex compatibility.
 - Add `capabilities.pet_behavior` only if the compact state grows too noisy.
 - Keep `pet_presence_sync` in Standard until live telemetry or UI usage proves Essential needs it.
 
@@ -623,6 +624,7 @@ Phase 7 tasks:
 4. **Phase 7.4 — Cross-Agent Presence Projection**
    - Project the core protocol into `agent_presence_announce` capabilities consistently across Codex, Claude Code, Warp, Gemini, Auggie, and local CLI.
    - Use `session_identity` as the canonical agent id when a frontend does not provide one.
+   - Status: first Codex/Standard projection implemented in `pet_presence_sync` on 2026-05-18; debug and installed-binary Standard probes passed with both `capabilities.avatar_state` and compatibility `capabilities.pet_state`; installed `AGENT_BRIDGE_CLIENT=claude-code` runtime-label probe also passed.
 
 5. **Phase 7.5 — Read-Only Multi-Agent Surface**
    - Build or prototype a read-only view that shows multiple agents with avatar id, mode, activity state, risk, block reason, and next action.
@@ -655,9 +657,9 @@ Acceptance:
 Phase 6.1 and Phase 6.2 are now live-verified in the current Codex/MCP path.
 Move in this order:
 
-1. Review whether `pet_presence_sync` should project `capabilities.avatar_state` in addition to `capabilities.pet_state`.
-2. Verify the combined presence projection against at least one Standard probe.
-3. Keep mutating `avatar_state_set` behind the RFC boundary until adapter availability is proven in at least one non-Codex runtime.
+1. Decide whether the read-only multi-agent surface should read `capabilities.avatar_state` directly from `agent_presence_list`.
+2. Validate the same protocol shape from a real non-Codex client session, not only a runtime-label stdio probe.
+3. Keep mutating `avatar_state_set` behind the RFC boundary until the read-only surface has been dogfooded.
 4. Dogfood Phase 6.3 during real Codex work.
 5. Return to Phase 3 skin switching after the behavior and presence loop is stable; do not auto-switch official Codex avatars until app reload behavior is proven.
 

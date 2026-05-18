@@ -3550,6 +3550,15 @@ fn pet_presence_capabilities(args: &Value, pet_id: &str, state: &Value) -> Value
         }),
     );
     capabilities.insert(
+        "avatar_state".to_string(),
+        avatar_state_project(
+            args,
+            pet_id,
+            state,
+            &crate::pet_state::pet_state_path(pet_id),
+        ),
+    );
+    capabilities.insert(
         "voice_policy".to_string(),
         json!({
             "default_silent": true,
@@ -3588,6 +3597,8 @@ impl McpTool for PetPresenceSyncTool {
                     "project":      { "type": "string", "description": "Override project slug. Defaults to pet state project or cwd basename." },
                     "role":         { "type": "string", "default": "main", "description": "Presence role." },
                     "tag":          { "type": "string", "description": "Optional disambiguator." },
+                    "agent_id":     { "type": "string", "description": "Optional Agent Avatar Protocol agent_id override for capabilities.avatar_state." },
+                    "runtime":      { "type": "string", "description": "Optional Agent Avatar Protocol runtime label such as codex, claude-code, warp, gemini-cli, auggie, or local-cli." },
                     "cwd":          { "type": "string", "description": "Caller cwd. Defaults to pet state cwd or current dir." },
                     "pid":          { "type": "integer", "description": "Caller pid. Defaults to the MCP server pid when omitted." },
                     "auto_tag":     { "type": "boolean", "default": true, "description": "When true, avoid fresh presence id collisions with a pid-derived tag." },
@@ -3731,6 +3742,7 @@ impl McpTool for PetPresenceSyncTool {
             "auto_tagged": auto_tagged,
             "pet_id": pet_id,
             "pet_state": capabilities.get("pet_state").cloned().unwrap_or(Value::Null),
+            "avatar_state": capabilities.get("avatar_state").cloned().unwrap_or(Value::Null),
             "voice_policy": capabilities.get("voice_policy").cloned().unwrap_or(Value::Null),
             "presence": row,
         })))
@@ -4028,6 +4040,9 @@ fn avatar_state_project(
             session_id
         });
     let mode = avatar_state_string_arg_state_or_default(args, state, "mode", "idle");
+    let activity_state = pet_state_str_field(args, "activity_state")
+        .or_else(|| pet_state_str_field(state, "activity_state"))
+        .unwrap_or_else(|| mode.clone());
     let updated_at = pet_state_str_field(state, "updated_at")
         .or_else(|| pet_state_str_field(state, "last_verified_at"))
         .unwrap_or_else(crate::pet_state::now_utc_rfc3339);
@@ -4053,7 +4068,7 @@ fn avatar_state_project(
         "session_id": avatar_state_string_arg_state_or_null(args, state, "session_id"),
         "source": avatar_state_string_arg_state_or_null(args, state, "source"),
         "reason": avatar_state_string_arg_state_or_null(args, state, "reason"),
-        "activity_state": avatar_state_string_arg_state_or_null(args, state, "activity_state"),
+        "activity_state": activity_state,
         "focus": avatar_state_string_arg_state_or_null(args, state, "focus"),
         "risk_level": avatar_state_string_arg_state_or_null(args, state, "risk_level"),
         "blocked_reason": avatar_state_string_arg_state_or_null(args, state, "blocked_reason"),
@@ -18955,6 +18970,13 @@ mod tests {
             "cargo test -p ab-bridge pet_state passed"
         );
         assert_eq!(capabilities["pet_state"]["next_action"], "sync presence");
+        assert_eq!(capabilities["avatar_state"]["agent_avatar_protocol"], 1);
+        assert_eq!(capabilities["avatar_state"]["avatar_id"], "xiao-shu-dev");
+        assert_eq!(capabilities["avatar_state"]["mode"], "working");
+        assert_eq!(capabilities["avatar_state"]["activity_state"], "verifying");
+        assert_eq!(capabilities["avatar_state"]["focus"], "cargo-tests");
+        assert_eq!(capabilities["avatar_state"]["risk_level"], "low");
+        assert_eq!(capabilities["avatar_state"]["next_action"], "sync presence");
         assert_eq!(capabilities["voice_policy"]["current_voice"], "Flo");
         assert_eq!(capabilities["voice_policy"]["current_rate"], 190);
     }
@@ -19004,6 +19026,18 @@ mod tests {
         assert_eq!(capabilities["pet_state"]["risk_level"], "medium");
         assert_eq!(capabilities["pet_state"]["evidence"], "reviewed diff");
         assert_eq!(capabilities["pet_state"]["next_action"], "ask user");
+        assert_eq!(capabilities["avatar_state"]["agent_avatar_protocol"], 1);
+        assert_eq!(capabilities["avatar_state"]["avatar_id"], "xiao-shu-dev");
+        assert_eq!(capabilities["avatar_state"]["mode"], "waiting_for_user");
+        assert_eq!(capabilities["avatar_state"]["activity_state"], "reviewing");
+        assert_eq!(
+            capabilities["avatar_state"]["blocked_reason"],
+            "needs-human-choice"
+        );
+        assert_eq!(capabilities["avatar_state"]["focus"], "docs");
+        assert_eq!(capabilities["avatar_state"]["risk_level"], "medium");
+        assert_eq!(capabilities["avatar_state"]["evidence"], "reviewed diff");
+        assert_eq!(capabilities["avatar_state"]["next_action"], "ask user");
         assert_eq!(capabilities["voice_policy"]["default_silent"], true);
         assert_eq!(capabilities["voice_policy"]["current_voice"], "Meijia");
         assert_eq!(capabilities["voice_policy"]["current_rate"], 180);
@@ -19082,6 +19116,23 @@ mod tests {
             projected["compat"]["codex"]["package_contract"],
             "codex-pet-atlas-8x9-v1"
         );
+    }
+
+    #[test]
+    fn avatar_state_get_defaults_activity_state_to_mode() {
+        let projected = avatar_state_project(
+            &serde_json::json!({"agent_id": "mac:agent-bridge:main"}),
+            "xiao-shu-dev",
+            &serde_json::json!({
+                "schema_version": 1,
+                "mode": "orienting",
+                "updated_at": "2026-05-18T15:31:18Z"
+            }),
+            std::path::Path::new("/tmp/xiao-shu-dev.json"),
+        );
+
+        assert_eq!(projected["mode"], "orienting");
+        assert_eq!(projected["activity_state"], "orienting");
     }
 
     #[test]
