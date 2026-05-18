@@ -79,6 +79,10 @@ pub struct McpToolCallStats {
     pub profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_reasoning_effort: Option<String>,
 }
 
 /// Optional attribution filter for MCP tool-call telemetry.
@@ -87,6 +91,8 @@ pub struct McpToolCallFilter {
     pub client_name: Option<String>,
     pub profile: Option<String>,
     pub source: Option<String>,
+    pub model: Option<String>,
+    pub model_reasoning_effort: Option<String>,
 }
 
 /// Grouped MCP tool-call telemetry by attributed caller/source.
@@ -95,6 +101,8 @@ pub struct McpToolSourceStats {
     pub source: String,
     pub client_name: String,
     pub profile: String,
+    pub model: String,
+    pub model_reasoning_effort: String,
     pub call_count: u64,
     pub error_count: u64,
 }
@@ -1476,6 +1484,8 @@ pub trait StateStore: Send + Sync {
         client_name: Option<String>,
         profile: Option<String>,
         source: Option<String>,
+        model: Option<String>,
+        model_reasoning_effort: Option<String>,
     ) -> Result<()> {
         let _ = (
             tool_name,
@@ -1486,6 +1496,8 @@ pub trait StateStore: Send + Sync {
             client_name,
             profile,
             source,
+            model,
+            model_reasoning_effort,
         );
         Ok(())
     }
@@ -1534,7 +1546,24 @@ pub trait StateStore: Send + Sync {
         window_secs: i64,
         top_n: u32,
     ) -> Result<Vec<McpToolSourceStats>> {
-        let _ = (window_secs, top_n);
+        self.mcp_tool_source_stats_filtered(
+            window_secs,
+            top_n,
+            McpToolCallFilter::default(),
+        )
+        .await
+    }
+
+    /// Group recent MCP traffic by source/client/profile/model attribution,
+    /// optionally narrowed by the same attribution filters used for hot-tool
+    /// stats.
+    async fn mcp_tool_source_stats_filtered(
+        &self,
+        window_secs: i64,
+        top_n: u32,
+        filter: McpToolCallFilter,
+    ) -> Result<Vec<McpToolSourceStats>> {
+        let _ = (window_secs, top_n, filter);
         Ok(Vec::new())
     }
 

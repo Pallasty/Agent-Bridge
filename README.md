@@ -500,6 +500,9 @@ input, printing candidate counts, kind distributions, and sample diffs vs baseli
 After registering local CLI clients, ask any connected agent to call
 `mcp_config_audit`. It checks Codex, Gemini CLI, and Claude Code MCP config,
 client-reported connection status, and a direct stdio initialize smoke test.
+For tool-surface tuning, call `mcp_dispatch_audit`; it summarizes MCP tool
+traffic and can filter by `source`, `client_name`, `profile`, `model`, and
+`model_reasoning_effort`.
 
 For `context_budget` heuristic calibration against a tokenizer baseline:
 
@@ -631,6 +634,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `session_lifecycle_step` | Dispatch `bootstrap` / `precompact` (curate+finalize) / `finalize` in one call |
 | meta | `capabilities` | Report what agent-bridge can do in this environment |
 | | `mcp_config_audit` | Audit Codex / Gemini CLI / Claude Code MCP config and direct stdio connectivity |
+| | `mcp_dispatch_audit` | Audit MCP tool traffic by source, client, profile, model, and reasoning effort |
 | | `context_budget` | Offline token estimate vs approximate model limit + compaction recommendation (W5) |
 | | `hook_status` | Check installed hook scripts and their last run status |
 | | `mcp_recent_errors` | List recent failed MCP `tools/call` rows from the SQLite ring buffer |

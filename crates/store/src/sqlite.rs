@@ -465,6 +465,16 @@ CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_profile
     ON mcp_tool_calls(profile, ts DESC);
 "#;
 
+// v28 — MCP dispatch telemetry model attribution. Models are supplied by
+// explicit MCP environment such as AGENT_BRIDGE_MODEL because MCP initialize
+// does not reliably carry active model metadata.
+const SCHEMA_V28_INDEXES: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_model
+    ON mcp_tool_calls(model, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_model_reasoning
+    ON mcp_tool_calls(model_reasoning_effort, ts DESC);
+"#;
+
 // v23 — Phase 1 P2 reconsolidation: `superseded_by` foreign key on memories.
 // Lets memory_save auto-detect when a new save semantically supersedes an
 // existing record (cosine ≥ threshold) and mark the old row → status='superseded'
@@ -1030,6 +1040,38 @@ impl SqliteStore {
                 }
                 c.execute_batch(SCHEMA_V27_INDEXES)?;
                 let _ = c.execute("UPDATE schema_meta SET value='27' WHERE key='version'", []);
+            }
+
+            // ── v28: MCP dispatch telemetry model attribution ─────────
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "27".to_string());
+            if cur.as_str() == "27" {
+                for (name, ddl_type) in [
+                    ("model", "TEXT"),
+                    ("model_reasoning_effort", "TEXT"),
+                ] {
+                    let col_exists: i64 = c
+                        .query_row(
+                            "SELECT COUNT(*) FROM pragma_table_info('mcp_tool_calls') \
+                             WHERE name=?1",
+                            params![name],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    if col_exists == 0 {
+                        c.execute(
+                            &format!("ALTER TABLE mcp_tool_calls ADD COLUMN {name} {ddl_type}"),
+                            [],
+                        )?;
+                    }
+                }
+                c.execute_batch(SCHEMA_V28_INDEXES)?;
+                let _ = c.execute("UPDATE schema_meta SET value='28' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -1960,6 +2002,8 @@ impl StateStore for SqliteStore {
         client_name: Option<String>,
         profile: Option<String>,
         source: Option<String>,
+        model: Option<String>,
+        model_reasoning_effort: Option<String>,
     ) -> Result<()> {
         let ts = now_secs();
         let tn = tool_name.to_string();
@@ -1971,8 +2015,8 @@ impl StateStore for SqliteStore {
                 c.execute(
                     "INSERT INTO mcp_tool_calls
                        (ts, tool_name, duration_ms, ok, args_size, result_size,
-                        client_name, profile, source)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        client_name, profile, source, model, model_reasoning_effort)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
                         ts,
                         tn,
@@ -1982,7 +2026,9 @@ impl StateStore for SqliteStore {
                         result_size_i,
                         client_name,
                         profile,
-                        source
+                        source,
+                        model,
+                        model_reasoning_effort
                     ],
                 )?;
                 Ok(())
@@ -2016,9 +2062,13 @@ impl StateStore for SqliteStore {
         let source_filter = filter.source;
         let client_filter = filter.client_name;
         let profile_filter = filter.profile;
+        let model_filter = filter.model;
+        let model_reasoning_filter = filter.model_reasoning_effort;
         let source_label = source_filter.clone();
         let client_label = client_filter.clone();
         let profile_label = profile_filter.clone();
+        let model_label = model_filter.clone();
+        let model_reasoning_label = model_reasoning_filter.clone();
         let rows = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<McpToolCallStats>> {
@@ -2031,6 +2081,8 @@ impl StateStore for SqliteStore {
                        AND (?2 IS NULL OR COALESCE(source, 'legacy') = ?2)
                        AND (?3 IS NULL OR COALESCE(client_name, 'legacy') = ?3)
                        AND (?4 IS NULL OR COALESCE(profile, 'legacy') = ?4)
+                       AND (?5 IS NULL OR COALESCE(model, 'legacy') = ?5)
+                       AND (?6 IS NULL OR COALESCE(model_reasoning_effort, 'legacy') = ?6)
                      ORDER BY tool_name",
                 )?;
                 let mut buckets: std::collections::HashMap<
@@ -2038,7 +2090,14 @@ impl StateStore for SqliteStore {
                     Vec<(u32, bool, u32)>,
                 > = std::collections::HashMap::new();
                 let iter = stmt.query_map(
-                    params![cutoff, source_filter, client_filter, profile_filter],
+                    params![
+                        cutoff,
+                        source_filter,
+                        client_filter,
+                        profile_filter,
+                        model_filter,
+                        model_reasoning_filter
+                    ],
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
@@ -2088,6 +2147,8 @@ impl StateStore for SqliteStore {
                             client_name: client_label.clone(),
                             profile: profile_label.clone(),
                             source: source_label.clone(),
+                            model: model_label.clone(),
+                            model_reasoning_effort: model_reasoning_label.clone(),
                         }
                     })
                     .collect();
@@ -2105,8 +2166,27 @@ impl StateStore for SqliteStore {
         window_secs: i64,
         top_n: u32,
     ) -> Result<Vec<McpToolSourceStats>> {
+        self.mcp_tool_source_stats_filtered(
+            window_secs,
+            top_n,
+            McpToolCallFilter::default(),
+        )
+        .await
+    }
+
+    async fn mcp_tool_source_stats_filtered(
+        &self,
+        window_secs: i64,
+        top_n: u32,
+        filter: McpToolCallFilter,
+    ) -> Result<Vec<McpToolSourceStats>> {
         let cutoff = now_secs() - window_secs.max(0);
         let limit = top_n.min(200).max(1) as i64;
+        let source_filter = filter.source;
+        let client_filter = filter.client_name;
+        let profile_filter = filter.profile;
+        let model_filter = filter.model;
+        let model_reasoning_filter = filter.model_reasoning_effort;
         let rows = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<McpToolSourceStats>> {
@@ -2114,24 +2194,44 @@ impl StateStore for SqliteStore {
                     "SELECT COALESCE(source, 'legacy'),
                             COALESCE(client_name, 'legacy'),
                             COALESCE(profile, 'legacy'),
+                            COALESCE(model, 'legacy'),
+                            COALESCE(model_reasoning_effort, 'legacy'),
                             COUNT(*),
                             COALESCE(SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END), 0)
                      FROM mcp_tool_calls
                      WHERE ts >= ?1
-                     GROUP BY 1, 2, 3
-                     ORDER BY 4 DESC, 5 DESC
-                     LIMIT ?2",
+                       AND (?2 IS NULL OR COALESCE(source, 'legacy') = ?2)
+                       AND (?3 IS NULL OR COALESCE(client_name, 'legacy') = ?3)
+                       AND (?4 IS NULL OR COALESCE(profile, 'legacy') = ?4)
+                       AND (?5 IS NULL OR COALESCE(model, 'legacy') = ?5)
+                       AND (?6 IS NULL OR COALESCE(model_reasoning_effort, 'legacy') = ?6)
+                     GROUP BY 1, 2, 3, 4, 5
+                     ORDER BY 6 DESC, 7 DESC
+                     LIMIT ?7",
                 )?;
                 let rows = stmt
-                    .query_map(params![cutoff, limit], |row| {
-                        Ok(McpToolSourceStats {
-                            source: row.get::<_, String>(0)?,
-                            client_name: row.get::<_, String>(1)?,
-                            profile: row.get::<_, String>(2)?,
-                            call_count: row.get::<_, i64>(3)? as u64,
-                            error_count: row.get::<_, i64>(4)? as u64,
-                        })
-                    })?
+                    .query_map(
+                        params![
+                            cutoff,
+                            source_filter,
+                            client_filter,
+                            profile_filter,
+                            model_filter,
+                            model_reasoning_filter,
+                            limit
+                        ],
+                        |row| {
+                            Ok(McpToolSourceStats {
+                                source: row.get::<_, String>(0)?,
+                                client_name: row.get::<_, String>(1)?,
+                                profile: row.get::<_, String>(2)?,
+                                model: row.get::<_, String>(3)?,
+                                model_reasoning_effort: row.get::<_, String>(4)?,
+                                call_count: row.get::<_, i64>(5)? as u64,
+                                error_count: row.get::<_, i64>(6)? as u64,
+                            })
+                        },
+                    )?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 Ok(rows)
             })
@@ -11369,6 +11469,8 @@ mod tests {
                 Some("OpenAI Codex".to_string()),
                 Some("essential".to_string()),
                 Some("codex".to_string()),
+                Some("gpt-5.5".to_string()),
+                Some("xhigh".to_string()),
             )
             .await
             .expect("record codex ok");
@@ -11382,6 +11484,8 @@ mod tests {
                 Some("OpenAI Codex".to_string()),
                 Some("essential".to_string()),
                 Some("codex".to_string()),
+                Some("gpt-5.5".to_string()),
+                Some("xhigh".to_string()),
             )
             .await
             .expect("record codex error");
@@ -11395,6 +11499,8 @@ mod tests {
                 Some("ab-session-end-hook".to_string()),
                 Some("essential".to_string()),
                 Some("hook".to_string()),
+                None,
+                None,
             )
             .await
             .expect("record hook");
@@ -11415,6 +11521,27 @@ mod tests {
         assert_eq!(codex[0].call_count, 2);
         assert_eq!(codex[0].error_count, 1);
         assert_eq!(codex[0].source.as_deref(), Some("codex"));
+
+        let codex_model = store
+            .mcp_tool_call_stats_filtered(
+                86_400,
+                10,
+                McpToolCallFilter {
+                    model: Some("gpt-5.5".to_string()),
+                    model_reasoning_effort: Some("xhigh".to_string()),
+                    ..McpToolCallFilter::default()
+                },
+            )
+            .await
+            .expect("codex model stats");
+        assert_eq!(codex_model.len(), 1);
+        assert_eq!(codex_model[0].tool_name, "memory_search");
+        assert_eq!(codex_model[0].call_count, 2);
+        assert_eq!(codex_model[0].model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(
+            codex_model[0].model_reasoning_effort.as_deref(),
+            Some("xhigh")
+        );
 
         let hook = store
             .mcp_tool_call_stats_filtered(
@@ -11438,6 +11565,8 @@ mod tests {
             s.source == "codex"
                 && s.client_name == "OpenAI Codex"
                 && s.profile == "essential"
+                && s.model == "gpt-5.5"
+                && s.model_reasoning_effort == "xhigh"
                 && s.call_count == 2
                 && s.error_count == 1
         }));
@@ -11445,9 +11574,30 @@ mod tests {
             s.source == "hook"
                 && s.client_name == "ab-session-end-hook"
                 && s.profile == "essential"
+                && s.model == "legacy"
+                && s.model_reasoning_effort == "legacy"
                 && s.call_count == 1
                 && s.error_count == 0
         }));
+
+        let filtered_source_stats = store
+            .mcp_tool_source_stats_filtered(
+                86_400,
+                10,
+                McpToolCallFilter {
+                    source: Some("codex".to_string()),
+                    model: Some("gpt-5.5".to_string()),
+                    model_reasoning_effort: Some("xhigh".to_string()),
+                    ..McpToolCallFilter::default()
+                },
+            )
+            .await
+            .expect("filtered source stats");
+        assert_eq!(filtered_source_stats.len(), 1);
+        assert_eq!(filtered_source_stats[0].source, "codex");
+        assert_eq!(filtered_source_stats[0].model, "gpt-5.5");
+        assert_eq!(filtered_source_stats[0].model_reasoning_effort, "xhigh");
+        assert_eq!(filtered_source_stats[0].call_count, 2);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -15477,7 +15627,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("26"),
+            Some("28"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;

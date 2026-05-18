@@ -9577,6 +9577,14 @@ impl McpTool for McpDispatchAuditTool {
                         "type": "string",
                         "enum": ["essential", "standard", "all", "legacy"],
                         "description": "Optional AGENT_BRIDGE_TOOL_PROFILE filter."
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Optional AGENT_BRIDGE_MODEL filter, for model-aware profile tuning."
+                    },
+                    "model_reasoning_effort": {
+                        "type": "string",
+                        "description": "Optional AGENT_BRIDGE_MODEL_REASONING_EFFORT filter."
                     }
                 }
             }),
@@ -9648,7 +9656,10 @@ impl McpTool for McpDispatchAuditTool {
             .cloned()
             .map(|s| (s.tool_name.clone(), s))
             .collect();
-        let source_breakdown = match store.mcp_tool_source_stats(window_days * 86_400, 50).await {
+        let source_breakdown = match store
+            .mcp_tool_source_stats_filtered(window_days * 86_400, 50, filter.clone())
+            .await
+        {
             Ok(rows) => rows
                 .iter()
                 .map(dispatch_source_stat_json)
@@ -9756,6 +9767,8 @@ impl McpTool for McpDispatchAuditTool {
         Ok(ToolResult::json_text(&json!({
             "profile": policy.profile().label(),
             "toolset": policy.label(),
+            "model": std::env::var("AGENT_BRIDGE_MODEL").ok(),
+            "model_reasoning_effort": std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT").ok(),
             "window_days": window_days,
             "filter": dispatch_filter_json(&filter),
             "current_exposed_tool_count": current_tool_count,
@@ -9788,6 +9801,8 @@ fn dispatch_filter_from_args(args: &Value) -> McpToolCallFilter {
         source: dispatch_optional_string_arg(args, "source"),
         client_name: dispatch_optional_string_arg(args, "client_name"),
         profile: dispatch_optional_string_arg(args, "profile"),
+        model: dispatch_optional_string_arg(args, "model"),
+        model_reasoning_effort: dispatch_optional_string_arg(args, "model_reasoning_effort"),
     }
 }
 
@@ -9800,7 +9815,11 @@ fn dispatch_optional_string_arg(args: &Value, key: &str) -> Option<String> {
 }
 
 fn dispatch_filter_is_empty(filter: &McpToolCallFilter) -> bool {
-    filter.source.is_none() && filter.client_name.is_none() && filter.profile.is_none()
+    filter.source.is_none()
+        && filter.client_name.is_none()
+        && filter.profile.is_none()
+        && filter.model.is_none()
+        && filter.model_reasoning_effort.is_none()
 }
 
 fn dispatch_filter_json(filter: &McpToolCallFilter) -> Value {
@@ -9808,6 +9827,8 @@ fn dispatch_filter_json(filter: &McpToolCallFilter) -> Value {
         "source": filter.source.as_deref(),
         "client_name": filter.client_name.as_deref(),
         "profile": filter.profile.as_deref(),
+        "model": filter.model.as_deref(),
+        "model_reasoning_effort": filter.model_reasoning_effort.as_deref(),
     })
 }
 
@@ -9816,6 +9837,8 @@ fn dispatch_source_stat_json(s: &ab_store::McpToolSourceStats) -> Value {
         "source": s.source,
         "client_name": s.client_name,
         "profile": s.profile,
+        "model": s.model,
+        "model_reasoning_effort": s.model_reasoning_effort,
         "call_count": s.call_count,
         "error_count": s.error_count,
     })
@@ -9840,6 +9863,15 @@ fn dispatch_stat_json(s: &ab_store::McpToolCallStats) -> Value {
         }
         if let Some(profile) = &s.profile {
             obj.insert("profile".to_string(), json!(profile));
+        }
+        if let Some(model) = &s.model {
+            obj.insert("model".to_string(), json!(model));
+        }
+        if let Some(model_reasoning_effort) = &s.model_reasoning_effort {
+            obj.insert(
+                "model_reasoning_effort".to_string(),
+                json!(model_reasoning_effort),
+            );
         }
     }
     out
@@ -20120,6 +20152,8 @@ mod tests {
             client_name: None,
             profile: None,
             source: None,
+            model: None,
+            model_reasoning_effort: None,
         };
         let reasons = dispatch_optimization_reasons(&s);
         assert!(reasons.contains(&"has_errors"));

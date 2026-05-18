@@ -107,6 +107,8 @@ struct ConnectionTelemetry {
     client_name: Option<String>,
     profile: String,
     source: String,
+    model: Option<String>,
+    model_reasoning_effort: Option<String>,
 }
 
 impl ConnectionTelemetry {
@@ -119,10 +121,18 @@ impl ConnectionTelemetry {
             .or_else(mcp_source_from_env)
             .unwrap_or("other")
             .to_string();
+        let model = std::env::var("AGENT_BRIDGE_MODEL")
+            .ok()
+            .and_then(nonempty_string);
+        let model_reasoning_effort = std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT")
+            .ok()
+            .and_then(nonempty_string);
         Self {
             client_name,
             profile,
             source,
+            model,
+            model_reasoning_effort,
         }
     }
 
@@ -140,6 +150,12 @@ impl ConnectionTelemetry {
             .or_else(mcp_source_from_env)
             .unwrap_or("other")
             .to_string();
+        self.model = std::env::var("AGENT_BRIDGE_MODEL")
+            .ok()
+            .and_then(nonempty_string);
+        self.model_reasoning_effort = std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT")
+            .ok()
+            .and_then(nonempty_string);
     }
 }
 
@@ -284,6 +300,8 @@ async fn record_mcp_tool_call_telemetry(
             telemetry.client_name.clone(),
             Some(telemetry.profile.clone()),
             Some(telemetry.source.clone()),
+            telemetry.model.clone(),
+            telemetry.model_reasoning_effort.clone(),
         )
         .await
     {
