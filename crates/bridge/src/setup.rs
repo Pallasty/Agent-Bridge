@@ -450,6 +450,26 @@ fn toml_line_assigns_key(line: &str, key: &str) -> bool {
         .is_some()
 }
 
+fn toml_top_level_string(raw: &str, key: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            break;
+        }
+        let Some(rest) = trimmed.strip_prefix(key) else {
+            continue;
+        };
+        let Some(value) = rest.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        let value = value.trim();
+        if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+            return Some(value[1..value.len() - 1].replace("\\\"", "\""));
+        }
+    }
+    None
+}
+
 fn merge_codex_config(home: &Path, bin_dst: &Path, enable_hooks: bool) -> Result<()> {
     let codex_home = codex_home(home);
     let config_path = codex_home.join("config.toml");
@@ -466,11 +486,33 @@ fn merge_codex_config(home: &Path, bin_dst: &Path, enable_hooks: bool) -> Result
         "AGENT_BRIDGE_TOOLSET = \"codex-essential\"".to_string(),
         "AGENT_BRIDGE_TOOL_PROFILE = \"essential\"".to_string(),
     ];
+    let model = toml_top_level_string(&raw, "model");
+    let model_reasoning_effort = toml_top_level_string(&raw, "model_reasoning_effort");
+    if let Some(model) = &model {
+        env_lines.push(format!(
+            "AGENT_BRIDGE_MODEL = \"{}\"",
+            escape_toml_basic_string(model)
+        ));
+    }
+    if let Some(reasoning_effort) = &model_reasoning_effort {
+        env_lines.push(format!(
+            "AGENT_BRIDGE_MODEL_REASONING_EFFORT = \"{}\"",
+            escape_toml_basic_string(reasoning_effort)
+        ));
+    }
     for line in toml_table_body_lines(&raw, "mcp_servers.agent-bridge.env") {
         let trimmed = line.trim_start();
         if MANAGED_TOOL_ENV_KEYS
             .iter()
             .any(|key| toml_line_assigns_key(trimmed, key))
+        {
+            continue;
+        }
+        if model.is_some() && toml_line_assigns_key(trimmed, "AGENT_BRIDGE_MODEL") {
+            continue;
+        }
+        if model_reasoning_effort.is_some()
+            && toml_line_assigns_key(trimmed, "AGENT_BRIDGE_MODEL_REASONING_EFFORT")
         {
             continue;
         }
@@ -1060,6 +1102,7 @@ AGENT_BRIDGE_TOOL_PROFILE = \"essential\"
         fs::write(
             codex_dir.join("config.toml"),
             r#"model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
 
 [mcp_servers.agent-bridge]
 command = "old"
@@ -1068,6 +1111,8 @@ command = "old"
 AGENT_BRIDGE_CLIENT = "claude-code"
 AGENT_BRIDGE_TOOLSET = "all-dev"
 AGENT_BRIDGE_TOOL_PROFILE = "all"
+AGENT_BRIDGE_MODEL = "stale-model"
+AGENT_BRIDGE_MODEL_REASONING_EFFORT = "low"
 AB_PET_TTS_VOICE = "Meijia"
 AB_PET_TTS_RATE = "180"
 
@@ -1083,9 +1128,13 @@ enabled = true
         assert!(out.contains("AGENT_BRIDGE_CLIENT = \"codex\""));
         assert!(out.contains("AGENT_BRIDGE_TOOLSET = \"codex-essential\""));
         assert!(out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"essential\""));
+        assert!(out.contains("AGENT_BRIDGE_MODEL = \"gpt-5.5\""));
+        assert!(out.contains("AGENT_BRIDGE_MODEL_REASONING_EFFORT = \"xhigh\""));
         assert!(!out.contains("AGENT_BRIDGE_CLIENT = \"claude-code\""));
         assert!(!out.contains("AGENT_BRIDGE_TOOLSET = \"all-dev\""));
         assert!(!out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"all\""));
+        assert!(!out.contains("AGENT_BRIDGE_MODEL = \"stale-model\""));
+        assert!(!out.contains("AGENT_BRIDGE_MODEL_REASONING_EFFORT = \"low\""));
         assert!(out.contains("AB_PET_TTS_VOICE = \"Meijia\""));
         assert!(out.contains("AB_PET_TTS_RATE = \"180\""));
         assert!(out.contains("[plugins.example]\nenabled = true"));

@@ -399,7 +399,7 @@ Codex profile (`--frontend codex`):
 | Binary | Copies itself to `~/.local/bin/agent-bridge` |
 | Hook scripts | Writes three scripts to `~/.local/bin/` |
 | Codex hooks | Enables `features.codex_hooks` and merges Agent-Bridge entries into `~/.codex/hooks.json` |
-| Settings file | Merges `[mcp_servers.agent-bridge]` into `~/.codex/config.toml` with `AGENT_BRIDGE_CLIENT=codex`, `AGENT_BRIDGE_TOOLSET=codex-essential`, and `AGENT_BRIDGE_TOOL_PROFILE=essential` |
+| Settings file | Merges `[mcp_servers.agent-bridge]` into `~/.codex/config.toml` with `AGENT_BRIDGE_CLIENT=codex`, `AGENT_BRIDGE_TOOLSET=codex-essential`, and `AGENT_BRIDGE_TOOL_PROFILE=essential`; snapshots Codex `model` / `model_reasoning_effort` into `AGENT_BRIDGE_MODEL` / `AGENT_BRIDGE_MODEL_REASONING_EFFORT` when present |
 
 Gemini CLI profile (`--frontend gemini-cli`):
 
