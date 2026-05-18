@@ -1195,6 +1195,18 @@ impl SqliteStore {
 /// to `v071*` and matched nothing (`lesson_fts5_search_dot_strip_bug`).
 fn sanitise_fts_query(q: &str) -> String {
     let trimmed = q.trim();
+
+    // FTS5 column-scoped tokens like `lens:cosine` parse as
+    // "column lens MATCH cosine", which errors with "no such column: lens"
+    // when the column doesn't exist. memories_fts has only `content`
+    // (MATCHable) and `key` (UNINDEXED, so MATCH on it also errors).
+    // If we see any other column prefix, fall back to phrase search so the
+    // user query becomes a literal token match instead of a SQL error.
+    if has_invalid_fts_column_prefix(trimmed) {
+        let escaped = trimmed.replace('"', "\"\"");
+        return format!("\"{escaped}\"");
+    }
+
     let has_operator = trimmed.contains('"')
         || trimmed.contains('*')
         || trimmed.contains(':')
@@ -1215,6 +1227,22 @@ fn sanitise_fts_query(q: &str) -> String {
         .map(|s| format!("{s}*"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// True if the query contains any `col:` prefix where `col` is not `content`
+/// (the only column we can MATCH against — `key` is UNINDEXED).
+fn has_invalid_fts_column_prefix(s: &str) -> bool {
+    s.split_whitespace().any(|tok| {
+        let t = tok.trim_start_matches(|c: char| c == '+' || c == '-');
+        match t.split_once(':') {
+            Some((col, _)) => {
+                !col.is_empty()
+                    && col != "content"
+                    && col.chars().all(|c| c.is_alphanumeric() || c == '_')
+            }
+            None => false,
+        }
+    })
 }
 
 fn now_secs() -> i64 {
@@ -8349,6 +8377,41 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         }
+    }
+
+    #[test]
+    fn sanitise_fts_unknown_column_prefix_falls_back_to_phrase() {
+        // Regression: a query like `lens:cosine` was passed through as-is
+        // because the early-exit on ':' assumed valid FTS5 operator syntax.
+        // FTS5 then errored with `no such column: lens` (memories_fts only
+        // has `content` MATCHable). Now we wrap as a phrase instead.
+        let out = sanitise_fts_query("lens:cosine");
+        assert_eq!(out, "\"lens:cosine\"");
+        // Multi-token with one invalid prefix → whole expression becomes a phrase.
+        let out2 = sanitise_fts_query("foo lens:cosine bar");
+        assert_eq!(out2, "\"foo lens:cosine bar\"");
+    }
+
+    #[test]
+    fn sanitise_fts_content_prefix_is_valid_passthrough() {
+        // `content:` is the only MATCHable column — must pass through as-is.
+        let out = sanitise_fts_query("content:cosine");
+        assert_eq!(out, "content:cosine");
+    }
+
+    #[test]
+    fn sanitise_fts_plain_token_still_gets_prefix_wildcard() {
+        // No `:` → plain-text path → tokenize + `*` for prefix match.
+        let out = sanitise_fts_query("warp ipc");
+        assert_eq!(out, "warp* ipc*");
+    }
+
+    #[test]
+    fn sanitise_fts_phrase_fallback_escapes_inner_quotes() {
+        // When the phrase-fallback path triggers, internal `"` must be
+        // doubled so the wrapping doesn't terminate the phrase early.
+        let out = sanitise_fts_query("lens:\"foo\"");
+        assert_eq!(out, "\"lens:\"\"foo\"\"\"");
     }
 
     #[test]

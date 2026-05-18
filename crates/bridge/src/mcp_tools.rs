@@ -15385,12 +15385,14 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryDeleteTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(MemoryNeighborsTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(MemoryCoactivationTopTool::new(hub.clone())));
-    // Terminal: list + send + read + split + resize.
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalListTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalSendKeysTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalReadOutputTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalSplitTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(TerminalResizeTool::new(hub.clone())));
+    // Terminal: list + send + read + split + resize. Retired after Warp drop
+    // (see memory `project_warp_drop_to_museum`); kept as Niche for any
+    // residual non-Warp PTY caller, opt-in via AGENT_BRIDGE_TOOL_PROFILE=all.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalListTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalSendKeysTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalReadOutputTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalSplitTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalResizeTool::new(hub.clone())));
     // Agent runtime: spawn + observe sessions.
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(AgentSpawnTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(AgentSessionGetTool::new(hub.clone())));
@@ -15403,8 +15405,9 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionReflectTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(CapabilitiesTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(McpDispatchAuditTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(IdeSnapshotTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Essential, Arc::new(IdeCommandTool::new(hub.clone())));
+    // IDE bridge: 7-day audit shows 0 calls; demoted to Niche.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(IdeSnapshotTool::new(hub.clone())));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(IdeCommandTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ProjectDetectTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Essential, Arc::new(ChangesDigestTool::new(hub.clone())));
     // Plans + worktrees + codebase search.
@@ -15457,34 +15460,40 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     // Tailscale REST API: ACL editing without browser automation.
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(TailscaleAclGetTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(TailscaleAclSetTool::new()));
-    // GitHub REST API: issue/PR management without browser/gh-cli.
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GithubIssueListTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GithubIssueCreateTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GithubPrListTool::new()));
+    // GitHub REST API: issue/PR management without browser/gh-cli. Demoted
+    // to Niche — Claude Code uses `gh` CLI; codex has native overlap.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GithubIssueListTool::new()));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GithubIssueCreateTool::new()));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GithubPrListTool::new()));
 
     // GitLab REST API v4: same pattern as github_*; primary forge for this project.
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GitlabIssueListTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GitlabIssueCreateTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(GitlabMrListTool::new()));
+    // Demoted to Niche — `glab` CLI covers the same surface.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GitlabIssueListTool::new()));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GitlabIssueCreateTool::new()));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(GitlabMrListTool::new()));
 
     // Notion REST API: integration-token Bearer; complements memory system.
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotionSearchTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotionPageGetTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotionPageCreateTool::new()));
+    // Demoted to Niche — 0 calls in 7-day audit window.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(NotionSearchTool::new()));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(NotionPageGetTool::new()));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(NotionPageCreateTool::new()));
 
     // Brave Search REST API: independent web search, fallback / fresh-results channel.
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(BraveWebSearchTool::new()));
+    // Demoted to Niche — Claude Code uses WebFetch/WebSearch built-ins.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(BraveWebSearchTool::new()));
 
     // Cloudflare REST API: zones / workers / R2 read scopes (others 403 with current token).
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(CloudflareZoneListTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(CloudflareWorkerListTool::new()));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(CloudflareR2BucketListTool::new()));
+    // Demoted to Niche — 0 calls in 7-day audit window.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(CloudflareZoneListTool::new()));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(CloudflareWorkerListTool::new()));
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(CloudflareR2BucketListTool::new()));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionCurateTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionHandoffBriefTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(SessionLifecycleStepTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(WorktreeRemoveTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(CodebaseIndexTool::new(hub.clone())));
-    reg_if(&mut reg, profile, Tier::Standard, Arc::new(TerminalReadBlocksTool::new(hub.clone())));
+    // Retired with rest of terminal_* after Warp drop.
+    reg_if(&mut reg, profile, Tier::Niche, Arc::new(TerminalReadBlocksTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotifyTool::new(hub.clone())));
     reg_if(&mut reg, profile, Tier::Standard, Arc::new(NotificationsRecentTool::new(hub.clone())));
     // Skill library (Phase C): in-loop recommendation over the local skill index.
