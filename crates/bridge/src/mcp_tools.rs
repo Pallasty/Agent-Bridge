@@ -11488,25 +11488,23 @@ impl McpTool for IntrospectRecallTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "L6 metacognition probe with Option E semantic relevance scoring. \
-                          Stage 1: returns top-K active memories ranked by pure cosine \
-                          similarity (no importance/recency blending) plus `novelty_score \
-                          = 1 - max(cosine)` (v0 backward-compat). Stage 2 (when an LLM is \
-                          configured via ANTHROPIC_API_KEY / OPENAI_API_KEY): one batched \
-                          LLM call rates each top-K doc {0,1,2} with required verbatim \
-                          quotes (substring-verified against doc body); `probability_grounded \
-                          = sum(verified_score) / (k * 2)` continuous in [0,1]. \
-                          `likely_unsupported = probability_grounded < threshold` (default \
-                          0.4) when Stage 2 succeeds, else falls back to `novelty_score >= \
-                          threshold`. `degraded: true` indicates the LLM probe failed or \
-                          was rate-limited (env `AB_INTROSPECT_LLM_MAX_PER_HOUR`, default \
-                          30). Returns `{query, probability_grounded?, novelty_score, \
-                          likely_unsupported, threshold, top_k_count, degraded, per_doc?: \
-                          [{key, kind, cosine, score, quote, quote_verified, \
-                          score_after_verify}], llm?: {model, provider, input_tokens, \
-                          output_tokens, latency_ms}, hits:[{key, kind, cosine, \
-                          content_preview}]}`. Reads only; never writes. See \
-                          docs/L6-OPTION-E-DESIGN-2026-05-16.md."
+            description: "L6 metacognition probe — Stage-1 raw cosine recall + novelty score. \
+                          **Use this before sediment when you suspect your conclusion may \
+                          duplicate or contradict existing memory.** Returns top-K active \
+                          memories ranked by pure cosine similarity (no importance/recency \
+                          blending) plus `novelty_score = 1 - max(cosine)`. \
+                          `likely_unsupported = (novelty_score >= threshold)` (default 0.4) \
+                          flags queries whose closest indexed memory is far enough to suggest \
+                          the claim is unsupported by current memory. Cheap and deterministic \
+                          (no LLM call). Returns `{query, novelty_score, likely_unsupported, \
+                          threshold, top_k_count, degraded, hits:[{key, kind, cosine, \
+                          content_preview}]}`. Reads only; never writes. \
+                          NOTE: A previous LLM-as-relevance Stage-2 layer (\"Option E\") was \
+                          FALSIFIED + SHELVED 2026-05-16 (commit `0ced487`) per §6.5 rule 3; \
+                          legacy `skip_llm_probe`, `probability_grounded`, `per_doc`, `llm` \
+                          fields and the `AB_INTROSPECT_LLM_MAX_PER_HOUR` env are dead-code \
+                          flags kept for API back-compat — do not rely on them. \
+                          See docs/L6-OPTION-E-DESIGN-2026-05-16.md (history)."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -11527,7 +11525,7 @@ impl McpTool for IntrospectRecallTool {
                         "default": 0.4,
                         "minimum": 0.0,
                         "maximum": 1.0,
-                        "description": "Grounding cutoff. With Option E: likely_unsupported = (probability_grounded < threshold). v0 fallback: likely_unsupported = (novelty_score >= threshold) — default flips from 0.7 (v0 novelty) to 0.4 (v0.5 grounded). Pass explicit threshold for v0 backward-compat semantics."
+                        "description": "Novelty cutoff. likely_unsupported = (novelty_score >= threshold). Lower threshold (e.g. 0.3) → more sensitive flagging; higher (e.g. 0.6) → only flags truly novel claims. Default 0.4 is calibrated for typical aio2 memory density."
                     },
                     "content_preview_chars": {
                         "type": "integer",
@@ -11539,7 +11537,7 @@ impl McpTool for IntrospectRecallTool {
                     "skip_llm_probe": {
                         "type": "boolean",
                         "default": false,
-                        "description": "When true, skip the Option E LLM relevance call and only return Stage-1 cosine results. Useful for cheap repeated probes or when an LLM is not configured."
+                        "description": "DEPRECATED — no-op since Option E shelved 2026-05-16 (commit `0ced487`). Stage-1 cosine is now the only path; this flag is kept for API back-compat. Safe to omit."
                     }
                 },
                 "required": ["query"]
