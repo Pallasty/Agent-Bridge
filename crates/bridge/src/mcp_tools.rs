@@ -15092,13 +15092,14 @@ impl McpTool for ContextPressureEstimateTool {
             .get("conversation_turns")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
-        let text = args
+        let text_raw = args
             .get("text_sample")
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        let text_sample_provided = !text_raw.is_empty();
 
         let limit = model_context_limit(model);
-        let estimated = estimated_usage_tokens(text, turns);
+        let estimated = estimated_usage_tokens(text_raw, turns);
         let pct_raw = if limit == 0 {
             0.0
         } else {
@@ -15113,6 +15114,17 @@ impl McpTool for ContextPressureEstimateTool {
         let soft_trigger = (limit as f64 * 0.80) as u64;
         let distance_to_compaction = soft_trigger.saturating_sub(estimated);
 
+        // L6 P3 dogfood 5/13 + 5/19: no-sample reading systematically
+        // under-counted. Flag confidence so the caller can weight the
+        // tier accordingly rather than treating heuristic-only as ground
+        // truth.
+        let confidence = if text_sample_provided { "high" } else { "low" };
+        let note = if text_sample_provided {
+            "Estimate uses turn × per-turn guess + actual sample tokens + system baseline."
+        } else {
+            "No text_sample passed — estimate is heuristic-only and may under-count tool-heavy turns. Pass `text_sample` (recent transcript excerpt) for higher confidence."
+        };
+
         Ok(ToolResult::json_text(&json!({
             "model_hint": model,
             "model_limit": limit,
@@ -15121,6 +15133,9 @@ impl McpTool for ContextPressureEstimateTool {
             "fatigue_tier": tier,
             "distance_to_compaction_tokens": distance_to_compaction,
             "recommendation": recommendation,
+            "text_sample_provided": text_sample_provided,
+            "confidence": confidence,
+            "note": note,
             "heuristic_note": "Offline estimate; actual tokenizer usage varies. Tier bands per roadmap §3 L6 P3.",
         })))
     }
@@ -22255,11 +22270,16 @@ mod tests {
         let v: Value = serde_json::from_str(&text).expect("valid json");
         assert_eq!(v["model_hint"], json!("claude-sonnet-4"));
         assert_eq!(v["model_limit"], json!(200_000));
-        assert_eq!(v["estimated_tokens_used"], json!(0));
+        // Post-calibration baseline: SYSTEM_BASELINE_TOKENS=15000 always
+        // contributed (system prompt + tool schemas + MEMORY.md). 15k of
+        // 200k = 7.5%, still fresh tier (<30%).
+        assert_eq!(v["estimated_tokens_used"], json!(15_000));
         assert_eq!(v["fatigue_tier"], json!("fresh"));
         assert_eq!(v["recommendation"], json!("nominal"));
-        // Distance to 80% trigger from 0 used = 80% of 200k = 160k.
-        assert_eq!(v["distance_to_compaction_tokens"], json!(160_000));
+        // Distance: 80% trigger = 160k; baseline used = 15k → 145k remaining.
+        assert_eq!(v["distance_to_compaction_tokens"], json!(145_000));
+        assert_eq!(v["text_sample_provided"], json!(false));
+        assert_eq!(v["confidence"], json!("low"));
     }
 
     #[tokio::test]
@@ -22401,12 +22421,14 @@ mod tests {
 
     #[tokio::test]
     async fn context_pressure_estimate_engaged_mid_range() {
-        // 200_000 * 0.45 ≈ 90_000 tokens; 90_000 / 2_000 = 45 turns.
+        // Post-calibration: 15k baseline + 19*4k = 91_000 ≈ 45.5% used,
+        // engaged band. Pre-calibration 45 turns was used for the same
+        // mid-engaged target under 2k/turn no-baseline math.
         let tool = ContextPressureEstimateTool::new();
         let ctx = ToolContext::default();
         let res = tool
             .execute(
-                json!({"model": "claude-sonnet-4", "conversation_turns": 45}),
+                json!({"model": "claude-sonnet-4", "conversation_turns": 19}),
                 &ctx,
             )
             .await
@@ -22417,8 +22439,8 @@ mod tests {
         };
         let v: Value = serde_json::from_str(&text).expect("valid json");
         assert_eq!(v["fatigue_tier"], json!("engaged"));
-        // Distance: 80% trigger = 160k; used = 90k → 70k remaining.
-        assert_eq!(v["distance_to_compaction_tokens"], json!(70_000));
+        // Distance: 80% trigger = 160k; used = 91k → 69k remaining.
+        assert_eq!(v["distance_to_compaction_tokens"], json!(69_000));
     }
 
     #[tokio::test]
