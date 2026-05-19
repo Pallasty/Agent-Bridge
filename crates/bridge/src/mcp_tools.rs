@@ -573,6 +573,34 @@ impl McpTool for TerminalResizeTool {
 
 const SHELL_EXEC_TRUNCATE_BYTES: usize = 131_072; // 128 KB
 
+fn mcp_schema_codex_context() -> bool {
+    let client = std::env::var("AGENT_BRIDGE_CLIENT").ok();
+    let toolset = std::env::var("AGENT_BRIDGE_TOOLSET").ok();
+    let codex_host = std::env::var("AGENT_BRIDGE_CODEX_HOST").ok();
+
+    client
+        .as_deref()
+        .map(normalize_tool_policy_value)
+        .is_some_and(|v| v.starts_with("codex"))
+        || toolset
+            .as_deref()
+            .map(normalize_tool_policy_value)
+            .is_some_and(|v| v.starts_with("codex"))
+        || codex_host.as_deref().is_some_and(|v| !v.trim().is_empty())
+}
+
+fn append_codex_native_hint(base: &str, codex_note: &str, codex_context: bool) -> String {
+    if codex_context {
+        format!("{base} Codex note: {codex_note}")
+    } else {
+        base.to_string()
+    }
+}
+
+fn mcp_schema_description(base: &str, codex_note: &str) -> String {
+    append_codex_native_hint(base, codex_note, mcp_schema_codex_context())
+}
+
 pub struct ShellExecTool {
     hub: Hub,
 }
@@ -591,11 +619,15 @@ impl McpTool for ShellExecTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Run a shell command synchronously; returns exit code, stdout, \
+            description: mcp_schema_description(
+                "Run a shell command synchronously; returns exit code, stdout, \
                  stderr, wall-clock duration. Unlike terminal_send_keys this captures \
-                 output directly — no PTY needed. stdout/stderr truncated at 128 KB. \
-                 Default timeout 30 s, max 300 s."
-                .into(),
+                 output directly; no PTY needed. stdout/stderr truncated at 128 KB. \
+                 Default timeout 30 s, max 300 s.",
+                "Prefer Codex native shell/exec tools for ordinary local commands; use \
+                 this Agent-Bridge tool only when you need MCP-level execution, dispatch \
+                 telemetry, or Agent-Bridge security/env limits.",
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -4631,11 +4663,15 @@ impl McpTool for WorktreeListTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "List git worktrees of a repository. Pass repo for a specific \
+            description: mcp_schema_description(
+                "List git worktrees of a repository. Pass repo for a specific \
                  checkout; otherwise uses the bridge-wide default (AGENT_BRIDGE_REPO env \
                  var, else daemon launch cwd). Lets the agent see what parallel branches \
-                 are in flight."
-                .into(),
+                 are in flight.",
+                "Prefer Codex native git/shell commands for one-off worktree checks; use \
+                 this when you want Agent-Bridge-managed coordination state or structured \
+                 JSON worktree rows.",
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -4674,11 +4710,15 @@ impl McpTool for WorktreeCreateTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Create a new git worktree on a fresh branch. Pass repo to target \
+            description: mcp_schema_description(
+                "Create a new git worktree on a fresh branch. Pass repo to target \
                  a checkout; otherwise uses the bridge-wide default. Use to try multiple \
                  approaches in parallel without polluting main. Pair with agent_spawn to \
-                 launch a sibling agent there."
-                .into(),
+                 launch a sibling agent there.",
+                "Prefer Codex native git/shell commands for simple local worktree creation; \
+                 use this when creating Agent-Bridge-managed parallel workspaces or pairing \
+                 the worktree with agent_spawn.",
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -10444,6 +10484,16 @@ fn dispatch_profile_suggestions(
         );
     }
 
+    let hot_overlap = stats
+        .iter()
+        .filter(|s| s.call_count >= 3 && dispatch_codex_native_overlap(&s.tool_name))
+        .count();
+    if hot_overlap > 0 {
+        suggestions.push(format!(
+            "{hot_overlap} hot tools overlap Codex native surfaces; prefer schema-description nudges or a codex-lean A/B run before removing them from the default profile."
+        ));
+    }
+
     let cold_overlap = cold_tools
         .iter()
         .filter(|v| {
@@ -15820,11 +15870,14 @@ impl McpTool for CodebaseSearchTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Search the codebase symbol index built by codebase_index. \
+            description: mcp_schema_description(
+                "Search the codebase symbol index built by codebase_index. \
                  Returns file_path, line, kind (fn/struct/class/…), name, signature for \
                  each match. mode=semantic enables natural-language queries. Run \
-                 codebase_index first if no results appear."
-                .into(),
+                 codebase_index first if no results appear.",
+                "Prefer Codex native file/search tools when live source text is enough; use \
+                 this indexed tool for semantic symbol lookup or stable structured rows.",
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -15936,12 +15989,16 @@ impl McpTool for CodebaseImportsTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Query the codebase imports table built by codebase_index. \
+            description: mcp_schema_description(
+                "Query the codebase imports table built by codebase_index. \
                  Returns one row per `use`/`import` statement matching `target` \
                  (substring LIKE). Use to answer 'who imports X' without re-walking \
                  source. Supports Rust, Python, TypeScript/JavaScript, and Go. \
-                 Run codebase_index first if no results appear."
-                .into(),
+                 Run codebase_index first if no results appear.",
+                "Prefer Codex native file/search tools for ad hoc source inspection; use \
+                 this when the indexed imports table avoids re-walking the tree or you need \
+                 structured import rows.",
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -16029,7 +16086,8 @@ impl McpTool for CodebaseCallsTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Query the codebase call-graph table built by \
+            description: mcp_schema_description(
+                "Query the codebase call-graph table built by \
                  codebase_index. Returns one row per call expression matching \
                  the given `callee` and/or `caller` substring (LIKE). Use to \
                  answer 'who calls X' (set `callee`) or 'what does Y call' \
@@ -16037,8 +16095,11 @@ impl McpTool for CodebaseCallsTool {
                  `callee` / `caller` is required. Method calls appear with \
                  a leading dot (e.g. `.collect`). Supports Rust, Python, \
                  TypeScript/JavaScript, and Go. Run codebase_index first if \
-                 no results appear."
-                .into(),
+                 no results appear.",
+                "Prefer Codex native file/search tools for simple grep-style questions; use \
+                 this when the indexed call graph provides better structured answers than \
+                 live text search.",
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -16142,7 +16203,8 @@ impl McpTool for CodebaseCallersTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Alias-resolved 'who calls X' across the imports + \
+            description: mcp_schema_description(
+                "Alias-resolved 'who calls X' across the imports + \
                  calls tables built by codebase_index. Joins use/import \
                  aliases per file so a `target` like \
                  `crate::store::SqliteStore::new` surfaces sites that wrote \
@@ -16152,8 +16214,10 @@ impl McpTool for CodebaseCallersTool {
                  `callee`, the resolved `resolved_callee` (= target), and \
                  the `via_alias` / `via_import` that produced the match. \
                  Supports Rust, Python, TypeScript/JavaScript, and Go — \
-                 all four resolve aliases via the shared v24 imports table."
-                .into(),
+                 all four resolve aliases via the shared v24 imports table.",
+                "Prefer Codex native file/search tools for direct text matches; use this \
+                 when alias-resolved callers matter more than raw grep results.",
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -16243,7 +16307,8 @@ impl McpTool for CodebaseImpactTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Multi-hop transitive caller closure for a \
+            description: mcp_schema_description(
+                "Multi-hop transitive caller closure for a \
                  symbol — answers 'what's the blast-radius if I change \
                  X?'. BFS over the alias-resolved callers graph up to \
                  `max_depth` hops. Each result node carries its \
@@ -16256,8 +16321,10 @@ impl McpTool for CodebaseImpactTool {
                  its shortest hop. Supports Rust, Python, \
                  TypeScript/JavaScript, and Go via the shared v24 \
                  imports + v25 calls tables. Use before refactors / \
-                 deprecations to preview affected surface."
-                .into(),
+                 deprecations to preview affected surface.",
+                "Prefer Codex native file/search tools for local spot checks; use this \
+                 when you need indexed multi-hop impact analysis before a refactor.",
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -20986,6 +21053,41 @@ mod tests {
         assert!(dispatch_codex_native_overlap("codebase_search"));
         assert!(!dispatch_codex_native_overlap("memory_search"));
         assert!(!dispatch_codex_native_overlap("skills_recommend"));
+    }
+
+    #[test]
+    fn codex_native_hint_appends_only_for_codex_context() {
+        assert_eq!(
+            append_codex_native_hint("Base.", "Use native tools.", false),
+            "Base."
+        );
+        assert_eq!(
+            append_codex_native_hint("Base.", "Use native tools.", true),
+            "Base. Codex note: Use native tools."
+        );
+    }
+
+    #[test]
+    fn dispatch_profile_suggestions_call_out_hot_native_overlap() {
+        let s = ab_store::McpToolCallStats {
+            tool_name: "shell_exec".to_string(),
+            call_count: 12,
+            error_count: 0,
+            avg_duration_ms: 900.0,
+            p95_duration_ms: 1_500,
+            max_duration_ms: 2_000,
+            avg_result_size: 1_000.0,
+            client_name: None,
+            profile: None,
+            source: None,
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+        let suggestions = dispatch_profile_suggestions(&[s], &[]);
+        assert!(suggestions
+            .iter()
+            .any(|s| s.contains("hot tools overlap Codex native surfaces")));
     }
 
     #[test]
