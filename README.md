@@ -502,7 +502,9 @@ After registering local CLI clients, ask any connected agent to call
 client-reported connection status, and a direct stdio initialize smoke test.
 For tool-surface tuning, call `mcp_dispatch_audit`; it summarizes MCP tool
 traffic and can filter by `source`, `client_name`, `profile`, `model`, and
-`model_reasoning_effort`.
+`model_reasoning_effort`. Filtered fields such as `hot_tools` and
+`source_breakdown` follow the current filter; `global_hot_codex_tools` and
+`global_hot_hook_tools` are source-only comparison panels.
 
 For `context_budget` heuristic calibration against a tokenizer baseline:
 

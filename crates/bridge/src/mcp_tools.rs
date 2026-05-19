@@ -9666,28 +9666,22 @@ impl McpTool for McpDispatchAuditTool {
                 .collect::<Vec<_>>(),
             Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
         };
-        let hot_codex_tools = match store
+        let global_hot_codex_tools = match store
             .mcp_tool_call_stats_filtered(
                 window_days * 86_400,
                 top_n as u32,
-                McpToolCallFilter {
-                    source: Some("codex".to_string()),
-                    ..McpToolCallFilter::default()
-                },
+                dispatch_source_only_filter("codex"),
             )
             .await
         {
             Ok(rows) => rows.iter().map(dispatch_stat_json).collect::<Vec<_>>(),
             Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
         };
-        let hot_hook_tools = match store
+        let global_hot_hook_tools = match store
             .mcp_tool_call_stats_filtered(
                 window_days * 86_400,
                 top_n as u32,
-                McpToolCallFilter {
-                    source: Some("hook".to_string()),
-                    ..McpToolCallFilter::default()
-                },
+                dispatch_source_only_filter("hook"),
             )
             .await
         {
@@ -9777,14 +9771,23 @@ impl McpTool for McpDispatchAuditTool {
             "total_errors": total_errors,
             "source_breakdown": source_breakdown,
             "hot_tools": hot_tools,
-            "hot_codex_tools": hot_codex_tools,
-            "hot_hook_tools": hot_hook_tools,
+            "global_hot_codex_tools": global_hot_codex_tools,
+            "global_hot_hook_tools": global_hot_hook_tools,
             "failing_tools": failing_tools,
             "optimization_candidates": optimization_candidates,
             "cold_basis": dispatch_filter_json(&cold_basis),
             "cold_tools": cold_tools,
             "recent_errors": recent_errors,
             "profile_suggestions": profile_suggestions,
+            "view_scope": {
+                "hot_tools": "current filter",
+                "failing_tools": "current filter",
+                "optimization_candidates": "current filter",
+                "source_breakdown": "current filter",
+                "cold_tools": "cold_basis filter",
+                "global_hot_codex_tools": "global source-only comparison: source=codex",
+                "global_hot_hook_tools": "global source-only comparison: source=hook"
+            },
             "limits": {
                 "top_n": top_n,
                 "cold_limit": cold_limit,
@@ -9820,6 +9823,13 @@ fn dispatch_filter_is_empty(filter: &McpToolCallFilter) -> bool {
         && filter.profile.is_none()
         && filter.model.is_none()
         && filter.model_reasoning_effort.is_none()
+}
+
+fn dispatch_source_only_filter(source: &str) -> McpToolCallFilter {
+    McpToolCallFilter {
+        source: Some(source.to_string()),
+        ..McpToolCallFilter::default()
+    }
 }
 
 fn dispatch_filter_json(filter: &McpToolCallFilter) -> Value {
@@ -20158,6 +20168,18 @@ mod tests {
         assert!(reasons.contains(&"slow_p95"));
         assert!(reasons.contains(&"large_average_result"));
         assert!(reasons.contains(&"high_error_rate"));
+    }
+
+    #[test]
+    fn dispatch_audit_source_only_filter_is_global_comparison() {
+        let filter = dispatch_source_only_filter("codex");
+
+        assert_eq!(filter.source.as_deref(), Some("codex"));
+        assert!(filter.client_name.is_none());
+        assert!(filter.profile.is_none());
+        assert!(filter.model.is_none());
+        assert!(filter.model_reasoning_effort.is_none());
+        assert_eq!(dispatch_filter_json(&filter)["source"], "codex");
     }
 
     // ── agent_spawn policy → backend mapping ──────────────────────────────
