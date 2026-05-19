@@ -109,6 +109,7 @@ struct ConnectionTelemetry {
     source: String,
     model: Option<String>,
     model_reasoning_effort: Option<String>,
+    codex_host: Option<String>,
 }
 
 impl ConnectionTelemetry {
@@ -127,12 +128,16 @@ impl ConnectionTelemetry {
         let model_reasoning_effort = std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT")
             .ok()
             .and_then(nonempty_string);
+        let codex_host = std::env::var("AGENT_BRIDGE_CODEX_HOST")
+            .ok()
+            .and_then(nonempty_string);
         Self {
             client_name,
             profile,
             source,
             model,
             model_reasoning_effort,
+            codex_host,
         }
     }
 
@@ -154,6 +159,9 @@ impl ConnectionTelemetry {
             .ok()
             .and_then(nonempty_string);
         self.model_reasoning_effort = std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT")
+            .ok()
+            .and_then(nonempty_string);
+        self.codex_host = std::env::var("AGENT_BRIDGE_CODEX_HOST")
             .ok()
             .and_then(nonempty_string);
     }
@@ -302,6 +310,7 @@ async fn record_mcp_tool_call_telemetry(
             Some(telemetry.source.clone()),
             telemetry.model.clone(),
             telemetry.model_reasoning_effort.clone(),
+            telemetry.codex_host.clone(),
         )
         .await
     {

@@ -475,6 +475,14 @@ CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_model_reasoning
     ON mcp_tool_calls(model_reasoning_effort, ts DESC);
 "#;
 
+// v29 — Codex host attribution. `AGENT_BRIDGE_CODEX_HOST` separates Codex
+// desktop app, CLI-hosted, and IDE-hosted traffic without creating incompatible
+// client-specific telemetry tables.
+const SCHEMA_V29_INDEXES: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_codex_host
+    ON mcp_tool_calls(codex_host, ts DESC);
+"#;
+
 // v23 — Phase 1 P2 reconsolidation: `superseded_by` foreign key on memories.
 // Lets memory_save auto-detect when a new save semantically supersedes an
 // existing record (cosine ≥ threshold) and mark the old row → status='superseded'
@@ -1072,6 +1080,30 @@ impl SqliteStore {
                 }
                 c.execute_batch(SCHEMA_V28_INDEXES)?;
                 let _ = c.execute("UPDATE schema_meta SET value='28' WHERE key='version'", []);
+            }
+
+            // ── v29: MCP dispatch telemetry Codex host attribution ───
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "28".to_string());
+            if cur.as_str() == "28" {
+                let col_exists: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('mcp_tool_calls') \
+                         WHERE name='codex_host'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                if col_exists == 0 {
+                    c.execute("ALTER TABLE mcp_tool_calls ADD COLUMN codex_host TEXT", [])?;
+                }
+                c.execute_batch(SCHEMA_V29_INDEXES)?;
+                let _ = c.execute("UPDATE schema_meta SET value='29' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -2004,6 +2036,7 @@ impl StateStore for SqliteStore {
         source: Option<String>,
         model: Option<String>,
         model_reasoning_effort: Option<String>,
+        codex_host: Option<String>,
     ) -> Result<()> {
         let ts = now_secs();
         let tn = tool_name.to_string();
@@ -2015,8 +2048,8 @@ impl StateStore for SqliteStore {
                 c.execute(
                     "INSERT INTO mcp_tool_calls
                        (ts, tool_name, duration_ms, ok, args_size, result_size,
-                        client_name, profile, source, model, model_reasoning_effort)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                        client_name, profile, source, model, model_reasoning_effort, codex_host)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                     params![
                         ts,
                         tn,
@@ -2028,7 +2061,8 @@ impl StateStore for SqliteStore {
                         profile,
                         source,
                         model,
-                        model_reasoning_effort
+                        model_reasoning_effort,
+                        codex_host
                     ],
                 )?;
                 Ok(())
@@ -2064,11 +2098,13 @@ impl StateStore for SqliteStore {
         let profile_filter = filter.profile;
         let model_filter = filter.model;
         let model_reasoning_filter = filter.model_reasoning_effort;
+        let codex_host_filter = filter.codex_host;
         let source_label = source_filter.clone();
         let client_label = client_filter.clone();
         let profile_label = profile_filter.clone();
         let model_label = model_filter.clone();
         let model_reasoning_label = model_reasoning_filter.clone();
+        let codex_host_label = codex_host_filter.clone();
         let rows = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<McpToolCallStats>> {
@@ -2083,6 +2119,7 @@ impl StateStore for SqliteStore {
                        AND (?4 IS NULL OR COALESCE(profile, 'legacy') = ?4)
                        AND (?5 IS NULL OR COALESCE(model, 'legacy') = ?5)
                        AND (?6 IS NULL OR COALESCE(model_reasoning_effort, 'legacy') = ?6)
+                       AND (?7 IS NULL OR COALESCE(codex_host, 'legacy') = ?7)
                      ORDER BY tool_name",
                 )?;
                 let mut buckets: std::collections::HashMap<
@@ -2096,7 +2133,8 @@ impl StateStore for SqliteStore {
                         client_filter,
                         profile_filter,
                         model_filter,
-                        model_reasoning_filter
+                        model_reasoning_filter,
+                        codex_host_filter
                     ],
                     |row| {
                         Ok((
@@ -2149,6 +2187,7 @@ impl StateStore for SqliteStore {
                             source: source_label.clone(),
                             model: model_label.clone(),
                             model_reasoning_effort: model_reasoning_label.clone(),
+                            codex_host: codex_host_label.clone(),
                         }
                     })
                     .collect();
@@ -2187,6 +2226,7 @@ impl StateStore for SqliteStore {
         let profile_filter = filter.profile;
         let model_filter = filter.model;
         let model_reasoning_filter = filter.model_reasoning_effort;
+        let codex_host_filter = filter.codex_host;
         let rows = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<McpToolSourceStats>> {
@@ -2196,6 +2236,7 @@ impl StateStore for SqliteStore {
                             COALESCE(profile, 'legacy'),
                             COALESCE(model, 'legacy'),
                             COALESCE(model_reasoning_effort, 'legacy'),
+                            COALESCE(codex_host, 'legacy'),
                             COUNT(*),
                             COALESCE(SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END), 0)
                      FROM mcp_tool_calls
@@ -2205,9 +2246,10 @@ impl StateStore for SqliteStore {
                        AND (?4 IS NULL OR COALESCE(profile, 'legacy') = ?4)
                        AND (?5 IS NULL OR COALESCE(model, 'legacy') = ?5)
                        AND (?6 IS NULL OR COALESCE(model_reasoning_effort, 'legacy') = ?6)
-                     GROUP BY 1, 2, 3, 4, 5
-                     ORDER BY 6 DESC, 7 DESC
-                     LIMIT ?7",
+                       AND (?7 IS NULL OR COALESCE(codex_host, 'legacy') = ?7)
+                     GROUP BY 1, 2, 3, 4, 5, 6
+                     ORDER BY 7 DESC, 8 DESC
+                     LIMIT ?8",
                 )?;
                 let rows = stmt
                     .query_map(
@@ -2218,6 +2260,7 @@ impl StateStore for SqliteStore {
                             profile_filter,
                             model_filter,
                             model_reasoning_filter,
+                            codex_host_filter,
                             limit
                         ],
                         |row| {
@@ -2227,8 +2270,9 @@ impl StateStore for SqliteStore {
                                 profile: row.get::<_, String>(2)?,
                                 model: row.get::<_, String>(3)?,
                                 model_reasoning_effort: row.get::<_, String>(4)?,
-                                call_count: row.get::<_, i64>(5)? as u64,
-                                error_count: row.get::<_, i64>(6)? as u64,
+                                codex_host: row.get::<_, String>(5)?,
+                                call_count: row.get::<_, i64>(6)? as u64,
+                                error_count: row.get::<_, i64>(7)? as u64,
                             })
                         },
                     )?
@@ -11503,6 +11547,7 @@ mod tests {
                 Some("codex".to_string()),
                 Some("gpt-5.5".to_string()),
                 Some("xhigh".to_string()),
+                Some("desktop".to_string()),
             )
             .await
             .expect("record codex ok");
@@ -11518,6 +11563,7 @@ mod tests {
                 Some("codex".to_string()),
                 Some("gpt-5.5".to_string()),
                 Some("xhigh".to_string()),
+                Some("desktop".to_string()),
             )
             .await
             .expect("record codex error");
@@ -11531,6 +11577,7 @@ mod tests {
                 Some("ab-session-end-hook".to_string()),
                 Some("essential".to_string()),
                 Some("hook".to_string()),
+                None,
                 None,
                 None,
             )
@@ -11561,6 +11608,7 @@ mod tests {
                 McpToolCallFilter {
                     model: Some("gpt-5.5".to_string()),
                     model_reasoning_effort: Some("xhigh".to_string()),
+                    codex_host: Some("desktop".to_string()),
                     ..McpToolCallFilter::default()
                 },
             )
@@ -11574,6 +11622,7 @@ mod tests {
             codex_model[0].model_reasoning_effort.as_deref(),
             Some("xhigh")
         );
+        assert_eq!(codex_model[0].codex_host.as_deref(), Some("desktop"));
 
         let hook = store
             .mcp_tool_call_stats_filtered(
@@ -11599,6 +11648,7 @@ mod tests {
                 && s.profile == "essential"
                 && s.model == "gpt-5.5"
                 && s.model_reasoning_effort == "xhigh"
+                && s.codex_host == "desktop"
                 && s.call_count == 2
                 && s.error_count == 1
         }));
@@ -11608,6 +11658,7 @@ mod tests {
                 && s.profile == "essential"
                 && s.model == "legacy"
                 && s.model_reasoning_effort == "legacy"
+                && s.codex_host == "legacy"
                 && s.call_count == 1
                 && s.error_count == 0
         }));
@@ -11620,6 +11671,7 @@ mod tests {
                     source: Some("codex".to_string()),
                     model: Some("gpt-5.5".to_string()),
                     model_reasoning_effort: Some("xhigh".to_string()),
+                    codex_host: Some("desktop".to_string()),
                     ..McpToolCallFilter::default()
                 },
             )
@@ -11629,6 +11681,7 @@ mod tests {
         assert_eq!(filtered_source_stats[0].source, "codex");
         assert_eq!(filtered_source_stats[0].model, "gpt-5.5");
         assert_eq!(filtered_source_stats[0].model_reasoning_effort, "xhigh");
+        assert_eq!(filtered_source_stats[0].codex_host, "desktop");
         assert_eq!(filtered_source_stats[0].call_count, 2);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -15659,7 +15712,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("28"),
+            Some("29"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
