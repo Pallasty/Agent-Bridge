@@ -5363,6 +5363,86 @@ async fn build_proactive_hint(
     Some(format!("{edge_note} | consider memory_link: {suggestions}"))
 }
 
+/// **B3 preflight** (audit-gap B3 v0) — cosine-rank the new save's content against
+/// same-kind active prior memories. Emits two structured signals:
+///
+/// - `prior_decision_warning` (cos ≥ 0.75, capped at 3): likely near-duplicate;
+///   sits at p99 of all-pairs same-kind cosines per the 2026-05-17 corpus probe.
+/// - `prior_decision_hint`    (0.60 ≤ cos < 0.75, capped at 5): soft "may be
+///   adjacent" tier; informational, no enforcement.
+///
+/// Skips the catalog (kind ∈ CATALOG_KINDS_C3 — `skill` records bulk-imported
+/// from external sources have templated boilerplate and would false-positive).
+/// Caller is responsible for the AB_REDO_WARN_DISABLE env opt-out (controls both
+/// bands per sibling Q4 vote) and for the `memory_correction` path skip — that
+/// tool is a separate `MemoryCorrectionTool`, so B3 naturally never fires there.
+///
+/// Returns (warnings, hints) as JSON arrays ready for direct response embedding.
+///
+/// Refs:
+/// - docs/DESIGN-A1-B1-B3-RECALL-TIMING-v0.md §2.4 mechanism
+/// - docs/PROBE-B3-REDO-THRESHOLD-CALIBRATION-2026-05-17.md threshold rationale
+/// - thread 10 #218 (probe) + #221/#223 (votes) + #229 (close-out) + #249 (act unlock)
+async fn b3_preflight(
+    store: &Arc<dyn StateStore>,
+    new_key: &str,
+    new_content: &str,
+    new_kind: &str,
+) -> (Vec<Value>, Vec<Value>) {
+    const HARD_THRESHOLD: f64 = 0.75;
+    const SOFT_THRESHOLD: f64 = 0.60;
+    const SOFT_THRESHOLD_F32: f32 = 0.60;
+    const WARN_CAP: usize = 3;
+    const HINT_CAP: usize = 5;
+    const SEARCH_LIMIT: u32 = 30;
+
+    // Round cosine to 3 decimals for stable, readable response payloads.
+    fn round3(x: f64) -> f64 {
+        (x * 1000.0).round() / 1000.0
+    }
+
+    let hits = match store
+        .memory_search_semantic(new_content, SEARCH_LIMIT, SOFT_THRESHOLD_F32)
+        .await
+    {
+        Ok(h) => h,
+        Err(_) => return (Vec::new(), Vec::new()),
+    };
+
+    let mut warnings: Vec<Value> = Vec::new();
+    let mut hints: Vec<Value> = Vec::new();
+    for hit in hits {
+        if hit.record.key == new_key {
+            continue;
+        }
+        if hit.record.kind != new_kind {
+            continue;
+        }
+        if hit.record.status != "active" {
+            continue;
+        }
+        if hit.score >= HARD_THRESHOLD {
+            if warnings.len() < WARN_CAP {
+                warnings.push(json!({
+                    "key": hit.record.key,
+                    "cosine": round3(hit.score),
+                    "kind": hit.record.kind,
+                }));
+            }
+        } else if hit.score >= SOFT_THRESHOLD && hints.len() < HINT_CAP {
+            hints.push(json!({
+                "key": hit.record.key,
+                "cosine": round3(hit.score),
+                "kind": hit.record.kind,
+            }));
+        }
+        if warnings.len() >= WARN_CAP && hints.len() >= HINT_CAP {
+            break;
+        }
+    }
+    (warnings, hints)
+}
+
 /// **Phase 1 P4 (structural)** — Pick top-k cosine neighbors of a freshly
 /// saved memory from the in-process embedding cache. The graph-side of
 /// A-MEM evolution: insert `evolved` edges from the new memory to its
@@ -5644,6 +5724,22 @@ impl McpTool for MemorySaveTool {
             trigger_pattern,
             superseded_by: None,
         };
+        // B3 preflight (audit-gap B3 v0) — see `b3_preflight` rustdoc + design memo.
+        // Runs before the save so warnings reach the caller in the same response;
+        // the save is not blocked, this is advisory. memory_correction is a
+        // separate tool path so naturally untouched per Q2 self-match argument.
+        let b3_disabled = std::env::var("AB_REDO_WARN_DISABLE")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        let b3_eligible_kind = {
+            use ab_store::CATALOG_KINDS_C3;
+            !CATALOG_KINDS_C3.contains(&mem.kind.as_str())
+        };
+        let (b3_warnings, b3_hints) = if !b3_disabled && b3_eligible_kind {
+            b3_preflight(&store, &mem.key, &mem.content, &mem.kind).await
+        } else {
+            (Vec::new(), Vec::new())
+        };
         match store.memory_save(&mem).await {
             Ok(()) => {
                 // Keep embedding cache coherent AND auto-evolve the graph:
@@ -5817,6 +5913,8 @@ impl McpTool for MemorySaveTool {
                     "status": "saved",
                     "key": key,
                     "proactive_hint": hint,
+                    "prior_decision_warnings": b3_warnings,
+                    "prior_decision_hints": b3_hints,
                 });
                 Ok(ToolResult::json_text(&resp))
             }
@@ -22622,4 +22720,145 @@ mod tests {
             "empty text must still return dim-sized vec"
         );
     }
+
+    // ── B3 preflight — same-kind cosine warnings/hints (audit-gap B3 v0) ─────
+
+    async fn b3_test_store() -> std::sync::Arc<dyn ab_store::StateStore> {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-b3-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&dir).await.expect("mkdir");
+        let store = ab_store::SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open");
+        std::sync::Arc::new(store) as std::sync::Arc<dyn ab_store::StateStore>
+    }
+
+    fn b3_mem(key: &str, kind: &str, content: &str) -> ab_store::MemoryRecord {
+        ab_store::MemoryRecord {
+            key: key.to_string(),
+            kind: kind.to_string(),
+            content: content.to_string(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn b3_preflight_empty_store_returns_no_signals() {
+        let store = b3_test_store().await;
+        let (warnings, hints) =
+            super::b3_preflight(&store, "lesson_new", "anything goes here", "lesson").await;
+        assert!(warnings.is_empty(), "no priors → no warnings");
+        assert!(hints.is_empty(), "no priors → no hints");
+    }
+
+    #[tokio::test]
+    async fn b3_preflight_filters_cross_kind() {
+        let store = b3_test_store().await;
+        // Insert a `decision` with identical content; new save is `lesson`.
+        // Same-kind filter must drop the decision out — zero signal expected.
+        store
+            .memory_save(&b3_mem(
+                "decision_prior",
+                "decision",
+                "FTS5 column-scoped query syntax misuse warning",
+            ))
+            .await
+            .expect("save decision");
+        let (warnings, hints) = super::b3_preflight(
+            &store,
+            "lesson_new",
+            "FTS5 column-scoped query syntax misuse warning",
+            "lesson",
+        )
+        .await;
+        assert!(
+            warnings.is_empty(),
+            "cross-kind prior must NOT yield warning (got {:?})",
+            warnings
+        );
+        assert!(hints.is_empty(), "cross-kind prior must NOT yield hint");
+    }
+
+    #[tokio::test]
+    async fn b3_preflight_self_key_excluded() {
+        let store = b3_test_store().await;
+        // Prior with the SAME key — represents the "memory_save replaces existing"
+        // case. Self-skip must keep the warning bucket empty even on perfect match.
+        store
+            .memory_save(&b3_mem(
+                "lesson_redo",
+                "lesson",
+                "long-running content about migration discipline patterns",
+            ))
+            .await
+            .expect("save prior");
+        let (warnings, hints) = super::b3_preflight(
+            &store,
+            "lesson_redo",
+            "long-running content about migration discipline patterns",
+            "lesson",
+        )
+        .await;
+        assert!(warnings.is_empty(), "self key must not warn against itself");
+        assert!(hints.is_empty(), "self key must not hint against itself");
+    }
+
+    #[tokio::test]
+    async fn b3_preflight_warns_on_near_duplicate_same_kind() {
+        let store = b3_test_store().await;
+        // Two distinct keys, same kind, identical content body → cosine should
+        // be ~1.0 on either ONNX or hash backend (same hash → same vector).
+        // This is the positive case: warning bucket must be populated.
+        let content = "FTS5 column-scoped query parser misinterprets user prefixes \
+                       as table column names which causes no such column SQL errors";
+        store
+            .memory_save(&b3_mem("lesson_prior", "lesson", content))
+            .await
+            .expect("save prior");
+        let (warnings, hints) =
+            super::b3_preflight(&store, "lesson_new_attempt", content, "lesson").await;
+        assert!(
+            !warnings.is_empty(),
+            "near-duplicate same-kind prior must yield ≥1 warning (got 0; \
+             cosine threshold likely degraded; check embed backend)"
+        );
+        let first_warning = &warnings[0];
+        assert_eq!(
+            first_warning["key"].as_str(),
+            Some("lesson_prior"),
+            "warning must cite the prior key"
+        );
+        let cos = first_warning["cosine"].as_f64().expect("cosine f64");
+        assert!(
+            cos >= 0.75,
+            "warning cosine must be ≥ hard threshold 0.75 (got {})",
+            cos
+        );
+        // Empty hint band is expected here since the cosine fell into the hard
+        // tier; soft tier [0.60, 0.75) is for adjacent-but-not-duplicate.
+        assert!(hints.is_empty(), "soft tier should be empty on hard-tier match");
+    }
+
+    // Note: cap-at-3 behavior is exercised by inspection (5-line `if len <
+    // WARN_CAP { push }` loop in b3_preflight). A DB-level test of the cap
+    // would need a search-backend that returns >3 distinct same-kind hits
+    // with cos ≥ 0.75 — the test-default hash backend collapses near-duplicate
+    // content into a single hit, so the cap path is unreachable from there.
+    // Dogfood (4-week P-B3 window) will exercise the cap with real ONNX
+    // embeddings + agent-generated content diversity.
 }
