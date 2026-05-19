@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook — inject scope-relevant agent-bridge memories.
 #
+# v4.0 (2026-05-19): A1 cooldown softening per docs/DESIGN-A1-B1-B3-RECALL-TIMING-v0.md §2.2.
+#   - The v3.0 one-shot lock fired memory injection only once per session
+#     (audit-gap A1 root cause: 17 untouched §6.5 working-def gap).
+#   - Lock file now stores a per-session turn counter; injection re-fires
+#     every AB_MEMORY_COOLDOWN_TURNS turns (default 8 per locked P-A1).
+#   - Drift dim DROPPED per PROBE-A1-DRIFT-CALIBRATION-2026-05-17.md
+#     (drift primitive could not separate same vs cross topic at any threshold).
+#   - Ranked payload capped at top-8 (was top-20) per design §2.2.
+#     concept+session_handoff always-inject unchanged at top-15 (L0 navigation).
+#   - Opt-out: AB_MEMORY_COOLDOWN_TURNS=999999 effectively restores v3.0 one-shot.
+#
 # v3.0 (2026-05-03): pure-SQL static ranking
 #   - Drops the v2.0 Python FNV-1a re-ranking: it computed 512-dim hash
 #     vectors but the DB now stores 384-dim ONNX embeddings, so the cosine
@@ -160,8 +171,17 @@ _ab_pet_state_write
 [[ -f "$DB" ]] || exit 0
 
 LOCK="/tmp/ab-mem-injected-${SESSION_ID}"
-[[ -f "$LOCK" ]] && exit 0
-touch "$LOCK"
+COOLDOWN_TURNS="${AB_MEMORY_COOLDOWN_TURNS:-8}"
+COUNT=$(cat "$LOCK" 2>/dev/null || echo "0")
+case "$COUNT" in
+    ''|*[!0-9]*) COUNT=0 ;;
+esac
+COUNT=$((COUNT + 1))
+printf '%s\n' "$COUNT" > "$LOCK"
+# Fire on turns 1, 1+N, 1+2N, ... (cooldown softening per A1 v0; drift dim dropped).
+if (( COOLDOWN_TURNS > 0 )) && (( (COUNT - 1) % COOLDOWN_TURNS != 0 )); then
+    exit 0
+fi
 
 CWD="${PWD:-/}"
 
@@ -213,7 +233,7 @@ ranked_rows = con.execute(
     f"FROM memories "
     f"WHERE status='active' AND kind NOT IN ('concept','session_handoff') "
     f"AND {scope_filter} "
-    f"ORDER BY {KIND_TIER}, {RANK} DESC LIMIT 20"
+    f"ORDER BY {KIND_TIER}, {RANK} DESC LIMIT 8"
 ).fetchall()
 con.close()
 
