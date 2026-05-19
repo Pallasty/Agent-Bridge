@@ -223,7 +223,16 @@ fn default_weight() -> f64 {
 pub struct MemorySearchHit {
     pub record: MemoryRecord,
     /// Composite score: matches × recency × usage. Higher = better.
+    /// **Not** a pure cosine — semantic paths blend in importance / recency
+    /// bonuses so `score` can exceed 1.0. For threshold checks against a
+    /// raw geometric distance use [`Self::cosine`] (semantic mode only).
     pub score: f64,
+    /// Raw cosine ∈ [-1, 1] for `semantic` and `hybrid` semantic-leg hits.
+    /// `None` for FTS5-only paths (no embedding compared). Callers doing
+    /// near-duplicate detection (e.g. B3 `prior_decision_warning`) MUST
+    /// read this field — `score` is post-blend and not bounded by 1.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cosine: Option<f32>,
 }
 
 /// One memory ranked purely by cosine similarity to a query, **without**

@@ -5242,18 +5242,26 @@ async fn b3_preflight(
         if hit.record.status != "active" {
             continue;
         }
-        if hit.score >= HARD_THRESHOLD {
+        // Raw cosine ∈ [-1, 1] from the semantic path. `score` is blended
+        // (cosine + importance/recency bonuses, can exceed 1.0) — wrong
+        // metric for threshold checks. Drop hits with no cosine (FTS-only
+        // paths can't classify near-duplicates by geometry).
+        let cosine = match hit.cosine {
+            Some(c) => c as f64,
+            None => continue,
+        };
+        if cosine >= HARD_THRESHOLD {
             if warnings.len() < WARN_CAP {
                 warnings.push(json!({
                     "key": hit.record.key,
-                    "cosine": round3(hit.score),
+                    "cosine": round3(cosine),
                     "kind": hit.record.kind,
                 }));
             }
-        } else if hit.score >= SOFT_THRESHOLD && hints.len() < HINT_CAP {
+        } else if cosine >= SOFT_THRESHOLD && hints.len() < HINT_CAP {
             hints.push(json!({
                 "key": hit.record.key,
-                "cosine": round3(hit.score),
+                "cosine": round3(cosine),
                 "kind": hit.record.kind,
             }));
         }
@@ -5996,6 +6004,7 @@ impl McpTool for MemorySearchTool {
                         Some(MemorySearchHit {
                             score: cosine as f64 + 0.2 * rec.importance,
                             record: rec.clone(),
+                            cosine: Some(cosine),
                         })
                     })
                     .collect();
@@ -20372,6 +20381,7 @@ mod tests {
                 superseded_by: None,
             },
             score,
+            cosine: None,
         }
     }
 
@@ -22797,6 +22807,79 @@ mod tests {
     // content into a single hit, so the cap path is unreachable from there.
     // Dogfood (4-week P-B3 window) will exercise the cap with real ONNX
     // embeddings + agent-generated content diversity.
+
+    /// Regression: B3 v0 wet-run on 5/19 observed `cosine=1.043` in the
+    /// `prior_decision_warning` payload because b3_preflight was reading
+    /// `hit.score` (blended cosine + 0.2*importance + recency bonus) as
+    /// "cosine". After the fix it reads `hit.cosine` (raw, clamped [-1,1]).
+    /// This test asserts the warning cosine is bounded at 1.0 so the bug
+    /// can't silently regress.
+    #[tokio::test(flavor = "current_thread")]
+    async fn b3_preflight_warning_cosine_bounded_at_one() {
+        let store = b3_test_store().await;
+        // High-importance prior to maximize the blend bonus in score —
+        // pre-fix `hit.score` would land near cosine(=1) + 0.2*0.9 ≈ 1.18.
+        let mut prior = b3_mem("decision_prior_high_imp", "decision", "near-duplicate body text");
+        prior.importance = 0.9;
+        store.memory_save(&prior).await.expect("save prior");
+
+        let (warnings, _hints) = super::b3_preflight(
+            &store,
+            "decision_new_attempt",
+            "near-duplicate body text",
+            "decision",
+        )
+        .await;
+        assert!(!warnings.is_empty(), "expected ≥1 warning for identical content");
+        for w in &warnings {
+            let cos = w["cosine"].as_f64().expect("cosine f64");
+            assert!(
+                cos <= 1.0 + 1e-9,
+                "warning cosine must be bounded at 1.0 \
+                 (regression: got {} — b3_preflight reading blended score?)",
+                cos
+            );
+            assert!(
+                cos >= -1.0 - 1e-9,
+                "warning cosine must be ≥ -1.0 (got {})",
+                cos
+            );
+        }
+    }
+
+    /// Regression: `MemorySearchHit.cosine` is the raw geometric distance;
+    /// `.score` is post-blend (cosine + importance/recency bonuses, can
+    /// exceed 1.0). Asserts the invariant `score ≥ cosine` when cosine is
+    /// present — this is what makes the two fields distinguishable.
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_search_semantic_cosine_bounded_and_below_blended_score() {
+        let store = b3_test_store().await;
+        let mut rec = b3_mem("lesson_anchor", "lesson", "anchor content for cosine bound test");
+        rec.importance = 0.9; // make blend bonus prominent
+        store.memory_save(&rec).await.expect("save");
+
+        let hits = store
+            .memory_search_semantic("anchor content for cosine bound test", 5, 0.0)
+            .await
+            .expect("semantic");
+        assert!(!hits.is_empty(), "expected ≥1 semantic hit");
+        for hit in &hits {
+            let cos = hit
+                .cosine
+                .expect("semantic path must populate cosine") as f64;
+            assert!(
+                (-1.0..=1.0).contains(&cos),
+                "cosine must be in [-1, 1], got {}",
+                cos
+            );
+            assert!(
+                hit.score >= cos - 1e-6,
+                "score (blended) must be ≥ cosine (got score={}, cosine={})",
+                hit.score,
+                cos
+            );
+        }
+    }
 
     // ── B1 project-state digest — formatter (audit-gap B1 v0) ────────────────
 

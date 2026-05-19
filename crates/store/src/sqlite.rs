@@ -2648,7 +2648,11 @@ impl StateStore for SqliteStore {
                             + memory_score(r.last_accessed_at, r.access_count, now, &r.kind)
                             + 0.5 * r.importance
                             + feedback_kind_boost_fts(&r.kind);
-                        MemorySearchHit { record: r, score }
+                        MemorySearchHit {
+                            record: r,
+                            score,
+                            cosine: None,
+                        }
                     })
                     .collect();
 
@@ -2703,7 +2707,11 @@ impl StateStore for SqliteStore {
                             + memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind)
                             + 0.5 * rec.importance
                             + feedback_kind_boost_fts(&rec.kind);
-                        hits.push(MemorySearchHit { record: rec, score });
+                        hits.push(MemorySearchHit {
+                            record: rec,
+                            score,
+                            cosine: None,
+                        });
                     }
                 }
 
@@ -2782,6 +2790,7 @@ impl StateStore for SqliteStore {
                     graph_hits.push(MemorySearchHit {
                         record: rec,
                         score: *gscore,
+                        cosine: None,
                     });
                 }
             }
@@ -2824,6 +2833,7 @@ impl StateStore for SqliteStore {
                 all_records.remove(&key).map(|record| MemorySearchHit {
                     score: rrf_score,
                     record,
+                    cosine: None,
                 })
             })
             .collect();
@@ -4936,7 +4946,11 @@ impl StateStore for SqliteStore {
                     + 0.2 * rec.importance
                     + 0.1 * memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind)
                     + feedback_kind_boost_semantic(&rec.kind);
-                Some(MemorySearchHit { record: rec, score })
+                Some(MemorySearchHit {
+                    record: rec,
+                    score,
+                    cosine: Some(cosine),
+                })
             })
             .collect();
 
