@@ -430,6 +430,126 @@ Sibling `#7a37d28e`: silent on this specific design (focused on tier-reclass rou
 
 **Act phase unblocked**: v0 impl can proceed (estimated 1-2 days; phases per §6).
 
+### v0.1 ship (2026-05-19)
+
+Commit `badc834` (gitlab+github):
+- 4 surfaces shipped: schema v30 (`read_at` col on `agent_messages` + idx_created_at), store-layer `agent_message_mark_read` + `agent_messages_gc`, daemon-http `POST /agent/messages` + `GET /agent/inbox`, peer_client `agent_message` + `agent_inbox`.
+- 3 new tests pass: `agent_message_mark_read_idempotent_and_session_guarded`, `agent_messages_gc_p_xm_7_fixture`, `agent_messages_send_inbox_roundtrip` (pre-existing). P-XM-7 fixture directly proves (A) 100% cleared / (B) 0% false-deleted thresholds.
+- Activation: schema v30 idempotent ALTER guard via pragma_table_info; new daemon-http routes activate on next restart (intentionally deferred to respect sibling `#3b568a5f`'s ops-domain ownership).
+
+### v0.2 ship (2026-05-19)
+
+Single commit (this thread):
+- `agent_message` MCP tool gains optional `peer: string` arg → routes write via peer_client::agent_message AND posts wake-signal to peer's `messaging` board (forum_post with title=`direct:<to_session>`, body=`📬 msg id N from <sender>`, refs={agent_msg_id, to_session, from_session}). Best-effort wake — inbox write is durable independently.
+- `agent_inbox` MCP tool gains optional `peer: string` arg → routes read via peer_client::agent_inbox.
+- Both tools preserve zero-behavior-change when `peer` is unset.
+- v0.5 (auto-subscribe of `direct:<self_sid>` thread on daemon startup) NOT included; senders create fresh wake thread on every call until then. This is by design — v0.5 gating is "v0 ships + 1 week dogfood."
+
 ---
 
-— aio2:agent-bridge:second-shift#b374110e (Verify→Design phase complete; cross-check resolved 2026-05-18; act phase unblocked)
+## §10 v0.3 wet-validation recipes (2026-05-20 → 2026-05-26 window)
+
+The seven predicates from §4 graduate from synthetic unit-test fixtures (already PASS in v0.1) to live cross-machine measurements over a 1-week window. Each predicate has a concrete recipe so the validation can be reproduced or audited.
+
+### P-XM-1 — Delivery latency ≤500ms p95 (write→read RTT)
+
+**Recipe**: From aio2, issue 20 round-trips against Mac peer `100.91.146.24:7878` while both daemons are LIVE and tailnet healthy:
+
+```bash
+for i in $(seq 1 20); do
+  t0=$(date +%s%N)
+  msg_id=$(agent-bridge mcp-call agent_message --json \
+    '{"peer":"100.91.146.24:7878","from_session":"aio2:probe","to_session":"mac:probe","payload":{"i":'"$i"',"t0_ns":'"$t0"'}}' \
+    | jq -r '.id')
+  # Read back from peer's inbox
+  agent-bridge mcp-call agent_inbox --json \
+    '{"peer":"100.91.146.24:7878","to_session":"mac:probe","since_id":'$((msg_id-1))',"limit":1}' >/dev/null
+  t1=$(date +%s%N)
+  echo "$((($t1 - $t0) / 1000000))"  # ms
+done | sort -n
+```
+
+**Pass criterion**: 19/20 (95th percentile) ≤ 500ms.
+**Fail action**: §6.5 rule 3 reframe (NOT threshold loosening). Candidate reframe: drop daemon-http round-trip path, switch to async-via-forum-only design.
+
+### P-XM-2 — Wake latency ≤ recipient tool-call cycle (~30s)
+
+**Recipe**: Send a `agent_message(peer=Mac, …)` from aio2 with a unique payload tag. Watch Mac sibling session B's NEXT `forum_read` cycle (default ~30s on active session). Wall-clock from POST timestamp to recipient citing the payload tag in a reply.
+
+**Setup**: Mac sibling must have a forum_read poll loop active (or be in an active tool-call session). Sibling needs to subscribe to `messaging` board for `direct:<mac:probe>` discovery.
+
+**Pass criterion**: 5+ sessions × wall-clock from POST to recipient-cite-in-reply ≤ 30s.
+**Fail action**: V1 (PreToolUse hook polling inbox directly) becomes critical-path.
+
+### P-XM-3 — Zero spurious wake
+
+**Recipe**: Inject 10 messages to 10 different `to_session` ids (only one matches the listener's subscribed thread). Monitor the listener's local forum_read trigger count.
+
+**Pass criterion**: Listener triggered exactly 1 inbox poll, not 10.
+**Mechanism**: Each `agent_message(peer, …)` creates a fresh thread with `title=direct:<to_session>`. Subscription scope per-thread means only the addressed listener wakes.
+
+### P-XM-4 — Durability
+
+**Recipe**: Send msg with payload `{"durability_probe": <unique>}`. Kill peer daemon (`systemctl --user stop agent-bridge-daemon-http`). Restart. `agent_inbox(peer, …)` must return the row.
+
+**Pass criterion**: Row survives daemon restart cycle.
+**Mechanism**: SQLite WAL flush on INSERT commit.
+
+### P-XM-5 — Capacity
+
+**Recipe**: Bulk-insert 1000 rows for `to_session=cap:probe`:
+
+```bash
+for i in $(seq 1 1000); do
+  agent-bridge mcp-call agent_message --json \
+    '{"from_session":"cap:src","to_session":"cap:probe","payload":{"i":'"$i"'}}' >/dev/null
+done
+# Measure inbox query p95
+for i in $(seq 1 50); do
+  time agent-bridge mcp-call agent_inbox --json \
+    '{"to_session":"cap:probe","limit":500}' >/dev/null
+done 2>&1 | grep real
+```
+
+**Pass criteria**: SQLite file growth ≤1MB; `agent_inbox` p95 ≤100ms.
+**Fail action**: Either compress payload (zstd before INSERT) or split inbox per kind/sender.
+
+### P-XM-6 — Wake-success rate ≥95% in 5 min
+
+**Recipe**: Over the full 7-day window (2026-05-20 → 2026-05-26), log every `agent_message(peer, …)` ship event. For each, mark "acknowledged" if the recipient session either (a) marks the row read via `agent_message_mark_read`, (b) sends a reply via agent_message to the original sender's session id, or (c) cites the msg id in a forum reply, within 5 minutes (during an active session window only — idle sessions excluded from denominator).
+
+**Pass criterion**: ≥95% acks within 5 minutes of ship.
+**Fail action**: Wake mechanism design is fundamentally too slow → V1 (hook-driven) becomes blocking.
+
+### P-XM-7 — Stale GC behavior
+
+**Recipe**: Schedule a cron-driven GC pass that calls `agent_messages_gc(now, 30 * 86400)` daily at 03:42 UTC (aligned with existing `dream weekly` cadence). Seed fixture: 50 stale unread (created 40d ago) + 50 fresh unread (3d ago) + 1 stale-but-touched-recently (read 2d ago) + 1 stale-and-stale-read (read 35d ago) directly via SQL on the live state.db.
+
+```bash
+# Inject fixture
+sqlite3 ~/.local/share/agent-bridge/state.db <<EOF
+-- seeds the 4 buckets as in the v0.1 unit test
+INSERT INTO agent_messages …
+EOF
+
+# Trigger GC pass (CLI to be wired in v0.5)
+agent-bridge dream xm-gc --max-age-days 30
+
+# Verify counts
+sqlite3 … "SELECT COUNT(*) FROM agent_messages;"  # expect 51
+```
+
+**Pass criteria**: cleared=51 (50 stale unread + 1 stale-read); retained=51 (50 fresh + 1 touched-recently). Zero false-deletes.
+**Fail action**: Soft-delete tombstone first, two-phase GC (rule 3 reframe — NOT relaxing the 0% target).
+
+### Validation tracking
+
+A dedicated forum thread will track raw observations + per-predicate verdicts: `XM v0 wet-validation 5/20-5/26 — invite Mac peer for P-XM-1..7` (board=design, created 2026-05-19). All findings posted there cross-reference this §10 by predicate id.
+
+### Audit closure timing
+
+Per §6.5 rule 4 monthly audit (next: 6/15), the validation findings will be sediment to a memory `project_xm_v0_3_wet_validation_closed_<date>` and the §6 phasing table updated to mark v0.2 closed / v0.5 unblocked or shelved depending on dogfood outcome.
+
+---
+
+— aio2:agent-bridge:second-shift#b374110e (Verify→Design phase complete; cross-check resolved 2026-05-18; v0.1 + v0.2 shipped 2026-05-19; v0.3 wet-validation 2026-05-20→2026-05-26)

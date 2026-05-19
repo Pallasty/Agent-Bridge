@@ -2520,24 +2520,25 @@ impl McpTool for AgentMessageTool {
         ToolSchema {
             name: self.name().into(),
             description: "Append a JSON payload to another session's inbox (SQLite \
-                 `agent_messages`). Use opaque session ids (e.g. client-supplied handles)."
+                 `agent_messages`). Use opaque session ids (e.g. client-supplied handles). \
+                 Set `peer: \"host:port\"` to route via that tailnet daemon-http instead of \
+                 local (XM v0.2); when peer is set, ALSO posts a wake signal to the peer's \
+                 `messaging` board (`direct:<to_session>` title) so the recipient session's \
+                 next forum_read cycle surfaces the new inbox entry."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "from_session": { "type": "string", "description": "Sender session id." },
                     "to_session":   { "type": "string", "description": "Recipient session id." },
-                    "payload":      { "type": "object", "description": "Arbitrary JSON object." }
+                    "payload":      { "type": "object", "description": "Arbitrary JSON object." },
+                    "peer":         { "type": "string", "description": "Optional tailnet peer host:port; routes inbox write + wake signal via that daemon-http. (XM v0.2)" }
                 },
                 "required": ["from_session", "to_session", "payload"]
             }),
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let store = match &self.hub.store {
-            Some(s) => s.clone(),
-            None => return Ok(ToolResult::error("no memory store configured")),
-        };
         let from_session = match args
             .get("from_session")
             .and_then(|v| v.as_str())
@@ -2557,6 +2558,75 @@ impl McpTool for AgentMessageTool {
         let payload = match args.get("payload").filter(|v| v.is_object()) {
             Some(v) => v.clone(),
             None => return Ok(ToolResult::error("missing 'payload' object")),
+        };
+        let peer = args
+            .get("peer")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+
+        if let Some(p) = peer {
+            // XM v0.2 — cross-machine path: write to peer's inbox + post
+            // wake signal to its `messaging` board. The inbox write is
+            // the durable payload; the wake forum_post is best-effort
+            // (recipient can still poll via agent_inbox if the wake fails).
+            let id = crate::peer_client::agent_message(p, &from_session, &to_session, &payload)
+                .await
+                .map_err(|e| ab_core::Error::Backend(format!("agent_message peer: {e}")))?;
+
+            // Wake signal — separate forum_post call so a forum-side
+            // SQLite hiccup on the peer doesn't roll back the inbox write.
+            let wake_title = format!("direct:{to_session}");
+            let wake_body = format!("📬 msg id {id} from {from_session}");
+            let wake_refs = json!({
+                "agent_msg_id": id,
+                "to_session": to_session,
+                "from_session": from_session,
+            });
+            let wake_req = crate::peer_client::ForumPostRequest {
+                author: &from_session,
+                body: &wake_body,
+                thread_id: None,
+                board: Some("messaging"),
+                title: Some(&wake_title),
+                kind: Some("msg"),
+                tags: None,
+                refs: Some(&wake_refs),
+            };
+            let (wake_status, wake_error) =
+                match crate::peer_client::forum_post(p, wake_req).await {
+                    Ok(v) => (
+                        json!({
+                            "ok": true,
+                            "post_id": v.get("post_id").cloned().unwrap_or(json!(null)),
+                            "thread_id": v.get("thread_id").cloned().unwrap_or(json!(null)),
+                            "board": "messaging",
+                            "title": wake_title.clone(),
+                        }),
+                        None,
+                    ),
+                    Err(e) => (json!({"ok": false}), Some(format!("{e}"))),
+                };
+
+            let mut resp = json!({
+                "status": "ok",
+                "id": id,
+                "peer": p,
+                "from_session": from_session,
+                "to_session": to_session,
+                "wake_signal": wake_status,
+            });
+            if let Some(err) = wake_error {
+                resp.as_object_mut()
+                    .expect("wake resp must be object")
+                    .insert("wake_signal_error".into(), Value::String(err));
+            }
+            return Ok(ToolResult::json_text(&resp));
+        }
+
+        // Local path — today's behavior unchanged.
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
         };
         let id = store
             .agent_message_send(&from_session, &to_session, &payload)
@@ -2589,7 +2659,10 @@ impl McpTool for AgentInboxTool {
             name: self.name().into(),
             description:
                 "Fetch inbox rows for `to_session`, optionally after `since_id` \
-                 (message id cursor), optionally unread-only. Ordered by id ascending; limit 1–500."
+                 (message id cursor), optionally unread-only. Ordered by id ascending; limit 1–500. \
+                 Set `peer: \"host:port\"` to read from that tailnet daemon-http's inbox instead \
+                 of local (XM v0.2). Returned payloads still live on the remote node; this tool \
+                 does NOT replicate them locally."
                     .into(),
             input_schema: json!({
                 "type": "object",
@@ -2605,12 +2678,16 @@ impl McpTool for AgentInboxTool {
                     "unread_only": {
                         "type": "boolean",
                         "default": false,
-                        "description": "If true, only rows with read=0 (column reserved for future use)."
+                        "description": "If true, only rows with read=0."
                     },
                     "limit": {
                         "type": "integer",
                         "default": 50,
                         "description": "Max rows (clamped 1–500)."
+                    },
+                    "peer": {
+                        "type": "string",
+                        "description": "Optional tailnet peer host:port; routes the read via that daemon-http. (XM v0.2)"
                     }
                 },
                 "required": ["to_session"]
@@ -2618,10 +2695,6 @@ impl McpTool for AgentInboxTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let store = match &self.hub.store {
-            Some(s) => s.clone(),
-            None => return Ok(ToolResult::error("no memory store configured")),
-        };
         let to_session = match args
             .get("to_session")
             .and_then(|v| v.as_str())
@@ -2640,6 +2713,29 @@ impl McpTool for AgentInboxTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(50)
             .clamp(1, 500) as u32;
+        let peer = args
+            .get("peer")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+
+        if let Some(p) = peer {
+            let rows =
+                crate::peer_client::agent_inbox(p, &to_session, since_id, unread_only, limit)
+                    .await
+                    .map_err(|e| ab_core::Error::Backend(format!("agent_inbox peer: {e}")))?;
+            return Ok(ToolResult::json_text(&json!({
+                "to_session": to_session,
+                "since_id": since_id,
+                "count": rows.len(),
+                "messages": rows,
+                "peer": p,
+            })));
+        }
+
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
         let rows = store
             .agent_inbox_fetch(&to_session, since_id, unread_only, limit)
             .await
