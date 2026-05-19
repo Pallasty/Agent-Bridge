@@ -629,6 +629,7 @@ Phase 7 tasks:
 5. **Phase 7.5 — Read-Only Multi-Agent Surface**
    - Build or prototype a read-only view that shows multiple agents with avatar id, mode, activity state, risk, block reason, and next action.
    - Do not ship auto-control from this panel until the state protocol has survived dogfood.
+   - Status: implemented first as Standard-profile `avatar_surface_snapshot` on 2026-05-19. It reads `agent_presence_list`, prefers `capabilities.avatar_state`, falls back to compatibility `capabilities.pet_state` or generic presence identity, and returns compact `avatars[]` entries for a future panel or terminal dashboard. It is read-only and does not mutate sidecar state, write presence, emit audio, or send notifications.
 
 Acceptance:
 
@@ -657,7 +658,7 @@ Acceptance:
 Phase 6.1 and Phase 6.2 are now live-verified in the current Codex/MCP path.
 Move in this order:
 
-1. Decide whether the read-only multi-agent surface should read `capabilities.avatar_state` directly from `agent_presence_list`.
+1. Validate `avatar_surface_snapshot` against the installed binary and live presence rows.
 2. Validate the same protocol shape from a real non-Codex client session, not only a runtime-label stdio probe.
 3. Keep mutating `avatar_state_set` behind the RFC boundary until the read-only surface has been dogfooded.
 4. Dogfood Phase 6.3 during real Codex work.

@@ -3509,6 +3509,214 @@ impl McpTool for AgentPresenceListTool {
     }
 }
 
+pub struct AvatarSurfaceSnapshotTool {
+    hub: Hub,
+}
+impl AvatarSurfaceSnapshotTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+fn avatar_surface_field(primary: Option<&Value>, compat: Option<&Value>, key: &str) -> Value {
+    primary
+        .and_then(|v| v.get(key).cloned())
+        .or_else(|| compat.and_then(|v| v.get(key).cloned()))
+        .unwrap_or(Value::Null)
+}
+
+fn avatar_surface_field_or_string(
+    primary: Option<&Value>,
+    compat: Option<&Value>,
+    key: &str,
+    fallback: String,
+) -> Value {
+    let value = avatar_surface_field(primary, compat, key);
+    if value.is_null() {
+        json!(fallback)
+    } else {
+        value
+    }
+}
+
+fn avatar_surface_entry_from_presence(
+    row: &ab_store::AgentPresenceRecord,
+    include_raw_presence: bool,
+    include_compat: bool,
+) -> Value {
+    let capabilities = row.capabilities.as_ref();
+    let avatar_state = capabilities
+        .and_then(|v| v.get("avatar_state"))
+        .filter(|v| v.is_object());
+    let pet_state = capabilities
+        .and_then(|v| v.get("pet_state"))
+        .filter(|v| v.is_object());
+    let source = if avatar_state.is_some() {
+        "avatar_state"
+    } else if pet_state.is_some() {
+        "pet_state"
+    } else {
+        "presence"
+    };
+    let mode = pet_state_str_field(avatar_state.or(pet_state).unwrap_or(&Value::Null), "mode")
+        .unwrap_or_else(|| "unknown".to_string());
+    let activity_state = pet_state_str_field(
+        avatar_state.or(pet_state).unwrap_or(&Value::Null),
+        "activity_state",
+    )
+    .unwrap_or_else(|| mode.clone());
+
+    let mut entry = json!({
+        "agent_avatar_protocol": 1,
+        "agent_id": avatar_surface_field_or_string(avatar_state, pet_state, "agent_id", row.session_id.clone()),
+        "session_id": row.session_id,
+        "name": row.name,
+        "runtime": avatar_surface_field(avatar_state, pet_state, "runtime"),
+        "avatar_id": avatar_surface_field(avatar_state, pet_state, "avatar_id"),
+        "mode": mode,
+        "activity_state": activity_state,
+        "focus": avatar_surface_field(avatar_state, pet_state, "focus"),
+        "risk_level": avatar_surface_field(avatar_state, pet_state, "risk_level"),
+        "blocked_reason": avatar_surface_field(avatar_state, pet_state, "blocked_reason"),
+        "evidence": avatar_surface_field(avatar_state, pet_state, "evidence"),
+        "next_action": avatar_surface_field(avatar_state, pet_state, "next_action"),
+        "updated_at": avatar_surface_field(avatar_state, pet_state, "updated_at"),
+        "project": avatar_surface_field_or_string(avatar_state, pet_state, "project", row.project.clone()),
+        "cwd": avatar_surface_field_or_string(
+            avatar_state,
+            pet_state,
+            "cwd",
+            row.cwd.clone().unwrap_or_default()
+        ),
+        "node": row.node,
+        "role": row.role,
+        "tag": row.tag,
+        "pid": row.pid,
+        "last_heartbeat_at": row.last_heartbeat_at,
+        "started_at": row.started_at,
+        "voice_policy": avatar_state
+            .and_then(|v| v.get("voice_policy").cloned())
+            .or_else(|| capabilities.and_then(|v| v.get("voice_policy").cloned()))
+            .unwrap_or(Value::Null),
+        "source": source,
+        "has_avatar_state": avatar_state.is_some(),
+        "has_compat_pet_state": pet_state.is_some()
+    });
+    if include_compat {
+        entry["compat_pet_state"] = pet_state.cloned().unwrap_or(Value::Null);
+    }
+    if include_raw_presence {
+        entry["presence"] = json!(row);
+    }
+    entry
+}
+
+#[async_trait]
+impl McpTool for AvatarSurfaceSnapshotTool {
+    fn name(&self) -> &'static str {
+        "avatar_surface_snapshot"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Phase 7.5 multi-agent avatar surface snapshot. \
+                 Lists active presence rows and projects each row into a compact \
+                 Agent Avatar Protocol view for panels, terminal dashboards, or \
+                 other UI surfaces. It does not mutate pet state, write presence, \
+                 emit audio, or send notifications."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "project":       { "type": "string",  "description": "Filter by project slug." },
+                    "role":          { "type": "string",  "description": "Filter by role." },
+                    "max_idle_secs": { "type": "integer", "default": 300, "description": "Skip rows whose heartbeat is older than this. 0 = no TTL." },
+                    "include_stale": { "type": "boolean", "default": false, "description": "Equivalent to max_idle_secs:0." },
+                    "limit":         { "type": "integer", "default": 50, "description": "Max rows (1-500)." },
+                    "peer":          { "type": "string",  "description": "Optional tailnet peer host:port; if set, query that daemon-http instead of local." },
+                    "include_raw_presence": { "type": "boolean", "default": false, "description": "Include the original presence row in each avatar entry." },
+                    "include_compat": { "type": "boolean", "default": false, "description": "Include compatibility capabilities.pet_state when present." }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let project = args
+            .get("project")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let role = args
+            .get("role")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let include_stale = args
+            .get("include_stale")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let max_idle_secs = if include_stale {
+            0
+        } else {
+            args.get("max_idle_secs")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(300)
+        };
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .clamp(1, 500) as u32;
+        let peer = args
+            .get("peer")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let include_raw_presence = args
+            .get("include_raw_presence")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let include_compat = args
+            .get("include_compat")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let rows = if let Some(p) = peer {
+            crate::peer_client::agent_presence_list(p, project, role, max_idle_secs, limit)
+                .await
+                .map_err(|e| {
+                    ab_core::Error::Backend(format!("avatar_surface_snapshot peer: {e}"))
+                })?
+        } else {
+            let store = match &self.hub.store {
+                Some(s) => s.clone(),
+                None => return Ok(ToolResult::error("no memory store configured")),
+            };
+            store
+                .agent_presence_list(project, role, max_idle_secs, limit)
+                .await
+                .map_err(|e| ab_core::Error::Backend(format!("avatar_surface_snapshot: {e}")))?
+        };
+        let avatars: Vec<Value> = rows
+            .iter()
+            .map(|row| {
+                avatar_surface_entry_from_presence(row, include_raw_presence, include_compat)
+            })
+            .collect();
+        Ok(ToolResult::json_text(&json!({
+            "agent_avatar_protocol": 1,
+            "read_only": true,
+            "surface": "avatar_surface_snapshot",
+            "count": avatars.len(),
+            "project": project,
+            "role": role,
+            "max_idle_secs": max_idle_secs,
+            "limit": limit,
+            "peer": peer,
+            "avatars": avatars,
+        })))
+    }
+}
+
 pub struct PetPresenceSyncTool {
     hub: Hub,
 }
@@ -17640,6 +17848,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         Tier::Standard,
         Arc::new(AvatarStateGetTool::new(hub.clone())),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AvatarSurfaceSnapshotTool::new(hub.clone())),
+    );
     // Tailscale REST API: ACL editing without browser automation.
     reg_if(
         &mut reg,
@@ -19173,6 +19387,154 @@ mod tests {
 
         assert_eq!(projected["mode"], "orienting");
         assert_eq!(projected["activity_state"], "orienting");
+    }
+
+    #[test]
+    fn avatar_surface_entry_prefers_avatar_state_for_panel_fields() {
+        let row = ab_store::AgentPresenceRecord {
+            session_id: "mac:agent-bridge:main".to_string(),
+            name: "Codex Xiao Shu".to_string(),
+            description: None,
+            version: Some("agent-bridge pet-presence-v23".to_string()),
+            url: None,
+            capabilities: Some(json!({
+                "avatar_state": {
+                    "agent_avatar_protocol": 1,
+                    "agent_id": "codex-xiao-shu-dev",
+                    "runtime": "codex",
+                    "avatar_id": "xiao-shu-dev",
+                    "mode": "working",
+                    "activity_state": "verifying",
+                    "focus": "presence",
+                    "risk_level": "low",
+                    "blocked_reason": null,
+                    "evidence": "probe passed",
+                    "next_action": "render panel",
+                    "project": "agent-bridge",
+                    "cwd": "/tmp/agent-bridge",
+                    "updated_at": "2026-05-19T11:19:53Z",
+                    "voice_policy": {
+                        "default_silent": true,
+                        "voice": "Flo"
+                    }
+                },
+                "pet_state": {
+                    "pet_id": "legacy-pet",
+                    "mode": "verified",
+                    "activity_state": "legacy"
+                },
+                "voice_policy": {
+                    "current_voice": "Flo"
+                }
+            })),
+            skills: None,
+            node: "mac".to_string(),
+            project: "agent-bridge".to_string(),
+            role: "main".to_string(),
+            tag: None,
+            cwd: Some("/tmp/agent-bridge".to_string()),
+            pid: Some(1234),
+            started_at: 10,
+            last_heartbeat_at: 20,
+        };
+
+        let entry = avatar_surface_entry_from_presence(&row, false, true);
+
+        assert_eq!(entry["agent_avatar_protocol"], 1);
+        assert_eq!(entry["agent_id"], "codex-xiao-shu-dev");
+        assert_eq!(entry["session_id"], "mac:agent-bridge:main");
+        assert_eq!(entry["runtime"], "codex");
+        assert_eq!(entry["avatar_id"], "xiao-shu-dev");
+        assert_eq!(entry["mode"], "working");
+        assert_eq!(entry["activity_state"], "verifying");
+        assert_eq!(entry["focus"], "presence");
+        assert_eq!(entry["risk_level"], "low");
+        assert_eq!(entry["evidence"], "probe passed");
+        assert_eq!(entry["next_action"], "render panel");
+        assert_eq!(entry["voice_policy"]["voice"], "Flo");
+        assert_eq!(entry["source"], "avatar_state");
+        assert_eq!(entry["has_avatar_state"], true);
+        assert_eq!(entry["has_compat_pet_state"], true);
+        assert_eq!(entry["compat_pet_state"]["pet_id"], "legacy-pet");
+        assert!(entry.get("presence").is_none());
+    }
+
+    #[tokio::test]
+    async fn avatar_surface_snapshot_lists_presence_rows_read_only() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+        let capabilities = json!({
+            "avatar_state": {
+                "agent_avatar_protocol": 1,
+                "agent_id": "codex-xiao-shu-dev",
+                "runtime": "codex",
+                "avatar_id": "xiao-shu-dev",
+                "mode": "reviewing",
+                "activity_state": "checking-snapshot",
+                "focus": "avatar-surface",
+                "risk_level": "low",
+                "next_action": "run installed probe",
+                "project": "agent-bridge",
+                "cwd": "/tmp/agent-bridge",
+                "updated_at": "2026-05-19T11:22:00Z",
+                "voice_policy": { "default_silent": true }
+            },
+            "pet_state": {
+                "pet_id": "xiao-shu-dev",
+                "mode": "reviewing"
+            }
+        });
+        store
+            .agent_presence_announce(
+                "mac:agent-bridge:main",
+                ab_store::AgentPresenceUpsert {
+                    name: Some("Codex Xiao Shu"),
+                    description: Some("unit test presence row"),
+                    version: Some("test"),
+                    url: None,
+                    node: Some("mac"),
+                    project: Some("agent-bridge"),
+                    role: Some("main"),
+                    tag: None,
+                    cwd: Some("/tmp/agent-bridge"),
+                    pid: Some(42),
+                    capabilities: Some(&capabilities),
+                    skills: None,
+                },
+            )
+            .await
+            .expect("seed presence row");
+
+        let tool = AvatarSurfaceSnapshotTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "project": "agent-bridge",
+                    "include_compat": true,
+                    "include_raw_presence": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["agent_avatar_protocol"], 1);
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["surface"], "avatar_surface_snapshot");
+        assert_eq!(payload["count"], 1);
+        let avatar = &payload["avatars"][0];
+        assert_eq!(avatar["agent_id"], "codex-xiao-shu-dev");
+        assert_eq!(avatar["runtime"], "codex");
+        assert_eq!(avatar["avatar_id"], "xiao-shu-dev");
+        assert_eq!(avatar["mode"], "reviewing");
+        assert_eq!(avatar["activity_state"], "checking-snapshot");
+        assert_eq!(avatar["focus"], "avatar-surface");
+        assert_eq!(avatar["next_action"], "run installed probe");
+        assert_eq!(avatar["source"], "avatar_state");
+        assert_eq!(avatar["compat_pet_state"]["pet_id"], "xiao-shu-dev");
+        assert_eq!(avatar["presence"]["session_id"], "mac:agent-bridge:main");
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[test]

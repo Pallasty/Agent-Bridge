@@ -370,6 +370,14 @@ Build a panel or terminal view that shows avatar id, runtime, mode,
 activity state, risk, block reason, evidence, and next action across agents.
 No auto-control in this stage.
 
+Implementation status: the first surface is `avatar_surface_snapshot`, a
+Standard-profile read-only MCP tool implemented on 2026-05-19. It lists presence
+rows through the same filters as `agent_presence_list`, projects each row into a
+compact protocol view, prefers `capabilities.avatar_state`, and falls back to
+compatibility `capabilities.pet_state` or generic presence identity. Optional
+`include_raw_presence` and `include_compat` flags are for debugging only; the
+default output is already shaped for a panel or terminal dashboard.
+
 ---
 
 ## 11. Acceptance Tests
@@ -381,6 +389,7 @@ No auto-control in this stage.
 | Standard `pet_presence_sync` | Presence row carries canonical `avatar_state` plus compatibility `pet_state` |
 | Standard `avatar_adapter_capabilities` | Tool reports adapter/surface availability without mutating state |
 | Standard `avatar_state_get` | Existing pet sidecar projects to protocol v1 without mutating state |
+| Standard `avatar_surface_snapshot` | Presence rows project to compact read-only `avatars[]` entries |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |
 | Unknown field injected | Reader ignores it |
 | Missing optional facets | Reader returns null or unknown, not error |
