@@ -3518,6 +3518,101 @@ impl AvatarSurfaceSnapshotTool {
     }
 }
 
+pub struct AvatarSurfaceReportTool {
+    hub: Hub,
+}
+impl AvatarSurfaceReportTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+struct AvatarSurfaceQuery<'a> {
+    project: Option<&'a str>,
+    role: Option<&'a str>,
+    max_idle_secs: i64,
+    limit: u32,
+    peer: Option<&'a str>,
+    include_raw_presence: bool,
+    include_compat: bool,
+}
+
+fn avatar_surface_query_from_args(args: &Value) -> AvatarSurfaceQuery<'_> {
+    let project = args
+        .get("project")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let role = args
+        .get("role")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let include_stale = args
+        .get("include_stale")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let max_idle_secs = if include_stale {
+        0
+    } else {
+        args.get("max_idle_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(300)
+    };
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(50)
+        .clamp(1, 500) as u32;
+    let peer = args
+        .get("peer")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let include_raw_presence = args
+        .get("include_raw_presence")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let include_compat = args
+        .get("include_compat")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    AvatarSurfaceQuery {
+        project,
+        role,
+        max_idle_secs,
+        limit,
+        peer,
+        include_raw_presence,
+        include_compat,
+    }
+}
+
+async fn avatar_surface_presence_rows(
+    hub: &Hub,
+    query: &AvatarSurfaceQuery<'_>,
+    surface: &str,
+) -> Result<Vec<ab_store::AgentPresenceRecord>> {
+    if let Some(peer) = query.peer {
+        crate::peer_client::agent_presence_list(
+            peer,
+            query.project,
+            query.role,
+            query.max_idle_secs,
+            query.limit,
+        )
+        .await
+        .map_err(|e| ab_core::Error::Backend(format!("{surface} peer: {e}")))
+    } else {
+        let store = match &hub.store {
+            Some(s) => s.clone(),
+            None => return Err(ab_core::Error::Backend("no memory store configured".into())),
+        };
+        store
+            .agent_presence_list(query.project, query.role, query.max_idle_secs, query.limit)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("{surface}: {e}")))
+    }
+}
+
 fn avatar_surface_field(primary: Option<&Value>, compat: Option<&Value>, key: &str) -> Value {
     primary
         .and_then(|v| v.get(key).cloned())
@@ -3611,6 +3706,98 @@ fn avatar_surface_entry_from_presence(
     entry
 }
 
+fn avatar_surface_report_clean(value: &str) -> String {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= 160 {
+        return collapsed;
+    }
+    let mut clipped: String = collapsed.chars().take(157).collect();
+    clipped.push_str("...");
+    clipped
+}
+
+fn avatar_surface_report_value(entry: &Value, key: &str) -> Option<String> {
+    let value = entry.get(key)?;
+    match value {
+        Value::Null => None,
+        Value::String(s) => {
+            let cleaned = avatar_surface_report_clean(s);
+            if cleaned.is_empty() {
+                None
+            } else {
+                Some(cleaned)
+            }
+        }
+        Value::Number(_) | Value::Bool(_) => Some(value.to_string()),
+        _ => Some(avatar_surface_report_clean(&value.to_string())),
+    }
+}
+
+fn avatar_surface_report_value_or(entry: &Value, key: &str, fallback: &str) -> String {
+    avatar_surface_report_value(entry, key).unwrap_or_else(|| fallback.to_string())
+}
+
+fn avatar_surface_report_from_entries(avatars: &[Value], query: &AvatarSurfaceQuery<'_>) -> String {
+    let mut lines = Vec::new();
+    lines.push("Agent Avatar Surface".to_string());
+    lines.push(format!(
+        "count={} project={} role={} max_idle_secs={} source={}",
+        avatars.len(),
+        query.project.unwrap_or("*"),
+        query.role.unwrap_or("*"),
+        query.max_idle_secs,
+        query.peer.unwrap_or("local")
+    ));
+
+    if avatars.is_empty() {
+        lines.push("No avatar presence rows matched the filters.".to_string());
+        return lines.join("\n");
+    }
+
+    for (idx, avatar) in avatars.iter().enumerate() {
+        let agent_id = avatar_surface_report_value_or(avatar, "agent_id", "unknown-agent");
+        let runtime = avatar_surface_report_value_or(avatar, "runtime", "unknown-runtime");
+        let avatar_id = avatar_surface_report_value_or(avatar, "avatar_id", "unknown-avatar");
+        let mode = avatar_surface_report_value_or(avatar, "mode", "unknown");
+        let activity = avatar_surface_report_value_or(avatar, "activity_state", &mode);
+        let focus = avatar_surface_report_value_or(avatar, "focus", "-");
+        let risk = avatar_surface_report_value_or(avatar, "risk_level", "-");
+        let heartbeat = avatar_surface_report_value_or(avatar, "last_heartbeat_at", "-");
+        let source = avatar_surface_report_value_or(avatar, "source", "presence");
+        let has_avatar_state = avatar_surface_report_value_or(avatar, "has_avatar_state", "false");
+        let has_compat_pet_state =
+            avatar_surface_report_value_or(avatar, "has_compat_pet_state", "false");
+
+        lines.push(format!(
+            "{}. {} runtime={} avatar={} mode={} activity={} focus={} risk={} heartbeat={}",
+            idx + 1,
+            agent_id,
+            runtime,
+            avatar_id,
+            mode,
+            activity,
+            focus,
+            risk,
+            heartbeat
+        ));
+        if let Some(blocked_reason) = avatar_surface_report_value(avatar, "blocked_reason") {
+            lines.push(format!("   blocked: {blocked_reason}"));
+        }
+        if let Some(next_action) = avatar_surface_report_value(avatar, "next_action") {
+            lines.push(format!("   next: {next_action}"));
+        }
+        if let Some(evidence) = avatar_surface_report_value(avatar, "evidence") {
+            lines.push(format!("   evidence: {evidence}"));
+        }
+        lines.push(format!(
+            "   flags: avatar_state={} compat_pet={} source={}",
+            has_avatar_state, has_compat_pet_state, source
+        ));
+    }
+
+    lines.join("\n")
+}
+
 #[async_trait]
 impl McpTool for AvatarSurfaceSnapshotTool {
     fn name(&self) -> &'static str {
@@ -3643,63 +3830,22 @@ impl McpTool for AvatarSurfaceSnapshotTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let project = args
-            .get("project")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty());
-        let role = args
-            .get("role")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty());
-        let include_stale = args
-            .get("include_stale")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let max_idle_secs = if include_stale {
-            0
-        } else {
-            args.get("max_idle_secs")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(300)
-        };
-        let limit = args
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(50)
-            .clamp(1, 500) as u32;
-        let peer = args
-            .get("peer")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty());
-        let include_raw_presence = args
-            .get("include_raw_presence")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let include_compat = args
-            .get("include_compat")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-        let rows = if let Some(p) = peer {
-            crate::peer_client::agent_presence_list(p, project, role, max_idle_secs, limit)
-                .await
-                .map_err(|e| {
-                    ab_core::Error::Backend(format!("avatar_surface_snapshot peer: {e}"))
-                })?
-        } else {
-            let store = match &self.hub.store {
-                Some(s) => s.clone(),
-                None => return Ok(ToolResult::error("no memory store configured")),
-            };
-            store
-                .agent_presence_list(project, role, max_idle_secs, limit)
-                .await
-                .map_err(|e| ab_core::Error::Backend(format!("avatar_surface_snapshot: {e}")))?
+        let query = avatar_surface_query_from_args(&args);
+        let rows = match avatar_surface_presence_rows(&self.hub, &query, self.name()).await {
+            Ok(rows) => rows,
+            Err(ab_core::Error::Backend(msg)) if msg == "no memory store configured" => {
+                return Ok(ToolResult::error(&msg));
+            }
+            Err(e) => return Err(e),
         };
         let avatars: Vec<Value> = rows
             .iter()
             .map(|row| {
-                avatar_surface_entry_from_presence(row, include_raw_presence, include_compat)
+                avatar_surface_entry_from_presence(
+                    row,
+                    query.include_raw_presence,
+                    query.include_compat,
+                )
             })
             .collect();
         Ok(ToolResult::json_text(&json!({
@@ -3707,13 +3853,92 @@ impl McpTool for AvatarSurfaceSnapshotTool {
             "read_only": true,
             "surface": "avatar_surface_snapshot",
             "count": avatars.len(),
-            "project": project,
-            "role": role,
-            "max_idle_secs": max_idle_secs,
-            "limit": limit,
-            "peer": peer,
+            "project": query.project,
+            "role": query.role,
+            "max_idle_secs": query.max_idle_secs,
+            "limit": query.limit,
+            "peer": query.peer,
             "avatars": avatars,
         })))
+    }
+}
+
+#[async_trait]
+impl McpTool for AvatarSurfaceReportTool {
+    fn name(&self) -> &'static str {
+        "avatar_surface_report"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only human-readable Agent Avatar Protocol report. \
+                 Uses the same presence projection as avatar_surface_snapshot, \
+                 but renders a compact terminal/panel-friendly text summary. \
+                 It does not mutate pet state, write presence, emit audio, or \
+                 send notifications."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "project":       { "type": "string",  "description": "Filter by project slug." },
+                    "role":          { "type": "string",  "description": "Filter by role." },
+                    "max_idle_secs": { "type": "integer", "default": 300, "description": "Skip rows whose heartbeat is older than this. 0 = no TTL." },
+                    "include_stale": { "type": "boolean", "default": false, "description": "Equivalent to max_idle_secs:0." },
+                    "limit":         { "type": "integer", "default": 20, "description": "Max rows (1-500)." },
+                    "peer":          { "type": "string",  "description": "Optional tailnet peer host:port; if set, query that daemon-http instead of local." },
+                    "include_raw_presence": { "type": "boolean", "default": false, "description": "Only applies when include_data is true." },
+                    "include_compat": { "type": "boolean", "default": false, "description": "Only applies when include_data is true." },
+                    "include_data":   { "type": "boolean", "default": false, "description": "Include the projected avatar entries alongside the report." }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let mut query = avatar_surface_query_from_args(&args);
+        if args.get("limit").is_none() {
+            query.limit = 20;
+        }
+        let include_data = args
+            .get("include_data")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let rows = match avatar_surface_presence_rows(&self.hub, &query, self.name()).await {
+            Ok(rows) => rows,
+            Err(ab_core::Error::Backend(msg)) if msg == "no memory store configured" => {
+                return Ok(ToolResult::error(&msg));
+            }
+            Err(e) => return Err(e),
+        };
+        let avatars: Vec<Value> = rows
+            .iter()
+            .map(|row| {
+                avatar_surface_entry_from_presence(
+                    row,
+                    query.include_raw_presence,
+                    query.include_compat,
+                )
+            })
+            .collect();
+        let report = avatar_surface_report_from_entries(&avatars, &query);
+        let mut payload = json!({
+            "agent_avatar_protocol": 1,
+            "read_only": true,
+            "surface": "avatar_surface_report",
+            "count": avatars.len(),
+            "project": query.project,
+            "role": query.role,
+            "max_idle_secs": query.max_idle_secs,
+            "limit": query.limit,
+            "peer": query.peer,
+            "report": report,
+        });
+        if include_data {
+            payload["avatars"] = Value::Array(avatars);
+        }
+        Ok(ToolResult::json_text(&payload))
     }
 }
 
@@ -17854,6 +18079,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         Tier::Standard,
         Arc::new(AvatarSurfaceSnapshotTool::new(hub.clone())),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AvatarSurfaceReportTool::new(hub.clone())),
+    );
     // Tailscale REST API: ACL editing without browser automation.
     reg_if(
         &mut reg,
@@ -19534,6 +19765,119 @@ mod tests {
         assert_eq!(avatar["source"], "avatar_state");
         assert_eq!(avatar["compat_pet_state"]["pet_id"], "xiao-shu-dev");
         assert_eq!(avatar["presence"]["session_id"], "mac:agent-bridge:main");
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn avatar_surface_report_formats_terminal_summary() {
+        let query = AvatarSurfaceQuery {
+            project: Some("agent-bridge"),
+            role: Some("main"),
+            max_idle_secs: 300,
+            limit: 20,
+            peer: None,
+            include_raw_presence: false,
+            include_compat: false,
+        };
+        let avatars = vec![json!({
+            "agent_id": "claude-code-xiao-shu-dogfood",
+            "runtime": "claude-code",
+            "avatar_id": "xiao-shu-dev",
+            "mode": "orienting",
+            "activity_state": "dogfooding-avatar-surface",
+            "focus": "avatar-surface",
+            "risk_level": "low",
+            "next_action": "choose first human-facing surface",
+            "evidence": "snapshot probe passed",
+            "last_heartbeat_at": 20,
+            "source": "avatar_state",
+            "has_avatar_state": true,
+            "has_compat_pet_state": true
+        })];
+
+        let report = avatar_surface_report_from_entries(&avatars, &query);
+
+        assert!(report.contains("Agent Avatar Surface"));
+        assert!(report.contains("count=1 project=agent-bridge role=main"));
+        assert!(report.contains("claude-code-xiao-shu-dogfood"));
+        assert!(report.contains("runtime=claude-code"));
+        assert!(report.contains("avatar=xiao-shu-dev"));
+        assert!(report.contains("activity=dogfooding-avatar-surface"));
+        assert!(report.contains("next: choose first human-facing surface"));
+        assert!(report.contains("flags: avatar_state=true compat_pet=true source=avatar_state"));
+    }
+
+    #[tokio::test]
+    async fn avatar_surface_report_lists_presence_rows_as_text() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+        let capabilities = json!({
+            "avatar_state": {
+                "agent_avatar_protocol": 1,
+                "agent_id": "codex-xiao-shu-dev",
+                "runtime": "codex",
+                "avatar_id": "xiao-shu-dev",
+                "mode": "reviewing",
+                "activity_state": "checking-report",
+                "focus": "avatar-surface",
+                "risk_level": "low",
+                "next_action": "ship terminal report",
+                "project": "agent-bridge",
+                "cwd": "/tmp/agent-bridge",
+                "updated_at": "2026-05-19T11:42:00Z",
+                "voice_policy": { "default_silent": true }
+            },
+            "pet_state": {
+                "pet_id": "xiao-shu-dev",
+                "mode": "reviewing"
+            }
+        });
+        store
+            .agent_presence_announce(
+                "mac:agent-bridge:main",
+                ab_store::AgentPresenceUpsert {
+                    name: Some("Codex Xiao Shu"),
+                    description: Some("unit test report row"),
+                    version: Some("test"),
+                    url: None,
+                    node: Some("mac"),
+                    project: Some("agent-bridge"),
+                    role: Some("main"),
+                    tag: None,
+                    cwd: Some("/tmp/agent-bridge"),
+                    pid: Some(42),
+                    capabilities: Some(&capabilities),
+                    skills: None,
+                },
+            )
+            .await
+            .expect("seed presence row");
+
+        let tool = AvatarSurfaceReportTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "project": "agent-bridge",
+                    "include_data": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["agent_avatar_protocol"], 1);
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["surface"], "avatar_surface_report");
+        assert_eq!(payload["count"], 1);
+        assert_eq!(payload["limit"], 20);
+        let report = payload["report"].as_str().expect("report text");
+        assert!(report.contains("Agent Avatar Surface"));
+        assert!(report.contains("codex-xiao-shu-dev"));
+        assert!(report.contains("runtime=codex"));
+        assert!(report.contains("activity=checking-report"));
+        assert!(report.contains("next: ship terminal report"));
+        assert_eq!(payload["avatars"][0]["agent_id"], "codex-xiao-shu-dev");
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
