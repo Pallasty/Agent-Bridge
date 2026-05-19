@@ -16,7 +16,7 @@
 //! runs an initial sync.
 
 use ab_store::{
-    default_db_path, ImportConflictPolicy, MemoryExportFilter, SqliteStore, StateStore,
+    default_db_path, ImportConflictPolicy, MemoryExportFilter, MemoryRecord, SqliteStore, StateStore,
 };
 use anyhow::{anyhow, bail, Context, Result};
 use std::path::{Path, PathBuf};
@@ -62,7 +62,21 @@ pub fn default_memory_repo_path() -> PathBuf {
 ///
 /// Returns `Ok(true)` when a commit + push happened, `Ok(false)` when
 /// nothing changed (or the repo isn't initialised).
+///
+/// Failure tracking: maintains `~/.cache/agent-bridge/sync_state.json` with
+/// a consecutive-fail counter. After 3 consecutive failures, emits a
+/// `kind=alert` memory (with a 1h cooldown so persistent failures don't
+/// spam the memory store). On success, the counter is reset. This is the
+/// detection layer that would have surfaced the 2026-05-18→19 31h silent
+/// loop within 45 minutes of onset; see
+/// `lesson_sync_fallback_branch_divergence_gap_2026_05_19`.
 pub async fn run_sync(verbose: bool) -> Result<bool> {
+    let outcome = run_sync_inner(verbose).await;
+    let _ = record_sync_outcome(&outcome, verbose).await;
+    outcome
+}
+
+async fn run_sync_inner(verbose: bool) -> Result<bool> {
     let repo = default_memory_repo_path();
     if !repo.join(".git").exists() {
         eprintln!(
@@ -330,6 +344,152 @@ pub fn run_status() -> Result<()> {
             "yes"
         }
     );
+    Ok(())
+}
+
+// ─── failure tracking + alert emit ──────────────────────────────────────
+
+const SYNC_FAIL_ALERT_THRESHOLD: u32 = 3;
+const SYNC_ALERT_COOLDOWN_SECS: u64 = 3600;
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct SyncState {
+    #[serde(default)]
+    consecutive_fails: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_alert_at_unix: Option<u64>,
+}
+
+fn sync_state_path() -> PathBuf {
+    let cache_dir = std::env::var("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(|h| PathBuf::from(h).join(".cache"))
+                .unwrap_or_else(|_| PathBuf::from("/tmp"))
+        });
+    cache_dir.join("agent-bridge").join("sync_state.json")
+}
+
+fn load_sync_state() -> SyncState {
+    std::fs::read_to_string(sync_state_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_sync_state(state: &SyncState) -> Result<()> {
+    let path = sync_state_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("mkdir {}", parent.display()))?;
+    }
+    let tmp = path.with_extension("tmp");
+    let body = serde_json::to_string_pretty(state).context("serialize sync_state")?;
+    std::fs::write(&tmp, body).with_context(|| format!("write {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).with_context(|| format!("rename {}", tmp.display()))?;
+    Ok(())
+}
+
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Update `sync_state.json` based on the latest sync outcome, and emit a
+/// `kind=alert` memory once `SYNC_FAIL_ALERT_THRESHOLD` consecutive failures
+/// are reached. Cooldown of `SYNC_ALERT_COOLDOWN_SECS` between alerts so
+/// the same persistent failure doesn't spam the store on every 15-minute
+/// timer fire. All errors here are best-effort and logged — they MUST NOT
+/// short-circuit the sync result.
+async fn record_sync_outcome(outcome: &Result<bool>, verbose: bool) -> Result<()> {
+    let mut state = load_sync_state();
+
+    if outcome.is_ok() {
+        if state.consecutive_fails > 0 || state.last_alert_at_unix.is_some() {
+            if verbose && state.consecutive_fails > 0 {
+                eprintln!(
+                    "[sync] recovery: clearing consecutive_fails={}",
+                    state.consecutive_fails
+                );
+            }
+            save_sync_state(&SyncState::default())?;
+        }
+        return Ok(());
+    }
+
+    state.consecutive_fails = state.consecutive_fails.saturating_add(1);
+    let now_unix = now_unix_secs();
+    let cooldown_ok = state
+        .last_alert_at_unix
+        .map_or(true, |last| now_unix.saturating_sub(last) >= SYNC_ALERT_COOLDOWN_SECS);
+
+    if verbose {
+        eprintln!(
+            "[sync] failure #{} (cooldown_ok={cooldown_ok}, threshold={})",
+            state.consecutive_fails, SYNC_FAIL_ALERT_THRESHOLD
+        );
+    }
+
+    if state.consecutive_fails >= SYNC_FAIL_ALERT_THRESHOLD && cooldown_ok {
+        let error_summary = outcome
+            .as_ref()
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "(error message not captured)".to_string());
+        let host = hostname_short();
+        match open_store().await {
+            Ok(store) => {
+                let mem = MemoryRecord {
+                    key: format!("alert-sync-failing-{host}-{now_unix}"),
+                    kind: "alert".to_string(),
+                    content: format!(
+                        "agent-bridge memory sync has failed {} consecutive runs on host `{host}`.\n\n\
+                         Likely cause: branch divergence, transient network, or stale rebase state. \
+                         Manual recovery recipe in `lesson_sync_fallback_branch_divergence_gap_2026_05_19`.\n\n\
+                         Last error: {}",
+                        state.consecutive_fails, error_summary
+                    ),
+                    tags: vec![
+                        "sync".to_string(),
+                        "alert".to_string(),
+                        "severity:high".to_string(),
+                    ],
+                    related_keys: vec![
+                        "lesson_sync_fallback_branch_divergence_gap_2026_05_19".to_string(),
+                    ],
+                    scope: None,
+                    created_at: now_unix as i64,
+                    updated_at: now_unix as i64,
+                    last_accessed_at: now_unix as i64,
+                    access_count: 0,
+                    importance: 0.8,
+                    status: "active".to_string(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                };
+                match store.memory_save(&mem).await {
+                    Ok(_) => {
+                        state.last_alert_at_unix = Some(now_unix);
+                        eprintln!(
+                            "[sync] WARNING: {} consecutive sync failures — emitted kind=alert memory `{}`",
+                            state.consecutive_fails, mem.key
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("[sync] failed to emit alert memory: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[sync] failed to open store for alert emit: {e}");
+            }
+        }
+    }
+
+    save_sync_state(&state)?;
     Ok(())
 }
 
