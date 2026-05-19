@@ -1,6 +1,6 @@
 //! `agent-bridge setup` — one-shot installer.
 //!
-//! Two installation profiles:
+//! Installation profiles:
 //!
 //! - `Frontend::ClaudeCode` (legacy default): copies the binary,
 //!   writes the three hook scripts, and merges `UserPromptSubmit /
@@ -9,6 +9,9 @@
 //!   `[mcp_servers.agent-bridge]` entry into `~/.codex/config.toml`.
 //!   It also enables Codex hooks and merges the Agent-Bridge lifecycle
 //!   hooks into `~/.codex/hooks.json`.
+//! - `Frontend::CodexCli` / `Frontend::CodexIde`: install the same Codex
+//!   MCP entry with a host marker, but skip lifecycle hooks because those
+//!   surfaces may not expose Codex desktop hook events.
 //! - `Frontend::GeminiCli`: copies the binary and merges an
 //!   `mcpServers.agent-bridge` entry into `~/.gemini/settings.json`.
 //! - `Frontend::LocalCli`: copies the binary and installs MCP config
@@ -41,6 +44,7 @@ const MANAGED_TOOL_ENV_KEYS: &[&str] = &[
     "AGENT_BRIDGE_CLIENT",
     "AGENT_BRIDGE_TOOLSET",
     "AGENT_BRIDGE_TOOL_PROFILE",
+    "AGENT_BRIDGE_CODEX_HOST",
 ];
 
 /// Which frontend the setup is targeting. Drives whether hook scripts
@@ -51,6 +55,8 @@ pub enum Frontend {
     Warp,
     Auggie,
     Codex,
+    CodexCli,
+    CodexIde,
     GeminiCli,
     LocalCli,
 }
@@ -76,9 +82,40 @@ pub fn run(frontend: Frontend) -> Result<()> {
         Frontend::ClaudeCode => install_claude_code(&home, &bin_dir, &bin_dst),
         Frontend::Warp => install_warp(&bin_dst),
         Frontend::Auggie => install_auggie(&bin_dst),
-        Frontend::Codex => install_codex(&home, &bin_dir, &bin_dst),
+        Frontend::Codex => install_codex(&home, &bin_dir, &bin_dst, CodexHost::Desktop),
+        Frontend::CodexCli => install_codex(&home, &bin_dir, &bin_dst, CodexHost::Cli),
+        Frontend::CodexIde => install_codex(&home, &bin_dir, &bin_dst, CodexHost::Ide),
         Frontend::GeminiCli => install_gemini_cli(&home, &bin_dst),
         Frontend::LocalCli => install_local_cli(&home, &bin_dst),
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum CodexHost {
+    Desktop,
+    Cli,
+    Ide,
+}
+
+impl CodexHost {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Desktop => "desktop",
+            Self::Cli => "cli",
+            Self::Ide => "ide",
+        }
+    }
+
+    fn profile_label(self) -> &'static str {
+        match self {
+            Self::Desktop => "codex desktop",
+            Self::Cli => "codex-cli",
+            Self::Ide => "codex-ide",
+        }
+    }
+
+    fn installs_hooks(self) -> bool {
+        matches!(self, Self::Desktop)
     }
 }
 
@@ -170,28 +207,40 @@ fn install_warp(bin_dst: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Codex profile: binary plus MCP and lifecycle hook registration.
+/// Codex profiles: binary plus MCP registration; desktop also installs lifecycle hooks.
 ///
 /// Codex reads MCP server definitions from the `[mcp_servers]` table in
 /// `config.toml`. Recent Codex builds expose a hooks.json lifecycle file,
 /// so this profile installs the same hook scripts as Claude Code and wires
 /// them into Codex without touching `~/.claude/settings.json`.
-fn install_codex(home: &Path, bin_dir: &Path, bin_dst: &Path) -> Result<()> {
-    write_script(&bin_dir.join("ab-memory-hook"), HOOK_MEMORY)?;
-    write_script(&bin_dir.join("ab-precompact-hook"), HOOK_PRECOMPACT)?;
-    write_script(&bin_dir.join("ab-session-end-hook"), HOOK_SESSION_END)?;
+fn install_codex(home: &Path, bin_dir: &Path, bin_dst: &Path, host: CodexHost) -> Result<()> {
+    if host.installs_hooks() {
+        write_script(&bin_dir.join("ab-memory-hook"), HOOK_MEMORY)?;
+        write_script(&bin_dir.join("ab-precompact-hook"), HOOK_PRECOMPACT)?;
+        write_script(&bin_dir.join("ab-session-end-hook"), HOOK_SESSION_END)?;
+    } else {
+        println!("  ·  hook scripts skipped ({} host)", host.profile_label());
+    }
     println!("  ·  ~/.claude/settings.json skipped (claude-code only)");
 
-    merge_codex_config(home, bin_dst, true)?;
-    merge_codex_hooks(home, bin_dir)?;
+    merge_codex_config(home, bin_dst, host.installs_hooks(), host)?;
+    if host.installs_hooks() {
+        merge_codex_hooks(home, bin_dir)?;
+    }
 
     println!();
-    println!("Setup complete (codex profile).");
+    println!("Setup complete ({} profile).", host.profile_label());
     println!();
     println!("Next steps in Codex:");
     println!("  1. Restart Codex or open a new Codex session so MCP servers reload.");
     println!("  2. Check the MCP/tools panel for the `agent-bridge` server.");
-    println!("  3. If Codex asks to trust new hooks, approve the Agent-Bridge entries.");
+    if host.installs_hooks() {
+        println!("  3. If Codex asks to trust new hooks, approve the Agent-Bridge entries.");
+    } else if matches!(host, CodexHost::Ide) {
+        println!("  3. Start an IDE snapshot writer so `ide_snapshot` returns editor state.");
+    } else {
+        println!("  3. Call `session_bootstrap` / `session_finalize` manually if this host has no hooks.");
+    }
     println!();
     println!("Optional: start the long-lived daemon for Unix-socket access:");
     println!("  agent-bridge daemon &");
@@ -222,7 +271,7 @@ fn install_local_cli(home: &Path, bin_dst: &Path) -> Result<()> {
     println!("  ·  hook scripts skipped (local CLI profile uses MCP config only)");
     println!("  ·  ~/.claude/settings.json skipped (claude-code hooks only)");
 
-    merge_codex_config(home, bin_dst, false)?;
+    merge_codex_config(home, bin_dst, false, CodexHost::Cli)?;
     merge_gemini_settings(home, bin_dst)?;
     let claude_registered = try_register_claude_mcp(bin_dst);
 
@@ -470,7 +519,12 @@ fn toml_top_level_string(raw: &str, key: &str) -> Option<String> {
     None
 }
 
-fn merge_codex_config(home: &Path, bin_dst: &Path, enable_hooks: bool) -> Result<()> {
+fn merge_codex_config(
+    home: &Path,
+    bin_dst: &Path,
+    enable_hooks: bool,
+    host: CodexHost,
+) -> Result<()> {
     let codex_home = codex_home(home);
     let config_path = codex_home.join("config.toml");
 
@@ -485,6 +539,7 @@ fn merge_codex_config(home: &Path, bin_dst: &Path, enable_hooks: bool) -> Result
         "AGENT_BRIDGE_CLIENT = \"codex\"".to_string(),
         "AGENT_BRIDGE_TOOLSET = \"codex-essential\"".to_string(),
         "AGENT_BRIDGE_TOOL_PROFILE = \"essential\"".to_string(),
+        format!("AGENT_BRIDGE_CODEX_HOST = \"{}\"", host.label()),
     ];
     let model = toml_top_level_string(&raw, "model");
     let model_reasoning_effort = toml_top_level_string(&raw, "model_reasoning_effort");
@@ -1039,7 +1094,7 @@ fn script_name_for_event(event: &str) -> &'static str {
 mod tests {
     use super::{
         ensure_toml_bool, merge_codex_config, merge_codex_hooks, merge_gemini_settings,
-        replace_toml_table, HOOK_PRECOMPACT, HOOK_SESSION_END,
+        replace_toml_table, CodexHost, HOOK_PRECOMPACT, HOOK_SESSION_END,
     };
     use serde_json::{json, Value};
     use std::fs;
@@ -1111,6 +1166,7 @@ command = "old"
 AGENT_BRIDGE_CLIENT = "claude-code"
 AGENT_BRIDGE_TOOLSET = "all-dev"
 AGENT_BRIDGE_TOOL_PROFILE = "all"
+AGENT_BRIDGE_CODEX_HOST = "stale-host"
 AGENT_BRIDGE_MODEL = "stale-model"
 AGENT_BRIDGE_MODEL_REASONING_EFFORT = "low"
 AB_PET_TTS_VOICE = "Meijia"
@@ -1122,17 +1178,25 @@ enabled = true
         )
         .unwrap();
 
-        merge_codex_config(&tmp, &tmp.join(".local/bin/agent-bridge"), true).unwrap();
+        merge_codex_config(
+            &tmp,
+            &tmp.join(".local/bin/agent-bridge"),
+            true,
+            CodexHost::Desktop,
+        )
+        .unwrap();
 
         let out = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
         assert!(out.contains("AGENT_BRIDGE_CLIENT = \"codex\""));
         assert!(out.contains("AGENT_BRIDGE_TOOLSET = \"codex-essential\""));
         assert!(out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"essential\""));
+        assert!(out.contains("AGENT_BRIDGE_CODEX_HOST = \"desktop\""));
         assert!(out.contains("AGENT_BRIDGE_MODEL = \"gpt-5.5\""));
         assert!(out.contains("AGENT_BRIDGE_MODEL_REASONING_EFFORT = \"xhigh\""));
         assert!(!out.contains("AGENT_BRIDGE_CLIENT = \"claude-code\""));
         assert!(!out.contains("AGENT_BRIDGE_TOOLSET = \"all-dev\""));
         assert!(!out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"all\""));
+        assert!(!out.contains("AGENT_BRIDGE_CODEX_HOST = \"stale-host\""));
         assert!(!out.contains("AGENT_BRIDGE_MODEL = \"stale-model\""));
         assert!(!out.contains("AGENT_BRIDGE_MODEL_REASONING_EFFORT = \"low\""));
         assert!(out.contains("AB_PET_TTS_VOICE = \"Meijia\""));
@@ -1140,6 +1204,29 @@ enabled = true
         assert!(out.contains("[plugins.example]\nenabled = true"));
 
         fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn merge_codex_config_marks_cli_and_ide_hosts_without_forcing_hooks() {
+        for (host, expected) in [(CodexHost::Cli, "cli"), (CodexHost::Ide, "ide")] {
+            let tmp = std::env::temp_dir().join(format!(
+                "agent-bridge-codex-host-test-{}-{}",
+                expected,
+                std::process::id()
+            ));
+            let codex_dir = tmp.join(".codex");
+            fs::create_dir_all(&codex_dir).unwrap();
+
+            merge_codex_config(&tmp, &tmp.join(".local/bin/agent-bridge"), false, host).unwrap();
+
+            let out = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+            assert!(out.contains("AGENT_BRIDGE_CLIENT = \"codex\""));
+            assert!(out.contains("AGENT_BRIDGE_TOOLSET = \"codex-essential\""));
+            assert!(out.contains(&format!("AGENT_BRIDGE_CODEX_HOST = \"{expected}\"")));
+            assert!(!out.contains("codex_hooks = true"));
+
+            fs::remove_dir_all(tmp).unwrap();
+        }
     }
 
     #[test]
