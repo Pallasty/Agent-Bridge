@@ -83,6 +83,8 @@ pub struct McpToolCallStats {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_host: Option<String>,
 }
 
 /// Optional attribution filter for MCP tool-call telemetry.
@@ -93,6 +95,7 @@ pub struct McpToolCallFilter {
     pub source: Option<String>,
     pub model: Option<String>,
     pub model_reasoning_effort: Option<String>,
+    pub codex_host: Option<String>,
 }
 
 /// Grouped MCP tool-call telemetry by attributed caller/source.
@@ -103,6 +106,7 @@ pub struct McpToolSourceStats {
     pub profile: String,
     pub model: String,
     pub model_reasoning_effort: String,
+    pub codex_host: String,
     pub call_count: u64,
     pub error_count: u64,
 }
@@ -1510,6 +1514,7 @@ pub trait StateStore: Send + Sync {
         source: Option<String>,
         model: Option<String>,
         model_reasoning_effort: Option<String>,
+        codex_host: Option<String>,
     ) -> Result<()> {
         let _ = (
             tool_name,
@@ -1522,6 +1527,7 @@ pub trait StateStore: Send + Sync {
             source,
             model,
             model_reasoning_effort,
+            codex_host,
         );
         Ok(())
     }

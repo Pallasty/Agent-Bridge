@@ -10053,6 +10053,11 @@ impl McpTool for McpDispatchAuditTool {
                     "model_reasoning_effort": {
                         "type": "string",
                         "description": "Optional AGENT_BRIDGE_MODEL_REASONING_EFFORT filter."
+                    },
+                    "codex_host": {
+                        "type": "string",
+                        "enum": ["desktop", "cli", "ide", "legacy"],
+                        "description": "Optional AGENT_BRIDGE_CODEX_HOST filter for Codex desktop/CLI/IDE slices."
                     }
                 }
             }),
@@ -10231,6 +10236,7 @@ impl McpTool for McpDispatchAuditTool {
             "toolset": policy.label(),
             "model": std::env::var("AGENT_BRIDGE_MODEL").ok(),
             "model_reasoning_effort": std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT").ok(),
+            "codex_host": std::env::var("AGENT_BRIDGE_CODEX_HOST").ok(),
             "window_days": window_days,
             "filter": dispatch_filter_json(&filter),
             "current_exposed_tool_count": current_tool_count,
@@ -10274,6 +10280,7 @@ fn dispatch_filter_from_args(args: &Value) -> McpToolCallFilter {
         profile: dispatch_optional_string_arg(args, "profile"),
         model: dispatch_optional_string_arg(args, "model"),
         model_reasoning_effort: dispatch_optional_string_arg(args, "model_reasoning_effort"),
+        codex_host: dispatch_optional_string_arg(args, "codex_host"),
     }
 }
 
@@ -10291,6 +10298,7 @@ fn dispatch_filter_is_empty(filter: &McpToolCallFilter) -> bool {
         && filter.profile.is_none()
         && filter.model.is_none()
         && filter.model_reasoning_effort.is_none()
+        && filter.codex_host.is_none()
 }
 
 fn dispatch_source_only_filter(source: &str) -> McpToolCallFilter {
@@ -10307,6 +10315,7 @@ fn dispatch_filter_json(filter: &McpToolCallFilter) -> Value {
         "profile": filter.profile.as_deref(),
         "model": filter.model.as_deref(),
         "model_reasoning_effort": filter.model_reasoning_effort.as_deref(),
+        "codex_host": filter.codex_host.as_deref(),
     })
 }
 
@@ -10317,6 +10326,7 @@ fn dispatch_source_stat_json(s: &ab_store::McpToolSourceStats) -> Value {
         "profile": s.profile,
         "model": s.model,
         "model_reasoning_effort": s.model_reasoning_effort,
+        "codex_host": s.codex_host,
         "call_count": s.call_count,
         "error_count": s.error_count,
     })
@@ -10350,6 +10360,9 @@ fn dispatch_stat_json(s: &ab_store::McpToolCallStats) -> Value {
                 "model_reasoning_effort".to_string(),
                 json!(model_reasoning_effort),
             );
+        }
+        if let Some(codex_host) = &s.codex_host {
+            obj.insert("codex_host".to_string(), json!(codex_host));
         }
     }
     out
@@ -20909,6 +20922,7 @@ mod tests {
             source: None,
             model: None,
             model_reasoning_effort: None,
+            codex_host: None,
         };
         let reasons = dispatch_optimization_reasons(&s);
         assert!(reasons.contains(&"has_errors"));
@@ -20926,7 +20940,21 @@ mod tests {
         assert!(filter.profile.is_none());
         assert!(filter.model.is_none());
         assert!(filter.model_reasoning_effort.is_none());
+        assert!(filter.codex_host.is_none());
         assert_eq!(dispatch_filter_json(&filter)["source"], "codex");
+    }
+
+    #[test]
+    fn dispatch_audit_filter_accepts_codex_host() {
+        let filter = dispatch_filter_from_args(&json!({
+            "source": "codex",
+            "codex_host": "ide",
+        }));
+
+        assert_eq!(filter.source.as_deref(), Some("codex"));
+        assert_eq!(filter.codex_host.as_deref(), Some("ide"));
+        assert!(!dispatch_filter_is_empty(&filter));
+        assert_eq!(dispatch_filter_json(&filter)["codex_host"], "ide");
     }
 
     // ── agent_spawn policy → backend mapping ──────────────────────────────
