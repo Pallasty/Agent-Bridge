@@ -436,6 +436,16 @@ fn git_capture(repo: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// `git rev-list --count <range>` parsed as u64. `range` is any git revision
+/// range, e.g. `origin/main..HEAD`. Errors when the ref doesn't exist (caller
+/// distinguishes "missing ref" via Err vs in-sync via Ok(0)).
+fn git_rev_list_count(repo: &Path, range: &str) -> Result<u64> {
+    let out = git_capture(repo, &["rev-list", "--count", range])?;
+    out.trim()
+        .parse::<u64>()
+        .with_context(|| format!("parse rev-list count: {}", out.trim()))
+}
+
 /// Best-effort `git pull --rebase --autostash`. Last-resort fallback (when
 /// rebase fails) checks out the remote `memory.jsonl` so subsequent
 /// import/export reconciles via the local SQLite store.
@@ -468,14 +478,46 @@ fn git_pull_rebase(repo: &Path, verbose: bool) {
                 .arg(repo)
                 .args(["fetch", "origin"])
                 .status();
-            // Try common default branches in order; first success wins.
+            // Try common default branches in order; first usable ref wins.
+            //
+            // When local is forked from origin (ahead>0 AND behind>0), a file-
+            // only fallback would commit + push and get REJECTED forever — the
+            // 2026-05-18→19 31h silent-loop failure mode. In that case we
+            // `reset --hard` to origin, which is safe because every prior sync
+            // commit's jsonl content is derivable from the current state.db
+            // (SQLite is the source of truth; jsonl/git are just transport).
+            // The subsequent import + export step re-emits a single union
+            // commit on top of origin. See memory key
+            // `lesson_sync_fallback_branch_divergence_gap_2026_05_19`.
             for branch in ["origin/HEAD", "origin/main", "origin/master"] {
-                let s = Command::new("git")
-                    .arg("-C")
-                    .arg(repo)
-                    .args(["checkout", branch, "--", MEMORY_FILE])
-                    .status();
-                if matches!(s, Ok(s) if s.success()) {
+                let Ok(ahead) = git_rev_list_count(repo, &format!("{branch}..HEAD")) else {
+                    continue; // ref doesn't exist — try next
+                };
+                let Ok(behind) = git_rev_list_count(repo, &format!("HEAD..{branch}")) else {
+                    continue;
+                };
+                let success = if ahead > 0 && behind > 0 {
+                    if verbose {
+                        eprintln!(
+                            "[sync] branch divergent vs {branch} (ahead={ahead} behind={behind}); \
+                             reset --hard (SQLite-as-truth)"
+                        );
+                    }
+                    Command::new("git")
+                        .arg("-C")
+                        .arg(repo)
+                        .args(["reset", "--hard", branch])
+                        .status()
+                } else {
+                    // Pure file conflict, not divergent. Legacy fallback: take
+                    // origin's memory.jsonl and let import/export reconcile.
+                    Command::new("git")
+                        .arg("-C")
+                        .arg(repo)
+                        .args(["checkout", branch, "--", MEMORY_FILE])
+                        .status()
+                };
+                if matches!(success, Ok(s) if s.success()) {
                     break;
                 }
             }
