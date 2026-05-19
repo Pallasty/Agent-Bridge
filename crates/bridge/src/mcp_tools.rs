@@ -10583,9 +10583,21 @@ impl McpTool for CapabilitiesTool {
 
         // Version from binary
         let version = env!("CARGO_PKG_VERSION");
+        let policy = ToolPolicy::from_env();
 
         let sec = &self.hub.security;
         Ok(ToolResult::json_text(&json!({
+            "mcp": {
+                "client": std::env::var("AGENT_BRIDGE_CLIENT").ok(),
+                "source": std::env::var("AGENT_BRIDGE_MCP_SOURCE").ok(),
+                "toolset": policy.label(),
+                "tool_profile": policy.profile().label(),
+                "toolset_env": std::env::var("AGENT_BRIDGE_TOOLSET").ok(),
+                "tool_profile_env": std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok(),
+                "codex_host": std::env::var("AGENT_BRIDGE_CODEX_HOST").ok(),
+                "model": std::env::var("AGENT_BRIDGE_MODEL").ok(),
+                "model_reasoning_effort": std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT").ok()
+            },
             "terminal": {
                 "backend": terminal_id,
                 "available": terminal_available,
@@ -17407,6 +17419,7 @@ impl ToolProfile {
 enum ToolSet {
     Profile,
     CodexEssential,
+    CodexLean,
     ClaudeStandard,
     GeminiLean,
     HookLifecycle,
@@ -17418,6 +17431,7 @@ impl ToolSet {
         match self {
             Self::Profile => "profile",
             Self::CodexEssential => "codex-essential",
+            Self::CodexLean => "codex-lean",
             Self::ClaudeStandard => "claude-standard",
             Self::GeminiLean => "gemini-lean",
             Self::HookLifecycle => "hook-lifecycle",
@@ -17429,6 +17443,7 @@ impl ToolSet {
         match value.map(normalize_tool_policy_value).as_deref() {
             Some("profile") | Some("legacy") => Some(Self::Profile),
             Some("codex-essential") | Some("codex") => Some(Self::CodexEssential),
+            Some("codex-lean") | Some("codex-minimal") => Some(Self::CodexLean),
             Some("claude-standard") | Some("claude-code") | Some("claude") => {
                 Some(Self::ClaudeStandard)
             }
@@ -17471,7 +17486,9 @@ impl ToolPolicy {
         let legacy_profile = ToolProfile::from_value(profile);
         let profile = match set {
             ToolSet::Profile => legacy_profile,
-            ToolSet::CodexEssential | ToolSet::GeminiLean => ToolProfile::Essential,
+            ToolSet::CodexEssential | ToolSet::CodexLean | ToolSet::GeminiLean => {
+                ToolProfile::Essential
+            }
             ToolSet::ClaudeStandard | ToolSet::HookLifecycle => ToolProfile::Standard,
             ToolSet::AllDev => ToolProfile::All,
         };
@@ -17492,6 +17509,7 @@ impl ToolPolicy {
                 self.profile.includes(tier)
             }
             ToolSet::CodexEssential => codex_essential_tool(tier, tool_name),
+            ToolSet::CodexLean => codex_lean_tool(tool_name),
             ToolSet::GeminiLean => gemini_lean_tool(tool_name),
             ToolSet::HookLifecycle => hook_lifecycle_tool(tool_name),
         }
@@ -17508,6 +17526,37 @@ fn normalize_tool_policy_value(value: &str) -> String {
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
     matches!(tier, Tier::Essential) || matches!(tool_name, "ide_snapshot" | "ide_command")
+}
+
+fn codex_lean_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "capabilities"
+            | "mcp_dispatch_audit"
+            | "memory_search"
+            | "memory_save"
+            | "memory_get"
+            | "memory_list"
+            | "memory_delete"
+            | "memory_neighbors"
+            | "session_bootstrap"
+            | "session_finalize"
+            | "skills_recommend"
+            | "agent_spawn"
+            | "agent_session_get"
+            | "agent_session_wait"
+            | "agent_session_list"
+            | "ide_snapshot"
+            | "ide_command"
+            | "pet_state_get"
+            | "pet_state_set"
+            | "pet_state_ritual"
+            | "project_detect"
+            | "changes_digest"
+            | "plan_save"
+            | "plan_load"
+            | "plan_update"
+    )
 }
 
 fn gemini_lean_tool(tool_name: &str) -> bool {
@@ -20879,6 +20928,23 @@ mod tests {
     }
 
     #[test]
+    fn tool_policy_codex_lean_excludes_native_overlap_tools() {
+        let p = ToolPolicy::from_values(Some("codex-lean"), None, None, Some("all"));
+
+        assert_eq!(p.label(), "codex-lean");
+        assert_eq!(p.profile().label(), "essential");
+        assert!(p.includes(Tier::Essential, "memory_search"));
+        assert!(p.includes(Tier::Essential, "skills_recommend"));
+        assert!(p.includes(Tier::Essential, "session_bootstrap"));
+        assert!(p.includes(Tier::Niche, "ide_snapshot"));
+        assert!(!p.includes(Tier::Essential, "shell_exec"));
+        assert!(!p.includes(Tier::Essential, "codebase_search"));
+        assert!(!p.includes(Tier::Essential, "codebase_impact"));
+        assert!(!p.includes(Tier::Essential, "worktree_list"));
+        assert!(!p.includes(Tier::Niche, "browser_navigate"));
+    }
+
+    #[test]
     fn tool_policy_hook_lifecycle_is_allowlisted() {
         let p = ToolPolicy::from_values(Some("hook-lifecycle"), None, None, None);
 
@@ -22869,7 +22935,11 @@ mod tests {
         let store = b3_test_store().await;
         // High-importance prior to maximize the blend bonus in score —
         // pre-fix `hit.score` would land near cosine(=1) + 0.2*0.9 ≈ 1.18.
-        let mut prior = b3_mem("decision_prior_high_imp", "decision", "near-duplicate body text");
+        let mut prior = b3_mem(
+            "decision_prior_high_imp",
+            "decision",
+            "near-duplicate body text",
+        );
         prior.importance = 0.9;
         store.memory_save(&prior).await.expect("save prior");
 
@@ -22880,7 +22950,10 @@ mod tests {
             "decision",
         )
         .await;
-        assert!(!warnings.is_empty(), "expected ≥1 warning for identical content");
+        assert!(
+            !warnings.is_empty(),
+            "expected ≥1 warning for identical content"
+        );
         for w in &warnings {
             let cos = w["cosine"].as_f64().expect("cosine f64");
             assert!(
@@ -22904,7 +22977,11 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn memory_search_semantic_cosine_bounded_and_below_blended_score() {
         let store = b3_test_store().await;
-        let mut rec = b3_mem("lesson_anchor", "lesson", "anchor content for cosine bound test");
+        let mut rec = b3_mem(
+            "lesson_anchor",
+            "lesson",
+            "anchor content for cosine bound test",
+        );
         rec.importance = 0.9; // make blend bonus prominent
         store.memory_save(&rec).await.expect("save");
 
@@ -22914,9 +22991,7 @@ mod tests {
             .expect("semantic");
         assert!(!hits.is_empty(), "expected ≥1 semantic hit");
         for hit in &hits {
-            let cos = hit
-                .cosine
-                .expect("semantic path must populate cosine") as f64;
+            let cos = hit.cosine.expect("semantic path must populate cosine") as f64;
             assert!(
                 (-1.0..=1.0).contains(&cos),
                 "cosine must be in [-1, 1], got {}",

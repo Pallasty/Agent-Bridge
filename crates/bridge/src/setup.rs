@@ -8,7 +8,9 @@
 //! - `Frontend::Codex`: copies the binary and merges an
 //!   `[mcp_servers.agent-bridge]` entry into `~/.codex/config.toml`.
 //!   It also enables Codex hooks and merges the Agent-Bridge lifecycle
-//!   hooks into `~/.codex/hooks.json`.
+//!   hooks into `~/.codex/hooks.json`. The default toolset is
+//!   `codex-essential`; `--codex-toolset lean` writes the narrower
+//!   experimental `codex-lean` surface.
 //! - `Frontend::CodexCli` / `Frontend::CodexIde`: install the same Codex
 //!   MCP entry with a host marker, but skip lifecycle hooks because those
 //!   surfaces may not expose Codex desktop hook events.
@@ -61,7 +63,26 @@ pub enum Frontend {
     LocalCli,
 }
 
-pub fn run(frontend: Frontend) -> Result<()> {
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CodexToolset {
+    Essential,
+    Lean,
+}
+
+impl CodexToolset {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Essential => "codex-essential",
+            Self::Lean => "codex-lean",
+        }
+    }
+
+    fn profile_label(self) -> &'static str {
+        "essential"
+    }
+}
+
+pub fn run(frontend: Frontend, codex_toolset: CodexToolset) -> Result<()> {
     let home = home_dir().context("cannot determine $HOME")?;
 
     // ── 1. Install binary (always) ───────────────────────────────────────
@@ -82,11 +103,17 @@ pub fn run(frontend: Frontend) -> Result<()> {
         Frontend::ClaudeCode => install_claude_code(&home, &bin_dir, &bin_dst),
         Frontend::Warp => install_warp(&bin_dst),
         Frontend::Auggie => install_auggie(&bin_dst),
-        Frontend::Codex => install_codex(&home, &bin_dir, &bin_dst, CodexHost::Desktop),
-        Frontend::CodexCli => install_codex(&home, &bin_dir, &bin_dst, CodexHost::Cli),
-        Frontend::CodexIde => install_codex(&home, &bin_dir, &bin_dst, CodexHost::Ide),
+        Frontend::Codex => {
+            install_codex(&home, &bin_dir, &bin_dst, CodexHost::Desktop, codex_toolset)
+        }
+        Frontend::CodexCli => {
+            install_codex(&home, &bin_dir, &bin_dst, CodexHost::Cli, codex_toolset)
+        }
+        Frontend::CodexIde => {
+            install_codex(&home, &bin_dir, &bin_dst, CodexHost::Ide, codex_toolset)
+        }
         Frontend::GeminiCli => install_gemini_cli(&home, &bin_dst),
-        Frontend::LocalCli => install_local_cli(&home, &bin_dst),
+        Frontend::LocalCli => install_local_cli(&home, &bin_dst, codex_toolset),
     }
 }
 
@@ -213,7 +240,13 @@ fn install_warp(bin_dst: &Path) -> Result<()> {
 /// `config.toml`. Recent Codex builds expose a hooks.json lifecycle file,
 /// so this profile installs the same hook scripts as Claude Code and wires
 /// them into Codex without touching `~/.claude/settings.json`.
-fn install_codex(home: &Path, bin_dir: &Path, bin_dst: &Path, host: CodexHost) -> Result<()> {
+fn install_codex(
+    home: &Path,
+    bin_dir: &Path,
+    bin_dst: &Path,
+    host: CodexHost,
+    toolset: CodexToolset,
+) -> Result<()> {
     if host.installs_hooks() {
         write_script(&bin_dir.join("ab-memory-hook"), HOOK_MEMORY)?;
         write_script(&bin_dir.join("ab-precompact-hook"), HOOK_PRECOMPACT)?;
@@ -223,7 +256,7 @@ fn install_codex(home: &Path, bin_dir: &Path, bin_dst: &Path, host: CodexHost) -
     }
     println!("  ·  ~/.claude/settings.json skipped (claude-code only)");
 
-    merge_codex_config(home, bin_dst, host.installs_hooks(), host)?;
+    merge_codex_config(home, bin_dst, host.installs_hooks(), host, toolset)?;
     if host.installs_hooks() {
         merge_codex_hooks(home, bin_dir)?;
     }
@@ -267,11 +300,11 @@ fn install_gemini_cli(home: &Path, bin_dst: &Path) -> Result<()> {
 }
 
 /// Local CLI profile: register stdio MCP config for multiple CLI clients.
-fn install_local_cli(home: &Path, bin_dst: &Path) -> Result<()> {
+fn install_local_cli(home: &Path, bin_dst: &Path, codex_toolset: CodexToolset) -> Result<()> {
     println!("  ·  hook scripts skipped (local CLI profile uses MCP config only)");
     println!("  ·  ~/.claude/settings.json skipped (claude-code hooks only)");
 
-    merge_codex_config(home, bin_dst, false, CodexHost::Cli)?;
+    merge_codex_config(home, bin_dst, false, CodexHost::Cli, codex_toolset)?;
     merge_gemini_settings(home, bin_dst)?;
     let claude_registered = try_register_claude_mcp(bin_dst);
 
@@ -524,6 +557,7 @@ fn merge_codex_config(
     bin_dst: &Path,
     enable_hooks: bool,
     host: CodexHost,
+    toolset: CodexToolset,
 ) -> Result<()> {
     let codex_home = codex_home(home);
     let config_path = codex_home.join("config.toml");
@@ -537,8 +571,11 @@ fn merge_codex_config(
 
     let mut env_lines = vec![
         "AGENT_BRIDGE_CLIENT = \"codex\"".to_string(),
-        "AGENT_BRIDGE_TOOLSET = \"codex-essential\"".to_string(),
-        "AGENT_BRIDGE_TOOL_PROFILE = \"essential\"".to_string(),
+        format!("AGENT_BRIDGE_TOOLSET = \"{}\"", toolset.label()),
+        format!(
+            "AGENT_BRIDGE_TOOL_PROFILE = \"{}\"",
+            toolset.profile_label()
+        ),
         format!("AGENT_BRIDGE_CODEX_HOST = \"{}\"", host.label()),
     ];
     let model = toml_top_level_string(&raw, "model");
@@ -1094,7 +1131,7 @@ fn script_name_for_event(event: &str) -> &'static str {
 mod tests {
     use super::{
         ensure_toml_bool, merge_codex_config, merge_codex_hooks, merge_gemini_settings,
-        replace_toml_table, CodexHost, HOOK_PRECOMPACT, HOOK_SESSION_END,
+        replace_toml_table, CodexHost, CodexToolset, HOOK_PRECOMPACT, HOOK_SESSION_END,
     };
     use serde_json::{json, Value};
     use std::fs;
@@ -1183,6 +1220,7 @@ enabled = true
             &tmp.join(".local/bin/agent-bridge"),
             true,
             CodexHost::Desktop,
+            CodexToolset::Essential,
         )
         .unwrap();
 
@@ -1217,7 +1255,14 @@ enabled = true
             let codex_dir = tmp.join(".codex");
             fs::create_dir_all(&codex_dir).unwrap();
 
-            merge_codex_config(&tmp, &tmp.join(".local/bin/agent-bridge"), false, host).unwrap();
+            merge_codex_config(
+                &tmp,
+                &tmp.join(".local/bin/agent-bridge"),
+                false,
+                host,
+                CodexToolset::Essential,
+            )
+            .unwrap();
 
             let out = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
             assert!(out.contains("AGENT_BRIDGE_CLIENT = \"codex\""));
@@ -1227,6 +1272,32 @@ enabled = true
 
             fs::remove_dir_all(tmp).unwrap();
         }
+    }
+
+    #[test]
+    fn merge_codex_config_can_write_lean_toolset() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agent-bridge-codex-lean-test-{}",
+            std::process::id()
+        ));
+        let codex_dir = tmp.join(".codex");
+        fs::create_dir_all(&codex_dir).unwrap();
+
+        merge_codex_config(
+            &tmp,
+            &tmp.join(".local/bin/agent-bridge"),
+            true,
+            CodexHost::Desktop,
+            CodexToolset::Lean,
+        )
+        .unwrap();
+
+        let out = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+        assert!(out.contains("AGENT_BRIDGE_TOOLSET = \"codex-lean\""));
+        assert!(out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"essential\""));
+        assert!(out.contains("AGENT_BRIDGE_CODEX_HOST = \"desktop\""));
+
+        fs::remove_dir_all(tmp).unwrap();
     }
 
     #[test]

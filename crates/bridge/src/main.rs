@@ -41,6 +41,9 @@ enum Cmd {
     /// `--frontend codex`: installs the Codex desktop profile with MCP config
     /// plus Codex lifecycle hooks.
     ///
+    /// Add `--codex-toolset lean` to write the narrower experimental Codex
+    /// tool surface without changing the default stable profile.
+    ///
     /// `--frontend codex-cli` / `--frontend codex-ide`: register Codex MCP
     /// config with a host marker but skip desktop lifecycle hooks.
     ///
@@ -60,6 +63,8 @@ enum Cmd {
     Setup {
         #[arg(long, value_enum, default_value_t = SetupFrontend::Auto)]
         frontend: SetupFrontend,
+        #[arg(long, value_enum, default_value_t = SetupCodexToolset::Essential)]
+        codex_toolset: SetupCodexToolset,
     },
     /// Cross-device memory sync via a private GitHub repo.
     ///
@@ -1150,6 +1155,23 @@ pub enum SetupFrontend {
     Auto,
 }
 
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum SetupCodexToolset {
+    /// Stable Codex default: compact but keeps shell/codebase/worktree bridge tools.
+    Essential,
+    /// Experimental narrower Codex surface: memory/skills/session/IDE/plan only.
+    Lean,
+}
+
+impl From<SetupCodexToolset> for setup::CodexToolset {
+    fn from(value: SetupCodexToolset) -> Self {
+        match value {
+            SetupCodexToolset::Essential => setup::CodexToolset::Essential,
+            SetupCodexToolset::Lean => setup::CodexToolset::Lean,
+        }
+    }
+}
+
 impl From<SyncProvider> for sync::Provider {
     fn from(p: SyncProvider) -> Self {
         match p {
@@ -1309,8 +1331,8 @@ async fn main() -> Result<()> {
     let cmd = cli.cmd.unwrap_or(Cmd::Daemon);
 
     // Setup runs synchronously, no async runtime needed beyond tokio's shell.
-    if let Cmd::Setup { frontend } = &cmd {
-        return setup::run(frontend.resolve());
+    if let Cmd::Setup { frontend, codex_toolset } = &cmd {
+        return setup::run(frontend.resolve(), (*codex_toolset).into());
     }
 
     // Sync subcommand: short-lived; no daemon hub needed.
