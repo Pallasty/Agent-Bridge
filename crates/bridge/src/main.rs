@@ -82,11 +82,17 @@ enum Cmd {
         #[command(subcommand)]
         op: SkillsOp,
     },
+    /// Read-only avatar/presence surfaces for terminal dashboards.
+    Avatar {
+        #[command(subcommand)]
+        op: AvatarOp,
+    },
     /// Run the v20 HTTP daemon for cross-machine forum + presence over
     /// Tailscale.
     ///
     /// Read-only in Stage 1: serves `/.well-known/agent.json/<sid>`,
-    /// `/forum/threads`, `/forum/posts`, `/presence`. Bind to a
+    /// `/forum/threads`, `/forum/posts`, `/presence`, and the
+    /// `/avatar-surface` JSON/text/HTML read-only surfaces. Bind to a
     /// tailnet-reachable address; tailscale ACL handles peer auth.
     /// See `docs/RFC-v20-tailscale-daemon.md`.
     DaemonHttp {
@@ -205,6 +211,37 @@ enum ShellKind {
     Bash,
     Zsh,
     Fish,
+}
+
+#[derive(Subcommand, Debug)]
+enum AvatarOp {
+    /// Render the Agent Avatar Protocol surface from local presence rows.
+    Surface {
+        /// Filter by project slug.
+        #[arg(long)]
+        project: Option<String>,
+        /// Filter by role.
+        #[arg(long)]
+        role: Option<String>,
+        /// Skip rows whose heartbeat is older than this. 0 = no TTL.
+        #[arg(long, default_value_t = 300)]
+        max_idle_secs: i64,
+        /// Equivalent to --max-idle-secs 0.
+        #[arg(long)]
+        include_stale: bool,
+        /// Max rows to include.
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+        /// Emit raw JSON payload instead of the human-readable report.
+        #[arg(long)]
+        json: bool,
+        /// Include original presence row in each JSON avatar entry.
+        #[arg(long)]
+        include_raw_presence: bool,
+        /// Include compatibility capabilities.pet_state in each JSON avatar entry.
+        #[arg(long)]
+        include_compat: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1296,6 +1333,34 @@ async fn main() -> Result<()> {
         };
     }
 
+    // Avatar subcommand: short-lived read-only terminal surface over presence rows.
+    if let Cmd::Avatar { op } = &cmd {
+        return match op {
+            AvatarOp::Surface {
+                project,
+                role,
+                max_idle_secs,
+                include_stale,
+                limit,
+                json: as_json,
+                include_raw_presence,
+                include_compat,
+            } => {
+                run_avatar_surface(
+                    project.clone(),
+                    role.clone(),
+                    *max_idle_secs,
+                    *include_stale,
+                    *limit,
+                    *as_json,
+                    *include_raw_presence,
+                    *include_compat,
+                )
+                .await
+            }
+        };
+    }
+
     // Substrate subcommand: short-lived read-only introspection over
     // in-process seed-bridge global. No state.db touched.
     if let Cmd::Substrate { op } = &cmd {
@@ -1860,6 +1925,7 @@ async fn main() -> Result<()> {
         Cmd::Setup { .. }
         | Cmd::Sync { .. }
         | Cmd::Skills { .. }
+        | Cmd::Avatar { .. }
         | Cmd::Dream { .. }
         | Cmd::Substrate { .. }
         | Cmd::Palace { .. }
@@ -1867,6 +1933,63 @@ async fn main() -> Result<()> {
         | Cmd::WorktreeSession { .. }
         | Cmd::RescueSnapshot { .. } => unreachable!(),
     }
+}
+
+async fn run_avatar_surface(
+    project: Option<String>,
+    role: Option<String>,
+    max_idle_secs: i64,
+    include_stale: bool,
+    limit: u32,
+    as_json: bool,
+    include_raw_presence: bool,
+    include_compat: bool,
+) -> Result<()> {
+    let max_idle_secs = if include_stale { 0 } else { max_idle_secs };
+    let limit = limit.clamp(1, 500);
+    let store = SqliteStore::open(&default_db_path())
+        .await
+        .context("open state.db")?;
+    let rows = store
+        .agent_presence_list(project.as_deref(), role.as_deref(), max_idle_secs, limit)
+        .await
+        .context("agent_presence_list")?;
+    let avatars: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| ab_bridge::avatar_surface::entry_from_presence(
+            row,
+            include_raw_presence,
+            include_compat,
+        ))
+        .collect();
+    let report_ctx = ab_bridge::avatar_surface::ReportContext {
+        project: project.as_deref(),
+        role: role.as_deref(),
+        max_idle_secs,
+        source: "local",
+    };
+    let report = ab_bridge::avatar_surface::report_from_entries(&avatars, &report_ctx);
+
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "agent_avatar_protocol": ab_bridge::avatar_surface::AGENT_AVATAR_PROTOCOL_VERSION,
+                "read_only": true,
+                "surface": "avatar_surface_cli",
+                "count": avatars.len(),
+                "project": project,
+                "role": role,
+                "max_idle_secs": max_idle_secs,
+                "limit": limit,
+                "report": report,
+                "avatars": avatars,
+            }))?
+        );
+    } else {
+        println!("{report}");
+    }
+    Ok(())
 }
 
 /// **v22** — Substrate stats CLI. Reads the in-process global installed by

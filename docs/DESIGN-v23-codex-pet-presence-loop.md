@@ -630,7 +630,8 @@ Phase 7 tasks:
    - Build or prototype a read-only view that shows multiple agents with avatar id, mode, activity state, risk, block reason, and next action.
    - Do not ship auto-control from this panel until the state protocol has survived dogfood.
    - Status: implemented first as Standard-profile `avatar_surface_snapshot` on 2026-05-19. It reads `agent_presence_list`, prefers `capabilities.avatar_state`, falls back to compatibility `capabilities.pet_state` or generic presence identity, and returns compact `avatars[]` entries for a future panel or terminal dashboard. It is read-only and does not mutate sidecar state, write presence, emit audio, or send notifications. Installed-binary probes passed with 81 Standard tools, and a real Claude Code dogfood session wrote `runtime=claude-code` / `agent_id=claude-code-xiao-shu-dogfood`; the snapshot read it back with both `has_avatar_state=true` and `has_compat_pet_state=true`.
-   - First human-facing surface: `avatar_surface_report` now renders the same projection as a compact terminal/panel-friendly text report. It stays Standard-profile and read-only. Installed-binary validation passed with 82 Standard tools; a probe wrote `agent_id=codex-xiao-shu-report-installed` / `runtime=codex` and `avatar_surface_report` read it back with `activity_state=verifying-report`, `focus=avatar-surface-report`, and both canonical and compatibility state flags present.
+   - First human-facing surface: `avatar_surface_report` now renders the same projection as a compact terminal/panel-friendly text report. It stays Standard-profile and read-only. Installed-binary validation passed with 82 Standard tools; a probe wrote `agent_id=codex-xiao-shu-report-installed` / `runtime=codex` and `avatar_surface_report` read it back with `activity_state=verifying-report`, `focus=avatar-surface-report`, and both canonical and compatibility state flags present. A real Claude Code terminal dogfood pass then wrote `agent_id=claude-code-xiao-shu-report-dogfood` / `runtime=claude-code`; installed `avatar_surface_report` read it back as the first row with `activity_state=dogfooding-avatar-report`, `focus=avatar-surface-report`, and both state flags present. A local CLI wrapper pass then wrote `agent_id=local-cli-avatar-report-dogfood` / `runtime=local-cli`, and the native `agent-bridge avatar surface --role dogfood` CLI read it back through the same shared projection.
+   - Daemon HTTP read-only panel: `/avatar-surface` returns the shared JSON projection, `/avatar-surface/report` returns the same report as `text/plain`, and `/avatar-surface/panel` renders a minimal HTML panel. All three routes are read-only and reuse `avatar_surface` rather than duplicating panel logic.
 
 Acceptance:
 
@@ -659,9 +660,10 @@ Acceptance:
 Phase 6.1 and Phase 6.2 are now live-verified in the current Codex/MCP path.
 Move in this order:
 
-1. Keep mutating `avatar_state_set` behind the RFC boundary until the read-only surface has been dogfooded across at least one more non-Codex runtime or terminal wrapper.
-2. Dogfood `avatar_surface_report` from one more terminal wrapper or non-Codex runtime, then choose whether the next user-facing layer should be daemon HTTP panel or Codex-side read-only panel.
+1. Validate the daemon HTTP avatar surface against a live `daemon-http` process and browser-rendered panel.
+2. Keep mutating `avatar_state_set` behind the RFC boundary until the read-only surfaces have survived the HTTP panel dogfood pass.
 3. Dogfood Phase 6.3 during real Codex work.
-4. Return to Phase 3 skin switching after the behavior and presence loop is stable; do not auto-switch official Codex avatars until app reload behavior is proven.
+4. Add a Codex-side read-only panel only after the external HTTP surface is stable.
+5. Return to Phase 3 skin switching after the behavior and presence loop is stable; do not auto-switch official Codex avatars until app reload behavior is proven.
 
 This preserves the user's preferred pattern: prove the live mechanism first, then expand capability.

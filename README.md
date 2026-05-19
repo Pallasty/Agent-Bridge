@@ -320,6 +320,15 @@ Claude Code and Codex have automatic lifecycle hook installation. Gemini
 CLI, Warp, and Auggie should use the lifecycle MCP tools directly:
 `session_bootstrap`, `session_curate`, and `session_finalize`.
 
+Read-only avatar/presence surfaces are also available without going through
+an MCP client. The terminal report uses the same projection as the Standard
+MCP `avatar_surface_report` tool:
+
+```bash
+agent-bridge avatar surface --project agent-bridge --include-stale
+agent-bridge avatar surface --project agent-bridge --role dogfood --json
+```
+
 ---
 
 ## Quick start (Warp)

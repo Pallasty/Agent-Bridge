@@ -391,7 +391,17 @@ that need both forms. Installed-binary validation passed with 82 Standard tools;
 a probe wrote `agent_id=codex-xiao-shu-report-installed` and
 `runtime=codex`, then `avatar_surface_report` read it back with
 `activity_state=verifying-report`, `focus=avatar-surface-report`, and both
-state flags present.
+state flags present. A real Claude Code terminal dogfood pass then wrote
+`agent_id=claude-code-xiao-shu-report-dogfood` and `runtime=claude-code`;
+installed `avatar_surface_report` read it back as the first row with
+`activity_state=dogfooding-avatar-report`, `focus=avatar-surface-report`, and
+both state flags present. A local CLI wrapper dogfood pass then wrote
+`agent_id=local-cli-avatar-report-dogfood` and `runtime=local-cli`, and the
+native `agent-bridge avatar surface --role dogfood` CLI read it back through
+the same shared projection. Daemon HTTP now exposes the same shared projection
+as `/avatar-surface` JSON, `/avatar-surface/report` text, and
+`/avatar-surface/panel` HTML so non-MCP clients and browsers can consume the
+read-only surface without a Codex dependency.
 
 ---
 
@@ -406,6 +416,8 @@ state flags present.
 | Standard `avatar_state_get` | Existing pet sidecar projects to protocol v1 without mutating state |
 | Standard `avatar_surface_snapshot` | Presence rows project to compact read-only `avatars[]` entries |
 | Standard `avatar_surface_report` | Same projection renders a compact read-only terminal/panel report |
+| `agent-bridge avatar surface` | Same projection is available without an MCP client |
+| daemon HTTP `/avatar-surface*` | Same projection is available as JSON, text, and a read-only HTML panel |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |
 | Unknown field injected | Reader ignores it |
 | Missing optional facets | Reader returns null or unknown, not error |

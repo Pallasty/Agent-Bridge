@@ -3613,191 +3613,6 @@ async fn avatar_surface_presence_rows(
     }
 }
 
-fn avatar_surface_field(primary: Option<&Value>, compat: Option<&Value>, key: &str) -> Value {
-    primary
-        .and_then(|v| v.get(key).cloned())
-        .or_else(|| compat.and_then(|v| v.get(key).cloned()))
-        .unwrap_or(Value::Null)
-}
-
-fn avatar_surface_field_or_string(
-    primary: Option<&Value>,
-    compat: Option<&Value>,
-    key: &str,
-    fallback: String,
-) -> Value {
-    let value = avatar_surface_field(primary, compat, key);
-    if value.is_null() {
-        json!(fallback)
-    } else {
-        value
-    }
-}
-
-fn avatar_surface_entry_from_presence(
-    row: &ab_store::AgentPresenceRecord,
-    include_raw_presence: bool,
-    include_compat: bool,
-) -> Value {
-    let capabilities = row.capabilities.as_ref();
-    let avatar_state = capabilities
-        .and_then(|v| v.get("avatar_state"))
-        .filter(|v| v.is_object());
-    let pet_state = capabilities
-        .and_then(|v| v.get("pet_state"))
-        .filter(|v| v.is_object());
-    let source = if avatar_state.is_some() {
-        "avatar_state"
-    } else if pet_state.is_some() {
-        "pet_state"
-    } else {
-        "presence"
-    };
-    let mode = pet_state_str_field(avatar_state.or(pet_state).unwrap_or(&Value::Null), "mode")
-        .unwrap_or_else(|| "unknown".to_string());
-    let activity_state = pet_state_str_field(
-        avatar_state.or(pet_state).unwrap_or(&Value::Null),
-        "activity_state",
-    )
-    .unwrap_or_else(|| mode.clone());
-
-    let mut entry = json!({
-        "agent_avatar_protocol": 1,
-        "agent_id": avatar_surface_field_or_string(avatar_state, pet_state, "agent_id", row.session_id.clone()),
-        "session_id": row.session_id,
-        "name": row.name,
-        "runtime": avatar_surface_field(avatar_state, pet_state, "runtime"),
-        "avatar_id": avatar_surface_field(avatar_state, pet_state, "avatar_id"),
-        "mode": mode,
-        "activity_state": activity_state,
-        "focus": avatar_surface_field(avatar_state, pet_state, "focus"),
-        "risk_level": avatar_surface_field(avatar_state, pet_state, "risk_level"),
-        "blocked_reason": avatar_surface_field(avatar_state, pet_state, "blocked_reason"),
-        "evidence": avatar_surface_field(avatar_state, pet_state, "evidence"),
-        "next_action": avatar_surface_field(avatar_state, pet_state, "next_action"),
-        "updated_at": avatar_surface_field(avatar_state, pet_state, "updated_at"),
-        "project": avatar_surface_field_or_string(avatar_state, pet_state, "project", row.project.clone()),
-        "cwd": avatar_surface_field_or_string(
-            avatar_state,
-            pet_state,
-            "cwd",
-            row.cwd.clone().unwrap_or_default()
-        ),
-        "node": row.node,
-        "role": row.role,
-        "tag": row.tag,
-        "pid": row.pid,
-        "last_heartbeat_at": row.last_heartbeat_at,
-        "started_at": row.started_at,
-        "voice_policy": avatar_state
-            .and_then(|v| v.get("voice_policy").cloned())
-            .or_else(|| capabilities.and_then(|v| v.get("voice_policy").cloned()))
-            .unwrap_or(Value::Null),
-        "source": source,
-        "has_avatar_state": avatar_state.is_some(),
-        "has_compat_pet_state": pet_state.is_some()
-    });
-    if include_compat {
-        entry["compat_pet_state"] = pet_state.cloned().unwrap_or(Value::Null);
-    }
-    if include_raw_presence {
-        entry["presence"] = json!(row);
-    }
-    entry
-}
-
-fn avatar_surface_report_clean(value: &str) -> String {
-    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.chars().count() <= 160 {
-        return collapsed;
-    }
-    let mut clipped: String = collapsed.chars().take(157).collect();
-    clipped.push_str("...");
-    clipped
-}
-
-fn avatar_surface_report_value(entry: &Value, key: &str) -> Option<String> {
-    let value = entry.get(key)?;
-    match value {
-        Value::Null => None,
-        Value::String(s) => {
-            let cleaned = avatar_surface_report_clean(s);
-            if cleaned.is_empty() {
-                None
-            } else {
-                Some(cleaned)
-            }
-        }
-        Value::Number(_) | Value::Bool(_) => Some(value.to_string()),
-        _ => Some(avatar_surface_report_clean(&value.to_string())),
-    }
-}
-
-fn avatar_surface_report_value_or(entry: &Value, key: &str, fallback: &str) -> String {
-    avatar_surface_report_value(entry, key).unwrap_or_else(|| fallback.to_string())
-}
-
-fn avatar_surface_report_from_entries(avatars: &[Value], query: &AvatarSurfaceQuery<'_>) -> String {
-    let mut lines = Vec::new();
-    lines.push("Agent Avatar Surface".to_string());
-    lines.push(format!(
-        "count={} project={} role={} max_idle_secs={} source={}",
-        avatars.len(),
-        query.project.unwrap_or("*"),
-        query.role.unwrap_or("*"),
-        query.max_idle_secs,
-        query.peer.unwrap_or("local")
-    ));
-
-    if avatars.is_empty() {
-        lines.push("No avatar presence rows matched the filters.".to_string());
-        return lines.join("\n");
-    }
-
-    for (idx, avatar) in avatars.iter().enumerate() {
-        let agent_id = avatar_surface_report_value_or(avatar, "agent_id", "unknown-agent");
-        let runtime = avatar_surface_report_value_or(avatar, "runtime", "unknown-runtime");
-        let avatar_id = avatar_surface_report_value_or(avatar, "avatar_id", "unknown-avatar");
-        let mode = avatar_surface_report_value_or(avatar, "mode", "unknown");
-        let activity = avatar_surface_report_value_or(avatar, "activity_state", &mode);
-        let focus = avatar_surface_report_value_or(avatar, "focus", "-");
-        let risk = avatar_surface_report_value_or(avatar, "risk_level", "-");
-        let heartbeat = avatar_surface_report_value_or(avatar, "last_heartbeat_at", "-");
-        let source = avatar_surface_report_value_or(avatar, "source", "presence");
-        let has_avatar_state = avatar_surface_report_value_or(avatar, "has_avatar_state", "false");
-        let has_compat_pet_state =
-            avatar_surface_report_value_or(avatar, "has_compat_pet_state", "false");
-
-        lines.push(format!(
-            "{}. {} runtime={} avatar={} mode={} activity={} focus={} risk={} heartbeat={}",
-            idx + 1,
-            agent_id,
-            runtime,
-            avatar_id,
-            mode,
-            activity,
-            focus,
-            risk,
-            heartbeat
-        ));
-        if let Some(blocked_reason) = avatar_surface_report_value(avatar, "blocked_reason") {
-            lines.push(format!("   blocked: {blocked_reason}"));
-        }
-        if let Some(next_action) = avatar_surface_report_value(avatar, "next_action") {
-            lines.push(format!("   next: {next_action}"));
-        }
-        if let Some(evidence) = avatar_surface_report_value(avatar, "evidence") {
-            lines.push(format!("   evidence: {evidence}"));
-        }
-        lines.push(format!(
-            "   flags: avatar_state={} compat_pet={} source={}",
-            has_avatar_state, has_compat_pet_state, source
-        ));
-    }
-
-    lines.join("\n")
-}
-
 #[async_trait]
 impl McpTool for AvatarSurfaceSnapshotTool {
     fn name(&self) -> &'static str {
@@ -3841,7 +3656,7 @@ impl McpTool for AvatarSurfaceSnapshotTool {
         let avatars: Vec<Value> = rows
             .iter()
             .map(|row| {
-                avatar_surface_entry_from_presence(
+                crate::avatar_surface::entry_from_presence(
                     row,
                     query.include_raw_presence,
                     query.include_compat,
@@ -3915,14 +3730,20 @@ impl McpTool for AvatarSurfaceReportTool {
         let avatars: Vec<Value> = rows
             .iter()
             .map(|row| {
-                avatar_surface_entry_from_presence(
+                crate::avatar_surface::entry_from_presence(
                     row,
                     query.include_raw_presence,
                     query.include_compat,
                 )
             })
             .collect();
-        let report = avatar_surface_report_from_entries(&avatars, &query);
+        let report_ctx = crate::avatar_surface::ReportContext {
+            project: query.project,
+            role: query.role,
+            max_idle_secs: query.max_idle_secs,
+            source: query.peer.unwrap_or("local"),
+        };
+        let report = crate::avatar_surface::report_from_entries(&avatars, &report_ctx);
         let mut payload = json!({
             "agent_avatar_protocol": 1,
             "read_only": true,
@@ -19874,7 +19695,7 @@ mod tests {
             last_heartbeat_at: 20,
         };
 
-        let entry = avatar_surface_entry_from_presence(&row, false, true);
+        let entry = crate::avatar_surface::entry_from_presence(&row, false, true);
 
         assert_eq!(entry["agent_avatar_protocol"], 1);
         assert_eq!(entry["agent_id"], "codex-xiao-shu-dev");
@@ -19975,14 +19796,11 @@ mod tests {
 
     #[test]
     fn avatar_surface_report_formats_terminal_summary() {
-        let query = AvatarSurfaceQuery {
+        let report_ctx = crate::avatar_surface::ReportContext {
             project: Some("agent-bridge"),
             role: Some("main"),
             max_idle_secs: 300,
-            limit: 20,
-            peer: None,
-            include_raw_presence: false,
-            include_compat: false,
+            source: "local",
         };
         let avatars = vec![json!({
             "agent_id": "claude-code-xiao-shu-dogfood",
@@ -20000,7 +19818,7 @@ mod tests {
             "has_compat_pet_state": true
         })];
 
-        let report = avatar_surface_report_from_entries(&avatars, &query);
+        let report = crate::avatar_surface::report_from_entries(&avatars, &report_ctx);
 
         assert!(report.contains("Agent Avatar Surface"));
         assert!(report.contains("count=1 project=agent-bridge role=main"));
@@ -22958,7 +22776,10 @@ mod tests {
         );
         // Empty hint band is expected here since the cosine fell into the hard
         // tier; soft tier [0.60, 0.75) is for adjacent-but-not-duplicate.
-        assert!(hints.is_empty(), "soft tier should be empty on hard-tier match");
+        assert!(
+            hints.is_empty(),
+            "soft tier should be empty on hard-tier match"
+        );
     }
 
     // Note: cap-at-3 behavior is exercised by inspection (5-line `if len <
