@@ -6098,12 +6098,186 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
         }
     }
 
+    // ── §4 P2 substrate↔α correlation one-liner ───────────────────────
+    // Auto-runs the v22 §4 P2 falsifiable measurement on the Monday
+    // cadence so no human has to remember `dream substrate-corr-audit`
+    // ad-hoc. Falsifiability rule: median Spearman ρ ≥ 0.4 across keys
+    // with ≥3 cofires degree → P2 PASS → unlock §4 P3 cold-start probe.
+    println!();
+    println!("[bonus #3] substrate↔α cofires correlation (§4 P2)");
+    println!("─────────────────────────────────────────");
+    match substrate_corr_weekly_one_liner(20, 3).await {
+        Ok(s) => match s.median_spearman {
+            Some(m) => {
+                println!(
+                    "  median ρ = {:>+.3} · {} bilateral / {} qualifying · {}",
+                    m, s.bilateral_pairs, s.qualifying_keys, s.verdict,
+                );
+                println!("  (run `dream substrate-corr-audit --json` for per-key detail)");
+            }
+            None => {
+                println!(
+                    "  ρ n/a · {} qualifying / {} substrate-empty · {}",
+                    s.qualifying_keys, s.substrate_misses, s.verdict,
+                );
+                println!("  (need more snapshot history or more cofires edges; check back next week)");
+            }
+        },
+        Err(e) => {
+            eprintln!("  substrate-corr-audit skipped: {e}");
+        }
+    }
+
     println!();
     println!(
         "next: re-run `dream weekly` in 7 days; \
          compare via `dream diff <prev_key> <this_key>` for drift."
     );
     Ok(())
+}
+
+/// Compact aggregate of `dream substrate-corr-audit`, sized for the
+/// `dream weekly` Monday-morning one-liner. Mirrors the aggregation
+/// done inline in `run_dream_substrate_corr_audit` but skips per-key
+/// detail — full breakdown stays on the standalone CLI + `--json`.
+#[derive(Debug, Clone)]
+struct SubstrateCorrOneLiner {
+    median_spearman: Option<f64>,
+    bilateral_pairs: u64,
+    qualifying_keys: u64,
+    substrate_misses: u64,
+    verdict: &'static str,
+}
+
+/// Compute the §4 P2 one-liner summary. Default snapshot path; `k=20`
+/// and `min_cofires=3` per memo §4 P2. Returns `Ok(SubstrateCorrOneLiner)`
+/// even on "no snapshot / no qualifying keys" — verdict text encodes the
+/// no-signal state. Errors only on DB open / unexpected store failure.
+async fn substrate_corr_weekly_one_liner(
+    k: usize,
+    min_cofires: u32,
+) -> Result<SubstrateCorrOneLiner> {
+    use ab_seed_bridge::snapshot::{self, SnapshotTier};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use std::collections::HashMap;
+
+    let snap_path = snapshot::default_snapshot_path();
+    let snap_row = match &snap_path {
+        Some(p) if p.exists() => {
+            let rows = snapshot::read_all(p)
+                .with_context(|| format!("read substrate snapshot {}", p.display()))?;
+            rows.into_iter()
+                .rev()
+                .find(|r| matches!(r.tier, SnapshotTier::Long))
+        }
+        _ => None,
+    };
+
+    let db_path = default_db_path();
+    let store = SqliteStore::open(&db_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
+    let qualifying = store
+        .cofires_keys_with_min_degree(min_cofires)
+        .await
+        .map_err(|e| anyhow::anyhow!("cofires_keys_with_min_degree: {e}"))?;
+
+    let mut spearmans: Vec<f64> = Vec::new();
+    let mut substrate_misses = 0u64;
+    let mut bilateral_pairs = 0u64;
+    for (key, _deg) in &qualifying {
+        let edges = store
+            .memory_neighbors(key)
+            .await
+            .map_err(|e| anyhow::anyhow!("memory_neighbors({key}): {e}"))?;
+        let mut cofires_pairs: Vec<(String, f64)> = edges
+            .iter()
+            .filter(|e| e.edge_type == "cofires")
+            .map(|e| {
+                let other = if e.from_key == *key {
+                    e.to_key.clone()
+                } else {
+                    e.from_key.clone()
+                };
+                (other, e.weight)
+            })
+            .collect();
+        cofires_pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut seen_co = std::collections::HashSet::new();
+        cofires_pairs.retain(|(k, _)| seen_co.insert(k.clone()));
+
+        let substrate_pairs: Vec<(String, f64)> = match snap_row.as_ref() {
+            Some(row) => ab_seed_bridge::neighbors_from_snapshot(row, key, k)
+                .into_iter()
+                .map(|(k_text, s)| (k_text, s as f64))
+                .collect(),
+            None => Vec::new(),
+        };
+        if substrate_pairs.is_empty() {
+            substrate_misses += 1;
+        }
+
+        let mut rank_co: HashMap<&str, f64> = HashMap::new();
+        for (i, (k_text, _)) in cofires_pairs.iter().enumerate() {
+            rank_co.insert(k_text.as_str(), (i + 1) as f64);
+        }
+        let mut rank_sub: HashMap<&str, f64> = HashMap::new();
+        for (i, (k_text, _)) in substrate_pairs.iter().enumerate() {
+            rank_sub.insert(k_text.as_str(), (i + 1) as f64);
+        }
+        let mut union: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for (k_text, _) in &cofires_pairs {
+            union.insert(k_text.as_str());
+        }
+        for (k_text, _) in &substrate_pairs {
+            union.insert(k_text.as_str());
+        }
+        let n_union = union.len();
+        let last_co = (cofires_pairs.len() + 1) as f64;
+        let last_sub = (substrate_pairs.len() + 1) as f64;
+        if n_union >= 3 {
+            let mut sum_d_sq = 0.0_f64;
+            for k_text in &union {
+                let ra = *rank_co.get(*k_text).unwrap_or(&last_co);
+                let rb = *rank_sub.get(*k_text).unwrap_or(&last_sub);
+                sum_d_sq += (ra - rb).powi(2);
+            }
+            let n_f = n_union as f64;
+            let denom = n_f * (n_f * n_f - 1.0);
+            if denom > 0.0 {
+                let rho = 1.0 - 6.0 * sum_d_sq / denom;
+                spearmans.push(rho);
+                bilateral_pairs += 1;
+            }
+        }
+    }
+
+    let median_spearman = if spearmans.is_empty() {
+        None
+    } else {
+        let mut v = spearmans.clone();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mid = v.len() / 2;
+        Some(if v.len() % 2 == 0 {
+            (v[mid - 1] + v[mid]) / 2.0
+        } else {
+            v[mid]
+        })
+    };
+
+    let verdict = match median_spearman {
+        Some(m) if m >= 0.4 => "P2 PASS (≥0.4)",
+        Some(_) => "P2 not yet PASS (<0.4)",
+        None => "no bilateral pairs — insufficient overlap",
+    };
+
+    Ok(SubstrateCorrOneLiner {
+        median_spearman,
+        bilateral_pairs,
+        qualifying_keys: qualifying.len() as u64,
+        substrate_misses,
+        verdict,
+    })
 }
 
 // ─── §6.5 rule 4 — gap-audit ────────────────────────────────────────────
