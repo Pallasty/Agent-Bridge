@@ -1359,15 +1359,30 @@ pub struct MemoryStats {
     pub db_size_bytes: Option<u64>,
 }
 
+/// Memory kinds treated as bulk-imported reference catalog rather than
+/// working memory. Excluded from `S234Counts::memories_active` so
+/// routine catalog churn (decay-archive, restore, bulk-import) doesn't
+/// trigger C3 s2 "memories drop" false-positive alerts. Matches the
+/// `catalog_kinds` field in `memory_stats` (P17b working/catalog split,
+/// see `project_palace_working_catalog_split_p17_shipped`).
+///
+/// Single source of truth for both `s234_counts` and the
+/// `memory_stats` MCP tool — if a new bulk-import kind is added,
+/// update here and both surfaces pick it up automatically.
+pub const CATALOG_KINDS_C3: &[&str] = &["skill"];
+
 /// Snapshot of the three counts feeding C3 §3.4 S2-S4 drop detection
 /// (`memories.count` active / `forum_threads.count` / `memory_edges.count`).
 /// Light-weight — three `SELECT COUNT(*)` calls, designed to be safe
 /// to read on a 30s tick.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct S234Counts {
-    /// Memories with `status='active'`. Excludes archived + tombstoned
-    /// so dream-tier GC bulk-status-change doesn't trigger S2 false
-    /// positives.
+    /// Memories with `status='active'` AND `kind NOT IN CATALOG_KINDS_C3`
+    /// (i.e. *working* active memories, excluding bulk-imported catalog
+    /// kinds like `skill`). Excludes archived + tombstoned so dream-tier
+    /// GC bulk-status-change doesn't trigger S2 false positives, and
+    /// excludes catalog kinds so importance-decay archives on the
+    /// reference catalog don't false-alarm either.
     pub memories_active: u64,
     /// Total `forum_threads` rows (status-agnostic — archive/resolve
     /// don't delete rows so this is stable).

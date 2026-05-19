@@ -8321,12 +8321,30 @@ impl StateStore for SqliteStore {
     }
 
     async fn s234_counts(&self) -> Result<S234Counts> {
+        // P17b alignment + thread 14 #265 fix: exclude catalog kinds
+        // from active count so memory_decay_importance archiving the
+        // bulk-imported skill catalog (importance ≈ 0.044, below the
+        // default archive_threshold 0.05) doesn't false-alarm C3 s2.
+        // CATALOG_KINDS_C3 is the single source of truth — see ab_store
+        // crate root.
+        use crate::CATALOG_KINDS_C3;
+        let placeholders = CATALOG_KINDS_C3
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
+        let active_query = format!(
+            "SELECT COUNT(*) FROM memories \
+             WHERE status='active' AND kind NOT IN ({placeholders})"
+        );
         let counts = self
             .conn
-            .call(|c| -> RusqliteResult<S234Counts> {
+            .call(move |c| -> RusqliteResult<S234Counts> {
+                let kind_params: Vec<&dyn rusqlite::ToSql> =
+                    CATALOG_KINDS_C3.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
                 let memories_active: i64 = c.query_row(
-                    "SELECT COUNT(*) FROM memories WHERE status='active'",
-                    [],
+                    &active_query,
+                    rusqlite::params_from_iter(kind_params.iter()),
                     |r| r.get(0),
                 )?;
                 let forum_threads: i64 =
@@ -15721,6 +15739,99 @@ mod tests {
         );
         assert!(c.forum_threads >= 1, "thread created (got {c:?})");
         assert!(c.memory_edges >= 1, "edge created (got {c:?})");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn s234_counts_excludes_catalog_kinds_to_prevent_decay_false_positives() {
+        // Regression for thread 14 #245 (2026-05-17 22:08 UTC) false-
+        // positive: memory_decay_importance archived 484 catalog `skill`
+        // memories at session_finalize, causing active count to drop
+        // 635→150 and tripping C3 s2 alarm. After the fix the active
+        // count excludes catalog kinds (CATALOG_KINDS_C3 = ["skill"])
+        // so identical catalog churn becomes invisible to s234_counts.
+        //
+        // Test setup: 1 working `lesson` + 3 catalog `skill` all active.
+        // BEFORE this fix, memories_active would be 4. AFTER fix, 1.
+        // Archiving all 3 skill leaves working active count unchanged.
+        use crate::MemoryRecord;
+        let temp_dir = schema_meta_temp_dir("s234_counts_catalog");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let base = MemoryRecord {
+            key: String::new(),
+            kind: String::new(),
+            content: "x".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_000_000,
+            updated_at: 1_000_000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+
+        let mut working = base.clone();
+        working.key = "tests:s234_catalog_working".into();
+        working.kind = "lesson".into();
+        store.memory_save(&working).await.expect("save working");
+
+        for i in 0..3 {
+            let mut cat = base.clone();
+            cat.key = format!("tests:s234_catalog_skill_{i}");
+            cat.kind = "skill".into();
+            store.memory_save(&cat).await.expect("save skill");
+        }
+
+        let c_before = store.s234_counts().await.expect("counts");
+        assert_eq!(
+            c_before.memories_active, 1,
+            "catalog skill rows must be excluded from memories_active \
+             even when active (got {c_before:?})"
+        );
+
+        // Now archive all 3 catalog rows — exactly the kind of bulk
+        // status change that triggered the false positive. The working
+        // active count must stay at 1 so C3 s2 sees no drop.
+        for i in 0..3 {
+            let mut cat = base.clone();
+            cat.key = format!("tests:s234_catalog_skill_{i}");
+            cat.kind = "skill".into();
+            cat.status = "archived".into();
+            store.memory_save(&cat).await.expect("archive skill");
+        }
+
+        let c_after = store.s234_counts().await.expect("counts");
+        assert_eq!(
+            c_after.memories_active, c_before.memories_active,
+            "archiving catalog rows must NOT change memories_active \
+             (got before={c_before:?} after={c_after:?})"
+        );
+
+        // Regression guard: archiving a working-kind row DOES still
+        // change memories_active, so the C3 s2 alarm remains live for
+        // actual working-memory loss.
+        let mut work_arch = working.clone();
+        work_arch.status = "archived".into();
+        store
+            .memory_save(&work_arch)
+            .await
+            .expect("archive working");
+
+        let c_drop = store.s234_counts().await.expect("counts");
+        assert_eq!(
+            c_drop.memories_active, 0,
+            "archiving a working (non-catalog) row must drop \
+             memories_active (got {c_drop:?})"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

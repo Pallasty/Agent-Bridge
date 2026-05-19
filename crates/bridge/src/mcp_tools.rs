@@ -10765,9 +10765,9 @@ impl McpTool for MemoryStatsTool {
         // P17b: working vs catalog split. Uses the un-capped
         // memory_kind_counts (vs counts_by_kind which is top-20 only) so
         // a catalog kind sitting at #21 still gets counted correctly.
-        // catalog_kinds is fixed here; future bulk-import kinds can be
-        // added in one place if needed.
-        const CATALOG_KINDS: &[&str] = &["skill"];
+        // Shared source of truth with C3 s2 self-check (s234_counts) —
+        // see ab_store::CATALOG_KINDS_C3.
+        use ab_store::CATALOG_KINDS_C3 as CATALOG_KINDS;
         let kind_rows = store
             .memory_kind_counts()
             .await
