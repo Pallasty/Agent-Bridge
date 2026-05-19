@@ -86,7 +86,7 @@ These steps are the same regardless of how you got the binary above.
 ```bash
 # 1. Install hooks (Claude Code) and register MCP config.
 agent-bridge setup --frontend claude-code
-# (or --frontend codex / gemini-cli / warp / auggie / local-cli / auto)
+# (or --frontend codex / codex-cli / codex-ide / gemini-cli / warp / auggie / local-cli / auto)
 
 # 2. Make sure ~/.local/bin is on PATH.
 fish_add_path ~/.local/bin
@@ -220,15 +220,16 @@ configuration when a new session starts.
 git clone git@gitlab.com:pallasting/agent-bridge.git ~/agent-bridge
 cd ~/agent-bridge && cargo build --release
 
-# 2. Install — Codex profile copies the binary and merges MCP + hook config.
+# 2. Install — Codex desktop profile copies the binary and merges MCP + hook config.
 ./target/release/agent-bridge setup --frontend codex
+# For non-desktop hosts, use --frontend codex-cli or --frontend codex-ide.
 # (Or rely on auto-detect when ~/.codex/config.toml exists:
 #   ./target/release/agent-bridge setup)
 
 # 3. Restart Codex or open a new Codex session.
 ```
 
-The Codex profile writes this MCP server entry:
+The Codex desktop profile writes this MCP server entry:
 
 ```toml
 [mcp_servers.agent-bridge]
@@ -243,6 +244,7 @@ supports_parallel_tool_calls = false
 AGENT_BRIDGE_CLIENT = "codex"
 AGENT_BRIDGE_TOOLSET = "codex-essential"
 AGENT_BRIDGE_TOOL_PROFILE = "essential"
+AGENT_BRIDGE_CODEX_HOST = "desktop"
 ```
 
 The command path is written as the expanded absolute path on your
@@ -262,6 +264,15 @@ The Codex profile also enables `features.codex_hooks`, writes the three
 into `~/.codex/hooks.json` while preserving existing hooks. If Codex asks
 you to trust the new hook commands after setup, approve the Agent-Bridge
 entries.
+
+Codex host variants share the same compact `codex-essential` toolset but mark
+their host explicitly:
+
+| Frontend | Host env | Hooks | Intended use |
+|----------|----------|-------|--------------|
+| `codex` | `AGENT_BRIDGE_CODEX_HOST=desktop` | yes | Codex desktop app with lifecycle hooks |
+| `codex-cli` | `AGENT_BRIDGE_CODEX_HOST=cli` | no | Codex CLI or CLI-like MCP host |
+| `codex-ide` | `AGENT_BRIDGE_CODEX_HOST=ide` | no | IDE-hosted Codex plus the file-based IDE snapshot bridge |
 
 | Codex lifecycle moment | Agent-Bridge hook |
 |------------------------|-------------------|
@@ -291,6 +302,8 @@ You can also target one client explicitly:
 
 ```bash
 ./target/release/agent-bridge setup --frontend codex
+./target/release/agent-bridge setup --frontend codex-cli
+./target/release/agent-bridge setup --frontend codex-ide
 ./target/release/agent-bridge setup --frontend gemini-cli
 ./target/release/agent-bridge setup --frontend claude-code
 ```
@@ -401,14 +414,18 @@ Warp profile (`--frontend warp`):
 | Curator settings | **Skipped** — only consumed by `ab-precompact-hook.sh` |
 | Settings file | **Skipped** — prints registration guidance for `Settings → MCP servers` instead |
 
-Codex profile (`--frontend codex`):
+Codex desktop profile (`--frontend codex`):
 
 | Step | What happens |
 |------|-------------|
 | Binary | Copies itself to `~/.local/bin/agent-bridge` |
 | Hook scripts | Writes three scripts to `~/.local/bin/` |
 | Codex hooks | Enables `features.codex_hooks` and merges Agent-Bridge entries into `~/.codex/hooks.json` |
-| Settings file | Merges `[mcp_servers.agent-bridge]` into `~/.codex/config.toml` with `AGENT_BRIDGE_CLIENT=codex`, `AGENT_BRIDGE_TOOLSET=codex-essential`, and `AGENT_BRIDGE_TOOL_PROFILE=essential`; snapshots Codex `model` / `model_reasoning_effort` into `AGENT_BRIDGE_MODEL` / `AGENT_BRIDGE_MODEL_REASONING_EFFORT` when present |
+| Settings file | Merges `[mcp_servers.agent-bridge]` into `~/.codex/config.toml` with `AGENT_BRIDGE_CLIENT=codex`, `AGENT_BRIDGE_TOOLSET=codex-essential`, `AGENT_BRIDGE_TOOL_PROFILE=essential`, and `AGENT_BRIDGE_CODEX_HOST=desktop`; snapshots Codex `model` / `model_reasoning_effort` into `AGENT_BRIDGE_MODEL` / `AGENT_BRIDGE_MODEL_REASONING_EFFORT` when present |
+
+Codex CLI and IDE profiles (`--frontend codex-cli` / `--frontend codex-ide`)
+write the same MCP entry with `AGENT_BRIDGE_CODEX_HOST=cli` or `ide`, but skip
+desktop lifecycle hooks.
 
 Gemini CLI profile (`--frontend gemini-cli`):
 

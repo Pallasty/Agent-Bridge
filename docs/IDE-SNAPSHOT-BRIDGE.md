@@ -5,6 +5,16 @@ intentionally file-based: VS Code, Cursor, Windsurf, or a small script can write
 the same JSON shape, and MCP clients can read it without linking to a specific
 editor API.
 
+For Codex running inside an IDE host, install the Codex MCP entry with:
+
+```bash
+agent-bridge setup --frontend codex-ide
+```
+
+This keeps `AGENT_BRIDGE_TOOLSET=codex-essential`, marks
+`AGENT_BRIDGE_CODEX_HOST=ide`, and skips Codex desktop lifecycle hooks. The IDE
+extension or script remains responsible for writing the snapshot file below.
+
 ## Lookup Order
 
 The MCP tool reads the first existing file from:

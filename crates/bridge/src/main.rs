@@ -38,8 +38,11 @@ enum Cmd {
     /// `~/.local/bin/agent-bridge`, writes the three Claude Code hook
     /// scripts, and merges hook entries into `~/.claude/settings.json`.
     ///
-    /// `--frontend codex`: copies the binary and registers the MCP server in
-    /// `~/.codex/config.toml`. Codex does not have Claude Code hook events.
+    /// `--frontend codex`: installs the Codex desktop profile with MCP config
+    /// plus Codex lifecycle hooks.
+    ///
+    /// `--frontend codex-cli` / `--frontend codex-ide`: register Codex MCP
+    /// config with a host marker but skip desktop lifecycle hooks.
     ///
     /// `--frontend gemini-cli`: copies the binary and registers the MCP server
     /// in `~/.gemini/settings.json`.
@@ -1135,6 +1138,10 @@ pub enum SetupFrontend {
     Auggie,
     /// Install for OpenAI Codex — registers MCP in ~/.codex/config.toml.
     Codex,
+    /// Install for Codex CLI — MCP config only, no desktop lifecycle hooks.
+    CodexCli,
+    /// Install for Codex IDE hosts — MCP config plus IDE bridge marker, no desktop hooks.
+    CodexIde,
     /// Install for Gemini CLI — registers MCP in ~/.gemini/settings.json.
     GeminiCli,
     /// Install MCP config for local CLI clients (Codex, Gemini CLI, Claude Code).
@@ -1175,6 +1182,8 @@ impl SetupFrontend {
             Self::Warp => setup::Frontend::Warp,
             Self::Auggie => setup::Frontend::Auggie,
             Self::Codex => setup::Frontend::Codex,
+            Self::CodexCli => setup::Frontend::CodexCli,
+            Self::CodexIde => setup::Frontend::CodexIde,
             Self::GeminiCli => setup::Frontend::GeminiCli,
             Self::LocalCli => setup::Frontend::LocalCli,
             Self::Auto => {
