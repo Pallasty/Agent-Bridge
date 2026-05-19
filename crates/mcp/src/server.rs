@@ -193,9 +193,12 @@ fn mcp_profile_label_from_env() -> &'static str {
 
 fn mcp_profile_label_from_values(toolset: Option<&str>, profile: Option<&str>) -> &'static str {
     match toolset.map(normalize_mcp_env_value).as_deref() {
-        Some("codex-essential") | Some("codex") | Some("gemini-lean") | Some("gemini") => {
-            "essential"
-        }
+        Some("codex-essential")
+        | Some("codex-lean")
+        | Some("codex-minimal")
+        | Some("codex")
+        | Some("gemini-lean")
+        | Some("gemini") => "essential",
         Some("all-dev") | Some("dev") | Some("full-dev") => "all",
         Some("claude-standard")
         | Some("claude-code")
@@ -754,6 +757,10 @@ mod tests {
     fn mcp_profile_label_honors_toolset_before_profile() {
         assert_eq!(
             mcp_profile_label_from_values(Some("codex-essential"), Some("all")),
+            "essential"
+        );
+        assert_eq!(
+            mcp_profile_label_from_values(Some("codex-lean"), Some("all")),
             "essential"
         );
         assert_eq!(
