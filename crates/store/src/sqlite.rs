@@ -3054,7 +3054,7 @@ impl StateStore for SqliteStore {
         decay_factor: f64,
         min_energy: f64,
     ) -> Result<Vec<(MemoryEdge, f64)>> {
-        use std::collections::{HashMap, VecDeque};
+        use std::collections::{HashSet, VecDeque};
 
         let start = start_key.to_string();
         let max_depth = depth.min(6); // hard cap to avoid O(n^d) blowup
@@ -3082,10 +3082,20 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("memory_neighbors_bfs fetch: {e}")))?;
 
-        // BFS with energy tracking (AiOT GraphMemoryBridge "ignite" pattern).
-        // visited: key → best energy seen so far (we propagate max).
-        let mut visited: HashMap<String, f64> = HashMap::new();
-        visited.insert(start.clone(), 1.0);
+        // BFS state — two distinct guards, mirroring the palace lineage BFS
+        // fix in commit cd38f8c. A single `visited: HashMap<String,_>` set
+        // (the old shape) silently dropped triangle / parallel edges: e.g.
+        // for A→B, A→C, B→C starting at A, the B→C leg never made it into
+        // `result` because C was inserted into visited at depth=1.
+        //
+        //   enqueued — cycle guard, per-node. A node is walked at most
+        //              once even if it has multiple inbound edges.
+        //   emitted  — emission dedup, per (from, to, edge_type) triple.
+        //              Parallel edges between the same pair each emit
+        //              their own row.
+        let mut enqueued: HashSet<String> = HashSet::new();
+        enqueued.insert(start.clone());
+        let mut emitted: HashSet<(String, String, String)> = HashSet::new();
 
         // queue: (current_key, remaining_depth, energy_at_this_node)
         let mut queue: VecDeque<(String, u8, f64)> = VecDeque::new();
@@ -3107,11 +3117,6 @@ impl StateStore for SqliteStore {
                 } else {
                     continue;
                 };
-                // Strict cycle guard: never revisit a node already in the queue.
-                // This prevents loops (e.g. A→B→A) from appearing in results.
-                if visited.contains_key(&neighbour) {
-                    continue;
-                }
                 // Energy propagation:
                 //   causal outbound edges get temporal bonus ×1.2
                 //   inbound causal edges don't get the bonus (information flows forward)
@@ -3124,9 +3129,24 @@ impl StateStore for SqliteStore {
                 if next_energy < threshold {
                     continue;
                 }
-                visited.insert(neighbour.clone(), next_energy);
+                // Emit per (from, to, edge_type). Skipping here keeps work
+                // bounded on dense subgraphs; the final dedup is redundant
+                // but kept as a belt-and-braces sort-stable invariant.
+                let emit_key = (
+                    edge.from_key.clone(),
+                    edge.to_key.clone(),
+                    edge.edge_type.clone(),
+                );
+                if !emitted.insert(emit_key) {
+                    continue;
+                }
                 result.push((edge.clone(), next_energy));
-                queue.push_back((neighbour, hops_left - 1, next_energy));
+                // Enqueue once per neighbour (cycle guard). Subsequent
+                // edges into this neighbour from other current nodes
+                // still emit above; we just don't walk out from it twice.
+                if enqueued.insert(neighbour.clone()) {
+                    queue.push_back((neighbour, hops_left - 1, next_energy));
+                }
             }
         }
 
@@ -9090,6 +9110,147 @@ mod tests {
             n.iter()
                 .any(|e| e.to_key == "edge_rt_b" && e.edge_type == "relates"),
             "expected relates edge; got {n:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // Regression for `memory_neighbors_bfs` visited-skip dropping triangle
+    // edges (2026-05-19 dogfood; see lesson_memory_neighbors_bfs_visited_
+    // skip_drops_triangle_edges_20260519). The old single-`visited`-HashMap
+    // BFS would silently drop B→C in the A→B, A→C, B→C topology because C
+    // was inserted into visited when A→C was traversed at depth=1, so the
+    // depth=2 walk from B would short-circuit on `visited.contains_key(C)`
+    // and never emit the B→C edge. Fix splits state into:
+    //   `enqueued` (per-node cycle guard) + `emitted` (per-(from,to,type)).
+    // Mirrors palace lineage fix commit cd38f8c.
+    #[tokio::test]
+    async fn memory_neighbors_bfs_emits_triangle_edge() {
+        use crate::MemoryRecord;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-bfs-triangle-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        let mk = |k: &str| MemoryRecord {
+            key: k.to_string(),
+            kind: "fact".to_string(),
+            content: format!("content {k}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000002,
+            updated_at: 1700000002,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        for k in &["tri_a", "tri_b", "tri_c"] {
+            store.memory_save(&mk(k)).await.expect("save");
+        }
+        // Triangle: A→B, A→C, B→C. All `relates` weight 1.0 so energy
+        // stays well above the default threshold for depth=2.
+        store
+            .memory_link("tri_a", "tri_b", "relates", 1.0)
+            .await
+            .expect("a->b");
+        store
+            .memory_link("tri_a", "tri_c", "relates", 1.0)
+            .await
+            .expect("a->c");
+        store
+            .memory_link("tri_b", "tri_c", "relates", 1.0)
+            .await
+            .expect("b->c");
+
+        let edges = store
+            .memory_neighbors_bfs("tri_a", 2, 0.7, 0.01)
+            .await
+            .expect("bfs");
+
+        let has = |from: &str, to: &str| {
+            edges
+                .iter()
+                .any(|(e, _)| e.from_key == from && e.to_key == to && e.edge_type == "relates")
+        };
+        assert!(has("tri_a", "tri_b"), "missing A→B; got {edges:?}");
+        assert!(has("tri_a", "tri_c"), "missing A→C; got {edges:?}");
+        assert!(
+            has("tri_b", "tri_c"),
+            "missing B→C triangle edge; got {edges:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // Parallel edges between the same pair (multigraph): two different
+    // edge_types A→B must both be emitted. Same root cause as triangle:
+    // the old code's visited set was keyed only by node, so a second
+    // edge_type between an already-visited pair was dropped.
+    #[tokio::test]
+    async fn memory_neighbors_bfs_emits_parallel_edge_types() {
+        use crate::MemoryRecord;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-bfs-parallel-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        let mk = |k: &str| MemoryRecord {
+            key: k.to_string(),
+            kind: "fact".to_string(),
+            content: format!("content {k}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000002,
+            updated_at: 1700000002,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&mk("par_a")).await.expect("save a");
+        store.memory_save(&mk("par_b")).await.expect("save b");
+        store
+            .memory_link("par_a", "par_b", "relates", 1.0)
+            .await
+            .expect("relates");
+        store
+            .memory_link("par_a", "par_b", "supersedes", 1.0)
+            .await
+            .expect("supersedes");
+
+        let edges = store
+            .memory_neighbors_bfs("par_a", 1, 0.7, 0.01)
+            .await
+            .expect("bfs");
+        let kinds: std::collections::HashSet<_> = edges
+            .iter()
+            .filter(|(e, _)| e.from_key == "par_a" && e.to_key == "par_b")
+            .map(|(e, _)| e.edge_type.clone())
+            .collect();
+        assert!(
+            kinds.contains("relates") && kinds.contains("supersedes"),
+            "expected both edge types between par_a→par_b; got {kinds:?}"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
