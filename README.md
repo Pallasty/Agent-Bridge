@@ -254,10 +254,12 @@ macOS.
 `supports_parallel_tool_calls` is deliberately false because
 agent-bridge tools share SQLite, browser, and terminal state.
 The Codex profile defaults `AGENT_BRIDGE_TOOLSET` to `codex-essential`
-so GPT/Codex sees a compact high-signal tool surface. For other client
-shapes, set `AGENT_BRIDGE_TOOLSET` to `claude-standard`, `gemini-lean`,
-`hook-lifecycle`, or `all-dev`. The older `AGENT_BRIDGE_TOOL_PROFILE`
-setting is still supported as the compatibility fallback.
+so GPT/Codex sees a compact high-signal tool surface while still keeping
+the IDE bridge tools (`ide_snapshot`, `ide_command`) available. For other
+client shapes, set `AGENT_BRIDGE_TOOLSET` to `claude-standard`,
+`gemini-lean`, `hook-lifecycle`, or `all-dev`. The older
+`AGENT_BRIDGE_TOOL_PROFILE` setting is still supported as the compatibility
+fallback.
 
 The Codex profile also enables `features.codex_hooks`, writes the three
 `ab-*-hook` scripts to `~/.local/bin`, and merges Agent-Bridge entries
