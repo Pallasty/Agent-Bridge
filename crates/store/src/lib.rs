@@ -463,6 +463,10 @@ pub struct PlanRecord {
 }
 
 /// One persisted agent-to-agent message row (W6 — multi-session inbox).
+///
+/// `read_at` (v30 / XM v0.1) is the unix-seconds timestamp the message was
+/// marked read, or `None` if still unread. The P-XM-7 GC pass uses
+/// `COALESCE(read_at, created_at)` as the effective last-touch timestamp.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentMessageRecord {
     pub id: i64,
@@ -471,6 +475,8 @@ pub struct AgentMessageRecord {
     pub payload: serde_json::Value,
     pub created_at: i64,
     pub read: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_at: Option<i64>,
 }
 
 // ── v18: forum / shared whiteboard ───────────────────────────────────────────
@@ -2212,6 +2218,26 @@ pub trait StateStore: Send + Sync {
         unread_only: bool,
         limit: u32,
     ) -> Result<Vec<AgentMessageRecord>>;
+
+    /// XM v0.1 — mark message `id` as read. Idempotent: if already read,
+    /// `read_at` is preserved (not overwritten). Returns `Ok(true)` if the
+    /// row was found AND addressed to `to_session`; `Ok(false)` otherwise.
+    /// The `to_session` guard prevents cross-session reads from accidentally
+    /// touching another recipient's inbox state.
+    async fn agent_message_mark_read(&self, id: i64, to_session: &str) -> Result<bool>;
+
+    /// XM v0.1 P-XM-7 GC pass. Deletes rows whose effective last-touch
+    /// timestamp (`COALESCE(read_at, created_at)`) is older than
+    /// `now_secs - max_age_secs`. Returns `(cleared, retained)` counts.
+    ///
+    /// Guarantees (locked per design §4 / §6.5 rule 2):
+    /// - any message with `last_touch < cutoff` → DELETED (100%)
+    /// - any message with `last_touch >= cutoff` → KEPT (0% false-delete)
+    async fn agent_messages_gc(
+        &self,
+        now_secs: i64,
+        max_age_secs: i64,
+    ) -> Result<(usize, usize)>;
 
     // ─── v18: forum / collaboration whiteboard ─────────────────────────────
 

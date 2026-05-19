@@ -11,7 +11,7 @@
 //! can `?`-propagate them and the caller sees a clean error message.
 
 use ab_core::{Error, Result};
-use ab_store::{AgentPresenceRecord, ForumPostRecord, ForumThreadRecord};
+use ab_store::{AgentMessageRecord, AgentPresenceRecord, ForumPostRecord, ForumThreadRecord};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
@@ -157,6 +157,78 @@ pub async fn forum_post(peer: &str, req: ForumPostRequest<'_>) -> Result<Value> 
     let r = map_err("forum_post.send", client()?.post(&url).json(&req).send().await)?;
     let r = map_err("forum_post.status", r.error_for_status())?;
     map_err("forum_post.json", r.json().await)
+}
+
+// ── XM v0.1 — cross-machine agent messaging ──────────────────────────────
+
+#[derive(Serialize)]
+struct AgentMessageRequest<'a> {
+    from_session: &'a str,
+    to_session: &'a str,
+    payload: &'a Value,
+}
+
+#[derive(Deserialize)]
+struct AgentMessageResponse {
+    id: i64,
+}
+
+/// `POST /agent/messages` — write a message to `peer`'s inbox. Returns the
+/// new row id assigned by the remote daemon. Tailnet-trusted; `from_session`
+/// is caller-claimed (R-XM-A in design §3).
+pub async fn agent_message(
+    peer: &str,
+    from_session: &str,
+    to_session: &str,
+    payload: &Value,
+) -> Result<i64> {
+    let url = format!("{}/agent/messages", base_url(peer));
+    let body = AgentMessageRequest {
+        from_session,
+        to_session,
+        payload,
+    };
+    let r = map_err(
+        "agent_message.send",
+        client()?.post(&url).json(&body).send().await,
+    )?;
+    let r = map_err("agent_message.status", r.error_for_status())?;
+    let body: AgentMessageResponse = map_err("agent_message.json", r.json().await)?;
+    Ok(body.id)
+}
+
+#[derive(Deserialize)]
+struct InboxResponse {
+    messages: Vec<AgentMessageRecord>,
+}
+
+/// `GET /agent/inbox` — read `peer`'s inbox for `to_session`. The returned
+/// rows live in the remote node's SQLite; this client does NOT replicate
+/// them locally (per design §3 split: payload is authoritative on the
+/// recipient daemon, forum post is the wake signal).
+pub async fn agent_inbox(
+    peer: &str,
+    to_session: &str,
+    since_id: Option<i64>,
+    unread_only: bool,
+    limit: u32,
+) -> Result<Vec<AgentMessageRecord>> {
+    let url = format!("{}/agent/inbox", base_url(peer));
+    let mut q: Vec<(&str, String)> = vec![
+        ("to_session", to_session.into()),
+        ("limit", limit.to_string()),
+        ("unread_only", unread_only.to_string()),
+    ];
+    if let Some(s) = since_id {
+        q.push(("since_id", s.to_string()));
+    }
+    let r = map_err(
+        "agent_inbox.send",
+        client()?.get(&url).query(&q).send().await,
+    )?;
+    let r = map_err("agent_inbox.status", r.error_for_status())?;
+    let body: InboxResponse = map_err("agent_inbox.json", r.json().await)?;
+    Ok(body.messages)
 }
 
 #[cfg(test)]

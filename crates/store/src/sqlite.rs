@@ -483,6 +483,16 @@ CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_codex_host
     ON mcp_tool_calls(codex_host, ts DESC);
 "#;
 
+// v30 — XM (cross-machine messaging) v0.1. Adds `read_at` timestamp on
+// agent_messages so the P-XM-7 GC pass can apply the "touched within 7 days"
+// semantic (created OR read inside the window). NULL = unread.
+// `idx_agent_messages_created_at` covers the GC sweep predicate
+// `COALESCE(read_at, created_at) < cutoff`.
+const SCHEMA_V30_INDEXES: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_agent_messages_created_at
+    ON agent_messages(created_at);
+"#;
+
 // v23 — Phase 1 P2 reconsolidation: `superseded_by` foreign key on memories.
 // Lets memory_save auto-detect when a new save semantically supersedes an
 // existing record (cosine ≥ threshold) and mark the old row → status='superseded'
@@ -1104,6 +1114,30 @@ impl SqliteStore {
                 }
                 c.execute_batch(SCHEMA_V29_INDEXES)?;
                 let _ = c.execute("UPDATE schema_meta SET value='29' WHERE key='version'", []);
+            }
+
+            // ── v30: agent_messages.read_at + idx_created_at (XM v0.1 GC) ─
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "29".to_string());
+            if cur.as_str() == "29" {
+                let col_exists: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('agent_messages') \
+                         WHERE name='read_at'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                if col_exists == 0 {
+                    c.execute("ALTER TABLE agent_messages ADD COLUMN read_at INTEGER", [])?;
+                }
+                c.execute_batch(SCHEMA_V30_INDEXES)?;
+                let _ = c.execute("UPDATE schema_meta SET value='30' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -7212,15 +7246,18 @@ impl StateStore for SqliteStore {
         let rows = self
             .conn
             .call(
-                move |c| -> RusqliteResult<Vec<(i64, String, String, String, i64, i64)>> {
+                move |c| -> RusqliteResult<
+                    Vec<(i64, String, String, String, i64, i64, Option<i64>)>,
+                > {
                     let mut stmt = c.prepare(
-                        "SELECT id, from_session, to_session, payload_json, created_at, read
-                     FROM agent_messages
-                     WHERE to_session = ?1
-                       AND (?2 IS NULL OR id > ?2)
-                       AND (?3 = 0 OR read = 0)
-                     ORDER BY id ASC
-                     LIMIT ?4",
+                        "SELECT id, from_session, to_session, payload_json,
+                                created_at, read, read_at
+                         FROM agent_messages
+                         WHERE to_session = ?1
+                           AND (?2 IS NULL OR id > ?2)
+                           AND (?3 = 0 OR read = 0)
+                         ORDER BY id ASC
+                         LIMIT ?4",
                     )?;
                     let mut out = Vec::new();
                     let mut q = stmt.query(params![to_s, since_id, unread_flag, lim])?;
@@ -7232,6 +7269,7 @@ impl StateStore for SqliteStore {
                             r.get(3)?,
                             r.get(4)?,
                             r.get(5)?,
+                            r.get(6)?,
                         ));
                     }
                     Ok(out)
@@ -7241,7 +7279,7 @@ impl StateStore for SqliteStore {
             .map_err(|e| Error::Backend(format!("agent_inbox_fetch: {e}")))?;
 
         let mut recs = Vec::with_capacity(rows.len());
-        for (id, from_session, to_session, payload_json, created_at, read_i) in rows {
+        for (id, from_session, to_session, payload_json, created_at, read_i, read_at) in rows {
             let payload: serde_json::Value = serde_json::from_str(&payload_json).map_err(|e| {
                 Error::Backend(format!(
                     "agent_inbox_fetch: corrupt payload_json id={id}: {e}"
@@ -7254,9 +7292,57 @@ impl StateStore for SqliteStore {
                 payload,
                 created_at,
                 read: read_i != 0,
+                read_at,
             });
         }
         Ok(recs)
+    }
+
+    async fn agent_message_mark_read(&self, id: i64, to_session: &str) -> Result<bool> {
+        let to_s = to_session.to_string();
+        let ts = now_secs();
+        let affected = self
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                // `COALESCE(read_at, ?1)` keeps the original read_at on a
+                // second mark-read so the GC clock starts from the first read.
+                c.execute(
+                    "UPDATE agent_messages
+                     SET read = 1,
+                         read_at = COALESCE(read_at, ?1)
+                     WHERE id = ?2 AND to_session = ?3",
+                    params![ts, id, to_s],
+                )
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("agent_message_mark_read: {e}")))?;
+        Ok(affected > 0)
+    }
+
+    async fn agent_messages_gc(
+        &self,
+        now_secs: i64,
+        max_age_secs: i64,
+    ) -> Result<(usize, usize)> {
+        let cutoff = now_secs.saturating_sub(max_age_secs);
+        let (cleared, retained) = self
+            .conn
+            .call(move |c| -> RusqliteResult<(usize, usize)> {
+                let cleared = c.execute(
+                    "DELETE FROM agent_messages
+                     WHERE COALESCE(read_at, created_at) < ?1",
+                    params![cutoff],
+                )?;
+                let retained: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM agent_messages",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok((cleared, retained as usize))
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("agent_messages_gc: {e}")))?;
+        Ok((cleared, retained))
     }
 
     // ── v18: forum / collaboration whiteboard ──────────────────────────────
@@ -8889,6 +8975,178 @@ mod tests {
             .await
             .expect("after_cursor");
         assert!(empty.is_empty());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    /// XM v0.1 — `agent_message_mark_read` flips `read=1` and stamps `read_at`,
+    /// is idempotent on the timestamp (first read wins so GC has a stable
+    /// clock), and refuses to act when `to_session` doesn't match the row's
+    /// recipient (defensive against cross-session reads). Returns `Ok(false)`
+    /// for unknown ids and for the cross-session mismatch case.
+    #[tokio::test]
+    async fn agent_message_mark_read_idempotent_and_session_guarded() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-agent-mark-read-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open");
+
+        let id = store
+            .agent_message_send("sess-a", "sess-b", &serde_json::json!({"x": 1}))
+            .await
+            .expect("send");
+
+        // First mark sets read=1 + read_at=<now>
+        let ok = store
+            .agent_message_mark_read(id, "sess-b")
+            .await
+            .expect("mark1");
+        assert!(ok);
+        let r1 = store
+            .agent_inbox_fetch("sess-b", None, false, 10)
+            .await
+            .expect("fetch1");
+        assert!(r1[0].read);
+        let first_read_at = r1[0].read_at.expect("read_at populated");
+
+        // Idempotent on timestamp: second mark must NOT bump read_at.
+        // Sleep 1s so a buggy implementation would write a fresh ts.
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let ok2 = store
+            .agent_message_mark_read(id, "sess-b")
+            .await
+            .expect("mark2");
+        assert!(ok2);
+        let r2 = store
+            .agent_inbox_fetch("sess-b", None, false, 10)
+            .await
+            .expect("fetch2");
+        assert_eq!(
+            r2[0].read_at,
+            Some(first_read_at),
+            "second mark must preserve first read_at"
+        );
+
+        // Cross-session attempt: to_session mismatch → no rows affected.
+        let other_id = store
+            .agent_message_send("sess-a", "sess-c", &serde_json::json!({"x": 2}))
+            .await
+            .expect("send-c");
+        let cross = store
+            .agent_message_mark_read(other_id, "sess-b")
+            .await
+            .expect("mark-cross");
+        assert!(
+            !cross,
+            "mark_read for wrong to_session must return false (defensive)"
+        );
+        let r3 = store
+            .agent_inbox_fetch("sess-c", None, false, 10)
+            .await
+            .expect("fetch3");
+        assert!(!r3[0].read, "sess-c row stays unread despite sess-b call");
+
+        // Unknown id → false.
+        let unknown = store
+            .agent_message_mark_read(999_999, "sess-b")
+            .await
+            .expect("mark-unknown");
+        assert!(!unknown);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    /// XM v0.1 P-XM-7 — GC pass: 30-day-old unread messages 100% cleared;
+    /// any message touched (created or read) within the last 7 days 0%
+    /// false-deleted. Synthetic fixture seeds messages across the boundary.
+    #[tokio::test]
+    async fn agent_messages_gc_p_xm_7_fixture() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-agent-gc-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open");
+
+        const DAY: i64 = 86_400;
+        let now: i64 = 2_000_000_000;
+        // Bucket A: 50 stale unread (40 days old) → MUST be cleared.
+        // Bucket B: 50 fresh unread (3 days old) → MUST be kept.
+        // Bucket C: 1 stale-created-but-read-recently (created 40d ago,
+        //          read 2d ago) → MUST be kept (touched within 7d).
+        // Bucket D: 1 stale-created-and-read-long-ago (read 35d ago) →
+        //          MUST be cleared (effective last-touch 35d > 30d cutoff).
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<()> {
+                let stale_ts = now - 40 * DAY;
+                let fresh_ts = now - 3 * DAY;
+                for i in 0..50 {
+                    c.execute(
+                        "INSERT INTO agent_messages \
+                         (from_session, to_session, payload_json, created_at, read, read_at) \
+                         VALUES ('a', 'b', '{}', ?1, 0, NULL)",
+                        params![stale_ts + i as i64],
+                    )?;
+                    c.execute(
+                        "INSERT INTO agent_messages \
+                         (from_session, to_session, payload_json, created_at, read, read_at) \
+                         VALUES ('a', 'b', '{}', ?1, 0, NULL)",
+                        params![fresh_ts + i as i64],
+                    )?;
+                }
+                // Bucket C
+                c.execute(
+                    "INSERT INTO agent_messages \
+                     (from_session, to_session, payload_json, created_at, read, read_at) \
+                     VALUES ('a', 'b', '{\"c\":1}', ?1, 1, ?2)",
+                    params![now - 40 * DAY, now - 2 * DAY],
+                )?;
+                // Bucket D
+                c.execute(
+                    "INSERT INTO agent_messages \
+                     (from_session, to_session, payload_json, created_at, read, read_at) \
+                     VALUES ('a', 'b', '{\"d\":1}', ?1, 1, ?2)",
+                    params![now - 40 * DAY, now - 35 * DAY],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed");
+
+        // GC with max_age = 30 days.
+        let (cleared, retained) = store
+            .agent_messages_gc(now, 30 * DAY)
+            .await
+            .expect("gc");
+
+        // P-XM-7 (A): 30-day-old unread cleared 100% → 50 (bucket A) + 1
+        // (bucket D, read long ago) = 51.
+        assert_eq!(cleared, 51, "must clear all stale rows");
+        // P-XM-7 (B): touched-within-7d 0% false-deleted → 50 (bucket B,
+        // unread but fresh) + 1 (bucket C, read 2d ago) = 51.
+        assert_eq!(retained, 51, "must retain all touched-within-7d rows");
+
+        // Double-check via inbox fetch.
+        let rows = store
+            .agent_inbox_fetch("b", None, false, 200)
+            .await
+            .expect("fetch");
+        assert_eq!(rows.len(), 51);
+        // The 1 surviving bucket-C row has the {"c":1} payload.
+        let bucket_c_count = rows
+            .iter()
+            .filter(|r| r.payload == serde_json::json!({"c": 1}))
+            .count();
+        assert_eq!(bucket_c_count, 1);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

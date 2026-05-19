@@ -17,6 +17,12 @@
 //!                    decoupled per thread 6 #226 / #228 / #231 split with
 //!                    `embed_text` MCP tool. Returns the raw inner backend's
 //!                    output without substrate side-effects.
+//!   - `POST /agent/messages` — XM v0.1: write a message addressed to
+//!                              a specific session on this node's inbox.
+//!                              See `docs/DESIGN-cross-machine-agent-messaging-2026-05-17.md`.
+//!   - `GET  /agent/inbox`    — XM v0.1: read this node's inbox for a
+//!                              given `to_session`. Both endpoints are
+//!                              tailnet-trusted; see R-XM-A/B in §3.
 //!
 //! Bind to a tailnet-reachable address (`0.0.0.0:7878` by default). The
 //! tailscale ACL handles peer auth — this daemon trusts whoever can reach
@@ -66,6 +72,8 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route("/avatar-surface/panel", get(avatar_surface_panel))
         .route("/identity", get(identity_endpoint))
         .route("/embed", post(embed_endpoint))
+        .route("/agent/messages", post(agent_message_write))
+        .route("/agent/inbox", get(agent_inbox_read))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen)
@@ -248,6 +256,72 @@ async fn forum_post(
         "post_id": outcome.post_id,
         "created_thread": outcome.created_thread,
     })))
+}
+
+// ── XM v0.1: cross-machine agent messaging ────────────────────────────────
+//
+// `POST /agent/messages` writes to this node's local agent_messages table.
+// `GET  /agent/inbox` reads from it. Both are tailnet-only (R-XM-A/B trust
+// model: `from_session` is caller-claimed, not verified — same trust level
+// as `POST /forum/post`).
+
+#[derive(Deserialize, Debug)]
+struct AgentMessageRequest {
+    from_session: String,
+    to_session: String,
+    payload: Value,
+}
+
+async fn agent_message_write(
+    State(s): State<AppState>,
+    Json(req): Json<AgentMessageRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    if req.from_session.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "missing 'from_session'".into()));
+    }
+    if req.to_session.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "missing 'to_session'".into()));
+    }
+    let id = s
+        .store
+        .agent_message_send(&req.from_session, &req.to_session, &req.payload)
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            let code = if msg.contains("locked") || msg.contains("busy") {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (code, msg)
+        })?;
+    Ok(Json(json!({ "status": "ok", "id": id })))
+}
+
+#[derive(Deserialize, Debug)]
+struct AgentInboxQuery {
+    to_session: String,
+    since_id: Option<i64>,
+    #[serde(default)]
+    unread_only: bool,
+    #[serde(default = "default_limit")]
+    limit: u32,
+}
+
+async fn agent_inbox_read(
+    State(s): State<AppState>,
+    Query(q): Query<AgentInboxQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    if q.to_session.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "missing 'to_session'".into()));
+    }
+    let limit = q.limit.clamp(1, 500);
+    let rows = s
+        .store
+        .agent_inbox_fetch(&q.to_session, q.since_id, q.unread_only, limit)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(json!({ "count": rows.len(), "messages": rows })))
 }
 
 #[derive(Deserialize, Debug)]
