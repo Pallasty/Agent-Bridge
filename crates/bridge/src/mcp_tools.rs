@@ -7942,6 +7942,63 @@ fn format_feedback_preamble_block(
     Some(out)
 }
 
+/// **B1 audit-gap v0 (2026-05-19)** — project-state digest block formatter.
+/// Compact "where am I right now" orientation card for session bootstrap.
+/// Three buckets (caller-sourced + pre-filtered):
+///   - up to 3 most important active `decision` records
+///   - up to 1 most recent `session_handoff`
+///   - up to 3 most recent active `project` records
+///
+/// Returns `None` if all three buckets are empty so the caller can skip
+/// the section header entirely (no visual noise on fresh stores).
+///
+/// Refs:
+/// - docs/DESIGN-A1-B1-B3-RECALL-TIMING-v0.md §2.3 mechanism
+/// - thread 10 #218 (design) + #221/#223 (cross-check) + #249 (act unlock)
+fn format_project_state_digest_block(
+    decisions: &[MemoryRecord],
+    handoffs: &[MemoryRecord],
+    projects: &[MemoryRecord],
+    is_compact: bool,
+    snippet_len: usize,
+) -> Option<Vec<String>> {
+    if decisions.is_empty() && handoffs.is_empty() && projects.is_empty() {
+        return None;
+    }
+    let total = decisions.len() + handoffs.len() + projects.len();
+    let header = if is_compact {
+        format!("=== State digest ({total}) ===")
+    } else {
+        format!(
+            "=== Project State Digest ({total} = {}D + {}H + {}P) ===",
+            decisions.len(),
+            handoffs.len(),
+            projects.len()
+        )
+    };
+    let mut out = vec![header, String::new()];
+    if !decisions.is_empty() {
+        if !is_compact {
+            out.push("-- recent important decisions --".to_string());
+        }
+        out.extend(format_bootstrap_memory_rows(decisions, snippet_len));
+    }
+    if !handoffs.is_empty() {
+        if !is_compact {
+            out.push("-- last handoff --".to_string());
+        }
+        out.extend(format_bootstrap_memory_rows(handoffs, snippet_len));
+    }
+    if !projects.is_empty() {
+        if !is_compact {
+            out.push("-- recently touched projects --".to_string());
+        }
+        out.extend(format_bootstrap_memory_rows(projects, snippet_len));
+    }
+    out.push(String::new());
+    Some(out)
+}
+
 // ---------------------------------------------------------------------------
 // session_bootstrap per-block token budgets (v0 — 2026-05-17).
 //
@@ -7968,6 +8025,9 @@ const BUDGET_BOOTSTRAP_ROWS: usize = 500;
 const BUDGET_GAMMA_BFS: usize = 200;
 const BUDGET_DELTA_TRANSITIONS: usize = 150;
 const BUDGET_SIBLING_WARN: usize = 200;
+// B1 audit-gap v0 (2026-05-19) — project-state digest. 7 rows max
+// (3 decisions + 1 handoff + 3 projects) × ~120 char snippets ≈ 200 tokens.
+const BUDGET_PROJECT_DIGEST: usize = 220;
 
 /// Trim a block of lines so the total estimated token count ≤ `budget`.
 ///
@@ -8317,6 +8377,53 @@ impl McpTool for SessionBootstrapTool {
             let picked = pick_top_feedback(feedback_pool, 5, now_ts);
             if let Some(block) = format_feedback_preamble_block(&picked, is_compact, snippet_len) {
                 lines.extend(cap_block_lines(block, BUDGET_FEEDBACK_PREAMBLE));
+            }
+        }
+
+        // B1 audit-gap v0 — project-state digest. Compact "where am I right
+        // now" card: top-3 important decisions + last handoff + top-3 recently-
+        // touched projects. Different from "Decisions Due for Review" (which
+        // is review-cycle-driven, not importance/recency-driven) and from the
+        // main bootstrap rows (mixed-kind, top-60, low compression). This
+        // block answers the orientation question first.
+        //
+        // Refs: docs/DESIGN-A1-B1-B3-RECALL-TIMING-v0.md §2.3, thread 10 #218/#249.
+        {
+            let decision_pool = store
+                .list_memories_in_scope(&cwd, Some("decision"), MemoryListSort::ByImportance, 12)
+                .await
+                .unwrap_or_default();
+            let decisions_picked: Vec<MemoryRecord> = decision_pool
+                .into_iter()
+                .filter(|r| r.status == "active" && r.importance >= 0.6)
+                .take(3)
+                .collect();
+            let handoff_pool = store
+                .list_memories_in_scope(&cwd, Some("session_handoff"), MemoryListSort::Recent, 5)
+                .await
+                .unwrap_or_default();
+            let handoffs_picked: Vec<MemoryRecord> = handoff_pool
+                .into_iter()
+                .filter(|r| r.status == "active")
+                .take(1)
+                .collect();
+            let project_pool = store
+                .list_memories_in_scope(&cwd, Some("project"), MemoryListSort::Recent, 12)
+                .await
+                .unwrap_or_default();
+            let projects_picked: Vec<MemoryRecord> = project_pool
+                .into_iter()
+                .filter(|r| r.status == "active")
+                .take(3)
+                .collect();
+            if let Some(block) = format_project_state_digest_block(
+                &decisions_picked,
+                &handoffs_picked,
+                &projects_picked,
+                is_compact,
+                snippet_len,
+            ) {
+                lines.extend(cap_block_lines(block, BUDGET_PROJECT_DIGEST));
             }
         }
 
@@ -22861,4 +22968,100 @@ mod tests {
     // content into a single hit, so the cap path is unreachable from there.
     // Dogfood (4-week P-B3 window) will exercise the cap with real ONNX
     // embeddings + agent-generated content diversity.
+
+    // ── B1 project-state digest — formatter (audit-gap B1 v0) ────────────────
+
+    fn b1_mem_with(key: &str, kind: &str, content: &str) -> ab_store::MemoryRecord {
+        ab_store::MemoryRecord {
+            key: key.to_string(),
+            kind: kind.to_string(),
+            content: content.to_string(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.7,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    #[test]
+    fn b1_digest_block_returns_none_when_all_buckets_empty() {
+        assert!(
+            super::format_project_state_digest_block(&[], &[], &[], false, 120).is_none(),
+            "empty buckets → no block emitted (avoid visual noise on fresh store)"
+        );
+    }
+
+    #[test]
+    fn b1_digest_block_compact_header_matches_total_count() {
+        let dec = vec![b1_mem_with("dec_a", "decision", "decision body A")];
+        let hnd = vec![b1_mem_with(
+            "handoff_z",
+            "session_handoff",
+            "handoff body Z",
+        )];
+        let prj = vec![
+            b1_mem_with("prj_a", "project", "project body A"),
+            b1_mem_with("prj_b", "project", "project body B"),
+        ];
+        let block = super::format_project_state_digest_block(&dec, &hnd, &prj, true, 80)
+            .expect("non-empty buckets → block emitted");
+        let header = &block[0];
+        assert!(
+            header.contains("4"),
+            "compact header must include total count (got {:?})",
+            header
+        );
+        assert!(
+            header.contains("digest"),
+            "compact header must include 'digest' (got {:?})",
+            header
+        );
+    }
+
+    #[test]
+    fn b1_digest_block_full_header_lists_bucket_sizes() {
+        let dec = vec![
+            b1_mem_with("dec_a", "decision", "A"),
+            b1_mem_with("dec_b", "decision", "B"),
+        ];
+        let hnd: Vec<ab_store::MemoryRecord> = vec![];
+        let prj = vec![b1_mem_with("prj_a", "project", "P")];
+        let block = super::format_project_state_digest_block(&dec, &hnd, &prj, false, 120)
+            .expect("non-empty buckets → block emitted");
+        let header = &block[0];
+        assert!(
+            header.contains("2D") && header.contains("0H") && header.contains("1P"),
+            "full header must list 2D + 0H + 1P breakdown (got {:?})",
+            header
+        );
+    }
+
+    #[test]
+    fn b1_digest_block_skips_empty_subsections_in_body() {
+        let dec = vec![b1_mem_with("dec_solo", "decision", "only decision")];
+        let block = super::format_project_state_digest_block(&dec, &[], &[], false, 120)
+            .expect("decisions only → block emitted");
+        let joined = block.join("\n");
+        assert!(
+            joined.contains("dec_solo"),
+            "decision row must appear (got {:?})",
+            joined
+        );
+        assert!(
+            !joined.contains("-- last handoff --"),
+            "empty handoff bucket must NOT emit subsection label (got {:?})",
+            joined
+        );
+        assert!(
+            !joined.contains("-- recently touched projects --"),
+            "empty project bucket must NOT emit subsection label"
+        );
+    }
 }
