@@ -17451,10 +17451,10 @@ impl ToolPolicy {
 
     fn includes(self, tier: Tier, tool_name: &'static str) -> bool {
         match self.set {
-            ToolSet::Profile
-            | ToolSet::CodexEssential
-            | ToolSet::ClaudeStandard
-            | ToolSet::AllDev => self.profile.includes(tier),
+            ToolSet::Profile | ToolSet::ClaudeStandard | ToolSet::AllDev => {
+                self.profile.includes(tier)
+            }
+            ToolSet::CodexEssential => codex_essential_tool(tier, tool_name),
             ToolSet::GeminiLean => gemini_lean_tool(tool_name),
             ToolSet::HookLifecycle => hook_lifecycle_tool(tool_name),
         }
@@ -17467,6 +17467,10 @@ fn normalize_tool_policy_value(value: &str) -> String {
         .to_lowercase()
         .replace('_', "-")
         .replace(' ', "-")
+}
+
+fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
+    matches!(tier, Tier::Essential) || matches!(tool_name, "ide_snapshot" | "ide_command")
 }
 
 fn gemini_lean_tool(tool_name: &str) -> bool {
@@ -17781,7 +17785,9 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         Tier::Essential,
         Arc::new(McpDispatchAuditTool::new(hub.clone())),
     );
-    // IDE bridge: 7-day audit shows 0 calls; demoted to Niche.
+    // IDE bridge stays Niche by default, but Codex Essential allowlists it so
+    // IDE-aware Codex sessions can opt into editor context without widening to
+    // the whole Standard surface.
     reg_if(
         &mut reg,
         policy,
@@ -20827,6 +20833,8 @@ mod tests {
         assert_eq!(p.label(), "codex-essential");
         assert_eq!(p.profile().label(), "essential");
         assert!(p.includes(Tier::Essential, "pet_state_get"));
+        assert!(p.includes(Tier::Niche, "ide_snapshot"));
+        assert!(p.includes(Tier::Niche, "ide_command"));
         assert!(!p.includes(Tier::Standard, "avatar_state_get"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
