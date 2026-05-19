@@ -629,7 +629,7 @@ Phase 7 tasks:
 5. **Phase 7.5 — Read-Only Multi-Agent Surface**
    - Build or prototype a read-only view that shows multiple agents with avatar id, mode, activity state, risk, block reason, and next action.
    - Do not ship auto-control from this panel until the state protocol has survived dogfood.
-   - Status: implemented first as Standard-profile `avatar_surface_snapshot` on 2026-05-19. It reads `agent_presence_list`, prefers `capabilities.avatar_state`, falls back to compatibility `capabilities.pet_state` or generic presence identity, and returns compact `avatars[]` entries for a future panel or terminal dashboard. It is read-only and does not mutate sidecar state, write presence, emit audio, or send notifications.
+   - Status: implemented first as Standard-profile `avatar_surface_snapshot` on 2026-05-19. It reads `agent_presence_list`, prefers `capabilities.avatar_state`, falls back to compatibility `capabilities.pet_state` or generic presence identity, and returns compact `avatars[]` entries for a future panel or terminal dashboard. It is read-only and does not mutate sidecar state, write presence, emit audio, or send notifications. Installed-binary probes passed with 81 Standard tools, and a real Claude Code dogfood session wrote `runtime=claude-code` / `agent_id=claude-code-xiao-shu-dogfood`; the snapshot read it back with both `has_avatar_state=true` and `has_compat_pet_state=true`.
 
 Acceptance:
 
@@ -658,10 +658,9 @@ Acceptance:
 Phase 6.1 and Phase 6.2 are now live-verified in the current Codex/MCP path.
 Move in this order:
 
-1. Validate `avatar_surface_snapshot` against the installed binary and live presence rows.
-2. Validate the same protocol shape from a real non-Codex client session, not only a runtime-label stdio probe.
-3. Keep mutating `avatar_state_set` behind the RFC boundary until the read-only surface has been dogfooded.
-4. Dogfood Phase 6.3 during real Codex work.
-5. Return to Phase 3 skin switching after the behavior and presence loop is stable; do not auto-switch official Codex avatars until app reload behavior is proven.
+1. Keep mutating `avatar_state_set` behind the RFC boundary until the read-only surface has been dogfooded across at least one more non-Codex runtime or terminal wrapper.
+2. Decide the first human-facing surface: terminal summary, daemon HTTP panel, or Codex-side read-only panel.
+3. Dogfood Phase 6.3 during real Codex work.
+4. Return to Phase 3 skin switching after the behavior and presence loop is stable; do not auto-switch official Codex avatars until app reload behavior is proven.
 
 This preserves the user's preferred pattern: prove the live mechanism first, then expand capability.

@@ -376,7 +376,12 @@ rows through the same filters as `agent_presence_list`, projects each row into a
 compact protocol view, prefers `capabilities.avatar_state`, and falls back to
 compatibility `capabilities.pet_state` or generic presence identity. Optional
 `include_raw_presence` and `include_compat` flags are for debugging only; the
-default output is already shaped for a panel or terminal dashboard.
+default output is already shaped for a panel or terminal dashboard. Installed
+binary validation confirmed the tool is present in the Standard profile, and a
+real Claude Code dogfood session successfully wrote a `runtime=claude-code`
+presence row that `avatar_surface_snapshot` read back as
+`agent_id=claude-code-xiao-shu-dogfood` with both canonical and compatibility
+state flags present.
 
 ---
 
