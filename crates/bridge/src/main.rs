@@ -659,6 +659,24 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Preview Xiao Shu's dynamic language line without emitting audio.
+    CortexLanguage {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2238,6 +2256,22 @@ async fn main() -> Result<()> {
                 json: as_json,
             } => {
                 run_avatar_cortex_preview(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexLanguage {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_language(
                     label.clone(),
                     heartbeat_label.clone(),
                     project.clone(),
@@ -3950,6 +3984,51 @@ async fn run_avatar_cortex_preview(
         avatar_health_display(preview.get("requires_explicit_emit_gate"), "true"),
         avatar_health_display(preview.get("voice_reason"), "sparse_voice_policy"),
         avatar_health_display(preview.get("notification_reason"), "read_only_panel_policy")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_language(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_language_preview(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let language = payload.get("language").unwrap_or(&Value::Null);
+    let slots = language.get("slots").unwrap_or(&Value::Null);
+    let safety = language.get("safety").unwrap_or(&Value::Null);
+    let generator = language.get("generator").unwrap_or(&Value::Null);
+    println!("avatar cortex language preview");
+    println!(
+        "line={}",
+        avatar_health_display(language.get("utterance"), "-")
+    );
+    println!(
+        "intent={} style={} state={} latest_status={}",
+        avatar_health_display(language.get("intent"), "-"),
+        avatar_health_display(language.get("style"), "-"),
+        avatar_health_display(slots.get("state"), "-"),
+        avatar_health_display(slots.get("latest_status"), "-")
+    );
+    println!(
+        "voice_allowed={} notification_allowed={} uses_llm={} uses_voice_model={}",
+        avatar_health_display(safety.get("voice_allowed"), "false"),
+        avatar_health_display(safety.get("notification_allowed"), "false"),
+        avatar_health_display(generator.get("uses_llm"), "false"),
+        avatar_health_display(generator.get("uses_voice_model"), "false")
     );
     Ok(())
 }
@@ -8560,10 +8639,7 @@ fn print_shadow_cortex_weekly_bonus(
     if let Some(feedback) = feedback {
         println!(
             "  feedback 7d: {} accepted / {} ignored ({} in-window, {} total)",
-            feedback.accepted,
-            feedback.ignored,
-            feedback.window_records,
-            feedback.total_records,
+            feedback.accepted, feedback.ignored, feedback.window_records, feedback.total_records,
         );
         if let Some(latest) = &feedback.latest {
             println!(
@@ -10736,7 +10812,7 @@ pqr1357 random free-form subject without prefix
         // Use a fixed `now` from the canonical audit baseline date to make
         // this deterministic across CI clock drift. 2026-05-16 UTC midnight.
         let now_unix: u64 = 1_778_975_200; // approx 2026-05-16 03:46 UTC
-        // L5-P1 opens 2026-06-14 → ~29 days from now (anchor day).
+                                           // L5-P1 opens 2026-06-14 → ~29 days from now (anchor day).
         let days = super::iso_days_until_now("2026-06-14", now_unix).expect("valid iso");
         assert!(
             (28..=30).contains(&days),

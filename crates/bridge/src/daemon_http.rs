@@ -12,6 +12,7 @@
 //!   - `GET /avatar-surface/panel?...` — minimal read-only HTML status panel
 //!   - `GET /avatar-surface/heartbeat-health?...` — launchd + presence health
 //!   - `GET /avatar-surface/cortex-status?...` — launchd + cortex snapshot status
+//!   - `GET /avatar-surface/cortex-language?...` — dynamic language preview
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
@@ -102,6 +103,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
             get(avatar_heartbeat_health),
         )
         .route("/avatar-surface/cortex-status", get(avatar_cortex_status))
+        .route(
+            "/avatar-surface/cortex-language",
+            get(avatar_cortex_language),
+        )
         .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
         .route(
             "/avatar-surface/cortex-voice-gate",
@@ -580,11 +585,14 @@ async fn avatar_surface_panel(
                 },
             })
         });
+    let cortex_language =
+        crate::avatar_cortex::avatar_cortex_language_preview_from_status(cortex.clone());
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
         &health,
         &cortex,
+        &cortex_language,
         &report,
         unix_now(),
     )))
@@ -609,6 +617,19 @@ async fn avatar_cortex_status(
     Query(q): Query<AvatarCortexStatusQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let payload = crate::avatar_cortex::avatar_cortex_status(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_language(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_language_preview(
         q.label.as_deref(),
         q.heartbeat_label.as_deref(),
         q.project.as_deref(),
@@ -1045,6 +1066,48 @@ fn avatar_surface_cortex_html(cortex: &Value) -> String {
     )
 }
 
+fn avatar_surface_language_html(language_preview: &Value) -> String {
+    let language = language_preview.get("language").unwrap_or(&Value::Null);
+    let safety = language.get("safety").unwrap_or(&Value::Null);
+    let generator = language.get("generator").unwrap_or(&Value::Null);
+    let slots = language.get("slots").unwrap_or(&Value::Null);
+    let utterance = avatar_surface_html_json_value(language.get("utterance"), "-");
+    let intent = avatar_surface_html_json_value(language.get("intent"), "-");
+    let style = avatar_surface_html_json_value(language.get("style"), "-");
+    let state = avatar_surface_html_json_value(slots.get("state"), "-");
+    let latest_status = avatar_surface_html_json_value(slots.get("latest_status"), "-");
+    let voice_allowed = avatar_surface_html_json_value(safety.get("voice_allowed"), "false");
+    let uses_llm = avatar_surface_html_json_value(generator.get("uses_llm"), "false");
+    let uses_voice_model =
+        avatar_surface_html_json_value(generator.get("uses_voice_model"), "false");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">preview</span>
+        <strong>Xiao Shu Language</strong>
+        <span>{utterance}</span>
+      </div>
+      <dl>
+        <div><dt>intent</dt><dd>{intent}</dd></div>
+        <div><dt>style</dt><dd>{style}</dd></div>
+        <div><dt>state</dt><dd>{state}</dd></div>
+        <div><dt>latest</dt><dd>{latest_status}</dd></div>
+        <div><dt>safety</dt><dd>voice={voice_allowed}</dd></div>
+        <div><dt>generator</dt><dd>llm={uses_llm} voice_model={uses_voice_model}</dd></div>
+      </dl>
+    </section>"#,
+        utterance = utterance,
+        intent = intent,
+        style = style,
+        state = state,
+        latest_status = latest_status,
+        voice_allowed = voice_allowed,
+        uses_llm = uses_llm,
+        uses_voice_model = uses_voice_model,
+    )
+}
+
 fn avatar_surface_payload(q: &AvatarSurfaceQuery, avatars: Vec<Value>, generated_at: i64) -> Value {
     json!({
         "agent_avatar_protocol": crate::avatar_surface::AGENT_AVATAR_PROTOCOL_VERSION,
@@ -1066,6 +1129,7 @@ fn avatar_surface_panel_html(
     avatars: &[Value],
     heartbeat_health: &Value,
     cortex_status: &Value,
+    cortex_language: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -1116,6 +1180,7 @@ fn avatar_surface_panel_html(
     }
     let health_html = avatar_surface_health_html(heartbeat_health);
     let cortex_html = avatar_surface_cortex_html(cortex_status);
+    let language_html = avatar_surface_language_html(cortex_language);
 
     format!(
         r#"<!doctype html>
@@ -1319,6 +1384,7 @@ fn avatar_surface_panel_html(
     </header>
     {health_html}
     {cortex_html}
+    {language_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -1334,6 +1400,7 @@ fn avatar_surface_panel_html(
         count = avatars.len(),
         health_html = health_html,
         cortex_html = cortex_html,
+        language_html = language_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -1650,11 +1717,14 @@ mod tests {
                 }
             }
         });
+        let language =
+            crate::avatar_cortex::avatar_cortex_language_preview_from_status(cortex.clone());
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
             &health,
             &cortex,
+            &language,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -1664,6 +1734,7 @@ mod tests {
         assert!(html.contains("Agent &lt;Avatar&gt; Surface"));
         assert!(html.contains("Heartbeat Health"));
         assert!(html.contains("Cortex Status"));
+        assert!(html.contains("Xiao Shu Language"));
         assert!(html.contains("healthy &lt;binary&gt;"));
         assert!(html.contains("step=16"));
         assert!(html.contains("records=16 latest=healthy reason=unchanged"));

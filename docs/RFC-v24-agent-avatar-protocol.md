@@ -459,6 +459,13 @@ emit voice, trigger notifications, or mutate the Seed substrate.
 `trend.behavior_policy` is also advisory: it can provide a panel badge, hint,
 recommended action, and voice preview text, but `voice.allowed` and
 `notification.allowed` default to false in the read-only HTTP/panel surface.
+`avatar cortex-language` and `/avatar-surface/cortex-language` add the first
+dynamic Xiao Shu language layer on top of that state. It is a deterministic
+phrase composer, not an LLM and not a voice model: it reads the cortex state,
+latest health event, event-window counters, and project slug, then returns a
+short Chinese utterance, alternatives, slots, generator metadata, and safety
+flags. The surface is read-only, reports `emits_audio=false`, and preserves the
+explicit emit gate as the only path toward future spoken output.
 `avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
 as a dedicated read-only surface with `emits_audio=false`,
 `emits_notification=false`, and `requires_explicit_emit_gate=true`.
@@ -541,6 +548,7 @@ external watchdogs and non-MCP clients.
 | `agent-bridge avatar cortex-replay` | Avatar Seed events replay into an isolated Xiao Shu cortex snapshot without touching the global substrate |
 | `agent-bridge avatar install-cortex-runner` | A separate per-user launchd job keeps the isolated Xiao Shu cortex snapshot refreshed |
 | `agent-bridge avatar cortex-status` | Launchd runner state and the latest cortex snapshot row/fingerprint are visible from one read-only command |
+| `agent-bridge avatar cortex-language` | Dynamic Xiao Shu phrase composition is visible without LLM, voice model, audio, or notifications |
 | `agent-bridge avatar cortex-preview` | Voice preview text is visible without emitting audio or notifications |
 | `agent-bridge avatar cortex-voice-gate` | Explicit voice-gate dry-run reports whether a future emit would pass, without emitting audio |
 | `agent-bridge avatar cortex-voice-emit` | CLI-only manual voice adapter can speak one gated line and record cooldown state |
@@ -552,6 +560,7 @@ external watchdogs and non-MCP clients.
 | daemon HTTP `/avatar-surface*` | Same projection is available as JSON, text, and a read-only HTML panel with refresh/stale markers plus heartbeat health |
 | daemon HTTP `/avatar-surface/heartbeat-health` | Same heartbeat health payload is available to browser and non-MCP clients |
 | daemon HTTP `/avatar-surface/cortex-status` | Same shadow-cortex runner/snapshot/event-trend/policy payload is available to browser and non-MCP clients |
+| daemon HTTP `/avatar-surface/cortex-language` | Same deterministic language preview is available to browser and non-MCP clients without emission |
 | daemon HTTP `/avatar-surface/cortex-preview` | Same voice preview is available to browser and non-MCP clients without emission |
 | daemon HTTP `/avatar-surface/cortex-voice-gate` | Same explicit voice-gate dry-run is available to browser and non-MCP clients without emission |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |

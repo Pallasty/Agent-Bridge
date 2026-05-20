@@ -431,6 +431,142 @@ fn avatar_cortex_behavior_policy(
     })
 }
 
+pub(crate) fn avatar_cortex_language_preview_from_status(status: Value) -> Value {
+    let trend = status.get("trend").unwrap_or(&Value::Null);
+    let learning = trend.get("learning_state").unwrap_or(&Value::Null);
+    let events = status.get("events").unwrap_or(&Value::Null);
+    let latest = events.get("latest").unwrap_or(&Value::Null);
+    let project = vstr(status.get("project")).unwrap_or("agent-bridge");
+    let state = vstr(learning.get("state")).unwrap_or("stale");
+    let reason = vstr(learning.get("reason")).unwrap_or("unknown");
+    let latest_status = vstr(latest.get("status")).unwrap_or("unknown");
+    let latest_reason = vstr(latest.get("reason")).unwrap_or("unknown");
+    let records_count = vi64(events.get("records_count"));
+    let unhealthy_count = vi64(events.get("unhealthy_count")).unwrap_or(0);
+    let step_records_delta = vi64(trend.get("step_records_delta"));
+    let snapshot_event_lag_secs = vi64(trend.get("snapshot_event_lag_secs"));
+
+    let intent = match state {
+        "caught_up" if latest_status == "healthy" => "reassure",
+        "caught_up" => "settled",
+        "learning" => "processing",
+        "behind" => "inspect",
+        _ => "refresh",
+    };
+    let opener = match state {
+        "caught_up" => "小舒追上啦，",
+        "learning" => "小舒正在整理新事件，",
+        "behind" => "小舒发现事件窗口有点不齐，",
+        _ => "小舒还在找最新状态，",
+    };
+    let state_clause = match (state, latest_status, unhealthy_count > 0) {
+        ("caught_up", "healthy", false) => "当前信号是健康的。",
+        ("caught_up", _, true) => "还有健康信号需要留意。",
+        ("learning", _, _) => "先把变化叠进自己的皮质层。",
+        ("behind", _, _) => "需要看一下快照和事件的顺序。",
+        _ => "需要刷新后再判断。",
+    };
+    let context_clause = if reason == "events_ahead_of_snapshot" {
+        " 新事件已经排队。"
+    } else if latest_reason == "transition" {
+        " 刚刚发生过一次状态切换。"
+    } else if latest_reason == "unchanged" {
+        " 最近状态保持稳定。"
+    } else {
+        ""
+    };
+    let next_hint = match state {
+        "caught_up" => " 我会继续安静观察。",
+        "learning" => " 等 runner 追上就好。",
+        "behind" => " 建议检查事件窗口。",
+        _ => " 建议刷新 cortex 状态。",
+    };
+    let utterance = format!("{opener}{state_clause}{context_clause}{next_hint}");
+    let alternatives = match state {
+        "caught_up" => vec![
+            "小舒已经把最新事件收好啦。",
+            "当前状态稳定，小舒继续安静守着。",
+            "皮质层已追上，小舒会继续观察。",
+        ],
+        "learning" => vec![
+            "小舒正在吸收新事件，马上跟上。",
+            "新信号到了，小舒先整理一下。",
+            "小舒在更新自己的小皮质层。",
+        ],
+        "behind" => vec![
+            "事件窗口有点错位，小舒建议检查一下。",
+            "快照跑在窗口前面了，需要看一眼。",
+            "小舒需要对齐事件和快照。",
+        ],
+        _ => vec![
+            "小舒还没有足够的新状态。",
+            "小舒需要刷新后再判断。",
+            "状态有点旧，小舒先保持安静。",
+        ],
+    };
+
+    json!({
+        "surface": "avatar_cortex_language_preview",
+        "schema": 1,
+        "read_only": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "project": status.get("project").cloned().unwrap_or(Value::Null),
+        "label": status.get("label").cloned().unwrap_or(Value::Null),
+        "heartbeat_label": status.get("heartbeat_label").cloned().unwrap_or(Value::Null),
+        "language": {
+            "schema": 1,
+            "locale": "zh-CN",
+            "style": "xiao_shu_bright_childlike",
+            "intent": intent,
+            "utterance": utterance,
+            "alternatives": alternatives,
+            "slots": {
+                "project": project,
+                "state": state,
+                "reason": reason,
+                "latest_status": latest_status,
+                "latest_reason": latest_reason,
+                "records_count": records_count,
+                "unhealthy_count": unhealthy_count,
+                "step_records_delta": step_records_delta,
+                "snapshot_event_lag_secs": snapshot_event_lag_secs,
+            },
+            "generator": {
+                "kind": "deterministic_phrase_composer",
+                "version": 1,
+                "uses_llm": false,
+                "uses_voice_model": false,
+            },
+            "safety": {
+                "requires_explicit_emit_gate": true,
+                "voice_allowed": false,
+                "notification_allowed": false,
+                "reason": "language_preview_only",
+            },
+        },
+        "learning_state": learning.clone(),
+        "source_status": {
+            "surface": status.get("surface").cloned().unwrap_or(Value::Null),
+            "launchd": status.get("launchd").cloned().unwrap_or(Value::Null),
+            "snapshot": status.get("snapshot").cloned().unwrap_or(Value::Null),
+            "events": status.get("events").cloned().unwrap_or(Value::Null),
+            "trend": trend.clone(),
+        }
+    })
+}
+
+pub fn avatar_cortex_language_preview(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_language_preview_from_status(status))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
@@ -605,14 +741,20 @@ pub fn avatar_cortex_status(
 }
 
 fn avatar_cortex_voice_preview_from_status(status: Value) -> Value {
+    let language_preview = avatar_cortex_language_preview_from_status(status.clone());
+    let language = language_preview
+        .get("language")
+        .cloned()
+        .unwrap_or(Value::Null);
     let trend = status.get("trend").unwrap_or(&Value::Null);
     let learning = trend.get("learning_state").cloned().unwrap_or(Value::Null);
     let policy = trend.get("behavior_policy").cloned().unwrap_or(Value::Null);
     let voice = policy.get("voice").cloned().unwrap_or(Value::Null);
     let notification = policy.get("notification").cloned().unwrap_or(Value::Null);
-    let preview_text = voice
-        .get("preview")
+    let preview_text = language
+        .get("utterance")
         .and_then(Value::as_str)
+        .or_else(|| voice.get("preview").and_then(Value::as_str))
         .unwrap_or("小舒当前保持安静。");
     json!({
         "surface": "avatar_cortex_voice_preview",
@@ -626,6 +768,7 @@ fn avatar_cortex_voice_preview_from_status(status: Value) -> Value {
         "heartbeat_label": status.get("heartbeat_label").cloned().unwrap_or(Value::Null),
         "learning_state": learning,
         "behavior_policy": policy,
+        "language": language,
         "preview": {
             "text": preview_text,
             "voice_allowed": voice.get("allowed").cloned().unwrap_or(json!(false)),
@@ -1044,8 +1187,17 @@ mod tests {
             "heartbeat_label": "com.agentbridge.avatar-heartbeat.agent-bridge",
             "launchd": {"loaded": true},
             "snapshot": {"total_rows": 1},
-            "events": {"records_count": 3},
+            "events": {
+                "records_count": 3,
+                "unhealthy_count": 0,
+                "latest": {
+                    "status": "healthy",
+                    "reason": "transition"
+                }
+            },
             "trend": {
+                "step_records_delta": -1,
+                "snapshot_event_lag_secs": -5,
                 "learning_state": {
                     "state": "learning",
                     "reason": "events_ahead_of_snapshot"
@@ -1069,11 +1221,61 @@ mod tests {
         assert_eq!(preview["surface"], "avatar_cortex_voice_preview");
         assert_eq!(preview["emits_audio"], false);
         assert_eq!(preview["emits_notification"], false);
-        assert_eq!(preview["preview"]["text"], "小舒正在吸收新事件。");
+        assert_eq!(
+            preview["preview"]["text"],
+            "小舒正在整理新事件，先把变化叠进自己的皮质层。 新事件已经排队。 等 runner 追上就好。"
+        );
+        assert_eq!(preview["language"]["intent"], "processing");
         assert_eq!(preview["preview"]["voice_allowed"], false);
         assert_eq!(preview["preview"]["notification_allowed"], false);
         assert_eq!(preview["preview"]["requires_explicit_emit_gate"], true);
         assert_eq!(preview["learning_state"]["state"], "learning");
+    }
+
+    #[test]
+    fn avatar_cortex_language_preview_composes_caught_up_line() {
+        let status = json!({
+            "surface": "avatar_cortex_status",
+            "project": "agent-bridge",
+            "label": "com.agentbridge.avatar-cortex.agent-bridge",
+            "heartbeat_label": "com.agentbridge.avatar-heartbeat.agent-bridge",
+            "launchd": {"loaded": true},
+            "snapshot": {"total_rows": 1},
+            "events": {
+                "records_count": 8,
+                "unhealthy_count": 0,
+                "latest": {
+                    "status": "healthy",
+                    "reason": "unchanged"
+                }
+            },
+            "trend": {
+                "step_records_delta": 0,
+                "snapshot_event_lag_secs": 30,
+                "learning_state": {
+                    "state": "caught_up",
+                    "reason": "step_matches_records"
+                },
+                "behavior_policy": {
+                    "badge": "caught up",
+                    "recommended_action": "none"
+                }
+            }
+        });
+        let preview = avatar_cortex_language_preview_from_status(status);
+        assert_eq!(preview["surface"], "avatar_cortex_language_preview");
+        assert_eq!(preview["emits_audio"], false);
+        assert_eq!(preview["language"]["intent"], "reassure");
+        assert_eq!(preview["language"]["generator"]["uses_llm"], false);
+        assert_eq!(preview["language"]["generator"]["uses_voice_model"], false);
+        assert_eq!(
+            preview["language"]["safety"]["requires_explicit_emit_gate"],
+            true
+        );
+        assert_eq!(
+            preview["language"]["utterance"],
+            "小舒追上啦，当前信号是健康的。 最近状态保持稳定。 我会继续安静观察。"
+        );
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
