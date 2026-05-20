@@ -17,3 +17,5 @@
 *.db-wal
 .worktrees/
 .fastembed_cache/
+.agent-bridge/
+*.vsix

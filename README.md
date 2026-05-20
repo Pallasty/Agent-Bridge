@@ -261,7 +261,7 @@ client shapes, set `AGENT_BRIDGE_TOOLSET` to `claude-standard`,
 `AGENT_BRIDGE_TOOL_PROFILE` setting is still supported as the compatibility
 fallback.
 
-The Codex profile also enables `features.codex_hooks`, writes the three
+The Codex profile also enables `features.hooks`, writes the three
 `ab-*-hook` scripts to `~/.local/bin`, and merges Agent-Bridge entries
 into `~/.codex/hooks.json` while preserving existing hooks. If Codex asks
 you to trust the new hook commands after setup, approve the Agent-Bridge
@@ -422,7 +422,7 @@ Codex desktop profile (`--frontend codex`):
 |------|-------------|
 | Binary | Copies itself to `~/.local/bin/agent-bridge` |
 | Hook scripts | Writes three scripts to `~/.local/bin/` |
-| Codex hooks | Enables `features.codex_hooks` and merges Agent-Bridge entries into `~/.codex/hooks.json` |
+| Codex hooks | Enables `features.hooks` and merges Agent-Bridge entries into `~/.codex/hooks.json` |
 | Settings file | Merges `[mcp_servers.agent-bridge]` into `~/.codex/config.toml` with `AGENT_BRIDGE_CLIENT=codex`, `AGENT_BRIDGE_TOOLSET=codex-essential`, `AGENT_BRIDGE_TOOL_PROFILE=essential`, and `AGENT_BRIDGE_CODEX_HOST=desktop`; snapshots Codex `model` / `model_reasoning_effort` into `AGENT_BRIDGE_MODEL` / `AGENT_BRIDGE_MODEL_REASONING_EFFORT` when present |
 
 Codex CLI and IDE profiles (`--frontend codex-cli` / `--frontend codex-ide`)

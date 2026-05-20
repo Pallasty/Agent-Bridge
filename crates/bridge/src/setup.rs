@@ -631,7 +631,8 @@ supports_parallel_tool_calls = false
 
     let updated = replace_toml_table(&raw, "mcp_servers.agent-bridge", &block);
     let updated = if enable_hooks {
-        ensure_toml_bool(&updated, "features", "codex_hooks", true)
+        let updated = remove_toml_key(&updated, "features", "codex_hooks");
+        ensure_toml_bool(&updated, "features", "hooks", true)
     } else {
         updated
     };
@@ -984,6 +985,26 @@ fn ensure_toml_bool(raw: &str, table: &str, key: &str, value: bool) -> String {
     out
 }
 
+fn remove_toml_key(raw: &str, table: &str, key: &str) -> String {
+    let mut out = String::new();
+    let mut in_table = false;
+
+    for line in raw.lines() {
+        if let Some(next_table) = toml_table_name(line) {
+            in_table = next_table == table;
+        }
+
+        if in_table && toml_line_assigns_key(line, key) {
+            continue;
+        }
+
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    out
+}
+
 fn toml_table_name(line: &str) -> Option<&str> {
     let trimmed = line.trim();
     let inner = trimmed.strip_prefix('[')?.strip_suffix(']')?.trim();
@@ -1131,7 +1152,8 @@ fn script_name_for_event(event: &str) -> &'static str {
 mod tests {
     use super::{
         ensure_toml_bool, merge_codex_config, merge_codex_hooks, merge_gemini_settings,
-        replace_toml_table, CodexHost, CodexToolset, HOOK_PRECOMPACT, HOOK_SESSION_END,
+        remove_toml_key, replace_toml_table, CodexHost, CodexToolset, HOOK_PRECOMPACT,
+        HOOK_SESSION_END,
     };
     use serde_json::{json, Value};
     use std::fs;
@@ -1268,6 +1290,7 @@ enabled = true
             assert!(out.contains("AGENT_BRIDGE_CLIENT = \"codex\""));
             assert!(out.contains("AGENT_BRIDGE_TOOLSET = \"codex-essential\""));
             assert!(out.contains(&format!("AGENT_BRIDGE_CODEX_HOST = \"{expected}\"")));
+            assert!(!out.contains("hooks = true"));
             assert!(!out.contains("codex_hooks = true"));
 
             fs::remove_dir_all(tmp).unwrap();
@@ -1301,23 +1324,41 @@ enabled = true
     }
 
     #[test]
-    fn enables_codex_hooks_feature_when_missing() {
+    fn enables_hooks_feature_when_missing() {
         let raw = "model = \"gpt-5.5\"\n\n[features]\nmulti_agent = true\n";
 
-        let out = ensure_toml_bool(raw, "features", "codex_hooks", true);
+        let out = ensure_toml_bool(raw, "features", "hooks", true);
 
-        assert!(out.contains("[features]\nmulti_agent = true\ncodex_hooks = true"));
+        assert!(out.contains("[features]\nmulti_agent = true\nhooks = true"));
     }
 
     #[test]
-    fn replaces_existing_codex_hooks_feature() {
-        let raw = "[features]\ncodex_hooks = false\nmulti_agent = true\n";
+    fn replaces_existing_hooks_feature() {
+        let raw = "[features]\nhooks = false\nmulti_agent = true\n";
 
-        let out = ensure_toml_bool(raw, "features", "codex_hooks", true);
+        let out = ensure_toml_bool(raw, "features", "hooks", true);
 
-        assert!(out.contains("codex_hooks = true"));
-        assert!(!out.contains("codex_hooks = false"));
+        assert!(out.contains("hooks = true"));
+        assert!(!out.contains("hooks = false"));
         assert!(out.contains("multi_agent = true"));
+    }
+
+    #[test]
+    fn removes_deprecated_codex_hooks_feature() {
+        let raw = "\
+[features]
+codex_hooks = true
+multi_agent = true
+
+[projects.\"/tmp/example\"]
+trust_level = \"trusted\"
+";
+
+        let out = remove_toml_key(raw, "features", "codex_hooks");
+
+        assert!(!out.contains("codex_hooks"));
+        assert!(out.contains("[features]\nmulti_agent = true"));
+        assert!(out.contains("[projects.\"/tmp/example\"]\ntrust_level = \"trusted\""));
     }
 
     #[test]
