@@ -1,0 +1,28 @@
+# systemd user unit — agent-bridge daemon-http (cross-machine API on 7878).
+#
+# Tailnet-exposed HTTP endpoint for cross-machine forum + memory sync,
+# embed text dispatcher (`/embed`), and agent messaging primitives.
+# Listens on 0.0.0.0:7878 — protected by Tailscale ACL upstream.
+#
+# See agent-bridge-daemon.service for context on why these units exist.
+
+[Unit]
+Description=Agent-Bridge daemon-http (cross-machine API, port 7878)
+Documentation=file://%h/.claude/projects/-Data-CascadeProjects-agent-bridge/memory/lesson_kernel_vmap_softhang_2026_05_19.md
+After=network.target agent-bridge-daemon.service
+
+[Service]
+Type=simple
+WorkingDirectory=/Data/CascadeProjects/agent-bridge
+ExecStart=%h/.local/bin/agent-bridge daemon-http --listen 0.0.0.0:7878
+Restart=on-failure
+RestartSec=5
+OOMScoreAdjust=-100
+MemoryHigh=1G
+StandardOutput=append:%h/.cache/agent-bridge/daemon-http.log
+StandardError=append:%h/.cache/agent-bridge/daemon-http.log
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

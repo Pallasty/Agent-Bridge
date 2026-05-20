@@ -1,0 +1,26 @@
+# systemd user unit — agent-bridge Palace viewer (HTTP on port 7979).
+#
+# UI for memory graph exploration (γ' BFS, kind chips, freshness rings).
+# Reader-only to state.db; safe to run alongside agent-bridge-daemon.service.
+#
+# See agent-bridge-daemon.service for context on why these units exist.
+
+[Unit]
+Description=Agent-Bridge Palace viewer (port 7979)
+Documentation=file://%h/.claude/projects/-Data-CascadeProjects-agent-bridge/memory/lesson_kernel_vmap_softhang_2026_05_19.md
+After=network.target agent-bridge-daemon.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/agent-bridge palace serve --port 7979
+Restart=on-failure
+RestartSec=5
+OOMScoreAdjust=-100
+MemoryHigh=1G
+StandardOutput=append:%h/.cache/agent-bridge/palace.log
+StandardError=append:%h/.cache/agent-bridge/palace.log
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

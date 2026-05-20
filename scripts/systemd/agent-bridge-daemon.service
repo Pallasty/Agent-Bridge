@@ -1,0 +1,61 @@
+# systemd user unit — agent-bridge state.db daemon (always-on writer).
+#
+# Hosts P-α coactivation tick, C3 self-check, embedding cache, and
+# substrate-tick thread. Single writer to ~/.local/share/agent-bridge/
+# state.db. Companion services:
+#   - agent-bridge-palace.service (palace serve UI, port 7979)
+#   - agent-bridge-daemon-http.service (cross-machine HTTP, port 7878)
+#
+# Reason this unit exists (2026-05-20):
+# Twice in <48h (5/19 07:31, 5/20 ~02:04) aio2 host kernel hit
+# `drain_vmap_area_work` workqueue exhaustion (vmalloc lock contention
+# under heavy mmap traffic — large state.db + cargo LTO builds + many
+# MCP processes). System soft-locked; no OOM, no panic, just unresponsive
+# until manual hard-reset / power-cycle. Forum thread 6 #273 / #325.
+#
+# Manual `setsid bash -c '... daemon &'` respawn after each crash is
+# brittle. This unit gives:
+#   - Restart=on-failure to self-heal sub-process death
+#   - WantedBy=default.target to come up on next user session
+#   - OOMScoreAdjust=-100 to be killed last under future memory pressure
+#   - MemoryHigh=2G soft cgroup limit (per forum #276 `#7a37d28e` suggestion)
+#
+# Wrapper path used (`%h/.local/bin/agent-bridge` not `.real`) so
+# AB_SUBSTRATE_PROJECTION=svd + AB_SUBSTRATE_SVD_PATH defaults inject
+# automatically (per memory `project_v22_phase24_wrapper_svd_defaults`).
+#
+# Install:
+#   ./scripts/systemd/install.sh
+#
+# Logs:
+#   tail -f ~/.cache/agent-bridge/daemon.log
+#   journalctl --user -u agent-bridge-daemon.service -f
+#
+# Status:
+#   systemctl --user status agent-bridge-daemon.service
+
+[Unit]
+Description=Agent-Bridge state.db daemon (P-α tick + C3 self-check + substrate)
+Documentation=file://%h/.claude/projects/-Data-CascadeProjects-agent-bridge/memory/lesson_kernel_vmap_softhang_2026_05_19.md
+After=network.target
+# Single writer to state.db — order matters if user enables all three.
+Before=agent-bridge-daemon-http.service agent-bridge-palace.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/agent-bridge daemon
+Restart=on-failure
+RestartSec=5
+# Be killed LAST under future memory pressure (state.db data integrity matters).
+OOMScoreAdjust=-100
+# Soft cgroup ceiling — daemon RSS ~25-40MB steady, leaving headroom for
+# embedding cache prefetch. 2G is generous; logs warn before kill.
+MemoryHigh=2G
+StandardOutput=append:%h/.cache/agent-bridge/daemon.log
+StandardError=append:%h/.cache/agent-bridge/daemon.log
+# `agent-bridge daemon` runs forever; don't time out start.
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

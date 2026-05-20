@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
-# Install user-systemd timers shipped with agent-bridge.
+# Install user-systemd units shipped with agent-bridge.
 #
 # Currently installs:
-#   - agent-bridge-memory-decay-unused.timer (Phase 2.x #8 daily decay)
-#   - agent-bridge-sync.timer (D2-G1 — 15-min cross-machine sync)
+#   Timers (cadenced):
+#     - agent-bridge-memory-decay-unused.timer (Phase 2.x #8 daily decay)
+#     - agent-bridge-sync.timer (D2-G1 — 15-min cross-machine sync)
+#   Services (always-on, ship 2026-05-20 #325 backlog after recurring soft-hang):
+#     - agent-bridge-daemon.service (state.db writer + P-α tick + C3 self-check)
+#     - agent-bridge-palace.service (UI on port 7979)
+#     - agent-bridge-daemon-http.service (cross-machine API on port 7878)
 #
 # Usage:
-#   ./scripts/systemd/install.sh           # copy + reload + enable timers
-#   ./scripts/systemd/install.sh --dry-run # show what would happen
-#   ./scripts/systemd/install.sh --once    # also run the decay service once
+#   ./scripts/systemd/install.sh             # copy + reload + enable timers + services
+#   ./scripts/systemd/install.sh --dry-run   # show what would happen
+#   ./scripts/systemd/install.sh --once      # also run the decay service once
+#   ./scripts/systemd/install.sh --no-daemons  # skip the 3 always-on daemons
+#                                              # (for headless / sibling sessions
+#                                              #  that don't want auto-start)
 
 set -euo pipefail
 
@@ -20,6 +28,9 @@ UNITS=(
   agent-bridge-memory-decay-unused.timer
   agent-bridge-sync.service
   agent-bridge-sync.timer
+  agent-bridge-daemon.service
+  agent-bridge-palace.service
+  agent-bridge-daemon-http.service
 )
 
 TIMERS=(
@@ -27,14 +38,22 @@ TIMERS=(
   agent-bridge-sync.timer
 )
 
+DAEMON_SERVICES=(
+  agent-bridge-daemon.service
+  agent-bridge-palace.service
+  agent-bridge-daemon-http.service
+)
+
 DRY=0
 RUN_ONCE=0
+NO_DAEMONS=0
 for arg in "$@"; do
   case "$arg" in
-    --dry-run) DRY=1 ;;
-    --once)    RUN_ONCE=1 ;;
+    --dry-run)    DRY=1 ;;
+    --once)       RUN_ONCE=1 ;;
+    --no-daemons) NO_DAEMONS=1 ;;
     -h|--help)
-      sed -n '2,12p' "$0"; exit 0 ;;
+      sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
@@ -63,6 +82,27 @@ for t in "${TIMERS[@]}"; do
   run systemctl --user enable --now "$t"
 done
 
+if [[ $NO_DAEMONS -eq 0 ]]; then
+  # Kill any setsid-launched manual daemons first to avoid double-spawn
+  # on shared state.db — see lesson `daemon_restart_idempotency_2026_05_19`.
+  # `pkill -f` matches the wrapper path; setsid orphans reparent to PID 1
+  # so they're not in our process group.
+  if [[ $DRY -eq 0 ]]; then
+    for cmd in 'agent-bridge daemon$' 'agent-bridge palace serve' 'agent-bridge daemon-http'; do
+      pids=$(pgrep -f "$cmd" 2>/dev/null || true)
+      if [[ -n "$pids" ]]; then
+        echo "+ pkill -TERM -f '$cmd' (pids: $pids)"
+        pkill -TERM -f "$cmd" || true
+      fi
+    done
+    sleep 2
+  fi
+
+  for s in "${DAEMON_SERVICES[@]}"; do
+    run systemctl --user enable --now "$s"
+  done
+fi
+
 if [[ $RUN_ONCE -eq 1 ]]; then
   # Trigger the .service once now, not the .timer — gives a fresh wet-test.
   run systemctl --user start agent-bridge-memory-decay-unused.service
@@ -75,3 +115,13 @@ fi
 echo
 echo "Installed timers:"
 systemctl --user list-timers --all "${TIMERS[@]}" 2>/dev/null || true
+
+if [[ $NO_DAEMONS -eq 0 ]]; then
+  echo
+  echo "Always-on services:"
+  for s in "${DAEMON_SERVICES[@]}"; do
+    state=$(systemctl --user is-active "$s" 2>/dev/null || echo "?")
+    enabled=$(systemctl --user is-enabled "$s" 2>/dev/null || echo "?")
+    printf "  %-44s %s / %s\n" "$s" "$state" "$enabled"
+  done
+fi
