@@ -2,18 +2,18 @@ use ab_agent::{
     AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, CodexRuntime, GeminiRuntime,
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
-use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
+use ab_bridge::warp_scheme;
+use ab_bridge::{Hub, Router, build_registry, default_socket_path, serve};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
-use ab_store::{default_db_path, SqliteStore, StateStore};
-use ab_bridge::warp_scheme;
-use ab_terminal::{auto_backend, TerminalBackend};
+use ab_store::{SqliteStore, StateStore, default_db_path};
+use ab_terminal::{TerminalBackend, auto_backend};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use serde_json::json;
+use serde_json::{Map, Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing_subscriber::{prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, prelude::*};
 
 mod setup;
 mod shadow_cortex;
@@ -250,6 +250,483 @@ enum AvatarOp {
         /// Include compatibility capabilities.pet_state in each JSON avatar entry.
         #[arg(long)]
         include_compat: bool,
+    },
+    /// Sync the current pet sidecar into a presence row for CLI/launchd heartbeats.
+    SyncPresence {
+        /// Pet id to sync. Defaults to AB_PET_ID, current Codex avatar, then xiao-shu-v2.
+        #[arg(long)]
+        pet_id: Option<String>,
+        /// Optional explicit presence session id.
+        #[arg(long)]
+        session_id: Option<String>,
+        /// Presence display name.
+        #[arg(long)]
+        name: Option<String>,
+        /// Presence description.
+        #[arg(long)]
+        description: Option<String>,
+        /// Presence version label.
+        #[arg(long)]
+        version: Option<String>,
+        /// Reserved daemon URL.
+        #[arg(long)]
+        url: Option<String>,
+        /// Override hostname.
+        #[arg(long)]
+        node: Option<String>,
+        /// Override project slug.
+        #[arg(long)]
+        project: Option<String>,
+        /// Presence role.
+        #[arg(long, default_value = "main")]
+        role: String,
+        /// Optional disambiguator.
+        #[arg(long)]
+        tag: Option<String>,
+        /// Optional Agent Avatar Protocol agent_id override.
+        #[arg(long)]
+        agent_id: Option<String>,
+        /// Runtime label for the adapter writing this row.
+        #[arg(long, default_value = "local-cli")]
+        runtime: String,
+        /// Caller cwd. Defaults to this CLI process cwd.
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Caller pid. Defaults to this CLI process.
+        #[arg(long)]
+        pid: Option<i64>,
+        /// Disable pid-tag collision avoidance.
+        #[arg(long)]
+        no_auto_tag: bool,
+        /// Optional fine-grained work posture.
+        #[arg(long)]
+        activity_state: Option<String>,
+        /// Optional compact focus label.
+        #[arg(long)]
+        focus: Option<String>,
+        /// Optional low/medium/high risk hint.
+        #[arg(long)]
+        risk_level: Option<String>,
+        /// Optional compact blocked reason.
+        #[arg(long)]
+        blocked_reason: Option<String>,
+        /// Optional compact verification evidence.
+        #[arg(long)]
+        evidence: Option<String>,
+        /// Optional compact next local action.
+        #[arg(long)]
+        next_action: Option<String>,
+        /// Voice policy override for presence metadata only.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Voice rate policy override for presence metadata only.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Emit the full JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Install a macOS launchd job that periodically runs avatar sync-presence.
+    InstallHeartbeat {
+        /// launchd label. Defaults to com.agentbridge.avatar-heartbeat.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Stable agent/presence project. Defaults to cwd basename.
+        #[arg(long)]
+        project: Option<String>,
+        /// Presence role for the heartbeat row.
+        #[arg(long, default_value = "heartbeat")]
+        role: String,
+        /// Stable presence session id. Defaults to the launchd label.
+        #[arg(long)]
+        session_id: Option<String>,
+        /// Stable Agent Avatar Protocol agent_id. Defaults to session id.
+        #[arg(long)]
+        agent_id: Option<String>,
+        /// Runtime label for the adapter writing this row.
+        #[arg(long, default_value = "local-cli")]
+        runtime: String,
+        /// Pet id to sync.
+        #[arg(long)]
+        pet_id: Option<String>,
+        /// Working directory to report.
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        /// Installed agent-bridge binary for launchd to run.
+        #[arg(long)]
+        bin: Option<PathBuf>,
+        /// StartInterval seconds.
+        #[arg(long, default_value_t = 60)]
+        interval_secs: u64,
+        /// Optional fine-grained work posture.
+        #[arg(long)]
+        activity_state: Option<String>,
+        /// Optional compact focus label.
+        #[arg(long)]
+        focus: Option<String>,
+        /// Optional low/medium/high risk hint.
+        #[arg(long)]
+        risk_level: Option<String>,
+        /// Optional compact verification evidence.
+        #[arg(long)]
+        evidence: Option<String>,
+        /// Optional compact next local action.
+        #[arg(long)]
+        next_action: Option<String>,
+        /// Voice policy override for presence metadata only.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Voice rate policy override for presence metadata only.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Write the plist but do not bootstrap it.
+        #[arg(long)]
+        no_load: bool,
+        /// Print the plist instead of writing or loading it.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Remove a macOS launchd avatar heartbeat job and plist.
+    RemoveHeartbeat {
+        /// launchd label. Defaults to com.agentbridge.avatar-heartbeat.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Project used to derive the default label.
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Show launchd status for an avatar heartbeat job.
+    HeartbeatStatus {
+        /// launchd label. Defaults to com.agentbridge.avatar-heartbeat.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Project used to derive the default label.
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Summarize launchd plus presence health for an avatar heartbeat job.
+    HeartbeatHealth {
+        /// launchd label. Defaults to com.agentbridge.avatar-heartbeat.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Project used to derive the default label.
+        #[arg(long)]
+        project: Option<String>,
+        /// Heartbeat age threshold for stale detection.
+        #[arg(long, default_value_t = 300)]
+        stale_secs: i64,
+        /// Emit raw JSON payload instead of the human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Emit a sparse notification/TTS only when heartbeat health changes.
+    HeartbeatAlert {
+        /// launchd label. Defaults to com.agentbridge.avatar-heartbeat.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Project used to derive the default label.
+        #[arg(long)]
+        project: Option<String>,
+        /// Heartbeat age threshold for stale detection.
+        #[arg(long, default_value_t = 300)]
+        stale_secs: i64,
+        /// Force an alert even if the event key is unchanged.
+        #[arg(long)]
+        force: bool,
+        /// Compute and record the event but do not emit notification or TTS.
+        #[arg(long)]
+        preview: bool,
+        /// Suppress desktop notification emission.
+        #[arg(long)]
+        no_notification: bool,
+        /// Also speak the status line with macOS say.
+        #[arg(long)]
+        tts: bool,
+        /// Repeat an unchanged unhealthy alert after this many seconds. 0 disables repeats.
+        #[arg(long, default_value_t = 3600)]
+        repeat_secs: i64,
+        /// Optional macOS say voice for --tts.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Optional macOS say rate for --tts.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Emit raw JSON payload instead of the human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Install a macOS launchd job that periodically runs avatar heartbeat-alert.
+    InstallHeartbeatAlert {
+        /// launchd label. Defaults to com.agentbridge.avatar-heartbeat-alert.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Project used to derive the default label.
+        #[arg(long)]
+        project: Option<String>,
+        /// Installed agent-bridge binary for launchd to run.
+        #[arg(long)]
+        bin: Option<PathBuf>,
+        /// StartInterval seconds.
+        #[arg(long, default_value_t = 120)]
+        interval_secs: u64,
+        /// Heartbeat age threshold for stale detection.
+        #[arg(long, default_value_t = 300)]
+        stale_secs: i64,
+        /// Repeat an unchanged unhealthy alert after this many seconds. 0 disables repeats.
+        #[arg(long, default_value_t = 3600)]
+        repeat_secs: i64,
+        /// Suppress desktop notification emission.
+        #[arg(long)]
+        no_notification: bool,
+        /// Also speak the status line with macOS say when an alert emits.
+        #[arg(long)]
+        tts: bool,
+        /// Optional macOS say voice for --tts.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Optional macOS say rate for --tts.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Write the plist but do not bootstrap it.
+        #[arg(long)]
+        no_load: bool,
+        /// Print the plist instead of writing or loading it.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Remove a macOS launchd avatar heartbeat alert job and plist.
+    RemoveHeartbeatAlert {
+        /// launchd label. Defaults to com.agentbridge.avatar-heartbeat-alert.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Project used to derive the default label.
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Show launchd status for an avatar heartbeat alert job.
+    HeartbeatAlertStatus {
+        /// launchd label. Defaults to com.agentbridge.avatar-heartbeat-alert.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Project used to derive the default label.
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Project avatar heartbeat alert events into Seed substrate replay JSONL.
+    SeedEvents {
+        /// Heartbeat label. Defaults to com.agentbridge.avatar-heartbeat.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Project used to derive the default heartbeat label.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override alert events JSONL path.
+        #[arg(long)]
+        input: Option<PathBuf>,
+        /// Keep the latest N projected records. 0 keeps all.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Include preview/dogfood events. Defaults to production events only.
+        #[arg(long)]
+        include_preview: bool,
+        /// Write projected replay JSONL to this path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Print projected replay JSONL to stdout.
+        #[arg(long)]
+        jsonl: bool,
+        /// Emit summary JSON payload instead of the human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Replay avatar Seed events into an isolated shadow-only Xiao Shu cortex snapshot.
+    CortexReplay {
+        /// Heartbeat label. Defaults to com.agentbridge.avatar-heartbeat.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Project used to derive the default heartbeat label.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override alert events JSONL path.
+        #[arg(long)]
+        input: Option<PathBuf>,
+        /// Output path for the isolated avatar cortex snapshot.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Keep the latest N projected records. 0 keeps all.
+        #[arg(long, default_value_t = 200)]
+        limit: usize,
+        /// Include preview/dogfood events.
+        #[arg(long)]
+        include_preview: bool,
+        /// Use OnnxBackend instead of the default HashBackend.
+        #[arg(long)]
+        onnx: bool,
+        /// Grid size N for the isolated cortex.
+        #[arg(long, default_value_t = 64)]
+        n: usize,
+        /// Substrate perception dimension D for the isolated cortex.
+        #[arg(long, default_value_t = 64)]
+        d: usize,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Install a macOS launchd job that periodically refreshes the Xiao Shu cortex snapshot.
+    InstallCortexRunner {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label to consume. Defaults to com.agentbridge.avatar-heartbeat.<project>.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Installed agent-bridge binary for launchd to run.
+        #[arg(long)]
+        bin: Option<PathBuf>,
+        /// StartInterval seconds.
+        #[arg(long, default_value_t = 300)]
+        interval_secs: u64,
+        /// Output path for the isolated avatar cortex snapshot.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Keep the latest N projected records. 0 keeps all.
+        #[arg(long, default_value_t = 500)]
+        limit: usize,
+        /// Include preview/dogfood events.
+        #[arg(long)]
+        include_preview: bool,
+        /// Use OnnxBackend instead of the default HashBackend.
+        #[arg(long)]
+        onnx: bool,
+        /// Grid size N for the isolated cortex.
+        #[arg(long, default_value_t = 64)]
+        n: usize,
+        /// Substrate perception dimension D for the isolated cortex.
+        #[arg(long, default_value_t = 64)]
+        d: usize,
+        /// Write the plist but do not bootstrap it.
+        #[arg(long)]
+        no_load: bool,
+        /// Print the plist instead of writing or loading it.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Remove the macOS launchd Xiao Shu cortex runner job and plist.
+    RemoveCortexRunner {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Project used to derive the default label.
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Show Xiao Shu cortex runner and snapshot status.
+    CortexStatus {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview Xiao Shu's cortex voice line without emitting audio or notifications.
+    CortexPreview {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
+    CortexVoiceGate {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Explicitly enable the dry-run gate for this invocation.
+        #[arg(long)]
+        enabled: bool,
+        /// Ignore cooldown state in the dry-run decision.
+        #[arg(long)]
+        force: bool,
+        /// Cooldown seconds to evaluate. Dry-run does not persist cooldown state.
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: i64,
+        /// Operator reason required before any future real emit path can pass.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Emit Xiao Shu's cortex voice line through a manual CLI-only gate.
+    CortexVoiceEmit {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Explicitly enable the emit gate for this invocation.
+        #[arg(long)]
+        enabled: bool,
+        /// Ignore cooldown state for this invocation.
+        #[arg(long)]
+        force: bool,
+        /// Cooldown seconds to evaluate and record after a successful emit.
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: i64,
+        /// Operator reason required for real audio emission.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Allow a manual operator to override the default silent cortex policy.
+        #[arg(long)]
+        allow_policy_override: bool,
+        /// Optional macOS say voice. Defaults to AB_PET_TTS_VOICE when set.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Optional macOS say rate. Defaults to AB_PET_TTS_RATE when set.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1203,9 +1680,7 @@ enum SkillsOp {
         limit: usize,
     },
     /// Print one skill's body and metadata (use a key from `list` / `search`).
-    Show {
-        key: String,
-    },
+    Show { key: String },
     /// Install an indexed skill into `~/.claude/skills/<name>/`.
     ///
     /// Re-clones the source repo and copies the original SKILL.md (plus
@@ -1419,7 +1894,11 @@ async fn main() -> Result<()> {
     let cmd = cli.cmd.unwrap_or(Cmd::Daemon);
 
     // Setup runs synchronously, no async runtime needed beyond tokio's shell.
-    if let Cmd::Setup { frontend, codex_toolset } = &cmd {
+    if let Cmd::Setup {
+        frontend,
+        codex_toolset,
+    } = &cmd
+    {
         return setup::run(frontend.resolve(), (*codex_toolset).into());
     }
 
@@ -1441,9 +1920,7 @@ async fn main() -> Result<()> {
                 skills::run_index(source, *verbose).await.map(|_| ())
             }
             SkillsOp::Seed { verbose } => skills::run_seed(*verbose).await,
-            SkillsOp::Refresh { verbose, prune } => {
-                skills::run_refresh(*verbose, *prune).await
-            }
+            SkillsOp::Refresh { verbose, prune } => skills::run_refresh(*verbose, *prune).await,
             SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::List { limit } => skills::run_list(*limit).await,
@@ -1477,6 +1954,352 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
+            AvatarOp::SyncPresence {
+                pet_id,
+                session_id,
+                name,
+                description,
+                version,
+                url,
+                node,
+                project,
+                role,
+                tag,
+                agent_id,
+                runtime,
+                cwd,
+                pid,
+                no_auto_tag,
+                activity_state,
+                focus,
+                risk_level,
+                blocked_reason,
+                evidence,
+                next_action,
+                tts_voice,
+                tts_rate,
+                json: as_json,
+            } => {
+                run_avatar_sync_presence(
+                    pet_id.clone(),
+                    session_id.clone(),
+                    name.clone(),
+                    description.clone(),
+                    version.clone(),
+                    url.clone(),
+                    node.clone(),
+                    project.clone(),
+                    role.clone(),
+                    tag.clone(),
+                    agent_id.clone(),
+                    runtime.clone(),
+                    cwd.clone(),
+                    *pid,
+                    *no_auto_tag,
+                    activity_state.clone(),
+                    focus.clone(),
+                    risk_level.clone(),
+                    blocked_reason.clone(),
+                    evidence.clone(),
+                    next_action.clone(),
+                    tts_voice.clone(),
+                    *tts_rate,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::InstallHeartbeat {
+                label,
+                project,
+                role,
+                session_id,
+                agent_id,
+                runtime,
+                pet_id,
+                cwd,
+                bin,
+                interval_secs,
+                activity_state,
+                focus,
+                risk_level,
+                evidence,
+                next_action,
+                tts_voice,
+                tts_rate,
+                no_load,
+                dry_run,
+            } => {
+                run_avatar_install_heartbeat(
+                    label.clone(),
+                    project.clone(),
+                    role.clone(),
+                    session_id.clone(),
+                    agent_id.clone(),
+                    runtime.clone(),
+                    pet_id.clone(),
+                    cwd.clone(),
+                    bin.clone(),
+                    *interval_secs,
+                    activity_state.clone(),
+                    focus.clone(),
+                    risk_level.clone(),
+                    evidence.clone(),
+                    next_action.clone(),
+                    tts_voice.clone(),
+                    *tts_rate,
+                    *no_load,
+                    *dry_run,
+                )
+                .await
+            }
+            AvatarOp::RemoveHeartbeat { label, project } => {
+                run_avatar_remove_heartbeat(label.clone(), project.clone()).await
+            }
+            AvatarOp::HeartbeatStatus { label, project } => {
+                run_avatar_heartbeat_status(label.clone(), project.clone()).await
+            }
+            AvatarOp::HeartbeatHealth {
+                label,
+                project,
+                stale_secs,
+                json: as_json,
+            } => {
+                run_avatar_heartbeat_health(label.clone(), project.clone(), *stale_secs, *as_json)
+                    .await
+            }
+            AvatarOp::HeartbeatAlert {
+                label,
+                project,
+                stale_secs,
+                force,
+                preview,
+                no_notification,
+                tts,
+                repeat_secs,
+                tts_voice,
+                tts_rate,
+                json: as_json,
+            } => {
+                run_avatar_heartbeat_alert(
+                    label.clone(),
+                    project.clone(),
+                    *stale_secs,
+                    *force,
+                    *preview,
+                    !*no_notification,
+                    *tts,
+                    *repeat_secs,
+                    tts_voice.clone(),
+                    *tts_rate,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::InstallHeartbeatAlert {
+                label,
+                project,
+                bin,
+                interval_secs,
+                stale_secs,
+                repeat_secs,
+                no_notification,
+                tts,
+                tts_voice,
+                tts_rate,
+                no_load,
+                dry_run,
+            } => {
+                run_avatar_install_heartbeat_alert(
+                    label.clone(),
+                    project.clone(),
+                    bin.clone(),
+                    *interval_secs,
+                    *stale_secs,
+                    *repeat_secs,
+                    !*no_notification,
+                    *tts,
+                    tts_voice.clone(),
+                    *tts_rate,
+                    *no_load,
+                    *dry_run,
+                )
+                .await
+            }
+            AvatarOp::RemoveHeartbeatAlert { label, project } => {
+                run_avatar_remove_heartbeat_alert(label.clone(), project.clone()).await
+            }
+            AvatarOp::HeartbeatAlertStatus { label, project } => {
+                run_avatar_heartbeat_alert_status(label.clone(), project.clone()).await
+            }
+            AvatarOp::SeedEvents {
+                label,
+                project,
+                input,
+                limit,
+                include_preview,
+                output,
+                jsonl,
+                json: as_json,
+            } => {
+                run_avatar_seed_events(
+                    label.clone(),
+                    project.clone(),
+                    input.clone(),
+                    *limit,
+                    *include_preview,
+                    output.clone(),
+                    *jsonl,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexReplay {
+                label,
+                project,
+                input,
+                output,
+                limit,
+                include_preview,
+                onnx,
+                n,
+                d,
+                json: as_json,
+            } => {
+                run_avatar_cortex_replay(
+                    label.clone(),
+                    project.clone(),
+                    input.clone(),
+                    output.clone(),
+                    *limit,
+                    *include_preview,
+                    !*onnx,
+                    *n,
+                    *d,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::InstallCortexRunner {
+                label,
+                heartbeat_label,
+                project,
+                bin,
+                interval_secs,
+                output,
+                limit,
+                include_preview,
+                onnx,
+                n,
+                d,
+                no_load,
+                dry_run,
+            } => {
+                run_avatar_install_cortex_runner(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    bin.clone(),
+                    *interval_secs,
+                    output.clone(),
+                    *limit,
+                    *include_preview,
+                    !*onnx,
+                    *n,
+                    *d,
+                    *no_load,
+                    *dry_run,
+                )
+                .await
+            }
+            AvatarOp::RemoveCortexRunner { label, project } => {
+                run_avatar_remove_cortex_runner(label.clone(), project.clone()).await
+            }
+            AvatarOp::CortexStatus {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_status(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexPreview {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_preview(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoiceGate {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                enabled,
+                force,
+                cooldown_secs,
+                reason,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_gate(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *enabled,
+                    *force,
+                    *cooldown_secs,
+                    reason.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoiceEmit {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                enabled,
+                force,
+                cooldown_secs,
+                reason,
+                allow_policy_override,
+                tts_voice,
+                tts_rate,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_emit(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *enabled,
+                    *force,
+                    *cooldown_secs,
+                    reason.clone(),
+                    *allow_policy_override,
+                    tts_voice.clone(),
+                    *tts_rate,
+                    *as_json,
+                )
+                .await
+            }
         };
     }
 
@@ -1484,9 +2307,10 @@ async fn main() -> Result<()> {
     // in-process seed-bridge global. No state.db touched.
     if let Cmd::Substrate { op } = &cmd {
         return match op {
-            SubstrateOp::Stats { snapshot_path, json } => {
-                run_substrate_stats(snapshot_path.clone(), *json).await
-            }
+            SubstrateOp::Stats {
+                snapshot_path,
+                json,
+            } => run_substrate_stats(snapshot_path.clone(), *json).await,
             SubstrateOp::Neighbors { key, k, path, json } => {
                 run_substrate_neighbors(key.clone(), *k, path.clone(), *json).await
             }
@@ -1499,16 +2323,8 @@ async fn main() -> Result<()> {
                 output,
                 json,
             } => {
-                run_substrate_replay(
-                    log.clone(),
-                    *seed,
-                    *n,
-                    *d,
-                    *use_hash,
-                    output.clone(),
-                    *json,
-                )
-                .await
+                run_substrate_replay(log.clone(), *seed, *n, *d, *use_hash, output.clone(), *json)
+                    .await
             }
             SubstrateOp::Snapshot {
                 path,
@@ -1517,14 +2333,8 @@ async fn main() -> Result<()> {
                 fingerprint_only,
                 json,
             } => {
-                run_substrate_snapshot(
-                    path.clone(),
-                    *limit,
-                    tier.clone(),
-                    *fingerprint_only,
-                    *json,
-                )
-                .await
+                run_substrate_snapshot(path.clone(), *limit, tier.clone(), *fingerprint_only, *json)
+                    .await
             }
         };
     }
@@ -1645,14 +2455,7 @@ async fn main() -> Result<()> {
                 ceiling,
                 json,
             } => {
-                run_dream_reinforce_active(
-                    *window_days,
-                    *min_access,
-                    *step,
-                    *ceiling,
-                    *json,
-                )
-                .await
+                run_dream_reinforce_active(*window_days, *min_access, *step, *ceiling, *json).await
             }
             DreamOp::SignalFidelity { top_n, json } => {
                 run_dream_signal_fidelity(*top_n, *json).await
@@ -1686,9 +2489,7 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
-            DreamOp::RestoreArchived { key, json } => {
-                run_dream_restore_archived(key, *json).await
-            }
+            DreamOp::RestoreArchived { key, json } => run_dream_restore_archived(key, *json).await,
             DreamOp::ClusterProbe {
                 min_size,
                 top_k,
@@ -1701,13 +2502,8 @@ async fn main() -> Result<()> {
                 dry_run,
                 json,
             } => {
-                run_dream_tombstone_aged_archived(
-                    *older_than_days,
-                    *max_count,
-                    *dry_run,
-                    *json,
-                )
-                .await
+                run_dream_tombstone_aged_archived(*older_than_days, *max_count, *dry_run, *json)
+                    .await
             }
             DreamOp::PurgeTombstones {
                 older_than_days,
@@ -1719,36 +2515,37 @@ async fn main() -> Result<()> {
                 waypoint_min,
                 overlap_min,
                 json,
-            } => {
-                run_dream_replay_audit(*stale_days, *waypoint_min, *overlap_min, *json).await
-            }
+            } => run_dream_replay_audit(*stale_days, *waypoint_min, *overlap_min, *json).await,
             DreamOp::Snapshot {
                 name,
                 days,
                 print_only,
                 json,
             } => run_dream_snapshot(name.as_deref(), *days, *print_only, *json).await,
-            DreamOp::Diff { key_a, key_b, auto, json } => {
-                run_dream_diff(key_a.as_deref(), key_b.as_deref(), *auto, *json).await
-            }
-            DreamOp::Weekly { no_snapshot, json } => {
-                run_dream_weekly(*no_snapshot, *json).await
-            }
-            DreamOp::CodebaseReport { root, top_n, html, json } => {
-                run_dream_codebase_report(
-                    root.as_deref(),
-                    *top_n,
-                    html.as_deref(),
-                    *json,
-                )
-                .await
-            }
-            DreamOp::SubstrateAudit { window_days, json, exclude_kinds } => {
-                run_dream_substrate_audit(*window_days, *json, exclude_kinds.clone()).await
-            }
-            DreamOp::DecayCoactivation { tau_days, max_iterations, dry_run, json } => {
-                run_dream_decay_coactivation(*tau_days, *max_iterations, *dry_run, *json).await
-            }
+            DreamOp::Diff {
+                key_a,
+                key_b,
+                auto,
+                json,
+            } => run_dream_diff(key_a.as_deref(), key_b.as_deref(), *auto, *json).await,
+            DreamOp::Weekly { no_snapshot, json } => run_dream_weekly(*no_snapshot, *json).await,
+            DreamOp::CodebaseReport {
+                root,
+                top_n,
+                html,
+                json,
+            } => run_dream_codebase_report(root.as_deref(), *top_n, html.as_deref(), *json).await,
+            DreamOp::SubstrateAudit {
+                window_days,
+                json,
+                exclude_kinds,
+            } => run_dream_substrate_audit(*window_days, *json, exclude_kinds.clone()).await,
+            DreamOp::DecayCoactivation {
+                tau_days,
+                max_iterations,
+                dry_run,
+                json,
+            } => run_dream_decay_coactivation(*tau_days, *max_iterations, *dry_run, *json).await,
             DreamOp::SubstrateCorrAudit {
                 k,
                 min_cofires,
@@ -1763,20 +2560,10 @@ async fn main() -> Result<()> {
                 agent_md_path,
                 json,
             } => {
-                run_dream_agent_md_drift(
-                    *window_days,
-                    *dry_run,
-                    agent_md_path.clone(),
-                    *json,
-                )
-                .await
+                run_dream_agent_md_drift(*window_days, *dry_run, agent_md_path.clone(), *json).await
             }
-            DreamOp::SkillRetro { days, json } => {
-                run_dream_skill_retro(*days, *json).await
-            }
-            DreamOp::GapAudit { since, json } => {
-                run_dream_gap_audit(since, *json).await
-            }
+            DreamOp::SkillRetro { days, json } => run_dream_skill_retro(*days, *json).await,
+            DreamOp::GapAudit { since, json } => run_dream_gap_audit(since, *json).await,
         };
     }
 
@@ -1867,7 +2654,9 @@ async fn main() -> Result<()> {
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false)
             {
-                tracing::info!("substrate-tick: disabled by env (AGENT_BRIDGE_DISABLE_SUBSTRATE_TICK=1)");
+                tracing::info!(
+                    "substrate-tick: disabled by env (AGENT_BRIDGE_DISABLE_SUBSTRATE_TICK=1)"
+                );
             } else if let Some(store) = hub.store.clone() {
                 let tick_secs: u64 = std::env::var("AGENT_BRIDGE_TICK_SECS")
                     .ok()
@@ -1880,14 +2669,14 @@ async fn main() -> Result<()> {
                     .unwrap_or(7 * 86_400)
                     .clamp(3600, 30 * 86_400);
                 tracing::info!(
-                    tick_secs, tau_secs,
+                    tick_secs,
+                    tau_secs,
                     "substrate-tick: spawning P-α always-warm coactivation tick"
                 );
                 tokio::spawn(async move {
-                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(tick_secs));
-                    interval.set_missed_tick_behavior(
-                        tokio::time::MissedTickBehavior::Delay,
-                    );
+                    let mut interval =
+                        tokio::time::interval(std::time::Duration::from_secs(tick_secs));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     // Skip the first immediate fire (interval ticks once at t=0).
                     interval.tick().await;
                     loop {
@@ -1899,7 +2688,9 @@ async fn main() -> Result<()> {
                         match store.decay_coactivation_once(tau_secs, now, 10).await {
                             Ok(s) if s.iterations > 0 => {
                                 tracing::debug!(
-                                    swept = s.swept, pruned = s.pruned, iters = s.iterations,
+                                    swept = s.swept,
+                                    pruned = s.pruned,
+                                    iters = s.iterations,
                                     "substrate-tick: ran"
                                 );
                             }
@@ -1922,9 +2713,7 @@ async fn main() -> Result<()> {
             // S5 schema_meta.version watch shares the same tick when a
             // store is configured. S2-S4/S6 still pending follow-ups.
             if ab_bridge::c3_self_check::c3_disabled_via_env() {
-                tracing::info!(
-                    "c3-self-check: disabled by env (AB_C3_DISABLE=1)"
-                );
+                tracing::info!("c3-self-check: disabled by env (AB_C3_DISABLE=1)");
             } else {
                 let c3_tick_secs: u64 = std::env::var("AB_C3_TICK_SECS")
                     .ok()
@@ -1938,12 +2727,9 @@ async fn main() -> Result<()> {
                     "c3-self-check: spawning S1+S5 tick"
                 );
                 tokio::spawn(async move {
-                    let mut interval = tokio::time::interval(
-                        std::time::Duration::from_secs(c3_tick_secs),
-                    );
-                    interval.set_missed_tick_behavior(
-                        tokio::time::MissedTickBehavior::Delay,
-                    );
+                    let mut interval =
+                        tokio::time::interval(std::time::Duration::from_secs(c3_tick_secs));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     // Skip the t=0 immediate fire — startup may race
                     // with the daemon installing its own fds.
                     interval.tick().await;
@@ -2115,11 +2901,13 @@ async fn run_avatar_surface(
         .context("agent_presence_list")?;
     let avatars: Vec<serde_json::Value> = rows
         .iter()
-        .map(|row| ab_bridge::avatar_surface::entry_from_presence(
-            row,
-            include_raw_presence,
-            include_compat,
-        ))
+        .map(|row| {
+            ab_bridge::avatar_surface::entry_from_presence(
+                row,
+                include_raw_presence,
+                include_compat,
+            )
+        })
         .collect();
     let report_ctx = ab_bridge::avatar_surface::ReportContext {
         project: project.as_deref(),
@@ -2151,6 +2939,1312 @@ async fn run_avatar_surface(
     Ok(())
 }
 
+fn avatar_arg_string(args: &mut Map<String, Value>, key: &str, value: Option<String>) {
+    if let Some(value) = value {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            args.insert(key.to_string(), json!(trimmed));
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_sync_presence(
+    pet_id: Option<String>,
+    session_id: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+    version: Option<String>,
+    url: Option<String>,
+    node: Option<String>,
+    project: Option<String>,
+    role: String,
+    tag: Option<String>,
+    agent_id: Option<String>,
+    runtime: String,
+    cwd: Option<String>,
+    pid: Option<i64>,
+    no_auto_tag: bool,
+    activity_state: Option<String>,
+    focus: Option<String>,
+    risk_level: Option<String>,
+    blocked_reason: Option<String>,
+    evidence: Option<String>,
+    next_action: Option<String>,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    as_json: bool,
+) -> Result<()> {
+    let mut args = Map::new();
+    avatar_arg_string(&mut args, "pet_id", pet_id);
+    avatar_arg_string(&mut args, "session_id", session_id);
+    avatar_arg_string(&mut args, "name", name);
+    avatar_arg_string(&mut args, "description", description);
+    avatar_arg_string(&mut args, "version", version);
+    avatar_arg_string(&mut args, "url", url);
+    avatar_arg_string(&mut args, "node", node);
+    avatar_arg_string(&mut args, "project", project);
+    avatar_arg_string(&mut args, "role", Some(role));
+    avatar_arg_string(&mut args, "tag", tag);
+    avatar_arg_string(&mut args, "agent_id", agent_id);
+    avatar_arg_string(&mut args, "runtime", Some(runtime));
+    let cwd = cwd.or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string())
+    });
+    avatar_arg_string(&mut args, "cwd", cwd);
+    avatar_arg_string(&mut args, "activity_state", activity_state);
+    avatar_arg_string(&mut args, "focus", focus);
+    avatar_arg_string(&mut args, "risk_level", risk_level);
+    avatar_arg_string(&mut args, "blocked_reason", blocked_reason);
+    avatar_arg_string(&mut args, "evidence", evidence);
+    avatar_arg_string(&mut args, "next_action", next_action);
+    avatar_arg_string(&mut args, "tts_voice", tts_voice);
+    if let Some(pid) = pid {
+        args.insert("pid".to_string(), json!(pid));
+    }
+    if no_auto_tag {
+        args.insert("auto_tag".to_string(), json!(false));
+    }
+    if let Some(rate) = tts_rate {
+        args.insert("tts_rate".to_string(), json!(rate));
+    }
+
+    let store = SqliteStore::open(&default_db_path())
+        .await
+        .context("open state.db")?;
+    let payload = ab_bridge::pet_presence::sync_pet_presence(&store, Value::Object(args))
+        .await
+        .context("avatar sync-presence")?;
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        let session_id = payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown-session");
+        let avatar = payload
+            .get("avatar_state")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
+        let presence = payload
+            .get("presence")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
+        let field = |key: &str, fallback: &str| {
+            avatar
+                .get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or(fallback)
+                .to_string()
+        };
+        let heartbeat = presence
+            .get("last_heartbeat_at")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        println!("Pet presence synced");
+        println!("session_id={session_id}");
+        println!(
+            "runtime={} avatar={} mode={} activity={} focus={}",
+            field("runtime", "unknown-runtime"),
+            field("avatar_id", "unknown-avatar"),
+            field("mode", "unknown"),
+            field("activity_state", "unknown"),
+            field("focus", "-")
+        );
+        println!("heartbeat={heartbeat}");
+        println!(
+            "auto_tagged={}",
+            payload
+                .get("auto_tagged")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        );
+    }
+    Ok(())
+}
+
+fn home_dir() -> Result<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("HOME is not set"))
+}
+
+fn avatar_current_cwd() -> Result<PathBuf> {
+    std::env::current_dir().context("resolve current dir")
+}
+
+fn avatar_project_slug(project: Option<String>, cwd: &std::path::Path) -> String {
+    project
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            cwd.file_name()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| "agent-bridge".to_string())
+}
+
+fn launchd_label_component(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            out.push(ch.to_ascii_lowercase());
+        } else if ch.is_whitespace() {
+            out.push('-');
+        }
+    }
+    let out = out.trim_matches(['-', '.', '_']).to_string();
+    if out.is_empty() {
+        "default".to_string()
+    } else {
+        out
+    }
+}
+
+fn avatar_heartbeat_label(label: Option<String>, project: &str) -> String {
+    label
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "com.agentbridge.avatar-heartbeat.{}",
+                launchd_label_component(project)
+            )
+        })
+}
+
+fn avatar_heartbeat_alert_label(label: Option<String>, project: &str) -> String {
+    label
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "com.agentbridge.avatar-heartbeat-alert.{}",
+                launchd_label_component(project)
+            )
+        })
+}
+
+fn avatar_cortex_runner_label(label: Option<String>, project: &str) -> String {
+    label
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "com.agentbridge.avatar-cortex.{}",
+                launchd_label_component(project)
+            )
+        })
+}
+
+fn launchd_xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn avatar_launchd_domain() -> Result<String> {
+    let output = std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .context("run id -u")?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!("id -u exited with {}", output.status));
+    }
+    let uid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if uid.is_empty() {
+        return Err(anyhow::anyhow!("id -u returned empty uid"));
+    }
+    Ok(format!("gui/{uid}"))
+}
+
+fn avatar_launchd_plist_path(label: &str) -> Result<PathBuf> {
+    Ok(home_dir()?
+        .join("Library")
+        .join("LaunchAgents")
+        .join(format!("{label}.plist")))
+}
+
+fn avatar_launchd_log_path(label: &str, suffix: &str) -> Result<PathBuf> {
+    Ok(home_dir()?
+        .join("Library")
+        .join("Logs")
+        .join("agent-bridge")
+        .join(format!("{label}.{suffix}.log")))
+}
+
+fn avatar_default_heartbeat_bin() -> Result<PathBuf> {
+    let home = home_dir()?;
+    let real = home.join(".local/bin/agent-bridge.real");
+    if real.exists() {
+        Ok(real)
+    } else {
+        Ok(home.join(".local/bin/agent-bridge"))
+    }
+}
+
+fn launchctl_status(args: &[&str]) -> Result<std::process::ExitStatus> {
+    std::process::Command::new("launchctl")
+        .args(args)
+        .status()
+        .with_context(|| format!("launchctl {}", args.join(" ")))
+}
+
+fn launchctl_status_quiet(args: &[&str]) -> Result<std::process::ExitStatus> {
+    std::process::Command::new("launchctl")
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .with_context(|| format!("launchctl {}", args.join(" ")))
+}
+
+fn run_launchctl(args: &[&str]) -> Result<()> {
+    let status = launchctl_status(args)?;
+    if !status.success() {
+        return Err(anyhow::anyhow!(
+            "launchctl {} exited with {}",
+            args.join(" "),
+            status
+        ));
+    }
+    Ok(())
+}
+
+fn avatar_heartbeat_plist(
+    label: &str,
+    program_args: &[String],
+    interval_secs: u64,
+    stdout_path: &std::path::Path,
+    stderr_path: &std::path::Path,
+) -> String {
+    let mut args_xml = String::new();
+    for arg in program_args {
+        args_xml.push_str("    <string>");
+        args_xml.push_str(&launchd_xml_escape(arg));
+        args_xml.push_str("</string>\n");
+    }
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{label}</string>
+  <key>ProgramArguments</key>
+  <array>
+{args_xml}  </array>
+  <key>StartInterval</key>
+  <integer>{interval_secs}</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>{stdout_path}</string>
+  <key>StandardErrorPath</key>
+  <string>{stderr_path}</string>
+</dict>
+</plist>
+"#,
+        label = launchd_xml_escape(label),
+        args_xml = args_xml,
+        interval_secs = interval_secs,
+        stdout_path = launchd_xml_escape(&stdout_path.display().to_string()),
+        stderr_path = launchd_xml_escape(&stderr_path.display().to_string())
+    )
+}
+
+fn avatar_program_arg(args: &mut Vec<String>, key: &str, value: String) {
+    args.push(key.to_string());
+    args.push(value);
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_install_heartbeat(
+    label: Option<String>,
+    project: Option<String>,
+    role: String,
+    session_id: Option<String>,
+    agent_id: Option<String>,
+    runtime: String,
+    pet_id: Option<String>,
+    cwd: Option<PathBuf>,
+    bin: Option<PathBuf>,
+    interval_secs: u64,
+    activity_state: Option<String>,
+    focus: Option<String>,
+    risk_level: Option<String>,
+    evidence: Option<String>,
+    next_action: Option<String>,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    no_load: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let cwd = cwd.unwrap_or(avatar_current_cwd()?);
+    let project = avatar_project_slug(project, &cwd);
+    let label = avatar_heartbeat_label(label, &project);
+    let session_id = session_id.unwrap_or_else(|| label.clone());
+    let agent_id = agent_id.unwrap_or_else(|| session_id.clone());
+    let bin = match bin {
+        Some(bin) => bin,
+        None => avatar_default_heartbeat_bin()?,
+    };
+    let interval_secs = interval_secs.clamp(30, 3600);
+    let activity_state = activity_state.unwrap_or_else(|| "launchd-heartbeat".to_string());
+    let focus = focus.unwrap_or_else(|| "avatar-heartbeat".to_string());
+    let risk_level = risk_level.unwrap_or_else(|| "low".to_string());
+    let evidence = evidence.unwrap_or_else(|| "launchd avatar heartbeat".to_string());
+    let next_action = next_action.unwrap_or_else(|| "refresh avatar surface panel".to_string());
+    let plist_path = avatar_launchd_plist_path(&label)?;
+    let stdout_path = avatar_launchd_log_path(&label, "out")?;
+    let stderr_path = avatar_launchd_log_path(&label, "err")?;
+
+    let mut program_args = vec![
+        bin.display().to_string(),
+        "avatar".to_string(),
+        "sync-presence".to_string(),
+    ];
+    if let Some(pet_id) = pet_id {
+        avatar_program_arg(&mut program_args, "--pet-id", pet_id);
+    }
+    avatar_program_arg(&mut program_args, "--project", project.clone());
+    avatar_program_arg(&mut program_args, "--role", role);
+    avatar_program_arg(&mut program_args, "--tag", "launchd".to_string());
+    avatar_program_arg(&mut program_args, "--session-id", session_id);
+    avatar_program_arg(&mut program_args, "--agent-id", agent_id);
+    avatar_program_arg(&mut program_args, "--runtime", runtime);
+    avatar_program_arg(&mut program_args, "--cwd", cwd.display().to_string());
+    avatar_program_arg(&mut program_args, "--activity-state", activity_state);
+    avatar_program_arg(&mut program_args, "--focus", focus);
+    avatar_program_arg(&mut program_args, "--risk-level", risk_level);
+    avatar_program_arg(&mut program_args, "--evidence", evidence);
+    avatar_program_arg(&mut program_args, "--next-action", next_action);
+    if let Some(tts_voice) = tts_voice {
+        avatar_program_arg(&mut program_args, "--tts-voice", tts_voice);
+    }
+    if let Some(tts_rate) = tts_rate {
+        avatar_program_arg(&mut program_args, "--tts-rate", tts_rate.to_string());
+    }
+    program_args.push("--json".to_string());
+
+    let plist = avatar_heartbeat_plist(
+        &label,
+        &program_args,
+        interval_secs,
+        &stdout_path,
+        &stderr_path,
+    );
+    if dry_run {
+        print!("{plist}");
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(plist_path.parent().unwrap())
+        .with_context(|| format!("create {}", plist_path.parent().unwrap().display()))?;
+    std::fs::create_dir_all(stdout_path.parent().unwrap())
+        .with_context(|| format!("create {}", stdout_path.parent().unwrap().display()))?;
+    std::fs::write(&plist_path, plist)
+        .with_context(|| format!("write {}", plist_path.display()))?;
+
+    if no_load {
+        println!("wrote {}", plist_path.display());
+        println!("label={label}");
+        println!("load=false");
+        return Ok(());
+    }
+
+    let domain = avatar_launchd_domain()?;
+    let _ = launchctl_status_quiet(&["bootout", &domain, plist_path.to_str().unwrap_or_default()]);
+    run_launchctl(&[
+        "bootstrap",
+        &domain,
+        plist_path.to_str().unwrap_or_default(),
+    ])?;
+    let target = format!("{domain}/{label}");
+    run_launchctl(&["kickstart", "-k", &target])?;
+    println!("installed avatar heartbeat");
+    println!("label={label}");
+    println!("plist={}", plist_path.display());
+    println!("bin={}", bin.display());
+    println!("interval_secs={interval_secs}");
+    println!("stdout={}", stdout_path.display());
+    println!("stderr={}", stderr_path.display());
+    Ok(())
+}
+
+async fn run_avatar_remove_heartbeat(label: Option<String>, project: Option<String>) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let label = avatar_heartbeat_label(label, &project);
+    let plist_path = avatar_launchd_plist_path(&label)?;
+    let domain = avatar_launchd_domain()?;
+    let _ = launchctl_status_quiet(&["bootout", &domain, plist_path.to_str().unwrap_or_default()]);
+    if plist_path.exists() {
+        std::fs::remove_file(&plist_path)
+            .with_context(|| format!("remove {}", plist_path.display()))?;
+    }
+    println!("removed avatar heartbeat");
+    println!("label={label}");
+    println!("plist={}", plist_path.display());
+    Ok(())
+}
+
+async fn run_avatar_heartbeat_status(label: Option<String>, project: Option<String>) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let label = avatar_heartbeat_label(label, &project);
+    let domain = avatar_launchd_domain()?;
+    let target = format!("{domain}/{label}");
+    let output = std::process::Command::new("launchctl")
+        .args(["print", &target])
+        .output()
+        .with_context(|| format!("launchctl print {target}"))?;
+    if output.status.success() {
+        println!("label={label}");
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+    } else {
+        println!("label={label}");
+        println!("status=not_loaded");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.trim().is_empty() {
+            println!("launchctl={}", stderr.trim());
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_install_heartbeat_alert(
+    label: Option<String>,
+    project: Option<String>,
+    bin: Option<PathBuf>,
+    interval_secs: u64,
+    stale_secs: i64,
+    repeat_secs: i64,
+    notification: bool,
+    tts: bool,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    no_load: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let label = avatar_heartbeat_alert_label(label, &project);
+    let bin = match bin {
+        Some(bin) => bin,
+        None => avatar_default_heartbeat_bin()?,
+    };
+    let interval_secs = interval_secs.clamp(60, 3600);
+    let stale_secs = stale_secs.clamp(30, 86_400);
+    let repeat_secs = repeat_secs.clamp(0, 86_400);
+    let plist_path = avatar_launchd_plist_path(&label)?;
+    let stdout_path = avatar_launchd_log_path(&label, "out")?;
+    let stderr_path = avatar_launchd_log_path(&label, "err")?;
+
+    let mut program_args = vec![
+        bin.display().to_string(),
+        "avatar".to_string(),
+        "heartbeat-alert".to_string(),
+    ];
+    avatar_program_arg(&mut program_args, "--project", project.clone());
+    avatar_program_arg(&mut program_args, "--stale-secs", stale_secs.to_string());
+    avatar_program_arg(&mut program_args, "--repeat-secs", repeat_secs.to_string());
+    if !notification {
+        program_args.push("--no-notification".to_string());
+    }
+    if tts {
+        program_args.push("--tts".to_string());
+    }
+    if let Some(tts_voice) = tts_voice {
+        avatar_program_arg(&mut program_args, "--tts-voice", tts_voice);
+    }
+    if let Some(tts_rate) = tts_rate {
+        avatar_program_arg(&mut program_args, "--tts-rate", tts_rate.to_string());
+    }
+    program_args.push("--json".to_string());
+
+    let plist = avatar_heartbeat_plist(
+        &label,
+        &program_args,
+        interval_secs,
+        &stdout_path,
+        &stderr_path,
+    );
+    if dry_run {
+        print!("{plist}");
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(plist_path.parent().unwrap())
+        .with_context(|| format!("create {}", plist_path.parent().unwrap().display()))?;
+    std::fs::create_dir_all(stdout_path.parent().unwrap())
+        .with_context(|| format!("create {}", stdout_path.parent().unwrap().display()))?;
+    std::fs::write(&plist_path, plist)
+        .with_context(|| format!("write {}", plist_path.display()))?;
+
+    if no_load {
+        println!("wrote {}", plist_path.display());
+        println!("label={label}");
+        println!("load=false");
+        return Ok(());
+    }
+
+    let domain = avatar_launchd_domain()?;
+    let _ = launchctl_status_quiet(&["bootout", &domain, plist_path.to_str().unwrap_or_default()]);
+    run_launchctl(&[
+        "bootstrap",
+        &domain,
+        plist_path.to_str().unwrap_or_default(),
+    ])?;
+    let target = format!("{domain}/{label}");
+    run_launchctl(&["kickstart", "-k", &target])?;
+    println!("installed avatar heartbeat alert");
+    println!("label={label}");
+    println!("plist={}", plist_path.display());
+    println!("bin={}", bin.display());
+    println!("interval_secs={interval_secs}");
+    println!("stale_secs={stale_secs}");
+    println!("repeat_secs={repeat_secs}");
+    println!("notification={notification}");
+    println!("tts={tts}");
+    println!("stdout={}", stdout_path.display());
+    println!("stderr={}", stderr_path.display());
+    Ok(())
+}
+
+async fn run_avatar_remove_heartbeat_alert(
+    label: Option<String>,
+    project: Option<String>,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let label = avatar_heartbeat_alert_label(label, &project);
+    let plist_path = avatar_launchd_plist_path(&label)?;
+    let domain = avatar_launchd_domain()?;
+    let _ = launchctl_status_quiet(&["bootout", &domain, plist_path.to_str().unwrap_or_default()]);
+    if plist_path.exists() {
+        std::fs::remove_file(&plist_path)
+            .with_context(|| format!("remove {}", plist_path.display()))?;
+    }
+    println!("removed avatar heartbeat alert");
+    println!("label={label}");
+    println!("plist={}", plist_path.display());
+    Ok(())
+}
+
+async fn run_avatar_heartbeat_alert_status(
+    label: Option<String>,
+    project: Option<String>,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let label = avatar_heartbeat_alert_label(label, &project);
+    let domain = avatar_launchd_domain()?;
+    let target = format!("{domain}/{label}");
+    let output = std::process::Command::new("launchctl")
+        .args(["print", &target])
+        .output()
+        .with_context(|| format!("launchctl print {target}"))?;
+    if output.status.success() {
+        println!("label={label}");
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+    } else {
+        println!("label={label}");
+        println!("status=not_loaded");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.trim().is_empty() {
+            println!("launchctl={}", stderr.trim());
+        }
+    }
+    Ok(())
+}
+
+fn avatar_records(value: &Value) -> &[Value] {
+    value
+        .get("records")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn write_avatar_seed_jsonl(path: &PathBuf, records: &[Value]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let mut out = String::new();
+    for record in records {
+        out.push_str(&serde_json::to_string(record)?);
+        out.push('\n');
+    }
+    std::fs::write(path, out).with_context(|| format!("write {}", path.display()))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_seed_events(
+    label: Option<String>,
+    project: Option<String>,
+    input: Option<PathBuf>,
+    limit: usize,
+    include_preview: bool,
+    output: Option<PathBuf>,
+    print_jsonl: bool,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_seed::AvatarSeedEventsOptions {
+        label: label.as_deref(),
+        project: Some(&project),
+        input: input.as_deref(),
+        limit,
+        include_preview,
+    };
+    let payload = ab_bridge::avatar_seed::avatar_seed_events(&opts)?;
+    let records = avatar_records(&payload);
+    if let Some(path) = output.as_ref() {
+        write_avatar_seed_jsonl(path, records)?;
+    }
+    if print_jsonl {
+        for record in records {
+            println!("{}", serde_json::to_string(record)?);
+        }
+        return Ok(());
+    }
+    if as_json {
+        let mut payload = payload;
+        if let Some(path) = output.as_ref() {
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("output_path".to_string(), json!(path.to_string_lossy()));
+            }
+        }
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("avatar seed events");
+    println!(
+        "project={} label={}",
+        avatar_health_display(payload.get("project"), "agent-bridge"),
+        avatar_health_display(payload.get("label"), "-")
+    );
+    println!(
+        "events_path={} seen={} records={} preview_skips={} parse_skips={}",
+        avatar_health_display(payload.get("events_path"), "-"),
+        avatar_health_display(payload.get("events_seen"), "0"),
+        avatar_health_display(payload.get("records_count"), "0"),
+        avatar_health_display(payload.get("preview_skips"), "0"),
+        avatar_health_display(payload.get("parse_skips"), "0")
+    );
+    println!(
+        "substrate_input={} target={}",
+        avatar_health_display(payload.get("substrate_input"), "-"),
+        avatar_health_display(payload.get("target"), "-")
+    );
+    if let Some(path) = output.as_ref() {
+        println!("output={}", path.display());
+    }
+    for (i, record) in records.iter().take(5).enumerate() {
+        println!(
+            "{:>2}. kind={} key={} ts={}",
+            i + 1,
+            avatar_health_display(record.get("kind"), "-"),
+            avatar_health_display(record.get("key"), "-"),
+            avatar_health_display(record.get("ts"), "-")
+        );
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_cortex_replay(
+    label: Option<String>,
+    project: Option<String>,
+    input: Option<PathBuf>,
+    output: Option<PathBuf>,
+    limit: usize,
+    include_preview: bool,
+    use_hash: bool,
+    n: usize,
+    d: usize,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::AvatarCortexReplayOptions {
+        label: label.as_deref(),
+        project: Some(&project),
+        input: input.as_deref(),
+        output: output.as_deref(),
+        limit,
+        include_preview,
+        use_hash,
+        n,
+        d,
+    };
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_replay(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    println!("avatar cortex replay");
+    println!(
+        "cortex_id={} mode={} encoder={} n={} d={}",
+        avatar_health_display(payload.get("cortex_id"), "xiao-shu"),
+        avatar_health_display(payload.get("mode"), "shadow_only"),
+        avatar_health_display(payload.get("encoder"), "hash"),
+        avatar_health_display(payload.get("n"), "64"),
+        avatar_health_display(payload.get("d"), "64")
+    );
+    println!(
+        "records={} perceived={} skipped={} snapshot_rows={}",
+        avatar_health_display(payload.get("records_count"), "0"),
+        avatar_health_display(payload.get("perceived"), "0"),
+        avatar_health_display(payload.get("skipped"), "0"),
+        avatar_health_display(payload.get("snapshot_rows"), "0")
+    );
+    println!(
+        "snapshot={} latest_long_fingerprint={}",
+        avatar_health_display(payload.get("snapshot_path"), "-"),
+        avatar_health_display(payload.get("latest_long_fingerprint"), "-")
+    );
+    println!(
+        "global_substrate_mutated={} no_daemon_restart={} no_sibling_activation={}",
+        avatar_health_display(payload.get("mutates_global_substrate"), "false"),
+        avatar_health_display(
+            payload
+                .get("aiot_alignment")
+                .and_then(|v| v.get("no_daemon_restart")),
+            "true"
+        ),
+        avatar_health_display(
+            payload
+                .get("aiot_alignment")
+                .and_then(|v| v.get("no_sibling_activation")),
+            "true"
+        )
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_install_cortex_runner(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    bin: Option<PathBuf>,
+    interval_secs: u64,
+    output: Option<PathBuf>,
+    limit: usize,
+    include_preview: bool,
+    use_hash: bool,
+    n: usize,
+    d: usize,
+    no_load: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let label = avatar_cortex_runner_label(label, &project);
+    let heartbeat_label = avatar_heartbeat_label(heartbeat_label, &project);
+    let bin = match bin {
+        Some(bin) => bin,
+        None => avatar_default_heartbeat_bin()?,
+    };
+    let interval_secs = interval_secs.clamp(120, 86_400);
+    let plist_path = avatar_launchd_plist_path(&label)?;
+    let stdout_path = avatar_launchd_log_path(&label, "out")?;
+    let stderr_path = avatar_launchd_log_path(&label, "err")?;
+
+    let mut program_args = vec![
+        bin.display().to_string(),
+        "avatar".to_string(),
+        "cortex-replay".to_string(),
+    ];
+    avatar_program_arg(&mut program_args, "--project", project.clone());
+    avatar_program_arg(&mut program_args, "--label", heartbeat_label.clone());
+    avatar_program_arg(&mut program_args, "--limit", limit.to_string());
+    avatar_program_arg(&mut program_args, "--n", n.to_string());
+    avatar_program_arg(&mut program_args, "--d", d.to_string());
+    if include_preview {
+        program_args.push("--include-preview".to_string());
+    }
+    if !use_hash {
+        program_args.push("--onnx".to_string());
+    }
+    if let Some(output) = output.as_ref() {
+        avatar_program_arg(&mut program_args, "--output", output.display().to_string());
+    }
+    program_args.push("--json".to_string());
+
+    let plist = avatar_heartbeat_plist(
+        &label,
+        &program_args,
+        interval_secs,
+        &stdout_path,
+        &stderr_path,
+    );
+    if dry_run {
+        print!("{plist}");
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(plist_path.parent().unwrap())
+        .with_context(|| format!("create {}", plist_path.parent().unwrap().display()))?;
+    std::fs::create_dir_all(stdout_path.parent().unwrap())
+        .with_context(|| format!("create {}", stdout_path.parent().unwrap().display()))?;
+    std::fs::write(&plist_path, plist)
+        .with_context(|| format!("write {}", plist_path.display()))?;
+
+    if no_load {
+        println!("wrote {}", plist_path.display());
+        println!("label={label}");
+        println!("load=false");
+        return Ok(());
+    }
+
+    let domain = avatar_launchd_domain()?;
+    let _ = launchctl_status_quiet(&["bootout", &domain, plist_path.to_str().unwrap_or_default()]);
+    run_launchctl(&[
+        "bootstrap",
+        &domain,
+        plist_path.to_str().unwrap_or_default(),
+    ])?;
+    let target = format!("{domain}/{label}");
+    run_launchctl(&["kickstart", "-k", &target])?;
+    println!("installed avatar cortex runner");
+    println!("label={label}");
+    println!("heartbeat_label={heartbeat_label}");
+    println!("plist={}", plist_path.display());
+    println!("bin={}", bin.display());
+    println!("interval_secs={interval_secs}");
+    println!("limit={limit}");
+    println!("encoder={}", if use_hash { "hash" } else { "onnx" });
+    println!("n={n}");
+    println!("d={d}");
+    if let Some(output) = output.as_ref() {
+        println!("output={}", output.display());
+    }
+    println!("stdout={}", stdout_path.display());
+    println!("stderr={}", stderr_path.display());
+    Ok(())
+}
+
+async fn run_avatar_remove_cortex_runner(
+    label: Option<String>,
+    project: Option<String>,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let label = avatar_cortex_runner_label(label, &project);
+    let plist_path = avatar_launchd_plist_path(&label)?;
+    let domain = avatar_launchd_domain()?;
+    let _ = launchctl_status_quiet(&["bootout", &domain, plist_path.to_str().unwrap_or_default()]);
+    if plist_path.exists() {
+        std::fs::remove_file(&plist_path)
+            .with_context(|| format!("remove {}", plist_path.display()))?;
+    }
+    println!("removed avatar cortex runner");
+    println!("label={label}");
+    println!("plist={}", plist_path.display());
+    Ok(())
+}
+
+async fn run_avatar_cortex_status(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_status(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let launchd = payload.get("launchd").unwrap_or(&Value::Null);
+    let snapshot = payload.get("snapshot").unwrap_or(&Value::Null);
+    let latest = snapshot.get("latest_long").unwrap_or(&Value::Null);
+    println!("avatar cortex status");
+    println!(
+        "label={} loaded={} state={} runs={} last_exit_code={} interval_secs={}",
+        avatar_health_display(payload.get("label"), "-"),
+        avatar_health_display(launchd.get("loaded"), "false"),
+        avatar_health_display(launchd.get("state"), "-"),
+        avatar_health_display(launchd.get("runs"), "-"),
+        avatar_health_display(launchd.get("last_exit_code"), "-"),
+        avatar_health_display(launchd.get("run_interval_secs"), "-")
+    );
+    println!(
+        "snapshot={} exists={} rows={} long_rows={} file_bytes={}",
+        avatar_health_display(snapshot.get("path"), "-"),
+        avatar_health_display(snapshot.get("exists"), "false"),
+        avatar_health_display(snapshot.get("total_rows"), "0"),
+        avatar_health_display(snapshot.get("long_rows"), "0"),
+        avatar_health_display(snapshot.get("file_bytes"), "-")
+    );
+    println!(
+        "latest_long_step={} fingerprint={}",
+        avatar_health_display(latest.get("step"), "-"),
+        avatar_health_display(latest.get("fingerprint"), "-")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_preview(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_preview(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let learning = payload.get("learning_state").unwrap_or(&Value::Null);
+    let policy = payload.get("behavior_policy").unwrap_or(&Value::Null);
+    let preview = payload.get("preview").unwrap_or(&Value::Null);
+    println!("avatar cortex voice preview");
+    println!(
+        "state={} reason={} badge={} action={}",
+        avatar_health_display(learning.get("state"), "-"),
+        avatar_health_display(learning.get("reason"), "-"),
+        avatar_health_display(policy.get("badge"), "-"),
+        avatar_health_display(policy.get("recommended_action"), "-")
+    );
+    println!(
+        "would_say={} voice_allowed={} notification_allowed={} emits_audio={} emits_notification={}",
+        avatar_health_display(preview.get("text"), "-"),
+        avatar_health_display(preview.get("voice_allowed"), "false"),
+        avatar_health_display(preview.get("notification_allowed"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false"),
+        avatar_health_display(payload.get("emits_notification"), "false")
+    );
+    println!(
+        "gate={} voice_reason={} notification_reason={}",
+        avatar_health_display(preview.get("requires_explicit_emit_gate"), "true"),
+        avatar_health_display(preview.get("voice_reason"), "sparse_voice_policy"),
+        avatar_health_display(preview.get("notification_reason"), "read_only_panel_policy")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_voice_gate(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    enabled: bool,
+    force: bool,
+    cooldown_secs: i64,
+    reason: Option<String>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::AvatarCortexVoiceGateOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        enabled,
+        force,
+        cooldown_secs,
+        reason: reason.as_deref(),
+    };
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_gate_dry_run(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let gate = payload.get("gate").unwrap_or(&Value::Null);
+    let required = payload.get("required").unwrap_or(&Value::Null);
+    let cooldown = payload.get("cooldown").unwrap_or(&Value::Null);
+    let preview = payload.get("preview").unwrap_or(&Value::Null);
+    println!("avatar cortex voice gate dry-run");
+    println!(
+        "enabled={} force={} dry_run={} would_emit={} emits_audio={} emits_notification={}",
+        avatar_health_display(gate.get("enabled"), "false"),
+        avatar_health_display(gate.get("force"), "false"),
+        avatar_health_display(payload.get("dry_run"), "true"),
+        avatar_health_display(payload.get("would_emit"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false"),
+        avatar_health_display(payload.get("emits_notification"), "false")
+    );
+    println!(
+        "blocked={} reasons={} preview={}",
+        avatar_health_display(gate.get("blocked"), "true"),
+        avatar_health_display_list(gate.get("blocked_reasons"), "none"),
+        avatar_health_display(preview.get("text"), "-")
+    );
+    println!(
+        "required enabled={} reason_present={} voice_policy_allowed={} cooldown_clear={}",
+        avatar_health_display(required.get("explicit_enabled"), "false"),
+        avatar_health_display(required.get("operator_reason_present"), "false"),
+        avatar_health_display(required.get("voice_policy_allowed"), "false"),
+        avatar_health_display(required.get("cooldown_clear"), "false")
+    );
+    println!(
+        "operator_reason={} cooldown_secs={} cooldown_active={}",
+        avatar_health_display(gate.get("operator_reason"), "-"),
+        avatar_health_display(cooldown.get("cooldown_secs"), "300"),
+        avatar_health_display(cooldown.get("active"), "false")
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_cortex_voice_emit(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    enabled: bool,
+    force: bool,
+    cooldown_secs: i64,
+    reason: Option<String>,
+    allow_policy_override: bool,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::AvatarCortexVoiceEmitOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        enabled,
+        force,
+        cooldown_secs,
+        reason: reason.as_deref(),
+        allow_policy_override,
+        tts_voice: tts_voice.as_deref(),
+        tts_rate,
+    };
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_emit(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let gate = payload.get("gate").unwrap_or(&Value::Null);
+    let tts = payload.get("tts").unwrap_or(&Value::Null);
+    println!("avatar cortex voice emit");
+    println!(
+        "enabled={} policy_override={} would_emit={} emitted={} emits_audio={}",
+        avatar_health_display(gate.get("gate").and_then(|v| v.get("enabled")), "false"),
+        avatar_health_display(
+            gate.get("gate")
+                .and_then(|v| v.get("allow_policy_override")),
+            "false"
+        ),
+        avatar_health_display(payload.get("would_emit"), "false"),
+        avatar_health_display(payload.get("emitted"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false")
+    );
+    println!(
+        "blocked={} reasons={} preview={}",
+        avatar_health_display(gate.get("gate").and_then(|v| v.get("blocked")), "true"),
+        avatar_health_display_list(
+            gate.get("gate").and_then(|v| v.get("blocked_reasons")),
+            "none"
+        ),
+        avatar_health_display(gate.get("preview").and_then(|v| v.get("text")), "-")
+    );
+    println!(
+        "tts_ok={} voice={} rate={}",
+        avatar_health_display(tts.get("ok"), "-"),
+        avatar_health_display(tts.get("voice"), "-"),
+        avatar_health_display(tts.get("rate"), "-")
+    );
+    println!(
+        "state={} events={}",
+        avatar_health_display(payload.get("state_path"), "-"),
+        avatar_health_display(payload.get("events_path"), "-")
+    );
+    Ok(())
+}
+
+fn avatar_health_display(value: Option<&Value>, fallback: &str) -> String {
+    match value {
+        Some(Value::String(s)) if !s.is_empty() => s.clone(),
+        Some(Value::Number(n)) => n.to_string(),
+        Some(Value::Bool(b)) => b.to_string(),
+        _ => fallback.to_string(),
+    }
+}
+
+fn avatar_health_display_list(value: Option<&Value>, fallback: &str) -> String {
+    match value.and_then(Value::as_array) {
+        Some(items) if !items.is_empty() => items
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(","),
+        _ => fallback.to_string(),
+    }
+}
+
+async fn run_avatar_heartbeat_health(
+    label: Option<String>,
+    project: Option<String>,
+    stale_secs: i64,
+    as_json: bool,
+) -> Result<()> {
+    let store = SqliteStore::open(&default_db_path())
+        .await
+        .context("open state.db")?;
+    let payload = ab_bridge::avatar_health::heartbeat_health(
+        &store,
+        label.as_deref(),
+        project.as_deref(),
+        stale_secs,
+    )
+    .await?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    let launchd = payload.get("launchd").unwrap_or(&Value::Null);
+    let binary = payload.get("binary").unwrap_or(&Value::Null);
+    let presence = payload.get("presence").unwrap_or(&Value::Null);
+    println!("avatar heartbeat health");
+    println!(
+        "status={} healthy={} project={} label={}",
+        avatar_health_display(payload.get("status"), "unknown"),
+        avatar_health_display(payload.get("healthy"), "false"),
+        avatar_health_display(payload.get("project"), "agent-bridge"),
+        avatar_health_display(payload.get("label"), "-")
+    );
+    println!(
+        "summary={}",
+        avatar_health_display(payload.get("summary"), "-")
+    );
+    println!(
+        "launchd.loaded={} state={} runs={} last_exit_code={} interval_secs={}",
+        avatar_health_display(launchd.get("loaded"), "false"),
+        avatar_health_display(launchd.get("state"), "-"),
+        avatar_health_display(launchd.get("runs"), "-"),
+        avatar_health_display(launchd.get("last_exit_code"), "-"),
+        avatar_health_display(launchd.get("run_interval_secs"), "-")
+    );
+    println!(
+        "binary.path={} exists={} supports_sync_presence={} supports_heartbeat_health={} missing_command={}",
+        avatar_health_display(binary.get("path"), "-"),
+        avatar_health_display(binary.get("exists"), "false"),
+        avatar_health_display(binary.get("supports_sync_presence"), "false"),
+        avatar_health_display(binary.get("supports_heartbeat_health"), "false"),
+        avatar_health_display(binary.get("missing_command"), "false")
+    );
+    println!(
+        "presence.exists={} fresh={} age_secs={} heartbeat={}",
+        avatar_health_display(presence.get("exists"), "false"),
+        avatar_health_display(presence.get("fresh"), "false"),
+        avatar_health_display(presence.get("age_secs"), "-"),
+        avatar_health_display(presence.get("last_heartbeat_at"), "-")
+    );
+    if let Some(avatar) = presence.get("avatar").filter(|v| !v.is_null()) {
+        println!(
+            "avatar.runtime={} avatar_id={} mode={} activity={} focus={}",
+            avatar_health_display(avatar.get("runtime"), "unknown-runtime"),
+            avatar_health_display(avatar.get("avatar_id"), "unknown-avatar"),
+            avatar_health_display(avatar.get("mode"), "unknown"),
+            avatar_health_display(avatar.get("activity_state"), "-"),
+            avatar_health_display(avatar.get("focus"), "-")
+        );
+    }
+    println!(
+        "plist={} stdout={} stderr={}",
+        avatar_health_display(launchd.get("plist_path"), "-"),
+        avatar_health_display(launchd.get("stdout_path"), "-"),
+        avatar_health_display(launchd.get("stderr_path"), "-")
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_heartbeat_alert(
+    label: Option<String>,
+    project: Option<String>,
+    stale_secs: i64,
+    force: bool,
+    preview: bool,
+    notification: bool,
+    tts: bool,
+    repeat_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    as_json: bool,
+) -> Result<()> {
+    let store = SqliteStore::open(&default_db_path())
+        .await
+        .context("open state.db")?;
+    let opts = ab_bridge::avatar_alert::HeartbeatAlertOptions {
+        label: label.as_deref(),
+        project: project.as_deref(),
+        stale_secs,
+        force,
+        preview,
+        notification,
+        tts,
+        repeat_secs,
+        tts_voice: tts_voice.as_deref(),
+        tts_rate,
+    };
+    let payload = ab_bridge::avatar_alert::heartbeat_alert(&store, &opts).await?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let event = payload.get("event").unwrap_or(&Value::Null);
+    let health = event.get("health").unwrap_or(&Value::Null);
+    println!("avatar heartbeat alert");
+    println!(
+        "status={} healthy={} emitted={} reason={}",
+        avatar_health_display(health.get("status"), "unknown"),
+        avatar_health_display(health.get("healthy"), "false"),
+        avatar_health_display(event.get("emitted"), "false"),
+        avatar_health_display(event.get("reason"), "-")
+    );
+    println!(
+        "event_key={}",
+        avatar_health_display(event.get("event_key"), "-")
+    );
+    println!(
+        "state={} events={}",
+        avatar_health_display(payload.get("state_path"), "-"),
+        avatar_health_display(payload.get("events_path"), "-")
+    );
+    Ok(())
+}
+
 /// **v22** — Substrate stats CLI. Reads the in-process global installed by
 /// `ab_seed_bridge::install_default()`. If substrate is not installed (env
 /// not set, or process didn't install), reports config + the disabled state
@@ -2161,10 +4255,7 @@ async fn run_avatar_surface(
 /// `default_snapshot_path()`, and reports row counts / latest fingerprints
 /// / file size. Snapshot section appears in both pretty and JSON output
 /// when a readable file is found.
-async fn run_substrate_stats(
-    path_override: Option<PathBuf>,
-    as_json: bool,
-) -> Result<()> {
+async fn run_substrate_stats(path_override: Option<PathBuf>, as_json: bool) -> Result<()> {
     use ab_seed_bridge::snapshot;
     let env_on = ab_seed_bridge::env_enabled();
     let installed = ab_seed_bridge::current();
@@ -2205,7 +4296,11 @@ async fn run_substrate_stats(
     println!(
         "env: {var}={state}",
         var = ab_seed_bridge::SUBSTRATE_ENV_VAR,
-        state = if env_on { "enabled" } else { "unset (substrate disabled)" }
+        state = if env_on {
+            "enabled"
+        } else {
+            "unset (substrate disabled)"
+        }
     );
     match stats {
         Some(s) => {
@@ -2239,8 +4334,7 @@ async fn run_substrate_stats(
                 None => println!(),
             }
             if snapshot_summary.is_none() {
-                println!(
-                    "(set `AB_SUBSTRATE=1` in env and re-launch the long-lived process;");
+                println!("(set `AB_SUBSTRATE=1` in env and re-launch the long-lived process;");
                 println!(" phase 2.2 ships snapshot persistence to");
                 println!(" `$HOME/.local/share/agent-bridge/substrate.parquet`)");
             }
@@ -2298,7 +4392,7 @@ fn summarize_snapshot_rows(
     file_bytes: Option<u64>,
     rows: &[ab_seed_bridge::SnapshotRow],
 ) -> SnapshotSummary {
-    use ab_seed_bridge::{snapshot, SnapshotTier};
+    use ab_seed_bridge::{SnapshotTier, snapshot};
     let mut hot_rows = 0usize;
     let mut long_rows = 0usize;
     for r in rows {
@@ -2367,7 +4461,7 @@ async fn run_dream_substrate_corr_audit(
     as_json: bool,
 ) -> Result<()> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
     use std::collections::HashMap;
 
     let snap_path = snapshot_path_override.or_else(snapshot::default_snapshot_path);
@@ -2375,7 +4469,9 @@ async fn run_dream_substrate_corr_audit(
         Some(p) if p.exists() => {
             let rows = snapshot::read_all(p)
                 .with_context(|| format!("read substrate snapshot {}", p.display()))?;
-            rows.into_iter().rev().find(|r| matches!(r.tier, SnapshotTier::Long))
+            rows.into_iter()
+                .rev()
+                .find(|r| matches!(r.tier, SnapshotTier::Long))
         }
         _ => None,
     };
@@ -2410,9 +4506,7 @@ async fn run_dream_substrate_corr_audit(
                 (other, e.weight)
             })
             .collect();
-        cofires_pairs.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        cofires_pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let mut seen_co = std::collections::HashSet::new();
         cofires_pairs.retain(|(k, _)| seen_co.insert(k.clone()));
 
@@ -2572,7 +4666,10 @@ async fn run_substrate_neighbors(
         Some(p) => p,
         None => {
             if as_json {
-                println!("{}", serde_json::json!({"neighbors": [], "reason": "no snapshot path"}));
+                println!(
+                    "{}",
+                    serde_json::json!({"neighbors": [], "reason": "no snapshot path"})
+                );
             } else {
                 println!("# v22 substrate neighbors");
                 println!("(no snapshot path configured; rerun with --path)");
@@ -2598,7 +4695,10 @@ async fn run_substrate_neighbors(
     }
     let rows = snapshot::read_all(&path)
         .with_context(|| format!("read substrate snapshot {}", path.display()))?;
-    let latest_long = rows.iter().rev().find(|r| matches!(r.tier, SnapshotTier::Long));
+    let latest_long = rows
+        .iter()
+        .rev()
+        .find(|r| matches!(r.tier, SnapshotTier::Long));
     let neighbors = match latest_long {
         Some(row) => ab_seed_bridge::neighbors_from_snapshot(row, &key, k),
         None => Vec::new(),
@@ -2623,7 +4723,9 @@ async fn run_substrate_neighbors(
     println!("# v22 substrate neighbors of {}", key);
     match latest_long {
         Some(row) => println!("(source: snapshot step={} ts={})", row.step, row.cycle_ts),
-        None => println!("(no Long-tier snapshot row yet — substrate needs ≥100 perception events)"),
+        None => {
+            println!("(no Long-tier snapshot row yet — substrate needs ≥100 perception events)")
+        }
     }
     if neighbors.is_empty() {
         println!("(no neighbors)");
@@ -2691,9 +4793,8 @@ async fn run_substrate_replay(
         }
     };
     if output.exists() {
-        std::fs::remove_file(&output).with_context(|| {
-            format!("clearing prior replay output at {}", output.display())
-        })?;
+        std::fs::remove_file(&output)
+            .with_context(|| format!("clearing prior replay output at {}", output.display()))?;
     }
 
     // --- 3. Build SeedBackend on chosen inner backend ---
@@ -2738,11 +4839,15 @@ async fn run_substrate_replay(
 
     // --- 6. Re-read snapshot to count rows + latest fingerprint ---
     let rows = snapshot::read_all(&output).unwrap_or_default();
-    let latest_long = rows.iter().rev().find(|r| matches!(r.tier, SnapshotTier::Long));
+    let latest_long = rows
+        .iter()
+        .rev()
+        .find(|r| matches!(r.tier, SnapshotTier::Long));
     let latest_long_fp = latest_long.map(snapshot::fingerprint);
 
     let warnings = vec![
-        "NeuronGrid::new / step use rand::thread_rng() — cross-machine sha256 will differ".to_string(),
+        "NeuronGrid::new / step use rand::thread_rng() — cross-machine sha256 will differ"
+            .to_string(),
         format!("--seed {seed} logged but not yet effective (AiOT crate pending)"),
     ];
 
@@ -2769,7 +4874,11 @@ async fn run_substrate_replay(
 
     println!("# v22 Phase 3 (B) — substrate replay");
     println!("log              : {}", log_path.display());
-    println!("events           : parsed={} skipped={}", events.len(), parse_skips);
+    println!(
+        "events           : parsed={} skipped={}",
+        events.len(),
+        parse_skips
+    );
     println!(
         "config           : n={n}  d={d}  encoder={}",
         if use_hash { "hash" } else { "onnx" }
@@ -2902,7 +5011,11 @@ async fn run_substrate_snapshot(
     println!();
     for r in &rows {
         let fp = ab_seed_bridge::snapshot::fingerprint(r);
-        let fp_short = if fp.len() >= 16 { &fp[..16] } else { fp.as_str() };
+        let fp_short = if fp.len() >= 16 {
+            &fp[..16]
+        } else {
+            fp.as_str()
+        };
         println!(
             "step={:<6} ts={} tier={:<4} n_alive={:<4} surprise(s/l)={:.4}/{:.4} logits={:<6} fp={}",
             r.step,
@@ -2932,7 +5045,8 @@ fn mean_f32(xs: &[f32]) -> f32 {
 /// (or vice-versa) so the install instructions stay consistent.
 fn shell_init_snippet(shell: ShellKind) -> &'static str {
     match shell {
-        ShellKind::Bash => "\
+        ShellKind::Bash => {
+            "\
 # agent-bridge — OSC 133 shell integration (bash)
 # See: docs/SHELL-INTEGRATION-OSC133.md
 __ab_osc133_preexec() { printf '\\e]133;C\\a'; }
@@ -2944,8 +5058,10 @@ __ab_osc133_precmd() {
 }
 trap '__ab_osc133_preexec' DEBUG
 PROMPT_COMMAND=\"__ab_osc133_precmd${PROMPT_COMMAND:+; $PROMPT_COMMAND}\"
-",
-        ShellKind::Zsh => "\
+"
+        }
+        ShellKind::Zsh => {
+            "\
 # agent-bridge — OSC 133 shell integration (zsh)
 # See: docs/SHELL-INTEGRATION-OSC133.md
 __ab_osc133_preexec() { print -nP '\\e]133;C\\a'; }
@@ -2958,8 +5074,10 @@ PS1='%{$(__ab_osc133_prompt_b)%}'\"$PS1\"
 autoload -Uz add-zsh-hook
 add-zsh-hook preexec __ab_osc133_preexec
 add-zsh-hook precmd __ab_osc133_precmd
-",
-        ShellKind::Fish => "\
+"
+        }
+        ShellKind::Fish => {
+            "\
 # agent-bridge — OSC 133 shell integration (fish)
 # See: docs/SHELL-INTEGRATION-OSC133.md
 function __ab_osc133_preexec --on-event fish_preexec
@@ -2976,7 +5094,8 @@ function fish_prompt_osc133 --description 'wrap fish_prompt with OSC 133 B marke
     end
 end
 fish_prompt_osc133
-",
+"
+        }
     }
 }
 
@@ -2985,7 +5104,7 @@ fish_prompt_osc133
 /// (or raw JSON with `--json`). The β trigger metric (top10/median ratio)
 /// is annotated inline so the user / future-Claude can read it at a glance.
 async fn run_dream_stats(as_json: bool) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -3086,10 +5205,7 @@ fn short_key(s: &str, max: usize) -> String {
 /// a sane convention: branch `session/<slug>`, dir `.worktrees/session-<slug>/`.
 /// Prints status to stderr; the final stdout line is the worktree path so
 /// callers can `cd "$(agent-bridge worktree-session new | tail -1)"`.
-async fn run_worktree_session_new(
-    name: Option<&str>,
-    base: Option<&str>,
-) -> Result<()> {
+async fn run_worktree_session_new(name: Option<&str>, base: Option<&str>) -> Result<()> {
     use std::process::Command;
 
     // Resolve repo root from cwd. Fall back to env-overridden $AGENT_BRIDGE_REPO
@@ -3137,8 +5253,7 @@ async fn run_worktree_session_new(
     // Make sure parent dir exists; `git worktree add` won't create
     // .worktrees/ itself.
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| anyhow::anyhow!("mkdir {parent:?}: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| anyhow::anyhow!("mkdir {parent:?}: {e}"))?;
     }
 
     let base_ref = base.unwrap_or("HEAD");
@@ -3166,7 +5281,9 @@ async fn run_worktree_session_new(
         eprint!("{}", String::from_utf8_lossy(&out.stdout));
     }
     eprintln!("  ✓ worktree created");
-    eprintln!("  next: cd to the printed path; work + commit there; `git worktree remove` when merged");
+    eprintln!(
+        "  next: cd to the printed path; work + commit there; `git worktree remove` when merged"
+    );
     eprintln!();
     // Last stdout line = the path, so the shell idiom works:
     //   cd "$(agent-bridge worktree-session new --name fix-foo | tail -1)"
@@ -3241,7 +5358,10 @@ async fn run_worktree_session_list() -> Result<()> {
         shown += 1;
     }
     if shown == 0 {
-        eprintln!("(no session worktrees under {})", repo_root.join(".worktrees").display());
+        eprintln!(
+            "(no session worktrees under {})",
+            repo_root.join(".worktrees").display()
+        );
     }
     Ok(())
 }
@@ -3251,7 +5371,7 @@ async fn run_worktree_session_list() -> Result<()> {
 /// This is vision principle 5's literal landing: a measurable anchor for
 /// "today-self vs last-week-self" across the non-continuous medium.
 async fn run_dream_identity(days: u32, as_json: bool) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     if days == 0 {
@@ -3289,9 +5409,7 @@ async fn run_dream_identity(days: u32, as_json: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!(
-        "# v21 — Identity continuity (last {days}d vs prior {days}d)"
-    );
+    println!("# v21 — Identity continuity (last {days}d vs prior {days}d)");
     println!("DB: {}", path.display());
     println!();
 
@@ -3452,7 +5570,7 @@ async fn run_dream_promote(
     tier: u8,
     tier2_edge: &str,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
     use std::collections::HashSet;
 
     // Tier semantics:
@@ -3546,7 +5664,11 @@ async fn run_dream_promote(
 
         if existing.contains(&pair) {
             if dry_run {
-                let reason = if tier == 2 { "edge already exists" } else { "cofires already exists" };
+                let reason = if tier == 2 {
+                    "edge already exists"
+                } else {
+                    "cofires already exists"
+                };
                 println!(
                     "  SKIP    ({:>2} fires)  {}  ↔  {}    [{reason}]",
                     c.count,
@@ -3601,10 +5723,7 @@ async fn run_dream_promote(
                     });
                 }
                 Err(e) => {
-                    eprintln!(
-                        "  ✗ ({} fires)  {} ↔ {}    [{e}]",
-                        c.count, pair.0, pair.1
-                    );
+                    eprintln!("  ✗ ({} fires)  {} ↔ {}    [{e}]", c.count, pair.0, pair.1);
                     decisions.push(PromoteDecision {
                         key_a: pair.0,
                         key_b: pair.1,
@@ -3619,7 +5738,12 @@ async fn run_dream_promote(
 
     let promoted = decisions
         .iter()
-        .filter(|d| matches!(d.status, PromoteStatus::Promoted | PromoteStatus::WouldPromote))
+        .filter(|d| {
+            matches!(
+                d.status,
+                PromoteStatus::Promoted | PromoteStatus::WouldPromote
+            )
+        })
         .count();
     let skipped = decisions
         .iter()
@@ -3632,24 +5756,23 @@ async fn run_dream_promote(
 
     println!();
     if dry_run {
-        println!(
-            "(dry run — no writes)  would promote {promoted}, skip {skipped}"
-        );
+        println!("(dry run — no writes)  would promote {promoted}, skip {skipped}");
     } else if errors == 0 {
-        let skip_reason = if tier == 2 { "edge already exists" } else { "cofires already exists" };
+        let skip_reason = if tier == 2 {
+            "edge already exists"
+        } else {
+            "cofires already exists"
+        };
         println!(
             "✓ promoted {promoted} pairs as `{primary_edge_type}`, skipped {skipped} ({skip_reason})"
         );
     } else {
-        println!(
-            "promoted {promoted}, skipped {skipped}, FAILED {errors} — see stderr"
-        );
+        println!("promoted {promoted}, skipped {skipped}, FAILED {errors} — see stderr");
     }
 
     if let Some(p) = html_path {
         let html = render_promote_html(min_count, limit, dry_run, &path, &decisions);
-        std::fs::write(p, html)
-            .map_err(|e| anyhow::anyhow!("write html report to {p:?}: {e}"))?;
+        std::fs::write(p, html).map_err(|e| anyhow::anyhow!("write html report to {p:?}: {e}"))?;
         println!("html report: {}", p.display());
     }
     Ok(())
@@ -3679,7 +5802,12 @@ fn render_promote_html(
     let total = decisions.len();
     let promoted = decisions
         .iter()
-        .filter(|d| matches!(d.status, PromoteStatus::Promoted | PromoteStatus::WouldPromote))
+        .filter(|d| {
+            matches!(
+                d.status,
+                PromoteStatus::Promoted | PromoteStatus::WouldPromote
+            )
+        })
         .count();
     let skipped = decisions
         .iter()
@@ -3701,11 +5829,7 @@ fn render_promote_html(
     let mut strength_map = String::new();
     for (i, d) in decisions.iter().enumerate() {
         let cls = chip_class(&d.status, d.weight);
-        let label = format!(
-            "{} ↔ {}",
-            short_key(&d.key_a, 24),
-            short_key(&d.key_b, 24)
-        );
+        let label = format!("{} ↔ {}", short_key(&d.key_a, 24), short_key(&d.key_b, 24));
         let title = format!(
             "{} ↔ {} — {} fires, w={:.2}",
             d.key_a, d.key_b, d.count, d.weight
@@ -3730,10 +5854,9 @@ fn render_promote_html(
             PromoteStatus::Failed(_) => ("FAILED", "status-failed"),
         };
         let err_block = match &d.status {
-            PromoteStatus::Failed(msg) => format!(
-                r#"<div class="error-msg">{}</div>"#,
-                html_escape(msg)
-            ),
+            PromoteStatus::Failed(msg) => {
+                format!(r#"<div class="error-msg">{}</div>"#, html_escape(msg))
+            }
             _ => String::new(),
         };
         let weight_pct = (d.weight * 100.0).round() as u32;
@@ -4051,10 +6174,8 @@ fn render_codebase_report_html(
         .collect::<String>();
 
     // Split orphans into high-confidence + likely-FP for visual demotion.
-    let (orphan_real, orphan_fp): (Vec<_>, Vec<_>) = stats
-        .orphan_functions
-        .iter()
-        .partition(|o| !o.likely_fp);
+    let (orphan_real, orphan_fp): (Vec<_>, Vec<_>) =
+        stats.orphan_functions.iter().partition(|o| !o.likely_fp);
     let orphan_rows = orphan_real
         .iter()
         .enumerate()
@@ -4319,7 +6440,7 @@ async fn run_dream_decay_unused(
     floor: f64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
 
     let window_days = window_days.max(0.0);
     let step = step.clamp(0.0, 1.0);
@@ -4350,9 +6471,7 @@ async fn run_dream_decay_unused(
 
     println!("# Phase 2.x #8 — read-recency importance decay");
     println!("DB: {}", path.display());
-    println!(
-        "window: >{window_days:.1}d unused · step: {step:.3} · floor: {floor:.3}"
-    );
+    println!("window: >{window_days:.1}d unused · step: {step:.3} · floor: {floor:.3}");
     println!();
     println!("candidates       : {}", stats.candidates);
     println!("decayed          : {}", stats.decayed);
@@ -4383,7 +6502,7 @@ async fn run_dream_reinforce_active(
     ceiling: f64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
 
     let window_days = window_days.max(0.0);
     let step = step.clamp(0.0, 1.0);
@@ -4442,7 +6561,7 @@ async fn run_dream_reinforce_active(
 /// longitudinal study: re-run weekly, compare. If the closure works,
 /// `spearman_r` should drift from ≈ 0 (decay-flattened) toward 0.4+.
 async fn run_dream_signal_fidelity(top_n: u32, as_json: bool) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -4543,9 +6662,7 @@ async fn run_dream_signal_fidelity(top_n: u32, as_json: bool) -> Result<()> {
     if stats.total_active >= 10 {
         println!();
         if stats.spearman_r.is_nan() {
-            println!(
-                "verdict: signal undefined — too few rows or zero variance."
-            );
+            println!("verdict: signal undefined — too few rows or zero variance.");
         } else if stats.spearman_r.abs() < 0.1 {
             println!(
                 "verdict: importance is noise — ranking does NOT predict access. \
@@ -4578,7 +6695,7 @@ async fn run_dream_prune_coact_noise(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
 
     let max_count = max_count.max(0);
     let older_than_days = older_than_days.max(0);
@@ -4605,9 +6722,7 @@ async fn run_dream_prune_coact_noise(
 
     println!("# δ-3 — coactivation noise prune");
     println!("DB: {}", path.display());
-    println!(
-        "max_count: {max_count} · older_than: {older_than_days}d · dry_run: {dry_run}"
-    );
+    println!("max_count: {max_count} · older_than: {older_than_days}d · dry_run: {dry_run}");
     println!();
     let label = if dry_run { "would prune" } else { "pruned" };
     println!("{label:16} : {pruned}");
@@ -4628,7 +6743,7 @@ async fn run_dream_prune_degenerate_relates(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
     let path = default_db_path();
     let store = SqliteStore::open(&path)
         .await
@@ -4650,18 +6765,13 @@ async fn run_dream_prune_degenerate_relates(
 
     println!("# ζ-12 — degenerate relates prune");
     println!("DB: {}", path.display());
-    println!(
-        "blacklist_tags: {:?} · dry_run: {dry_run}",
-        blacklist_tags
-    );
+    println!("blacklist_tags: {:?} · dry_run: {dry_run}", blacklist_tags);
     println!();
     let label = if dry_run { "would prune" } else { "pruned" };
     println!("{label:16} : {pruned}");
     if pruned == 0 {
         println!();
-        println!(
-            "(no degenerate relates edges found — pre-ζ-11 noise hubs already cleaned)"
-        );
+        println!("(no degenerate relates edges found — pre-ζ-11 noise hubs already cleaned)");
     }
     Ok(())
 }
@@ -4678,7 +6788,7 @@ async fn run_dream_archive_orphan_stubs(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, MemoryRecord, SqliteStore, StateStore};
+    use ab_store::{MemoryRecord, SqliteStore, StateStore, default_db_path};
     use std::time::{SystemTime, UNIX_EPOCH};
     let older_than_days = older_than_days.max(0);
     let max_archive = max_archive.clamp(1, 1000);
@@ -4724,11 +6834,7 @@ async fn run_dream_archive_orphan_stubs(
             key: key.clone(),
             kind: "alert".into(),
             content: body,
-            tags: vec![
-                "alert".into(),
-                "zeta-15".into(),
-                "archive-burst".into(),
-            ],
+            tags: vec!["alert".into(), "zeta-15".into(), "archive-burst".into()],
             related_keys: vec![],
             scope: None,
             created_at: now,
@@ -4807,7 +6913,7 @@ fn archive_alarm_should_fire(archived: u64, threshold: i64, dry_run: bool) -> bo
 /// Operator escape hatch when ζ-14 retires a row that turns out to
 /// still carry signal. Single-key, status-gated, returns bool.
 async fn run_dream_restore_archived(key: &str, as_json: bool) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
     let path = default_db_path();
     let store = SqliteStore::open(&path)
         .await
@@ -4852,7 +6958,7 @@ async fn run_dream_tombstone_aged_archived(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
     let older_than_days = older_than_days.max(0);
     let max_count = max_count.clamp(1, 5000);
     let path = default_db_path();
@@ -4877,11 +6983,13 @@ async fn run_dream_tombstone_aged_archived(
     }
     println!("# ζ-19 — tombstone aged archived");
     println!("DB: {}", path.display());
-    println!(
-        "older_than_days: {older_than_days} · max_count: {max_count} · dry_run: {dry_run}"
-    );
+    println!("older_than_days: {older_than_days} · max_count: {max_count} · dry_run: {dry_run}");
     println!();
-    let label = if dry_run { "would tombstone" } else { "tombstoned" };
+    let label = if dry_run {
+        "would tombstone"
+    } else {
+        "tombstoned"
+    };
     println!("{label:18} : {tombstoned}");
     if tombstoned == 0 {
         println!();
@@ -4902,7 +7010,7 @@ async fn run_dream_cluster_probe(
     preview: i64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
     let min_size = min_size.max(2);
     let top_k = top_k.max(1) as usize;
     let preview = preview.max(1) as usize;
@@ -4957,7 +7065,12 @@ async fn run_dream_cluster_probe(
         return Ok(());
     }
     for (i, c) in clusters.iter().take(top_k).enumerate() {
-        println!("## cluster #{i} (size {size}, hub: {hub})", i = i + 1, size = c.size, hub = c.hub);
+        println!(
+            "## cluster #{i} (size {size}, hub: {hub})",
+            i = i + 1,
+            size = c.size,
+            hub = c.hub
+        );
         for m in c.members.iter().take(preview) {
             let star = if *m == c.hub { " ★" } else { "" };
             println!("  - {m}{star}");
@@ -4968,7 +7081,10 @@ async fn run_dream_cluster_probe(
         println!();
     }
     if clusters.len() > top_k {
-        println!("({} more clusters below --top-k cap)", clusters.len() - top_k);
+        println!(
+            "({} more clusters below --top-k cap)",
+            clusters.len() - top_k
+        );
     }
     Ok(())
 }
@@ -4983,7 +7099,7 @@ async fn run_dream_purge_tombstones(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
     let path = default_db_path();
     let store = SqliteStore::open(&path)
         .await
@@ -5008,9 +7124,7 @@ async fn run_dream_purge_tombstones(
 
     println!("# Phase 2.x #6 — purge tombstones (sync-window GC)");
     println!("DB: {}", path.display());
-    println!(
-        "older_than: {older_than_days}d · dry_run: {dry_run}"
-    );
+    println!("older_than: {older_than_days}d · dry_run: {dry_run}");
     println!();
     let verb = if dry_run { "would remove" } else { "removed" };
     println!("{verb:<16}: {}", removed.len());
@@ -5048,7 +7162,7 @@ async fn run_dream_decay_coactivation(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
 
     let tau_days = tau_days.clamp(0.5, 30.0);
     let tau_secs = (tau_days * 86_400.0) as i64;
@@ -5137,7 +7251,7 @@ async fn run_dream_replay_audit(
     overlap_min: f64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -5241,10 +7355,7 @@ async fn run_dream_replay_audit(
     // *what role* does the summary play in attention flow?
     if let Some(wp) = &stats.waypoint {
         println!();
-        println!(
-            "# waypoint pass (±{} min window)",
-            wp.window_secs / 60
-        );
+        println!("# waypoint pass (±{} min window)", wp.window_secs / 60);
         println!("  gateway (lead→source) : {}", wp.gateway_summaries);
         println!("  trailing (source→lead): {}", wp.trailing_summaries);
         println!("  ambiguous (==)        : {}", wp.ambiguous_summaries);
@@ -5299,9 +7410,7 @@ async fn run_dream_replay_audit(
     if stats.total_summaries >= 3 {
         println!();
         if useful_ratio >= 50.0 && stats.avg_access_count > stats.avg_source_access_count {
-            println!(
-                "verdict: replay is paying for itself — summaries out-access their sources."
-            );
+            println!("verdict: replay is paying for itself — summaries out-access their sources.");
         } else if dead_ratio >= 30.0 {
             println!(
                 "verdict: significant dead weight ({:.0}%) — consider raising replay's min_cluster_size or top_n.",
@@ -5318,14 +7427,10 @@ async fn run_dream_replay_audit(
                     "verdict: summaries trail their sources — they read more like decoration than entrypoints."
                 );
             } else {
-                println!(
-                    "verdict: mixed signal — let it bake a few more days before judging."
-                );
+                println!("verdict: mixed signal — let it bake a few more days before judging.");
             }
         } else {
-            println!(
-                "verdict: mixed signal — let it bake a few more days before judging."
-            );
+            println!("verdict: mixed signal — let it bake a few more days before judging.");
         }
     }
 
@@ -5350,7 +7455,7 @@ async fn run_dream_snapshot(
     print_only: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, MemoryRecord, SqliteStore, StateStore};
+    use ab_store::{MemoryRecord, SqliteStore, StateStore, default_db_path};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     let path = default_db_path();
@@ -5384,12 +7489,7 @@ async fn run_dream_snapshot(
     // ── top-10 most-accessed non-skill memories (current attention) ──────
     let top_access: Vec<(String, u64)> = {
         let rows = store
-            .list_memories_in_scope(
-                "",
-                None,
-                ab_store::MemoryListSort::Frequent,
-                200,
-            )
+            .list_memories_in_scope("", None, ab_store::MemoryListSort::Frequent, 200)
             .await
             .map_err(|e| anyhow::anyhow!("list_memories: {e}"))?;
         rows.into_iter()
@@ -5414,10 +7514,7 @@ async fn run_dream_snapshot(
 
     // ── δ-4 transitions (top repeated A→B with span ≤ 10min) ─────────────
     let transitions: Vec<(String, String, u32)> = {
-        let mut events = store
-            .recent_memory_get_keys(200)
-            .await
-            .unwrap_or_default();
+        let mut events = store.recent_memory_get_keys(200).await.unwrap_or_default();
         events.reverse();
         let mut counts: std::collections::HashMap<(String, String), u32> =
             std::collections::HashMap::new();
@@ -5430,9 +7527,7 @@ async fn run_dream_snapshot(
             if b_at - a_at > 600 {
                 continue;
             }
-            *counts
-                .entry((a_key.clone(), b_key.clone()))
-                .or_insert(0) += 1;
+            *counts.entry((a_key.clone(), b_key.clone())).or_insert(0) += 1;
         }
         let mut ranked: Vec<((String, String), u32)> =
             counts.into_iter().filter(|(_, c)| *c >= 2).collect();
@@ -5476,11 +7571,7 @@ async fn run_dream_snapshot(
             })
         })
         .collect();
-    let active_total = mstats
-        .counts_by_status
-        .get("active")
-        .copied()
-        .unwrap_or(0);
+    let active_total = mstats.counts_by_status.get("active").copied().unwrap_or(0);
     let archived_total = mstats
         .counts_by_status
         .get("archived")
@@ -5530,12 +7621,16 @@ async fn run_dream_snapshot(
     } else {
         // Human summary — same fields, narrative layout. Goes to stdout
         // so it composes with shell pipelines.
-        println!("# ζ-1 self-portrait snapshot ({} {})",
-            chrono_like_date(now), node);
+        println!(
+            "# ζ-1 self-portrait snapshot ({} {})",
+            chrono_like_date(now),
+            node
+        );
         println!();
-        println!("memory       : {} active / {} archived / {} edges · avg imp {:.3}",
-            active_total, archived_total,
-            mstats.edge_count, mstats.avg_importance_active);
+        println!(
+            "memory       : {} active / {} archived / {} edges · avg imp {:.3}",
+            active_total, archived_total, mstats.edge_count, mstats.avg_importance_active
+        );
         let non_skill: Vec<String> = by_kind_non_skill
             .iter()
             .take(6)
@@ -5564,13 +7659,12 @@ async fn run_dream_snapshot(
         );
         if let Some(e) = cstats.top_5_persistent_edges.first() {
             let span = (e.last_at - e.first_at) / 3600;
+            println!("  top persistent (count={}, span={}h):", e.count, span);
             println!(
-                "  top persistent (count={}, span={}h):",
-                e.count, span
-            );
-            println!("    {} ↔ {}",
+                "    {} ↔ {}",
                 short_key(&e.key_a, 40),
-                short_key(&e.key_b, 40));
+                short_key(&e.key_b, 40)
+            );
         }
         println!("attention    : top-3 most-accessed (non-skill)");
         for (key, n) in top_access.iter().take(3) {
@@ -5588,19 +7682,14 @@ async fn run_dream_snapshot(
         };
         println!(
             "identity {days}d : tools={} (×{:.1}) · saves={} (×{:.1})",
-            id_cur.tool_calls_total, tools_ratio,
-            id_cur.memory_saves, saves_ratio
+            id_cur.tool_calls_total, tools_ratio, id_cur.memory_saves, saves_ratio
         );
         if transitions.is_empty() {
             println!("transitions  : (none surfaced yet — need ≥2 repeated A→B within 10min)");
         } else {
             println!("transitions  : {} surfaced", transitions.len());
             for (a, b, n) in transitions.iter().take(3) {
-                println!(
-                    "  [×{n}] {} → {}",
-                    short_key(a, 30),
-                    short_key(b, 30)
-                );
+                println!("  [×{n}] {} → {}", short_key(a, 30), short_key(b, 30));
             }
         }
         // ζ-9 — topology line (orphan rate + P4 coverage + top hubs)
@@ -5724,7 +7813,7 @@ async fn run_dream_diff(
     auto: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -5785,8 +7874,14 @@ async fn run_dream_diff(
     let pb: serde_json::Value = serde_json::from_str(&rec_b.content)
         .map_err(|e| anyhow::anyhow!("parse {key_b} content as JSON: {e}"))?;
 
-    let schema_a = pa.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(0);
-    let schema_b = pb.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(0);
+    let schema_a = pa
+        .get("schema_version")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let schema_b = pb
+        .get("schema_version")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     // ζ-9: allow v1↔v2 — newer schemas are strict supersets so missing
     // fields default to 0/empty via gi64/gf64 helpers below. Bail only on
     // wholly-unsupported versions (e.g. some future v3 that drops fields).
@@ -5816,7 +7911,9 @@ async fn run_dream_diff(
                 None => return 0,
             };
         }
-        cur.as_i64().or_else(|| cur.as_u64().map(|u| u as i64)).unwrap_or(0)
+        cur.as_i64()
+            .or_else(|| cur.as_u64().map(|u| u as i64))
+            .unwrap_or(0)
     };
     let gf64 = |v: &serde_json::Value, path: &[&str]| -> f64 {
         let mut cur = v;
@@ -5830,12 +7927,11 @@ async fn run_dream_diff(
     };
 
     // memory.* deltas
-    let active_d = gi64(newer, &["memory", "active_total"])
-        - gi64(older, &["memory", "active_total"]);
-    let archived_d = gi64(newer, &["memory", "archived_total"])
-        - gi64(older, &["memory", "archived_total"]);
-    let edges_d = gi64(newer, &["memory", "edge_count"])
-        - gi64(older, &["memory", "edge_count"]);
+    let active_d =
+        gi64(newer, &["memory", "active_total"]) - gi64(older, &["memory", "active_total"]);
+    let archived_d =
+        gi64(newer, &["memory", "archived_total"]) - gi64(older, &["memory", "archived_total"]);
+    let edges_d = gi64(newer, &["memory", "edge_count"]) - gi64(older, &["memory", "edge_count"]);
     let avg_imp_d = gf64(newer, &["memory", "avg_importance_active"])
         - gf64(older, &["memory", "avg_importance_active"]);
 
@@ -5889,7 +7985,11 @@ async fn run_dream_diff(
         .iter()
         .filter_map(|(k, n)| {
             access_old.get(k).and_then(|o| {
-                if o != n { Some((k.clone(), *o, *n)) } else { None }
+                if o != n {
+                    Some((k.clone(), *o, *n))
+                } else {
+                    None
+                }
             })
         })
         .collect();
@@ -5903,8 +8003,8 @@ async fn run_dream_diff(
     // ζ-9 — topology deltas (v1 snapshots default to 0/empty via gi64).
     let topo_total_d = gi64(newer, &["topology", "non_skill_active_total"])
         - gi64(older, &["topology", "non_skill_active_total"]);
-    let topo_orphan_d = gi64(newer, &["topology", "orphan_count"])
-        - gi64(older, &["topology", "orphan_count"]);
+    let topo_orphan_d =
+        gi64(newer, &["topology", "orphan_count"]) - gi64(older, &["topology", "orphan_count"]);
     let topo_p4_d = gi64(newer, &["topology", "p4_evolved_coverage"])
         - gi64(older, &["topology", "p4_evolved_coverage"]);
     // Hub set diff — which keys entered/left top-5 hubs.
@@ -6034,28 +8134,17 @@ async fn run_dream_diff(
             println!("    a {:+} ({o}→{n})  {}", n - o, short_key(k, 56));
         }
     }
-    println!(
-        "identity     : tools {:+} · saves {:+}",
-        tools_d, saves_d
-    );
+    println!("identity     : tools {:+} · saves {:+}", tools_d, saves_d);
     if !trans_entered.is_empty() {
         println!("transitions  : entered top-5");
         for (a, b, n) in trans_entered.iter().take(3) {
-            println!(
-                "  + [×{n}] {} → {}",
-                short_key(a, 30),
-                short_key(b, 30)
-            );
+            println!("  + [×{n}] {} → {}", short_key(a, 30), short_key(b, 30));
         }
     }
     if !trans_dropped.is_empty() {
         println!("               dropped from top-5");
         for (a, b, n) in trans_dropped.iter().take(3) {
-            println!(
-                "  - [×{n}] {} → {}",
-                short_key(a, 30),
-                short_key(b, 30)
-            );
+            println!("  - [×{n}] {} → {}", short_key(a, 30), short_key(b, 30));
         }
     }
     // ζ-9 — topology delta (suppressed when both snapshots are v1 since
@@ -6109,7 +8198,7 @@ async fn run_dream_diff(
 ///   3. snapshot key (if not --no-snapshot; identifies the freshly-saved
 ///      `kind=snapshot` memory the next `dream weekly` can diff against)
 async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -6188,8 +8277,10 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
         let useful_ratio = 100.0 * replay.accessed_multi as f64 / replay.total_summaries as f64;
         println!(
             "  {} summaries · {:.0}% accessed≥2 · avg access {:.1} (vs source {:.1})",
-            replay.total_summaries, useful_ratio,
-            replay.avg_access_count, replay.avg_source_access_count
+            replay.total_summaries,
+            useful_ratio,
+            replay.avg_access_count,
+            replay.avg_source_access_count
         );
         if let Some(wp) = &replay.waypoint {
             println!(
@@ -6269,7 +8360,7 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
     println!("[bonus] substrate-readiness (P-ε)");
     println!("─────────────────────────────────────────");
     match {
-        use ab_store::{default_db_path, SqliteStore, StateStore as _};
+        use ab_store::{SqliteStore, StateStore as _, default_db_path};
         let path = default_db_path();
         let store_res = SqliteStore::open(&path).await;
         match store_res {
@@ -6297,9 +8388,7 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
                 r.m5_edge_coverage.fraction * 100.0,
                 r.m7_signal_fidelity.verdict,
             );
-            println!(
-                "  (run `dream substrate-audit` for full M1-M8 breakdown)"
-            );
+            println!("  (run `dream substrate-audit` for full M1-M8 breakdown)");
         }
         Err(e) => {
             eprintln!("  substrate-audit skipped: {e}");
@@ -6330,7 +8419,10 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
             );
             println!(
                 "  delta since 7d: {total_delta} in-scope ships ({} layers touched)",
-                rep.sectional_delta.iter().filter(|s| s.commit_count > 0).count(),
+                rep.sectional_delta
+                    .iter()
+                    .filter(|s| s.commit_count > 0)
+                    .count(),
             );
             match next_gate {
                 Some(g) if g.days_until >= 0 => println!(
@@ -6372,7 +8464,9 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
                     "  ρ n/a · {} qualifying / {} substrate-empty · {}",
                     s.qualifying_keys, s.substrate_misses, s.verdict,
                 );
-                println!("  (need more snapshot history or more cofires edges; check back next week)");
+                println!(
+                    "  (need more snapshot history or more cofires edges; check back next week)"
+                );
             }
         },
         Err(e) => {
@@ -6503,7 +8597,7 @@ async fn substrate_corr_weekly_one_liner(
     min_cofires: u32,
 ) -> Result<SubstrateCorrOneLiner> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
     use std::collections::HashMap;
 
     let snap_path = snapshot::default_snapshot_path();
@@ -6867,12 +8961,11 @@ fn iso_days_until_now(iso: &str, now_unix: u64) -> Option<i64> {
     let days_since_civil_epoch = era * 146097 + doe - 719468; // 1970-01-01
     let target_unix = days_since_civil_epoch * 86400;
     let now_days = (now_unix as i64) / 86400;
-    Some(days_since_civil_epoch - now_days)
-        .map(|d| {
-            // Recompute target days for cleaner reporting.
-            let _ = target_unix;
-            d
-        })
+    Some(days_since_civil_epoch - now_days).map(|d| {
+        // Recompute target days for cleaner reporting.
+        let _ = target_unix;
+        d
+    })
 }
 
 /// Build the gap-audit report against the canonical baseline. Pure aside
@@ -6957,12 +9050,9 @@ fn group_oneline_by_prefix(oneline: &str) -> Vec<SectionalDelta> {
             continue;
         };
         // Extract `type(scope):` or `type:` prefix; fallback "uncategorized".
-        let prefix = extract_conventional_prefix(subject)
-            .unwrap_or_else(|| "uncategorized".to_string());
-        buckets
-            .entry(prefix)
-            .or_default()
-            .push(subject.to_string());
+        let prefix =
+            extract_conventional_prefix(subject).unwrap_or_else(|| "uncategorized".to_string());
+        buckets.entry(prefix).or_default().push(subject.to_string());
     }
     buckets
         .into_iter()
@@ -7072,10 +9162,9 @@ async fn run_dream_codebase_report(
     html_path: Option<&std::path::Path>,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
 
-    let cwd = std::env::current_dir()
-        .map_err(|e| anyhow::anyhow!("current_dir: {e}"))?;
+    let cwd = std::env::current_dir().map_err(|e| anyhow::anyhow!("current_dir: {e}"))?;
     let root_path = root.map(|p| p.to_path_buf()).unwrap_or(cwd);
     let root_canonical = std::fs::canonicalize(&root_path)
         .unwrap_or(root_path.clone())
@@ -7162,10 +9251,8 @@ async fn run_dream_codebase_report(
             }
 
             if !stats.orphan_functions.is_empty() {
-                let (real, likely_fp): (Vec<_>, Vec<_>) = stats
-                    .orphan_functions
-                    .iter()
-                    .partition(|o| !o.likely_fp);
+                let (real, likely_fp): (Vec<_>, Vec<_>) =
+                    stats.orphan_functions.iter().partition(|o| !o.likely_fp);
                 println!();
                 println!(
                     "orphan function candidates — {} high-confidence + {} likely false positives:",
@@ -7187,7 +9274,9 @@ async fn run_dream_codebase_report(
                 }
                 if !likely_fp.is_empty() {
                     println!();
-                    println!("  likely false positives (test files / main entry / pytest convention):");
+                    println!(
+                        "  likely false positives (test files / main entry / pytest convention):"
+                    );
                     for o in &likely_fp {
                         println!(
                             "    {:<10} {:<28}  [{}]  {}:{}",
@@ -7205,8 +9294,7 @@ async fn run_dream_codebase_report(
 
     if let Some(p) = html_path {
         let html = render_codebase_report_html(&stats, &db_path);
-        std::fs::write(p, html)
-            .map_err(|e| anyhow::anyhow!("write html report to {p:?}: {e}"))?;
+        std::fs::write(p, html).map_err(|e| anyhow::anyhow!("write html report to {p:?}: {e}"))?;
         println!();
         println!("html report: {}", p.display());
     }
@@ -7230,7 +9318,7 @@ async fn run_dream_substrate_audit(
     as_json: bool,
     exclude_kinds: Vec<String>,
 ) -> Result<()> {
-    use ab_store::{default_db_path, SqliteStore, StateStore};
+    use ab_store::{SqliteStore, StateStore, default_db_path};
     let db_path = default_db_path();
     let store = SqliteStore::open(&db_path)
         .await
@@ -7337,10 +9425,7 @@ async fn run_dream_substrate_audit(
     println!("M4 retire-state balance:");
     println!(
         "  active: {}  archived: {}  superseded: {}  tombstoned: {}",
-        r.m4_retire.active,
-        r.m4_retire.archived,
-        r.m4_retire.superseded,
-        r.m4_retire.tombstoned,
+        r.m4_retire.active, r.m4_retire.archived, r.m4_retire.superseded, r.m4_retire.tombstoned,
     );
     println!(
         "  archived_fraction: {:.3}  delta_7d (approx={}): a={:+} archived={:+} t={:+} s={:+}",
@@ -7409,7 +9494,6 @@ async fn run_dream_substrate_audit(
 
     Ok(())
 }
-
 
 /// Build a kind→count map from a JSON array of `{kind, count}` objects.
 /// Returns empty map on None / non-array / malformed entries.
@@ -7486,9 +9570,13 @@ fn chip_class(status: &PromoteStatus, weight: f64) -> &'static str {
         PromoteStatus::Skipped => "chip-skipped",
         PromoteStatus::Failed(_) => "chip-failed",
         PromoteStatus::Promoted | PromoteStatus::WouldPromote => {
-            if weight >= 0.8 { "chip-strong" }
-            else if weight >= 0.65 { "chip-mid" }
-            else { "chip-weak" }
+            if weight >= 0.8 {
+                "chip-strong"
+            } else if weight >= 0.65 {
+                "chip-mid"
+            } else {
+                "chip-weak"
+            }
         }
     }
 }
@@ -7514,8 +9602,8 @@ fn url_escape(s: &str) -> String {
     // identifiers but be defensive about spaces/&/=/#.
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
-        let safe = b.is_ascii_alphanumeric()
-            || matches!(b, b'-' | b'_' | b'.' | b'~' | b':' | b'/');
+        let safe =
+            b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b':' | b'/');
         if safe {
             out.push(b as char);
         } else {
@@ -7722,10 +9810,10 @@ async fn run_dream_agent_md_drift(
     agent_md_path_override: Option<PathBuf>,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{default_db_path, MemoryListSort, MemoryRecord, SqliteStore, StateStore};
+    use ab_store::{MemoryListSort, MemoryRecord, SqliteStore, StateStore, default_db_path};
 
-    let agent_md_path = agent_md_path_override
-        .unwrap_or_else(ab_bridge::mcp_tools::agent_profile_path);
+    let agent_md_path =
+        agent_md_path_override.unwrap_or_else(ab_bridge::mcp_tools::agent_profile_path);
     let agent_md_content = std::fs::read_to_string(&agent_md_path).unwrap_or_default();
     let agent_md_bytes = agent_md_content.len();
     let preamble_tokens = drift_tokens(&agent_md_content);
@@ -7789,11 +9877,7 @@ async fn run_dream_agent_md_drift(
                 key: proposal_key.clone(),
                 kind: "l7_proposed_update".into(),
                 content: stored_content,
-                tags: vec![
-                    "l7".into(),
-                    "drift_proposal".into(),
-                    "needs_review".into(),
-                ],
+                tags: vec!["l7".into(), "drift_proposal".into(), "needs_review".into()],
                 related_keys: vec![lesson.key.clone()],
                 scope: None,
                 created_at: 0,
@@ -7839,10 +9923,17 @@ async fn run_dream_agent_md_drift(
     }
 
     println!("# AGENT.md Drift Report (L7 P2)");
-    println!("AGENT.md: {} ({} bytes)", report.agent_md_path, report.agent_md_bytes);
+    println!(
+        "AGENT.md: {} ({} bytes)",
+        report.agent_md_path, report.agent_md_bytes
+    );
     println!("window: {} days", report.window_days);
     println!("lessons scanned: {}", report.lessons_scanned);
-    println!("  covered (≥{:.0}% token overlap): {}", AGENT_MD_DRIFT_COVERAGE_THRESHOLD * 100.0, report.covered);
+    println!(
+        "  covered (≥{:.0}% token overlap): {}",
+        AGENT_MD_DRIFT_COVERAGE_THRESHOLD * 100.0,
+        report.covered
+    );
     println!(
         "  proposed updates: {}{}",
         report.proposed,
@@ -7943,7 +10034,7 @@ fn aggregate_skill_retro(
 }
 
 async fn run_dream_skill_retro(days: u32, as_json: bool) -> Result<()> {
-    use ab_store::{default_db_path, MemoryListSort, MemoryRecord, SqliteStore, StateStore};
+    use ab_store::{MemoryListSort, MemoryRecord, SqliteStore, StateStore, default_db_path};
 
     let db_path = default_db_path();
     let store = SqliteStore::open(&db_path)
@@ -7975,7 +10066,10 @@ async fn run_dream_skill_retro(days: u32, as_json: bool) -> Result<()> {
     }
 
     println!("# Skill-Rating Retro (L7 P3)");
-    println!("window: {} days  cutoff_unix={}  now_unix={}", report.window_days, report.cutoff_unix, report.now_unix);
+    println!(
+        "window: {} days  cutoff_unix={}  now_unix={}",
+        report.window_days, report.cutoff_unix, report.now_unix
+    );
     println!("lessons in window: {}", report.lessons_total);
     println!(
         "  consulted post-creation: {} ({:.0}%)",
@@ -8303,7 +10397,10 @@ mod tests {
         let got = parse_event_line(r#"{"text":"content body","key":"memory_key_42"}"#);
         assert_eq!(
             got,
-            Some(("content body".to_string(), Some("memory_key_42".to_string())))
+            Some((
+                "content body".to_string(),
+                Some("memory_key_42".to_string())
+            ))
         );
     }
 
@@ -8440,9 +10537,8 @@ mod tests {
     #[test]
     fn drift_coverage_ratio_full_partial_zero_empty() {
         use std::collections::HashSet;
-        let make = |words: &[&str]| -> HashSet<String> {
-            words.iter().map(|s| s.to_string()).collect()
-        };
+        let make =
+            |words: &[&str]| -> HashSet<String> { words.iter().map(|s| s.to_string()).collect() };
         // Full coverage: every lesson token appears in preamble.
         let full = drift_coverage_ratio(
             &make(&["alpha", "beta"]),
@@ -8450,16 +10546,10 @@ mod tests {
         );
         assert!((full - 1.0).abs() < 1e-9);
         // Half coverage.
-        let half = drift_coverage_ratio(
-            &make(&["alpha", "delta"]),
-            &make(&["alpha", "beta"]),
-        );
+        let half = drift_coverage_ratio(&make(&["alpha", "delta"]), &make(&["alpha", "beta"]));
         assert!((half - 0.5).abs() < 1e-9);
         // Zero coverage.
-        let zero = drift_coverage_ratio(
-            &make(&["epsilon"]),
-            &make(&["alpha", "beta"]),
-        );
+        let zero = drift_coverage_ratio(&make(&["epsilon"]), &make(&["alpha", "beta"]));
         assert!(zero.abs() < 1e-9);
         // Empty lesson → 0 by convention.
         let empty = drift_coverage_ratio(&HashSet::new(), &make(&["x"]));
@@ -8475,7 +10565,12 @@ mod tests {
 
     // ── L7 P3 — skill-retro aggregator (pure) ─────────────────────────
 
-    fn mk_lesson(key: &str, importance: f64, access_count: u64, created_at: i64) -> ab_store::MemoryRecord {
+    fn mk_lesson(
+        key: &str,
+        importance: f64,
+        access_count: u64,
+        created_at: i64,
+    ) -> ab_store::MemoryRecord {
         ab_store::MemoryRecord {
             key: key.into(),
             kind: "lesson".into(),
@@ -8485,7 +10580,11 @@ mod tests {
             scope: None,
             created_at,
             updated_at: created_at,
-            last_accessed_at: if access_count > 0 { created_at + 3600 } else { 0 },
+            last_accessed_at: if access_count > 0 {
+                created_at + 3600
+            } else {
+                0
+            },
             access_count,
             importance,
             status: "active".into(),
@@ -8544,10 +10643,16 @@ mod tests {
     #[test]
     fn gap_audit_table_has_13_entries() {
         let (_, entries) = super::current_gap_baseline();
-        assert_eq!(entries.len(), 13, "13-gap inventory must have exactly 13 entries");
+        assert_eq!(
+            entries.len(),
+            13,
+            "13-gap inventory must have exactly 13 entries"
+        );
         let mut ids: Vec<&str> = entries.iter().map(|e| e.id).collect();
         ids.sort();
-        let expected = ["A1", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "D3", "E1", "E2"];
+        let expected = [
+            "A1", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "D3", "E1", "E2",
+        ];
         assert_eq!(ids, expected, "gap IDs must match canonical 13-set");
     }
 
@@ -8566,7 +10671,10 @@ mod tests {
         // silently drift from the doc without a corresponding audit refresh.
         let (_, entries) = super::current_gap_baseline();
         let c = super::GapStatusCounts::from_entries(entries);
-        assert_eq!(c.closed, 6, "audit memo §revised tally: 6 closed (A3 B2 D1 D3 E1 E2)");
+        assert_eq!(
+            c.closed, 6,
+            "audit memo §revised tally: 6 closed (A3 B2 D1 D3 E1 E2)"
+        );
         assert_eq!(c.shelved, 1, "1 shelved (C1)");
         assert_eq!(c.partial, 1, "1 partial (D2 — sync gap)");
         assert_eq!(c.planned, 2, "2 planned (C2 C3)");
@@ -8649,8 +10757,17 @@ pqr1357 random free-form subject without prefix
     fn gap_audit_iso_parse_rejects_bad_input() {
         let now: u64 = 1_700_000_000;
         assert!(super::iso_days_until_now("not-a-date", now).is_none());
-        assert!(super::iso_days_until_now("2026-13-01", now).is_none(), "month 13 invalid");
-        assert!(super::iso_days_until_now("2026-05-32", now).is_none(), "day 32 invalid");
-        assert!(super::iso_days_until_now("2026-05", now).is_none(), "wrong arity");
+        assert!(
+            super::iso_days_until_now("2026-13-01", now).is_none(),
+            "month 13 invalid"
+        );
+        assert!(
+            super::iso_days_until_now("2026-05-32", now).is_none(),
+            "day 32 invalid"
+        );
+        assert!(
+            super::iso_days_until_now("2026-05", now).is_none(),
+            "wrong arity"
+        );
     }
 }
