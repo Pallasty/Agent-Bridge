@@ -1202,6 +1202,7 @@ fn avatar_surface_motion_html(motion_preview: &Value) -> String {
 fn avatar_surface_renderer_html(renderer_preview: &Value) -> String {
     let renderer = renderer_preview.get("renderer").unwrap_or(&Value::Null);
     let mapping = renderer.get("mapping").unwrap_or(&Value::Null);
+    let evidence = mapping.get("evidence").unwrap_or(&Value::Null);
     let target = mapping.get("target").unwrap_or(&Value::Null);
     let safety = renderer.get("safety").unwrap_or(&Value::Null);
     let token = avatar_surface_html_json_value(mapping.get("input_token"), "-");
@@ -1214,6 +1215,9 @@ fn avatar_surface_renderer_html(renderer_preview: &Value) -> String {
     let mutates_renderer = avatar_surface_html_json_value(safety.get("mutates_renderer"), "false");
     let pet_mutation =
         avatar_surface_html_json_value(safety.get("codex_pet_package_mutation"), "false");
+    let binding_stage = avatar_surface_html_json_value(evidence.get("binding_stage"), "-");
+    let risk_level = avatar_surface_html_json_value(evidence.get("risk_level"), "-");
+    let visual_intent = avatar_surface_html_json_value(evidence.get("visual_intent"), "-");
 
     format!(
         r#"<section class="health status-fresh">
@@ -1225,6 +1229,8 @@ fn avatar_surface_renderer_html(renderer_preview: &Value) -> String {
       <dl>
         <div><dt>resolved</dt><dd>{resolved}</dd></div>
         <div><dt>slots</dt><dd>pose={pose} expression={expression} motion={motion} accessory={accessory}</dd></div>
+        <div><dt>evidence</dt><dd>stage={binding_stage} risk={risk_level}</dd></div>
+        <div><dt>intent</dt><dd>{visual_intent}</dd></div>
         <div><dt>safety</dt><dd>writes_files={writes_files} mutates_renderer={mutates_renderer} pet_package={pet_mutation}</dd></div>
       </dl>
     </section>"#,
@@ -1234,6 +1240,9 @@ fn avatar_surface_renderer_html(renderer_preview: &Value) -> String {
         expression = expression,
         motion = motion,
         accessory = accessory,
+        binding_stage = binding_stage,
+        risk_level = risk_level,
+        visual_intent = visual_intent,
         writes_files = writes_files,
         mutates_renderer = mutates_renderer,
         pet_mutation = pet_mutation,
@@ -1882,6 +1891,7 @@ mod tests {
         assert!(html.contains("Xiao Shu Language"));
         assert!(html.contains("Xiao Shu Motion"));
         assert!(html.contains("Xiao Shu Renderer"));
+        assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));
         assert!(html.contains("step=16"));

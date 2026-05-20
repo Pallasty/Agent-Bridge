@@ -4175,6 +4175,7 @@ async fn run_avatar_cortex_renderer(
     }
     let renderer = payload.get("renderer").unwrap_or(&Value::Null);
     let mapping = renderer.get("mapping").unwrap_or(&Value::Null);
+    let evidence = mapping.get("evidence").unwrap_or(&Value::Null);
     let target = mapping.get("target").unwrap_or(&Value::Null);
     let safety = renderer.get("safety").unwrap_or(&Value::Null);
     println!("avatar cortex renderer preview");
@@ -4189,6 +4190,12 @@ async fn run_avatar_cortex_renderer(
         avatar_health_display(target.get("expression_slot"), "-"),
         avatar_health_display(target.get("motion_slot"), "-"),
         avatar_health_display(target.get("accessory_slot"), "-")
+    );
+    println!(
+        "evidence_stage={} risk={} intent={}",
+        avatar_health_display(evidence.get("binding_stage"), "-"),
+        avatar_health_display(evidence.get("risk_level"), "-"),
+        avatar_health_display(evidence.get("visual_intent"), "-")
     );
     println!(
         "dry_run={} writes_files={} mutates_renderer={} codex_pet_package_mutation={}",

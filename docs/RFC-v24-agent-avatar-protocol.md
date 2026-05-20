@@ -479,7 +479,9 @@ extension point.
 adapter dry-run on that boundary: they map `motion.animation_hint.renderer_token`
 into `pose`, `expression`, `motion`, `accessory`, and timeline slots, while
 reporting `writes_files=false`, `mutates_renderer=false`, and
-`codex_pet_package_mutation=false`.
+`codex_pet_package_mutation=false`. Each mapping can carry
+`mapping.evidence`, a review block with visual intent, acceptance criteria,
+risk level, review questions, binding stage, and the recommended next step.
 `avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
 as a dedicated read-only surface with `emits_audio=false`,
 `emits_notification=false`, and `requires_explicit_emit_gate=true`.

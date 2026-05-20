@@ -892,6 +892,110 @@ fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
                 "unknown renderer token falls back to neutral idle",
             ),
         };
+    let evidence = match renderer_token {
+        "xiao_shu::soft_bounce::low" => json!({
+            "schema": 1,
+            "binding_stage": "candidate",
+            "risk_level": "low",
+            "visual_intent": "show a small cheerful confirmation when Xiao Shu is caught up and recent signals are stable",
+            "acceptance_criteria": [
+                "reads as happy but not celebratory",
+                "returns to idle within two seconds",
+                "does not distract from the terminal or panel content"
+            ],
+            "risk_notes": "avoid repeating the bounce too frequently during stable heartbeat loops",
+            "review_questions": [
+                "does the bounce still feel calm after several panel refreshes",
+                "is the smile visible at desktop pet size"
+            ],
+            "recommended_next_step": "safe candidate for first manual renderer binding"
+        }),
+        "xiao_shu::idle_breathe::low" => json!({
+            "schema": 1,
+            "binding_stage": "candidate",
+            "risk_level": "low",
+            "visual_intent": "keep Xiao Shu present without implying work or urgency",
+            "acceptance_criteria": [
+                "motion is barely noticeable during long idle periods",
+                "expression remains neutral and friendly",
+                "loop can run repeatedly without visual fatigue"
+            ],
+            "risk_notes": "too much movement would make idle feel needy",
+            "review_questions": [
+                "does idle remain comfortable beside a coding session",
+                "does it preserve the official pet silhouette"
+            ],
+            "recommended_next_step": "bind after soft_bounce baseline is accepted"
+        }),
+        "xiao_shu::sorting_glow::medium" => json!({
+            "schema": 1,
+            "binding_stage": "needs_review",
+            "risk_level": "medium",
+            "visual_intent": "show quiet concentration while cortex events are waiting for replay",
+            "acceptance_criteria": [
+                "reads as focused sorting, not error handling",
+                "glow is subtle enough for repeated background use",
+                "the pose suggests attention without blocking interaction"
+            ],
+            "risk_notes": "glow or forward lean can look like a warning if too bright",
+            "review_questions": [
+                "does the glow imply urgency",
+                "does the state remain understandable without text"
+            ],
+            "recommended_next_step": "prototype after stable idle and bounce slots exist"
+        }),
+        "xiao_shu::look_sideways::medium" => json!({
+            "schema": 1,
+            "binding_stage": "needs_review",
+            "risk_level": "medium",
+            "visual_intent": "suggest inspection when snapshot and event windows are misaligned",
+            "acceptance_criteria": [
+                "reads as checking rather than confused",
+                "does not imply user error",
+                "returns to neutral if the next cortex pass catches up"
+            ],
+            "risk_notes": "sideways look can feel uncertain if expression is too strong",
+            "review_questions": [
+                "is inspection distinguishable from alert_peek",
+                "does it feel supportive rather than worried"
+            ],
+            "recommended_next_step": "prototype only after mismatch states are common enough to judge"
+        }),
+        "xiao_shu::alert_peek::medium" => json!({
+            "schema": 1,
+            "binding_stage": "needs_review",
+            "risk_level": "medium",
+            "visual_intent": "request attention for recent unhealthy signals without sounding alarmed",
+            "acceptance_criteria": [
+                "communicates attention needed in one glance",
+                "stays gentle and non-panicked",
+                "does not trigger unless the recent window contains an unhealthy signal"
+            ],
+            "risk_notes": "attention mark can become noisy if health flaps",
+            "review_questions": [
+                "is the attention mark too loud",
+                "should this ever pair with sparse voice output"
+            ],
+            "recommended_next_step": "keep dry-run until health-flap behavior is reviewed"
+        }),
+        _ => json!({
+            "schema": 1,
+            "binding_stage": "fallback_only",
+            "risk_level": "high",
+            "visual_intent": "preserve safe neutral behavior for an unknown renderer token",
+            "acceptance_criteria": [
+                "unknown tokens never mutate assets",
+                "fallback remains visually neutral",
+                "payload makes the unresolved token obvious"
+            ],
+            "risk_notes": "do not bind unknown tokens without adding an explicit evidence entry",
+            "review_questions": [
+                "should this token become a named motion",
+                "what state produced the unknown token"
+            ],
+            "recommended_next_step": "add a named mapping before any renderer binding"
+        }),
+    };
 
     json!({
         "schema": 1,
@@ -907,6 +1011,7 @@ fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
         },
         "timeline": timeline,
         "note": note,
+        "evidence": evidence,
     })
 }
 
@@ -1916,6 +2021,14 @@ mod tests {
             "bright_smile"
         );
         assert_eq!(
+            preview["renderer"]["mapping"]["evidence"]["binding_stage"],
+            "candidate"
+        );
+        assert_eq!(
+            preview["renderer"]["mapping"]["evidence"]["risk_level"],
+            "low"
+        );
+        assert_eq!(
             preview["renderer"]["safety"]["codex_pet_package_mutation"],
             false
         );
@@ -1927,6 +2040,8 @@ mod tests {
         assert_eq!(mapping["resolved"], false);
         assert_eq!(mapping["target"]["pose_slot"], "neutral_idle");
         assert_eq!(mapping["target"]["motion_slot"], "idle_breathe");
+        assert_eq!(mapping["evidence"]["binding_stage"], "fallback_only");
+        assert_eq!(mapping["evidence"]["risk_level"], "high");
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
