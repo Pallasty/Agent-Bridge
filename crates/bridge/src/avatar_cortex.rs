@@ -671,6 +671,142 @@ pub fn avatar_cortex_language_preview(
     Ok(avatar_cortex_language_preview_from_status(status))
 }
 
+pub(crate) fn avatar_cortex_motion_preview_from_status(status: Value) -> Value {
+    let language_preview = avatar_cortex_language_preview_from_status(status.clone());
+    let language = language_preview
+        .get("language")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let slots = language.get("slots").unwrap_or(&Value::Null);
+    let memory = language.get("memory").unwrap_or(&Value::Null);
+    let learning = language_preview
+        .get("learning_state")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let state = vstr(slots.get("state")).unwrap_or("stale");
+    let latest_status = vstr(slots.get("latest_status")).unwrap_or("unknown");
+    let memory_observation = vstr(memory.get("observation")).unwrap_or("no_recent_events");
+
+    let (gesture, mood, attention, animation_loop, intensity, reason) =
+        if memory_observation == "recent_unhealthy_signal" {
+            (
+                "alert_peek",
+                "concerned",
+                "health_signal",
+                "alert_peek",
+                "medium",
+                "recent_unhealthy_signal",
+            )
+        } else if state == "caught_up"
+            && latest_status == "healthy"
+            && memory_observation == "stable_recent_window"
+        {
+            (
+                "caught_up_bounce",
+                "bright",
+                "steady_watch",
+                "soft_bounce",
+                "low",
+                "caught_up_stable_window",
+            )
+        } else {
+            match state {
+                "caught_up" => (
+                    "settled_watch",
+                    "calm",
+                    "steady_watch",
+                    "idle_breathe",
+                    "low",
+                    "caught_up",
+                ),
+                "learning" => (
+                    "sorting_stack",
+                    "focused",
+                    "event_queue",
+                    "sorting_glow",
+                    "medium",
+                    "events_waiting_for_runner",
+                ),
+                "behind" => (
+                    "inspect_tilt",
+                    "alert",
+                    "window_check",
+                    "look_sideways",
+                    "medium",
+                    "snapshot_ahead_of_window",
+                ),
+                _ => (
+                    "quiet_listening",
+                    "calm",
+                    "refresh_wait",
+                    "idle_breathe",
+                    "low",
+                    "insufficient_fresh_state",
+                ),
+            }
+        };
+
+    json!({
+        "surface": "avatar_cortex_motion_preview",
+        "schema": 1,
+        "read_only": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "project": status.get("project").cloned().unwrap_or(Value::Null),
+        "label": status.get("label").cloned().unwrap_or(Value::Null),
+        "heartbeat_label": status.get("heartbeat_label").cloned().unwrap_or(Value::Null),
+        "motion": {
+            "schema": 1,
+            "gesture": gesture,
+            "mood": mood,
+            "attention": attention,
+            "reason": reason,
+            "animation_hint": {
+                "loop": animation_loop,
+                "intensity": intensity,
+                "duration_ms": 1800,
+                "renderer_token": format!("xiao_shu::{animation_loop}::{intensity}"),
+            },
+            "source": {
+                "state": state,
+                "latest_status": latest_status,
+                "memory_observation": memory_observation,
+                "language_intent": language.get("intent").cloned().unwrap_or(Value::Null),
+                "memory_window": memory.get("window_size").cloned().unwrap_or(Value::Null),
+                "transition_count": memory.get("transition_count").cloned().unwrap_or(Value::Null),
+            },
+            "safety": {
+                "read_only": true,
+                "sidecar_only": true,
+                "requires_renderer_mapping": true,
+                "codex_pet_package_mutation": false,
+                "emits_audio": false,
+                "emits_notification": false,
+            },
+        },
+        "language": language,
+        "learning_state": learning,
+        "source_status": {
+            "surface": status.get("surface").cloned().unwrap_or(Value::Null),
+            "launchd": status.get("launchd").cloned().unwrap_or(Value::Null),
+            "snapshot": status.get("snapshot").cloned().unwrap_or(Value::Null),
+            "events": status.get("events").cloned().unwrap_or(Value::Null),
+            "trend": status.get("trend").cloned().unwrap_or(Value::Null),
+        }
+    })
+}
+
+pub fn avatar_cortex_motion_preview(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_motion_preview_from_status(status))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
@@ -1480,6 +1616,99 @@ mod tests {
             "小舒记得最近几次里有异常信号。"
         );
         assert_eq!(preview["language"]["intent"], "processing");
+    }
+
+    #[test]
+    fn avatar_cortex_motion_preview_maps_stable_window_to_bounce() {
+        let status = json!({
+            "surface": "avatar_cortex_status",
+            "project": "agent-bridge",
+            "label": "com.agentbridge.avatar-cortex.agent-bridge",
+            "heartbeat_label": "com.agentbridge.avatar-heartbeat.agent-bridge",
+            "launchd": {"loaded": true},
+            "snapshot": {"total_rows": 1},
+            "events": {
+                "records_count": 3,
+                "unhealthy_count": 0,
+                "latest": {
+                    "status": "healthy",
+                    "healthy": true,
+                    "reason": "unchanged",
+                    "ts": 300
+                },
+                "recent": [
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 100},
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 200},
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 300}
+                ]
+            },
+            "trend": {
+                "step_records_delta": 0,
+                "snapshot_event_lag_secs": 0,
+                "learning_state": {
+                    "state": "caught_up",
+                    "reason": "step_matches_records"
+                }
+            }
+        });
+        let preview = avatar_cortex_motion_preview_from_status(status);
+        assert_eq!(preview["surface"], "avatar_cortex_motion_preview");
+        assert_eq!(preview["emits_audio"], false);
+        assert_eq!(preview["motion"]["gesture"], "caught_up_bounce");
+        assert_eq!(preview["motion"]["mood"], "bright");
+        assert_eq!(preview["motion"]["attention"], "steady_watch");
+        assert_eq!(
+            preview["motion"]["source"]["memory_observation"],
+            "stable_recent_window"
+        );
+        assert_eq!(
+            preview["motion"]["safety"]["codex_pet_package_mutation"],
+            false
+        );
+    }
+
+    #[test]
+    fn avatar_cortex_motion_preview_prioritizes_recent_unhealthy_signal() {
+        let status = json!({
+            "surface": "avatar_cortex_status",
+            "project": "agent-bridge",
+            "label": "com.agentbridge.avatar-cortex.agent-bridge",
+            "heartbeat_label": "com.agentbridge.avatar-heartbeat.agent-bridge",
+            "launchd": {"loaded": true},
+            "snapshot": {"total_rows": 1},
+            "events": {
+                "records_count": 3,
+                "unhealthy_count": 1,
+                "latest": {
+                    "status": "healthy",
+                    "healthy": true,
+                    "reason": "transition",
+                    "ts": 300
+                },
+                "recent": [
+                    {"status": "failing", "healthy": false, "reason": "launchd_error", "ts": 100},
+                    {"status": "healthy", "healthy": true, "reason": "transition", "ts": 200},
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 300}
+                ]
+            },
+            "trend": {
+                "step_records_delta": -1,
+                "snapshot_event_lag_secs": -10,
+                "learning_state": {
+                    "state": "learning",
+                    "reason": "events_ahead_of_snapshot"
+                }
+            }
+        });
+        let preview = avatar_cortex_motion_preview_from_status(status);
+        assert_eq!(preview["motion"]["gesture"], "alert_peek");
+        assert_eq!(preview["motion"]["mood"], "concerned");
+        assert_eq!(preview["motion"]["attention"], "health_signal");
+        assert_eq!(preview["motion"]["animation_hint"]["loop"], "alert_peek");
+        assert_eq!(
+            preview["motion"]["source"]["memory_observation"],
+            "recent_unhealthy_signal"
+        );
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {

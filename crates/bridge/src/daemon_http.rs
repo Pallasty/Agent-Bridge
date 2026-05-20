@@ -13,6 +13,7 @@
 //!   - `GET /avatar-surface/heartbeat-health?...` — launchd + presence health
 //!   - `GET /avatar-surface/cortex-status?...` — launchd + cortex snapshot status
 //!   - `GET /avatar-surface/cortex-language?...` — dynamic language preview
+//!   - `GET /avatar-surface/cortex-motion?...` — gesture/mood/attention preview
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
@@ -107,6 +108,7 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
             "/avatar-surface/cortex-language",
             get(avatar_cortex_language),
         )
+        .route("/avatar-surface/cortex-motion", get(avatar_cortex_motion))
         .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
         .route(
             "/avatar-surface/cortex-voice-gate",
@@ -587,12 +589,15 @@ async fn avatar_surface_panel(
         });
     let cortex_language =
         crate::avatar_cortex::avatar_cortex_language_preview_from_status(cortex.clone());
+    let cortex_motion =
+        crate::avatar_cortex::avatar_cortex_motion_preview_from_status(cortex.clone());
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
         &health,
         &cortex,
         &cortex_language,
+        &cortex_motion,
         &report,
         unix_now(),
     )))
@@ -630,6 +635,19 @@ async fn avatar_cortex_language(
     Query(q): Query<AvatarCortexStatusQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let payload = crate::avatar_cortex::avatar_cortex_language_preview(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_motion(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_motion_preview(
         q.label.as_deref(),
         q.heartbeat_label.as_deref(),
         q.project.as_deref(),
@@ -1116,6 +1134,50 @@ fn avatar_surface_language_html(language_preview: &Value) -> String {
     )
 }
 
+fn avatar_surface_motion_html(motion_preview: &Value) -> String {
+    let motion = motion_preview.get("motion").unwrap_or(&Value::Null);
+    let hint = motion.get("animation_hint").unwrap_or(&Value::Null);
+    let source = motion.get("source").unwrap_or(&Value::Null);
+    let safety = motion.get("safety").unwrap_or(&Value::Null);
+    let gesture = avatar_surface_html_json_value(motion.get("gesture"), "-");
+    let mood = avatar_surface_html_json_value(motion.get("mood"), "-");
+    let attention = avatar_surface_html_json_value(motion.get("attention"), "-");
+    let reason = avatar_surface_html_json_value(motion.get("reason"), "-");
+    let animation = avatar_surface_html_json_value(hint.get("loop"), "-");
+    let intensity = avatar_surface_html_json_value(hint.get("intensity"), "-");
+    let state = avatar_surface_html_json_value(source.get("state"), "-");
+    let memory = avatar_surface_html_json_value(source.get("memory_observation"), "-");
+    let sidecar_only = avatar_surface_html_json_value(safety.get("sidecar_only"), "true");
+    let renderer_mapping =
+        avatar_surface_html_json_value(safety.get("requires_renderer_mapping"), "true");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">motion</span>
+        <strong>Xiao Shu Motion</strong>
+        <span>{gesture} / {mood} / {attention}</span>
+      </div>
+      <dl>
+        <div><dt>animation</dt><dd>{animation} intensity={intensity}</dd></div>
+        <div><dt>reason</dt><dd>{reason}</dd></div>
+        <div><dt>source</dt><dd>state={state} memory={memory}</dd></div>
+        <div><dt>safety</dt><dd>sidecar={sidecar_only} renderer_mapping={renderer_mapping}</dd></div>
+      </dl>
+    </section>"#,
+        gesture = gesture,
+        mood = mood,
+        attention = attention,
+        animation = animation,
+        intensity = intensity,
+        reason = reason,
+        state = state,
+        memory = memory,
+        sidecar_only = sidecar_only,
+        renderer_mapping = renderer_mapping,
+    )
+}
+
 fn avatar_surface_payload(q: &AvatarSurfaceQuery, avatars: Vec<Value>, generated_at: i64) -> Value {
     json!({
         "agent_avatar_protocol": crate::avatar_surface::AGENT_AVATAR_PROTOCOL_VERSION,
@@ -1138,6 +1200,7 @@ fn avatar_surface_panel_html(
     heartbeat_health: &Value,
     cortex_status: &Value,
     cortex_language: &Value,
+    cortex_motion: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -1189,6 +1252,7 @@ fn avatar_surface_panel_html(
     let health_html = avatar_surface_health_html(heartbeat_health);
     let cortex_html = avatar_surface_cortex_html(cortex_status);
     let language_html = avatar_surface_language_html(cortex_language);
+    let motion_html = avatar_surface_motion_html(cortex_motion);
 
     format!(
         r#"<!doctype html>
@@ -1393,6 +1457,7 @@ fn avatar_surface_panel_html(
     {health_html}
     {cortex_html}
     {language_html}
+    {motion_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -1409,6 +1474,7 @@ fn avatar_surface_panel_html(
         health_html = health_html,
         cortex_html = cortex_html,
         language_html = language_html,
+        motion_html = motion_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -1727,12 +1793,14 @@ mod tests {
         });
         let language =
             crate::avatar_cortex::avatar_cortex_language_preview_from_status(cortex.clone());
+        let motion = crate::avatar_cortex::avatar_cortex_motion_preview_from_status(cortex.clone());
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
             &health,
             &cortex,
             &language,
+            &motion,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -1743,6 +1811,7 @@ mod tests {
         assert!(html.contains("Heartbeat Health"));
         assert!(html.contains("Cortex Status"));
         assert!(html.contains("Xiao Shu Language"));
+        assert!(html.contains("Xiao Shu Motion"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));
         assert!(html.contains("step=16"));

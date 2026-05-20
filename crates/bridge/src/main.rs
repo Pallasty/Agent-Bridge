@@ -677,6 +677,24 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Preview Xiao Shu's gesture/mood/attention semantics without touching renderer assets.
+    CortexMotion {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2272,6 +2290,22 @@ async fn main() -> Result<()> {
                 json: as_json,
             } => {
                 run_avatar_cortex_language(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexMotion {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_motion(
                     label.clone(),
                     heartbeat_label.clone(),
                     project.clone(),
@@ -4036,6 +4070,52 @@ async fn run_avatar_cortex_language(
         avatar_health_display(safety.get("notification_allowed"), "false"),
         avatar_health_display(generator.get("uses_llm"), "false"),
         avatar_health_display(generator.get("uses_voice_model"), "false")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_motion(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_motion_preview(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let motion = payload.get("motion").unwrap_or(&Value::Null);
+    let hint = motion.get("animation_hint").unwrap_or(&Value::Null);
+    let source = motion.get("source").unwrap_or(&Value::Null);
+    let safety = motion.get("safety").unwrap_or(&Value::Null);
+    println!("avatar cortex motion preview");
+    println!(
+        "gesture={} mood={} attention={}",
+        avatar_health_display(motion.get("gesture"), "-"),
+        avatar_health_display(motion.get("mood"), "-"),
+        avatar_health_display(motion.get("attention"), "-")
+    );
+    println!(
+        "animation={} intensity={} reason={}",
+        avatar_health_display(hint.get("loop"), "-"),
+        avatar_health_display(hint.get("intensity"), "-"),
+        avatar_health_display(motion.get("reason"), "-")
+    );
+    println!(
+        "state={} memory={} sidecar_only={} renderer_mapping={}",
+        avatar_health_display(source.get("state"), "-"),
+        avatar_health_display(source.get("memory_observation"), "-"),
+        avatar_health_display(safety.get("sidecar_only"), "true"),
+        avatar_health_display(safety.get("requires_renderer_mapping"), "true")
     );
     Ok(())
 }
