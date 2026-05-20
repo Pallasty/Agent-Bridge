@@ -16,6 +16,7 @@ use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod setup;
+mod shadow_cortex;
 mod skills;
 mod sync;
 
@@ -309,6 +310,38 @@ enum DreamOp {
         /// Emit raw JSON instead of pretty text.
         #[arg(long)]
         json: bool,
+    },
+    /// v25 — Agent Shadow Cortex heuristic attention report. Read-only:
+    /// scores existing MCP dispatch telemetry, memory query logs, and forum
+    /// activity into compact attention signals. Does not write memories, run
+    /// tools, or change MCP exposure.
+    ShadowCortex {
+        /// Look-back window in days.
+        #[arg(long, default_value_t = 7)]
+        window_days: u32,
+        /// Maximum signals to print or emit.
+        #[arg(long, default_value_t = 8)]
+        max_signals: usize,
+        /// Source selector: all | mcp_dispatch | memory | forum | codex.
+        /// `codex` narrows MCP dispatch telemetry to source=codex.
+        #[arg(long, default_value = "all")]
+        source: String,
+        /// Write the deterministic replay fixture to this JSON path.
+        #[arg(long)]
+        fixture_out: Option<PathBuf>,
+        /// Build the report from a previously captured replay fixture.
+        #[arg(long)]
+        fixture_in: Option<PathBuf>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// v25 — Explicit accepted/ignored feedback for shadow-cortex signals.
+    /// Appends JSONL under `~/.cache/agent-bridge/shadow-cortex/` by default;
+    /// does not write state.db or change live ranking.
+    ShadowCortexFeedback {
+        #[command(subcommand)]
+        op: ShadowCortexFeedbackOp,
     },
     /// **Phase 1 P5** — Sleep replay: scan the coactivation graph for tight
     /// clusters, ask the LLM to consolidate each into a higher-order summary
@@ -1028,6 +1061,61 @@ enum SubstrateOp {
 }
 
 #[derive(Subcommand, Debug)]
+enum ShadowCortexFeedbackOp {
+    /// Append one accepted/ignored decision to feedback.jsonl.
+    Record {
+        /// Human/agent review decision for the signal.
+        #[arg(long, value_enum)]
+        decision: ShadowCortexFeedbackDecision,
+        /// Stable signal id from report context; source_event_id is fine for v0.
+        #[arg(long)]
+        signal_id: String,
+        /// Optional source event id; repeat for multi-event signals.
+        #[arg(long = "source-event-id")]
+        source_event_ids: Vec<String>,
+        /// Actor writing the review.
+        #[arg(long, default_value = "codex-desktop-gpt-5.5")]
+        actor: String,
+        /// Short review note.
+        #[arg(long)]
+        note: Option<String>,
+        /// Override feedback log path.
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print recent shadow-cortex feedback decisions.
+    List {
+        /// Maximum recent records to print.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Override feedback log path.
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ShadowCortexFeedbackDecision {
+    Accepted,
+    Ignored,
+}
+
+impl ShadowCortexFeedbackDecision {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Ignored => "ignored",
+        }
+    }
+}
+
+#[derive(Subcommand, Debug)]
 enum SyncOp {
     /// Bootstrap the cross-device memory repo via `gh` (GitHub) or
     /// `glab` (GitLab) CLI. Uses `--provider auto` (default) to pick:
@@ -1446,6 +1534,46 @@ async fn main() -> Result<()> {
         return match op {
             DreamOp::Stats { json } => run_dream_stats(*json).await,
             DreamOp::Identity { days, json } => run_dream_identity(*days, *json).await,
+            DreamOp::ShadowCortex {
+                window_days,
+                max_signals,
+                source,
+                fixture_out,
+                fixture_in,
+                json,
+            } => {
+                run_dream_shadow_cortex(
+                    *window_days,
+                    *max_signals,
+                    source.as_str(),
+                    fixture_out.as_deref(),
+                    fixture_in.as_deref(),
+                    *json,
+                )
+                .await
+            }
+            DreamOp::ShadowCortexFeedback { op } => match op {
+                ShadowCortexFeedbackOp::Record {
+                    decision,
+                    signal_id,
+                    source_event_ids,
+                    actor,
+                    note,
+                    path,
+                    json,
+                } => run_dream_shadow_cortex_feedback_record(
+                    *decision,
+                    signal_id,
+                    source_event_ids.clone(),
+                    actor,
+                    note.as_deref(),
+                    path.as_deref(),
+                    *json,
+                ),
+                ShadowCortexFeedbackOp::List { limit, path, json } => {
+                    run_dream_shadow_cortex_feedback_list(*limit, path.as_deref(), *json)
+                }
+            },
             DreamOp::Replay {
                 top_n,
                 min_cluster_size,
@@ -3168,6 +3296,116 @@ async fn run_dream_identity(days: u32, as_json: bool) -> Result<()> {
     println!();
 
     print_identity_section(&cur, &prior);
+    Ok(())
+}
+
+/// v25 — `agent-bridge dream shadow-cortex`. Read-only heuristic attention
+/// report over existing Agent-Bridge telemetry. This is the Gate A baseline
+/// for later Seed shadow/runtime comparison.
+async fn run_dream_shadow_cortex(
+    window_days: u32,
+    max_signals: usize,
+    source: &str,
+    fixture_out: Option<&std::path::Path>,
+    fixture_in: Option<&std::path::Path>,
+    as_json: bool,
+) -> Result<()> {
+    let db_path = default_db_path();
+    let fixture = if let Some(path) = fixture_in {
+        let body = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("read shadow-cortex fixture at {path:?}: {e}"))?;
+        serde_json::from_str::<shadow_cortex::ShadowCortexReplayFixture>(&body)
+            .map_err(|e| anyhow::anyhow!("parse shadow-cortex fixture at {path:?}: {e}"))?
+    } else {
+        let store = SqliteStore::open(&db_path)
+            .await
+            .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
+        shadow_cortex::collect_shadow_cortex_fixture(
+            &store,
+            shadow_cortex::ShadowCortexOptions {
+                window_days,
+                source: source.to_string(),
+            },
+        )
+        .await?
+    };
+
+    if let Some(path) = fixture_out {
+        let body = serde_json::to_string_pretty(&fixture)?;
+        std::fs::write(path, body)
+            .map_err(|e| anyhow::anyhow!("write shadow-cortex fixture at {path:?}: {e}"))?;
+    }
+
+    let report = shadow_cortex::build_shadow_cortex_report_from_fixture(&fixture, max_signals)?;
+    let source_label = match fixture_in {
+        Some(path) => path,
+        None => db_path.as_path(),
+    };
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        shadow_cortex::print_shadow_cortex_report(&report, source_label);
+    }
+    Ok(())
+}
+
+fn run_dream_shadow_cortex_feedback_record(
+    decision: ShadowCortexFeedbackDecision,
+    signal_id: &str,
+    source_event_ids: Vec<String>,
+    actor: &str,
+    note: Option<&str>,
+    path: Option<&std::path::Path>,
+    as_json: bool,
+) -> Result<()> {
+    let record = shadow_cortex::append_feedback_record(
+        path,
+        decision.as_str(),
+        signal_id,
+        source_event_ids,
+        actor,
+        note,
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&record)?);
+    } else {
+        let path = path
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(shadow_cortex::default_feedback_path);
+        println!(
+            "recorded shadow-cortex feedback: {} {}",
+            record.decision, record.signal_id
+        );
+        println!("path: {}", path.display());
+    }
+    Ok(())
+}
+
+fn run_dream_shadow_cortex_feedback_list(
+    limit: usize,
+    path: Option<&std::path::Path>,
+    as_json: bool,
+) -> Result<()> {
+    let records = shadow_cortex::read_feedback_records(path, limit)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&records)?);
+    } else if records.is_empty() {
+        println!("(no shadow-cortex feedback records)");
+    } else {
+        for record in records {
+            println!(
+                "{}  {}  {}  {}",
+                record.recorded_at, record.decision, record.signal_id, record.actor
+            );
+            if let Some(note) = record.note {
+                println!("  note: {note}");
+            }
+            if !record.source_event_ids.is_empty() {
+                println!("  source_event_ids: {}", record.source_event_ids.join(", "));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -5910,12 +6148,26 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
         }
     };
 
+    let (shadow_cortex, shadow_cortex_error) = match shadow_cortex_weekly_summary(&store).await {
+        Ok(summary) => (Some(summary), None),
+        Err(e) => (None, Some(e.to_string())),
+    };
+    let (shadow_cortex_feedback, shadow_cortex_feedback_error) =
+        match shadow_cortex::feedback_summary(None, 7 * 86_400, now_epoch as i64) {
+            Ok(summary) => (Some(summary), None),
+            Err(e) => (None, Some(e.to_string())),
+        };
+
     if as_json {
         let payload = serde_json::json!({
             "generated_at_epoch": now_epoch,
             "snapshot_key": snapshot_key,
             "replay_audit": replay,
             "signal_fidelity": fidelity,
+            "shadow_cortex": shadow_cortex,
+            "shadow_cortex_error": shadow_cortex_error,
+            "shadow_cortex_feedback": shadow_cortex_feedback,
+            "shadow_cortex_feedback_error": shadow_cortex_feedback_error,
         });
         println!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(());
@@ -6128,12 +6380,105 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
         }
     }
 
+    // ── v25 Agent Shadow Cortex one-liner ─────────────────────────────
+    // First read-only consumer for the shadow-cortex lane. Keep it compact:
+    // the standalone `dream shadow-cortex` command owns the full replay report.
+    println!();
+    println!("[bonus #4] shadow-cortex attention (v25)");
+    println!("─────────────────────────────────────────");
+    match shadow_cortex {
+        Some(summary) => {
+            print_shadow_cortex_weekly_bonus(&summary, shadow_cortex_feedback.as_ref());
+            if let Some(err) = shadow_cortex_feedback_error {
+                eprintln!("  shadow-cortex feedback skipped: {err}");
+            }
+        }
+        None => {
+            let err = shadow_cortex_error.unwrap_or_else(|| "unknown error".to_string());
+            eprintln!("  shadow-cortex skipped: {err}");
+        }
+    }
+
     println!();
     println!(
         "next: re-run `dream weekly` in 7 days; \
          compare via `dream diff <prev_key> <this_key>` for drift."
     );
     Ok(())
+}
+
+async fn shadow_cortex_weekly_summary(
+    store: &dyn StateStore,
+) -> Result<shadow_cortex::ShadowCortexWeeklySummary> {
+    let fixture = shadow_cortex::collect_shadow_cortex_fixture(
+        store,
+        shadow_cortex::ShadowCortexOptions {
+            window_days: 7,
+            source: "codex".to_string(),
+        },
+    )
+    .await?;
+    let report = shadow_cortex::build_shadow_cortex_report_from_fixture(&fixture, 3)?;
+    Ok(shadow_cortex::weekly_summary(&report))
+}
+
+fn print_shadow_cortex_weekly_bonus(
+    summary: &shadow_cortex::ShadowCortexWeeklySummary,
+    feedback: Option<&shadow_cortex::ShadowCortexFeedbackSummary>,
+) {
+    println!(
+        "  verdict: {} | mode={:?} | source={} | events={}",
+        summary.verdict, summary.mode, summary.requested_source, summary.total_events,
+    );
+    println!(
+        "  totals: tool_calls={} errors={} memory_queries={} misses={} forum_posts={}",
+        summary.totals.mcp_tool_calls,
+        summary.totals.mcp_tool_errors,
+        summary.totals.memory_queries,
+        summary.totals.memory_misses,
+        summary.totals.forum_posts,
+    );
+    for lane in &summary.lane_coverage {
+        println!(
+            "  {}: {} ({}/{}, {:.0}%) rank_tie={}",
+            lane.lane,
+            lane.state,
+            lane.covered_events,
+            lane.total_events,
+            lane.coverage * 100.0,
+            lane.rank_tie_state,
+        );
+    }
+    if let Some(signal) = &summary.top_signal {
+        println!(
+            "  heuristic top: {:?}/{:?} {} ({:.2})",
+            signal.scope, signal.signal_type, signal.subject_id, signal.salience,
+        );
+        println!("    {}", signal.summary);
+    }
+    if let Some(signal) = &summary.seed_shadow_top_signal {
+        println!(
+            "  seed-shadow top: {:?}/{:?} {} ({:.2})",
+            signal.scope, signal.signal_type, signal.subject_id, signal.salience,
+        );
+        println!("    {}", signal.summary);
+    }
+    if let Some(feedback) = feedback {
+        println!(
+            "  feedback 7d: {} accepted / {} ignored ({} in-window, {} total)",
+            feedback.accepted,
+            feedback.ignored,
+            feedback.window_records,
+            feedback.total_records,
+        );
+        if let Some(latest) = &feedback.latest {
+            println!(
+                "  latest feedback: {} {} by {}",
+                latest.decision, latest.signal_id, latest.actor
+            );
+        }
+    }
+    println!("  (run `dream shadow-cortex --source codex --json` for replay detail)");
 }
 
 /// Compact aggregate of `dream substrate-corr-audit`, sized for the
