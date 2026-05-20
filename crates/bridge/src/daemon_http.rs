@@ -52,9 +52,32 @@ struct AppState {
     embed_backend: Arc<dyn EmbeddingBackend>,
 }
 
-/// Run the HTTP daemon on `listen` (e.g. `0.0.0.0:7878`). Blocks until the
-/// listener is dropped or the runtime is cancelled.
+/// Parse the `listen` argument into one or more addresses. Comma-separated
+/// values are split (whitespace around each entry is trimmed). Empty entries
+/// are skipped. Used by `run()` to support binding both a tailnet interface
+/// and `127.0.0.1` from a single config value without forcing `0.0.0.0` (which
+/// would also expose the daemon on any other interface present on the host).
+pub fn parse_listen_addrs(listen: &str) -> Vec<String> {
+    listen
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Run the HTTP daemon on one or more `listen` addresses. Pass a single
+/// address (e.g. `0.0.0.0:7878`) for the legacy single-listener mode, or a
+/// comma-separated list (e.g. `127.0.0.1:7878,100.91.146.24:7878`) to bind
+/// loopback alongside a specific tailnet interface — strictly narrower than
+/// `0.0.0.0` because public interfaces (WiFi, ethernet) are not bound.
+/// Blocks until all listeners exit or the runtime is cancelled.
 pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
+    let addrs = parse_listen_addrs(listen);
+    if addrs.is_empty() {
+        anyhow::bail!("daemon-http listen address is empty: {listen:?}");
+    }
+
     let embed_backend = build_raw_embed_backend();
     let state = AppState {
         store,
@@ -76,15 +99,34 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route("/agent/inbox", get(agent_inbox_read))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(listen)
-        .await
-        .with_context(|| format!("bind {listen}"))?;
-    let addr = listener
-        .local_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|_| listen.to_string());
-    tracing::info!(addr = %addr, "agent-bridge daemon-http listening");
-    axum::serve(listener, app).await.context("axum::serve")?;
+    // Bind all listeners up-front so any bind failure fails the whole
+    // daemon (rather than serving on a subset of addresses silently).
+    let mut listeners = Vec::with_capacity(addrs.len());
+    for addr in &addrs {
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .with_context(|| format!("bind {addr}"))?;
+        let bound = listener
+            .local_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|_| addr.clone());
+        tracing::info!(addr = %bound, "agent-bridge daemon-http listening");
+        listeners.push(listener);
+    }
+
+    // Spawn one axum::serve task per listener; first one to error wins.
+    // The shared Router (`app`) is cheaply cloneable (state is Arc-based).
+    let mut joins = Vec::with_capacity(listeners.len());
+    for listener in listeners {
+        let app = app.clone();
+        joins.push(tokio::spawn(async move {
+            axum::serve(listener, app).await.context("axum::serve")
+        }));
+    }
+    // Wait for any listener task to finish; surface its error if any.
+    // The remaining tasks are aborted when this future resolves and joins drop.
+    let (res, _idx, _rest) = futures::future::select_all(joins).await;
+    res.context("daemon-http listener task panicked")??;
     Ok(())
 }
 
@@ -827,6 +869,35 @@ fn default_max_idle() -> i64 {
 mod tests {
     use super::*;
     use ab_store::AgentPresenceRecord;
+
+    #[test]
+    fn parse_listen_addrs_single() {
+        assert_eq!(parse_listen_addrs("0.0.0.0:7878"), vec!["0.0.0.0:7878"]);
+        assert_eq!(parse_listen_addrs("127.0.0.1:7878"), vec!["127.0.0.1:7878"]);
+    }
+
+    #[test]
+    fn parse_listen_addrs_comma_separated_dual_bind() {
+        // Realistic config: loopback + tailscale interface only — strictly
+        // narrower than 0.0.0.0 since WiFi/ethernet are not bound.
+        let addrs = parse_listen_addrs("127.0.0.1:7878,100.91.146.24:7878");
+        assert_eq!(addrs, vec!["127.0.0.1:7878", "100.91.146.24:7878"]);
+    }
+
+    #[test]
+    fn parse_listen_addrs_trims_whitespace_and_skips_empty() {
+        // Tolerate "addr1 , addr2 ,, addr3" — common when humans hand-edit.
+        let addrs = parse_listen_addrs(" 127.0.0.1:7878 , 100.91.146.24:7878 ,, ");
+        assert_eq!(addrs, vec!["127.0.0.1:7878", "100.91.146.24:7878"]);
+    }
+
+    #[test]
+    fn parse_listen_addrs_empty_input_returns_empty() {
+        // `run()` rejects empty-after-parse to fail fast rather than bind to
+        // an implicit default surprising the operator.
+        assert!(parse_listen_addrs("").is_empty());
+        assert!(parse_listen_addrs("  ,  ,  ").is_empty());
+    }
 
     fn presence_fixture() -> AgentPresenceRecord {
         AgentPresenceRecord {

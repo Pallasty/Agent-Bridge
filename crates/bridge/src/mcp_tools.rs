@@ -17688,7 +17688,19 @@ fn normalize_tool_policy_value(value: &str) -> String {
 }
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
-    matches!(tier, Tier::Essential) || matches!(tool_name, "ide_snapshot" | "ide_command")
+    matches!(tier, Tier::Essential)
+        || matches!(
+            tool_name,
+            "ide_snapshot"
+                | "ide_command"
+                | "forum_post"
+                | "forum_read"
+                | "forum_list_threads"
+                | "forum_subscribe"
+                | "forum_set_thread_status"
+                | "agent_presence_announce"
+                | "agent_presence_list"
+        )
 }
 
 fn codex_lean_tool(tool_name: &str) -> bool {
@@ -17719,6 +17731,10 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "plan_save"
             | "plan_load"
             | "plan_update"
+            | "forum_post"
+            | "forum_read"
+            | "forum_list_threads"
+            | "agent_presence_list"
     )
 }
 
@@ -21085,6 +21101,16 @@ mod tests {
         assert!(p.includes(Tier::Essential, "pet_state_get"));
         assert!(p.includes(Tier::Niche, "ide_snapshot"));
         assert!(p.includes(Tier::Niche, "ide_command"));
+        // Forum + presence collab tools — allowlisted into codex-essential so
+        // Codex agents can post/read the cross-process whiteboard without
+        // dropping to SQLite-direct or daemon-http workarounds.
+        assert!(p.includes(Tier::Standard, "forum_post"));
+        assert!(p.includes(Tier::Standard, "forum_read"));
+        assert!(p.includes(Tier::Standard, "forum_list_threads"));
+        assert!(p.includes(Tier::Standard, "forum_subscribe"));
+        assert!(p.includes(Tier::Standard, "forum_set_thread_status"));
+        assert!(p.includes(Tier::Standard, "agent_presence_announce"));
+        assert!(p.includes(Tier::Standard, "agent_presence_list"));
         assert!(!p.includes(Tier::Standard, "avatar_state_get"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
@@ -21100,6 +21126,16 @@ mod tests {
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "session_bootstrap"));
         assert!(p.includes(Tier::Niche, "ide_snapshot"));
+        // Minimum collab surface: lean keeps read+post+list-threads + presence_list
+        // so a lean Codex can still see + reach the whiteboard.
+        assert!(p.includes(Tier::Standard, "forum_post"));
+        assert!(p.includes(Tier::Standard, "forum_read"));
+        assert!(p.includes(Tier::Standard, "forum_list_threads"));
+        assert!(p.includes(Tier::Standard, "agent_presence_list"));
+        // Lean stays narrower than essential: no subscribe / status / announce.
+        assert!(!p.includes(Tier::Standard, "forum_subscribe"));
+        assert!(!p.includes(Tier::Standard, "forum_set_thread_status"));
+        assert!(!p.includes(Tier::Standard, "agent_presence_announce"));
         assert!(!p.includes(Tier::Essential, "shell_exec"));
         assert!(!p.includes(Tier::Essential, "codebase_search"));
         assert!(!p.includes(Tier::Essential, "codebase_impact"));
