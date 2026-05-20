@@ -475,6 +475,11 @@ renderer-neutral behavior layer. They derive `gesture`, `mood`, `attention`, and
 `codex_pet_package_mutation=false` and `requires_renderer_mapping=true` so
 official Pet assets remain a packaging boundary rather than an internal
 extension point.
+`avatar cortex-renderer` and `/avatar-surface/cortex-renderer` are the first
+adapter dry-run on that boundary: they map `motion.animation_hint.renderer_token`
+into `pose`, `expression`, `motion`, `accessory`, and timeline slots, while
+reporting `writes_files=false`, `mutates_renderer=false`, and
+`codex_pet_package_mutation=false`.
 `avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
 as a dedicated read-only surface with `emits_audio=false`,
 `emits_notification=false`, and `requires_explicit_emit_gate=true`.
@@ -559,6 +564,7 @@ external watchdogs and non-MCP clients.
 | `agent-bridge avatar cortex-status` | Launchd runner state and the latest cortex snapshot row/fingerprint are visible from one read-only command |
 | `agent-bridge avatar cortex-language` | Dynamic Xiao Shu phrase composition is visible without LLM, voice model, audio, or notifications |
 | `agent-bridge avatar cortex-motion` | Gesture/mood/attention semantics are visible without renderer mutation or official Pet package changes |
+| `agent-bridge avatar cortex-renderer` | Renderer slot mapping is visible as a dry-run without writing files or mutating assets |
 | `agent-bridge avatar cortex-preview` | Voice preview text is visible without emitting audio or notifications |
 | `agent-bridge avatar cortex-voice-gate` | Explicit voice-gate dry-run reports whether a future emit would pass, without emitting audio |
 | `agent-bridge avatar cortex-voice-emit` | CLI-only manual voice adapter can speak one gated line and record cooldown state |
@@ -572,6 +578,7 @@ external watchdogs and non-MCP clients.
 | daemon HTTP `/avatar-surface/cortex-status` | Same shadow-cortex runner/snapshot/event-trend/policy payload is available to browser and non-MCP clients |
 | daemon HTTP `/avatar-surface/cortex-language` | Same deterministic language preview is available to browser and non-MCP clients without emission |
 | daemon HTTP `/avatar-surface/cortex-motion` | Same gesture/mood/attention preview is available to browser and non-MCP clients without renderer mutation |
+| daemon HTTP `/avatar-surface/cortex-renderer` | Same renderer slot mapping dry-run is available to browser and non-MCP clients without asset mutation |
 | daemon HTTP `/avatar-surface/cortex-preview` | Same voice preview is available to browser and non-MCP clients without emission |
 | daemon HTTP `/avatar-surface/cortex-voice-gate` | Same explicit voice-gate dry-run is available to browser and non-MCP clients without emission |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |

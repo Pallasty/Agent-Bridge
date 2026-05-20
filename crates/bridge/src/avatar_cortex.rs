@@ -807,6 +807,164 @@ pub fn avatar_cortex_motion_preview(
     Ok(avatar_cortex_motion_preview_from_status(status))
 }
 
+fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
+    let (resolved, pose_slot, expression_slot, motion_slot, accessory_slot, timeline, note) =
+        match renderer_token {
+            "xiao_shu::soft_bounce::low" => (
+                true,
+                "upright_ready",
+                "bright_smile",
+                "soft_bounce",
+                "none",
+                json!([
+                    {"at_ms": 0, "slot": "pose", "value": "upright_ready"},
+                    {"at_ms": 200, "slot": "expression", "value": "bright_smile"},
+                    {"at_ms": 400, "slot": "motion", "value": "soft_bounce"},
+                    {"at_ms": 1800, "slot": "motion", "value": "idle_breathe"}
+                ]),
+                "stable caught-up state can become a small cheerful bounce",
+            ),
+            "xiao_shu::idle_breathe::low" => (
+                true,
+                "neutral_idle",
+                "calm_eyes",
+                "idle_breathe",
+                "none",
+                json!([
+                    {"at_ms": 0, "slot": "pose", "value": "neutral_idle"},
+                    {"at_ms": 150, "slot": "expression", "value": "calm_eyes"},
+                    {"at_ms": 300, "slot": "motion", "value": "idle_breathe"}
+                ]),
+                "settled or stale state should remain quiet and legible",
+            ),
+            "xiao_shu::sorting_glow::medium" => (
+                true,
+                "lean_forward",
+                "focused_eyes",
+                "sorting_glow",
+                "soft_status_glow",
+                json!([
+                    {"at_ms": 0, "slot": "pose", "value": "lean_forward"},
+                    {"at_ms": 180, "slot": "expression", "value": "focused_eyes"},
+                    {"at_ms": 360, "slot": "accessory", "value": "soft_status_glow"},
+                    {"at_ms": 540, "slot": "motion", "value": "sorting_glow"}
+                ]),
+                "learning state can show quiet focused sorting",
+            ),
+            "xiao_shu::look_sideways::medium" => (
+                true,
+                "inspect_tilt",
+                "checking_eyes",
+                "look_sideways",
+                "none",
+                json!([
+                    {"at_ms": 0, "slot": "pose", "value": "inspect_tilt"},
+                    {"at_ms": 200, "slot": "expression", "value": "checking_eyes"},
+                    {"at_ms": 420, "slot": "motion", "value": "look_sideways"}
+                ]),
+                "window mismatch should read as inspection, not alarm",
+            ),
+            "xiao_shu::alert_peek::medium" => (
+                true,
+                "peek_forward",
+                "concerned_eyes",
+                "alert_peek",
+                "small_attention_mark",
+                json!([
+                    {"at_ms": 0, "slot": "pose", "value": "peek_forward"},
+                    {"at_ms": 160, "slot": "expression", "value": "concerned_eyes"},
+                    {"at_ms": 320, "slot": "accessory", "value": "small_attention_mark"},
+                    {"at_ms": 480, "slot": "motion", "value": "alert_peek"}
+                ]),
+                "recent unhealthy signal should request attention without panic",
+            ),
+            _ => (
+                false,
+                "neutral_idle",
+                "calm_eyes",
+                "idle_breathe",
+                "none",
+                json!([
+                    {"at_ms": 0, "slot": "pose", "value": "neutral_idle"},
+                    {"at_ms": 150, "slot": "expression", "value": "calm_eyes"},
+                    {"at_ms": 300, "slot": "motion", "value": "idle_breathe"}
+                ]),
+                "unknown renderer token falls back to neutral idle",
+            ),
+        };
+
+    json!({
+        "schema": 1,
+        "resolved": resolved,
+        "input_token": renderer_token,
+        "target": {
+            "runtime": "codex_pet_compatible_sidecar",
+            "contract": "xiao_shu_renderer_slots_v1",
+            "pose_slot": pose_slot,
+            "expression_slot": expression_slot,
+            "motion_slot": motion_slot,
+            "accessory_slot": accessory_slot,
+        },
+        "timeline": timeline,
+        "note": note,
+    })
+}
+
+pub(crate) fn avatar_cortex_renderer_preview_from_status(status: Value) -> Value {
+    let motion_preview = avatar_cortex_motion_preview_from_status(status.clone());
+    let motion = motion_preview
+        .get("motion")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let hint = motion.get("animation_hint").unwrap_or(&Value::Null);
+    let renderer_token = vstr(hint.get("renderer_token")).unwrap_or("xiao_shu::idle_breathe::low");
+    let mapping = avatar_cortex_renderer_mapping(renderer_token);
+
+    json!({
+        "surface": "avatar_cortex_renderer_preview",
+        "schema": 1,
+        "read_only": true,
+        "dry_run": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "project": status.get("project").cloned().unwrap_or(Value::Null),
+        "label": status.get("label").cloned().unwrap_or(Value::Null),
+        "heartbeat_label": status.get("heartbeat_label").cloned().unwrap_or(Value::Null),
+        "renderer": {
+            "schema": 1,
+            "adapter": {
+                "kind": "xiao_shu_motion_renderer_dry_run",
+                "version": 1,
+                "input": "motion.animation_hint.renderer_token",
+            },
+            "mapping": mapping,
+            "safety": {
+                "dry_run": true,
+                "sidecar_only": true,
+                "writes_files": false,
+                "mutates_renderer": false,
+                "codex_pet_package_mutation": false,
+                "requires_human_binding": true,
+            },
+        },
+        "motion": motion,
+        "language": motion_preview.get("language").cloned().unwrap_or(Value::Null),
+        "source_status": motion_preview.get("source_status").cloned().unwrap_or(Value::Null),
+    })
+}
+
+pub fn avatar_cortex_renderer_preview(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_renderer_preview_from_status(status))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
@@ -1709,6 +1867,66 @@ mod tests {
             preview["motion"]["source"]["memory_observation"],
             "recent_unhealthy_signal"
         );
+    }
+
+    #[test]
+    fn avatar_cortex_renderer_preview_maps_soft_bounce_slots() {
+        let status = json!({
+            "surface": "avatar_cortex_status",
+            "project": "agent-bridge",
+            "label": "com.agentbridge.avatar-cortex.agent-bridge",
+            "heartbeat_label": "com.agentbridge.avatar-heartbeat.agent-bridge",
+            "launchd": {"loaded": true},
+            "snapshot": {"total_rows": 1},
+            "events": {
+                "records_count": 3,
+                "unhealthy_count": 0,
+                "latest": {
+                    "status": "healthy",
+                    "healthy": true,
+                    "reason": "unchanged",
+                    "ts": 300
+                },
+                "recent": [
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 100},
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 200},
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 300}
+                ]
+            },
+            "trend": {
+                "step_records_delta": 0,
+                "snapshot_event_lag_secs": 0,
+                "learning_state": {
+                    "state": "caught_up",
+                    "reason": "step_matches_records"
+                }
+            }
+        });
+        let preview = avatar_cortex_renderer_preview_from_status(status);
+        assert_eq!(preview["surface"], "avatar_cortex_renderer_preview");
+        assert_eq!(preview["dry_run"], true);
+        assert_eq!(preview["writes_files"], false);
+        assert_eq!(preview["renderer"]["mapping"]["resolved"], true);
+        assert_eq!(
+            preview["renderer"]["mapping"]["input_token"],
+            "xiao_shu::soft_bounce::low"
+        );
+        assert_eq!(
+            preview["renderer"]["mapping"]["target"]["expression_slot"],
+            "bright_smile"
+        );
+        assert_eq!(
+            preview["renderer"]["safety"]["codex_pet_package_mutation"],
+            false
+        );
+    }
+
+    #[test]
+    fn avatar_cortex_renderer_mapping_falls_back_for_unknown_token() {
+        let mapping = avatar_cortex_renderer_mapping("xiao_shu::unknown::high");
+        assert_eq!(mapping["resolved"], false);
+        assert_eq!(mapping["target"]["pose_slot"], "neutral_idle");
+        assert_eq!(mapping["target"]["motion_slot"], "idle_breathe");
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
