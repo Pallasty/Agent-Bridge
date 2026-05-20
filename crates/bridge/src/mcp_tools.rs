@@ -35,7 +35,7 @@ use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -10006,6 +10006,12 @@ impl McpTool for McpCallStatsTool {
                         "default": 7,
                         "description": "Look-back window in days. Default 7."
                     },
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "description": "Optional look-back window in seconds. Overrides window_days; useful for post-restart or A/B observation."
+                    },
                     "top_n": {
                         "type": "integer",
                         "minimum": 1,
@@ -10022,23 +10028,20 @@ impl McpTool for McpCallStatsTool {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
         };
-        let window_days = args
-            .get("window_days")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(7)
-            .clamp(1, 365);
+        let (window_days, window_secs, window_source) = dispatch_window_from_args(&args);
         let top_n = args
             .get("top_n")
             .and_then(|v| v.as_u64())
             .unwrap_or(30)
             .clamp(1, 200) as u32;
-        let window_secs = window_days * 86_400;
         match store.mcp_tool_call_stats(window_secs, top_n).await {
             Ok(stats) => {
                 let total_calls: u64 = stats.iter().map(|s| s.call_count).sum();
                 let total_errors: u64 = stats.iter().map(|s| s.error_count).sum();
                 Ok(ToolResult::json_text(&json!({
                     "window_days": window_days,
+                    "window_secs": window_secs,
+                    "window_source": window_source,
                     "tools": stats,
                     "total_calls": total_calls,
                     "total_errors": total_errors,
@@ -10084,6 +10087,12 @@ impl McpTool for McpDispatchAuditTool {
                         "maximum": 365,
                         "default": 7,
                         "description": "Look-back window in days. Default 7."
+                    },
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "description": "Optional look-back window in seconds. Overrides window_days; useful for post-restart or A/B observation."
                     },
                     "top_n": {
                         "type": "integer",
@@ -10143,11 +10152,7 @@ impl McpTool for McpDispatchAuditTool {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
         };
-        let window_days = args
-            .get("window_days")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(7)
-            .clamp(1, 365);
+        let (window_days, window_secs, window_source) = dispatch_window_from_args(&args);
         let top_n = args
             .get("top_n")
             .and_then(|v| v.as_u64())
@@ -10185,14 +10190,14 @@ impl McpTool for McpDispatchAuditTool {
         // to 200, which is enough for today's registry profiles.
         let stats_limit = current_tool_count.max(top_n).min(200) as u32;
         let stats = match store
-            .mcp_tool_call_stats_filtered(window_days * 86_400, stats_limit, filter.clone())
+            .mcp_tool_call_stats_filtered(window_secs, stats_limit, filter.clone())
             .await
         {
             Ok(rows) => rows,
             Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
         };
         let cold_basis_stats = match store
-            .mcp_tool_call_stats_filtered(window_days * 86_400, stats_limit, cold_basis.clone())
+            .mcp_tool_call_stats_filtered(window_secs, stats_limit, cold_basis.clone())
             .await
         {
             Ok(rows) => rows,
@@ -10204,7 +10209,7 @@ impl McpTool for McpDispatchAuditTool {
             .map(|s| (s.tool_name.clone(), s))
             .collect();
         let source_breakdown = match store
-            .mcp_tool_source_stats_filtered(window_days * 86_400, 50, filter.clone())
+            .mcp_tool_source_stats_filtered(window_secs, 50, filter.clone())
             .await
         {
             Ok(rows) => rows
@@ -10215,7 +10220,7 @@ impl McpTool for McpDispatchAuditTool {
         };
         let global_hot_codex_tools = match store
             .mcp_tool_call_stats_filtered(
-                window_days * 86_400,
+                window_secs,
                 top_n as u32,
                 dispatch_source_only_filter("codex"),
             )
@@ -10226,7 +10231,7 @@ impl McpTool for McpDispatchAuditTool {
         };
         let global_hot_hook_tools = match store
             .mcp_tool_call_stats_filtered(
-                window_days * 86_400,
+                window_secs,
                 top_n as u32,
                 dispatch_source_only_filter("hook"),
             )
@@ -10297,10 +10302,11 @@ impl McpTool for McpDispatchAuditTool {
         let recent_errors = if recent_errors_limit == 0 {
             Vec::new()
         } else {
-            store
-                .recent_mcp_tool_errors(recent_errors_limit)
+            let rows = store
+                .recent_mcp_tool_errors(ab_store::MCP_TOOL_ERROR_RING_CAP)
                 .await
-                .unwrap_or_default()
+                .unwrap_or_default();
+            dispatch_recent_errors_for_audit(rows, recent_errors_limit, window_secs, &stats)
         };
 
         let profile_suggestions = dispatch_profile_suggestions(&stats, &cold_tools);
@@ -10312,6 +10318,8 @@ impl McpTool for McpDispatchAuditTool {
             "model_reasoning_effort": std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT").ok(),
             "codex_host": std::env::var("AGENT_BRIDGE_CODEX_HOST").ok(),
             "window_days": window_days,
+            "window_secs": window_secs,
+            "window_source": window_source,
             "filter": dispatch_filter_json(&filter),
             "current_exposed_tool_count": current_tool_count,
             "observed_tool_count": stats.len(),
@@ -10333,6 +10341,7 @@ impl McpTool for McpDispatchAuditTool {
                 "optimization_candidates": "current filter",
                 "source_breakdown": "current filter",
                 "cold_tools": "cold_basis filter",
+                "recent_errors": "current-filter failing tool names within the current window; mcp_tool_errors rows do not carry source/model attribution",
                 "global_hot_codex_tools": "global source-only comparison: source=codex",
                 "global_hot_hook_tools": "global source-only comparison: source=hook"
             },
@@ -10345,6 +10354,50 @@ impl McpTool for McpDispatchAuditTool {
             "note": "Telemetry covers Agent-Bridge MCP tools/call traffic only; Codex native shell/browser/GitHub tool use is outside this table. Rows recorded before telemetry attribution appear as source=legacy. The current audit call itself is recorded after this response, so it appears on the next audit."
         })))
     }
+}
+
+fn dispatch_window_from_args(args: &Value) -> (i64, i64, &'static str) {
+    let window_days = args
+        .get("window_days")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(7)
+        .clamp(1, 365);
+    if let Some(secs) = args.get("window_secs").and_then(|v| v.as_i64()) {
+        (window_days, secs.clamp(60, 31_536_000), "window_secs")
+    } else {
+        (window_days, window_days * 86_400, "window_days")
+    }
+}
+
+fn dispatch_now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn dispatch_recent_errors_for_audit(
+    rows: Vec<ab_store::McpToolErrorRecord>,
+    limit: u32,
+    window_secs: i64,
+    stats: &[ab_store::McpToolCallStats],
+) -> Vec<ab_store::McpToolErrorRecord> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    let failing_tools: HashSet<&str> = stats
+        .iter()
+        .filter(|s| s.error_count > 0)
+        .map(|s| s.tool_name.as_str())
+        .collect();
+    if failing_tools.is_empty() {
+        return Vec::new();
+    }
+    let cutoff = dispatch_now_secs().saturating_sub(window_secs.max(0));
+    rows.into_iter()
+        .filter(|row| row.ts >= cutoff && failing_tools.contains(row.tool_name.as_str()))
+        .take(limit as usize)
+        .collect()
 }
 
 fn dispatch_filter_from_args(args: &Value) -> McpToolCallFilter {
@@ -19624,6 +19677,81 @@ mod tests {
         assert!(!compact_mcp_output_default_for_policy(
             ToolPolicy::from_values(Some("claude-standard"), None, None, Some("compact"))
         ));
+    }
+
+    #[test]
+    fn dispatch_window_from_args_uses_seconds_override_and_clamps() {
+        assert_eq!(
+            dispatch_window_from_args(&json!({"window_days": 7, "window_secs": 900})),
+            (7, 900, "window_secs")
+        );
+        assert_eq!(
+            dispatch_window_from_args(&json!({"window_days": 2})),
+            (2, 172_800, "window_days")
+        );
+        assert_eq!(
+            dispatch_window_from_args(&json!({"window_secs": 3})),
+            (7, 60, "window_secs")
+        );
+    }
+
+    #[test]
+    fn dispatch_recent_errors_for_audit_scopes_to_failing_tools_and_window() {
+        let now = dispatch_now_secs();
+        let stats = vec![
+            ab_store::McpToolCallStats {
+                tool_name: "forum_read".into(),
+                call_count: 2,
+                error_count: 1,
+                avg_duration_ms: 1.0,
+                p95_duration_ms: 2,
+                max_duration_ms: 3,
+                avg_result_size: 100.0,
+                client_name: None,
+                profile: None,
+                source: Some("codex".into()),
+                model: None,
+                model_reasoning_effort: None,
+                codex_host: None,
+            },
+            ab_store::McpToolCallStats {
+                tool_name: "capabilities".into(),
+                call_count: 4,
+                error_count: 0,
+                avg_duration_ms: 1.0,
+                p95_duration_ms: 2,
+                max_duration_ms: 3,
+                avg_result_size: 100.0,
+                client_name: None,
+                profile: None,
+                source: Some("codex".into()),
+                model: None,
+                model_reasoning_effort: None,
+                codex_host: None,
+            },
+        ];
+        let rows = vec![
+            ab_store::McpToolErrorRecord {
+                ts: now,
+                tool_name: "forum_read".into(),
+                message: "current scoped error".into(),
+            },
+            ab_store::McpToolErrorRecord {
+                ts: now.saturating_sub(3_600),
+                tool_name: "forum_read".into(),
+                message: "old error".into(),
+            },
+            ab_store::McpToolErrorRecord {
+                ts: now,
+                tool_name: "capabilities".into(),
+                message: "healthy tool historical error".into(),
+            },
+        ];
+
+        let scoped = dispatch_recent_errors_for_audit(rows, 5, 900, &stats);
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].tool_name, "forum_read");
+        assert_eq!(scoped[0].message, "current scoped error");
     }
 
     #[test]
