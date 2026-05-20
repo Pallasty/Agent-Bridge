@@ -15,7 +15,9 @@ use ab_store::{
     embed_text,
     prioritize_session_handoff,
     // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
+    AgentPresenceRecord,
     CompactPolicy,
+    ForumPostRecord,
     ImportConflictPolicy,
     McpToolCallFilter,
     MemoryCosineHit,
@@ -32,7 +34,7 @@ use ab_store::{
 use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -599,6 +601,188 @@ fn append_codex_native_hint(base: &str, codex_note: &str, codex_context: bool) -
 
 fn mcp_schema_description(base: &str, codex_note: &str) -> String {
     append_codex_native_hint(base, codex_note, mcp_schema_codex_context())
+}
+
+fn compact_mcp_output_default() -> bool {
+    let policy = ToolPolicy::from_env();
+    compact_mcp_output_default_for_policy(policy)
+}
+
+fn compact_mcp_output_default_for_policy(policy: ToolPolicy) -> bool {
+    matches!(policy.set, ToolSet::CodexEssential | ToolSet::CodexLean)
+        || matches!(policy.profile(), ToolProfile::Compact)
+}
+
+fn truncate_chars(s: &str, max_chars: usize) -> (String, bool, usize) {
+    let total = s.chars().count();
+    if max_chars == 0 || total <= max_chars {
+        (s.to_string(), false, total)
+    } else {
+        let mut out: String = s.chars().take(max_chars).collect();
+        out.push('…');
+        (out, true, total)
+    }
+}
+
+fn project_forum_posts(
+    posts: &[ForumPostRecord],
+    body_max_chars: usize,
+    include_refs: bool,
+) -> (Vec<Value>, usize) {
+    let mut truncated = 0usize;
+    let out = posts
+        .iter()
+        .map(|post| {
+            let (body, body_truncated, body_total_chars) =
+                truncate_chars(&post.body, body_max_chars);
+            if body_truncated {
+                truncated += 1;
+            }
+            let mut obj = Map::new();
+            obj.insert("id".to_string(), json!(post.id));
+            obj.insert("thread_id".to_string(), json!(post.thread_id));
+            obj.insert("author".to_string(), json!(post.author));
+            obj.insert("kind".to_string(), json!(post.kind));
+            obj.insert("body".to_string(), json!(body));
+            if body_truncated {
+                obj.insert("body_truncated".to_string(), json!(true));
+                obj.insert("body_total_chars".to_string(), json!(body_total_chars));
+            }
+            if include_refs {
+                obj.insert("refs".to_string(), post.refs.clone());
+            } else if !post.refs.is_null() {
+                obj.insert("refs_omitted".to_string(), json!(true));
+            }
+            obj.insert("created_at".to_string(), json!(post.created_at));
+            Value::Object(obj)
+        })
+        .collect();
+    (out, truncated)
+}
+
+fn capabilities_summary(capabilities: &Value) -> Value {
+    let Some(obj) = capabilities.as_object() else {
+        return json!({"type": capabilities_type_label(capabilities)});
+    };
+    let mut keys: Vec<&str> = obj.keys().map(|s| s.as_str()).collect();
+    keys.sort_unstable();
+    let mut out = Map::new();
+    out.insert("keys".to_string(), json!(keys));
+    if let Some(avatar) = obj.get("avatar_state").and_then(|v| v.as_object()) {
+        let mut compact = Map::new();
+        for key in [
+            "mode",
+            "activity_state",
+            "focus",
+            "next_action",
+            "risk_level",
+            "updated_at",
+            "source",
+        ] {
+            if let Some(v) = avatar.get(key) {
+                compact.insert(key.to_string(), v.clone());
+            }
+        }
+        if let Some(policy) = avatar.get("voice_policy").and_then(|v| v.as_object()) {
+            if let Some(default_silent) = policy.get("default_silent") {
+                compact.insert("voice_default_silent".to_string(), default_silent.clone());
+            }
+        }
+        if !compact.is_empty() {
+            out.insert("avatar_state".to_string(), Value::Object(compact));
+        }
+    }
+    if let Some(pet) = obj.get("pet_state").and_then(|v| v.as_object()) {
+        let mut compact = Map::new();
+        for key in [
+            "mode",
+            "activity_state",
+            "focus",
+            "next_action",
+            "risk_level",
+        ] {
+            if let Some(v) = pet.get(key) {
+                compact.insert(key.to_string(), v.clone());
+            }
+        }
+        if !compact.is_empty() {
+            out.insert("pet_state".to_string(), Value::Object(compact));
+        }
+    }
+    Value::Object(out)
+}
+
+fn capabilities_type_label(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn project_agent_presence_rows(
+    rows: &[AgentPresenceRecord],
+    include_capabilities: bool,
+    include_skills: bool,
+) -> (Vec<Value>, usize, usize) {
+    let mut capabilities_omitted = 0usize;
+    let mut skills_omitted = 0usize;
+    let out = rows
+        .iter()
+        .map(|row| {
+            let mut obj = Map::new();
+            obj.insert("session_id".to_string(), json!(row.session_id));
+            obj.insert("name".to_string(), json!(row.name));
+            if let Some(v) = &row.description {
+                obj.insert("description".to_string(), json!(v));
+            }
+            if let Some(v) = &row.version {
+                obj.insert("version".to_string(), json!(v));
+            }
+            if let Some(v) = &row.url {
+                obj.insert("url".to_string(), json!(v));
+            }
+            if include_capabilities {
+                if let Some(v) = &row.capabilities {
+                    obj.insert("capabilities".to_string(), v.clone());
+                }
+            } else if let Some(v) = &row.capabilities {
+                capabilities_omitted += 1;
+                obj.insert("capabilities_omitted".to_string(), json!(true));
+                obj.insert("capabilities_summary".to_string(), capabilities_summary(v));
+            }
+            if include_skills {
+                if let Some(v) = &row.skills {
+                    obj.insert("skills".to_string(), v.clone());
+                }
+            } else if row.skills.is_some() {
+                skills_omitted += 1;
+                obj.insert("skills_omitted".to_string(), json!(true));
+            }
+            obj.insert("node".to_string(), json!(row.node));
+            obj.insert("project".to_string(), json!(row.project));
+            obj.insert("role".to_string(), json!(row.role));
+            if let Some(v) = &row.tag {
+                obj.insert("tag".to_string(), json!(v));
+            }
+            if let Some(v) = &row.cwd {
+                obj.insert("cwd".to_string(), json!(v));
+            }
+            if let Some(v) = row.pid {
+                obj.insert("pid".to_string(), json!(v));
+            }
+            obj.insert("started_at".to_string(), json!(row.started_at));
+            obj.insert(
+                "last_heartbeat_at".to_string(),
+                json!(row.last_heartbeat_at),
+            );
+            Value::Object(obj)
+        })
+        .collect();
+    (out, capabilities_omitted, skills_omitted)
 }
 
 pub struct ShellExecTool {
@@ -2972,7 +3156,11 @@ impl McpTool for ForumReadTool {
                  Set `peer: \"host:port\"` to read from a remote tailnet peer's \
                  daemon-http; omit for local-only. NOTE: `unread_for` cursor advance \
                  is local-only and is silently ignored when `peer` is set (the \
-                 remote daemon doesn't carry your subscription state)."
+                 remote daemon doesn't carry your subscription state).\n\n\
+                 Output projection: in Codex compact toolsets, omitted projection args \
+                 default to a compact body preview and omit refs; other clients default \
+                 to full posts. Set `compact:false`, `body_max_chars:0`, and \
+                 `include_refs:true` when you need verbatim full posts."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2982,7 +3170,10 @@ impl McpTool for ForumReadTool {
                     "since_post_id": { "type": "integer", "description": "Exclusive cursor — only posts with id > this." },
                     "unread_for":    { "type": "string",  "description": "Session id; reads from that session's subscription cursor and advances it. (local-only)" },
                     "limit":         { "type": "integer", "default": 50, "description": "Max rows (1–500)." },
-                    "peer":          { "type": "string",  "description": "Optional tailnet peer host:port; if set, query that daemon-http instead of local. (v20)" }
+                    "peer":          { "type": "string",  "description": "Optional tailnet peer host:port; if set, query that daemon-http instead of local. (v20)" },
+                    "compact":       { "type": "boolean", "description": "Use compact projection defaults. Omitted = true for Codex compact toolsets, false otherwise." },
+                    "body_max_chars": { "type": "integer", "description": "Per-post body preview length. 0 disables truncation. Omitted = 2000 in compact output, 0 otherwise." },
+                    "include_refs":  { "type": "boolean", "description": "Include refs JSON for each post. Omitted = false in compact output, true otherwise." }
                 }
             }),
         }
@@ -3009,6 +3200,19 @@ impl McpTool for ForumReadTool {
             .get("peer")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty());
+        let compact = args
+            .get("compact")
+            .and_then(|v| v.as_bool())
+            .unwrap_or_else(compact_mcp_output_default);
+        let body_max_chars = args
+            .get("body_max_chars")
+            .and_then(|v| v.as_u64())
+            .map(|v| v.min(100_000) as usize)
+            .unwrap_or(if compact { 2_000 } else { 0 });
+        let include_refs = args
+            .get("include_refs")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(!compact);
 
         let posts = if let Some(p) = peer {
             // Drop unread_for when going remote — cursor state is per-device.
@@ -3027,13 +3231,20 @@ impl McpTool for ForumReadTool {
         };
 
         let next_cursor = posts.last().map(|p| p.id);
+        let (posts, truncated_posts) = project_forum_posts(&posts, body_max_chars, include_refs);
         Ok(ToolResult::json_text(&json!({
             "thread_id": thread_id,
             "board": board,
             "count": posts.len(),
             "next_cursor": next_cursor,
             "posts": posts,
-            "peer": peer
+            "peer": peer,
+            "projection": {
+                "compact": compact,
+                "body_max_chars": body_max_chars,
+                "include_refs": include_refs,
+                "truncated_posts": truncated_posts
+            }
         })))
     }
 }
@@ -3570,7 +3781,12 @@ impl McpTool for AgentPresenceListTool {
                  within ~5 min. Pass `max_idle_secs:0` or `include_stale:true` to see \
                  every row including stale ones. Filters by `project` and `role` so \
                  you can ask 'who's reviewing AiOT right now'. Set `peer: \"host:port\"` \
-                 to list agents from a remote tailnet peer's daemon-http instead of local."
+                 to list agents from a remote tailnet peer's daemon-http instead of local.\n\n\
+                 Output projection: in Codex compact toolsets, omitted projection args \
+                 default to a presence summary and omit large capabilities/skills blobs; \
+                 other clients default to full rows. Set `compact:false`, \
+                 `include_capabilities:true`, and `include_skills:true` when you need \
+                 full AgentCard metadata."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -3580,7 +3796,10 @@ impl McpTool for AgentPresenceListTool {
                     "max_idle_secs": { "type": "integer", "default": 300, "description": "Skip rows whose heartbeat is older than this. 0 = no TTL." },
                     "include_stale": { "type": "boolean", "default": false, "description": "Equivalent to max_idle_secs:0." },
                     "limit":         { "type": "integer", "default": 50, "description": "Max rows (1–500)." },
-                    "peer":          { "type": "string",  "description": "Optional tailnet peer host:port; if set, query that daemon-http instead of local. (v20)" }
+                    "peer":          { "type": "string",  "description": "Optional tailnet peer host:port; if set, query that daemon-http instead of local. (v20)" },
+                    "compact":       { "type": "boolean", "description": "Use compact projection defaults. Omitted = true for Codex compact toolsets, false otherwise." },
+                    "include_capabilities": { "type": "boolean", "description": "Include full capabilities JSON. Omitted = false in compact output, true otherwise." },
+                    "include_skills": { "type": "boolean", "description": "Include full skills JSON. Omitted = false in compact output, true otherwise." }
                 }
             }),
         }
@@ -3614,6 +3833,18 @@ impl McpTool for AgentPresenceListTool {
             .get("peer")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty());
+        let compact = args
+            .get("compact")
+            .and_then(|v| v.as_bool())
+            .unwrap_or_else(compact_mcp_output_default);
+        let include_capabilities = args
+            .get("include_capabilities")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(!compact);
+        let include_skills = args
+            .get("include_skills")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(!compact);
 
         let rows = if let Some(p) = peer {
             crate::peer_client::agent_presence_list(p, project, role, max_idle_secs, limit)
@@ -3629,10 +3860,19 @@ impl McpTool for AgentPresenceListTool {
                 .await
                 .map_err(|e| ab_core::Error::Backend(format!("agent_presence_list: {e}")))?
         };
+        let (agents, capabilities_omitted, skills_omitted) =
+            project_agent_presence_rows(&rows, include_capabilities, include_skills);
         Ok(ToolResult::json_text(&json!({
             "count": rows.len(),
             "max_idle_secs": max_idle_secs,
-            "agents": rows
+            "agents": agents,
+            "projection": {
+                "compact": compact,
+                "include_capabilities": include_capabilities,
+                "include_skills": include_skills,
+                "capabilities_omitted": capabilities_omitted,
+                "skills_omitted": skills_omitted
+            }
         })))
     }
 }
@@ -19369,6 +19609,88 @@ fn unescape_keys(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_output_defaults_only_for_codex_or_compact_profile() {
+        assert!(compact_mcp_output_default_for_policy(
+            ToolPolicy::from_values(Some("codex-essential"), None, None, Some("all"))
+        ));
+        assert!(compact_mcp_output_default_for_policy(
+            ToolPolicy::from_values(Some("codex-lean"), None, None, None)
+        ));
+        assert!(compact_mcp_output_default_for_policy(
+            ToolPolicy::from_values(None, None, None, Some("compact"))
+        ));
+        assert!(!compact_mcp_output_default_for_policy(
+            ToolPolicy::from_values(Some("claude-standard"), None, None, Some("compact"))
+        ));
+    }
+
+    #[test]
+    fn project_forum_posts_truncates_body_and_omits_refs() {
+        let posts = vec![ForumPostRecord {
+            id: 7,
+            thread_id: 18,
+            author: "codex".into(),
+            kind: "finding".into(),
+            body: "abcdef".into(),
+            refs: json!({"files": ["a.rs"]}),
+            created_at: 123,
+        }];
+        let (rows, truncated) = project_forum_posts(&posts, 3, false);
+        assert_eq!(truncated, 1);
+        assert_eq!(rows[0]["body"], json!("abc…"));
+        assert_eq!(rows[0]["body_truncated"], json!(true));
+        assert_eq!(rows[0]["body_total_chars"], json!(6));
+        assert_eq!(rows[0]["refs_omitted"], json!(true));
+        assert!(rows[0].get("refs").is_none());
+    }
+
+    #[test]
+    fn project_agent_presence_rows_summarizes_large_metadata() {
+        let rows = vec![AgentPresenceRecord {
+            session_id: "sid".into(),
+            name: "Codex".into(),
+            description: None,
+            version: Some("v".into()),
+            url: None,
+            capabilities: Some(json!({
+                "avatar_state": {
+                    "mode": "working",
+                    "focus": "mcp",
+                    "next_action": "trim output",
+                    "voice_policy": {"default_silent": true},
+                    "large_blob": "x".repeat(100)
+                },
+                "pet_presence": true
+            })),
+            skills: Some(json!([{"id": "pet-presence"}])),
+            node: "node".into(),
+            project: "agent-bridge".into(),
+            role: "main".into(),
+            tag: None,
+            cwd: Some("/tmp".into()),
+            pid: Some(42),
+            started_at: 1,
+            last_heartbeat_at: 2,
+        }];
+
+        let (projected, capabilities_omitted, skills_omitted) =
+            project_agent_presence_rows(&rows, false, false);
+        assert_eq!(capabilities_omitted, 1);
+        assert_eq!(skills_omitted, 1);
+        assert_eq!(projected[0]["capabilities_omitted"], json!(true));
+        assert_eq!(
+            projected[0]["capabilities_summary"]["avatar_state"]["mode"],
+            json!("working")
+        );
+        assert_eq!(
+            projected[0]["capabilities_summary"]["avatar_state"]["voice_default_silent"],
+            json!(true)
+        );
+        assert!(projected[0].get("capabilities").is_none());
+        assert!(projected[0].get("skills").is_none());
+    }
 
     #[test]
     fn pet_state_auto_spec_allows_sparse_semantic_modes() {
