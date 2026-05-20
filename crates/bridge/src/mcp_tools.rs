@@ -10738,6 +10738,7 @@ impl McpTool for CapabilitiesTool {
                 "source": std::env::var("AGENT_BRIDGE_MCP_SOURCE").ok(),
                 "toolset": policy.label(),
                 "tool_profile": policy.profile().label(),
+                "tool_profile_extras": policy.extras(),
                 "toolset_env": std::env::var("AGENT_BRIDGE_TOOLSET").ok(),
                 "tool_profile_env": std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok(),
                 "codex_host": std::env::var("AGENT_BRIDGE_CODEX_HOST").ok(),
@@ -17542,6 +17543,7 @@ pub enum Tier {
 #[derive(Debug, Clone, Copy)]
 pub enum ToolProfile {
     Essential,
+    Compact,
     Standard,
     All,
 }
@@ -17554,6 +17556,7 @@ impl ToolProfile {
     fn from_value(value: Option<&str>) -> Self {
         match value.map(|s| s.trim().to_lowercase()).as_deref() {
             Some("essential") | Some("minimal") => Self::Essential,
+            Some("compact") | Some("essential-plus") => Self::Compact,
             Some("all") | Some("full") => Self::All,
             _ => Self::Standard,
         }
@@ -17562,6 +17565,7 @@ impl ToolProfile {
     pub fn label(self) -> &'static str {
         match self {
             Self::Essential => "essential",
+            Self::Compact => "compact",
             Self::Standard => "standard",
             Self::All => "all",
         }
@@ -17572,8 +17576,8 @@ impl ToolProfile {
             (Self::All, _) => true,
             (Self::Standard, Tier::Niche) => false,
             (Self::Standard, _) => true,
-            (Self::Essential, Tier::Essential) => true,
-            (Self::Essential, _) => false,
+            (Self::Essential | Self::Compact, Tier::Essential) => true,
+            (Self::Essential | Self::Compact, _) => false,
         }
     }
 }
@@ -17618,6 +17622,13 @@ impl ToolSet {
             _ => None,
         }
     }
+
+    fn extras(self) -> &'static [&'static str] {
+        match self {
+            Self::CodexEssential => CODEX_ESSENTIAL_EXTRAS,
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -17649,9 +17660,8 @@ impl ToolPolicy {
         let legacy_profile = ToolProfile::from_value(profile);
         let profile = match set {
             ToolSet::Profile => legacy_profile,
-            ToolSet::CodexEssential | ToolSet::CodexLean | ToolSet::GeminiLean => {
-                ToolProfile::Essential
-            }
+            ToolSet::CodexEssential => ToolProfile::Compact,
+            ToolSet::CodexLean | ToolSet::GeminiLean => ToolProfile::Essential,
             ToolSet::ClaudeStandard | ToolSet::HookLifecycle => ToolProfile::Standard,
             ToolSet::AllDev => ToolProfile::All,
         };
@@ -17664,6 +17674,16 @@ impl ToolPolicy {
 
     fn profile(self) -> ToolProfile {
         self.profile
+    }
+
+    /// Tools explicitly whitelisted by this toolset *beyond* what the underlying
+    /// `ToolProfile` tier covers. For `codex-essential` this is the IDE bridge
+    /// pair plus forum/presence collab tools — they are Tier::Standard/Niche
+    /// but exposed anyway so Codex agents can use the cross-process whiteboard.
+    /// Returned as `&'static [&'static str]` so capabilities serialization can
+    /// surface the list verbatim.
+    fn extras(self) -> &'static [&'static str] {
+        self.set.extras()
     }
 
     fn includes(self, tier: Tier, tool_name: &'static str) -> bool {
@@ -17687,20 +17707,23 @@ fn normalize_tool_policy_value(value: &str) -> String {
         .replace(' ', "-")
 }
 
+/// Tools allowlisted into the `codex-essential` surface beyond Tier::Essential.
+/// Single source of truth — `codex_essential_tool` matches against this and
+/// `ToolSet::extras` returns it so capabilities can surface the list to clients.
+const CODEX_ESSENTIAL_EXTRAS: &[&str] = &[
+    "ide_snapshot",
+    "ide_command",
+    "forum_post",
+    "forum_read",
+    "forum_list_threads",
+    "forum_subscribe",
+    "forum_set_thread_status",
+    "agent_presence_announce",
+    "agent_presence_list",
+];
+
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
-    matches!(tier, Tier::Essential)
-        || matches!(
-            tool_name,
-            "ide_snapshot"
-                | "ide_command"
-                | "forum_post"
-                | "forum_read"
-                | "forum_list_threads"
-                | "forum_subscribe"
-                | "forum_set_thread_status"
-                | "agent_presence_announce"
-                | "agent_presence_list"
-        )
+    matches!(tier, Tier::Essential) || CODEX_ESSENTIAL_EXTRAS.contains(&tool_name)
 }
 
 fn codex_lean_tool(tool_name: &str) -> bool {
@@ -21097,7 +21120,7 @@ mod tests {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, Some("all"));
 
         assert_eq!(p.label(), "codex-essential");
-        assert_eq!(p.profile().label(), "essential");
+        assert_eq!(p.profile().label(), "compact");
         assert!(p.includes(Tier::Essential, "pet_state_get"));
         assert!(p.includes(Tier::Niche, "ide_snapshot"));
         assert!(p.includes(Tier::Niche, "ide_command"));
@@ -21114,6 +21137,47 @@ mod tests {
         assert!(!p.includes(Tier::Standard, "avatar_state_get"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
+    }
+
+    #[test]
+    fn tool_policy_codex_essential_exposes_extras_list() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        let extras = p.extras();
+        assert_eq!(extras.len(), 9);
+        assert!(extras.contains(&"ide_snapshot"));
+        assert!(extras.contains(&"ide_command"));
+        assert!(extras.contains(&"forum_post"));
+        assert!(extras.contains(&"forum_read"));
+        assert!(extras.contains(&"forum_list_threads"));
+        assert!(extras.contains(&"forum_subscribe"));
+        assert!(extras.contains(&"forum_set_thread_status"));
+        assert!(extras.contains(&"agent_presence_announce"));
+        assert!(extras.contains(&"agent_presence_list"));
+    }
+
+    #[test]
+    fn tool_policy_non_codex_essential_has_empty_extras() {
+        for label in [
+            "claude-standard",
+            "codex-lean",
+            "gemini-lean",
+            "hook-lifecycle",
+            "all-dev",
+        ] {
+            let p = ToolPolicy::from_values(Some(label), None, None, None);
+            assert_eq!(
+                p.extras().len(),
+                0,
+                "extras should be empty for {label} (only codex-essential surfaces them today)"
+            );
+        }
+    }
+
+    #[test]
+    fn tool_profile_compact_accepts_legacy_aliases() {
+        for raw in ["compact", "essential-plus", "Essential-Plus", "  compact "] {
+            assert_eq!(ToolProfile::from_value(Some(raw)).label(), "compact");
+        }
     }
 
     #[test]
