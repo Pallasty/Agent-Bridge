@@ -4009,6 +4009,7 @@ async fn run_avatar_cortex_language(
     }
     let language = payload.get("language").unwrap_or(&Value::Null);
     let slots = language.get("slots").unwrap_or(&Value::Null);
+    let memory = language.get("memory").unwrap_or(&Value::Null);
     let safety = language.get("safety").unwrap_or(&Value::Null);
     let generator = language.get("generator").unwrap_or(&Value::Null);
     println!("avatar cortex language preview");
@@ -4022,6 +4023,12 @@ async fn run_avatar_cortex_language(
         avatar_health_display(language.get("style"), "-"),
         avatar_health_display(slots.get("state"), "-"),
         avatar_health_display(slots.get("latest_status"), "-")
+    );
+    println!(
+        "memory={} window={} transitions={}",
+        avatar_health_display(memory.get("summary"), "-"),
+        avatar_health_display(memory.get("window_size"), "0"),
+        avatar_health_display(memory.get("transition_count"), "0")
     );
     println!(
         "voice_allowed={} notification_allowed={} uses_llm={} uses_voice_model={}",

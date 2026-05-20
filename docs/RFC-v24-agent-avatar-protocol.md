@@ -464,7 +464,10 @@ dynamic Xiao Shu language layer on top of that state. It is a deterministic
 phrase composer, not an LLM and not a voice model: it reads the cortex state,
 latest health event, event-window counters, and project slug, then returns a
 short Chinese utterance, alternatives, slots, generator metadata, and safety
-flags. The surface is read-only, reports `emits_audio=false`, and preserves the
+flags. The optional `language.memory` block is also read-only: it summarizes the
+visible `events.recent` window as stable, transitioning, mixed, or unhealthy
+short-term context, but does not write to persistent Agent-Bridge memory or the
+global Seed substrate. The surface reports `emits_audio=false` and preserves the
 explicit emit gate as the only path toward future spoken output.
 `avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
 as a dedicated read-only surface with `emits_audio=false`,

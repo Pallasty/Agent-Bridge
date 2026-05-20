@@ -1070,12 +1070,16 @@ fn avatar_surface_language_html(language_preview: &Value) -> String {
     let language = language_preview.get("language").unwrap_or(&Value::Null);
     let safety = language.get("safety").unwrap_or(&Value::Null);
     let generator = language.get("generator").unwrap_or(&Value::Null);
+    let memory = language.get("memory").unwrap_or(&Value::Null);
     let slots = language.get("slots").unwrap_or(&Value::Null);
     let utterance = avatar_surface_html_json_value(language.get("utterance"), "-");
     let intent = avatar_surface_html_json_value(language.get("intent"), "-");
     let style = avatar_surface_html_json_value(language.get("style"), "-");
     let state = avatar_surface_html_json_value(slots.get("state"), "-");
     let latest_status = avatar_surface_html_json_value(slots.get("latest_status"), "-");
+    let memory_summary = avatar_surface_html_json_value(memory.get("summary"), "-");
+    let memory_window = avatar_surface_html_json_value(memory.get("window_size"), "0");
+    let memory_transitions = avatar_surface_html_json_value(memory.get("transition_count"), "0");
     let voice_allowed = avatar_surface_html_json_value(safety.get("voice_allowed"), "false");
     let uses_llm = avatar_surface_html_json_value(generator.get("uses_llm"), "false");
     let uses_voice_model =
@@ -1093,6 +1097,7 @@ fn avatar_surface_language_html(language_preview: &Value) -> String {
         <div><dt>style</dt><dd>{style}</dd></div>
         <div><dt>state</dt><dd>{state}</dd></div>
         <div><dt>latest</dt><dd>{latest_status}</dd></div>
+        <div><dt>memory</dt><dd>{memory_summary} window={memory_window} transitions={memory_transitions}</dd></div>
         <div><dt>safety</dt><dd>voice={voice_allowed}</dd></div>
         <div><dt>generator</dt><dd>llm={uses_llm} voice_model={uses_voice_model}</dd></div>
       </dl>
@@ -1102,6 +1107,9 @@ fn avatar_surface_language_html(language_preview: &Value) -> String {
         style = style,
         state = state,
         latest_status = latest_status,
+        memory_summary = memory_summary,
+        memory_window = memory_window,
+        memory_transitions = memory_transitions,
         voice_allowed = voice_allowed,
         uses_llm = uses_llm,
         uses_voice_model = uses_voice_model,
@@ -1735,6 +1743,7 @@ mod tests {
         assert!(html.contains("Heartbeat Health"));
         assert!(html.contains("Cortex Status"));
         assert!(html.contains("Xiao Shu Language"));
+        assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));
         assert!(html.contains("step=16"));
         assert!(html.contains("records=16 latest=healthy reason=unchanged"));

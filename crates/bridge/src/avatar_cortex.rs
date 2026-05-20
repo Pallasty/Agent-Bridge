@@ -431,6 +431,99 @@ fn avatar_cortex_behavior_policy(
     })
 }
 
+fn avatar_cortex_language_memory(events: &Value) -> Value {
+    let recent = events
+        .get("recent")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let window_size = recent.len();
+    let mut healthy_count = 0usize;
+    let mut unhealthy_count = 0usize;
+    let mut stable_count = 0usize;
+    let mut transition_count = 0usize;
+    let mut previous_signature: Option<String> = None;
+
+    for record in &recent {
+        let status = vstr(record.get("status")).unwrap_or("unknown");
+        let reason = vstr(record.get("reason")).unwrap_or("unknown");
+        if vbool(record.get("healthy")) == Some(false) || status != "healthy" {
+            unhealthy_count += 1;
+        } else {
+            healthy_count += 1;
+        }
+        if status == "healthy" && reason == "unchanged" {
+            stable_count += 1;
+        }
+        let signature = format!("{status}:{reason}");
+        if previous_signature
+            .as_ref()
+            .is_some_and(|previous| previous != &signature)
+        {
+            transition_count += 1;
+        }
+        previous_signature = Some(signature);
+    }
+
+    let first = recent.first().unwrap_or(&Value::Null);
+    let latest = recent.last().unwrap_or(&Value::Null);
+    let first_status = vstr(first.get("status")).unwrap_or("unknown");
+    let latest_status = vstr(latest.get("status")).unwrap_or("unknown");
+    let first_reason = vstr(first.get("reason")).unwrap_or("unknown");
+    let latest_reason = vstr(latest.get("reason")).unwrap_or("unknown");
+    let observation = if window_size == 0 {
+        "no_recent_events"
+    } else if unhealthy_count > 0 {
+        "recent_unhealthy_signal"
+    } else if transition_count > 0 {
+        "recent_transition"
+    } else if stable_count == window_size {
+        "stable_recent_window"
+    } else {
+        "mixed_recent_window"
+    };
+    let clause = match observation {
+        "stable_recent_window" => "小舒记得最近几次信号都很稳。",
+        "recent_transition" => "小舒记得刚才有过状态切换。",
+        "recent_unhealthy_signal" => "小舒记得最近几次里有异常信号。",
+        "mixed_recent_window" => "小舒记得最近几次信号还在变化。",
+        _ => "",
+    };
+    let summary = match observation {
+        "stable_recent_window" => "recent window is stable",
+        "recent_transition" => "recent window contains a transition",
+        "recent_unhealthy_signal" => "recent window contains an unhealthy signal",
+        "mixed_recent_window" => "recent window is mixed",
+        _ => "no recent event window",
+    };
+
+    json!({
+        "schema": 1,
+        "kind": "short_event_window",
+        "read_only": true,
+        "writes_persistent_memory": false,
+        "window_size": window_size,
+        "healthy_count": healthy_count,
+        "unhealthy_count": unhealthy_count,
+        "stable_count": stable_count,
+        "transition_count": transition_count,
+        "observation": observation,
+        "summary": summary,
+        "clause": clause,
+        "first": {
+            "ts": vi64(first.get("ts")),
+            "status": first_status,
+            "reason": first_reason,
+        },
+        "latest": {
+            "ts": vi64(latest.get("ts")),
+            "status": latest_status,
+            "reason": latest_reason,
+        },
+        "recent": recent,
+    })
+}
+
 pub(crate) fn avatar_cortex_language_preview_from_status(status: Value) -> Value {
     let trend = status.get("trend").unwrap_or(&Value::Null);
     let learning = trend.get("learning_state").unwrap_or(&Value::Null);
@@ -445,6 +538,8 @@ pub(crate) fn avatar_cortex_language_preview_from_status(status: Value) -> Value
     let unhealthy_count = vi64(events.get("unhealthy_count")).unwrap_or(0);
     let step_records_delta = vi64(trend.get("step_records_delta"));
     let snapshot_event_lag_secs = vi64(trend.get("snapshot_event_lag_secs"));
+    let memory = avatar_cortex_language_memory(events);
+    let recent_unhealthy_count = vi64(memory.get("unhealthy_count")).unwrap_or(0);
 
     let intent = match state {
         "caught_up" if latest_status == "healthy" => "reassure",
@@ -461,19 +556,27 @@ pub(crate) fn avatar_cortex_language_preview_from_status(status: Value) -> Value
     };
     let state_clause = match (state, latest_status, unhealthy_count > 0) {
         ("caught_up", "healthy", false) => "当前信号是健康的。",
+        ("caught_up", "healthy", true) if recent_unhealthy_count == 0 => "当前信号是健康的。",
         ("caught_up", _, true) => "还有健康信号需要留意。",
         ("learning", _, _) => "先把变化叠进自己的皮质层。",
         ("behind", _, _) => "需要看一下快照和事件的顺序。",
         _ => "需要刷新后再判断。",
     };
-    let context_clause = if reason == "events_ahead_of_snapshot" {
-        " 新事件已经排队。"
+    let mut context_clauses: Vec<String> = Vec::new();
+    if let Some(clause) = vstr(memory.get("clause")).filter(|s| !s.is_empty()) {
+        context_clauses.push(clause.to_string());
+    }
+    if reason == "events_ahead_of_snapshot" {
+        context_clauses.push("新事件已经排队。".to_string());
     } else if latest_reason == "transition" {
-        " 刚刚发生过一次状态切换。"
+        context_clauses.push("刚刚发生过一次状态切换。".to_string());
     } else if latest_reason == "unchanged" {
-        " 最近状态保持稳定。"
+        context_clauses.push("最近状态保持稳定。".to_string());
+    }
+    let context_clause = if context_clauses.is_empty() {
+        String::new()
     } else {
-        ""
+        format!(" {}", context_clauses.join(" "))
     };
     let next_hint = match state {
         "caught_up" => " 我会继续安静观察。",
@@ -522,6 +625,7 @@ pub(crate) fn avatar_cortex_language_preview_from_status(status: Value) -> Value
             "intent": intent,
             "utterance": utterance,
             "alternatives": alternatives,
+            "memory": memory,
             "slots": {
                 "project": project,
                 "state": state,
@@ -1276,6 +1380,106 @@ mod tests {
             preview["language"]["utterance"],
             "小舒追上啦，当前信号是健康的。 最近状态保持稳定。 我会继续安静观察。"
         );
+    }
+
+    #[test]
+    fn avatar_cortex_language_preview_remembers_stable_recent_window() {
+        let status = json!({
+            "surface": "avatar_cortex_status",
+            "project": "agent-bridge",
+            "label": "com.agentbridge.avatar-cortex.agent-bridge",
+            "heartbeat_label": "com.agentbridge.avatar-heartbeat.agent-bridge",
+            "launchd": {"loaded": true},
+            "snapshot": {"total_rows": 1},
+            "events": {
+                "records_count": 3,
+                "unhealthy_count": 0,
+                "latest": {
+                    "status": "healthy",
+                    "healthy": true,
+                    "reason": "unchanged",
+                    "ts": 300
+                },
+                "recent": [
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 100},
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 200},
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 300}
+                ]
+            },
+            "trend": {
+                "step_records_delta": 0,
+                "snapshot_event_lag_secs": 0,
+                "learning_state": {
+                    "state": "caught_up",
+                    "reason": "step_matches_records"
+                },
+                "behavior_policy": {
+                    "badge": "caught up",
+                    "recommended_action": "none"
+                }
+            }
+        });
+        let preview = avatar_cortex_language_preview_from_status(status);
+        assert_eq!(
+            preview["language"]["memory"]["observation"],
+            "stable_recent_window"
+        );
+        assert_eq!(preview["language"]["memory"]["window_size"], 3);
+        assert_eq!(preview["language"]["memory"]["transition_count"], 0);
+        assert_eq!(
+            preview["language"]["utterance"],
+            "小舒追上啦，当前信号是健康的。 小舒记得最近几次信号都很稳。 最近状态保持稳定。 我会继续安静观察。"
+        );
+    }
+
+    #[test]
+    fn avatar_cortex_language_preview_remembers_recent_transition() {
+        let status = json!({
+            "surface": "avatar_cortex_status",
+            "project": "agent-bridge",
+            "label": "com.agentbridge.avatar-cortex.agent-bridge",
+            "heartbeat_label": "com.agentbridge.avatar-heartbeat.agent-bridge",
+            "launchd": {"loaded": true},
+            "snapshot": {"total_rows": 1},
+            "events": {
+                "records_count": 3,
+                "unhealthy_count": 1,
+                "latest": {
+                    "status": "healthy",
+                    "healthy": true,
+                    "reason": "transition",
+                    "ts": 300
+                },
+                "recent": [
+                    {"status": "failing", "healthy": false, "reason": "launchd_error", "ts": 100},
+                    {"status": "healthy", "healthy": true, "reason": "transition", "ts": 200},
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 300}
+                ]
+            },
+            "trend": {
+                "step_records_delta": -1,
+                "snapshot_event_lag_secs": -10,
+                "learning_state": {
+                    "state": "learning",
+                    "reason": "events_ahead_of_snapshot"
+                },
+                "behavior_policy": {
+                    "badge": "learning",
+                    "recommended_action": "wait_for_cortex_runner"
+                }
+            }
+        });
+        let preview = avatar_cortex_language_preview_from_status(status);
+        assert_eq!(
+            preview["language"]["memory"]["observation"],
+            "recent_unhealthy_signal"
+        );
+        assert_eq!(preview["language"]["memory"]["transition_count"], 2);
+        assert_eq!(
+            preview["language"]["memory"]["clause"],
+            "小舒记得最近几次里有异常信号。"
+        );
+        assert_eq!(preview["language"]["intent"], "processing");
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
