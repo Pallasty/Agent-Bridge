@@ -12,7 +12,7 @@
 
 use ab_core::{Error, Result};
 use ab_store::{AgentMessageRecord, AgentPresenceRecord, ForumPostRecord, ForumThreadRecord};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
@@ -41,6 +41,59 @@ fn map_err<T, E: std::fmt::Display>(prefix: &str, r: std::result::Result<T, E>) 
     r.map_err(|e| Error::Backend(format!("peer.{prefix}: {e}")))
 }
 
+fn body_snippet(body: &str) -> String {
+    const MAX: usize = 512;
+    let mut out = String::new();
+    for ch in body.chars().take(MAX) {
+        if ch.is_control() && ch != '\n' && ch != '\t' {
+            out.push(' ');
+        } else {
+            out.push(ch);
+        }
+    }
+    if body.chars().count() > MAX {
+        out.push_str("...");
+    }
+    out
+}
+
+async fn json_body<T: DeserializeOwned>(
+    prefix: &str,
+    url: &str,
+    response: reqwest::Response,
+) -> Result<T> {
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("<missing>")
+        .to_string();
+    let text = map_err(&format!("{prefix}.body"), response.text().await)?;
+    decode_json_body(prefix, url, status, &content_type, &text)
+}
+
+fn decode_json_body<T: DeserializeOwned>(
+    prefix: &str,
+    url: &str,
+    status: reqwest::StatusCode,
+    content_type: &str,
+    text: &str,
+) -> Result<T> {
+    if !status.is_success() {
+        return Err(Error::Backend(format!(
+            "peer.{prefix}.status: HTTP {status}; url={url}; content_type={content_type}; body={}",
+            body_snippet(text)
+        )));
+    }
+    serde_json::from_str(text).map_err(|e| {
+        Error::Backend(format!(
+            "peer.{prefix}.json: {e}; url={url}; status={status}; content_type={content_type}; body={}",
+            body_snippet(text)
+        ))
+    })
+}
+
 #[derive(Deserialize)]
 struct ThreadsResponse {
     threads: Vec<ForumThreadRecord>,
@@ -65,8 +118,7 @@ pub async fn forum_list_threads(
         "forum_list_threads.send",
         client()?.get(&url).query(&q).send().await,
     )?;
-    let r = map_err("forum_list_threads.status", r.error_for_status())?;
-    let body: ThreadsResponse = map_err("forum_list_threads.json", r.json().await)?;
+    let body: ThreadsResponse = json_body("forum_list_threads", &url, r).await?;
     Ok(body.threads)
 }
 
@@ -97,9 +149,11 @@ pub async fn forum_read(
     if let Some(u) = unread_for {
         q.push(("unread_for", u.into()));
     }
-    let r = map_err("forum_read.send", client()?.get(&url).query(&q).send().await)?;
-    let r = map_err("forum_read.status", r.error_for_status())?;
-    let body: PostsResponse = map_err("forum_read.json", r.json().await)?;
+    let r = map_err(
+        "forum_read.send",
+        client()?.get(&url).query(&q).send().await,
+    )?;
+    let body: PostsResponse = json_body("forum_read", &url, r).await?;
     Ok(body.posts)
 }
 
@@ -127,8 +181,7 @@ pub async fn agent_presence_list(
         q.push(("role", r.into()));
     }
     let r = map_err("presence.send", client()?.get(&url).query(&q).send().await)?;
-    let r = map_err("presence.status", r.error_for_status())?;
-    let body: PresenceResponse = map_err("presence.json", r.json().await)?;
+    let body: PresenceResponse = json_body("presence", &url, r).await?;
     Ok(body.agents)
 }
 
@@ -154,9 +207,11 @@ pub struct ForumPostRequest<'a> {
 /// emits (mirrors local `forum_post` shape: `{status, post_id, thread_id, ...}`).
 pub async fn forum_post(peer: &str, req: ForumPostRequest<'_>) -> Result<Value> {
     let url = format!("{}/forum/post", base_url(peer));
-    let r = map_err("forum_post.send", client()?.post(&url).json(&req).send().await)?;
-    let r = map_err("forum_post.status", r.error_for_status())?;
-    map_err("forum_post.json", r.json().await)
+    let r = map_err(
+        "forum_post.send",
+        client()?.post(&url).json(&req).send().await,
+    )?;
+    json_body("forum_post", &url, r).await
 }
 
 // ── XM v0.1 — cross-machine agent messaging ──────────────────────────────
@@ -192,8 +247,7 @@ pub async fn agent_message(
         "agent_message.send",
         client()?.post(&url).json(&body).send().await,
     )?;
-    let r = map_err("agent_message.status", r.error_for_status())?;
-    let body: AgentMessageResponse = map_err("agent_message.json", r.json().await)?;
+    let body: AgentMessageResponse = json_body("agent_message", &url, r).await?;
     Ok(body.id)
 }
 
@@ -226,8 +280,7 @@ pub async fn agent_inbox(
         "agent_inbox.send",
         client()?.get(&url).query(&q).send().await,
     )?;
-    let r = map_err("agent_inbox.status", r.error_for_status())?;
-    let body: InboxResponse = map_err("agent_inbox.json", r.json().await)?;
+    let body: InboxResponse = json_body("agent_inbox", &url, r).await?;
     Ok(body.messages)
 }
 
@@ -245,5 +298,34 @@ mod tests {
     fn base_url_passes_through_explicit_scheme() {
         assert_eq!(base_url("http://x:7878/"), "http://x:7878");
         assert_eq!(base_url("https://x:7878"), "https://x:7878");
+    }
+
+    #[test]
+    fn body_snippet_strips_control_chars_and_truncates() {
+        let input = format!("ok\u{0000}{}\n", "x".repeat(600));
+        let out = body_snippet(&input);
+        assert!(out.starts_with("ok "));
+        assert!(out.ends_with("..."));
+        assert!(!out.contains('\u{0000}'));
+    }
+
+    #[test]
+    fn decode_json_body_reports_context_on_shape_mismatch() {
+        let result = decode_json_body::<PostsResponse>(
+            "forum_read",
+            "http://peer:7878/forum/posts",
+            reqwest::StatusCode::OK,
+            "text/plain",
+            "not forum json",
+        );
+        let err = match result {
+            Ok(_) => panic!("invalid response shape should be diagnostic"),
+            Err(err) => err,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("peer.forum_read.json"));
+        assert!(msg.contains("url=http://peer:7878/forum/posts"));
+        assert!(msg.contains("content_type=text/plain"));
+        assert!(msg.contains("body=not forum json"));
     }
 }
