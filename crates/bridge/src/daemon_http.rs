@@ -10,6 +10,10 @@
 //!     — read-only Agent Avatar Protocol JSON projection
 //!   - `GET /avatar-surface/report?...` — same projection as text/plain
 //!   - `GET /avatar-surface/panel?...` — minimal read-only HTML status panel
+//!   - `GET /avatar-surface/heartbeat-health?...` — launchd + presence health
+//!   - `GET /avatar-surface/cortex-status?...` — launchd + cortex snapshot status
+//!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
+//!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
 //!                              (same shape as `dream identity --json`)
 //!   - `POST /embed` — text → 384-d embedding for non-Rust / non-MCP clients
@@ -36,14 +40,14 @@ use ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend};
 use ab_store::{AgentPresenceRecord, StateStore};
 use anyhow::{Context, Result};
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{Html, IntoResponse},
     routing::{get, post},
-    Json, Router,
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -93,6 +97,16 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route("/avatar-surface", get(avatar_surface_snapshot))
         .route("/avatar-surface/report", get(avatar_surface_report))
         .route("/avatar-surface/panel", get(avatar_surface_panel))
+        .route(
+            "/avatar-surface/heartbeat-health",
+            get(avatar_heartbeat_health),
+        )
+        .route("/avatar-surface/cortex-status", get(avatar_cortex_status))
+        .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
+        .route(
+            "/avatar-surface/cortex-voice-gate",
+            get(avatar_cortex_voice_gate),
+        )
         .route("/identity", get(identity_endpoint))
         .route("/embed", post(embed_endpoint))
         .route("/agent/messages", post(agent_message_write))
@@ -404,10 +418,51 @@ struct AvatarSurfaceQuery {
     include_stale: bool,
     #[serde(default = "default_limit")]
     limit: u32,
+    #[serde(default = "default_panel_refresh_secs")]
+    refresh_secs: u32,
+    #[serde(default = "default_avatar_stale_secs")]
+    stale_secs: i64,
     #[serde(default)]
     include_raw_presence: bool,
     #[serde(default)]
     include_compat: bool,
+}
+
+#[derive(Deserialize, Debug)]
+struct AvatarHeartbeatHealthQuery {
+    label: Option<String>,
+    project: Option<String>,
+    #[serde(default = "default_avatar_stale_secs")]
+    stale_secs: i64,
+}
+
+#[derive(Deserialize, Debug)]
+struct AvatarCortexStatusQuery {
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<std::path::PathBuf>,
+}
+
+#[derive(Deserialize, Debug)]
+struct AvatarCortexVoiceGateQuery {
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<std::path::PathBuf>,
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    force: bool,
+    #[serde(default = "default_avatar_voice_gate_cooldown_secs")]
+    cooldown_secs: i64,
+    reason: Option<String>,
+}
+
+impl AvatarHeartbeatHealthQuery {
+    fn effective_stale_secs(&self) -> i64 {
+        self.stale_secs.clamp(30, 86_400)
+    }
 }
 
 impl AvatarSurfaceQuery {
@@ -421,6 +476,14 @@ impl AvatarSurfaceQuery {
 
     fn effective_limit(&self) -> u32 {
         self.limit.clamp(1, 500)
+    }
+
+    fn effective_refresh_secs(&self) -> u32 {
+        self.refresh_secs.clamp(3, 3600)
+    }
+
+    fn effective_stale_secs(&self) -> i64 {
+        self.stale_secs.clamp(30, 86_400)
     }
 
     fn report_context(&self) -> crate::avatar_surface::ReportContext<'_> {
@@ -459,26 +522,12 @@ async fn avatar_surface_entries(
         .collect())
 }
 
-fn avatar_surface_payload(q: &AvatarSurfaceQuery, avatars: Vec<Value>) -> Value {
-    json!({
-        "agent_avatar_protocol": crate::avatar_surface::AGENT_AVATAR_PROTOCOL_VERSION,
-        "read_only": true,
-        "surface": "avatar_surface_http",
-        "count": avatars.len(),
-        "project": q.project.as_deref(),
-        "role": q.role.as_deref(),
-        "max_idle_secs": q.effective_max_idle_secs(),
-        "limit": q.effective_limit(),
-        "avatars": avatars,
-    })
-}
-
 async fn avatar_surface_snapshot(
     State(s): State<AppState>,
     Query(q): Query<AvatarSurfaceQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let avatars = avatar_surface_entries(&s, &q).await?;
-    Ok(Json(avatar_surface_payload(&q, avatars)))
+    Ok(Json(avatar_surface_payload(&q, avatars, unix_now())))
 }
 
 async fn avatar_surface_report(
@@ -499,7 +548,105 @@ async fn avatar_surface_panel(
 ) -> Result<Html<String>, (StatusCode, String)> {
     let avatars = avatar_surface_entries(&s, &q).await?;
     let report = crate::avatar_surface::report_from_entries(&avatars, &q.report_context());
-    Ok(Html(avatar_surface_panel_html(&q, &avatars, &report)))
+    let health = crate::avatar_health::heartbeat_health(
+        s.store.as_ref(),
+        None,
+        q.project.as_deref(),
+        q.effective_stale_secs(),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        json!({
+            "surface": "avatar_heartbeat_health",
+            "read_only": true,
+            "status": "error",
+            "healthy": false,
+            "summary": e.to_string(),
+        })
+    });
+    let cortex = crate::avatar_cortex::avatar_cortex_status(None, None, q.project.as_deref(), None)
+        .unwrap_or_else(|e| {
+            json!({
+                "surface": "avatar_cortex_status",
+                "read_only": true,
+                "mutates_global_substrate": false,
+                "launchd": {
+                    "loaded": false,
+                    "error": e.to_string(),
+                },
+                "snapshot": {
+                    "exists": false,
+                    "error": e.to_string(),
+                },
+            })
+        });
+    Ok(Html(avatar_surface_panel_html(
+        &q,
+        &avatars,
+        &health,
+        &cortex,
+        &report,
+        unix_now(),
+    )))
+}
+
+async fn avatar_heartbeat_health(
+    State(s): State<AppState>,
+    Query(q): Query<AvatarHeartbeatHealthQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_health::heartbeat_health(
+        s.store.as_ref(),
+        q.label.as_deref(),
+        q.project.as_deref(),
+        q.effective_stale_secs(),
+    )
+    .await
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_status(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_status(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_preview(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_voice_preview(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_voice_gate(
+    Query(q): Query<AvatarCortexVoiceGateQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let opts = crate::avatar_cortex::AvatarCortexVoiceGateOptions {
+        label: q.label.as_deref(),
+        heartbeat_label: q.heartbeat_label.as_deref(),
+        project: q.project.as_deref(),
+        output: q.output.as_deref(),
+        enabled: q.enabled,
+        force: q.force,
+        cooldown_secs: q.cooldown_secs,
+        reason: q.reason.as_deref(),
+    };
+    let payload =
+        crate::avatar_cortex::avatar_cortex_voice_gate_dry_run(&opts).map_err(internal_error)?;
+    Ok(Json(payload))
 }
 
 /// δ-1 (2026-05-11) — Expose this node's behavioural identity fingerprint
@@ -653,6 +800,13 @@ fn internal_error<E: std::fmt::Display>(e: E) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
 }
 
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 fn html_escape(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for ch in input.chars() {
@@ -669,7 +823,11 @@ fn html_escape(input: &str) -> String {
 }
 
 fn avatar_surface_html_value(entry: &Value, key: &str, fallback: &str) -> String {
-    match entry.get(key) {
+    avatar_surface_html_json_value(entry.get(key), fallback)
+}
+
+fn avatar_surface_html_json_value(value: Option<&Value>, fallback: &str) -> String {
+    match value {
         Some(Value::String(s)) if !s.is_empty() => html_escape(s),
         Some(Value::Number(n)) => html_escape(&n.to_string()),
         Some(Value::Bool(b)) => html_escape(&b.to_string()),
@@ -677,12 +835,251 @@ fn avatar_surface_html_value(entry: &Value, key: &str, fallback: &str) -> String
     }
 }
 
-fn avatar_surface_panel_html(q: &AvatarSurfaceQuery, avatars: &[Value], report: &str) -> String {
+fn avatar_surface_raw_i64(entry: &Value, key: &str) -> Option<i64> {
+    match entry.get(key) {
+        Some(Value::Number(n)) => n.as_i64().or_else(|| n.as_u64().map(|v| v as i64)),
+        Some(Value::String(s)) => s.parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
+fn avatar_surface_age_label(age_secs: i64) -> String {
+    if age_secs < 0 {
+        return "future".to_string();
+    }
+    if age_secs < 60 {
+        return format!("{age_secs}s ago");
+    }
+    if age_secs < 3_600 {
+        return format!("{}m {}s ago", age_secs / 60, age_secs % 60);
+    }
+    if age_secs < 86_400 {
+        return format!("{}h {}m ago", age_secs / 3_600, (age_secs % 3_600) / 60);
+    }
+    format!(
+        "{}d {}h ago",
+        age_secs / 86_400,
+        (age_secs % 86_400) / 3_600
+    )
+}
+
+fn avatar_surface_status(
+    entry: &Value,
+    generated_at: i64,
+    stale_secs: i64,
+) -> (&'static str, &'static str, String) {
+    match avatar_surface_raw_i64(entry, "last_heartbeat_at") {
+        Some(heartbeat) => {
+            let age = generated_at.saturating_sub(heartbeat);
+            if age > stale_secs {
+                ("status-stale", "stale", avatar_surface_age_label(age))
+            } else {
+                ("status-fresh", "fresh", avatar_surface_age_label(age))
+            }
+        }
+        None => ("status-unknown", "unknown", "no heartbeat".to_string()),
+    }
+}
+
+fn avatar_surface_health_class(status: &str) -> &'static str {
+    match status {
+        "healthy" => "status-fresh",
+        "stale" | "failing" | "binary_missing" | "binary_missing_command" | "error" => {
+            "status-stale"
+        }
+        _ => "status-unknown",
+    }
+}
+
+fn avatar_surface_health_html(health: &Value) -> String {
+    let status = health
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let status_class = avatar_surface_health_class(status);
+    let summary = avatar_surface_html_json_value(health.get("summary"), "-");
+    let binary = health.get("binary").unwrap_or(&Value::Null);
+    let launchd = health.get("launchd").unwrap_or(&Value::Null);
+    let presence = health.get("presence").unwrap_or(&Value::Null);
+    let age = match presence.get("age_secs").and_then(Value::as_i64) {
+        Some(age) => html_escape(&avatar_surface_age_label(age)),
+        None => html_escape("-"),
+    };
+    let binary_path = avatar_surface_html_json_value(binary.get("path"), "-");
+    let sync = avatar_surface_html_json_value(binary.get("supports_sync_presence"), "false");
+    let health_cmd =
+        avatar_surface_html_json_value(binary.get("supports_heartbeat_health"), "false");
+    let exit_code = avatar_surface_html_json_value(launchd.get("last_exit_code"), "-");
+    let runs = avatar_surface_html_json_value(launchd.get("runs"), "-");
+
+    format!(
+        r#"<section class="health {status_class}">
+      <div class="health-title">
+        <span class="pill {status_class}">{status}</span>
+        <strong>Heartbeat Health</strong>
+        <span>{summary}</span>
+      </div>
+      <dl>
+        <div><dt>binary</dt><dd>{binary_path}</dd></div>
+        <div><dt>commands</dt><dd>sync={sync} health={health_cmd}</dd></div>
+        <div><dt>launchd</dt><dd>exit={exit_code} runs={runs}</dd></div>
+        <div><dt>presence</dt><dd>{age}</dd></div>
+      </dl>
+    </section>"#,
+        status = html_escape(status),
+        status_class = status_class,
+        summary = summary,
+        binary_path = binary_path,
+        sync = sync,
+        health_cmd = health_cmd,
+        exit_code = exit_code,
+        runs = runs,
+        age = age
+    )
+}
+
+fn avatar_surface_cortex_class(cortex: &Value) -> &'static str {
+    let launchd = cortex.get("launchd").unwrap_or(&Value::Null);
+    let snapshot = cortex.get("snapshot").unwrap_or(&Value::Null);
+    let loaded = launchd
+        .get("loaded")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let exit_ok = launchd
+        .get("last_exit_code")
+        .and_then(Value::as_i64)
+        .map(|code| code == 0)
+        .unwrap_or(false);
+    let rows_ok = snapshot
+        .get("total_rows")
+        .and_then(Value::as_u64)
+        .map(|rows| rows > 0)
+        .unwrap_or(false);
+    if loaded && exit_ok && rows_ok {
+        "status-fresh"
+    } else if loaded || rows_ok {
+        "status-stale"
+    } else {
+        "status-unknown"
+    }
+}
+
+fn avatar_surface_cortex_html(cortex: &Value) -> String {
+    let launchd = cortex.get("launchd").unwrap_or(&Value::Null);
+    let snapshot = cortex.get("snapshot").unwrap_or(&Value::Null);
+    let events = cortex.get("events").unwrap_or(&Value::Null);
+    let trend = cortex.get("trend").unwrap_or(&Value::Null);
+    let learning = trend.get("learning_state").unwrap_or(&Value::Null);
+    let policy = trend.get("behavior_policy").unwrap_or(&Value::Null);
+    let voice = policy.get("voice").unwrap_or(&Value::Null);
+    let latest = snapshot.get("latest_long").unwrap_or(&Value::Null);
+    let latest_event = events.get("latest").unwrap_or(&Value::Null);
+    let status_class = avatar_surface_cortex_class(cortex);
+    let status = match status_class {
+        "status-fresh" => "active",
+        "status-stale" => "attention",
+        _ => "unknown",
+    };
+    let label = avatar_surface_html_json_value(cortex.get("label"), "-");
+    let loaded = avatar_surface_html_json_value(launchd.get("loaded"), "false");
+    let runs = avatar_surface_html_json_value(launchd.get("runs"), "-");
+    let exit_code = avatar_surface_html_json_value(launchd.get("last_exit_code"), "-");
+    let interval = avatar_surface_html_json_value(launchd.get("run_interval_secs"), "-");
+    let rows = avatar_surface_html_json_value(snapshot.get("total_rows"), "0");
+    let step = avatar_surface_html_json_value(latest.get("step"), "-");
+    let fingerprint = avatar_surface_html_json_value(latest.get("fingerprint"), "-");
+    let event_records = avatar_surface_html_json_value(events.get("records_count"), "0");
+    let latest_status = avatar_surface_html_json_value(latest_event.get("status"), "-");
+    let latest_reason = avatar_surface_html_json_value(latest_event.get("reason"), "-");
+    let unhealthy_count = avatar_surface_html_json_value(events.get("unhealthy_count"), "0");
+    let delta = avatar_surface_html_json_value(trend.get("step_records_delta"), "-");
+    let lag = avatar_surface_html_json_value(trend.get("snapshot_event_lag_secs"), "-");
+    let learning_state = avatar_surface_html_json_value(learning.get("state"), "-");
+    let learning_reason = avatar_surface_html_json_value(learning.get("reason"), "-");
+    let policy_badge = avatar_surface_html_json_value(policy.get("badge"), "-");
+    let policy_action = avatar_surface_html_json_value(policy.get("recommended_action"), "-");
+    let voice_allowed = avatar_surface_html_json_value(voice.get("allowed"), "false");
+    let path = avatar_surface_html_json_value(snapshot.get("path"), "-");
+
+    format!(
+        r#"<section class="health {status_class}">
+      <div class="health-title">
+        <span class="pill {status_class}">{status}</span>
+        <strong>Cortex Status</strong>
+        <span>{label}</span>
+      </div>
+      <dl>
+        <div><dt>launchd</dt><dd>loaded={loaded} exit={exit_code} runs={runs}</dd></div>
+        <div><dt>interval</dt><dd>{interval}s</dd></div>
+        <div><dt>snapshot</dt><dd>rows={rows} step={step}</dd></div>
+        <div><dt>events</dt><dd>records={event_records} latest={latest_status} reason={latest_reason}</dd></div>
+        <div><dt>learning</dt><dd>state={learning_state} reason={learning_reason}</dd></div>
+        <div><dt>policy</dt><dd>badge={policy_badge} action={policy_action} voice={voice_allowed}</dd></div>
+        <div><dt>trend</dt><dd>delta={delta} lag={lag}s unhealthy={unhealthy_count}</dd></div>
+        <div><dt>fingerprint</dt><dd>{fingerprint}</dd></div>
+        <div><dt>path</dt><dd>{path}</dd></div>
+      </dl>
+    </section>"#,
+        status_class = status_class,
+        status = html_escape(status),
+        label = label,
+        loaded = loaded,
+        exit_code = exit_code,
+        runs = runs,
+        interval = interval,
+        rows = rows,
+        step = step,
+        fingerprint = fingerprint,
+        event_records = event_records,
+        latest_status = latest_status,
+        latest_reason = latest_reason,
+        unhealthy_count = unhealthy_count,
+        delta = delta,
+        lag = lag,
+        learning_state = learning_state,
+        learning_reason = learning_reason,
+        policy_badge = policy_badge,
+        policy_action = policy_action,
+        voice_allowed = voice_allowed,
+        path = path,
+    )
+}
+
+fn avatar_surface_payload(q: &AvatarSurfaceQuery, avatars: Vec<Value>, generated_at: i64) -> Value {
+    json!({
+        "agent_avatar_protocol": crate::avatar_surface::AGENT_AVATAR_PROTOCOL_VERSION,
+        "read_only": true,
+        "surface": "avatar_surface_http",
+        "count": avatars.len(),
+        "project": q.project.as_deref(),
+        "role": q.role.as_deref(),
+        "max_idle_secs": q.effective_max_idle_secs(),
+        "limit": q.effective_limit(),
+        "generated_at": generated_at,
+        "stale_secs": q.effective_stale_secs(),
+        "avatars": avatars,
+    })
+}
+
+fn avatar_surface_panel_html(
+    q: &AvatarSurfaceQuery,
+    avatars: &[Value],
+    heartbeat_health: &Value,
+    cortex_status: &Value,
+    report: &str,
+    generated_at: i64,
+) -> String {
+    let refresh_secs = q.effective_refresh_secs();
+    let stale_secs = q.effective_stale_secs();
     let subtitle = format!(
         "project={} role={} max_idle_secs={} source=daemon-http",
         q.project.as_deref().unwrap_or("*"),
         q.role.as_deref().unwrap_or("*"),
         q.effective_max_idle_secs()
+    );
+    let meta = format!(
+        "last update={} refresh={}s stale_after={}s",
+        generated_at, refresh_secs, stale_secs
     );
     let mut rows = String::new();
     for avatar in avatars {
@@ -695,18 +1092,20 @@ fn avatar_surface_panel_html(q: &AvatarSurfaceQuery, avatars: &[Value], report: 
         let risk = avatar_surface_html_value(avatar, "risk_level", "-");
         let next = avatar_surface_html_value(avatar, "next_action", "-");
         let heartbeat = avatar_surface_html_value(avatar, "last_heartbeat_at", "-");
+        let (status_class, status_label, age_label) =
+            avatar_surface_status(avatar, generated_at, stale_secs);
         let flags = format!(
             "avatar_state={} compat_pet={}",
             avatar_surface_html_value(avatar, "has_avatar_state", "false"),
             avatar_surface_html_value(avatar, "has_compat_pet_state", "false")
         );
         rows.push_str(&format!(
-            r#"<tr>
+            r#"<tr class="{status_class}">
   <td><strong>{agent_id}</strong><span>{runtime} / {avatar_id}</span></td>
   <td>{mode}<span>{activity}</span></td>
   <td>{focus}<span>risk {risk}</span></td>
   <td>{next}<span>{flags}</span></td>
-  <td>{heartbeat}</td>
+  <td><span class="pill {status_class}">{status_label}</span><span>{age_label}</span><span>heartbeat {heartbeat}</span></td>
 </tr>"#
         ));
     }
@@ -715,6 +1114,8 @@ fn avatar_surface_panel_html(q: &AvatarSurfaceQuery, avatars: &[Value], report: 
             r#"<tr><td colspan="5" class="empty">No avatar presence rows matched the filters.</td></tr>"#,
         );
     }
+    let health_html = avatar_surface_health_html(heartbeat_health);
+    let cortex_html = avatar_surface_cortex_html(cortex_status);
 
     format!(
         r#"<!doctype html>
@@ -722,6 +1123,7 @@ fn avatar_surface_panel_html(q: &AvatarSurfaceQuery, avatars: &[Value], report: 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="{refresh_secs}">
   <title>Agent Avatar Surface</title>
   <style>
     :root {{
@@ -731,6 +1133,9 @@ fn avatar_surface_panel_html(q: &AvatarSurfaceQuery, avatars: &[Value], report: 
       --muted: #65685f;
       --line: #d8d9cf;
       --accent: #167a72;
+      --fresh: #167a72;
+      --stale: #b45309;
+      --unknown: #65685f;
       --surface: #ffffff;
       --code: #f0f1eb;
     }}
@@ -741,6 +1146,9 @@ fn avatar_surface_panel_html(q: &AvatarSurfaceQuery, avatars: &[Value], report: 
         --muted: #a5a99d;
         --line: #33372e;
         --accent: #5bd0c3;
+        --fresh: #5bd0c3;
+        --stale: #f0a35e;
+        --unknown: #a5a99d;
         --surface: #20221d;
         --code: #282b24;
       }}
@@ -776,10 +1184,55 @@ fn avatar_surface_panel_html(q: &AvatarSurfaceQuery, avatars: &[Value], report: 
       color: var(--muted);
       overflow-wrap: anywhere;
     }}
+    .meta {{
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }}
     .count {{
       color: var(--accent);
       font-weight: 700;
       white-space: nowrap;
+    }}
+    .health {{
+      margin-top: 18px;
+      padding: 12px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--unknown);
+    }}
+    .health.status-fresh {{ border-left-color: var(--fresh); }}
+    .health.status-stale {{ border-left-color: var(--stale); }}
+    .health.status-unknown {{ border-left-color: var(--unknown); }}
+    .health-title {{
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+    .health-title strong {{
+      font-size: 14px;
+    }}
+    .health-title span:last-child {{
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }}
+    .health dl {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 12px 0 0;
+    }}
+    .health dt {{
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }}
+    .health dd {{
+      margin: 3px 0 0;
+      overflow-wrap: anywhere;
     }}
     table {{
       width: 100%;
@@ -807,6 +1260,28 @@ fn avatar_surface_panel_html(q: &AvatarSurfaceQuery, avatars: &[Value], report: 
       color: var(--muted);
       font-size: 12px;
     }}
+    tbody tr.status-fresh td:first-child {{
+      border-left: 4px solid var(--fresh);
+    }}
+    tbody tr.status-stale td:first-child {{
+      border-left: 4px solid var(--stale);
+    }}
+    tbody tr.status-unknown td:first-child {{
+      border-left: 4px solid var(--unknown);
+    }}
+    .pill {{
+      display: inline-block;
+      margin: 0 0 4px;
+      padding: 2px 7px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.25;
+    }}
+    .pill.status-fresh {{ color: var(--fresh); }}
+    .pill.status-stale {{ color: var(--stale); }}
+    .pill.status-unknown {{ color: var(--unknown); }}
     .empty {{
       color: var(--muted);
       text-align: center;
@@ -824,6 +1299,7 @@ fn avatar_surface_panel_html(q: &AvatarSurfaceQuery, avatars: &[Value], report: 
       main {{ width: min(100vw - 20px, 1120px); margin-top: 14px; }}
       header {{ display: block; }}
       .count {{ display: block; margin-top: 10px; }}
+      .health dl {{ grid-template-columns: 1fr; }}
       table, thead, tbody, tr, th, td {{ display: block; }}
       thead {{ display: none; }}
       tr {{ border-bottom: 1px solid var(--line); }}
@@ -837,9 +1313,12 @@ fn avatar_surface_panel_html(q: &AvatarSurfaceQuery, avatars: &[Value], report: 
       <div>
         <h1>Agent Avatar Surface</h1>
         <div class="subtitle">{subtitle}</div>
+        <div class="meta">{meta}</div>
       </div>
       <div class="count">{count} avatars</div>
     </header>
+    {health_html}
+    {cortex_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -851,7 +1330,10 @@ fn avatar_surface_panel_html(q: &AvatarSurfaceQuery, avatars: &[Value], report: 
 </body>
 </html>"#,
         subtitle = html_escape(&subtitle),
+        meta = html_escape(&meta),
         count = avatars.len(),
+        health_html = health_html,
+        cortex_html = cortex_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -862,6 +1344,18 @@ fn default_limit() -> u32 {
 }
 
 fn default_max_idle() -> i64 {
+    300
+}
+
+fn default_panel_refresh_secs() -> u32 {
+    10
+}
+
+fn default_avatar_stale_secs() -> i64 {
+    300
+}
+
+fn default_avatar_voice_gate_cooldown_secs() -> i64 {
     300
 }
 
@@ -1019,12 +1513,16 @@ mod tests {
             max_idle_secs: 300,
             include_stale: true,
             limit: 999,
+            refresh_secs: 1,
+            stale_secs: 1_000_000,
             include_raw_presence: false,
             include_compat: false,
         };
 
         assert_eq!(q.effective_max_idle_secs(), 0);
         assert_eq!(q.effective_limit(), 500);
+        assert_eq!(q.effective_refresh_secs(), 3);
+        assert_eq!(q.effective_stale_secs(), 86_400);
         let ctx = q.report_context();
         assert_eq!(ctx.project, Some("agent-bridge"));
         assert_eq!(ctx.role, None);
@@ -1039,12 +1537,14 @@ mod tests {
             max_idle_secs: 300,
             include_stale: false,
             limit: 5,
+            refresh_secs: 10,
+            stale_secs: 300,
             include_raw_presence: false,
             include_compat: true,
         };
         let avatar =
             crate::avatar_surface::entry_from_presence(&avatar_presence_fixture(), false, true);
-        let payload = avatar_surface_payload(&q, vec![avatar]);
+        let payload = avatar_surface_payload(&q, vec![avatar], 1_779_193_100);
 
         assert_eq!(payload["agent_avatar_protocol"], 1);
         assert_eq!(payload["read_only"], true);
@@ -1054,6 +1554,8 @@ mod tests {
         assert_eq!(payload["role"], "main");
         assert_eq!(payload["max_idle_secs"], 300);
         assert_eq!(payload["limit"], 5);
+        assert_eq!(payload["generated_at"], 1_779_193_100i64);
+        assert_eq!(payload["stale_secs"], 300);
         assert_eq!(
             payload["avatars"][0]["agent_id"],
             "claude-code-xiao-shu-report-dogfood"
@@ -1071,6 +1573,8 @@ mod tests {
             max_idle_secs: 0,
             include_stale: true,
             limit: 5,
+            refresh_secs: 10,
+            stale_secs: 300,
             include_raw_presence: false,
             include_compat: false,
         };
@@ -1087,11 +1591,92 @@ mod tests {
             "has_avatar_state": true,
             "has_compat_pet_state": true
         });
-        let html = avatar_surface_panel_html(&q, &[avatar], "Agent <Avatar> Surface");
+        let health = json!({
+            "status": "healthy",
+            "summary": "healthy <binary>",
+            "binary": {
+                "path": "/Users/me/.local/bin/agent-bridge.real",
+                "supports_sync_presence": true,
+                "supports_heartbeat_health": true
+            },
+            "launchd": {
+                "last_exit_code": 0,
+                "runs": 3
+            },
+            "presence": {
+                "age_secs": 12
+            }
+        });
+        let cortex = json!({
+            "label": "com.agentbridge.avatar-cortex.agent-bridge",
+            "launchd": {
+                "loaded": true,
+                "last_exit_code": 0,
+                "runs": 2,
+                "run_interval_secs": 300
+            },
+            "snapshot": {
+                "path": "/Users/me/.local/share/agent-bridge/avatar_cortex/test.parquet",
+                "total_rows": 1,
+                "latest_long": {
+                    "step": 16,
+                    "cycle_ts": 1779193100,
+                    "fingerprint": "abc<123>"
+                }
+            },
+            "events": {
+                "records_count": 16,
+                "unhealthy_count": 0,
+                "latest": {
+                    "ts": 1779193080,
+                    "status": "healthy",
+                    "reason": "unchanged"
+                }
+            },
+            "trend": {
+                "step_records_delta": 0,
+                "snapshot_event_lag_secs": 20,
+                "latest_status": "healthy",
+                "learning_state": {
+                    "state": "caught_up",
+                    "reason": "step_matches_records"
+                },
+                "behavior_policy": {
+                    "badge": "caught up",
+                    "recommended_action": "none",
+                    "voice": {
+                        "allowed": false
+                    }
+                }
+            }
+        });
+        let html = avatar_surface_panel_html(
+            &q,
+            &[avatar],
+            &health,
+            &cortex,
+            "Agent <Avatar> Surface",
+            1779193140,
+        );
 
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(html.contains("read &lt;panel&gt;"));
         assert!(html.contains("Agent &lt;Avatar&gt; Surface"));
+        assert!(html.contains("Heartbeat Health"));
+        assert!(html.contains("Cortex Status"));
+        assert!(html.contains("healthy &lt;binary&gt;"));
+        assert!(html.contains("step=16"));
+        assert!(html.contains("records=16 latest=healthy reason=unchanged"));
+        assert!(html.contains("state=caught_up reason=step_matches_records"));
+        assert!(html.contains("badge=caught up action=none voice=false"));
+        assert!(html.contains("delta=0 lag=20s unhealthy=0"));
+        assert!(html.contains("abc&lt;123&gt;"));
+        assert!(html.contains("/Users/me/.local/bin/agent-bridge.real"));
+        assert!(html.contains("sync=true health=true"));
+        assert!(html.contains(r#"<meta http-equiv="refresh" content="10">"#));
+        assert!(html.contains("last update=1779193140 refresh=10s stale_after=300s"));
+        assert!(html.contains("status-fresh"));
+        assert!(html.contains("5m 0s ago"));
         assert!(!html.contains("<script>alert(1)</script>"));
     }
 }

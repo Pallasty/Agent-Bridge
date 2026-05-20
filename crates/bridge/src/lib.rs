@@ -3,6 +3,10 @@
 //! Routes incoming RPC calls to backend traits (Notifier, AgentRuntime, ...).
 
 pub mod anthropic_api;
+pub mod avatar_alert;
+pub mod avatar_cortex;
+pub mod avatar_health;
+pub mod avatar_seed;
 pub mod avatar_surface;
 pub mod bootstrap_bfs;
 pub mod bootstrap_transitions;
@@ -25,6 +29,7 @@ pub mod notion_api;
 pub mod openai_api;
 pub mod palace_viewer;
 pub mod peer_client;
+pub mod pet_presence;
 pub mod pet_state;
 pub mod project;
 pub mod rescue;

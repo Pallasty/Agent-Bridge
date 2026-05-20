@@ -361,8 +361,117 @@ Project protocol v1 into `capabilities.avatar_state` while continuing to emit
 Implementation status: `pet_presence_sync` now emits both
 `capabilities.avatar_state` and compatibility `capabilities.pet_state` on
 2026-05-18. Debug and installed-binary Standard probes passed. An installed
-`AGENT_BRIDGE_CLIENT=claude-code` runtime-label probe also passed; a real
-non-Codex client-session dogfood pass is still pending.
+`AGENT_BRIDGE_CLIENT=claude-code` runtime-label probe also passed. The first
+CLI heartbeat dogfood is captured below; long-running non-Codex client-session
+dogfood remains pending.
+
+Native CLI status: `agent-bridge avatar sync-presence` now calls the same shared
+projection path as `pet_presence_sync`, defaults to `runtime=local-cli`, and
+uses the CLI process cwd unless `--cwd` is supplied. It is intended for
+terminal wrappers, launchd heartbeats, and non-MCP agent clients. It writes
+presence only; it does not mutate the official Codex pet package, emit audio,
+or expand Codex Essential tool exposure. Debug dogfood on 2026-05-19 wrote
+`agent_id=local-cli-avatar-heartbeat-dogfood` / `runtime=local-cli` /
+`activity_state=heartbeat-probe`, and `/avatar-surface` read it back with a
+fresh heartbeat age of 10 seconds.
+
+Native launchd status: `agent-bridge avatar install-heartbeat`,
+`avatar heartbeat-status`, and `avatar remove-heartbeat` now manage a per-user
+LaunchAgent wrapper around `avatar sync-presence`. The installer defaults to a
+stable launchd label as both `session_id` and `agent_id`, preventing one-shot
+launchd pid churn from creating a new presence row on every interval.
+Installed-binary dogfood on 2026-05-19 wrote
+`~/Library/LaunchAgents/com.agentbridge.avatar-heartbeat.agent-bridge.plist`,
+loaded it into `gui/501`, and kicked it immediately. `heartbeat-status` showed
+`runs=2`, `last exit code=0`, and `run interval = 60 seconds`; `/avatar-surface`
+read back `agent_id=com.agentbridge.avatar-heartbeat.agent-bridge`,
+`runtime=local-cli`, `activity_state=launchd-heartbeat`, and heartbeat age
+11 seconds.
+
+Heartbeat health status: `agent-bridge avatar heartbeat-health` evaluates the
+LaunchAgent, the actual binary named in the plist, and the stable presence row
+through one shared read-only module. It reports launchd load state, run count,
+last exit code, interval, plist/log paths, binary path, binary command support,
+presence freshness, and the projected avatar fields. This is the
+operator-facing health answer for independent Xiao Shu runtime checks.
+
+Binary drift guard: `agent-bridge avatar install-heartbeat` now prefers
+`~/.local/bin/agent-bridge.real` when it exists, then falls back to
+`~/.local/bin/agent-bridge`. This aligns with the existing wrapper/background
+job layout and keeps the heartbeat on the stable real binary even if the
+front-door `agent-bridge` path is replaced. `heartbeat-health` reports
+`binary_missing` or `binary_missing_command` when the configured binary cannot
+run the required avatar heartbeat command.
+
+Sparse alert gate: `agent-bridge avatar heartbeat-alert` consumes the same
+read-only health payload and maintains a local transition receipt. It emits
+only on first-unhealthy, event-key transition, forced run, or repeat-due
+unhealthy state. Desktop notifications are the default alert channel; TTS is
+explicit via `--tts`. The command appends JSONL events with
+`seed_ready.substrate_input=avatar_health_transition_v1`, giving the Seed
+substrate a future perception stream while keeping this stage operational
+without a substrate dependency.
+
+Independent alert runner: `agent-bridge avatar install-heartbeat-alert`,
+`heartbeat-alert-status`, and `remove-heartbeat-alert` manage a second per-user
+LaunchAgent for the sparse alert gate. The runner executes `avatar
+heartbeat-alert` on a slower interval than the presence writer, so the watcher
+can still report a broken heartbeat writer. The first dogfood install used
+`--tts --tts-voice Flo --tts-rate 190`; while health was unchanged/healthy, the
+runner wrote a Seed-ready event but emitted neither notification nor TTS.
+
+Seed perception adapter: `agent-bridge avatar seed-events` reads the avatar
+heartbeat alert JSONL and projects each non-preview alert into the existing
+`substrate replay` event schema: `{text, key, ts, kind}`. The adapter is
+read-only and does not require `AB_SUBSTRATE=1`; it only prepares a replay log
+that can be fed to Seed by an explicit operator action. The first dogfood pass
+converted 4 non-preview `avatar_health_transition_v1` records and `substrate
+replay --use-hash` consumed them with `step_count_final=4`.
+
+Xiao Shu cortex v0: `agent-bridge avatar cortex-replay` creates an isolated
+shadow-only Seed cortex for the avatar stream. It reuses `avatar seed-events`,
+feeds the records into a fresh `SeedBackend`, and writes a dedicated snapshot
+under `~/.local/share/agent-bridge/avatar_cortex/`. This is separate from the
+global memory substrate, does not require `AB_SUBSTRATE=1`, and explicitly does
+not restart or activate AiOT daemon/sibling-gated work. The v0 shape is a
+single-stream cortex; a future v1 can map health, voice, and session signals to
+AiOT's MultiModalGrid cortical plan after shadow evidence accumulates.
+
+Cortex runner: `agent-bridge avatar install-cortex-runner`, `cortex-status`,
+and `remove-cortex-runner` provide a per-user LaunchAgent for the shadow cortex.
+The runner periodically executes `avatar cortex-replay`, writing only the
+dedicated avatar cortex parquet and leaving the global memory substrate
+untouched. `cortex-status` is the read-only operator surface that combines
+launchd state with snapshot row/fingerprint information.
+
+Cortex HTTP projection: `/avatar-surface/cortex-status` exposes the same
+runner/snapshot payload to browser and non-MCP clients, while
+`/avatar-surface/panel` renders a Cortex Status band beside heartbeat health.
+This keeps the shadow cortex observable from the independent panel without
+turning it into a live Seed subscription or mutating the global substrate.
+The status payload also carries a read-only `events` summary from
+`avatar seed-events` and a compact `trend` object so clients can compare
+snapshot step, event count, latest health status, and snapshot/event lag
+without reading the alert JSONL or cortex parquet directly.
+`trend.learning_state` is a UI-facing interpretation layer with stable states:
+`caught_up`, `learning`, `behind`, and `stale`. It is advisory only; it does not
+emit voice, trigger notifications, or mutate the Seed substrate.
+`trend.behavior_policy` is also advisory: it can provide a panel badge, hint,
+recommended action, and voice preview text, but `voice.allowed` and
+`notification.allowed` default to false in the read-only HTTP/panel surface.
+`avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
+as a dedicated read-only surface with `emits_audio=false`,
+`emits_notification=false`, and `requires_explicit_emit_gate=true`.
+`avatar cortex-voice-gate` and `/avatar-surface/cortex-voice-gate` then evaluate
+the explicit gate as a dry-run surface: it requires `enabled=true`, an operator
+reason, preview text, a clear cooldown check, and voice policy approval, but
+still returns `dry_run=true`, `emits_audio=false`, and
+`emits_notification=false`.
+`avatar cortex-voice-emit` is the narrow real-output adapter: CLI-only, no HTTP
+emit route, no notification, no global Seed mutation, and no audio unless the
+operator supplies `--enabled`, a non-empty `--reason`, cooldown is clear (or
+`--force` is used), and either the policy allows voice or the operator supplies
+the explicit `--allow-policy-override` dogfood switch.
 
 ### Stage 5 - Read-only multi-agent surface
 
@@ -401,7 +510,18 @@ native `agent-bridge avatar surface --role dogfood` CLI read it back through
 the same shared projection. Daemon HTTP now exposes the same shared projection
 as `/avatar-surface` JSON, `/avatar-surface/report` text, and
 `/avatar-surface/panel` HTML so non-MCP clients and browsers can consume the
-read-only surface without a Codex dependency.
+read-only surface without a Codex dependency. Local live validation passed
+against both `cargo run` and the reinstalled signed binary: JSON/text/panel
+routes returned avatar rows for `runtime=local-cli`, `runtime=claude-code`, and
+`runtime=codex`, and a Chrome headless screenshot confirmed the HTML panel
+renders nonblank. The panel now supports `refresh_secs` and `stale_secs`, emits
+a meta refresh tag, shows a server-side last update timestamp, and marks rows
+fresh/stale/unknown from `last_heartbeat_at`. The JSON endpoint includes
+`generated_at` and `stale_secs` so non-browser clients can apply the same
+freshness rule. The panel also renders a top heartbeat-health band from the
+same launchd, binary, and presence projection as
+`/avatar-surface/heartbeat-health`, which remains available as JSON for
+external watchdogs and non-MCP clients.
 
 ---
 
@@ -412,12 +532,28 @@ read-only surface without a Codex dependency.
 | Codex `pet_state_set` with Phase 6 facets | Existing sidecar keeps the new fields |
 | Codex `pet_state_get` after write | Fields round-trip without losing old keys |
 | Standard `pet_presence_sync` | Presence row carries canonical `avatar_state` plus compatibility `pet_state` |
+| `agent-bridge avatar sync-presence` | Same presence projection is available for CLI/launchd heartbeats without an MCP client |
+| `agent-bridge avatar install-heartbeat` | A per-user launchd job periodically refreshes one stable presence row |
+| `agent-bridge avatar heartbeat-health` | Launchd, binary command support, and the stable presence row are summarized by one read-only health payload |
+| `agent-bridge avatar heartbeat-alert` | Health transitions are gated sparsely, optionally notified/spoken, and logged as Seed-ready JSONL events |
+| `agent-bridge avatar install-heartbeat-alert` | A separate per-user launchd job periodically runs the sparse alert gate without writing presence |
+| `agent-bridge avatar seed-events` | Avatar alert JSONL projects into Seed replay-compatible perception records without live substrate mutation |
+| `agent-bridge avatar cortex-replay` | Avatar Seed events replay into an isolated Xiao Shu cortex snapshot without touching the global substrate |
+| `agent-bridge avatar install-cortex-runner` | A separate per-user launchd job keeps the isolated Xiao Shu cortex snapshot refreshed |
+| `agent-bridge avatar cortex-status` | Launchd runner state and the latest cortex snapshot row/fingerprint are visible from one read-only command |
+| `agent-bridge avatar cortex-preview` | Voice preview text is visible without emitting audio or notifications |
+| `agent-bridge avatar cortex-voice-gate` | Explicit voice-gate dry-run reports whether a future emit would pass, without emitting audio |
+| `agent-bridge avatar cortex-voice-emit` | CLI-only manual voice adapter can speak one gated line and record cooldown state |
 | Standard `avatar_adapter_capabilities` | Tool reports adapter/surface availability without mutating state |
 | Standard `avatar_state_get` | Existing pet sidecar projects to protocol v1 without mutating state |
 | Standard `avatar_surface_snapshot` | Presence rows project to compact read-only `avatars[]` entries |
 | Standard `avatar_surface_report` | Same projection renders a compact read-only terminal/panel report |
 | `agent-bridge avatar surface` | Same projection is available without an MCP client |
-| daemon HTTP `/avatar-surface*` | Same projection is available as JSON, text, and a read-only HTML panel |
+| daemon HTTP `/avatar-surface*` | Same projection is available as JSON, text, and a read-only HTML panel with refresh/stale markers plus heartbeat health |
+| daemon HTTP `/avatar-surface/heartbeat-health` | Same heartbeat health payload is available to browser and non-MCP clients |
+| daemon HTTP `/avatar-surface/cortex-status` | Same shadow-cortex runner/snapshot/event-trend/policy payload is available to browser and non-MCP clients |
+| daemon HTTP `/avatar-surface/cortex-preview` | Same voice preview is available to browser and non-MCP clients without emission |
+| daemon HTTP `/avatar-surface/cortex-voice-gate` | Same explicit voice-gate dry-run is available to browser and non-MCP clients without emission |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |
 | Unknown field injected | Reader ignores it |
 | Missing optional facets | Reader returns null or unknown, not error |
