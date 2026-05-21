@@ -2487,6 +2487,9 @@ fn avatar_surface_renderer_view_html(
       transition: filter 180ms ease, transform 180ms ease;
       z-index: 2;
     }}
+    .xiao-shu.sprite-choreographed .xiao-shu-sprite {{
+      transition: none;
+    }}
     .xiao-shu.sprite-backed .xiao-shu-body {{
       display: none;
     }}
@@ -2504,12 +2507,15 @@ fn avatar_surface_renderer_view_html(
       transition: opacity 180ms ease, transform 180ms ease;
       z-index: 3;
     }}
-    .sprite-alert .sprite-alert-mark {{
+    .sprite-alert.sprite-attention-visible .sprite-alert-mark {{
       opacity: 0.78;
       transform: scale(1);
     }}
     .sprite-alert .xiao-shu-sprite {{
       filter: none;
+      transform: translateY(8px) scale(1.42);
+    }}
+    .xiao-shu[data-sprite-variant="current_alert_row"].sprite-alert .xiao-shu-sprite {{
       transform: translateY(8px) scale(1.46);
     }}
     .xiao-shu[data-sprite-variant="waiting_peek_row"].sprite-alert .sprite-alert-mark {{
@@ -2648,7 +2654,6 @@ fn avatar_surface_renderer_view_html(
     .motion-soft-bounce .xiao-shu-inner {{ animation: soft-bounce 900ms ease-in-out infinite; }}
     .motion-sorting-glow .status-dot {{ animation: glow 1200ms ease-in-out infinite; }}
     .motion-look-sideways .xiao-shu-inner {{ animation: look-sideways 1600ms ease-in-out infinite; }}
-    .motion-alert-peek .xiao-shu-inner {{ animation: alert-peek 1400ms ease-in-out infinite; }}
     @keyframes breathe {{
       0%, 100% {{ transform: translateY(0) scale(1); }}
       50% {{ transform: translateY(-3px) scale(1.01); }}
@@ -2664,10 +2669,6 @@ fn avatar_surface_renderer_view_html(
     @keyframes look-sideways {{
       0%, 100% {{ transform: translateX(0); }}
       50% {{ transform: translateX(-8px); }}
-    }}
-    @keyframes alert-peek {{
-      0%, 100% {{ transform: translateY(2px) scale(1); }}
-      50% {{ transform: translateY(-5px) scale(1.015); }}
     }}
     .inspector {{
       border-top: 4px solid var(--teal);
@@ -2887,6 +2888,42 @@ fn avatar_surface_renderer_view_html(
       return variants.find((variant) => variant.variant_id === variantId) || defaultVariant(variants);
     }}
 
+    function variantChoreography(track) {{
+      const variant = activeVariant(track);
+      const choreography = variant && variant.frame_choreography;
+      if (!choreography || !Array.isArray(choreography.frames) || choreography.frames.length === 0) {{
+        return null;
+      }}
+      return choreography;
+    }}
+
+    function choreographyFrames(track) {{
+      const choreography = variantChoreography(track);
+      return choreography ? choreography.frames : null;
+    }}
+
+    function playbackFrameCount(track, stateFrames) {{
+      const spriteFrames = choreographyFrames(track);
+      if (spriteFrames) {{
+        return spriteFrames.length;
+      }}
+      return Math.max(1, stateFrames.length);
+    }}
+
+    function stateFrameForOrdinal(stateFrames, ordinal, playbackCount) {{
+      if (!stateFrames.length) {{
+        return null;
+      }}
+      if (playbackCount <= 1) {{
+        return stateFrames[0];
+      }}
+      const stateIndex = Math.min(
+        stateFrames.length - 1,
+        Math.round((Number(ordinal || 0) / (playbackCount - 1)) * (stateFrames.length - 1))
+      );
+      return stateFrames[stateIndex] || stateFrames[0];
+    }}
+
     function setActiveButton() {{
       buttons.forEach((button) => {{
         button.classList.toggle("is-active", Number(button.dataset.trackIndex) === trackIndex);
@@ -2955,7 +2992,9 @@ fn avatar_surface_renderer_view_html(
         const label = document.createElement("span");
         label.textContent = variant.label || variant.variant_id || "variant";
         const detail = document.createElement("small");
-        detail.textContent = `row=${{variant.sprite_row}} frames=${{variant.sprite_frames}} mark=${{Boolean(variant.alert_mark)}}`;
+        const choreography = variant.frame_choreography || {{}};
+        const choreoFrames = Array.isArray(choreography.frames) ? choreography.frames.length : 0;
+        detail.textContent = `row=${{variant.sprite_row}} frames=${{variant.sprite_frames}} choreo=${{choreoFrames}} css_motion=${{Boolean(choreography.uses_css_motion)}}`;
         const intent = document.createElement("small");
         intent.textContent = variant.intent || "";
         button.append(label, detail, intent);
@@ -2984,7 +3023,7 @@ fn avatar_surface_renderer_view_html(
       }});
     }}
 
-    function applySpriteFrame(track, ordinal) {{
+    function applySpriteFrame(track, ordinal, choreoFrame) {{
       if (!spriteFrame || !figure) {{
         return;
       }}
@@ -2995,13 +3034,24 @@ fn avatar_surface_renderer_view_html(
         config.frames = Number(variant.sprite_frames || config.frames || 1);
         config.alert = Boolean(variant.alert_mark);
       }}
-      const column = Number(ordinal || 0) % Number(config.frames || 1);
+      if (choreoFrame) {{
+        config.row = Number(choreoFrame.row ?? config.row ?? 0);
+        config.frames = Number(config.frames || 1);
+        config.alert = Boolean(config.alert);
+      }}
+      const column = choreoFrame
+        ? Number(choreoFrame.col ?? 0)
+        : Number(ordinal || 0) % Number(config.frames || 1);
       const x = -column * 192;
       const y = -Number(config.row || 0) * 208;
       spriteFrame.style.backgroundPosition = `${{x}}px ${{y}}px`;
       figure.dataset.spriteVariant = variant && variant.variant_id ? variant.variant_id : "default";
+      figure.dataset.spritePhase = choreoFrame && choreoFrame.phase ? choreoFrame.phase : "";
       figure.classList.toggle("sprite-backed", true);
+      figure.classList.toggle("sprite-choreographed", Boolean(choreoFrame));
       figure.classList.toggle("sprite-alert", Boolean(config.alert));
+      const markVisible = Boolean(config.alert) && (!choreoFrame || choreoFrame.mark !== false);
+      figure.classList.toggle("sprite-attention-visible", markVisible);
     }}
 
     function applyFrame() {{
@@ -3010,21 +3060,26 @@ fn avatar_surface_renderer_view_html(
       if (!figure || frames.length === 0) {{
         return;
       }}
-      const frame = frames[frameIndex] || frames[0];
+      const spriteFrames = choreographyFrames(track);
+      const playbackCount = playbackFrameCount(track, frames);
+      const playbackOrdinal = frameIndex % playbackCount;
+      const frame = stateFrameForOrdinal(frames, playbackOrdinal, playbackCount) || frames[0];
+      const choreoFrame = spriteFrames ? spriteFrames[playbackOrdinal] : null;
       figure.className = "xiao-shu sprite-backed " + (frame.css_classes || "pose-neutral-idle expression-calm-eyes motion-idle-breathe accessory-none");
-      const ordinal = frameIndex;
-      applySpriteFrame(track, ordinal);
+      applySpriteFrame(track, playbackOrdinal, choreoFrame);
       figure.dataset.currentFrame = frame.frame_id || "";
       if (tokenEl) tokenEl.textContent = track.token || "xiao_shu::unknown";
       setStateLabel(frame.state_label || "");
       updateVariantLabel();
-      const nextFrame = frames[(frameIndex + 1) % frames.length] || frame;
+      const nextFrame = frames[Math.min(frames.length - 1, playbackOrdinal + 1)] || frame;
       const currentAt = Number(frame.at_ms || 0);
       const nextAt = Number(nextFrame.at_ms || 0);
       const duration = Number(track.duration_ms || 1000);
-      let delay = frameIndex < frames.length - 1 ? nextAt - currentAt : duration - currentAt;
-      delay = Math.max(180, delay);
-      frameIndex = (frameIndex + 1) % frames.length;
+      let delay = choreoFrame && choreoFrame.hold_ms
+        ? Number(choreoFrame.hold_ms)
+        : playbackOrdinal < frames.length - 1 ? nextAt - currentAt : duration - currentAt;
+      delay = Math.max(choreoFrame ? 80 : 180, delay);
+      frameIndex = (frameIndex + 1) % playbackCount;
       timer = window.setTimeout(applyFrame, delay);
     }}
 
@@ -3968,6 +4023,9 @@ mod tests {
         assert!(html.contains("\"variant_id\":\"current_alert_row\""));
         assert!(html.contains("\"variant_id\":\"waiting_peek_row\""));
         assert!(html.contains("\"variant_id\":\"focused_review_row\""));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_frame_choreo_v1\""));
+        assert!(html.contains("\"uses_css_motion\":false"));
+        assert!(html.contains("\"phase\":\"attention_hold\""));
         assert!(
             html.contains("\"xiao_shu::alert_peek::medium\": { row: 5, frames: 8, alert: true }")
         );
@@ -3975,8 +4033,10 @@ mod tests {
         assert!(html.contains("--alert-soft: #c97968;"));
         assert!(html.contains("border-width: 4px;"));
         assert!(html.contains("brightness(0.94)"));
-        assert!(html.contains("animation: alert-peek 1400ms ease-in-out infinite;"));
-        assert!(html.contains("translateY(-5px) scale(1.015);"));
+        assert!(html.contains("sprite-choreographed"));
+        assert!(html.contains("sprite-attention-visible"));
+        assert!(html.contains("function choreographyFrames(track)"));
+        assert!(!html.contains("animation: alert-peek 1400ms ease-in-out infinite;"));
         assert!(html.contains("browser pixels=true"));
         assert!(html.contains("<span>writes_files=false</span>"));
         assert!(html.contains("<span>mutates_renderer=false</span>"));
@@ -3992,8 +4052,11 @@ mod tests {
         );
         assert!(focused.contains("<span>active=xiao_shu::alert_peek::medium</span>"));
         assert!(focused.contains("waiting_peek_row / waiting peek row"));
+        assert!(focused.contains("choreo=${choreoFrames} css_motion=${Boolean(choreography.uses_css_motion)}"));
         assert!(focused.contains(r#"let variantId = "waiting_peek_row";"#));
         assert!(focused.contains("data-sprite-variant=\"waiting_peek_row\""));
+        assert!(focused.contains("figure.dataset.spritePhase"));
+        assert!(focused.contains("choreoFrame.hold_ms"));
         assert!(focused.contains("url.searchParams.set(\"variant\", variant.variant_id);"));
         assert!(focused.contains(r#"let trackIndex = 4;"#));
         assert!(focused.contains(r#"data-track-token="xiao_shu::alert_peek::medium""#));

@@ -518,8 +518,11 @@ the official package. Those review tracks must not promote themselves into the
 selected binding fixture or mutate the official package. Focused review tracks
 may expose read-only semantic variants such as alternate `alert_peek` sprite
 rows through a `variant` query parameter; those variants are comparison
-evidence only and cannot write approval, promote bindings, or emit voice. The
-view remains a manual visual-QA surface before any official package binding.
+evidence only and cannot write approval, promote bindings, or emit voice. A
+variant may also carry a `frame_choreography` table (`row`, `col`, `hold_ms`,
+`phase`, `mark`) so the browser can play atlas columns as an action sequence
+instead of faking motion through CSS transforms. The view remains a manual
+visual-QA surface before any official package binding.
 `avatar cortex-review-gate` and `/avatar-surface/cortex-review-gate` add a
 read-only review gate over that browser view. The gate can report automatic
 checks and pending manual decisions, but it does not write approval state or

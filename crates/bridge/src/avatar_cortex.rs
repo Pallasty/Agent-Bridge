@@ -1770,6 +1770,25 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "alert_mark": true,
                 "default": true,
                 "intent": "accepted original-sprite baseline; strongest attention read",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "alert_peek_frame_choreo_v1",
+                    "mode": "sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "enter_hold_return",
+                    "duration_ms": 1760,
+                    "frames": [
+                        {"row": 5, "col": 0, "hold_ms": 110, "phase": "idle_entry", "mark": false},
+                        {"row": 5, "col": 1, "hold_ms": 110, "phase": "notice_start", "mark": false},
+                        {"row": 5, "col": 2, "hold_ms": 130, "phase": "peek_in", "mark": false},
+                        {"row": 5, "col": 3, "hold_ms": 160, "phase": "peek_check", "mark": true},
+                        {"row": 5, "col": 4, "hold_ms": 300, "phase": "attention_hold", "mark": true},
+                        {"row": 5, "col": 5, "hold_ms": 160, "phase": "soften", "mark": true},
+                        {"row": 5, "col": 6, "hold_ms": 130, "phase": "returning", "mark": false},
+                        {"row": 5, "col": 7, "hold_ms": 700, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "uses every available row-5 atlas column before any CSS motion",
+                },
                 "review_question": "does this still feel like a gentle attention request rather than failure",
                 "voice_policy": "silent_now_review_sparse_voice_later",
             }),
@@ -1781,6 +1800,28 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "alert_mark": true,
                 "default": false,
                 "intent": "softer waiting or inspection posture with the same muted attention mark",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "alert_peek_frame_choreo_v1",
+                    "mode": "sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "enter_hold_return",
+                    "duration_ms": 1760,
+                    "frames": [
+                        {"row": 6, "col": 0, "hold_ms": 120, "phase": "idle_entry", "mark": false},
+                        {"row": 6, "col": 1, "hold_ms": 120, "phase": "notice_start", "mark": false},
+                        {"row": 6, "col": 2, "hold_ms": 150, "phase": "peek_in", "mark": false},
+                        {"row": 6, "col": 3, "hold_ms": 190, "phase": "peek_check", "mark": true},
+                        {"row": 6, "col": 4, "hold_ms": 330, "phase": "attention_hold", "mark": true},
+                        {"row": 6, "col": 5, "hold_ms": 240, "phase": "gentle_hold", "mark": true},
+                        {"row": 6, "col": 4, "hold_ms": 160, "phase": "soften", "mark": true},
+                        {"row": 6, "col": 3, "hold_ms": 130, "phase": "returning", "mark": false},
+                        {"row": 6, "col": 2, "hold_ms": 110, "phase": "returning", "mark": false},
+                        {"row": 6, "col": 1, "hold_ms": 100, "phase": "settle", "mark": false},
+                        {"row": 6, "col": 0, "hold_ms": 210, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "uses row-6 ping-pong columns so the peek reads as atlas-frame action, not CSS wobble",
+                },
                 "review_question": "does this read as supportively checking rather than alarmed",
                 "voice_policy": "silent_now_review_sparse_voice_later",
             }),
@@ -1792,6 +1833,25 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "alert_mark": true,
                 "default": false,
                 "intent": "focused review posture for attention-needed states that should feel work-like",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "alert_peek_frame_choreo_v1",
+                    "mode": "sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "enter_hold_return",
+                    "duration_ms": 1560,
+                    "frames": [
+                        {"row": 8, "col": 0, "hold_ms": 120, "phase": "idle_entry", "mark": false},
+                        {"row": 8, "col": 1, "hold_ms": 140, "phase": "focus_in", "mark": false},
+                        {"row": 8, "col": 2, "hold_ms": 190, "phase": "review_check", "mark": true},
+                        {"row": 8, "col": 3, "hold_ms": 330, "phase": "review_hold", "mark": true},
+                        {"row": 8, "col": 4, "hold_ms": 210, "phase": "soften", "mark": true},
+                        {"row": 8, "col": 5, "hold_ms": 160, "phase": "returning", "mark": false},
+                        {"row": 8, "col": 4, "hold_ms": 120, "phase": "settle", "mark": false},
+                        {"row": 8, "col": 0, "hold_ms": 290, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "uses the brighter row-8 columns as a focused inspection alternative",
+                },
                 "review_question": "does this make alert_peek feel too much like sorting_glow",
                 "voice_policy": "silent_now_review_sparse_voice_later",
             }),
@@ -3907,6 +3967,25 @@ mod tests {
         assert_eq!(
             alert_peek["semantic_variants"][1]["variant_id"],
             "waiting_peek_row"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][1]["frame_choreography"]["choreography_id"],
+            "alert_peek_frame_choreo_v1"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][1]["frame_choreography"]["uses_css_motion"],
+            false
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][1]["frame_choreography"]["frames"]
+                .as_array()
+                .unwrap()
+                .len(),
+            11
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][1]["frame_choreography"]["frames"][5]["col"],
+            5
         );
         assert_eq!(alert_peek["semantic_variants"][2]["sprite_row"], 8);
         assert_eq!(
