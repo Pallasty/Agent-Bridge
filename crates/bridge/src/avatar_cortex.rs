@@ -1348,6 +1348,8 @@ fn avatar_cortex_binding_fixture_record(entry: &Value) -> Value {
         "source_selection": entry.get("selection").cloned().unwrap_or(Value::Null),
         "risk_level": entry.get("risk_level").cloned().unwrap_or(Value::Null),
         "binding_stage": entry.get("binding_stage").cloned().unwrap_or(Value::Null),
+        "track_kind": "selected",
+        "review_only": false,
         "visual_intent": entry.get("visual_intent").cloned().unwrap_or(Value::Null),
         "target": target,
         "timeline": timeline,
@@ -1503,6 +1505,10 @@ fn avatar_cortex_visual_adapter_preview(record: &Value) -> Value {
     json!({
         "fixture_id": record.get("fixture_id").cloned().unwrap_or(Value::Null),
         "token": record.get("token").cloned().unwrap_or(Value::Null),
+        "source_selection": record.get("source_selection").cloned().unwrap_or(Value::Null),
+        "binding_stage": record.get("binding_stage").cloned().unwrap_or(Value::Null),
+        "track_kind": record.get("track_kind").cloned().unwrap_or(json!("selected")),
+        "review_only": record.get("review_only").cloned().unwrap_or(json!(false)),
         "risk_level": record.get("risk_level").cloned().unwrap_or(Value::Null),
         "visual_intent": record.get("visual_intent").cloned().unwrap_or(Value::Null),
         "frame_count": frames.len(),
@@ -1616,6 +1622,84 @@ fn avatar_cortex_slot_css_class(prefix: &str, value: Option<&Value>, fallback: &
     }
 }
 
+fn avatar_cortex_review_timeline(timeline: &Value) -> (Value, i64) {
+    let mut events = timeline.as_array().cloned().unwrap_or_default();
+    let base_ms = avatar_cortex_timeline_max_ms(timeline);
+    events.extend([
+        json!({"at_ms": base_ms + 660, "slot": "expression", "value": "calm_eyes"}),
+        json!({"at_ms": base_ms + 740, "slot": "accessory", "value": "none"}),
+        json!({"at_ms": base_ms + 820, "slot": "pose", "value": "neutral_idle"}),
+        json!({"at_ms": base_ms + 900, "slot": "motion", "value": "idle_breathe"}),
+    ]);
+    (Value::Array(events), base_ms + 900)
+}
+
+fn avatar_cortex_review_preview_from_deferred(entry: &Value) -> Option<Value> {
+    let token = vstr(entry.get("token"))?;
+    let resolved = entry
+        .get("resolved")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let binding_stage = vstr(entry.get("binding_stage")).unwrap_or("unknown");
+    let risk_level = vstr(entry.get("risk_level")).unwrap_or("unknown");
+    if !resolved || binding_stage != "needs_review" || risk_level != "medium" {
+        return None;
+    }
+
+    let mapping = avatar_cortex_renderer_mapping(token);
+    if mapping
+        .get("resolved")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        != true
+    {
+        return None;
+    }
+    let target = mapping.get("target").cloned().unwrap_or(Value::Null);
+    let (timeline, duration_ms) =
+        avatar_cortex_review_timeline(mapping.get("timeline").unwrap_or(&Value::Null));
+    let motion_slot = vstr(target.get("motion_slot")).unwrap_or("unknown");
+    let record = json!({
+        "fixture_id": format!("{}_review_fixture_v1", avatar_cortex_fixture_id(token)),
+        "token": token,
+        "source_selection": "deferred",
+        "risk_level": risk_level,
+        "binding_stage": binding_stage,
+        "track_kind": "review_only",
+        "review_only": true,
+        "visual_intent": entry.get("visual_intent").cloned().unwrap_or(Value::Null),
+        "target": target,
+        "timeline": timeline,
+        "golden_assertions": {
+            "schema": 1,
+            "motion_slot": motion_slot,
+            "duration_ms": duration_ms,
+            "returns_to_idle": true,
+            "duration_within_2s": duration_ms <= 2000,
+            "asset_writes_allowed": false,
+            "renderer_mutation_allowed": false,
+            "codex_pet_package_mutation_allowed": false,
+        },
+    });
+    Some(avatar_cortex_visual_adapter_preview(&record))
+}
+
+fn avatar_cortex_renderer_review_previews(visual_adapter_preview: &Value) -> Vec<Value> {
+    visual_adapter_preview
+        .get("source_fixture")
+        .and_then(|value| value.get("source_plan"))
+        .and_then(|value| value.get("binding_plan"))
+        .and_then(|value| value.get("deferred"))
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(avatar_cortex_review_preview_from_deferred)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn avatar_cortex_renderer_view_frame(frame: &Value, index: usize, duration_ms: i64) -> Value {
     let at_ms = frame
         .get("at_ms")
@@ -1692,6 +1776,10 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
         "track_id": format!("xiao_shu_sidecar_renderer_track_{}", index + 1),
         "token": token,
         "fixture_id": preview.get("fixture_id").cloned().unwrap_or(Value::Null),
+        "source_selection": preview.get("source_selection").cloned().unwrap_or(Value::Null),
+        "binding_stage": preview.get("binding_stage").cloned().unwrap_or(Value::Null),
+        "track_kind": preview.get("track_kind").cloned().unwrap_or(json!("selected")),
+        "review_only": preview.get("review_only").cloned().unwrap_or(json!(false)),
         "risk_level": preview.get("risk_level").cloned().unwrap_or(Value::Null),
         "visual_intent": preview.get("visual_intent").cloned().unwrap_or(Value::Null),
         "duration_ms": duration_ms,
@@ -1718,19 +1806,31 @@ fn avatar_cortex_renderer_view_from_visual_adapter_payload(visual_adapter_previe
     let adapter = visual_adapter_preview
         .get("visual_adapter")
         .unwrap_or(&Value::Null);
-    let tracks: Vec<Value> = adapter
+    let mut previews: Vec<Value> = adapter
         .get("previews")
         .and_then(Value::as_array)
-        .map(|previews| {
-            previews
-                .iter()
-                .enumerate()
-                .map(|(index, preview)| avatar_cortex_renderer_view_track(preview, index))
-                .collect()
-        })
+        .cloned()
         .unwrap_or_default();
+    let selected_track_count = previews.len();
+    let review_previews = avatar_cortex_renderer_review_previews(&visual_adapter_preview);
+    let review_track_count = review_previews.len();
+    previews.extend(review_previews);
+    let tracks: Vec<Value> = previews
+        .iter()
+        .enumerate()
+        .map(|(index, preview)| avatar_cortex_renderer_view_track(preview, index))
+        .collect();
     let first_track = tracks.first().cloned().unwrap_or(Value::Null);
-    let acceptance = adapter.get("acceptance").unwrap_or(&Value::Null);
+    let all_return_to_idle = previews.iter().all(|preview| {
+        preview["acceptance"]["returns_to_idle"]
+            .as_bool()
+            .unwrap_or(false)
+    });
+    let all_duration_within_2s = previews.iter().all(|preview| {
+        preview["acceptance"]["duration_within_2s"]
+            .as_bool()
+            .unwrap_or(false)
+    });
     let track_count = tracks.len();
 
     json!({
@@ -1751,28 +1851,26 @@ fn avatar_cortex_renderer_view_from_visual_adapter_payload(visual_adapter_previe
         "renderer_view": {
             "schema": 1,
             "kind": "browser_dom_css_sidecar_renderer_view",
-            "input": "avatar_cortex_sidecar_visual_adapter.visual_adapter.previews",
+            "input": "avatar_cortex_sidecar_visual_adapter.visual_adapter.previews + avatar_cortex_binding_plan.deferred.needs_review",
             "contract": "xiao_shu_renderer_slots_v1",
             "html_route": "/avatar-surface/cortex-renderer-view",
             "track_count": track_count,
+            "selected_track_count": selected_track_count,
+            "review_track_count": review_track_count,
             "first_track": first_track,
             "tracks": tracks,
             "acceptance": {
-                "all_return_to_idle": acceptance
-                    .get("all_return_to_idle")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-                "all_duration_within_2s": acceptance
-                    .get("all_duration_within_2s")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+                "all_return_to_idle": all_return_to_idle,
+                "all_duration_within_2s": all_duration_within_2s,
+                "review_tracks_require_manual_approval": review_track_count > 0,
+                "review_tracks_mutate_bindings": false,
                 "browser_view_only": true,
                 "asset_writes_allowed": false,
                 "renderer_mutation_allowed": false,
                 "codex_pet_package_mutation_allowed": false,
                 "manual_visual_qa_required": true,
             },
-            "next_step": "manual browser visual QA before any official package binding",
+            "next_step": "manual browser visual QA for selected and review-only tracks before any official package binding",
         },
         "source_visual_adapter": visual_adapter_preview,
     })
@@ -2949,6 +3047,14 @@ mod tests {
             "idle_breathe"
         );
         assert_eq!(adapter["visual_adapter"]["first_preview"]["frame_count"], 4);
+        assert_eq!(
+            adapter["visual_adapter"]["first_preview"]["track_kind"],
+            "selected"
+        );
+        assert_eq!(
+            adapter["visual_adapter"]["first_preview"]["review_only"],
+            false
+        );
     }
 
     #[test]
@@ -2993,8 +3099,12 @@ mod tests {
         assert_eq!(view["writes_files"], false);
         assert_eq!(view["mutates_renderer"], false);
         assert_eq!(view["codex_pet_package_mutation"], false);
-        assert_eq!(view["renderer_view"]["track_count"], 2);
+        assert_eq!(view["renderer_view"]["track_count"], 5);
+        assert_eq!(view["renderer_view"]["selected_track_count"], 2);
+        assert_eq!(view["renderer_view"]["review_track_count"], 3);
         assert_eq!(first["token"], "xiao_shu::soft_bounce::low");
+        assert_eq!(first["track_kind"], "selected");
+        assert_eq!(first["review_only"], false);
         assert_eq!(first["frame_count"], 4);
         assert_eq!(first["duration_ms"], 1800);
         assert!(first["frames"][2]["css_classes"]
@@ -3008,6 +3118,37 @@ mod tests {
                 .contains("motion-idle-breathe"),
             true
         );
+        let tracks = view["renderer_view"]["tracks"].as_array().unwrap();
+        let sorting_glow = tracks
+            .iter()
+            .find(|track| track["token"] == "xiao_shu::sorting_glow::medium")
+            .unwrap();
+        assert_eq!(sorting_glow["track_kind"], "review_only");
+        assert_eq!(sorting_glow["binding_stage"], "needs_review");
+        assert_eq!(sorting_glow["review_only"], true);
+        assert_eq!(sorting_glow["duration_ms"], 1440);
+        assert!(sorting_glow["frames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|frame| frame["css_classes"]
+                .as_str()
+                .unwrap()
+                .contains("motion-sorting-glow")));
+        assert!(sorting_glow["final_frame"]["css_classes"]
+            .as_str()
+            .unwrap()
+            .contains("pose-neutral-idle"));
+        assert!(sorting_glow["final_frame"]["css_classes"]
+            .as_str()
+            .unwrap()
+            .contains("motion-idle-breathe"));
+        assert!(tracks
+            .iter()
+            .any(|track| track["token"] == "xiao_shu::look_sideways::medium"));
+        assert!(tracks
+            .iter()
+            .any(|track| track["token"] == "xiao_shu::alert_peek::medium"));
     }
 
     #[test]
@@ -3020,12 +3161,14 @@ mod tests {
         let acceptance = &view["renderer_view"]["acceptance"];
         assert_eq!(view["sidecar_only"], true);
         assert_eq!(acceptance["browser_view_only"], true);
+        assert_eq!(acceptance["review_tracks_require_manual_approval"], true);
+        assert_eq!(acceptance["review_tracks_mutate_bindings"], false);
         assert_eq!(acceptance["asset_writes_allowed"], false);
         assert_eq!(acceptance["renderer_mutation_allowed"], false);
         assert_eq!(acceptance["codex_pet_package_mutation_allowed"], false);
         assert_eq!(
             view["renderer_view"]["next_step"],
-            "manual browser visual QA before any official package binding"
+            "manual browser visual QA for selected and review-only tracks before any official package binding"
         );
     }
 

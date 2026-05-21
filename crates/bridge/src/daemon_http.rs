@@ -1638,6 +1638,8 @@ fn avatar_surface_renderer_view_summary_html(
     };
     let href = html_escape(&href_raw);
     let tracks = avatar_surface_html_json_value(view.get("track_count"), "0");
+    let selected_tracks = avatar_surface_html_json_value(view.get("selected_track_count"), "0");
+    let review_tracks = avatar_surface_html_json_value(view.get("review_track_count"), "0");
     let route = html_escape(route_raw);
     let first_token = avatar_surface_html_json_value(first.get("token"), "-");
     let frames = avatar_surface_html_json_value(first.get("frame_count"), "0");
@@ -1659,7 +1661,7 @@ fn avatar_surface_renderer_view_summary_html(
       <div class="health-title">
         <span class="pill status-fresh">view</span>
         <strong>Xiao Shu Renderer View</strong>
-        <span>tracks={tracks} route={route}</span>
+        <span>tracks={tracks} selected={selected_tracks} review={review_tracks} route={route}</span>
       </div>
       <dl>
         <div><dt>first</dt><dd>{first_token} frames={frames}</dd></div>
@@ -1669,6 +1671,8 @@ fn avatar_surface_renderer_view_summary_html(
       </dl>
     </section>"#,
         tracks = tracks,
+        selected_tracks = selected_tracks,
+        review_tracks = review_tracks,
         route = route,
         first_token = first_token,
         frames = frames,
@@ -1699,12 +1703,19 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
     let track_count = avatar_surface_html_json_value(view.get("track_count"), "0");
     let input = avatar_surface_html_json_value(view.get("input"), "-");
     let input_label = {
-        let parts = input.split('.').collect::<Vec<_>>();
-        if parts.len() >= 2 {
-            format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1])
-        } else {
-            input.clone()
-        }
+        input
+            .split('+')
+            .map(|part| {
+                let trimmed = part.trim();
+                let parts = trimmed.split('.').collect::<Vec<_>>();
+                if parts.len() >= 2 {
+                    format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1])
+                } else {
+                    trimmed.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" + ")
     };
     let writes_files =
         avatar_surface_html_json_value(renderer_view_preview.get("writes_files"), "false");
@@ -1723,17 +1734,29 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
     if let Some(tracks) = view.get("tracks").and_then(Value::as_array) {
         for (index, track) in tracks.iter().enumerate() {
             let active = if index == 0 { " is-active" } else { "" };
+            let review = if track
+                .get("review_only")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                " is-review"
+            } else {
+                ""
+            };
             let token = avatar_surface_html_json_value(track.get("token"), "-");
+            let track_kind = avatar_surface_html_json_value(track.get("track_kind"), "selected");
             let frames = avatar_surface_html_json_value(track.get("frame_count"), "0");
             let duration = avatar_surface_html_json_value(track.get("duration_ms"), "0");
             track_buttons.push_str(&format!(
-                r#"<button type="button" class="track-button{active}" data-track-index="{index}">
+                r#"<button type="button" class="track-button{active}{review}" data-track-index="{index}">
           <span>{token}</span>
-          <small>{frames} frames / {duration}ms</small>
+          <small>{track_kind} / {frames} frames / {duration}ms</small>
         </button>"#,
                 active = active,
+                review = review,
                 index = index,
                 token = token,
+                track_kind = track_kind,
                 frames = frames,
                 duration = duration,
             ));
@@ -2073,6 +2096,9 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
     .track-button.is-active {{
       border-color: var(--teal);
       box-shadow: inset 4px 0 0 var(--teal);
+    }}
+    .track-button.is-review:not(.is-active) {{
+      box-shadow: inset 4px 0 0 var(--gold);
     }}
     .track-button span,
     .track-button small {{
@@ -2963,7 +2989,8 @@ mod tests {
         assert!(html
             .contains("pixels=false writes_files=false mutates_renderer=false pet_package=false"));
         assert!(html.contains("Xiao Shu Renderer View"));
-        assert!(html.contains("tracks=2 route=/avatar-surface/cortex-renderer-view"));
+        assert!(html
+            .contains("tracks=5 selected=2 review=3 route=/avatar-surface/cortex-renderer-view"));
         assert!(html.contains("xiao_shu::soft_bounce::low frames=4"));
         assert!(html.contains("browser=true"));
         assert!(html.contains("renderer view"));
@@ -3032,7 +3059,10 @@ mod tests {
         assert!(html.contains("Xiao Shu Sidecar Renderer"));
         assert!(html.contains("data-stage=\"xiao-shu-renderer-view\""));
         assert!(html.contains("xiao_shu::soft_bounce::low"));
+        assert!(html.contains("xiao_shu::sorting_glow::medium"));
+        assert!(html.contains("review_only / 8 frames / 1440ms"));
         assert!(html.contains("motion-soft-bounce"));
+        assert!(html.contains("motion-sorting-glow"));
         assert!(html.contains("browser pixels=true"));
         assert!(html.contains("<span>writes_files=false</span>"));
         assert!(html.contains("<span>mutates_renderer=false</span>"));
