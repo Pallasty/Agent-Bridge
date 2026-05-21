@@ -1826,6 +1826,49 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "voice_policy": "silent_now_review_sparse_voice_later",
             }),
             json!({
+                "variant_id": "sidecar_peek_v2",
+                "label": "sidecar peek v2",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": true,
+                "default": false,
+                "intent": "purpose-built sidecar-only action frames with a clearer peek, hand lift, blink, and return",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-alert-peek-v2",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-alert-peek-v2",
+                    "format": "image/svg+xml",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "prototype_v2"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-alert-peek-v2",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "alert_peek_sidecar_v2_frame_choreo",
+                    "mode": "sidecar_sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "enter_blink_return",
+                    "duration_ms": 1660,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 95, "phase": "hidden_entry", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 110, "phase": "peek_start", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 130, "phase": "notice", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 150, "phase": "hand_lift", "mark": true},
+                        {"row": 0, "col": 4, "hold_ms": 260, "phase": "attention_hold", "mark": true},
+                        {"row": 0, "col": 5, "hold_ms": 150, "phase": "blink", "mark": true},
+                        {"row": 0, "col": 4, "hold_ms": 150, "phase": "soften", "mark": true},
+                        {"row": 0, "col": 6, "hold_ms": 130, "phase": "returning", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 185, "phase": "settle", "mark": false},
+                        {"row": 0, "col": 0, "hold_ms": 300, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "switches to a read-only sidecar asset so the action frames can change before any official package decision",
+                },
+                "review_question": "does this finally read as Xiao Shu actively peeking rather than a flat atlas wobble",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+            json!({
                 "variant_id": "focused_review_row",
                 "label": "focused review row",
                 "sprite_row": 8,
@@ -3958,7 +4001,7 @@ mod tests {
             .iter()
             .find(|track| track["token"] == "xiao_shu::alert_peek::medium")
             .unwrap();
-        assert_eq!(alert_peek["semantic_variant_count"], 3);
+        assert_eq!(alert_peek["semantic_variant_count"], 4);
         assert_eq!(alert_peek["has_semantic_variants"], true);
         assert_eq!(
             alert_peek["semantic_variants"][0]["variant_id"],
@@ -3987,7 +4030,19 @@ mod tests {
             alert_peek["semantic_variants"][1]["frame_choreography"]["frames"][5]["col"],
             5
         );
-        assert_eq!(alert_peek["semantic_variants"][2]["sprite_row"], 8);
+        assert_eq!(
+            alert_peek["semantic_variants"][2]["variant_id"],
+            "sidecar_peek_v2"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][2]["sidecar_asset"]["route"],
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-alert-peek-v2"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][2]["frame_choreography"]["choreography_id"],
+            "alert_peek_sidecar_v2_frame_choreo"
+        );
+        assert_eq!(alert_peek["semantic_variants"][3]["sprite_row"], 8);
         assert_eq!(
             alert_peek["semantic_variant_review"]["can_promote_binding"],
             false

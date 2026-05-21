@@ -521,8 +521,11 @@ rows through a `variant` query parameter; those variants are comparison
 evidence only and cannot write approval, promote bindings, or emit voice. A
 variant may also carry a `frame_choreography` table (`row`, `col`, `hold_ms`,
 `phase`, `mark`) so the browser can play atlas columns as an action sequence
-instead of faking motion through CSS transforms. The view remains a manual
-visual-QA surface before any official package binding.
+instead of faking motion through CSS transforms. If the installed atlas does not
+carry enough expressive difference, a variant may reference a read-only sidecar
+asset route such as `/avatar-surface/sidecar-spritesheet`; that resource remains
+prototype review evidence, not an official package write or binding. The view
+remains a manual visual-QA surface before any official package binding.
 `avatar cortex-review-gate` and `/avatar-surface/cortex-review-gate` add a
 read-only review gate over that browser view. The gate can report automatic
 checks and pending manual decisions, but it does not write approval state or
@@ -661,6 +664,7 @@ external watchdogs and non-MCP clients.
 | daemon HTTP `/avatar-surface/cortex-visual-adapter` | Same sidecar preview frame payload is available to browser and non-MCP clients without pixel rendering |
 | daemon HTTP `/avatar-surface/cortex-renderer-view` | Browser-only sidecar renderer view, including focused `track` / `track_index` previews and read-only semantic `variant` comparisons for review-only deferred medium tracks, is available for manual visual QA without package mutation |
 | daemon HTTP `/avatar-surface/pet-spritesheet` | Installed Xiao Shu pet spritesheets can be served as read-only browser assets for sidecar review without package mutation |
+| daemon HTTP `/avatar-surface/sidecar-spritesheet` | Prototype Xiao Shu spritesheets can be served as read-only sidecar review assets without official package mutation or binding promotion |
 | daemon HTTP `/avatar-surface/cortex-review-gate` | Same read-only renderer review gate is available to browser and non-MCP clients without approval writes; panel links can open pending tracks for focused inspection only |
 | daemon HTTP `/avatar-surface/cortex-review-packet` | Same pending-track human inspection packets are available without approval persistence, record writes, or binding promotion |
 | daemon HTTP `/avatar-surface/cortex-review-report` | Same packet-readiness report is available without human decision writes, approval persistence, or merge readiness |

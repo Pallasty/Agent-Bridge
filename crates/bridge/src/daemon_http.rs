@@ -21,6 +21,7 @@
 //!   - `GET /avatar-surface/cortex-visual-adapter?...` — sidecar frame preview
 //!   - `GET /avatar-surface/cortex-renderer-view?...` — browser sidecar renderer view
 //!   - `GET /avatar-surface/pet-spritesheet?...` — read-only installed pet sprite source
+//!   - `GET /avatar-surface/sidecar-spritesheet?...` — read-only prototype sprite source
 //!   - `GET /avatar-surface/cortex-review-gate?...` — read-only renderer review gate
 //!   - `GET /avatar-surface/cortex-review-packet?...` — read-only renderer review packets
 //!   - `GET /avatar-surface/cortex-review-report?...` — read-only review readiness report
@@ -146,6 +147,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/pet-spritesheet",
             get(avatar_pet_spritesheet),
+        )
+        .route(
+            "/avatar-surface/sidecar-spritesheet",
+            get(avatar_sidecar_spritesheet),
         )
         .route(
             "/avatar-surface/cortex-review-gate",
@@ -556,6 +561,11 @@ struct AvatarPetSpritesheetQuery {
 }
 
 #[derive(Deserialize, Debug)]
+struct AvatarSidecarSpritesheetQuery {
+    asset: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
 struct AvatarCortexVoiceGateQuery {
     label: Option<String>,
     heartbeat_label: Option<String>,
@@ -939,6 +949,228 @@ async fn avatar_pet_spritesheet(
         )
     })?;
     Ok(([(header::CONTENT_TYPE, content_type)], bytes))
+}
+
+fn avatar_sidecar_spritesheet_svg(asset: &str) -> Option<String> {
+    if asset != "xiao-shu-alert-peek-v2" {
+        return None;
+    }
+
+    use std::fmt::Write as _;
+
+    struct Frame {
+        col: i32,
+        rise: i32,
+        tilt: i32,
+        scale: &'static str,
+        eye_shift: i32,
+        blink: bool,
+        mouth: &'static str,
+        left_arm: i32,
+        right_arm: i32,
+        cheek: &'static str,
+    }
+
+    let frames = [
+        Frame {
+            col: 0,
+            rise: 58,
+            tilt: -7,
+            scale: "0.92",
+            eye_shift: -2,
+            blink: false,
+            mouth: "small",
+            left_arm: 18,
+            right_arm: -18,
+            cheek: "0.12",
+        },
+        Frame {
+            col: 1,
+            rise: 42,
+            tilt: -10,
+            scale: "0.96",
+            eye_shift: -6,
+            blink: false,
+            mouth: "small",
+            left_arm: 28,
+            right_arm: -24,
+            cheek: "0.18",
+        },
+        Frame {
+            col: 2,
+            rise: 24,
+            tilt: -6,
+            scale: "1.00",
+            eye_shift: -4,
+            blink: false,
+            mouth: "open",
+            left_arm: 40,
+            right_arm: -28,
+            cheek: "0.24",
+        },
+        Frame {
+            col: 3,
+            rise: 8,
+            tilt: 0,
+            scale: "1.03",
+            eye_shift: 0,
+            blink: false,
+            mouth: "smile",
+            left_arm: 58,
+            right_arm: -38,
+            cheek: "0.30",
+        },
+        Frame {
+            col: 4,
+            rise: -2,
+            tilt: 5,
+            scale: "1.04",
+            eye_shift: 2,
+            blink: false,
+            mouth: "smile",
+            left_arm: 72,
+            right_arm: -44,
+            cheek: "0.34",
+        },
+        Frame {
+            col: 5,
+            rise: 0,
+            tilt: 2,
+            scale: "1.04",
+            eye_shift: 0,
+            blink: true,
+            mouth: "smile",
+            left_arm: 64,
+            right_arm: -40,
+            cheek: "0.36",
+        },
+        Frame {
+            col: 6,
+            rise: 18,
+            tilt: -4,
+            scale: "1.00",
+            eye_shift: -3,
+            blink: false,
+            mouth: "small",
+            left_arm: 40,
+            right_arm: -30,
+            cheek: "0.24",
+        },
+        Frame {
+            col: 7,
+            rise: 46,
+            tilt: -8,
+            scale: "0.95",
+            eye_shift: -1,
+            blink: false,
+            mouth: "small",
+            left_arm: 22,
+            right_arm: -22,
+            cheek: "0.16",
+        },
+    ];
+
+    let mut svg = String::new();
+    svg.push_str(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872" viewBox="0 0 1536 1872">
+  <title>Xiao Shu alert peek sidecar v2 sprite atlas</title>
+  <defs>
+    <linearGradient id="xs-body" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f0dfc8"/>
+      <stop offset="1" stop-color="#d8e5d6"/>
+    </linearGradient>
+    <linearGradient id="xs-head" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f2dec4"/>
+      <stop offset="1" stop-color="#e0c8ac"/>
+    </linearGradient>
+    <filter id="xs-soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#26312f" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+"##,
+    );
+
+    for frame in frames {
+        let x = frame.col * 192;
+        let left_eye_x = 72 + frame.eye_shift;
+        let right_eye_x = 120 + frame.eye_shift;
+        let eyes = if frame.blink {
+            format!(
+                r##"<rect x="{left_eye_x}" y="93" width="18" height="5" rx="3" fill="#26312f"/>
+      <rect x="{right_eye_x}" y="93" width="18" height="5" rx="3" fill="#26312f"/>"##
+            )
+        } else {
+            format!(
+                r##"<ellipse cx="{left_eye_x}" cy="93" rx="7" ry="13" fill="#26312f"/>
+      <ellipse cx="{right_eye_x}" cy="93" rx="7" ry="13" fill="#26312f"/>"##
+            )
+        };
+        let mouth = match frame.mouth {
+            "open" => r##"<ellipse cx="96" cy="112" rx="9" ry="7" fill="#26312f"/>"##,
+            "smile" => r##"<path d="M79 108 Q96 121 113 108" fill="none" stroke="#26312f" stroke-width="5" stroke-linecap="round"/>"##,
+            _ => r##"<path d="M87 110 Q96 115 105 110" fill="none" stroke="#26312f" stroke-width="4" stroke-linecap="round"/>"##,
+        };
+
+        writeln!(
+            svg,
+            r##"  <g id="frame-{col}" transform="translate({x} 0)">
+    <rect width="192" height="208" fill="none"/>
+    <ellipse cx="96" cy="188" rx="54" ry="12" fill="#26312f" opacity="0.14"/>
+    <g filter="url(#xs-soft-shadow)" transform="translate(96 118) scale({scale}) translate(-96 -118) translate(0 {rise})">
+      <g transform="translate(96 94) rotate({tilt}) translate(-96 -94)">
+        <ellipse cx="96" cy="154" rx="50" ry="43" fill="url(#xs-body)" stroke="#26312f" stroke-width="5"/>
+        <path d="M58 133 C76 121 116 121 134 133" fill="none" stroke="#147a74" stroke-width="6" stroke-linecap="round"/>
+        <g transform="translate(53 147) rotate({left_arm})">
+          <ellipse cx="0" cy="0" rx="14" ry="29" fill="#ead7bd" stroke="#26312f" stroke-width="5"/>
+        </g>
+        <g transform="translate(139 147) rotate({right_arm})">
+          <ellipse cx="0" cy="0" rx="14" ry="29" fill="#ead7bd" stroke="#26312f" stroke-width="5"/>
+        </g>
+        <path d="M42 82 C42 47 63 25 96 25 C129 25 150 47 150 82 C150 123 128 145 96 145 C64 145 42 123 42 82 Z" fill="url(#xs-head)" stroke="#26312f" stroke-width="5"/>
+        <path d="M89 26 C100 6 126 10 124 34 C111 29 99 33 89 26 Z" fill="#d45f4c" stroke="#26312f" stroke-width="5" stroke-linejoin="round"/>
+        {eyes}
+        <ellipse cx="58" cy="112" rx="13" ry="7" fill="#d45f4c" opacity="{cheek}"/>
+        <ellipse cx="134" cy="112" rx="13" ry="7" fill="#d45f4c" opacity="{cheek}"/>
+        {mouth}
+      </g>
+    </g>
+  </g>
+"##,
+            col = frame.col,
+            x = x,
+            scale = frame.scale,
+            rise = frame.rise,
+            tilt = frame.tilt,
+            left_arm = frame.left_arm,
+            right_arm = frame.right_arm,
+            eyes = eyes,
+            cheek = frame.cheek,
+            mouth = mouth
+        )
+        .ok()?;
+    }
+
+    svg.push_str("</svg>\n");
+    Some(svg)
+}
+
+async fn avatar_sidecar_spritesheet(
+    Query(q): Query<AvatarSidecarSpritesheetQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let asset = q.asset.as_deref().unwrap_or("xiao-shu-alert-peek-v2");
+    let svg = avatar_sidecar_spritesheet_svg(asset).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("unsupported sidecar spritesheet asset: {asset}"),
+        )
+    })?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/svg+xml; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        svg,
+    ))
 }
 
 async fn avatar_cortex_review_gate(
@@ -2287,6 +2519,8 @@ fn avatar_surface_renderer_view_html(
         "/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev",
     );
     let data_json = html_json_script(renderer_view_preview);
+    let sprite_route_json = html_json_script(&json!(sprite_route.clone()));
+    let asset_pet_id_json = html_json_script(&json!(asset_pet_id.clone()));
     let mut track_buttons = String::new();
     if let Some(tracks) = view.get("tracks").and_then(Value::as_array) {
         for (index, track) in tracks.iter().enumerate() {
@@ -2521,6 +2755,14 @@ fn avatar_surface_renderer_view_html(
     .xiao-shu[data-sprite-variant="waiting_peek_row"].sprite-alert .sprite-alert-mark {{
       opacity: 0.58;
       transform: scale(0.86);
+    }}
+    .xiao-shu[data-sprite-variant="sidecar_peek_v2"].sprite-alert .sprite-alert-mark {{
+      width: 18px;
+      height: 18px;
+      right: 78px;
+      top: 56px;
+      opacity: 0.62;
+      transform: scale(0.9);
     }}
     .xiao-shu[data-sprite-variant="focused_review_row"].sprite-alert .sprite-alert-mark {{
       width: 18px;
@@ -2829,7 +3071,7 @@ fn avatar_surface_renderer_view_html(
           <dt>token</dt><dd data-token>{first_token}</dd>
           <dt>state</dt><dd data-state>{first_state}</dd>
           <dt>variant</dt><dd data-variant>{active_variant_label}</dd>
-          <dt>asset</dt><dd><span>pet={asset_pet_id}</span><span>route={sprite_route}</span><span>mode=read-only spritesheet</span></dd>
+          <dt>asset</dt><dd data-asset><span>pet={asset_pet_id}</span><span>route={sprite_route}</span><span>mode=read-only spritesheet</span></dd>
           <dt>safety</dt><dd><span>writes_files={writes_files}</span><span>mutates_renderer={mutates_renderer}</span><span>pet_package={pet_mutation}</span></dd>
           <dt>mode</dt><dd>sidecar-only browser view</dd>
         </dl>
@@ -2853,6 +3095,7 @@ fn avatar_surface_renderer_view_html(
     const tokenEl = document.querySelector("[data-token]");
     const stateEl = document.querySelector("[data-state]");
     const variantEl = document.querySelector("[data-variant]");
+    const assetEl = document.querySelector("[data-asset]");
     const variantPanel = document.querySelector("[data-variant-panel]");
     const variantOptions = document.querySelector("[data-variant-options]");
     const buttons = Array.from(document.querySelectorAll("[data-track-index]"));
@@ -2860,6 +3103,8 @@ fn avatar_surface_renderer_view_html(
     let variantId = {active_variant_json};
     let frameIndex = 0;
     let timer = null;
+    const defaultSpriteRoute = {sprite_route_json};
+    const defaultAssetPetId = {asset_pet_id_json};
     const spriteRows = {{
       "xiao_shu::soft_bounce::low": {{ row: 0, frames: 6, alert: false }},
       "xiao_shu::idle_breathe::low": {{ row: 0, frames: 6, alert: false }},
@@ -2994,7 +3239,8 @@ fn avatar_surface_renderer_view_html(
         const detail = document.createElement("small");
         const choreography = variant.frame_choreography || {{}};
         const choreoFrames = Array.isArray(choreography.frames) ? choreography.frames.length : 0;
-        detail.textContent = `row=${{variant.sprite_row}} frames=${{variant.sprite_frames}} choreo=${{choreoFrames}} css_motion=${{Boolean(choreography.uses_css_motion)}}`;
+        const asset = variant.sidecar_asset && variant.sidecar_asset.asset_id ? ` asset=${{variant.sidecar_asset.asset_id}}` : "";
+        detail.textContent = `row=${{variant.sprite_row}} frames=${{variant.sprite_frames}} choreo=${{choreoFrames}} css_motion=${{Boolean(choreography.uses_css_motion)}}${{asset}}`;
         const intent = document.createElement("small");
         intent.textContent = variant.intent || "";
         button.append(label, detail, intent);
@@ -3023,12 +3269,40 @@ fn avatar_surface_renderer_view_html(
       }});
     }}
 
+    function setAssetLabel(spriteRoute, sidecarAsset) {{
+      if (!assetEl) {{
+        return;
+      }}
+      assetEl.textContent = "";
+      const parts = sidecarAsset
+        ? [
+            `sidecar=${{sidecarAsset.asset_id || "prototype"}}`,
+            `route=${{spriteRoute || ""}}`,
+            `format=${{sidecarAsset.format || "image/svg+xml"}}`,
+            "mode=read-only sidecar spritesheet"
+          ]
+        : [
+            `pet=${{defaultAssetPetId || "xiao-shu-dev"}}`,
+            `route=${{spriteRoute || defaultSpriteRoute}}`,
+            "mode=read-only spritesheet"
+          ];
+      parts.forEach((part) => {{
+        const span = document.createElement("span");
+        span.textContent = part;
+        assetEl.appendChild(span);
+      }});
+    }}
+
     function applySpriteFrame(track, ordinal, choreoFrame) {{
       if (!spriteFrame || !figure) {{
         return;
       }}
       const config = {{ ...(spriteRows[track.token] || {{ row: 0, frames: 6, alert: false }}) }};
       const variant = activeVariant(track);
+      const sidecarAsset = variant && variant.sidecar_asset ? variant.sidecar_asset : null;
+      const spriteRoute = variant && (variant.asset_route || (sidecarAsset && sidecarAsset.route))
+        ? variant.asset_route || sidecarAsset.route
+        : defaultSpriteRoute;
       if (variant) {{
         config.row = Number(variant.sprite_row || config.row || 0);
         config.frames = Number(variant.sprite_frames || config.frames || 1);
@@ -3044,11 +3318,15 @@ fn avatar_surface_renderer_view_html(
         : Number(ordinal || 0) % Number(config.frames || 1);
       const x = -column * 192;
       const y = -Number(config.row || 0) * 208;
+      spriteFrame.style.backgroundImage = "url(" + JSON.stringify(String(spriteRoute || defaultSpriteRoute)) + ")";
       spriteFrame.style.backgroundPosition = `${{x}}px ${{y}}px`;
+      setAssetLabel(spriteRoute, sidecarAsset);
       figure.dataset.spriteVariant = variant && variant.variant_id ? variant.variant_id : "default";
+      figure.dataset.spriteAsset = sidecarAsset && sidecarAsset.asset_id ? sidecarAsset.asset_id : "official_pet";
       figure.dataset.spritePhase = choreoFrame && choreoFrame.phase ? choreoFrame.phase : "";
       figure.classList.toggle("sprite-backed", true);
       figure.classList.toggle("sprite-choreographed", Boolean(choreoFrame));
+      figure.classList.toggle("sprite-sidecar-asset", Boolean(sidecarAsset));
       figure.classList.toggle("sprite-alert", Boolean(config.alert));
       const markVisible = Boolean(config.alert) && (!choreoFrame || choreoFrame.mark !== false);
       figure.classList.toggle("sprite-attention-visible", markVisible);
@@ -3112,12 +3390,14 @@ fn avatar_surface_renderer_view_html(
         active_variant_label = active_variant_label,
         active_variant_json = active_variant_json,
         asset_pet_id = asset_pet_id,
+        asset_pet_id_json = asset_pet_id_json,
         active_track_index = active_track_index,
         writes_files = writes_files,
         mutates_renderer = mutates_renderer,
         pet_mutation = pet_mutation,
         track_buttons = track_buttons,
         data_json = data_json,
+        sprite_route_json = sprite_route_json,
     )
 }
 
@@ -4017,13 +4297,18 @@ mod tests {
         assert!(html.contains("xiao-shu sprite-backed"));
         assert!(html.contains("xiao-shu-sprite"));
         assert!(html.contains("pet=xiao-shu-dev"));
+        assert!(html.contains("<dd data-asset>"));
         assert!(html.contains("/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev"));
         assert!(html.contains("Alert Peek Semantic Variants"));
         assert!(html.contains("data-variant-panel hidden"));
         assert!(html.contains("\"variant_id\":\"current_alert_row\""));
         assert!(html.contains("\"variant_id\":\"waiting_peek_row\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_peek_v2\""));
         assert!(html.contains("\"variant_id\":\"focused_review_row\""));
+        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-alert-peek-v2"));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-alert-peek-v2\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_frame_choreo_v1\""));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v2_frame_choreo\""));
         assert!(html.contains("\"uses_css_motion\":false"));
         assert!(html.contains("\"phase\":\"attention_hold\""));
         assert!(
@@ -4052,13 +4337,31 @@ mod tests {
         );
         assert!(focused.contains("<span>active=xiao_shu::alert_peek::medium</span>"));
         assert!(focused.contains("waiting_peek_row / waiting peek row"));
-        assert!(focused.contains("choreo=${choreoFrames} css_motion=${Boolean(choreography.uses_css_motion)}"));
+        assert!(focused.contains("choreo=${choreoFrames} css_motion=${Boolean(choreography.uses_css_motion)}${asset}"));
         assert!(focused.contains(r#"let variantId = "waiting_peek_row";"#));
         assert!(focused.contains("data-sprite-variant=\"waiting_peek_row\""));
+        assert!(focused.contains("const defaultSpriteRoute = \"/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev\";"));
+        assert!(focused.contains("const defaultAssetPetId = \"xiao-shu-dev\";"));
+        assert!(focused.contains("function setAssetLabel(spriteRoute, sidecarAsset)"));
+        assert!(focused.contains("figure.dataset.spriteAsset"));
+        assert!(focused.contains("sprite-sidecar-asset"));
         assert!(focused.contains("figure.dataset.spritePhase"));
         assert!(focused.contains("choreoFrame.hold_ms"));
         assert!(focused.contains("url.searchParams.set(\"variant\", variant.variant_id);"));
         assert!(focused.contains(r#"let trackIndex = 4;"#));
         assert!(focused.contains(r#"data-track-token="xiao_shu::alert_peek::medium""#));
+    }
+
+    #[test]
+    fn avatar_sidecar_spritesheet_serves_prototype_atlas_contract() {
+        let svg = avatar_sidecar_spritesheet_svg("xiao-shu-alert-peek-v2").unwrap();
+
+        assert!(svg.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872""#));
+        assert!(svg.contains("Xiao Shu alert peek sidecar v2 sprite atlas"));
+        assert!(svg.contains(r#"id="frame-0""#));
+        assert!(svg.contains(r#"id="frame-7""#));
+        assert!(svg.contains("rotate(72)"));
+        assert!(svg.contains(r##"fill="#d45f4c""##));
+        assert!(avatar_sidecar_spritesheet_svg("unknown").is_none());
     }
 }
