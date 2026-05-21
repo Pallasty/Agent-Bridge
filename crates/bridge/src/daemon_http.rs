@@ -19,6 +19,7 @@
 //!   - `GET /avatar-surface/cortex-binding-plan?...` — first safe binding plan
 //!   - `GET /avatar-surface/cortex-binding-fixture?...` — sidecar preview fixtures
 //!   - `GET /avatar-surface/cortex-visual-adapter?...` — sidecar frame preview
+//!   - `GET /avatar-surface/cortex-renderer-view?...` — browser sidecar renderer view
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
@@ -47,14 +48,14 @@ use ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend};
 use ab_store::{AgentPresenceRecord, StateStore};
 use anyhow::{Context, Result};
 use axum::{
-    Json, Router,
     extract::{Path, Query, State},
-    http::{StatusCode, header},
+    http::{header, StatusCode},
     response::{Html, IntoResponse},
     routing::{get, post},
+    Json, Router,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -133,6 +134,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-visual-adapter",
             get(avatar_cortex_visual_adapter),
+        )
+        .route(
+            "/avatar-surface/cortex-renderer-view",
+            get(avatar_cortex_renderer_view),
         )
         .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
         .route(
@@ -672,6 +677,8 @@ async fn avatar_surface_panel(
         crate::avatar_cortex::avatar_cortex_binding_fixture_from_status(cortex.clone());
     let cortex_visual_adapter =
         crate::avatar_cortex::avatar_cortex_visual_adapter_from_status(cortex.clone());
+    let cortex_renderer_view =
+        crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex.clone());
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
@@ -684,6 +691,7 @@ async fn avatar_surface_panel(
         &cortex_binding_plan,
         &cortex_binding_fixture,
         &cortex_visual_adapter,
+        &cortex_renderer_view,
         &report,
         unix_now(),
     )))
@@ -806,6 +814,22 @@ async fn avatar_cortex_visual_adapter(
     )
     .map_err(internal_error)?;
     Ok(Json(payload))
+}
+
+async fn avatar_cortex_renderer_view(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_view(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Html(avatar_surface_renderer_view_html(
+        &payload,
+        unix_now(),
+    )))
 }
 
 async fn avatar_cortex_preview(
@@ -1007,6 +1031,25 @@ fn html_escape(input: &str) -> String {
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&#39;"),
             _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn html_json_script(value: &Value) -> String {
+    serde_json::to_string(value)
+        .unwrap_or_else(|_| "{}".to_string())
+        .replace("</", "<\\/")
+}
+
+fn url_query_component(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for byte in input.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
         }
     }
     out
@@ -1535,18 +1578,12 @@ fn avatar_surface_visual_adapter_html(visual_adapter_preview: &Value) -> String 
     let all_idle = avatar_surface_html_json_value(acceptance.get("all_return_to_idle"), "false");
     let all_duration =
         avatar_surface_html_json_value(acceptance.get("all_duration_within_2s"), "false");
-    let renders_pixels = avatar_surface_html_json_value(
-        visual_adapter_preview.get("renders_pixels"),
-        "false",
-    );
-    let writes_files = avatar_surface_html_json_value(
-        visual_adapter_preview.get("writes_files"),
-        "false",
-    );
-    let mutates_renderer = avatar_surface_html_json_value(
-        visual_adapter_preview.get("mutates_renderer"),
-        "false",
-    );
+    let renders_pixels =
+        avatar_surface_html_json_value(visual_adapter_preview.get("renders_pixels"), "false");
+    let writes_files =
+        avatar_surface_html_json_value(visual_adapter_preview.get("writes_files"), "false");
+    let mutates_renderer =
+        avatar_surface_html_json_value(visual_adapter_preview.get("mutates_renderer"), "false");
     let pet_mutation = avatar_surface_html_json_value(
         visual_adapter_preview.get("codex_pet_package_mutation"),
         "false",
@@ -1581,6 +1618,561 @@ fn avatar_surface_visual_adapter_html(visual_adapter_preview: &Value) -> String 
     )
 }
 
+fn avatar_surface_renderer_view_summary_html(
+    renderer_view_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let view = renderer_view_preview
+        .get("renderer_view")
+        .unwrap_or(&Value::Null);
+    let first = view.get("first_track").unwrap_or(&Value::Null);
+    let route_raw = view
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-renderer-view");
+    let href_raw = match q.project.as_deref() {
+        Some(project) if !project.is_empty() => {
+            format!("{route_raw}?project={}", url_query_component(project))
+        }
+        _ => route_raw.to_string(),
+    };
+    let href = html_escape(&href_raw);
+    let tracks = avatar_surface_html_json_value(view.get("track_count"), "0");
+    let route = html_escape(route_raw);
+    let first_token = avatar_surface_html_json_value(first.get("token"), "-");
+    let frames = avatar_surface_html_json_value(first.get("frame_count"), "0");
+    let browser_pixels = avatar_surface_html_json_value(
+        renderer_view_preview.get("browser_renders_pixels"),
+        "false",
+    );
+    let writes_files =
+        avatar_surface_html_json_value(renderer_view_preview.get("writes_files"), "false");
+    let mutates_renderer =
+        avatar_surface_html_json_value(renderer_view_preview.get("mutates_renderer"), "false");
+    let pet_mutation = avatar_surface_html_json_value(
+        renderer_view_preview.get("codex_pet_package_mutation"),
+        "false",
+    );
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">view</span>
+        <strong>Xiao Shu Renderer View</strong>
+        <span>tracks={tracks} route={route}</span>
+      </div>
+      <dl>
+        <div><dt>first</dt><dd>{first_token} frames={frames}</dd></div>
+        <div><dt>pixels</dt><dd>browser={browser_pixels}</dd></div>
+        <div><dt>safety</dt><dd>writes_files={writes_files} mutates_renderer={mutates_renderer} pet_package={pet_mutation}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">renderer view</a></dd></div>
+      </dl>
+    </section>"#,
+        tracks = tracks,
+        route = route,
+        first_token = first_token,
+        frames = frames,
+        browser_pixels = browser_pixels,
+        writes_files = writes_files,
+        mutates_renderer = mutates_renderer,
+        pet_mutation = pet_mutation,
+        href = href,
+    )
+}
+
+fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at: i64) -> String {
+    let view = renderer_view_preview
+        .get("renderer_view")
+        .unwrap_or(&Value::Null);
+    let first = view.get("first_track").unwrap_or(&Value::Null);
+    let initial = first.get("initial_frame").unwrap_or(&Value::Null);
+    let initial_classes = avatar_surface_html_json_value(
+        initial.get("css_classes"),
+        "pose-neutral-idle expression-calm-eyes motion-idle-breathe accessory-none",
+    );
+    let first_token = avatar_surface_html_json_value(first.get("token"), "xiao_shu::unknown");
+    let first_state = avatar_surface_html_json_value(initial.get("state_label"), "ready");
+    let track_count = avatar_surface_html_json_value(view.get("track_count"), "0");
+    let input = avatar_surface_html_json_value(view.get("input"), "-");
+    let writes_files =
+        avatar_surface_html_json_value(renderer_view_preview.get("writes_files"), "false");
+    let mutates_renderer =
+        avatar_surface_html_json_value(renderer_view_preview.get("mutates_renderer"), "false");
+    let pet_mutation = avatar_surface_html_json_value(
+        renderer_view_preview.get("codex_pet_package_mutation"),
+        "false",
+    );
+    let browser_pixels = avatar_surface_html_json_value(
+        renderer_view_preview.get("browser_renders_pixels"),
+        "false",
+    );
+    let data_json = html_json_script(renderer_view_preview);
+    let mut track_buttons = String::new();
+    if let Some(tracks) = view.get("tracks").and_then(Value::as_array) {
+        for (index, track) in tracks.iter().enumerate() {
+            let active = if index == 0 { " is-active" } else { "" };
+            let token = avatar_surface_html_json_value(track.get("token"), "-");
+            let frames = avatar_surface_html_json_value(track.get("frame_count"), "0");
+            let duration = avatar_surface_html_json_value(track.get("duration_ms"), "0");
+            track_buttons.push_str(&format!(
+                r#"<button type="button" class="track-button{active}" data-track-index="{index}">
+          <span>{token}</span>
+          <small>{frames} frames / {duration}ms</small>
+        </button>"#,
+                active = active,
+                index = index,
+                token = token,
+                frames = frames,
+                duration = duration,
+            ));
+        }
+    }
+    if track_buttons.is_empty() {
+        track_buttons.push_str(
+            r#"<button type="button" class="track-button is-active" data-track-index="0">
+          <span>xiao_shu::unknown</span>
+          <small>0 frames / 0ms</small>
+        </button>"#,
+        );
+    }
+
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Xiao Shu Sidecar Renderer</title>
+  <style>
+    :root {{
+      color-scheme: light dark;
+      --bg: #fbfaf5;
+      --fg: #1c1d18;
+      --muted: #687066;
+      --line: #d9ddd1;
+      --teal: #147a74;
+      --coral: #d45f4c;
+      --gold: #d69b2d;
+      --ink: #26312f;
+      --stage: #eef5ef;
+      --surface: #ffffff;
+      --soft: #f7efe6;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root {{
+        --bg: #151711;
+        --fg: #eff2e6;
+        --muted: #a7ad9f;
+        --line: #32382f;
+        --teal: #5bd0c3;
+        --coral: #ff907d;
+        --gold: #f3c66b;
+        --ink: #f4f7ed;
+        --stage: #20261f;
+        --surface: #1d211b;
+        --soft: #29251d;
+      }}
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    main {{
+      width: min(1160px, calc(100vw - 32px));
+      margin: 22px auto 40px;
+    }}
+    header {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-end;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 14px;
+    }}
+    h1 {{
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.1;
+      font-weight: 760;
+      letter-spacing: 0;
+    }}
+    .meta {{
+      margin-top: 7px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }}
+    .badge {{
+      color: var(--teal);
+      font-weight: 800;
+      white-space: nowrap;
+    }}
+    .stage-grid {{
+      display: grid;
+      grid-template-columns: minmax(320px, 1.2fr) minmax(280px, 0.8fr);
+      gap: 18px;
+      margin-top: 22px;
+      align-items: stretch;
+    }}
+    .stage {{
+      min-height: 460px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      background:
+        radial-gradient(circle at 22% 18%, rgba(212, 95, 76, 0.18), transparent 26%),
+        radial-gradient(circle at 80% 12%, rgba(214, 155, 45, 0.18), transparent 28%),
+        linear-gradient(180deg, var(--stage), var(--soft));
+      overflow: hidden;
+      position: relative;
+    }}
+    .stage::after {{
+      content: "";
+      position: absolute;
+      inset: auto 8% 42px;
+      height: 1px;
+      background: var(--line);
+      opacity: 0.75;
+    }}
+    .xiao-shu {{
+      position: relative;
+      width: min(320px, 72vw);
+      height: min(320px, 72vw);
+      display: grid;
+      place-items: center;
+      isolation: isolate;
+    }}
+    .xiao-shu-shadow {{
+      position: absolute;
+      width: 170px;
+      height: 26px;
+      bottom: 38px;
+      border-radius: 999px;
+      background: rgba(38, 49, 47, 0.18);
+      filter: blur(1px);
+    }}
+    .xiao-shu-body {{
+      position: relative;
+      width: 188px;
+      height: 226px;
+      transform: translateY(0) rotate(0deg);
+      transition: transform 180ms ease, filter 180ms ease;
+    }}
+    .xiao-shu-inner {{
+      position: absolute;
+      inset: 0;
+      transform-origin: 50% 82%;
+    }}
+    .xiao-shu-torso {{
+      position: absolute;
+      width: 132px;
+      height: 132px;
+      left: 28px;
+      bottom: 8px;
+      border-radius: 44% 44% 40% 40%;
+      background: linear-gradient(180deg, #f6ead7, #dfeadf);
+      border: 3px solid var(--ink);
+      box-shadow: inset 0 -10px 0 rgba(20, 122, 116, 0.12);
+    }}
+    .xiao-shu-head {{
+      position: absolute;
+      width: 152px;
+      height: 138px;
+      left: 18px;
+      top: 18px;
+      border-radius: 45% 45% 42% 42%;
+      background: linear-gradient(180deg, #fff5e7, #f1ddc3);
+      border: 3px solid var(--ink);
+      box-shadow: inset 0 -12px 0 rgba(212, 95, 76, 0.1);
+    }}
+    .xiao-shu-hair {{
+      position: absolute;
+      width: 44px;
+      height: 26px;
+      top: 0;
+      left: 72px;
+      border-radius: 70% 30% 70% 30%;
+      background: var(--coral);
+      transform: rotate(-10deg);
+      border: 3px solid var(--ink);
+    }}
+    .eye {{
+      position: absolute;
+      width: 16px;
+      height: 23px;
+      top: 66px;
+      border-radius: 999px;
+      background: var(--ink);
+      transition: height 160ms ease, transform 160ms ease;
+    }}
+    .eye.left {{ left: 46px; }}
+    .eye.right {{ right: 46px; }}
+    .cheek {{
+      position: absolute;
+      width: 24px;
+      height: 12px;
+      top: 90px;
+      border-radius: 999px;
+      background: rgba(212, 95, 76, 0.28);
+    }}
+    .cheek.left {{ left: 28px; }}
+    .cheek.right {{ right: 28px; }}
+    .mouth {{
+      position: absolute;
+      width: 34px;
+      height: 16px;
+      left: 59px;
+      top: 92px;
+      border: 3px solid var(--ink);
+      border-top: 0;
+      border-radius: 0 0 34px 34px;
+      transition: width 160ms ease, height 160ms ease, left 160ms ease;
+    }}
+    .hand {{
+      position: absolute;
+      width: 34px;
+      height: 50px;
+      top: 126px;
+      border-radius: 999px;
+      background: #fff0db;
+      border: 3px solid var(--ink);
+      transform-origin: 50% 12%;
+    }}
+    .hand.left {{ left: 8px; transform: rotate(18deg); }}
+    .hand.right {{ right: 8px; transform: rotate(-18deg); }}
+    .status-dot {{
+      position: absolute;
+      width: 38px;
+      height: 38px;
+      right: 16px;
+      top: 22px;
+      border-radius: 999px;
+      background: var(--gold);
+      border: 3px solid var(--ink);
+      opacity: 0;
+      transform: scale(0.84);
+      transition: opacity 180ms ease, transform 180ms ease;
+    }}
+    .pose-upright-ready .xiao-shu-body {{ transform: translateY(-8px) rotate(-1deg); }}
+    .pose-neutral-idle .xiao-shu-body {{ transform: translateY(0) rotate(0deg); }}
+    .pose-lean-forward .xiao-shu-body {{ transform: translateY(4px) rotate(3deg); }}
+    .pose-inspect-tilt .xiao-shu-body {{ transform: translateY(1px) rotate(-5deg); }}
+    .pose-peek-forward .xiao-shu-body {{ transform: translateY(6px) scale(1.02); }}
+    .expression-bright-smile .mouth {{ width: 44px; height: 22px; left: 54px; }}
+    .expression-focused-eyes .eye {{ height: 13px; transform: translateY(5px); }}
+    .expression-checking-eyes .eye.left {{ transform: translateX(-4px); }}
+    .expression-checking-eyes .eye.right {{ transform: translateX(-4px); }}
+    .expression-concerned-eyes .eye {{ height: 18px; transform: rotate(6deg); }}
+    .accessory-soft-status-glow .status-dot,
+    .accessory-small-attention-mark .status-dot {{
+      opacity: 1;
+      transform: scale(1);
+    }}
+    .motion-idle-breathe .xiao-shu-inner {{ animation: breathe 2400ms ease-in-out infinite; }}
+    .motion-soft-bounce .xiao-shu-inner {{ animation: soft-bounce 900ms ease-in-out infinite; }}
+    .motion-sorting-glow .status-dot {{ animation: glow 1200ms ease-in-out infinite; }}
+    .motion-look-sideways .xiao-shu-inner {{ animation: look-sideways 1600ms ease-in-out infinite; }}
+    .motion-alert-peek .xiao-shu-inner {{ animation: alert-peek 900ms ease-in-out infinite; }}
+    @keyframes breathe {{
+      0%, 100% {{ transform: translateY(0) scale(1); }}
+      50% {{ transform: translateY(-3px) scale(1.01); }}
+    }}
+    @keyframes soft-bounce {{
+      0%, 100% {{ transform: translateY(0); }}
+      45% {{ transform: translateY(-14px); }}
+    }}
+    @keyframes glow {{
+      0%, 100% {{ box-shadow: 0 0 0 rgba(214, 155, 45, 0.15); }}
+      50% {{ box-shadow: 0 0 28px rgba(214, 155, 45, 0.55); }}
+    }}
+    @keyframes look-sideways {{
+      0%, 100% {{ transform: translateX(0); }}
+      50% {{ transform: translateX(-8px); }}
+    }}
+    @keyframes alert-peek {{
+      0%, 100% {{ transform: translateY(2px) scale(1); }}
+      50% {{ transform: translateY(-8px) scale(1.03); }}
+    }}
+    .inspector {{
+      border-top: 4px solid var(--teal);
+      border-bottom: 1px solid var(--line);
+      padding: 0 0 10px;
+      min-width: 0;
+    }}
+    .inspector h2 {{
+      margin: 0 0 10px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }}
+    .inspector dl {{
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr);
+      gap: 9px 12px;
+      margin: 0;
+    }}
+    .inspector dt {{
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }}
+    .inspector dd {{
+      margin: 0;
+      overflow-wrap: anywhere;
+    }}
+    .tracks {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }}
+    .track-button {{
+      min-height: 58px;
+      text-align: left;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--fg);
+      padding: 10px 12px;
+      cursor: pointer;
+      font: inherit;
+    }}
+    .track-button.is-active {{
+      border-color: var(--teal);
+      box-shadow: inset 4px 0 0 var(--teal);
+    }}
+    .track-button span,
+    .track-button small {{ display: block; overflow-wrap: anywhere; }}
+    .track-button small {{ color: var(--muted); margin-top: 3px; }}
+    @media (max-width: 820px) {{
+      main {{ width: min(100vw - 20px, 1160px); margin-top: 14px; }}
+      header {{ display: block; }}
+      .badge {{ display: block; margin-top: 10px; }}
+      .stage-grid {{ grid-template-columns: 1fr; }}
+      .stage {{ min-height: 380px; }}
+      .inspector dl {{ grid-template-columns: 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Xiao Shu Sidecar Renderer</h1>
+        <div class="meta">tracks={track_count} input={input} generated_at={generated_at}</div>
+      </div>
+      <div class="badge">browser pixels={browser_pixels}</div>
+    </header>
+    <section class="stage-grid" data-stage="xiao-shu-renderer-view">
+      <div class="stage">
+        <div class="xiao-shu {initial_classes}" data-xiao-shu data-current-frame="">
+          <div class="xiao-shu-shadow"></div>
+          <div class="xiao-shu-body">
+            <div class="xiao-shu-inner">
+              <div class="xiao-shu-torso"></div>
+              <div class="hand left"></div>
+              <div class="hand right"></div>
+              <div class="xiao-shu-head">
+                <div class="xiao-shu-hair"></div>
+                <div class="eye left"></div>
+                <div class="eye right"></div>
+                <div class="cheek left"></div>
+                <div class="cheek right"></div>
+                <div class="mouth"></div>
+              </div>
+              <div class="status-dot"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <aside class="inspector">
+        <h2>Renderer State</h2>
+        <dl>
+          <dt>token</dt><dd data-token>{first_token}</dd>
+          <dt>state</dt><dd data-state>{first_state}</dd>
+          <dt>safety</dt><dd>writes_files={writes_files} mutates_renderer={mutates_renderer} pet_package={pet_mutation}</dd>
+          <dt>mode</dt><dd>sidecar-only browser view</dd>
+        </dl>
+      </aside>
+    </section>
+    <nav class="tracks" aria-label="renderer tracks">
+      {track_buttons}
+    </nav>
+  </main>
+  <script type="application/json" id="renderer-data">{data_json}</script>
+  <script>
+    const payload = JSON.parse(document.getElementById("renderer-data").textContent);
+    const view = payload.renderer_view || {{}};
+    const tracks = Array.isArray(view.tracks) ? view.tracks : [];
+    const figure = document.querySelector("[data-xiao-shu]");
+    const tokenEl = document.querySelector("[data-token]");
+    const stateEl = document.querySelector("[data-state]");
+    const buttons = Array.from(document.querySelectorAll("[data-track-index]"));
+    let trackIndex = 0;
+    let frameIndex = 0;
+    let timer = null;
+
+    function activeTrack() {{
+      return tracks[trackIndex] || tracks[0] || {{ frames: [] }};
+    }}
+
+    function setActiveButton() {{
+      buttons.forEach((button) => {{
+        button.classList.toggle("is-active", Number(button.dataset.trackIndex) === trackIndex);
+      }});
+    }}
+
+    function applyFrame() {{
+      const track = activeTrack();
+      const frames = Array.isArray(track.frames) ? track.frames : [];
+      if (!figure || frames.length === 0) {{
+        return;
+      }}
+      const frame = frames[frameIndex] || frames[0];
+      figure.className = "xiao-shu " + (frame.css_classes || "pose-neutral-idle expression-calm-eyes motion-idle-breathe accessory-none");
+      figure.dataset.currentFrame = frame.frame_id || "";
+      if (tokenEl) tokenEl.textContent = track.token || "xiao_shu::unknown";
+      if (stateEl) stateEl.textContent = frame.state_label || "";
+      const nextFrame = frames[(frameIndex + 1) % frames.length] || frame;
+      const currentAt = Number(frame.at_ms || 0);
+      const nextAt = Number(nextFrame.at_ms || 0);
+      const duration = Number(track.duration_ms || 1000);
+      let delay = frameIndex < frames.length - 1 ? nextAt - currentAt : duration - currentAt;
+      delay = Math.max(180, delay);
+      frameIndex = (frameIndex + 1) % frames.length;
+      timer = window.setTimeout(applyFrame, delay);
+    }}
+
+    buttons.forEach((button) => {{
+      button.addEventListener("click", () => {{
+        trackIndex = Number(button.dataset.trackIndex || 0);
+        frameIndex = 0;
+        if (timer) window.clearTimeout(timer);
+        setActiveButton();
+        applyFrame();
+      }});
+    }});
+    setActiveButton();
+    applyFrame();
+  </script>
+</body>
+</html>"#,
+        track_count = track_count,
+        input = input,
+        generated_at = generated_at,
+        browser_pixels = browser_pixels,
+        initial_classes = initial_classes,
+        first_token = first_token,
+        first_state = first_state,
+        writes_files = writes_files,
+        mutates_renderer = mutates_renderer,
+        pet_mutation = pet_mutation,
+        track_buttons = track_buttons,
+        data_json = data_json,
+    )
+}
+
 fn avatar_surface_payload(q: &AvatarSurfaceQuery, avatars: Vec<Value>, generated_at: i64) -> Value {
     json!({
         "agent_avatar_protocol": crate::avatar_surface::AGENT_AVATAR_PROTOCOL_VERSION,
@@ -1609,6 +2201,7 @@ fn avatar_surface_panel_html(
     cortex_binding_plan: &Value,
     cortex_binding_fixture: &Value,
     cortex_visual_adapter: &Value,
+    cortex_renderer_view: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -1666,6 +2259,7 @@ fn avatar_surface_panel_html(
     let binding_plan_html = avatar_surface_binding_plan_html(cortex_binding_plan);
     let binding_fixture_html = avatar_surface_binding_fixture_html(cortex_binding_fixture);
     let visual_adapter_html = avatar_surface_visual_adapter_html(cortex_visual_adapter);
+    let renderer_view_html = avatar_surface_renderer_view_summary_html(cortex_renderer_view, q);
 
     format!(
         r#"<!doctype html>
@@ -1876,6 +2470,7 @@ fn avatar_surface_panel_html(
     {binding_plan_html}
     {binding_fixture_html}
     {visual_adapter_html}
+    {renderer_view_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -1898,6 +2493,7 @@ fn avatar_surface_panel_html(
         binding_plan_html = binding_plan_html,
         binding_fixture_html = binding_fixture_html,
         visual_adapter_html = visual_adapter_html,
+        renderer_view_html = renderer_view_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -2269,6 +2865,8 @@ mod tests {
             crate::avatar_cortex::avatar_cortex_binding_fixture_from_status(cortex.clone());
         let visual_adapter =
             crate::avatar_cortex::avatar_cortex_visual_adapter_from_status(cortex.clone());
+        let renderer_view =
+            crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex.clone());
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
@@ -2281,6 +2879,7 @@ mod tests {
             &binding_plan,
             &binding_fixture,
             &visual_adapter,
+            &renderer_view,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -2306,14 +2905,18 @@ mod tests {
         assert!(html.contains("duration=1800ms returns_idle=true"));
         assert!(html.contains("all_idle=true all_under_2s=true"));
         assert!(html.contains("Xiao Shu Visual Adapter"));
-        assert!(html.contains(
-            "previews=2 input=avatar_cortex_binding_fixture.fixture.golden_payloads"
-        ));
+        assert!(
+            html.contains("previews=2 input=avatar_cortex_binding_fixture.fixture.golden_payloads")
+        );
         assert!(html.contains("xiao_shu::soft_bounce::low frames=4"));
         assert!(html.contains("motion=idle_breathe expression=bright_smile"));
-        assert!(html.contains(
-            "pixels=false writes_files=false mutates_renderer=false pet_package=false"
-        ));
+        assert!(html
+            .contains("pixels=false writes_files=false mutates_renderer=false pet_package=false"));
+        assert!(html.contains("Xiao Shu Renderer View"));
+        assert!(html.contains("tracks=2 route=/avatar-surface/cortex-renderer-view"));
+        assert!(html.contains("xiao_shu::soft_bounce::low frames=4"));
+        assert!(html.contains("browser=true"));
+        assert!(html.contains("renderer view"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));
@@ -2330,5 +2933,58 @@ mod tests {
         assert!(html.contains("status-fresh"));
         assert!(html.contains("5m 0s ago"));
         assert!(!html.contains("<script>alert(1)</script>"));
+    }
+
+    #[test]
+    fn avatar_surface_renderer_view_html_embeds_sidecar_view() {
+        let cortex = json!({
+            "surface": "avatar_cortex_status",
+            "read_only": true,
+            "launchd": { "loaded": true, "last_exit_code": 0, "runs": 1 },
+            "snapshot": {
+                "path": "/Users/me/.local/share/agent-bridge/avatar_cortex/test.parquet",
+                "total_rows": 1,
+                "latest_long": {
+                    "step": 16,
+                    "cycle_ts": 1779193100,
+                    "fingerprint": "abc123"
+                }
+            },
+            "events": {
+                "records_count": 16,
+                "unhealthy_count": 0,
+                "latest": {
+                    "ts": 1779193080,
+                    "status": "healthy",
+                    "reason": "unchanged"
+                }
+            },
+            "trend": {
+                "step_records_delta": 0,
+                "snapshot_event_lag_secs": 20,
+                "latest_status": "healthy",
+                "learning_state": {
+                    "state": "caught_up",
+                    "reason": "step_matches_records"
+                },
+                "behavior_policy": {
+                    "badge": "caught up",
+                    "recommended_action": "none",
+                    "voice": {
+                        "allowed": false
+                    }
+                }
+            }
+        });
+        let renderer_view = crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex);
+        let html = avatar_surface_renderer_view_html(&renderer_view, 1779193140);
+
+        assert!(html.contains("Xiao Shu Sidecar Renderer"));
+        assert!(html.contains("data-stage=\"xiao-shu-renderer-view\""));
+        assert!(html.contains("xiao_shu::soft_bounce::low"));
+        assert!(html.contains("motion-soft-bounce"));
+        assert!(html.contains("browser pixels=true"));
+        assert!(html.contains("writes_files=false mutates_renderer=false pet_package=false"));
+        assert!(html.contains("\"surface\":\"avatar_cortex_sidecar_renderer_view\""));
     }
 }

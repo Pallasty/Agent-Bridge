@@ -3,17 +3,17 @@ use ab_agent::{
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
 use ab_bridge::warp_scheme;
-use ab_bridge::{Hub, Router, build_registry, default_socket_path, serve};
+use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
-use ab_store::{SqliteStore, StateStore, default_db_path};
-use ab_terminal::{TerminalBackend, auto_backend};
+use ab_store::{default_db_path, SqliteStore, StateStore};
+use ab_terminal::{auto_backend, TerminalBackend};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing_subscriber::{EnvFilter, prelude::*};
+use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod setup;
 mod shadow_cortex;
@@ -769,6 +769,24 @@ enum AvatarOp {
     },
     /// Preview Xiao Shu sidecar visual frames without rendering pixels or mutating assets.
     CortexVisualAdapter {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Build a browser sidecar renderer view without writing assets or package bindings.
+    CortexRendererView {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
         #[arg(long)]
         label: Option<String>,
@@ -2476,6 +2494,22 @@ async fn main() -> Result<()> {
                 json: as_json,
             } => {
                 run_avatar_cortex_visual_adapter(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexRendererView {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_renderer_view(
                     label.clone(),
                     heartbeat_label.clone(),
                     project.clone(),
@@ -4518,6 +4552,49 @@ async fn run_avatar_cortex_visual_adapter(
     Ok(())
 }
 
+async fn run_avatar_cortex_renderer_view(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_view(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let view = payload.get("renderer_view").unwrap_or(&Value::Null);
+    let first = view.get("first_track").unwrap_or(&Value::Null);
+    println!("avatar cortex renderer view");
+    println!(
+        "tracks={} route={} input={}",
+        avatar_health_display(view.get("track_count"), "0"),
+        avatar_health_display(view.get("html_route"), "-"),
+        avatar_health_display(view.get("input"), "-")
+    );
+    println!(
+        "first={} frames={} browser_pixels={}",
+        avatar_health_display(first.get("token"), "-"),
+        avatar_health_display(first.get("frame_count"), "0"),
+        avatar_health_display(payload.get("browser_renders_pixels"), "false")
+    );
+    println!(
+        "writes_files={} mutates_renderer={} pet_package={}",
+        avatar_health_display(payload.get("writes_files"), "false"),
+        avatar_health_display(payload.get("mutates_renderer"), "false"),
+        avatar_health_display(payload.get("codex_pet_package_mutation"), "false")
+    );
+    Ok(())
+}
+
 async fn run_avatar_cortex_voice_gate(
     label: Option<String>,
     heartbeat_label: Option<String>,
@@ -4956,7 +5033,7 @@ fn summarize_snapshot_rows(
     file_bytes: Option<u64>,
     rows: &[ab_seed_bridge::SnapshotRow],
 ) -> SnapshotSummary {
-    use ab_seed_bridge::{SnapshotTier, snapshot};
+    use ab_seed_bridge::{snapshot, SnapshotTier};
     let mut hot_rows = 0usize;
     let mut long_rows = 0usize;
     for r in rows {
@@ -5025,7 +5102,7 @@ async fn run_dream_substrate_corr_audit(
     as_json: bool,
 ) -> Result<()> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     use std::collections::HashMap;
 
     let snap_path = snapshot_path_override.or_else(snapshot::default_snapshot_path);
@@ -5668,7 +5745,7 @@ fish_prompt_osc133
 /// (or raw JSON with `--json`). The β trigger metric (top10/median ratio)
 /// is annotated inline so the user / future-Claude can read it at a glance.
 async fn run_dream_stats(as_json: bool) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -5935,7 +6012,7 @@ async fn run_worktree_session_list() -> Result<()> {
 /// This is vision principle 5's literal landing: a measurable anchor for
 /// "today-self vs last-week-self" across the non-continuous medium.
 async fn run_dream_identity(days: u32, as_json: bool) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     if days == 0 {
@@ -6134,7 +6211,7 @@ async fn run_dream_promote(
     tier: u8,
     tier2_edge: &str,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     use std::collections::HashSet;
 
     // Tier semantics:
@@ -7004,7 +7081,7 @@ async fn run_dream_decay_unused(
     floor: f64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let window_days = window_days.max(0.0);
     let step = step.clamp(0.0, 1.0);
@@ -7066,7 +7143,7 @@ async fn run_dream_reinforce_active(
     ceiling: f64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let window_days = window_days.max(0.0);
     let step = step.clamp(0.0, 1.0);
@@ -7125,7 +7202,7 @@ async fn run_dream_reinforce_active(
 /// longitudinal study: re-run weekly, compare. If the closure works,
 /// `spearman_r` should drift from ≈ 0 (decay-flattened) toward 0.4+.
 async fn run_dream_signal_fidelity(top_n: u32, as_json: bool) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -7259,7 +7336,7 @@ async fn run_dream_prune_coact_noise(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let max_count = max_count.max(0);
     let older_than_days = older_than_days.max(0);
@@ -7307,7 +7384,7 @@ async fn run_dream_prune_degenerate_relates(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let path = default_db_path();
     let store = SqliteStore::open(&path)
         .await
@@ -7352,7 +7429,7 @@ async fn run_dream_archive_orphan_stubs(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{MemoryRecord, SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, MemoryRecord, SqliteStore, StateStore};
     use std::time::{SystemTime, UNIX_EPOCH};
     let older_than_days = older_than_days.max(0);
     let max_archive = max_archive.clamp(1, 1000);
@@ -7477,7 +7554,7 @@ fn archive_alarm_should_fire(archived: u64, threshold: i64, dry_run: bool) -> bo
 /// Operator escape hatch when ζ-14 retires a row that turns out to
 /// still carry signal. Single-key, status-gated, returns bool.
 async fn run_dream_restore_archived(key: &str, as_json: bool) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let path = default_db_path();
     let store = SqliteStore::open(&path)
         .await
@@ -7522,7 +7599,7 @@ async fn run_dream_tombstone_aged_archived(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let older_than_days = older_than_days.max(0);
     let max_count = max_count.clamp(1, 5000);
     let path = default_db_path();
@@ -7574,7 +7651,7 @@ async fn run_dream_cluster_probe(
     preview: i64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let min_size = min_size.max(2);
     let top_k = top_k.max(1) as usize;
     let preview = preview.max(1) as usize;
@@ -7663,7 +7740,7 @@ async fn run_dream_purge_tombstones(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let path = default_db_path();
     let store = SqliteStore::open(&path)
         .await
@@ -7726,7 +7803,7 @@ async fn run_dream_decay_coactivation(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let tau_days = tau_days.clamp(0.5, 30.0);
     let tau_secs = (tau_days * 86_400.0) as i64;
@@ -7815,7 +7892,7 @@ async fn run_dream_replay_audit(
     overlap_min: f64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -8019,7 +8096,7 @@ async fn run_dream_snapshot(
     print_only: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{MemoryRecord, SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, MemoryRecord, SqliteStore, StateStore};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     let path = default_db_path();
@@ -8377,7 +8454,7 @@ async fn run_dream_diff(
     auto: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -8762,7 +8839,7 @@ async fn run_dream_diff(
 ///   3. snapshot key (if not --no-snapshot; identifies the freshly-saved
 ///      `kind=snapshot` memory the next `dream weekly` can diff against)
 async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -8924,7 +9001,7 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
     println!("[bonus] substrate-readiness (P-ε)");
     println!("─────────────────────────────────────────");
     match {
-        use ab_store::{SqliteStore, StateStore as _, default_db_path};
+        use ab_store::{default_db_path, SqliteStore, StateStore as _};
         let path = default_db_path();
         let store_res = SqliteStore::open(&path).await;
         match store_res {
@@ -9158,7 +9235,7 @@ async fn substrate_corr_weekly_one_liner(
     min_cofires: u32,
 ) -> Result<SubstrateCorrOneLiner> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     use std::collections::HashMap;
 
     let snap_path = snapshot::default_snapshot_path();
@@ -9723,7 +9800,7 @@ async fn run_dream_codebase_report(
     html_path: Option<&std::path::Path>,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let cwd = std::env::current_dir().map_err(|e| anyhow::anyhow!("current_dir: {e}"))?;
     let root_path = root.map(|p| p.to_path_buf()).unwrap_or(cwd);
@@ -9879,7 +9956,7 @@ async fn run_dream_substrate_audit(
     as_json: bool,
     exclude_kinds: Vec<String>,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let db_path = default_db_path();
     let store = SqliteStore::open(&db_path)
         .await
@@ -10371,7 +10448,7 @@ async fn run_dream_agent_md_drift(
     agent_md_path_override: Option<PathBuf>,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{MemoryListSort, MemoryRecord, SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, MemoryListSort, MemoryRecord, SqliteStore, StateStore};
 
     let agent_md_path =
         agent_md_path_override.unwrap_or_else(ab_bridge::mcp_tools::agent_profile_path);
@@ -10595,7 +10672,7 @@ fn aggregate_skill_retro(
 }
 
 async fn run_dream_skill_retro(days: u32, as_json: bool) -> Result<()> {
-    use ab_store::{MemoryListSort, MemoryRecord, SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, MemoryListSort, MemoryRecord, SqliteStore, StateStore};
 
     let db_path = default_db_path();
     let store = SqliteStore::open(&db_path)

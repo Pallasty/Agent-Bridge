@@ -5,7 +5,7 @@
 //! a dedicated snapshot file for inspection.
 
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -1097,10 +1097,7 @@ fn avatar_cortex_renderer_registry_payload(current: Option<Value>) -> Value {
 
 pub(crate) fn avatar_cortex_renderer_preview_from_status(status: Value) -> Value {
     let motion_preview = avatar_cortex_motion_preview_from_status(status.clone());
-    let motion = motion_preview
-        .get("motion")
-        .cloned()
-        .unwrap_or(Value::Null);
+    let motion = motion_preview.get("motion").cloned().unwrap_or(Value::Null);
     let hint = motion.get("animation_hint").unwrap_or(&Value::Null);
     let renderer_token = vstr(hint.get("renderer_token")).unwrap_or("xiao_shu::idle_breathe::low");
     let mapping = avatar_cortex_renderer_mapping(renderer_token);
@@ -1599,6 +1596,201 @@ pub fn avatar_cortex_visual_adapter(
 ) -> Result<Value> {
     let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
     Ok(avatar_cortex_visual_adapter_from_status(status))
+}
+
+fn avatar_cortex_slot_css_class(prefix: &str, value: Option<&Value>, fallback: &str) -> String {
+    let raw = vstr(value).unwrap_or(fallback);
+    let mut slug = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+        } else if (ch == '_' || ch == '-' || ch.is_ascii_whitespace()) && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_matches('-');
+    if slug.is_empty() {
+        format!("{prefix}-unknown")
+    } else {
+        format!("{prefix}-{slug}")
+    }
+}
+
+fn avatar_cortex_renderer_view_frame(frame: &Value, index: usize, duration_ms: i64) -> Value {
+    let at_ms = frame
+        .get("at_ms")
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .max(0);
+    let at_pct = if duration_ms > 0 {
+        ((at_ms * 100) / duration_ms).clamp(0, 100)
+    } else {
+        0
+    };
+    let pose_class = avatar_cortex_slot_css_class("pose", frame.get("pose_slot"), "neutral_idle");
+    let expression_class =
+        avatar_cortex_slot_css_class("expression", frame.get("expression_slot"), "calm_eyes");
+    let motion_class =
+        avatar_cortex_slot_css_class("motion", frame.get("motion_slot"), "idle_breathe");
+    let accessory_class =
+        avatar_cortex_slot_css_class("accessory", frame.get("accessory_slot"), "none");
+    let css_classes = format!("{pose_class} {expression_class} {motion_class} {accessory_class}");
+    json!({
+        "index": index,
+        "frame_id": frame.get("frame_id").cloned().unwrap_or(Value::Null),
+        "at_ms": at_ms,
+        "at_pct": at_pct,
+        "pose_slot": frame.get("pose_slot").cloned().unwrap_or(Value::Null),
+        "expression_slot": frame.get("expression_slot").cloned().unwrap_or(Value::Null),
+        "motion_slot": frame.get("motion_slot").cloned().unwrap_or(Value::Null),
+        "accessory_slot": frame.get("accessory_slot").cloned().unwrap_or(Value::Null),
+        "state_label": frame.get("state_label").cloned().unwrap_or(Value::Null),
+        "css_classes": css_classes,
+    })
+}
+
+fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
+    let token = vstr(preview.get("token")).unwrap_or("xiao_shu::unknown");
+    let source_frames = preview
+        .get("frames")
+        .and_then(Value::as_array)
+        .cloned()
+        .filter(|frames| !frames.is_empty())
+        .unwrap_or_else(|| {
+            vec![json!({
+                "frame_id": format!("{token}@0"),
+                "at_ms": 0,
+                "pose_slot": "neutral_idle",
+                "expression_slot": "calm_eyes",
+                "motion_slot": "idle_breathe",
+                "accessory_slot": "none",
+                "state_label": "pose=neutral_idle expression=calm_eyes motion=idle_breathe accessory=none",
+            })]
+        });
+    let duration_ms = preview
+        .get("duration_ms")
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            source_frames
+                .last()
+                .and_then(|frame| frame.get("at_ms"))
+                .and_then(Value::as_i64)
+        })
+        .unwrap_or(0)
+        .max(1);
+    let frames: Vec<Value> = source_frames
+        .iter()
+        .enumerate()
+        .map(|(frame_index, frame)| {
+            avatar_cortex_renderer_view_frame(frame, frame_index, duration_ms)
+        })
+        .collect();
+    let initial_frame = frames.first().cloned().unwrap_or(Value::Null);
+    let final_frame = frames.last().cloned().unwrap_or(Value::Null);
+
+    json!({
+        "track_id": format!("xiao_shu_sidecar_renderer_track_{}", index + 1),
+        "token": token,
+        "fixture_id": preview.get("fixture_id").cloned().unwrap_or(Value::Null),
+        "risk_level": preview.get("risk_level").cloned().unwrap_or(Value::Null),
+        "visual_intent": preview.get("visual_intent").cloned().unwrap_or(Value::Null),
+        "duration_ms": duration_ms,
+        "frame_count": frames.len(),
+        "renderer": {
+            "schema": 1,
+            "kind": "browser_dom_css_sidecar",
+            "geometry": "xiao_shu_sidecar_css_v1",
+            "asset_source": "generated_dom_shapes",
+            "official_pet_package_binding": false,
+        },
+        "viewport": {
+            "width": 320,
+            "height": 320,
+            "unit": "css_px",
+        },
+        "initial_frame": initial_frame,
+        "final_frame": final_frame,
+        "frames": frames,
+    })
+}
+
+fn avatar_cortex_renderer_view_from_visual_adapter_payload(visual_adapter_preview: Value) -> Value {
+    let adapter = visual_adapter_preview
+        .get("visual_adapter")
+        .unwrap_or(&Value::Null);
+    let tracks: Vec<Value> = adapter
+        .get("previews")
+        .and_then(Value::as_array)
+        .map(|previews| {
+            previews
+                .iter()
+                .enumerate()
+                .map(|(index, preview)| avatar_cortex_renderer_view_track(preview, index))
+                .collect()
+        })
+        .unwrap_or_default();
+    let first_track = tracks.first().cloned().unwrap_or(Value::Null);
+    let acceptance = adapter.get("acceptance").unwrap_or(&Value::Null);
+    let track_count = tracks.len();
+
+    json!({
+        "surface": "avatar_cortex_sidecar_renderer_view",
+        "schema": 1,
+        "read_only": true,
+        "dry_run": true,
+        "sidecar_only": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "renders_pixels": true,
+        "browser_renders_pixels": true,
+        "server_side_renders_pixels": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "renderer_view": {
+            "schema": 1,
+            "kind": "browser_dom_css_sidecar_renderer_view",
+            "input": "avatar_cortex_sidecar_visual_adapter.visual_adapter.previews",
+            "contract": "xiao_shu_renderer_slots_v1",
+            "html_route": "/avatar-surface/cortex-renderer-view",
+            "track_count": track_count,
+            "first_track": first_track,
+            "tracks": tracks,
+            "acceptance": {
+                "all_return_to_idle": acceptance
+                    .get("all_return_to_idle")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                "all_duration_within_2s": acceptance
+                    .get("all_duration_within_2s")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                "browser_view_only": true,
+                "asset_writes_allowed": false,
+                "renderer_mutation_allowed": false,
+                "codex_pet_package_mutation_allowed": false,
+                "manual_visual_qa_required": true,
+            },
+            "next_step": "manual browser visual QA before any official package binding",
+        },
+        "source_visual_adapter": visual_adapter_preview,
+    })
+}
+
+pub(crate) fn avatar_cortex_renderer_view_from_status(status: Value) -> Value {
+    let visual_adapter = avatar_cortex_visual_adapter_from_status(status);
+    avatar_cortex_renderer_view_from_visual_adapter_payload(visual_adapter)
+}
+
+pub fn avatar_cortex_renderer_view(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_renderer_view_from_status(status))
 }
 
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
@@ -2628,7 +2820,10 @@ mod tests {
             registry["registry"]["current"]["token"],
             "xiao_shu::soft_bounce::low"
         );
-        assert_eq!(registry["registry"]["current"]["binding_stage"], "candidate");
+        assert_eq!(
+            registry["registry"]["current"]["binding_stage"],
+            "candidate"
+        );
         assert_eq!(registry["registry"]["current"]["risk_level"], "low");
     }
 
@@ -2707,10 +2902,7 @@ mod tests {
         let registry = avatar_cortex_renderer_registry_payload(None);
         let plan = avatar_cortex_binding_plan_from_registry(registry);
         let fixture = avatar_cortex_binding_fixture_from_plan(plan);
-        assert_eq!(
-            fixture["fixture"]["acceptance"]["all_return_to_idle"],
-            true
-        );
+        assert_eq!(fixture["fixture"]["acceptance"]["all_return_to_idle"], true);
         assert_eq!(
             fixture["fixture"]["acceptance"]["all_duration_within_2s"],
             true
@@ -2727,13 +2919,11 @@ mod tests {
             fixture["fixture"]["first_fixture"]["golden_assertions"]["duration_ms"],
             1800
         );
-        assert!(
-            !fixture["fixture"]["golden_payloads"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|entry| entry["token"] == "xiao_shu::sorting_glow::medium")
-        );
+        assert!(!fixture["fixture"]["golden_payloads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["token"] == "xiao_shu::sorting_glow::medium"));
     }
 
     #[test]
@@ -2758,10 +2948,7 @@ mod tests {
             adapter["visual_adapter"]["first_preview"]["final_state"]["motion_slot"],
             "idle_breathe"
         );
-        assert_eq!(
-            adapter["visual_adapter"]["first_preview"]["frame_count"],
-            4
-        );
+        assert_eq!(adapter["visual_adapter"]["first_preview"]["frame_count"], 4);
     }
 
     #[test]
@@ -2788,6 +2975,57 @@ mod tests {
         assert_eq!(
             adapter["visual_adapter"]["acceptance"]["manual_visual_qa_required"],
             true
+        );
+    }
+
+    #[test]
+    fn avatar_cortex_renderer_view_builds_browser_tracks() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let first = &view["renderer_view"]["first_track"];
+        assert_eq!(view["surface"], "avatar_cortex_sidecar_renderer_view");
+        assert_eq!(view["read_only"], true);
+        assert_eq!(view["browser_renders_pixels"], true);
+        assert_eq!(view["server_side_renders_pixels"], false);
+        assert_eq!(view["writes_files"], false);
+        assert_eq!(view["mutates_renderer"], false);
+        assert_eq!(view["codex_pet_package_mutation"], false);
+        assert_eq!(view["renderer_view"]["track_count"], 2);
+        assert_eq!(first["token"], "xiao_shu::soft_bounce::low");
+        assert_eq!(first["frame_count"], 4);
+        assert_eq!(first["duration_ms"], 1800);
+        assert!(first["frames"][2]["css_classes"]
+            .as_str()
+            .unwrap()
+            .contains("motion-soft-bounce"));
+        assert_eq!(
+            first["final_frame"]["css_classes"]
+                .as_str()
+                .unwrap()
+                .contains("motion-idle-breathe"),
+            true
+        );
+    }
+
+    #[test]
+    fn avatar_cortex_renderer_view_keeps_official_package_untouched() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let acceptance = &view["renderer_view"]["acceptance"];
+        assert_eq!(view["sidecar_only"], true);
+        assert_eq!(acceptance["browser_view_only"], true);
+        assert_eq!(acceptance["asset_writes_allowed"], false);
+        assert_eq!(acceptance["renderer_mutation_allowed"], false);
+        assert_eq!(acceptance["codex_pet_package_mutation_allowed"], false);
+        assert_eq!(
+            view["renderer_view"]["next_step"],
+            "manual browser visual QA before any official package binding"
         );
     }
 
@@ -2845,12 +3083,10 @@ mod tests {
         assert_eq!(gate["emits_audio"], false);
         assert_eq!(gate["emits_notification"], false);
         assert_eq!(gate["required"]["explicit_enabled"], false);
-        assert!(
-            gate["gate"]["blocked_reasons"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("gate_disabled"))
-        );
+        assert!(gate["gate"]["blocked_reasons"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("gate_disabled")));
     }
 
     #[test]
@@ -2864,12 +3100,10 @@ mod tests {
         );
         assert_eq!(gate["would_emit"], false);
         assert_eq!(gate["required"]["operator_reason_present"], false);
-        assert!(
-            gate["gate"]["blocked_reasons"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("missing_reason"))
-        );
+        assert!(gate["gate"]["blocked_reasons"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("missing_reason")));
     }
 
     #[test]
@@ -2883,12 +3117,10 @@ mod tests {
         );
         assert_eq!(gate["would_emit"], false);
         assert_eq!(gate["required"]["voice_policy_allowed"], false);
-        assert!(
-            gate["gate"]["blocked_reasons"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("policy_voice_disabled"))
-        );
+        assert!(gate["gate"]["blocked_reasons"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("policy_voice_disabled")));
     }
 
     #[test]
@@ -2904,12 +3136,10 @@ mod tests {
         assert_eq!(gate["dry_run"], true);
         assert_eq!(gate["emits_audio"], false);
         assert_eq!(gate["emits_notification"], false);
-        assert!(
-            gate["gate"]["blocked_reasons"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        assert!(gate["gate"]["blocked_reasons"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -2931,12 +3161,10 @@ mod tests {
         assert_eq!(gate["gate"]["allow_policy_override"], true);
         assert_eq!(gate["required"]["voice_policy_allowed"], false);
         assert_eq!(gate["required"]["policy_override_allowed"], true);
-        assert!(
-            gate["gate"]["blocked_reasons"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        assert!(gate["gate"]["blocked_reasons"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -2954,12 +3182,10 @@ mod tests {
         );
         assert_eq!(gate["would_emit"], false);
         assert_eq!(gate["cooldown"]["active"], true);
-        assert!(
-            gate["gate"]["blocked_reasons"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("cooldown_active"))
-        );
+        assert!(gate["gate"]["blocked_reasons"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("cooldown_active")));
 
         let forced = avatar_cortex_voice_gate_payload(
             sample_voice_preview(true),
