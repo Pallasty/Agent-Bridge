@@ -2443,9 +2443,9 @@ fn avatar_surface_renderer_view_html(
       background-repeat: no-repeat;
       background-size: 1536px 1872px;
       background-position: 0 0;
-      transform: translateY(8px) scale(1.58);
+      transform: translateY(8px) scale(1.42);
       transform-origin: 50% 88%;
-      filter: saturate(0.96) contrast(1.04) brightness(0.96);
+      filter: none;
       transition: filter 180ms ease, transform 180ms ease;
       z-index: 2;
     }}
@@ -2471,8 +2471,8 @@ fn avatar_surface_renderer_view_html(
       transform: scale(1);
     }}
     .sprite-alert .xiao-shu-sprite {{
-      filter: saturate(0.88) contrast(1.05) brightness(0.9);
-      transform: translateY(8px) scale(1.62);
+      filter: none;
+      transform: translateY(8px) scale(1.46);
     }}
     .xiao-shu-torso {{
       position: absolute;
@@ -3766,6 +3766,7 @@ mod tests {
         assert!(
             html.contains("\"xiao_shu::alert_peek::medium\": { row: 5, frames: 8, alert: true }")
         );
+        assert!(html.contains("filter: none;"));
         assert!(html.contains("--alert-soft: #c97968;"));
         assert!(html.contains("border-width: 4px;"));
         assert!(html.contains("brightness(0.94)"));
