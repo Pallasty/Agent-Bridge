@@ -509,7 +509,10 @@ final-state checks, and acceptance summaries while keeping `renders_pixels=false
 convert the same preview frames into a browser-only sidecar renderer view. This
 is allowed to report `browser_renders_pixels=true`, but it keeps
 `server_side_renders_pixels=false`, `writes_files=false`,
-`mutates_renderer=false`, and `codex_pet_package_mutation=false`; the view is a
+`mutates_renderer=false`, and `codex_pet_package_mutation=false`; the view can
+also project resolved medium-risk deferred tokens as `review_only` tracks for
+manual inspection. Those review tracks must not promote themselves into the
+selected binding fixture or mutate the official package. The view remains a
 manual visual-QA surface before any official package binding.
 `avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
 as a dedicated read-only surface with `emits_audio=false`,
@@ -600,7 +603,7 @@ external watchdogs and non-MCP clients.
 | `agent-bridge avatar cortex-binding-plan` | First safe renderer binding candidates, validation gates, and rollback points are visible without mutation |
 | `agent-bridge avatar cortex-binding-fixture` | Selected binding candidates are frozen as deterministic sidecar preview fixtures without mutation |
 | `agent-bridge avatar cortex-visual-adapter` | Fixture timelines become observable sidecar preview frames without pixel rendering or mutation |
-| `agent-bridge avatar cortex-renderer-view` | Preview frames become a browser sidecar renderer view without asset writes or package mutation |
+| `agent-bridge avatar cortex-renderer-view` | Preview frames and review-only deferred medium tracks become a browser sidecar renderer view without asset writes or package mutation |
 | `agent-bridge avatar cortex-preview` | Voice preview text is visible without emitting audio or notifications |
 | `agent-bridge avatar cortex-voice-gate` | Explicit voice-gate dry-run reports whether a future emit would pass, without emitting audio |
 | `agent-bridge avatar cortex-voice-emit` | CLI-only manual voice adapter can speak one gated line and record cooldown state |
@@ -619,7 +622,7 @@ external watchdogs and non-MCP clients.
 | daemon HTTP `/avatar-surface/cortex-binding-plan` | Same first-binding plan is available to browser and non-MCP clients without asset mutation |
 | daemon HTTP `/avatar-surface/cortex-binding-fixture` | Same sidecar preview fixture payload is available to browser and non-MCP clients without asset mutation |
 | daemon HTTP `/avatar-surface/cortex-visual-adapter` | Same sidecar preview frame payload is available to browser and non-MCP clients without pixel rendering |
-| daemon HTTP `/avatar-surface/cortex-renderer-view` | Browser-only sidecar renderer view is available for manual visual QA without package mutation |
+| daemon HTTP `/avatar-surface/cortex-renderer-view` | Browser-only sidecar renderer view, including review-only deferred medium tracks, is available for manual visual QA without package mutation |
 | daemon HTTP `/avatar-surface/cortex-preview` | Same voice preview is available to browser and non-MCP clients without emission |
 | daemon HTTP `/avatar-surface/cortex-voice-gate` | Same explicit voice-gate dry-run is available to browser and non-MCP clients without emission |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |

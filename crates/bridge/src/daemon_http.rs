@@ -1744,18 +1744,27 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
                 ""
             };
             let token = avatar_surface_html_json_value(track.get("token"), "-");
+            let token_label = {
+                let parts = token.split("::").collect::<Vec<_>>();
+                if parts.len() >= 2 {
+                    format!("{}::{}", parts[parts.len() - 2], parts[parts.len() - 1])
+                } else {
+                    token.clone()
+                }
+            };
             let track_kind = avatar_surface_html_json_value(track.get("track_kind"), "selected");
             let frames = avatar_surface_html_json_value(track.get("frame_count"), "0");
             let duration = avatar_surface_html_json_value(track.get("duration_ms"), "0");
             track_buttons.push_str(&format!(
                 r#"<button type="button" class="track-button{active}{review}" data-track-index="{index}">
-          <span>{token}</span>
+          <span title="{token}">{token_label}</span>
           <small>{track_kind} / {frames} frames / {duration}ms</small>
         </button>"#,
                 active = active,
                 review = review,
                 index = index,
                 token = token,
+                token_label = token_label,
                 track_kind = track_kind,
                 frames = frames,
                 duration = duration,
