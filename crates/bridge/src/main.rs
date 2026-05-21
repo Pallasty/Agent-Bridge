@@ -8534,13 +8534,16 @@ fn print_shadow_cortex_weekly_bonus(
     );
     for lane in &summary.lane_coverage {
         println!(
-            "  {}: {} ({}/{}, {:.0}%) rank_tie={}",
+            "  {}: {} ({}/{}, {:.0}%) rank_tie={} saturation={} top_k_cap_hits={}/{}",
             lane.lane,
             lane.state,
             lane.covered_events,
             lane.total_events,
             lane.coverage * 100.0,
             lane.rank_tie_state,
+            lane.salience_saturation_state,
+            lane.top_k_cap_hits,
+            lane.top_k_size,
         );
     }
     if let Some(signal) = &summary.top_signal {

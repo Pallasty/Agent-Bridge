@@ -367,9 +367,11 @@ Current Gate B prep status:
   fixture. It emits `seed_shadow_signals` plus `comparison.lane_coverage` for
   `heuristic`, `seed_shadow`, and `seed_runtime`.
 - `comparison.verdict` uses explicit `ablation_state` /
-  `insufficient_coverage` / `rank_tie_guarded` guardrails before any
-  correlation-style conclusion. This absorbs the v22 rank-tie pathology lesson:
-  zero-coverage lanes are not negative evidence.
+  `insufficient_coverage` / `rank_tie_guarded` /
+  `salience_saturation_guarded` guardrails before any correlation-style
+  conclusion. This absorbs the v22 rank-tie pathology lesson and the first
+  Mac-side saturation sweep: zero-coverage lanes are not negative evidence, and
+  top-K signals that all hit a salience cap are not reliable rank evidence.
 - `dream weekly` is now the first read-only consumer. It emits a compact
   `shadow_cortex` JSON summary and a `[bonus #4]` text one-liner over the
   Codex MCP lane. The full replay/evidence surface remains on
@@ -387,6 +389,8 @@ Recommended PR 3:
 1. Add optional Seed runtime bridge.
 2. Keep it off by default.
 3. Add replay fixtures and runtime budget gates.
+4. Keep `salience_saturation_state` visible in the comparison output so Gate C
+   can distinguish Seed runtime quality from capped heuristic baselines.
 
 ---
 
