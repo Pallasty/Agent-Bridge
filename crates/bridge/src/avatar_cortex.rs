@@ -990,6 +990,7 @@ fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
                 ]
             },
             "revision_response": [
+                "replace the white CSS stand-in with the read-only xiao-shu-dev sprite source",
                 "mute the attention mark brightness",
                 "soften alert_peek motion timing",
                 "add slight outline and body weight only in alert state",
@@ -1811,10 +1812,14 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
         "frame_count": frames.len(),
         "renderer": {
             "schema": 1,
-            "kind": "browser_dom_css_sidecar",
-            "geometry": "xiao_shu_sidecar_css_v1",
-            "asset_source": "generated_dom_shapes",
+            "kind": "browser_codex_pet_sprite_sidecar",
+            "geometry": "xiao_shu_codex_pet_atlas_1536x1872",
+            "asset_source": "installed_codex_pet_package_readonly",
+            "asset_pet_id": "xiao-shu-dev",
+            "asset_route": "/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev",
+            "fallback_geometry": "xiao_shu_sidecar_css_v1",
             "official_pet_package_binding": false,
+            "official_pet_package_mutation": false,
         },
         "viewport": {
             "width": 320,
@@ -1875,10 +1880,18 @@ fn avatar_cortex_renderer_view_from_visual_adapter_payload(visual_adapter_previe
         "codex_pet_package_mutation": false,
         "renderer_view": {
             "schema": 1,
-            "kind": "browser_dom_css_sidecar_renderer_view",
+            "kind": "browser_codex_pet_sprite_sidecar_renderer_view",
             "input": "avatar_cortex_sidecar_visual_adapter.visual_adapter.previews + avatar_cortex_binding_plan.deferred.needs_review",
             "contract": "xiao_shu_renderer_slots_v1",
             "html_route": "/avatar-surface/cortex-renderer-view",
+            "asset_source": {
+                "pet_id": "xiao-shu-dev",
+                "route": "/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev",
+                "atlas": "1536x1872",
+                "cell": "192x208",
+                "read_only": true,
+                "official_pet_package_mutation": false
+            },
             "track_count": track_count,
             "selected_track_count": selected_track_count,
             "review_track_count": review_track_count,
@@ -3755,6 +3768,18 @@ mod tests {
         assert_eq!(view["writes_files"], false);
         assert_eq!(view["mutates_renderer"], false);
         assert_eq!(view["codex_pet_package_mutation"], false);
+        assert_eq!(
+            view["renderer_view"]["kind"],
+            "browser_codex_pet_sprite_sidecar_renderer_view"
+        );
+        assert_eq!(
+            view["renderer_view"]["asset_source"]["pet_id"],
+            "xiao-shu-dev"
+        );
+        assert_eq!(
+            view["renderer_view"]["asset_source"]["official_pet_package_mutation"],
+            false
+        );
         assert_eq!(view["renderer_view"]["track_count"], 5);
         assert_eq!(view["renderer_view"]["selected_track_count"], 2);
         assert_eq!(view["renderer_view"]["review_track_count"], 3);
@@ -3763,6 +3788,12 @@ mod tests {
         assert_eq!(first["review_only"], false);
         assert_eq!(first["frame_count"], 4);
         assert_eq!(first["duration_ms"], 1800);
+        assert_eq!(
+            first["renderer"]["asset_source"],
+            "installed_codex_pet_package_readonly"
+        );
+        assert_eq!(first["renderer"]["asset_pet_id"], "xiao-shu-dev");
+        assert_eq!(first["renderer"]["official_pet_package_mutation"], false);
         assert!(first["frames"][2]["css_classes"]
             .as_str()
             .unwrap()
@@ -3822,6 +3853,11 @@ mod tests {
         assert_eq!(acceptance["asset_writes_allowed"], false);
         assert_eq!(acceptance["renderer_mutation_allowed"], false);
         assert_eq!(acceptance["codex_pet_package_mutation_allowed"], false);
+        assert_eq!(
+            view["renderer_view"]["asset_source"]["route"],
+            "/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev"
+        );
+        assert_eq!(view["renderer_view"]["asset_source"]["read_only"], true);
         assert_eq!(
             view["renderer_view"]["next_step"],
             "manual browser visual QA for selected and review-only tracks before any official package binding"
@@ -4003,7 +4039,7 @@ mod tests {
             "request_visual_revision"
         );
         assert_eq!(alert["voice_linkage"]["emits_audio_now"], false);
-        assert_eq!(alert["evidence_counts"]["revision_response"], 5);
+        assert_eq!(alert["evidence_counts"]["revision_response"], 6);
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {

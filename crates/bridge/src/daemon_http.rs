@@ -20,6 +20,7 @@
 //!   - `GET /avatar-surface/cortex-binding-fixture?...` — sidecar preview fixtures
 //!   - `GET /avatar-surface/cortex-visual-adapter?...` — sidecar frame preview
 //!   - `GET /avatar-surface/cortex-renderer-view?...` — browser sidecar renderer view
+//!   - `GET /avatar-surface/pet-spritesheet?...` — read-only installed pet sprite source
 //!   - `GET /avatar-surface/cortex-review-gate?...` — read-only renderer review gate
 //!   - `GET /avatar-surface/cortex-review-packet?...` — read-only renderer review packets
 //!   - `GET /avatar-surface/cortex-review-report?...` — read-only review readiness report
@@ -141,6 +142,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-renderer-view",
             get(avatar_cortex_renderer_view),
+        )
+        .route(
+            "/avatar-surface/pet-spritesheet",
+            get(avatar_pet_spritesheet),
         )
         .route(
             "/avatar-surface/cortex-review-gate",
@@ -545,6 +550,11 @@ struct AvatarCortexStatusQuery {
 }
 
 #[derive(Deserialize, Debug)]
+struct AvatarPetSpritesheetQuery {
+    pet_id: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
 struct AvatarCortexVoiceGateQuery {
     label: Option<String>,
     heartbeat_label: Option<String>,
@@ -858,6 +868,75 @@ async fn avatar_cortex_renderer_view(
         q.track.as_deref(),
         q.track_index,
     )))
+}
+
+fn avatar_pet_package_dir(pet_id: &str) -> Result<std::path::PathBuf, (StatusCode, String)> {
+    match pet_id {
+        "xiao-shu-dev" | "xiao-shu-v2" | "xiao-shu" => {}
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("unsupported pet_id: {pet_id}"),
+            ));
+        }
+    }
+    let home = std::env::var("HOME").map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("HOME is not available: {e}"),
+        )
+    })?;
+    Ok(std::path::PathBuf::from(home)
+        .join(".codex")
+        .join("pets")
+        .join(pet_id))
+}
+
+fn avatar_pet_spritesheet_content_type(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("webp") => "image/webp",
+        _ => "image/png",
+    }
+}
+
+async fn avatar_pet_spritesheet(
+    Query(q): Query<AvatarPetSpritesheetQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let pet_id = q.pet_id.as_deref().unwrap_or("xiao-shu-dev");
+    let package_dir = avatar_pet_package_dir(pet_id)?;
+    let manifest_path = package_dir.join("pet.json");
+    let manifest_bytes = tokio::fs::read(&manifest_path).await.map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("read {}: {e}", manifest_path.display()),
+        )
+    })?;
+    let manifest: Value = serde_json::from_slice(&manifest_bytes).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("parse {}: {e}", manifest_path.display()),
+        )
+    })?;
+    let sprite_name = manifest
+        .get("spritesheetPath")
+        .and_then(Value::as_str)
+        .unwrap_or("spritesheet.png");
+    let sprite_rel = std::path::Path::new(sprite_name);
+    if sprite_rel.components().count() != 1 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("unsafe spritesheetPath in {pet_id}: {sprite_name}"),
+        ));
+    }
+    let sprite_path = package_dir.join(sprite_rel);
+    let content_type = avatar_pet_spritesheet_content_type(&sprite_path);
+    let bytes = tokio::fs::read(&sprite_path).await.map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("read {}: {e}", sprite_path.display()),
+        )
+    })?;
+    Ok(([(header::CONTENT_TYPE, content_type)], bytes))
 }
 
 async fn avatar_cortex_review_gate(
@@ -2163,6 +2242,12 @@ fn avatar_surface_renderer_view_html(
         renderer_view_preview.get("browser_renders_pixels"),
         "false",
     );
+    let asset_source = view.get("asset_source").unwrap_or(&Value::Null);
+    let asset_pet_id = avatar_surface_html_json_value(asset_source.get("pet_id"), "xiao-shu-dev");
+    let sprite_route = avatar_surface_html_json_value(
+        asset_source.get("route"),
+        "/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev",
+    );
     let data_json = html_json_script(renderer_view_preview);
     let mut track_buttons = String::new();
     if let Some(tracks) = view.get("tracks").and_then(Value::as_array) {
@@ -2350,6 +2435,44 @@ fn avatar_surface_renderer_view_html(
       position: absolute;
       inset: 0;
       transform-origin: 50% 82%;
+    }}
+    .xiao-shu-sprite {{
+      width: 192px;
+      height: 208px;
+      background-image: url("{sprite_route}");
+      background-repeat: no-repeat;
+      background-size: 1536px 1872px;
+      background-position: 0 0;
+      transform: translateY(8px) scale(1.58);
+      transform-origin: 50% 88%;
+      filter: saturate(0.96) contrast(1.04) brightness(0.96);
+      transition: filter 180ms ease, transform 180ms ease;
+      z-index: 2;
+    }}
+    .xiao-shu.sprite-backed .xiao-shu-body {{
+      display: none;
+    }}
+    .sprite-alert-mark {{
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      right: 82px;
+      top: 54px;
+      border-radius: 999px;
+      background: var(--alert-soft);
+      border: 3px solid rgba(244, 247, 237, 0.82);
+      opacity: 0;
+      transform: scale(0.9);
+      transition: opacity 180ms ease, transform 180ms ease;
+      z-index: 3;
+    }}
+    .sprite-alert .sprite-alert-mark {{
+      opacity: 0.78;
+      transform: scale(1);
+    }}
+    .sprite-alert .xiao-shu-sprite {{
+      filter: saturate(0.88) contrast(1.05) brightness(0.9);
+      transform: translateY(8px) scale(1.62);
     }}
     .xiao-shu-torso {{
       position: absolute;
@@ -2588,8 +2711,10 @@ fn avatar_surface_renderer_view_html(
     </header>
     <section class="stage-grid" data-stage="xiao-shu-renderer-view">
       <div class="stage">
-        <div class="xiao-shu {initial_classes}" data-xiao-shu data-current-frame="">
+        <div class="xiao-shu sprite-backed {initial_classes}" data-xiao-shu data-current-frame="">
           <div class="xiao-shu-shadow"></div>
+          <div class="xiao-shu-sprite" data-sprite-frame aria-hidden="true"></div>
+          <div class="sprite-alert-mark" aria-hidden="true"></div>
           <div class="xiao-shu-body">
             <div class="xiao-shu-inner">
               <div class="xiao-shu-torso"></div>
@@ -2613,6 +2738,7 @@ fn avatar_surface_renderer_view_html(
         <dl>
           <dt>token</dt><dd data-token>{first_token}</dd>
           <dt>state</dt><dd data-state>{first_state}</dd>
+          <dt>asset</dt><dd><span>pet={asset_pet_id}</span><span>route={sprite_route}</span><span>mode=read-only spritesheet</span></dd>
           <dt>safety</dt><dd><span>writes_files={writes_files}</span><span>mutates_renderer={mutates_renderer}</span><span>pet_package={pet_mutation}</span></dd>
           <dt>mode</dt><dd>sidecar-only browser view</dd>
         </dl>
@@ -2628,12 +2754,20 @@ fn avatar_surface_renderer_view_html(
     const view = payload.renderer_view || {{}};
     const tracks = Array.isArray(view.tracks) ? view.tracks : [];
     const figure = document.querySelector("[data-xiao-shu]");
+    const spriteFrame = document.querySelector("[data-sprite-frame]");
     const tokenEl = document.querySelector("[data-token]");
     const stateEl = document.querySelector("[data-state]");
     const buttons = Array.from(document.querySelectorAll("[data-track-index]"));
     let trackIndex = {active_track_index};
     let frameIndex = 0;
     let timer = null;
+    const spriteRows = {{
+      "xiao_shu::soft_bounce::low": {{ row: 0, frames: 6, alert: false }},
+      "xiao_shu::idle_breathe::low": {{ row: 0, frames: 6, alert: false }},
+      "xiao_shu::sorting_glow::medium": {{ row: 8, frames: 6, alert: false }},
+      "xiao_shu::look_sideways::medium": {{ row: 6, frames: 6, alert: false }},
+      "xiao_shu::alert_peek::medium": {{ row: 5, frames: 8, alert: true }}
+    }};
 
     function activeTrack() {{
       return tracks[trackIndex] || tracks[0] || {{ frames: [] }};
@@ -2657,6 +2791,19 @@ fn avatar_surface_renderer_view_html(
       }});
     }}
 
+    function applySpriteFrame(track, ordinal) {{
+      if (!spriteFrame || !figure) {{
+        return;
+      }}
+      const config = spriteRows[track.token] || {{ row: 0, frames: 6, alert: false }};
+      const column = Number(ordinal || 0) % Number(config.frames || 1);
+      const x = -column * 192;
+      const y = -Number(config.row || 0) * 208;
+      spriteFrame.style.backgroundPosition = `${{x}}px ${{y}}px`;
+      figure.classList.toggle("sprite-backed", true);
+      figure.classList.toggle("sprite-alert", Boolean(config.alert));
+    }}
+
     function applyFrame() {{
       const track = activeTrack();
       const frames = Array.isArray(track.frames) ? track.frames : [];
@@ -2664,7 +2811,9 @@ fn avatar_surface_renderer_view_html(
         return;
       }}
       const frame = frames[frameIndex] || frames[0];
-      figure.className = "xiao-shu " + (frame.css_classes || "pose-neutral-idle expression-calm-eyes motion-idle-breathe accessory-none");
+      figure.className = "xiao-shu sprite-backed " + (frame.css_classes || "pose-neutral-idle expression-calm-eyes motion-idle-breathe accessory-none");
+      const ordinal = frameIndex;
+      applySpriteFrame(track, ordinal);
       figure.dataset.currentFrame = frame.frame_id || "";
       if (tokenEl) tokenEl.textContent = track.token || "xiao_shu::unknown";
       setStateLabel(frame.state_label || "");
@@ -2703,9 +2852,11 @@ fn avatar_surface_renderer_view_html(
         input_title = input,
         generated_at = generated_at,
         browser_pixels = browser_pixels,
+        sprite_route = sprite_route,
         initial_classes = initial_classes,
         first_token = first_token,
         first_state = first_state_html,
+        asset_pet_id = asset_pet_id,
         active_track_index = active_track_index,
         writes_files = writes_files,
         mutates_renderer = mutates_renderer,
@@ -3608,6 +3759,13 @@ mod tests {
         assert!(html.contains("review_only / 8 frames / 1440ms"));
         assert!(html.contains("motion-soft-bounce"));
         assert!(html.contains("motion-sorting-glow"));
+        assert!(html.contains("xiao-shu sprite-backed"));
+        assert!(html.contains("xiao-shu-sprite"));
+        assert!(html.contains("pet=xiao-shu-dev"));
+        assert!(html.contains("/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev"));
+        assert!(
+            html.contains("\"xiao_shu::alert_peek::medium\": { row: 5, frames: 8, alert: true }")
+        );
         assert!(html.contains("--alert-soft: #c97968;"));
         assert!(html.contains("border-width: 4px;"));
         assert!(html.contains("brightness(0.94)"));

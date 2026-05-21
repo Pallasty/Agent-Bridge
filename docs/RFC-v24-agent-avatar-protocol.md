@@ -511,7 +511,10 @@ is allowed to report `browser_renders_pixels=true`, but it keeps
 `server_side_renders_pixels=false`, `writes_files=false`,
 `mutates_renderer=false`, and `codex_pet_package_mutation=false`; the view can
 also project resolved medium-risk deferred tokens as `review_only` tracks for
-manual inspection. Those review tracks must not promote themselves into the
+manual inspection. The browser view may read an installed Codex pet spritesheet
+through `/avatar-surface/pet-spritesheet` as a visual source, but that route is
+read-only, allowlists known Xiao Shu package ids, and does not mutate or bind
+the official package. Those review tracks must not promote themselves into the
 selected binding fixture or mutate the official package. The view remains a
 manual visual-QA surface before any official package binding.
 `avatar cortex-review-gate` and `/avatar-surface/cortex-review-gate` add a
@@ -651,6 +654,7 @@ external watchdogs and non-MCP clients.
 | daemon HTTP `/avatar-surface/cortex-binding-fixture` | Same sidecar preview fixture payload is available to browser and non-MCP clients without asset mutation |
 | daemon HTTP `/avatar-surface/cortex-visual-adapter` | Same sidecar preview frame payload is available to browser and non-MCP clients without pixel rendering |
 | daemon HTTP `/avatar-surface/cortex-renderer-view` | Browser-only sidecar renderer view, including focused `track` / `track_index` previews for review-only deferred medium tracks, is available for manual visual QA without package mutation |
+| daemon HTTP `/avatar-surface/pet-spritesheet` | Installed Xiao Shu pet spritesheets can be served as read-only browser assets for sidecar review without package mutation |
 | daemon HTTP `/avatar-surface/cortex-review-gate` | Same read-only renderer review gate is available to browser and non-MCP clients without approval writes; panel links can open pending tracks for focused inspection only |
 | daemon HTTP `/avatar-surface/cortex-review-packet` | Same pending-track human inspection packets are available without approval persistence, record writes, or binding promotion |
 | daemon HTTP `/avatar-surface/cortex-review-report` | Same packet-readiness report is available without human decision writes, approval persistence, or merge readiness |
