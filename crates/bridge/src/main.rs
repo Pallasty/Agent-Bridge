@@ -4838,11 +4838,13 @@ async fn run_avatar_cortex_review_report(
     let report = payload.get("review_report").unwrap_or(&Value::Null);
     println!("avatar cortex review report");
     println!(
-        "state={} packets={} ready={} blocked={} human_decisions={}",
+        "state={} packets={} ready={} blocked={} feedback={} voice_requests={} human_decisions={}",
         avatar_health_display(report.get("report_state"), "-"),
         avatar_health_display(report.get("packet_count"), "0"),
         avatar_health_display(report.get("ready_packet_count"), "0"),
         avatar_health_display(report.get("blocked_packet_count"), "0"),
+        avatar_health_display(report.get("human_feedback_count"), "0"),
+        avatar_health_display(report.get("voice_linkage_requested_count"), "0"),
         avatar_health_display(report.get("human_decision_count"), "0")
     );
     println!(

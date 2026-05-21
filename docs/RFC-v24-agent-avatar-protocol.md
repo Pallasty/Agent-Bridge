@@ -533,7 +533,12 @@ summarize whether those packets are ready for human visual review. The report
 can mark implementation evidence ready for a human pass, but it must keep
 `human_decision_count=0`, `ready_for_approval=false`,
 `approval_writes_allowed=false`, `records_persisted=false`, and
-`merge_without_human_review_allowed=false`.
+`merge_without_human_review_allowed=false`. Packets and reports may include
+`latest_human_feedback`, `revision_response`, and `voice_linkage` so a visual
+review can request lower brightness, thicker shape, aesthetic revision, or
+future sparse voice linkage. Those fields are evidence and design intent only:
+they do not approve a track, persist a review decision, bind a renderer, mutate
+the official pet package, or emit audio.
 `avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
 as a dedicated read-only surface with `emits_audio=false`,
 `emits_notification=false`, and `requires_explicit_emit_gate=true`.

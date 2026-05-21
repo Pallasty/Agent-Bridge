@@ -969,14 +969,39 @@ fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
             "acceptance_criteria": [
                 "communicates attention needed in one glance",
                 "stays gentle and non-panicked",
+                "attention mark is muted enough for repeated desktop use",
+                "shape can feel slightly thicker without becoming heavy",
                 "does not trigger unless the recent window contains an unhealthy signal"
             ],
             "risk_notes": "attention mark can become noisy if health flaps",
             "review_questions": [
                 "is the attention mark too loud",
+                "does the revised silhouette feel warmer and less toy-like",
                 "should this ever pair with sparse voice output"
             ],
-            "recommended_next_step": "keep dry-run until health-flap behavior is reviewed"
+            "latest_human_feedback": {
+                "source": "desktop_visual_review_2026_05_21_alert_peek",
+                "outcome": "request_visual_revision",
+                "notes": [
+                    "too_bright",
+                    "aesthetic_needs_improvement",
+                    "voice_linkage_desired",
+                    "slightly_thicker_shape_ok"
+                ]
+            },
+            "revision_response": [
+                "mute the attention mark brightness",
+                "soften alert_peek motion timing",
+                "add slight outline and body weight only in alert state",
+                "reduce alert-state body brightness without changing other tracks",
+                "keep voice linkage as future sparse voice design, not immediate emit"
+            ],
+            "voice_linkage": {
+                "requested": true,
+                "policy": "future_sparse_voice_after_visual_re_review",
+                "emits_audio_now": false
+            },
+            "recommended_next_step": "re-review revised alert_peek before any voice or binding approval design"
         }),
         _ => json!({
             "schema": 1,
@@ -1996,6 +2021,19 @@ fn avatar_cortex_renderer_review_gate_item(track: &Value, index: usize) -> Value
             "official_package_binding": official_package_binding,
         },
         "visual_intent": track.get("visual_intent").cloned().unwrap_or(Value::Null),
+        "risk_notes": evidence.get("risk_notes").cloned().unwrap_or(Value::Null),
+        "latest_human_feedback": evidence
+            .get("latest_human_feedback")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "revision_response": evidence
+            .get("revision_response")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+        "voice_linkage": evidence
+            .get("voice_linkage")
+            .cloned()
+            .unwrap_or(Value::Null),
         "acceptance_criteria": avatar_cortex_value_array_strings(
             evidence.get("acceptance_criteria").unwrap_or(&Value::Null),
         ),
@@ -2153,6 +2191,18 @@ fn avatar_cortex_renderer_review_packet_item(item: &Value) -> Value {
                 .get("acceptance_criteria")
                 .cloned()
                 .unwrap_or_else(|| json!([])),
+            "latest_human_feedback": item
+                .get("latest_human_feedback")
+                .cloned()
+                .unwrap_or(Value::Null),
+            "revision_response": item
+                .get("revision_response")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+            "voice_linkage": item
+                .get("voice_linkage")
+                .cloned()
+                .unwrap_or(Value::Null),
             "evidence_to_capture": [
                 "desktop screenshot or live panel observation",
                 "whether the motion feels calm after repeated loops",
@@ -2272,7 +2322,24 @@ fn avatar_cortex_renderer_review_report_item(packet: &Value) -> Value {
     let review_packet = packet.get("review_packet").unwrap_or(&Value::Null);
     let source_checks = packet.get("source_checks").unwrap_or(&Value::Null);
     let blockers = source_checks.get("blockers").unwrap_or(&Value::Null);
+    let latest_human_feedback = review_packet
+        .get("latest_human_feedback")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let revision_response = review_packet
+        .get("revision_response")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let voice_linkage = review_packet
+        .get("voice_linkage")
+        .cloned()
+        .unwrap_or(Value::Null);
     let has_blockers = avatar_cortex_json_array_len(blockers) > 0;
+    let has_human_feedback = latest_human_feedback.is_object();
+    let voice_linkage_requested = voice_linkage
+        .get("requested")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let has_preview_route = packet
         .get("renderer_view")
         .and_then(|renderer| renderer.get("track"))
@@ -2321,6 +2388,11 @@ fn avatar_cortex_renderer_review_report_item(packet: &Value) -> Value {
             .get("renderer_view")
             .cloned()
             .unwrap_or(Value::Null),
+        "latest_human_feedback": latest_human_feedback,
+        "revision_response": revision_response,
+        "voice_linkage": voice_linkage,
+        "human_feedback_present": has_human_feedback,
+        "voice_linkage_requested": voice_linkage_requested,
         "evidence_counts": {
             "visual_questions": avatar_cortex_json_array_len(
                 review_packet.get("visual_questions").unwrap_or(&Value::Null),
@@ -2330,6 +2402,9 @@ fn avatar_cortex_renderer_review_report_item(packet: &Value) -> Value {
             ),
             "operator_checks": avatar_cortex_json_array_len(
                 review_packet.get("required_human_checks").unwrap_or(&Value::Null),
+            ),
+            "revision_response": avatar_cortex_json_array_len(
+                review_packet.get("revision_response").unwrap_or(&Value::Null),
             ),
             "source_blockers": avatar_cortex_json_array_len(blockers),
         },
@@ -2366,8 +2441,74 @@ fn avatar_cortex_renderer_review_report_from_packet_payload(review_packet_payloa
                 .unwrap_or(false)
         })
         .count();
+    let human_feedback_count = items
+        .iter()
+        .filter(|item| {
+            item.get("human_feedback_present")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .count();
+    let voice_linkage_requested_count = items
+        .iter()
+        .filter(|item| {
+            item.get("voice_linkage_requested")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .count();
     let blocked_count = packet_count.saturating_sub(ready_count);
     let ready_for_human_review = packet_count > 0 && blocked_count == 0;
+    let packet_route = packet
+        .get("html_route")
+        .cloned()
+        .unwrap_or_else(|| json!("/avatar-surface/cortex-review-packet"));
+    let renderer_view_route = packet
+        .get("renderer_view_route")
+        .cloned()
+        .unwrap_or_else(|| json!("/avatar-surface/cortex-renderer-view"));
+    let report_state = if ready_for_human_review {
+        "ready_for_human_visual_review"
+    } else {
+        "needs_packet_repair"
+    };
+    let checklist = json!([
+        "open each focused renderer preview from the packet",
+        "watch the motion through several loops beside a coding session",
+        "compare the visual behavior with the packet acceptance criteria",
+        "record any human observation in a future explicit review record surface",
+    ]);
+    let acceptance = json!({
+        "ready_for_human_visual_review": ready_for_human_review,
+        "ready_for_approval": false,
+        "approval_writes_allowed": false,
+        "records_persisted": false,
+        "review_tracks_mutate_bindings": false,
+        "can_promote_review_tracks": false,
+        "asset_writes_allowed": false,
+        "renderer_mutation_allowed": false,
+        "codex_pet_package_mutation_allowed": false,
+        "merge_without_human_review_allowed": false,
+    });
+    let review_report = json!({
+        "schema": 1,
+        "input": "avatar_cortex_renderer_review_packet.review_packet.packets",
+        "html_route": "/avatar-surface/cortex-review-report",
+        "packet_route": packet_route,
+        "renderer_view_route": renderer_view_route,
+        "packet_count": packet_count,
+        "ready_packet_count": ready_count,
+        "blocked_packet_count": blocked_count,
+        "human_feedback_count": human_feedback_count,
+        "voice_linkage_requested_count": voice_linkage_requested_count,
+        "human_decision_count": 0,
+        "report_state": report_state,
+        "items": items,
+        "checklist": checklist,
+        "acceptance": acceptance,
+        "decision": "implementation is ready for human visual review, but no pending track is approved or promotable",
+        "next_step": "perform the human visual pass for sorting_glow, look_sideways, and alert_peek before designing any approval record",
+    });
 
     json!({
         "surface": "avatar_cortex_renderer_review_report",
@@ -2386,49 +2527,7 @@ fn avatar_cortex_renderer_review_report_from_packet_payload(review_packet_payloa
         "codex_pet_package_mutation": false,
         "writes_approval": false,
         "persists_review_record": false,
-        "review_report": {
-            "schema": 1,
-            "input": "avatar_cortex_renderer_review_packet.review_packet.packets",
-            "html_route": "/avatar-surface/cortex-review-report",
-            "packet_route": packet
-                .get("html_route")
-                .cloned()
-                .unwrap_or(json!("/avatar-surface/cortex-review-packet")),
-            "renderer_view_route": packet
-                .get("renderer_view_route")
-                .cloned()
-                .unwrap_or(json!("/avatar-surface/cortex-renderer-view")),
-            "packet_count": packet_count,
-            "ready_packet_count": ready_count,
-            "blocked_packet_count": blocked_count,
-            "human_decision_count": 0,
-            "report_state": if ready_for_human_review {
-                "ready_for_human_visual_review"
-            } else {
-                "needs_packet_repair"
-            },
-            "items": items,
-            "checklist": [
-                "open each focused renderer preview from the packet",
-                "watch the motion through several loops beside a coding session",
-                "compare the visual behavior with the packet acceptance criteria",
-                "record any human observation in a future explicit review record surface",
-            ],
-            "acceptance": {
-                "ready_for_human_visual_review": ready_for_human_review,
-                "ready_for_approval": false,
-                "approval_writes_allowed": false,
-                "records_persisted": false,
-                "review_tracks_mutate_bindings": false,
-                "can_promote_review_tracks": false,
-                "asset_writes_allowed": false,
-                "renderer_mutation_allowed": false,
-                "codex_pet_package_mutation_allowed": false,
-                "merge_without_human_review_allowed": false,
-            },
-            "decision": "implementation is ready for human visual review, but no pending track is approved or promotable",
-            "next_step": "perform the human visual pass for sorting_glow, look_sideways, and alert_peek before designing any approval record",
-        },
+        "review_report": review_report,
         "source_review_packet": review_packet_payload,
     })
 }
@@ -3818,6 +3917,20 @@ mod tests {
             alert["renderer_view"]["track"],
             "xiao_shu::alert_peek::medium"
         );
+        assert_eq!(
+            alert["review_packet"]["latest_human_feedback"]["outcome"],
+            "request_visual_revision"
+        );
+        assert_eq!(alert["review_packet"]["voice_linkage"]["requested"], true);
+        assert_eq!(
+            alert["review_packet"]["voice_linkage"]["emits_audio_now"],
+            false
+        );
+        assert!(alert["review_packet"]["revision_response"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|step| step == "mute the attention mark brightness"));
         assert!(alert["review_packet"]["required_human_checks"]
             .as_array()
             .unwrap()
@@ -3848,6 +3961,8 @@ mod tests {
         assert_eq!(review_report["packet_count"], 3);
         assert_eq!(review_report["ready_packet_count"], 3);
         assert_eq!(review_report["blocked_packet_count"], 0);
+        assert_eq!(review_report["human_feedback_count"], 1);
+        assert_eq!(review_report["voice_linkage_requested_count"], 1);
         assert_eq!(review_report["human_decision_count"], 0);
         assert_eq!(
             review_report["report_state"],
@@ -3876,6 +3991,19 @@ mod tests {
         assert_eq!(look_sideways["ready_for_approval"], false);
         assert_eq!(look_sideways["can_promote_binding"], false);
         assert_eq!(look_sideways["evidence_counts"]["source_blockers"], 0);
+
+        let alert = items
+            .iter()
+            .find(|item| item["token"] == "xiao_shu::alert_peek::medium")
+            .unwrap();
+        assert_eq!(alert["human_feedback_present"], true);
+        assert_eq!(alert["voice_linkage_requested"], true);
+        assert_eq!(
+            alert["latest_human_feedback"]["outcome"],
+            "request_visual_revision"
+        );
+        assert_eq!(alert["voice_linkage"]["emits_audio_now"], false);
+        assert_eq!(alert["evidence_counts"]["revision_response"], 5);
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {

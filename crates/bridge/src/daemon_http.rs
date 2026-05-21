@@ -2037,6 +2037,9 @@ fn avatar_surface_review_report_html(
     let packets = avatar_surface_html_json_value(report.get("packet_count"), "0");
     let ready = avatar_surface_html_json_value(report.get("ready_packet_count"), "0");
     let blocked = avatar_surface_html_json_value(report.get("blocked_packet_count"), "0");
+    let feedback = avatar_surface_html_json_value(report.get("human_feedback_count"), "0");
+    let voice_requests =
+        avatar_surface_html_json_value(report.get("voice_linkage_requested_count"), "0");
     let human_decisions = avatar_surface_html_json_value(report.get("human_decision_count"), "0");
     let ready_for_human = avatar_surface_html_json_value(
         report
@@ -2072,6 +2075,7 @@ fn avatar_surface_review_report_html(
       </div>
       <dl>
         <div><dt>readiness</dt><dd>human={ready_for_human} approval={ready_for_approval} decisions={human_decisions}</dd></div>
+        <div><dt>feedback</dt><dd>items={feedback} voice_requests={voice_requests}</dd></div>
         <div><dt>safety</dt><dd>can_promote={can_promote} merge_without_review={merge_without_review}</dd></div>
         <div><dt>packet</dt><dd><a href="{packet_href}">review packet json</a></dd></div>
         <div><dt>open</dt><dd><a href="{href}">review report json</a></dd></div>
@@ -2081,6 +2085,8 @@ fn avatar_surface_review_report_html(
         packets = packets,
         ready = ready,
         blocked = blocked,
+        feedback = feedback,
+        voice_requests = voice_requests,
         ready_for_human = ready_for_human,
         ready_for_approval = ready_for_approval,
         human_decisions = human_decisions,
@@ -2223,6 +2229,7 @@ fn avatar_surface_renderer_view_html(
       --teal: #147a74;
       --coral: #d45f4c;
       --gold: #d69b2d;
+      --alert-soft: #c97968;
       --ink: #26312f;
       --stage: #eef5ef;
       --surface: #ffffff;
@@ -2237,6 +2244,7 @@ fn avatar_surface_renderer_view_html(
         --teal: #5bd0c3;
         --coral: #ff907d;
         --gold: #f3c66b;
+        --alert-soft: #d58c7f;
         --ink: #f4f7ed;
         --stage: #20261f;
         --surface: #1d211b;
@@ -2448,11 +2456,27 @@ fn avatar_surface_renderer_view_html(
       opacity: 1;
       transform: scale(1);
     }}
+    .accessory-small-attention-mark .status-dot {{
+      width: 34px;
+      height: 34px;
+      background: var(--alert-soft);
+      opacity: 0.68;
+      transform: scale(0.9);
+    }}
+    .motion-alert-peek .xiao-shu-head,
+    .motion-alert-peek .xiao-shu-torso,
+    .motion-alert-peek .hand,
+    .motion-alert-peek .status-dot {{
+      border-width: 4px;
+    }}
+    .motion-alert-peek .xiao-shu-body {{
+      filter: saturate(0.88) brightness(0.94) contrast(0.96);
+    }}
     .motion-idle-breathe .xiao-shu-inner {{ animation: breathe 2400ms ease-in-out infinite; }}
     .motion-soft-bounce .xiao-shu-inner {{ animation: soft-bounce 900ms ease-in-out infinite; }}
     .motion-sorting-glow .status-dot {{ animation: glow 1200ms ease-in-out infinite; }}
     .motion-look-sideways .xiao-shu-inner {{ animation: look-sideways 1600ms ease-in-out infinite; }}
-    .motion-alert-peek .xiao-shu-inner {{ animation: alert-peek 900ms ease-in-out infinite; }}
+    .motion-alert-peek .xiao-shu-inner {{ animation: alert-peek 1400ms ease-in-out infinite; }}
     @keyframes breathe {{
       0%, 100% {{ transform: translateY(0) scale(1); }}
       50% {{ transform: translateY(-3px) scale(1.01); }}
@@ -2471,7 +2495,7 @@ fn avatar_surface_renderer_view_html(
     }}
     @keyframes alert-peek {{
       0%, 100% {{ transform: translateY(2px) scale(1); }}
-      50% {{ transform: translateY(-8px) scale(1.03); }}
+      50% {{ transform: translateY(-5px) scale(1.015); }}
     }}
     .inspector {{
       border-top: 4px solid var(--teal);
@@ -3512,6 +3536,7 @@ mod tests {
         assert!(html.contains("Xiao Shu Review Report"));
         assert!(html.contains("state=ready_for_human_visual_review packets=3 ready=3 blocked=0"));
         assert!(html.contains("human=true approval=false decisions=0"));
+        assert!(html.contains("items=1 voice_requests=1"));
         assert!(html.contains("can_promote=false merge_without_review=false"));
         assert!(html.contains("review report json"));
         assert!(html.contains("stage=candidate risk=low"));
@@ -3583,6 +3608,11 @@ mod tests {
         assert!(html.contains("review_only / 8 frames / 1440ms"));
         assert!(html.contains("motion-soft-bounce"));
         assert!(html.contains("motion-sorting-glow"));
+        assert!(html.contains("--alert-soft: #c97968;"));
+        assert!(html.contains("border-width: 4px;"));
+        assert!(html.contains("brightness(0.94)"));
+        assert!(html.contains("animation: alert-peek 1400ms ease-in-out infinite;"));
+        assert!(html.contains("translateY(-5px) scale(1.015);"));
         assert!(html.contains("browser pixels=true"));
         assert!(html.contains("<span>writes_files=false</span>"));
         assert!(html.contains("<span>mutates_renderer=false</span>"));
