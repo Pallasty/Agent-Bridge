@@ -1692,8 +1692,20 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
     );
     let first_token = avatar_surface_html_json_value(first.get("token"), "xiao_shu::unknown");
     let first_state = avatar_surface_html_json_value(initial.get("state_label"), "ready");
+    let first_state_html = first_state
+        .split_whitespace()
+        .map(|part| format!("<span>{part}</span>"))
+        .collect::<String>();
     let track_count = avatar_surface_html_json_value(view.get("track_count"), "0");
     let input = avatar_surface_html_json_value(view.get("input"), "-");
+    let input_label = {
+        let parts = input.split('.').collect::<Vec<_>>();
+        if parts.len() >= 2 {
+            format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1])
+        } else {
+            input.clone()
+        }
+    };
     let writes_files =
         avatar_surface_html_json_value(renderer_view_preview.get("writes_files"), "false");
     let mutates_renderer =
@@ -1802,7 +1814,15 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
     .meta {{
       margin-top: 7px;
       color: var(--muted);
+      min-width: 0;
       overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .meta span {{
+      display: block;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-all;
     }}
     .badge {{
       color: var(--teal);
@@ -2011,6 +2031,7 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
       grid-template-columns: 110px minmax(0, 1fr);
       gap: 9px 12px;
       margin: 0;
+      min-width: 0;
     }}
     .inspector dt {{
       color: var(--muted);
@@ -2020,7 +2041,18 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
     }}
     .inspector dd {{
       margin: 0;
+      min-width: 0;
       overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .inspector dd span {{
+      display: block;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .inspector dd[data-state] span {{
+      word-break: break-all;
     }}
     .tracks {{
       display: grid;
@@ -2043,7 +2075,12 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
       box-shadow: inset 4px 0 0 var(--teal);
     }}
     .track-button span,
-    .track-button small {{ display: block; overflow-wrap: anywhere; }}
+    .track-button small {{
+      display: block;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
     .track-button small {{ color: var(--muted); margin-top: 3px; }}
     @media (max-width: 820px) {{
       main {{ width: min(100vw - 20px, 1160px); margin-top: 14px; }}
@@ -2060,7 +2097,7 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
     <header>
       <div>
         <h1>Xiao Shu Sidecar Renderer</h1>
-        <div class="meta">tracks={track_count} input={input} generated_at={generated_at}</div>
+        <div class="meta"><span>tracks={track_count}</span><span title="{input_title}">input={input}</span><span>generated_at={generated_at}</span></div>
       </div>
       <div class="badge">browser pixels={browser_pixels}</div>
     </header>
@@ -2091,7 +2128,7 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
         <dl>
           <dt>token</dt><dd data-token>{first_token}</dd>
           <dt>state</dt><dd data-state>{first_state}</dd>
-          <dt>safety</dt><dd>writes_files={writes_files} mutates_renderer={mutates_renderer} pet_package={pet_mutation}</dd>
+          <dt>safety</dt><dd><span>writes_files={writes_files}</span><span>mutates_renderer={mutates_renderer}</span><span>pet_package={pet_mutation}</span></dd>
           <dt>mode</dt><dd>sidecar-only browser view</dd>
         </dl>
       </aside>
@@ -2123,6 +2160,18 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
       }});
     }}
 
+    function setStateLabel(value) {{
+      if (!stateEl) {{
+        return;
+      }}
+      stateEl.textContent = "";
+      String(value || "").split(/\s+/).filter(Boolean).forEach((part) => {{
+        const span = document.createElement("span");
+        span.textContent = part;
+        stateEl.appendChild(span);
+      }});
+    }}
+
     function applyFrame() {{
       const track = activeTrack();
       const frames = Array.isArray(track.frames) ? track.frames : [];
@@ -2133,7 +2182,7 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
       figure.className = "xiao-shu " + (frame.css_classes || "pose-neutral-idle expression-calm-eyes motion-idle-breathe accessory-none");
       figure.dataset.currentFrame = frame.frame_id || "";
       if (tokenEl) tokenEl.textContent = track.token || "xiao_shu::unknown";
-      if (stateEl) stateEl.textContent = frame.state_label || "";
+      setStateLabel(frame.state_label || "");
       const nextFrame = frames[(frameIndex + 1) % frames.length] || frame;
       const currentAt = Number(frame.at_ms || 0);
       const nextAt = Number(nextFrame.at_ms || 0);
@@ -2159,12 +2208,13 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
 </body>
 </html>"#,
         track_count = track_count,
-        input = input,
+        input = input_label,
+        input_title = input,
         generated_at = generated_at,
         browser_pixels = browser_pixels,
         initial_classes = initial_classes,
         first_token = first_token,
-        first_state = first_state,
+        first_state = first_state_html,
         writes_files = writes_files,
         mutates_renderer = mutates_renderer,
         pet_mutation = pet_mutation,
@@ -2984,7 +3034,9 @@ mod tests {
         assert!(html.contains("xiao_shu::soft_bounce::low"));
         assert!(html.contains("motion-soft-bounce"));
         assert!(html.contains("browser pixels=true"));
-        assert!(html.contains("writes_files=false mutates_renderer=false pet_package=false"));
+        assert!(html.contains("<span>writes_files=false</span>"));
+        assert!(html.contains("<span>mutates_renderer=false</span>"));
+        assert!(html.contains("<span>pet_package=false</span>"));
         assert!(html.contains("\"surface\":\"avatar_cortex_sidecar_renderer_view\""));
     }
 }
