@@ -16,6 +16,7 @@
 //!   - `GET /avatar-surface/cortex-motion?...` — gesture/mood/attention preview
 //!   - `GET /avatar-surface/cortex-renderer?...` — renderer slot mapping dry-run
 //!   - `GET /avatar-surface/cortex-renderer-registry?...` — renderer binding registry
+//!   - `GET /avatar-surface/cortex-binding-plan?...` — first safe binding plan
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
@@ -118,6 +119,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-renderer-registry",
             get(avatar_cortex_renderer_registry),
+        )
+        .route(
+            "/avatar-surface/cortex-binding-plan",
+            get(avatar_cortex_binding_plan),
         )
         .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
         .route(
@@ -605,6 +610,8 @@ async fn avatar_surface_panel(
         crate::avatar_cortex::avatar_cortex_renderer_preview_from_status(cortex.clone());
     let cortex_renderer_registry =
         crate::avatar_cortex::avatar_cortex_renderer_registry_from_status(cortex.clone());
+    let cortex_binding_plan =
+        crate::avatar_cortex::avatar_cortex_binding_plan_from_status(cortex.clone());
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
@@ -614,6 +621,7 @@ async fn avatar_surface_panel(
         &cortex_motion,
         &cortex_renderer,
         &cortex_renderer_registry,
+        &cortex_binding_plan,
         &report,
         unix_now(),
     )))
@@ -690,6 +698,19 @@ async fn avatar_cortex_renderer_registry(
     Query(q): Query<AvatarCortexStatusQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let payload = crate::avatar_cortex::avatar_cortex_renderer_registry(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_binding_plan(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_binding_plan(
         q.label.as_deref(),
         q.heartbeat_label.as_deref(),
         q.project.as_deref(),
@@ -1311,6 +1332,52 @@ fn avatar_surface_renderer_registry_html(registry_preview: &Value) -> String {
     )
 }
 
+fn avatar_surface_binding_plan_html(binding_plan_preview: &Value) -> String {
+    let plan = binding_plan_preview
+        .get("binding_plan")
+        .unwrap_or(&Value::Null);
+    let first = plan.get("first_candidate").unwrap_or(&Value::Null);
+    let current = plan.get("current").unwrap_or(&Value::Null);
+    let safety = plan.get("safety").unwrap_or(&Value::Null);
+    let selected = avatar_surface_html_json_value(plan.get("selected_count"), "0");
+    let deferred = avatar_surface_html_json_value(plan.get("deferred_count"), "0");
+    let first_token = avatar_surface_html_json_value(first.get("token"), "-");
+    let first_risk = avatar_surface_html_json_value(first.get("risk_level"), "-");
+    let current_token = avatar_surface_html_json_value(current.get("token"), "-");
+    let current_stage = avatar_surface_html_json_value(current.get("binding_stage"), "-");
+    let writes_files = avatar_surface_html_json_value(safety.get("writes_files"), "false");
+    let mutates_renderer = avatar_surface_html_json_value(safety.get("mutates_renderer"), "false");
+    let pet_mutation =
+        avatar_surface_html_json_value(safety.get("codex_pet_package_mutation"), "false");
+    let decision = avatar_surface_html_json_value(plan.get("decision"), "-");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">plan</span>
+        <strong>Xiao Shu Binding Plan</strong>
+        <span>selected={selected} deferred={deferred}</span>
+      </div>
+      <dl>
+        <div><dt>first</dt><dd>{first_token} risk={first_risk}</dd></div>
+        <div><dt>current</dt><dd>{current_token} stage={current_stage}</dd></div>
+        <div><dt>safety</dt><dd>writes_files={writes_files} mutates_renderer={mutates_renderer} pet_package={pet_mutation}</dd></div>
+        <div><dt>decision</dt><dd>{decision}</dd></div>
+      </dl>
+    </section>"#,
+        selected = selected,
+        deferred = deferred,
+        first_token = first_token,
+        first_risk = first_risk,
+        current_token = current_token,
+        current_stage = current_stage,
+        writes_files = writes_files,
+        mutates_renderer = mutates_renderer,
+        pet_mutation = pet_mutation,
+        decision = decision,
+    )
+}
+
 fn avatar_surface_payload(q: &AvatarSurfaceQuery, avatars: Vec<Value>, generated_at: i64) -> Value {
     json!({
         "agent_avatar_protocol": crate::avatar_surface::AGENT_AVATAR_PROTOCOL_VERSION,
@@ -1336,6 +1403,7 @@ fn avatar_surface_panel_html(
     cortex_motion: &Value,
     cortex_renderer: &Value,
     cortex_renderer_registry: &Value,
+    cortex_binding_plan: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -1390,6 +1458,7 @@ fn avatar_surface_panel_html(
     let motion_html = avatar_surface_motion_html(cortex_motion);
     let renderer_html = avatar_surface_renderer_html(cortex_renderer);
     let renderer_registry_html = avatar_surface_renderer_registry_html(cortex_renderer_registry);
+    let binding_plan_html = avatar_surface_binding_plan_html(cortex_binding_plan);
 
     format!(
         r#"<!doctype html>
@@ -1597,6 +1666,7 @@ fn avatar_surface_panel_html(
     {motion_html}
     {renderer_html}
     {renderer_registry_html}
+    {binding_plan_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -1616,6 +1686,7 @@ fn avatar_surface_panel_html(
         motion_html = motion_html,
         renderer_html = renderer_html,
         renderer_registry_html = renderer_registry_html,
+        binding_plan_html = binding_plan_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -1939,6 +2010,8 @@ mod tests {
             crate::avatar_cortex::avatar_cortex_renderer_preview_from_status(cortex.clone());
         let renderer_registry =
             crate::avatar_cortex::avatar_cortex_renderer_registry_from_status(cortex.clone());
+        let binding_plan =
+            crate::avatar_cortex::avatar_cortex_binding_plan_from_status(cortex.clone());
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
@@ -1948,6 +2021,7 @@ mod tests {
             &motion,
             &renderer,
             &renderer_registry,
+            &binding_plan,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -1962,6 +2036,11 @@ mod tests {
         assert!(html.contains("Xiao Shu Renderer"));
         assert!(html.contains("Xiao Shu Renderer Registry"));
         assert!(html.contains("known=5 candidate=2 review=3 fallback=1"));
+        assert!(html.contains("Xiao Shu Binding Plan"));
+        assert!(html.contains("selected=2 deferred=4"));
+        assert!(html.contains("first"));
+        assert!(html.contains("xiao_shu::soft_bounce::low risk=low"));
+        assert!(html.contains("writes_files=false mutates_renderer=false pet_package=false"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));

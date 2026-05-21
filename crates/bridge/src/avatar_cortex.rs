@@ -1165,6 +1165,148 @@ pub fn avatar_cortex_renderer_registry(
     Ok(avatar_cortex_renderer_registry_from_status(status))
 }
 
+fn avatar_cortex_binding_plan_entry(entry: &Value, selected: bool) -> Value {
+    let token = vstr(entry.get("token")).unwrap_or("unknown");
+    let binding_stage = vstr(entry.get("binding_stage")).unwrap_or("unknown");
+    let risk_level = vstr(entry.get("risk_level")).unwrap_or("unknown");
+    let reason = if selected {
+        "low-risk resolved candidate with explicit visual evidence"
+    } else if binding_stage == "fallback_only" {
+        "fallback policy is not a named renderer binding"
+    } else {
+        "requires manual review before renderer binding"
+    };
+
+    json!({
+        "token": token,
+        "resolved": entry.get("resolved").cloned().unwrap_or(Value::Null),
+        "target": entry.get("target").cloned().unwrap_or(Value::Null),
+        "binding_stage": binding_stage,
+        "risk_level": risk_level,
+        "visual_intent": entry.get("visual_intent").cloned().unwrap_or(Value::Null),
+        "recommended_next_step": entry.get("recommended_next_step").cloned().unwrap_or(Value::Null),
+        "selection": if selected { "selected" } else { "deferred" },
+        "reason": reason,
+    })
+}
+
+fn avatar_cortex_binding_plan_from_registry(registry_preview: Value) -> Value {
+    let registry = registry_preview.get("registry").unwrap_or(&Value::Null);
+    let mut selected = Vec::new();
+    let mut deferred = Vec::new();
+    if let Some(entries) = registry.get("entries").and_then(Value::as_array) {
+        for entry in entries {
+            let is_candidate = vstr(entry.get("binding_stage")) == Some("candidate");
+            let is_low_risk = vstr(entry.get("risk_level")) == Some("low");
+            let resolved = entry
+                .get("resolved")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if is_candidate && is_low_risk && resolved {
+                selected.push(avatar_cortex_binding_plan_entry(entry, true));
+            } else {
+                deferred.push(avatar_cortex_binding_plan_entry(entry, false));
+            }
+        }
+    }
+    if let Some(fallback) = registry.get("fallback_policy") {
+        deferred.push(avatar_cortex_binding_plan_entry(fallback, false));
+    }
+
+    let first = selected.first().cloned().unwrap_or(Value::Null);
+    let current = registry.get("current").cloned().unwrap_or(Value::Null);
+    let selected_count = selected.len();
+    let deferred_count = deferred.len();
+
+    json!({
+        "surface": "avatar_cortex_binding_plan",
+        "schema": 1,
+        "read_only": true,
+        "dry_run": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "binding_plan": {
+            "schema": 1,
+            "contract": "xiao_shu_renderer_slots_v1",
+            "decision": "bind only low-risk resolved candidates first; keep review and fallback tokens deferred",
+            "selected_count": selected_count,
+            "deferred_count": deferred_count,
+            "first_candidate": first,
+            "selected": selected,
+            "deferred": deferred,
+            "current": current,
+            "phases": [
+                {
+                    "id": "sidecar_renderer_slot_contract_snapshot",
+                    "action": "freeze the selected slot contract as a local sidecar preview fixture",
+                    "validation": "CLI, HTTP, and panel surfaces expose identical selected tokens",
+                    "rollback": "drop the fixture and continue serving registry-only dry-runs"
+                },
+                {
+                    "id": "local_preview_fixture_golden_payload",
+                    "action": "generate golden payloads for soft_bounce and idle_breathe without touching assets",
+                    "validation": "focused tests prove writes_files=false and mutates_renderer=false",
+                    "rollback": "remove golden payloads; motion semantics remain unchanged"
+                },
+                {
+                    "id": "manual_visual_qa_panel_desktop_adapter",
+                    "action": "review the selected motions in a desktop adapter or panel preview before package binding",
+                    "validation": "soft_bounce returns to idle within two seconds and idle_breathe remains subtle",
+                    "rollback": "map the token back to idle_breathe in the adapter layer"
+                },
+                {
+                    "id": "optional_official_package_binding_after_approval",
+                    "action": "only after explicit approval, bind accepted motions into an official Codex-compatible package",
+                    "validation": "official package validation and contact-sheet QA pass",
+                    "rollback": "restore the previously installed package and keep sidecar semantics intact"
+                }
+            ],
+            "validation_checklist": [
+                "no official Pet package mutation in this phase",
+                "CLI, HTTP, and panel smoke checks all read the same plan",
+                "renderer slot fallback remains neutral idle",
+                "low-risk candidates return to idle within two seconds",
+                "needs_review and fallback_only tokens remain deferred"
+            ],
+            "rollback_points": [
+                "disable selected token mapping in the adapter",
+                "fall back to xiao_shu::idle_breathe::low",
+                "remove adapter binding without changing cortex state",
+                "keep registry and motion semantics as the source of truth"
+            ],
+            "safety": {
+                "read_only": true,
+                "dry_run": true,
+                "sidecar_only": true,
+                "writes_files": false,
+                "mutates_renderer": false,
+                "codex_pet_package_mutation": false,
+                "requires_human_approval": true
+            }
+        },
+        "registry": registry_preview,
+    })
+}
+
+pub(crate) fn avatar_cortex_binding_plan_from_status(status: Value) -> Value {
+    let registry = avatar_cortex_renderer_registry_from_status(status);
+    avatar_cortex_binding_plan_from_registry(registry)
+}
+
+pub fn avatar_cortex_binding_plan(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_binding_plan_from_status(status))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
@@ -2194,6 +2336,51 @@ mod tests {
         );
         assert_eq!(registry["registry"]["current"]["binding_stage"], "candidate");
         assert_eq!(registry["registry"]["current"]["risk_level"], "low");
+    }
+
+    #[test]
+    fn avatar_cortex_binding_plan_selects_low_risk_candidates() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        assert_eq!(plan["surface"], "avatar_cortex_binding_plan");
+        assert_eq!(plan["read_only"], true);
+        assert_eq!(plan["writes_files"], false);
+        assert_eq!(plan["mutates_renderer"], false);
+        assert_eq!(plan["codex_pet_package_mutation"], false);
+        assert_eq!(plan["binding_plan"]["selected_count"], 2);
+        assert_eq!(plan["binding_plan"]["deferred_count"], 4);
+        assert_eq!(
+            plan["binding_plan"]["first_candidate"]["token"],
+            "xiao_shu::soft_bounce::low"
+        );
+        assert_eq!(
+            plan["binding_plan"]["selected"][1]["token"],
+            "xiao_shu::idle_breathe::low"
+        );
+        assert_eq!(
+            plan["binding_plan"]["safety"]["requires_human_approval"],
+            true
+        );
+    }
+
+    #[test]
+    fn avatar_cortex_binding_plan_defers_review_and_fallback_tokens() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let deferred = plan["binding_plan"]["deferred"].as_array().unwrap();
+        assert!(deferred.iter().any(|entry| {
+            entry["token"] == "xiao_shu::sorting_glow::medium"
+                && entry["reason"] == "requires manual review before renderer binding"
+        }));
+        assert!(deferred.iter().any(|entry| {
+            entry["token"] == "xiao_shu::unknown::fallback"
+                && entry["reason"] == "fallback policy is not a named renderer binding"
+        }));
+        assert!(plan["binding_plan"]["validation_checklist"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "needs_review and fallback_only tokens remain deferred"));
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {

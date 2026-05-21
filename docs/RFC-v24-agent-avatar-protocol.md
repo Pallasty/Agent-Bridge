@@ -486,6 +486,13 @@ risk level, review questions, binding stage, and the recommended next step.
 `/avatar-surface/cortex-renderer-registry` summarize those mappings as a
 read-only candidate registry with counts by binding stage and risk level plus
 the current live renderer token.
+`avatar cortex-binding-plan` and `/avatar-surface/cortex-binding-plan` turn the
+registry into the first safe implementation plan. They select only low-risk
+resolved candidates, defer `needs_review` and fallback tokens, and expose the
+phases, validation checklist, rollback points, and safety flags required before
+any real renderer binding. The surface remains read-only and reports
+`writes_files=false`, `mutates_renderer=false`, and
+`codex_pet_package_mutation=false`.
 `avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
 as a dedicated read-only surface with `emits_audio=false`,
 `emits_notification=false`, and `requires_explicit_emit_gate=true`.
@@ -572,6 +579,7 @@ external watchdogs and non-MCP clients.
 | `agent-bridge avatar cortex-motion` | Gesture/mood/attention semantics are visible without renderer mutation or official Pet package changes |
 | `agent-bridge avatar cortex-renderer` | Renderer slot mapping is visible as a dry-run without writing files or mutating assets |
 | `agent-bridge avatar cortex-renderer-registry` | Renderer token candidates and review stages are visible as a read-only registry |
+| `agent-bridge avatar cortex-binding-plan` | First safe renderer binding candidates, validation gates, and rollback points are visible without mutation |
 | `agent-bridge avatar cortex-preview` | Voice preview text is visible without emitting audio or notifications |
 | `agent-bridge avatar cortex-voice-gate` | Explicit voice-gate dry-run reports whether a future emit would pass, without emitting audio |
 | `agent-bridge avatar cortex-voice-emit` | CLI-only manual voice adapter can speak one gated line and record cooldown state |
@@ -587,6 +595,7 @@ external watchdogs and non-MCP clients.
 | daemon HTTP `/avatar-surface/cortex-motion` | Same gesture/mood/attention preview is available to browser and non-MCP clients without renderer mutation |
 | daemon HTTP `/avatar-surface/cortex-renderer` | Same renderer slot mapping dry-run is available to browser and non-MCP clients without asset mutation |
 | daemon HTTP `/avatar-surface/cortex-renderer-registry` | Same renderer token registry is available to browser and non-MCP clients without asset mutation |
+| daemon HTTP `/avatar-surface/cortex-binding-plan` | Same first-binding plan is available to browser and non-MCP clients without asset mutation |
 | daemon HTTP `/avatar-surface/cortex-preview` | Same voice preview is available to browser and non-MCP clients without emission |
 | daemon HTTP `/avatar-surface/cortex-voice-gate` | Same explicit voice-gate dry-run is available to browser and non-MCP clients without emission |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |
