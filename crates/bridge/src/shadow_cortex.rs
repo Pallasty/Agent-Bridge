@@ -11,6 +11,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const SIGNAL_SCHEMA_VERSION: u8 = 1;
 const SHORT_TTL_SECS: u64 = 3_600;
 const LONG_TTL_SECS: u64 = 86_400;
+const SALIENCE_SATURATION_TOP_K: usize = 4;
+const HEURISTIC_SALIENCE_SATURATION_THRESHOLD: f64 = 0.75;
+const SEED_SHADOW_SALIENCE_SATURATION_THRESHOLD: f64 = 0.945;
 
 #[derive(Debug, Clone)]
 pub struct ShadowCortexOptions {
@@ -152,6 +155,9 @@ pub struct ShadowCortexLaneCoverage {
     pub coverage: f64,
     pub unique_salience_values: usize,
     pub rank_tie_state: String,
+    pub salience_saturation_state: String,
+    pub top_k_cap_hits: usize,
+    pub top_k_size: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -517,13 +523,16 @@ pub fn print_shadow_cortex_report(report: &ShadowCortexReport, input_path: &Path
             println!("Coverage:");
             for lane in &report.comparison.lane_coverage {
                 println!(
-                    "- {}: {} ({}/{}, {:.0}%) rank_tie={}",
+                    "- {}: {} ({}/{}, {:.0}%) rank_tie={} saturation={} top_k_cap_hits={}/{}",
                     lane.lane,
                     lane.state,
                     lane.covered_events,
                     lane.total_events,
                     lane.coverage * 100.0,
-                    lane.rank_tie_state
+                    lane.rank_tie_state,
+                    lane.salience_saturation_state,
+                    lane.top_k_cap_hits,
+                    lane.top_k_size
                 );
             }
         }
@@ -1039,12 +1048,18 @@ fn build_shadow_comparison(
                 .to_string(),
         );
     }
+    if salience_saturation_is_guarded(&seed_shadow) || salience_saturation_is_guarded(&heuristic) {
+        notes.push(
+            "top-K salience saturation guardrail is active; inspect capped signals before treating rank order as evidence"
+                .to_string(),
+        );
+    }
     notes.push(
         "seed_shadow is deterministic and shadow-only; no Seed runtime was called".to_string(),
     );
 
     ShadowCortexComparison {
-        verdict: comparison_verdict(&fixture.events, &seed_shadow),
+        verdict: comparison_verdict(&fixture.events, &heuristic, &seed_shadow),
         notes,
         lane_coverage,
         rank_deltas: rank_deltas(heuristic_signals, seed_shadow_signals, 12),
@@ -1083,6 +1098,8 @@ fn lane_coverage(
     } else {
         "ok"
     };
+    let (salience_saturation_state, top_k_cap_hits, top_k_size) =
+        classify_salience_saturation(lane, signals);
     let state = if !enabled {
         "not_enabled"
     } else if total_events == 0 {
@@ -1104,11 +1121,55 @@ fn lane_coverage(
         coverage,
         unique_salience_values,
         rank_tie_state: rank_tie_state.to_string(),
+        salience_saturation_state: salience_saturation_state.to_string(),
+        top_k_cap_hits,
+        top_k_size,
     }
+}
+
+fn classify_salience_saturation(
+    lane: &str,
+    signals: &[AgentAttentionSignal],
+) -> (&'static str, usize, usize) {
+    let mut saliences: Vec<f64> = signals.iter().map(|signal| signal.salience).collect();
+    saliences.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    let top_k_size = saliences.len().min(SALIENCE_SATURATION_TOP_K);
+    if top_k_size == 0 {
+        return ("ok", 0, 0);
+    }
+
+    let saturation_threshold = match lane {
+        "seed_shadow" => SEED_SHADOW_SALIENCE_SATURATION_THRESHOLD,
+        _ => HEURISTIC_SALIENCE_SATURATION_THRESHOLD,
+    };
+    let cap_hits = saliences
+        .iter()
+        .take(top_k_size)
+        .filter(|salience| **salience >= saturation_threshold)
+        .count();
+    let cap_hit_fraction = cap_hits as f64 / top_k_size as f64;
+    let state = if top_k_size >= 3 && cap_hits == top_k_size {
+        "fully_saturated_top_k"
+    } else if top_k_size >= 4 && cap_hit_fraction >= 0.5 {
+        "majority_saturated_top_k"
+    } else if cap_hits >= 2 {
+        "partial_saturated_top_k"
+    } else {
+        "ok"
+    };
+    (state, cap_hits, top_k_size)
+}
+
+fn salience_saturation_is_guarded(lane: &ShadowCortexLaneCoverage) -> bool {
+    matches!(
+        lane.salience_saturation_state.as_str(),
+        "fully_saturated_top_k" | "majority_saturated_top_k"
+    )
 }
 
 fn comparison_verdict(
     events: &[ShadowCortexEvent],
+    heuristic: &ShadowCortexLaneCoverage,
     seed_shadow: &ShadowCortexLaneCoverage,
 ) -> String {
     if events.is_empty() {
@@ -1119,6 +1180,10 @@ fn comparison_verdict(
         "insufficient_coverage".to_string()
     } else if seed_shadow.rank_tie_state != "ok" {
         "rank_tie_guarded".to_string()
+    } else if salience_saturation_is_guarded(seed_shadow)
+        || salience_saturation_is_guarded(heuristic)
+    {
+        "salience_saturation_guarded".to_string()
     } else {
         "seed_shadow_ready_for_review".to_string()
     }
@@ -1805,7 +1870,14 @@ mod tests {
         fixture.events = encode_shadow_events(&fixture);
         let report = build_shadow_cortex_report_from_fixture(&fixture, 10).expect("report");
         assert!(!report.seed_shadow_signals.is_empty());
-        assert_eq!(report.comparison.verdict, "seed_shadow_ready_for_review");
+        assert_eq!(report.comparison.verdict, "salience_saturation_guarded");
+        let heuristic = report
+            .comparison
+            .lane_coverage
+            .iter()
+            .find(|lane| lane.lane == "heuristic")
+            .expect("heuristic lane");
+        assert!(salience_saturation_is_guarded(heuristic));
         let seed = report
             .comparison
             .lane_coverage
@@ -1814,6 +1886,7 @@ mod tests {
             .expect("seed shadow lane");
         assert_eq!(seed.state, "covered");
         assert_eq!(seed.covered_events, seed.total_events);
+        assert_eq!(seed.salience_saturation_state, "ok");
     }
 
     #[test]
@@ -1823,7 +1896,7 @@ mod tests {
         let report = build_shadow_cortex_report_from_fixture(&fixture, 10).expect("report");
         let summary = weekly_summary(&report);
 
-        assert_eq!(summary.verdict, "seed_shadow_ready_for_review");
+        assert_eq!(summary.verdict, "salience_saturation_guarded");
         assert_eq!(summary.total_events, fixture.events.len());
         assert!(summary.top_signal.is_some());
         assert!(summary.seed_shadow_top_signal.is_some());
@@ -1840,7 +1913,7 @@ mod tests {
         let coverage = lane_coverage("seed_shadow", &fixture.events, &[], true);
         assert_eq!(coverage.state, "ablation_state");
         assert_eq!(
-            comparison_verdict(&fixture.events, &coverage),
+            comparison_verdict(&fixture.events, &coverage, &coverage),
             "ablation_state"
         );
     }
@@ -1900,7 +1973,10 @@ mod tests {
         let coverage = lane_coverage("seed_shadow", &events, &signals, true);
         assert_eq!(coverage.state, "covered");
         assert_eq!(coverage.rank_tie_state, "degenerate_rank_tie");
-        assert_eq!(comparison_verdict(&events, &coverage), "rank_tie_guarded");
+        assert_eq!(
+            comparison_verdict(&events, &coverage, &coverage),
+            "rank_tie_guarded"
+        );
     }
 
     #[test]
@@ -1937,7 +2013,93 @@ mod tests {
         let coverage = lane_coverage("seed_shadow", &events, &signals, true);
         assert_eq!(coverage.state, "covered");
         assert_eq!(coverage.rank_tie_state, "low_resolution_rank_tie");
-        assert_eq!(comparison_verdict(&events, &coverage), "rank_tie_guarded");
+        assert_eq!(
+            comparison_verdict(&events, &coverage, &coverage),
+            "rank_tie_guarded"
+        );
+    }
+
+    #[test]
+    fn coverage_guardrail_detects_top_k_salience_saturation() {
+        let mut events = Vec::new();
+        let mut signals = Vec::new();
+        let saliences = [0.77, 0.77, 0.77, 0.77, 0.70, 0.69, 0.68, 0.67];
+        for (idx, salience) in saliences.iter().enumerate() {
+            let subject = format!("tool_{idx}");
+            let event_id = format!("mcp_dispatch:{subject}:latency");
+            events.push(shadow_event(
+                event_id.clone(),
+                1,
+                "mcp_dispatch",
+                SignalScope::Tool,
+                &subject,
+                json!({"p95_ms": 3_500 + idx}),
+            ));
+            signals.push(signal(
+                1,
+                SignalScope::Tool,
+                subject,
+                SignalType::Opportunity,
+                *salience,
+                &["probe"],
+                vec![event_id],
+                SHORT_TTL_SECS,
+                json!({}),
+                &[],
+                0.5,
+                "probe",
+                "probe",
+            ));
+        }
+        let coverage = lane_coverage("heuristic", &events, &signals, true);
+        assert_eq!(coverage.state, "covered");
+        assert_eq!(coverage.rank_tie_state, "ok");
+        assert_eq!(coverage.salience_saturation_state, "fully_saturated_top_k");
+        assert_eq!(coverage.top_k_cap_hits, 4);
+        assert_eq!(coverage.top_k_size, 4);
+        assert_eq!(
+            comparison_verdict(&events, &coverage, &coverage),
+            "salience_saturation_guarded"
+        );
+    }
+
+    #[test]
+    fn seed_shadow_saturation_uses_seed_shadow_cap() {
+        let mut events = Vec::new();
+        let mut signals = Vec::new();
+        let saliences = [0.94, 0.93, 0.86, 0.80];
+        for (idx, salience) in saliences.iter().enumerate() {
+            let subject = format!("tool_{idx}");
+            let event_id = format!("mcp_dispatch:{subject}:errors");
+            events.push(shadow_event(
+                event_id.clone(),
+                1,
+                "mcp_dispatch",
+                SignalScope::Tool,
+                &subject,
+                json!({"error_rate": 0.3}),
+            ));
+            signals.push(signal(
+                1,
+                SignalScope::Tool,
+                subject,
+                SignalType::Risk,
+                *salience,
+                &["probe"],
+                vec![event_id],
+                SHORT_TTL_SECS,
+                json!({}),
+                &[],
+                0.5,
+                "probe",
+                "probe",
+            ));
+        }
+        let coverage = lane_coverage("seed_shadow", &events, &signals, true);
+        assert_eq!(coverage.state, "covered");
+        assert_eq!(coverage.rank_tie_state, "ok");
+        assert_eq!(coverage.salience_saturation_state, "ok");
+        assert_eq!(coverage.top_k_cap_hits, 0);
     }
 
     #[test]
