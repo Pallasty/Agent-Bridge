@@ -1015,6 +1015,86 @@ fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
     })
 }
 
+fn avatar_cortex_renderer_known_tokens() -> Vec<&'static str> {
+    vec![
+        "xiao_shu::soft_bounce::low",
+        "xiao_shu::idle_breathe::low",
+        "xiao_shu::sorting_glow::medium",
+        "xiao_shu::look_sideways::medium",
+        "xiao_shu::alert_peek::medium",
+    ]
+}
+
+fn avatar_cortex_renderer_registry_entry(renderer_token: &str) -> Value {
+    let mapping = avatar_cortex_renderer_mapping(renderer_token);
+    let target = mapping.get("target").cloned().unwrap_or(Value::Null);
+    let evidence = mapping.get("evidence").unwrap_or(&Value::Null);
+    json!({
+        "token": renderer_token,
+        "resolved": mapping.get("resolved").cloned().unwrap_or(Value::Null),
+        "target": target,
+        "binding_stage": evidence.get("binding_stage").cloned().unwrap_or(Value::Null),
+        "risk_level": evidence.get("risk_level").cloned().unwrap_or(Value::Null),
+        "visual_intent": evidence.get("visual_intent").cloned().unwrap_or(Value::Null),
+        "recommended_next_step": evidence.get("recommended_next_step").cloned().unwrap_or(Value::Null),
+    })
+}
+
+fn avatar_cortex_renderer_registry_payload(current: Option<Value>) -> Value {
+    let entries: Vec<Value> = avatar_cortex_renderer_known_tokens()
+        .into_iter()
+        .map(avatar_cortex_renderer_registry_entry)
+        .collect();
+    let fallback_policy = avatar_cortex_renderer_registry_entry("xiao_shu::unknown::fallback");
+    let mut stage_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut risk_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for entry in entries.iter().chain(std::iter::once(&fallback_policy)) {
+        let stage = vstr(entry.get("binding_stage")).unwrap_or("unknown");
+        let risk = vstr(entry.get("risk_level")).unwrap_or("unknown");
+        *stage_counts.entry(stage.to_string()).or_default() += 1;
+        *risk_counts.entry(risk.to_string()).or_default() += 1;
+    }
+
+    let current_renderer = current
+        .as_ref()
+        .and_then(|value| value.get("renderer"))
+        .unwrap_or(&Value::Null);
+    let current_mapping = current_renderer.get("mapping").unwrap_or(&Value::Null);
+    let current_evidence = current_mapping.get("evidence").unwrap_or(&Value::Null);
+
+    json!({
+        "surface": "avatar_cortex_renderer_registry",
+        "schema": 1,
+        "read_only": true,
+        "dry_run": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "registry": {
+            "schema": 1,
+            "contract": "xiao_shu_renderer_slots_v1",
+            "known_token_count": entries.len(),
+            "entries": entries,
+            "fallback_policy": fallback_policy,
+            "stage_counts": stage_counts,
+            "risk_counts": risk_counts,
+            "current": {
+                "token": current_mapping.get("input_token").cloned().unwrap_or(Value::Null),
+                "resolved": current_mapping.get("resolved").cloned().unwrap_or(Value::Null),
+                "binding_stage": current_evidence.get("binding_stage").cloned().unwrap_or(Value::Null),
+                "risk_level": current_evidence.get("risk_level").cloned().unwrap_or(Value::Null),
+            },
+        },
+        "renderer": current_renderer.clone(),
+        "source_status": current
+            .as_ref()
+            .and_then(|value| value.get("source_status"))
+            .cloned()
+            .unwrap_or(Value::Null),
+    })
+}
+
 pub(crate) fn avatar_cortex_renderer_preview_from_status(status: Value) -> Value {
     let motion_preview = avatar_cortex_motion_preview_from_status(status.clone());
     let motion = motion_preview
@@ -1068,6 +1148,21 @@ pub fn avatar_cortex_renderer_preview(
 ) -> Result<Value> {
     let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
     Ok(avatar_cortex_renderer_preview_from_status(status))
+}
+
+pub(crate) fn avatar_cortex_renderer_registry_from_status(status: Value) -> Value {
+    let renderer = avatar_cortex_renderer_preview_from_status(status);
+    avatar_cortex_renderer_registry_payload(Some(renderer))
+}
+
+pub fn avatar_cortex_renderer_registry(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_renderer_registry_from_status(status))
 }
 
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
@@ -2042,6 +2137,63 @@ mod tests {
         assert_eq!(mapping["target"]["motion_slot"], "idle_breathe");
         assert_eq!(mapping["evidence"]["binding_stage"], "fallback_only");
         assert_eq!(mapping["evidence"]["risk_level"], "high");
+    }
+
+    #[test]
+    fn avatar_cortex_renderer_registry_counts_binding_stages() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        assert_eq!(registry["surface"], "avatar_cortex_renderer_registry");
+        assert_eq!(registry["read_only"], true);
+        assert_eq!(registry["writes_files"], false);
+        assert_eq!(registry["registry"]["known_token_count"], 5);
+        assert_eq!(registry["registry"]["stage_counts"]["candidate"], 2);
+        assert_eq!(registry["registry"]["stage_counts"]["needs_review"], 3);
+        assert_eq!(registry["registry"]["stage_counts"]["fallback_only"], 1);
+        assert_eq!(registry["registry"]["risk_counts"]["low"], 2);
+        assert_eq!(registry["registry"]["risk_counts"]["medium"], 3);
+        assert_eq!(registry["registry"]["risk_counts"]["high"], 1);
+    }
+
+    #[test]
+    fn avatar_cortex_renderer_registry_tracks_current_token() {
+        let status = json!({
+            "surface": "avatar_cortex_status",
+            "project": "agent-bridge",
+            "label": "com.agentbridge.avatar-cortex.agent-bridge",
+            "heartbeat_label": "com.agentbridge.avatar-heartbeat.agent-bridge",
+            "launchd": {"loaded": true},
+            "snapshot": {"total_rows": 1},
+            "events": {
+                "records_count": 3,
+                "unhealthy_count": 0,
+                "latest": {
+                    "status": "healthy",
+                    "healthy": true,
+                    "reason": "unchanged",
+                    "ts": 300
+                },
+                "recent": [
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 100},
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 200},
+                    {"status": "healthy", "healthy": true, "reason": "unchanged", "ts": 300}
+                ]
+            },
+            "trend": {
+                "step_records_delta": 0,
+                "snapshot_event_lag_secs": 0,
+                "learning_state": {
+                    "state": "caught_up",
+                    "reason": "step_matches_records"
+                }
+            }
+        });
+        let registry = avatar_cortex_renderer_registry_from_status(status);
+        assert_eq!(
+            registry["registry"]["current"]["token"],
+            "xiao_shu::soft_bounce::low"
+        );
+        assert_eq!(registry["registry"]["current"]["binding_stage"], "candidate");
+        assert_eq!(registry["registry"]["current"]["risk_level"], "low");
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {

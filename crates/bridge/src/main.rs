@@ -713,6 +713,24 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Show the renderer binding candidate registry without mutating renderer assets.
+    CortexRendererRegistry {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2340,6 +2358,22 @@ async fn main() -> Result<()> {
                 json: as_json,
             } => {
                 run_avatar_cortex_renderer(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexRendererRegistry {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_renderer_registry(
                     label.clone(),
                     heartbeat_label.clone(),
                     project.clone(),
@@ -4203,6 +4237,52 @@ async fn run_avatar_cortex_renderer(
         avatar_health_display(safety.get("writes_files"), "false"),
         avatar_health_display(safety.get("mutates_renderer"), "false"),
         avatar_health_display(safety.get("codex_pet_package_mutation"), "false")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_renderer_registry(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_registry(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let registry = payload.get("registry").unwrap_or(&Value::Null);
+    let current = registry.get("current").unwrap_or(&Value::Null);
+    let stage_counts = registry.get("stage_counts").unwrap_or(&Value::Null);
+    let risk_counts = registry.get("risk_counts").unwrap_or(&Value::Null);
+    println!("avatar cortex renderer registry");
+    println!(
+        "known={} candidate={} needs_review={} fallback={}",
+        avatar_health_display(registry.get("known_token_count"), "0"),
+        avatar_health_display(stage_counts.get("candidate"), "0"),
+        avatar_health_display(stage_counts.get("needs_review"), "0"),
+        avatar_health_display(stage_counts.get("fallback_only"), "0")
+    );
+    println!(
+        "risk_low={} risk_medium={} risk_high={}",
+        avatar_health_display(risk_counts.get("low"), "0"),
+        avatar_health_display(risk_counts.get("medium"), "0"),
+        avatar_health_display(risk_counts.get("high"), "0")
+    );
+    println!(
+        "current={} stage={} risk={}",
+        avatar_health_display(current.get("token"), "-"),
+        avatar_health_display(current.get("binding_stage"), "-"),
+        avatar_health_display(current.get("risk_level"), "-")
     );
     Ok(())
 }

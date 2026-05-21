@@ -15,6 +15,7 @@
 //!   - `GET /avatar-surface/cortex-language?...` — dynamic language preview
 //!   - `GET /avatar-surface/cortex-motion?...` — gesture/mood/attention preview
 //!   - `GET /avatar-surface/cortex-renderer?...` — renderer slot mapping dry-run
+//!   - `GET /avatar-surface/cortex-renderer-registry?...` — renderer binding registry
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
@@ -113,6 +114,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-renderer",
             get(avatar_cortex_renderer),
+        )
+        .route(
+            "/avatar-surface/cortex-renderer-registry",
+            get(avatar_cortex_renderer_registry),
         )
         .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
         .route(
@@ -598,6 +603,8 @@ async fn avatar_surface_panel(
         crate::avatar_cortex::avatar_cortex_motion_preview_from_status(cortex.clone());
     let cortex_renderer =
         crate::avatar_cortex::avatar_cortex_renderer_preview_from_status(cortex.clone());
+    let cortex_renderer_registry =
+        crate::avatar_cortex::avatar_cortex_renderer_registry_from_status(cortex.clone());
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
@@ -606,6 +613,7 @@ async fn avatar_surface_panel(
         &cortex_language,
         &cortex_motion,
         &cortex_renderer,
+        &cortex_renderer_registry,
         &report,
         unix_now(),
     )))
@@ -669,6 +677,19 @@ async fn avatar_cortex_renderer(
     Query(q): Query<AvatarCortexStatusQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let payload = crate::avatar_cortex::avatar_cortex_renderer_preview(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_renderer_registry(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_registry(
         q.label.as_deref(),
         q.heartbeat_label.as_deref(),
         q.project.as_deref(),
@@ -1249,6 +1270,47 @@ fn avatar_surface_renderer_html(renderer_preview: &Value) -> String {
     )
 }
 
+fn avatar_surface_renderer_registry_html(registry_preview: &Value) -> String {
+    let registry = registry_preview.get("registry").unwrap_or(&Value::Null);
+    let current = registry.get("current").unwrap_or(&Value::Null);
+    let stage_counts = registry.get("stage_counts").unwrap_or(&Value::Null);
+    let risk_counts = registry.get("risk_counts").unwrap_or(&Value::Null);
+    let known = avatar_surface_html_json_value(registry.get("known_token_count"), "0");
+    let candidate = avatar_surface_html_json_value(stage_counts.get("candidate"), "0");
+    let needs_review = avatar_surface_html_json_value(stage_counts.get("needs_review"), "0");
+    let fallback = avatar_surface_html_json_value(stage_counts.get("fallback_only"), "0");
+    let risk_low = avatar_surface_html_json_value(risk_counts.get("low"), "0");
+    let risk_medium = avatar_surface_html_json_value(risk_counts.get("medium"), "0");
+    let risk_high = avatar_surface_html_json_value(risk_counts.get("high"), "0");
+    let current_token = avatar_surface_html_json_value(current.get("token"), "-");
+    let current_stage = avatar_surface_html_json_value(current.get("binding_stage"), "-");
+    let current_risk = avatar_surface_html_json_value(current.get("risk_level"), "-");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">registry</span>
+        <strong>Xiao Shu Renderer Registry</strong>
+        <span>known={known} candidate={candidate} review={needs_review} fallback={fallback}</span>
+      </div>
+      <dl>
+        <div><dt>risk</dt><dd>low={risk_low} medium={risk_medium} high={risk_high}</dd></div>
+        <div><dt>current</dt><dd>{current_token} stage={current_stage} risk={current_risk}</dd></div>
+      </dl>
+    </section>"#,
+        known = known,
+        candidate = candidate,
+        needs_review = needs_review,
+        fallback = fallback,
+        risk_low = risk_low,
+        risk_medium = risk_medium,
+        risk_high = risk_high,
+        current_token = current_token,
+        current_stage = current_stage,
+        current_risk = current_risk,
+    )
+}
+
 fn avatar_surface_payload(q: &AvatarSurfaceQuery, avatars: Vec<Value>, generated_at: i64) -> Value {
     json!({
         "agent_avatar_protocol": crate::avatar_surface::AGENT_AVATAR_PROTOCOL_VERSION,
@@ -1273,6 +1335,7 @@ fn avatar_surface_panel_html(
     cortex_language: &Value,
     cortex_motion: &Value,
     cortex_renderer: &Value,
+    cortex_renderer_registry: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -1326,6 +1389,7 @@ fn avatar_surface_panel_html(
     let language_html = avatar_surface_language_html(cortex_language);
     let motion_html = avatar_surface_motion_html(cortex_motion);
     let renderer_html = avatar_surface_renderer_html(cortex_renderer);
+    let renderer_registry_html = avatar_surface_renderer_registry_html(cortex_renderer_registry);
 
     format!(
         r#"<!doctype html>
@@ -1532,6 +1596,7 @@ fn avatar_surface_panel_html(
     {language_html}
     {motion_html}
     {renderer_html}
+    {renderer_registry_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -1550,6 +1615,7 @@ fn avatar_surface_panel_html(
         language_html = language_html,
         motion_html = motion_html,
         renderer_html = renderer_html,
+        renderer_registry_html = renderer_registry_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -1871,6 +1937,8 @@ mod tests {
         let motion = crate::avatar_cortex::avatar_cortex_motion_preview_from_status(cortex.clone());
         let renderer =
             crate::avatar_cortex::avatar_cortex_renderer_preview_from_status(cortex.clone());
+        let renderer_registry =
+            crate::avatar_cortex::avatar_cortex_renderer_registry_from_status(cortex.clone());
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
@@ -1879,6 +1947,7 @@ mod tests {
             &language,
             &motion,
             &renderer,
+            &renderer_registry,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -1891,6 +1960,8 @@ mod tests {
         assert!(html.contains("Xiao Shu Language"));
         assert!(html.contains("Xiao Shu Motion"));
         assert!(html.contains("Xiao Shu Renderer"));
+        assert!(html.contains("Xiao Shu Renderer Registry"));
+        assert!(html.contains("known=5 candidate=2 review=3 fallback=1"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));
