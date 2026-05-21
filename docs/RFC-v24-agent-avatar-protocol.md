@@ -499,6 +499,12 @@ The surface emits slot-timeline golden payloads for `soft_bounce` and
 `idle_breathe`, per-token assertions, return-to-idle and under-2s acceptance
 gates, and the same mutation safety flags. These fixtures are review evidence
 for a later sidecar visual adapter, not official package writes.
+`avatar cortex-visual-adapter` and `/avatar-surface/cortex-visual-adapter`
+consume those fixtures and project each slot timeline into observable preview
+frames. The surface reports pose/expression/motion/accessory state labels,
+final-state checks, and acceptance summaries while keeping `renders_pixels=false`,
+`writes_files=false`, `mutates_renderer=false`, and
+`codex_pet_package_mutation=false`.
 `avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
 as a dedicated read-only surface with `emits_audio=false`,
 `emits_notification=false`, and `requires_explicit_emit_gate=true`.
@@ -587,6 +593,7 @@ external watchdogs and non-MCP clients.
 | `agent-bridge avatar cortex-renderer-registry` | Renderer token candidates and review stages are visible as a read-only registry |
 | `agent-bridge avatar cortex-binding-plan` | First safe renderer binding candidates, validation gates, and rollback points are visible without mutation |
 | `agent-bridge avatar cortex-binding-fixture` | Selected binding candidates are frozen as deterministic sidecar preview fixtures without mutation |
+| `agent-bridge avatar cortex-visual-adapter` | Fixture timelines become observable sidecar preview frames without pixel rendering or mutation |
 | `agent-bridge avatar cortex-preview` | Voice preview text is visible without emitting audio or notifications |
 | `agent-bridge avatar cortex-voice-gate` | Explicit voice-gate dry-run reports whether a future emit would pass, without emitting audio |
 | `agent-bridge avatar cortex-voice-emit` | CLI-only manual voice adapter can speak one gated line and record cooldown state |
@@ -604,6 +611,7 @@ external watchdogs and non-MCP clients.
 | daemon HTTP `/avatar-surface/cortex-renderer-registry` | Same renderer token registry is available to browser and non-MCP clients without asset mutation |
 | daemon HTTP `/avatar-surface/cortex-binding-plan` | Same first-binding plan is available to browser and non-MCP clients without asset mutation |
 | daemon HTTP `/avatar-surface/cortex-binding-fixture` | Same sidecar preview fixture payload is available to browser and non-MCP clients without asset mutation |
+| daemon HTTP `/avatar-surface/cortex-visual-adapter` | Same sidecar preview frame payload is available to browser and non-MCP clients without pixel rendering |
 | daemon HTTP `/avatar-surface/cortex-preview` | Same voice preview is available to browser and non-MCP clients without emission |
 | daemon HTTP `/avatar-surface/cortex-voice-gate` | Same explicit voice-gate dry-run is available to browser and non-MCP clients without emission |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |

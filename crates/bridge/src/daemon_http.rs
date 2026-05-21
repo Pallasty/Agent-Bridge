@@ -18,6 +18,7 @@
 //!   - `GET /avatar-surface/cortex-renderer-registry?...` — renderer binding registry
 //!   - `GET /avatar-surface/cortex-binding-plan?...` — first safe binding plan
 //!   - `GET /avatar-surface/cortex-binding-fixture?...` — sidecar preview fixtures
+//!   - `GET /avatar-surface/cortex-visual-adapter?...` — sidecar frame preview
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
@@ -128,6 +129,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-binding-fixture",
             get(avatar_cortex_binding_fixture),
+        )
+        .route(
+            "/avatar-surface/cortex-visual-adapter",
+            get(avatar_cortex_visual_adapter),
         )
         .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
         .route(
@@ -619,6 +624,8 @@ async fn avatar_surface_panel(
         crate::avatar_cortex::avatar_cortex_binding_plan_from_status(cortex.clone());
     let cortex_binding_fixture =
         crate::avatar_cortex::avatar_cortex_binding_fixture_from_status(cortex.clone());
+    let cortex_visual_adapter =
+        crate::avatar_cortex::avatar_cortex_visual_adapter_from_status(cortex.clone());
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
@@ -630,6 +637,7 @@ async fn avatar_surface_panel(
         &cortex_renderer_registry,
         &cortex_binding_plan,
         &cortex_binding_fixture,
+        &cortex_visual_adapter,
         &report,
         unix_now(),
     )))
@@ -732,6 +740,19 @@ async fn avatar_cortex_binding_fixture(
     Query(q): Query<AvatarCortexStatusQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let payload = crate::avatar_cortex::avatar_cortex_binding_fixture(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_visual_adapter(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_visual_adapter(
         q.label.as_deref(),
         q.heartbeat_label.as_deref(),
         q.project.as_deref(),
@@ -1452,6 +1473,68 @@ fn avatar_surface_binding_fixture_html(binding_fixture_preview: &Value) -> Strin
     )
 }
 
+fn avatar_surface_visual_adapter_html(visual_adapter_preview: &Value) -> String {
+    let adapter = visual_adapter_preview
+        .get("visual_adapter")
+        .unwrap_or(&Value::Null);
+    let first = adapter.get("first_preview").unwrap_or(&Value::Null);
+    let final_state = first.get("final_state").unwrap_or(&Value::Null);
+    let acceptance = adapter.get("acceptance").unwrap_or(&Value::Null);
+    let previews = avatar_surface_html_json_value(adapter.get("preview_count"), "0");
+    let input = avatar_surface_html_json_value(adapter.get("input"), "-");
+    let first_token = avatar_surface_html_json_value(first.get("token"), "-");
+    let frames = avatar_surface_html_json_value(first.get("frame_count"), "0");
+    let final_motion = avatar_surface_html_json_value(final_state.get("motion_slot"), "-");
+    let final_expression = avatar_surface_html_json_value(final_state.get("expression_slot"), "-");
+    let all_idle = avatar_surface_html_json_value(acceptance.get("all_return_to_idle"), "false");
+    let all_duration =
+        avatar_surface_html_json_value(acceptance.get("all_duration_within_2s"), "false");
+    let renders_pixels = avatar_surface_html_json_value(
+        visual_adapter_preview.get("renders_pixels"),
+        "false",
+    );
+    let writes_files = avatar_surface_html_json_value(
+        visual_adapter_preview.get("writes_files"),
+        "false",
+    );
+    let mutates_renderer = avatar_surface_html_json_value(
+        visual_adapter_preview.get("mutates_renderer"),
+        "false",
+    );
+    let pet_mutation = avatar_surface_html_json_value(
+        visual_adapter_preview.get("codex_pet_package_mutation"),
+        "false",
+    );
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">adapter</span>
+        <strong>Xiao Shu Visual Adapter</strong>
+        <span>previews={previews} input={input}</span>
+      </div>
+      <dl>
+        <div><dt>first</dt><dd>{first_token} frames={frames}</dd></div>
+        <div><dt>final</dt><dd>motion={final_motion} expression={final_expression}</dd></div>
+        <div><dt>acceptance</dt><dd>all_idle={all_idle} all_under_2s={all_duration}</dd></div>
+        <div><dt>safety</dt><dd>pixels={renders_pixels} writes_files={writes_files} mutates_renderer={mutates_renderer} pet_package={pet_mutation}</dd></div>
+      </dl>
+    </section>"#,
+        previews = previews,
+        input = input,
+        first_token = first_token,
+        frames = frames,
+        final_motion = final_motion,
+        final_expression = final_expression,
+        all_idle = all_idle,
+        all_duration = all_duration,
+        renders_pixels = renders_pixels,
+        writes_files = writes_files,
+        mutates_renderer = mutates_renderer,
+        pet_mutation = pet_mutation,
+    )
+}
+
 fn avatar_surface_payload(q: &AvatarSurfaceQuery, avatars: Vec<Value>, generated_at: i64) -> Value {
     json!({
         "agent_avatar_protocol": crate::avatar_surface::AGENT_AVATAR_PROTOCOL_VERSION,
@@ -1479,6 +1562,7 @@ fn avatar_surface_panel_html(
     cortex_renderer_registry: &Value,
     cortex_binding_plan: &Value,
     cortex_binding_fixture: &Value,
+    cortex_visual_adapter: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -1535,6 +1619,7 @@ fn avatar_surface_panel_html(
     let renderer_registry_html = avatar_surface_renderer_registry_html(cortex_renderer_registry);
     let binding_plan_html = avatar_surface_binding_plan_html(cortex_binding_plan);
     let binding_fixture_html = avatar_surface_binding_fixture_html(cortex_binding_fixture);
+    let visual_adapter_html = avatar_surface_visual_adapter_html(cortex_visual_adapter);
 
     format!(
         r#"<!doctype html>
@@ -1744,6 +1829,7 @@ fn avatar_surface_panel_html(
     {renderer_registry_html}
     {binding_plan_html}
     {binding_fixture_html}
+    {visual_adapter_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -1765,6 +1851,7 @@ fn avatar_surface_panel_html(
         renderer_registry_html = renderer_registry_html,
         binding_plan_html = binding_plan_html,
         binding_fixture_html = binding_fixture_html,
+        visual_adapter_html = visual_adapter_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -2092,6 +2179,8 @@ mod tests {
             crate::avatar_cortex::avatar_cortex_binding_plan_from_status(cortex.clone());
         let binding_fixture =
             crate::avatar_cortex::avatar_cortex_binding_fixture_from_status(cortex.clone());
+        let visual_adapter =
+            crate::avatar_cortex::avatar_cortex_visual_adapter_from_status(cortex.clone());
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
@@ -2103,6 +2192,7 @@ mod tests {
             &renderer_registry,
             &binding_plan,
             &binding_fixture,
+            &visual_adapter,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -2127,6 +2217,15 @@ mod tests {
         assert!(html.contains("xiao_shu::soft_bounce::low motion=soft_bounce"));
         assert!(html.contains("duration=1800ms returns_idle=true"));
         assert!(html.contains("all_idle=true all_under_2s=true"));
+        assert!(html.contains("Xiao Shu Visual Adapter"));
+        assert!(html.contains(
+            "previews=2 input=avatar_cortex_binding_fixture.fixture.golden_payloads"
+        ));
+        assert!(html.contains("xiao_shu::soft_bounce::low frames=4"));
+        assert!(html.contains("motion=idle_breathe expression=bright_smile"));
+        assert!(html.contains(
+            "pixels=false writes_files=false mutates_renderer=false pet_package=false"
+        ));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));

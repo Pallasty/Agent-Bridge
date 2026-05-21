@@ -1441,6 +1441,166 @@ pub fn avatar_cortex_binding_fixture(
     Ok(avatar_cortex_binding_fixture_from_status(status))
 }
 
+fn avatar_cortex_visual_adapter_frames(record: &Value) -> Vec<Value> {
+    let mut pose = "neutral_idle".to_string();
+    let mut expression = "calm_eyes".to_string();
+    let mut motion = "idle_breathe".to_string();
+    let mut accessory = "none".to_string();
+    let mut events = record
+        .get("timeline")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    events.sort_by_key(|event| event.get("at_ms").and_then(Value::as_i64).unwrap_or(0));
+
+    let mut frames = Vec::new();
+    for event in events {
+        let slot = vstr(event.get("slot")).unwrap_or("unknown");
+        let value = vstr(event.get("value")).unwrap_or("unknown");
+        match slot {
+            "pose" => pose = value.to_string(),
+            "expression" => expression = value.to_string(),
+            "motion" => motion = value.to_string(),
+            "accessory" => accessory = value.to_string(),
+            _ => {}
+        }
+        let at_ms = event.get("at_ms").and_then(Value::as_i64).unwrap_or(0);
+        frames.push(json!({
+            "frame_id": format!("{}@{}", vstr(record.get("fixture_id")).unwrap_or("fixture"), at_ms),
+            "at_ms": at_ms,
+            "updated_slot": slot,
+            "updated_value": value,
+            "pose_slot": pose,
+            "expression_slot": expression,
+            "motion_slot": motion,
+            "accessory_slot": accessory,
+            "state_label": format!(
+                "pose={} expression={} motion={} accessory={}",
+                pose, expression, motion, accessory
+            ),
+        }));
+    }
+
+    if frames.is_empty() {
+        frames.push(json!({
+            "frame_id": format!("{}@0", vstr(record.get("fixture_id")).unwrap_or("fixture")),
+            "at_ms": 0,
+            "updated_slot": "none",
+            "updated_value": "none",
+            "pose_slot": pose,
+            "expression_slot": expression,
+            "motion_slot": motion,
+            "accessory_slot": accessory,
+            "state_label": "pose=neutral_idle expression=calm_eyes motion=idle_breathe accessory=none",
+        }));
+    }
+
+    frames
+}
+
+fn avatar_cortex_visual_adapter_preview(record: &Value) -> Value {
+    let frames = avatar_cortex_visual_adapter_frames(record);
+    let final_frame = frames.last().cloned().unwrap_or(Value::Null);
+    let final_motion = vstr(final_frame.get("motion_slot")).unwrap_or("unknown");
+    let assertions = record.get("golden_assertions").unwrap_or(&Value::Null);
+    json!({
+        "fixture_id": record.get("fixture_id").cloned().unwrap_or(Value::Null),
+        "token": record.get("token").cloned().unwrap_or(Value::Null),
+        "risk_level": record.get("risk_level").cloned().unwrap_or(Value::Null),
+        "visual_intent": record.get("visual_intent").cloned().unwrap_or(Value::Null),
+        "frame_count": frames.len(),
+        "duration_ms": assertions.get("duration_ms").cloned().unwrap_or(Value::Null),
+        "frames": frames,
+        "final_state": final_frame,
+        "acceptance": {
+            "returns_to_idle": final_motion == "idle_breathe",
+            "duration_within_2s": assertions
+                .get("duration_within_2s")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            "pixel_rendered": false,
+            "asset_writes_allowed": false,
+            "renderer_mutation_allowed": false,
+            "codex_pet_package_mutation_allowed": false,
+        },
+    })
+}
+
+fn avatar_cortex_visual_adapter_from_fixture(fixture_preview: Value) -> Value {
+    let fixture = fixture_preview.get("fixture").unwrap_or(&Value::Null);
+    let previews: Vec<Value> = fixture
+        .get("golden_payloads")
+        .and_then(Value::as_array)
+        .map(|records| {
+            records
+                .iter()
+                .map(avatar_cortex_visual_adapter_preview)
+                .collect()
+        })
+        .unwrap_or_default();
+    let first = previews.first().cloned().unwrap_or(Value::Null);
+    let all_return_to_idle = previews.iter().all(|preview| {
+        preview["acceptance"]["returns_to_idle"]
+            .as_bool()
+            .unwrap_or(false)
+    });
+    let all_duration_within_2s = previews.iter().all(|preview| {
+        preview["acceptance"]["duration_within_2s"]
+            .as_bool()
+            .unwrap_or(false)
+    });
+    let preview_count = previews.len();
+
+    json!({
+        "surface": "avatar_cortex_sidecar_visual_adapter",
+        "schema": 1,
+        "read_only": true,
+        "dry_run": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "renders_pixels": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "visual_adapter": {
+            "schema": 1,
+            "kind": "sidecar_slot_timeline_adapter_dry_run",
+            "input": "avatar_cortex_binding_fixture.fixture.golden_payloads",
+            "contract": "xiao_shu_renderer_slots_v1",
+            "preview_count": preview_count,
+            "first_preview": first,
+            "previews": previews,
+            "acceptance": {
+                "all_return_to_idle": all_return_to_idle,
+                "all_duration_within_2s": all_duration_within_2s,
+                "pixel_rendered": false,
+                "asset_writes_allowed": false,
+                "renderer_mutation_allowed": false,
+                "codex_pet_package_mutation_allowed": false,
+                "manual_visual_qa_required": true,
+            },
+            "next_step": "connect these preview frames to a local sidecar renderer view before package binding",
+        },
+        "source_fixture": fixture_preview,
+    })
+}
+
+pub(crate) fn avatar_cortex_visual_adapter_from_status(status: Value) -> Value {
+    let fixture = avatar_cortex_binding_fixture_from_status(status);
+    avatar_cortex_visual_adapter_from_fixture(fixture)
+}
+
+pub fn avatar_cortex_visual_adapter(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_visual_adapter_from_status(status))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
@@ -2573,6 +2733,61 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|entry| entry["token"] == "xiao_shu::sorting_glow::medium")
+        );
+    }
+
+    #[test]
+    fn avatar_cortex_visual_adapter_builds_preview_frames() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        assert_eq!(adapter["surface"], "avatar_cortex_sidecar_visual_adapter");
+        assert_eq!(adapter["read_only"], true);
+        assert_eq!(adapter["renders_pixels"], false);
+        assert_eq!(adapter["visual_adapter"]["preview_count"], 2);
+        assert_eq!(
+            adapter["visual_adapter"]["first_preview"]["token"],
+            "xiao_shu::soft_bounce::low"
+        );
+        assert_eq!(
+            adapter["visual_adapter"]["first_preview"]["frames"][2]["motion_slot"],
+            "soft_bounce"
+        );
+        assert_eq!(
+            adapter["visual_adapter"]["first_preview"]["final_state"]["motion_slot"],
+            "idle_breathe"
+        );
+        assert_eq!(
+            adapter["visual_adapter"]["first_preview"]["frame_count"],
+            4
+        );
+    }
+
+    #[test]
+    fn avatar_cortex_visual_adapter_keeps_sidecar_acceptance_safe() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        assert_eq!(adapter["writes_files"], false);
+        assert_eq!(adapter["mutates_renderer"], false);
+        assert_eq!(adapter["codex_pet_package_mutation"], false);
+        assert_eq!(
+            adapter["visual_adapter"]["acceptance"]["all_return_to_idle"],
+            true
+        );
+        assert_eq!(
+            adapter["visual_adapter"]["acceptance"]["all_duration_within_2s"],
+            true
+        );
+        assert_eq!(
+            adapter["visual_adapter"]["acceptance"]["pixel_rendered"],
+            false
+        );
+        assert_eq!(
+            adapter["visual_adapter"]["acceptance"]["manual_visual_qa_required"],
+            true
         );
     }
 
