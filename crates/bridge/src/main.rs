@@ -8560,6 +8560,13 @@ fn print_shadow_cortex_weekly_bonus(
         );
         println!("    {}", signal.summary);
     }
+    if let Some(signal) = &summary.seed_runtime_top_signal {
+        println!(
+            "  seed-runtime top: {:?}/{:?} {} ({:.2})",
+            signal.scope, signal.signal_type, signal.subject_id, signal.salience,
+        );
+        println!("    {}", signal.summary);
+    }
     if let Some(feedback) = feedback {
         println!(
             "  feedback 7d: {} accepted / {} ignored ({} in-window, {} total)",

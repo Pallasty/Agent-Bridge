@@ -210,8 +210,12 @@ It does not require AiOT `seed_neuron` at runtime.
 
 ### 7.4 `SeedRuntimeAgentCortex`
 
-Optional true Seed runtime bridge. It may call AiOT `seed_neuron` or a future
-MLX-backed runtime, but only under explicit environment flags.
+Optional true Seed runtime bridge. The first implementation is an ephemeral
+in-process replay over `ab-seed-bridge::SeedBackend<HashBackend>`; it calls the
+same Rust Seed runtime used by the v22 substrate, but never installs the global
+substrate, writes snapshots, or contacts the AiOT production daemon. Later
+implementations may call a future MLX-backed runtime, but only under explicit
+environment flags.
 
 Runtime failure must degrade to deterministic shadow scoring.
 
@@ -224,7 +228,7 @@ Runtime failure must degrade to deterministic shadow scoring.
 | `AGENT_BRIDGE_SHADOW_CORTEX=off` | Disabled, returns no signals |
 | `AGENT_BRIDGE_SHADOW_CORTEX=heuristic` | Default target for first ship |
 | `AGENT_BRIDGE_SHADOW_CORTEX=seed-shadow` | Run heuristic plus deterministic Seed-shaped shadow scoring |
-| `AGENT_BRIDGE_SHADOW_CORTEX=seed-runtime` | Run heuristic plus true Seed runtime when available |
+| `AGENT_BRIDGE_SHADOW_CORTEX=seed-runtime` | Run heuristic plus an explicit Seed runtime replay probe |
 | `AGENT_BRIDGE_SHADOW_CORTEX_REPORT=1` | Write replayable side-by-side reports |
 | `AGENT_BRIDGE_SHADOW_CORTEX_MAX_SIGNALS=N` | Clamp per-window output |
 
@@ -391,6 +395,21 @@ Recommended PR 3:
 3. Add replay fixtures and runtime budget gates.
 4. Keep `salience_saturation_state` visible in the comparison output so Gate C
    can distinguish Seed runtime quality from capped heuristic baselines.
+
+Current Gate C feasibility status:
+
+- `AGENT_BRIDGE_SHADOW_CORTEX=seed-runtime` now evaluates an explicit
+  `seed_runtime` lane using an ephemeral `SeedBackend<HashBackend>` replay over
+  the normalized Shadow Cortex events.
+- Runtime evidence includes per-event `step_count`, surprise stats, and
+  `neighbors`, plus explicit booleans showing it does not mutate the global
+  substrate, write snapshots, or call the AiOT daemon.
+- `comparison.verdict` becomes `seed_runtime_ready_for_review` when the runtime
+  lane has coverage and passes the rank-tie/salience-saturation guards. This is
+  intentionally a review verdict, not permission to wire runtime output into
+  `session_bootstrap`, MCP exposure, or retrieval ranking.
+- The runtime probe remains CLI/weekly only and read-only; any production
+  daemon, Bench C, iter-11, or MLX adapter work is out of scope for this gate.
 
 ---
 
