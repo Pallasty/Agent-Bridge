@@ -530,6 +530,8 @@ struct AvatarCortexStatusQuery {
     heartbeat_label: Option<String>,
     project: Option<String>,
     output: Option<std::path::PathBuf>,
+    track: Option<String>,
+    track_index: Option<usize>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -837,6 +839,8 @@ async fn avatar_cortex_renderer_view(
     Ok(Html(avatar_surface_renderer_view_html(
         &payload,
         unix_now(),
+        q.track.as_deref(),
+        q.track_index,
     )))
 }
 
@@ -1074,6 +1078,36 @@ fn url_query_component(input: &str) -> String {
         }
     }
     out
+}
+
+fn avatar_surface_route_href(
+    route_raw: &str,
+    project: Option<&str>,
+    track: Option<&str>,
+) -> String {
+    let mut href = route_raw.to_string();
+    let mut sep = "?";
+    if let Some(project) = project.filter(|value| !value.is_empty()) {
+        href.push_str(sep);
+        href.push_str("project=");
+        href.push_str(&url_query_component(project));
+        sep = "&";
+    }
+    if let Some(track) = track.filter(|value| !value.is_empty()) {
+        href.push_str(sep);
+        href.push_str("track=");
+        href.push_str(&url_query_component(track));
+    }
+    href
+}
+
+fn avatar_surface_renderer_token_label(token: &str) -> String {
+    let parts = token.split("::").collect::<Vec<_>>();
+    if parts.len() >= 2 {
+        format!("{}::{}", parts[parts.len() - 2], parts[parts.len() - 1])
+    } else {
+        token.to_string()
+    }
 }
 
 fn avatar_surface_html_value(entry: &Value, key: &str, fallback: &str) -> String {
@@ -1651,12 +1685,7 @@ fn avatar_surface_renderer_view_summary_html(
         .get("html_route")
         .and_then(Value::as_str)
         .unwrap_or("/avatar-surface/cortex-renderer-view");
-    let href_raw = match q.project.as_deref() {
-        Some(project) if !project.is_empty() => {
-            format!("{route_raw}?project={}", url_query_component(project))
-        }
-        _ => route_raw.to_string(),
-    };
+    let href_raw = avatar_surface_route_href(route_raw, q.project.as_deref(), None);
     let href = html_escape(&href_raw);
     let tracks = avatar_surface_html_json_value(view.get("track_count"), "0");
     let selected_tracks = avatar_surface_html_json_value(view.get("selected_track_count"), "0");
@@ -1724,18 +1753,8 @@ fn avatar_surface_quick_actions_html(
         .get("html_route")
         .and_then(Value::as_str)
         .unwrap_or("/avatar-surface/cortex-review-gate");
-    let renderer_href_raw = match q.project.as_deref() {
-        Some(project) if !project.is_empty() => {
-            format!("{renderer_route}?project={}", url_query_component(project))
-        }
-        _ => renderer_route.to_string(),
-    };
-    let review_href_raw = match q.project.as_deref() {
-        Some(project) if !project.is_empty() => {
-            format!("{review_route}?project={}", url_query_component(project))
-        }
-        _ => review_route.to_string(),
-    };
+    let renderer_href_raw = avatar_surface_route_href(renderer_route, q.project.as_deref(), None);
+    let review_href_raw = avatar_surface_route_href(review_route, q.project.as_deref(), None);
 
     let tracks = avatar_surface_html_json_value(view.get("track_count"), "0");
     let selected = avatar_surface_html_json_value(view.get("selected_track_count"), "0");
@@ -1783,13 +1802,12 @@ fn avatar_surface_review_gate_html(review_gate_preview: &Value, q: &AvatarSurfac
         .get("html_route")
         .and_then(Value::as_str)
         .unwrap_or("/avatar-surface/cortex-review-gate");
-    let href_raw = match q.project.as_deref() {
-        Some(project) if !project.is_empty() => {
-            format!("{route_raw}?project={}", url_query_component(project))
-        }
-        _ => route_raw.to_string(),
-    };
+    let href_raw = avatar_surface_route_href(route_raw, q.project.as_deref(), None);
     let href = html_escape(&href_raw);
+    let renderer_route_raw = gate
+        .get("renderer_view_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-renderer-view");
     let tracks = avatar_surface_html_json_value(gate.get("track_count"), "0");
     let selected = avatar_surface_html_json_value(gate.get("selected_baseline_count"), "0");
     let pending = avatar_surface_html_json_value(gate.get("manual_pending_count"), "0");
@@ -1806,6 +1824,7 @@ fn avatar_surface_review_gate_html(review_gate_preview: &Value, q: &AvatarSurfac
         "false",
     );
     let mut first_pending = "-".to_string();
+    let mut pending_links = String::new();
     if let Some(items) = gate.get("items").and_then(Value::as_array) {
         if let Some(item) = items
             .iter()
@@ -1817,6 +1836,28 @@ fn avatar_surface_review_gate_html(review_gate_preview: &Value, q: &AvatarSurfac
                 avatar_surface_html_json_value(item.get("automatic_gate"), "-")
             );
         }
+        for item in items
+            .iter()
+            .filter(|item| item.get("manual_decision").and_then(Value::as_str) == Some("pending"))
+        {
+            let Some(token) = item.get("token").and_then(Value::as_str) else {
+                continue;
+            };
+            let href_raw =
+                avatar_surface_route_href(renderer_route_raw, q.project.as_deref(), Some(token));
+            let label = avatar_surface_renderer_token_label(token);
+            if !pending_links.is_empty() {
+                pending_links.push(' ');
+            }
+            pending_links.push_str(&format!(
+                r#"<a href="{href}">{label}</a>"#,
+                href = html_escape(&href_raw),
+                label = html_escape(&label),
+            ));
+        }
+    }
+    if pending_links.is_empty() {
+        pending_links.push('-');
     }
 
     format!(
@@ -1830,6 +1871,7 @@ fn avatar_surface_review_gate_html(review_gate_preview: &Value, q: &AvatarSurfac
         <div><dt>auto</dt><dd>pass={auto_pass} blocked={auto_blocked}</dd></div>
         <div><dt>manual</dt><dd>required={manual_required} can_promote_review={can_promote}</dd></div>
         <div><dt>first pending</dt><dd>{first_pending}</dd></div>
+        <div><dt>pending links</dt><dd class="pending-links">{pending_links}</dd></div>
         <div><dt>open</dt><dd><a href="{href}">review gate json</a></dd></div>
       </dl>
     </section>"#,
@@ -1841,21 +1883,43 @@ fn avatar_surface_review_gate_html(review_gate_preview: &Value, q: &AvatarSurfac
         manual_required = manual_required,
         can_promote = can_promote,
         first_pending = first_pending,
+        pending_links = pending_links,
         href = href,
     )
 }
 
-fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at: i64) -> String {
+fn avatar_surface_renderer_view_html(
+    renderer_view_preview: &Value,
+    generated_at: i64,
+    requested_track: Option<&str>,
+    requested_track_index: Option<usize>,
+) -> String {
     let view = renderer_view_preview
         .get("renderer_view")
         .unwrap_or(&Value::Null);
-    let first = view.get("first_track").unwrap_or(&Value::Null);
-    let initial = first.get("initial_frame").unwrap_or(&Value::Null);
+    let tracks = view.get("tracks").and_then(Value::as_array);
+    let active_track_index = tracks
+        .map(|tracks| {
+            requested_track
+                .and_then(|token| {
+                    tracks
+                        .iter()
+                        .position(|track| track.get("token").and_then(Value::as_str) == Some(token))
+                })
+                .or_else(|| requested_track_index.filter(|index| *index < tracks.len()))
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+    let active = tracks
+        .and_then(|tracks| tracks.get(active_track_index))
+        .or_else(|| view.get("first_track"))
+        .unwrap_or(&Value::Null);
+    let initial = active.get("initial_frame").unwrap_or(&Value::Null);
     let initial_classes = avatar_surface_html_json_value(
         initial.get("css_classes"),
         "pose-neutral-idle expression-calm-eyes motion-idle-breathe accessory-none",
     );
-    let first_token = avatar_surface_html_json_value(first.get("token"), "xiao_shu::unknown");
+    let first_token = avatar_surface_html_json_value(active.get("token"), "xiao_shu::unknown");
     let first_state = avatar_surface_html_json_value(initial.get("state_label"), "ready");
     let first_state_html = first_state
         .split_whitespace()
@@ -1894,7 +1958,11 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
     let mut track_buttons = String::new();
     if let Some(tracks) = view.get("tracks").and_then(Value::as_array) {
         for (index, track) in tracks.iter().enumerate() {
-            let active = if index == 0 { " is-active" } else { "" };
+            let active = if index == active_track_index {
+                " is-active"
+            } else {
+                ""
+            };
             let review = if track
                 .get("review_only")
                 .and_then(Value::as_bool)
@@ -1904,20 +1972,14 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
             } else {
                 ""
             };
-            let token = avatar_surface_html_json_value(track.get("token"), "-");
-            let token_label = {
-                let parts = token.split("::").collect::<Vec<_>>();
-                if parts.len() >= 2 {
-                    format!("{}::{}", parts[parts.len() - 2], parts[parts.len() - 1])
-                } else {
-                    token.clone()
-                }
-            };
+            let token_raw = track.get("token").and_then(Value::as_str).unwrap_or("-");
+            let token = html_escape(token_raw);
+            let token_label = html_escape(&avatar_surface_renderer_token_label(token_raw));
             let track_kind = avatar_surface_html_json_value(track.get("track_kind"), "selected");
             let frames = avatar_surface_html_json_value(track.get("frame_count"), "0");
             let duration = avatar_surface_html_json_value(track.get("duration_ms"), "0");
             track_buttons.push_str(&format!(
-                r#"<button type="button" class="track-button{active}{review}" data-track-index="{index}">
+                r#"<button type="button" class="track-button{active}{review}" data-track-index="{index}" data-track-token="{token}">
           <span title="{token}">{token_label}</span>
           <small>{track_kind} / {frames} frames / {duration}ms</small>
         </button>"#,
@@ -2293,7 +2355,7 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
     <header>
       <div>
         <h1>Xiao Shu Sidecar Renderer</h1>
-        <div class="meta"><span>tracks={track_count}</span><span title="{input_title}">input={input}</span><span>generated_at={generated_at}</span></div>
+        <div class="meta"><span>tracks={track_count}</span><span>active={first_token}</span><span title="{input_title}">input={input}</span><span>generated_at={generated_at}</span></div>
       </div>
       <div class="badge">browser pixels={browser_pixels}</div>
     </header>
@@ -2342,7 +2404,7 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
     const tokenEl = document.querySelector("[data-token]");
     const stateEl = document.querySelector("[data-state]");
     const buttons = Array.from(document.querySelectorAll("[data-track-index]"));
-    let trackIndex = 0;
+    let trackIndex = {active_track_index};
     let frameIndex = 0;
     let timer = null;
 
@@ -2396,6 +2458,12 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
         if (timer) window.clearTimeout(timer);
         setActiveButton();
         applyFrame();
+        const track = activeTrack();
+        if (track.token && window.history && window.URL) {{
+          const url = new URL(window.location.href);
+          url.searchParams.set("track", track.token);
+          window.history.replaceState(null, "", url);
+        }}
       }});
     }});
     setActiveButton();
@@ -2411,6 +2479,7 @@ fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at
         initial_classes = initial_classes,
         first_token = first_token,
         first_state = first_state_html,
+        active_track_index = active_track_index,
         writes_files = writes_files,
         mutates_renderer = mutates_renderer,
         pet_mutation = pet_mutation,
@@ -3213,6 +3282,10 @@ mod tests {
         assert!(html.contains("tracks=5 selected=2 pending=3"));
         assert!(html.contains("pass=5 blocked=0"));
         assert!(html.contains("required=true can_promote_review=false"));
+        assert!(html.contains("pending links"));
+        assert!(html.contains("track=xiao_shu%3A%3Asorting_glow%3A%3Amedium"));
+        assert!(html.contains("track=xiao_shu%3A%3Alook_sideways%3A%3Amedium"));
+        assert!(html.contains("track=xiao_shu%3A%3Aalert_peek%3A%3Amedium"));
         assert!(html.contains("review gate json"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
@@ -3274,7 +3347,7 @@ mod tests {
             }
         });
         let renderer_view = crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex);
-        let html = avatar_surface_renderer_view_html(&renderer_view, 1779193140);
+        let html = avatar_surface_renderer_view_html(&renderer_view, 1779193140, None, None);
 
         assert!(html.contains("Xiao Shu Sidecar Renderer"));
         assert!(html.contains("data-stage=\"xiao-shu-renderer-view\""));
@@ -3288,5 +3361,15 @@ mod tests {
         assert!(html.contains("<span>mutates_renderer=false</span>"));
         assert!(html.contains("<span>pet_package=false</span>"));
         assert!(html.contains("\"surface\":\"avatar_cortex_sidecar_renderer_view\""));
+
+        let focused = avatar_surface_renderer_view_html(
+            &renderer_view,
+            1779193140,
+            Some("xiao_shu::alert_peek::medium"),
+            None,
+        );
+        assert!(focused.contains("<span>active=xiao_shu::alert_peek::medium</span>"));
+        assert!(focused.contains(r#"let trackIndex = 4;"#));
+        assert!(focused.contains(r#"data-track-token="xiao_shu::alert_peek::medium""#));
     }
 }

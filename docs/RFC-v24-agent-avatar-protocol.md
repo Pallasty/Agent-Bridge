@@ -518,7 +518,10 @@ manual visual-QA surface before any official package binding.
 read-only review gate over that browser view. The gate can report automatic
 checks and pending manual decisions, but it does not write approval state or
 promote `review_only` tracks into selected bindings. `can_promote_review_tracks`
-must remain false until a separate explicit approval design exists.
+must remain false until a separate explicit approval design exists. The browser
+renderer view may accept `track` or `track_index` query parameters, and the
+panel may link pending review tokens to those focused previews; these links are
+navigation evidence only and do not approve, persist, or bind any track.
 `avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
 as a dedicated read-only surface with `emits_audio=false`,
 `emits_notification=false`, and `requires_explicit_emit_gate=true`.
@@ -628,8 +631,8 @@ external watchdogs and non-MCP clients.
 | daemon HTTP `/avatar-surface/cortex-binding-plan` | Same first-binding plan is available to browser and non-MCP clients without asset mutation |
 | daemon HTTP `/avatar-surface/cortex-binding-fixture` | Same sidecar preview fixture payload is available to browser and non-MCP clients without asset mutation |
 | daemon HTTP `/avatar-surface/cortex-visual-adapter` | Same sidecar preview frame payload is available to browser and non-MCP clients without pixel rendering |
-| daemon HTTP `/avatar-surface/cortex-renderer-view` | Browser-only sidecar renderer view, including review-only deferred medium tracks, is available for manual visual QA without package mutation |
-| daemon HTTP `/avatar-surface/cortex-review-gate` | Same read-only renderer review gate is available to browser and non-MCP clients without approval writes |
+| daemon HTTP `/avatar-surface/cortex-renderer-view` | Browser-only sidecar renderer view, including focused `track` / `track_index` previews for review-only deferred medium tracks, is available for manual visual QA without package mutation |
+| daemon HTTP `/avatar-surface/cortex-review-gate` | Same read-only renderer review gate is available to browser and non-MCP clients without approval writes; panel links can open pending tracks for focused inspection only |
 | daemon HTTP `/avatar-surface/cortex-preview` | Same voice preview is available to browser and non-MCP clients without emission |
 | daemon HTTP `/avatar-surface/cortex-voice-gate` | Same explicit voice-gate dry-run is available to browser and non-MCP clients without emission |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |
