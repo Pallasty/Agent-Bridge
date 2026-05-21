@@ -839,6 +839,24 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Summarize whether pending Xiao Shu renderer packets are ready for human review.
+    CortexReviewReport {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2578,6 +2596,22 @@ async fn main() -> Result<()> {
                 json: as_json,
             } => {
                 run_avatar_cortex_review_packet(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexReviewReport {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_review_report(
                     label.clone(),
                     heartbeat_label.clone(),
                     project.clone(),
@@ -4776,6 +4810,76 @@ async fn run_avatar_cortex_review_packet(
                         .and_then(|renderer| renderer.get("track")),
                     "-"
                 )
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn run_avatar_cortex_review_report(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_review_report(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let report = payload.get("review_report").unwrap_or(&Value::Null);
+    println!("avatar cortex review report");
+    println!(
+        "state={} packets={} ready={} blocked={} human_decisions={}",
+        avatar_health_display(report.get("report_state"), "-"),
+        avatar_health_display(report.get("packet_count"), "0"),
+        avatar_health_display(report.get("ready_packet_count"), "0"),
+        avatar_health_display(report.get("blocked_packet_count"), "0"),
+        avatar_health_display(report.get("human_decision_count"), "0")
+    );
+    println!(
+        "ready_for_human_review={} ready_for_approval={} can_promote={} merge_without_review={}",
+        avatar_health_display(
+            report
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("ready_for_human_visual_review")),
+            "false"
+        ),
+        avatar_health_display(
+            report
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("ready_for_approval")),
+            "false"
+        ),
+        avatar_health_display(
+            report
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+            "false"
+        ),
+        avatar_health_display(
+            report
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("merge_without_human_review_allowed")),
+            "false"
+        )
+    );
+    if let Some(items) = report.get("items").and_then(Value::as_array) {
+        for item in items.iter().take(5) {
+            println!(
+                "- {} readiness={} approval={} promote={}",
+                avatar_health_display(item.get("token"), "-"),
+                avatar_health_display(item.get("readiness"), "-"),
+                avatar_health_display(item.get("ready_for_approval"), "false"),
+                avatar_health_display(item.get("can_promote_binding"), "false")
             );
         }
     }

@@ -22,6 +22,7 @@
 //!   - `GET /avatar-surface/cortex-renderer-view?...` — browser sidecar renderer view
 //!   - `GET /avatar-surface/cortex-review-gate?...` — read-only renderer review gate
 //!   - `GET /avatar-surface/cortex-review-packet?...` — read-only renderer review packets
+//!   - `GET /avatar-surface/cortex-review-report?...` — read-only review readiness report
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
@@ -148,6 +149,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-review-packet",
             get(avatar_cortex_review_packet),
+        )
+        .route(
+            "/avatar-surface/cortex-review-report",
+            get(avatar_cortex_review_report),
         )
         .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
         .route(
@@ -695,6 +700,8 @@ async fn avatar_surface_panel(
         crate::avatar_cortex::avatar_cortex_renderer_review_gate_from_status(cortex.clone());
     let cortex_review_packet =
         crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(cortex.clone());
+    let cortex_review_report =
+        crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(cortex.clone());
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
@@ -710,6 +717,7 @@ async fn avatar_surface_panel(
         &cortex_renderer_view,
         &cortex_review_gate,
         &cortex_review_packet,
+        &cortex_review_report,
         &report,
         unix_now(),
     )))
@@ -869,6 +877,19 @@ async fn avatar_cortex_review_packet(
     Query(q): Query<AvatarCortexStatusQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let payload = crate::avatar_cortex::avatar_cortex_renderer_review_packet(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_review_report(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_review_report(
         q.label.as_deref(),
         q.heartbeat_label.as_deref(),
         q.project.as_deref(),
@@ -1993,6 +2014,83 @@ fn avatar_surface_review_packet_html(
     )
 }
 
+fn avatar_surface_review_report_html(
+    review_report_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let report = review_report_preview
+        .get("review_report")
+        .unwrap_or(&Value::Null);
+    let route_raw = report
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-review-report");
+    let packet_route_raw = report
+        .get("packet_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-review-packet");
+    let href_raw = avatar_surface_route_href(route_raw, q.project.as_deref(), None);
+    let packet_href_raw = avatar_surface_route_href(packet_route_raw, q.project.as_deref(), None);
+    let href = html_escape(&href_raw);
+    let packet_href = html_escape(&packet_href_raw);
+    let state = avatar_surface_html_json_value(report.get("report_state"), "-");
+    let packets = avatar_surface_html_json_value(report.get("packet_count"), "0");
+    let ready = avatar_surface_html_json_value(report.get("ready_packet_count"), "0");
+    let blocked = avatar_surface_html_json_value(report.get("blocked_packet_count"), "0");
+    let human_decisions = avatar_surface_html_json_value(report.get("human_decision_count"), "0");
+    let ready_for_human = avatar_surface_html_json_value(
+        report
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("ready_for_human_visual_review")),
+        "false",
+    );
+    let ready_for_approval = avatar_surface_html_json_value(
+        report
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("ready_for_approval")),
+        "false",
+    );
+    let can_promote = avatar_surface_html_json_value(
+        report
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+        "false",
+    );
+    let merge_without_review = avatar_surface_html_json_value(
+        report
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("merge_without_human_review_allowed")),
+        "false",
+    );
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">report</span>
+        <strong>Xiao Shu Review Report</strong>
+        <span>state={state} packets={packets} ready={ready} blocked={blocked}</span>
+      </div>
+      <dl>
+        <div><dt>readiness</dt><dd>human={ready_for_human} approval={ready_for_approval} decisions={human_decisions}</dd></div>
+        <div><dt>safety</dt><dd>can_promote={can_promote} merge_without_review={merge_without_review}</dd></div>
+        <div><dt>packet</dt><dd><a href="{packet_href}">review packet json</a></dd></div>
+        <div><dt>open</dt><dd><a href="{href}">review report json</a></dd></div>
+      </dl>
+    </section>"#,
+        state = state,
+        packets = packets,
+        ready = ready,
+        blocked = blocked,
+        ready_for_human = ready_for_human,
+        ready_for_approval = ready_for_approval,
+        human_decisions = human_decisions,
+        can_promote = can_promote,
+        merge_without_review = merge_without_review,
+        packet_href = packet_href,
+        href = href,
+    )
+}
+
 fn avatar_surface_renderer_view_html(
     renderer_view_preview: &Value,
     generated_at: i64,
@@ -2624,6 +2722,7 @@ fn avatar_surface_panel_html(
     cortex_renderer_view: &Value,
     cortex_review_gate: &Value,
     cortex_review_packet: &Value,
+    cortex_review_report: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -2684,6 +2783,7 @@ fn avatar_surface_panel_html(
     let renderer_view_html = avatar_surface_renderer_view_summary_html(cortex_renderer_view, q);
     let review_gate_html = avatar_surface_review_gate_html(cortex_review_gate, q);
     let review_packet_html = avatar_surface_review_packet_html(cortex_review_packet, q);
+    let review_report_html = avatar_surface_review_report_html(cortex_review_report, q);
     let quick_actions_html =
         avatar_surface_quick_actions_html(cortex_renderer_view, cortex_review_gate, q);
 
@@ -2930,6 +3030,7 @@ fn avatar_surface_panel_html(
     {renderer_view_html}
     {review_gate_html}
     {review_packet_html}
+    {review_report_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -2956,6 +3057,7 @@ fn avatar_surface_panel_html(
         renderer_view_html = renderer_view_html,
         review_gate_html = review_gate_html,
         review_packet_html = review_packet_html,
+        review_report_html = review_report_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -3333,6 +3435,8 @@ mod tests {
             crate::avatar_cortex::avatar_cortex_renderer_review_gate_from_status(cortex.clone());
         let review_packet =
             crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(cortex.clone());
+        let review_report =
+            crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(cortex.clone());
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
@@ -3348,6 +3452,7 @@ mod tests {
             &renderer_view,
             &review_gate,
             &review_packet,
+            &review_report,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -3404,6 +3509,11 @@ mod tests {
         assert!(html.contains("approval_writes=false records_persisted=false can_promote=false"));
         assert!(html.contains("decision=keep_pending"));
         assert!(html.contains("review packet json"));
+        assert!(html.contains("Xiao Shu Review Report"));
+        assert!(html.contains("state=ready_for_human_visual_review packets=3 ready=3 blocked=0"));
+        assert!(html.contains("human=true approval=false decisions=0"));
+        assert!(html.contains("can_promote=false merge_without_review=false"));
+        assert!(html.contains("review report json"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));
