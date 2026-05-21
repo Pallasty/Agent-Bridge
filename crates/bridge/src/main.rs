@@ -749,6 +749,24 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Build sidecar renderer preview fixtures for the first safe Xiao Shu bindings.
+    CortexBindingFixture {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2408,6 +2426,22 @@ async fn main() -> Result<()> {
                 json: as_json,
             } => {
                 run_avatar_cortex_binding_plan(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexBindingFixture {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_binding_fixture(
                     label.clone(),
                     heartbeat_label.clone(),
                     project.clone(),
@@ -4352,6 +4386,50 @@ async fn run_avatar_cortex_binding_plan(
         "first={} risk={}",
         avatar_health_display(first.get("token"), "-"),
         avatar_health_display(first.get("risk_level"), "-")
+    );
+    println!(
+        "writes_files={} mutates_renderer={} pet_package={}",
+        avatar_health_display(payload.get("writes_files"), "false"),
+        avatar_health_display(payload.get("mutates_renderer"), "false"),
+        avatar_health_display(payload.get("codex_pet_package_mutation"), "false")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_binding_fixture(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_binding_fixture(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let fixture = payload.get("fixture").unwrap_or(&Value::Null);
+    let first = fixture.get("first_fixture").unwrap_or(&Value::Null);
+    let first_assertions = first.get("golden_assertions").unwrap_or(&Value::Null);
+    println!("avatar cortex binding fixture");
+    println!(
+        "fixtures={} source={}",
+        avatar_health_display(fixture.get("fixture_count"), "0"),
+        avatar_health_display(fixture.get("source"), "-")
+    );
+    println!(
+        "first={} motion={} returns_idle={} duration_ms={}",
+        avatar_health_display(first.get("token"), "-"),
+        avatar_health_display(first_assertions.get("motion_slot"), "-"),
+        avatar_health_display(first_assertions.get("returns_to_idle"), "false"),
+        avatar_health_display(first_assertions.get("duration_ms"), "0")
     );
     println!(
         "writes_files={} mutates_renderer={} pet_package={}",

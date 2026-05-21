@@ -1307,6 +1307,140 @@ pub fn avatar_cortex_binding_plan(
     Ok(avatar_cortex_binding_plan_from_status(status))
 }
 
+fn avatar_cortex_fixture_id(token: &str) -> String {
+    token.replace("::", "_")
+}
+
+fn avatar_cortex_timeline_max_ms(timeline: &Value) -> i64 {
+    timeline
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("at_ms").and_then(Value::as_i64))
+                .max()
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
+}
+
+fn avatar_cortex_timeline_returns_to_idle(timeline: &Value) -> bool {
+    timeline
+        .as_array()
+        .map(|items| {
+            items.iter().any(|item| {
+                vstr(item.get("slot")) == Some("motion")
+                    && vstr(item.get("value")) == Some("idle_breathe")
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn avatar_cortex_binding_fixture_record(entry: &Value) -> Value {
+    let token = vstr(entry.get("token")).unwrap_or("unknown");
+    let mapping = avatar_cortex_renderer_mapping(token);
+    let target = mapping.get("target").cloned().unwrap_or(Value::Null);
+    let timeline = mapping.get("timeline").cloned().unwrap_or(Value::Null);
+    let duration_ms = avatar_cortex_timeline_max_ms(&timeline);
+    let returns_to_idle = avatar_cortex_timeline_returns_to_idle(&timeline);
+    let motion_slot = vstr(target.get("motion_slot")).unwrap_or("unknown");
+
+    json!({
+        "fixture_id": format!("{}_fixture_v1", avatar_cortex_fixture_id(token)),
+        "token": token,
+        "source_selection": entry.get("selection").cloned().unwrap_or(Value::Null),
+        "risk_level": entry.get("risk_level").cloned().unwrap_or(Value::Null),
+        "binding_stage": entry.get("binding_stage").cloned().unwrap_or(Value::Null),
+        "visual_intent": entry.get("visual_intent").cloned().unwrap_or(Value::Null),
+        "target": target,
+        "timeline": timeline,
+        "golden_assertions": {
+            "schema": 1,
+            "motion_slot": motion_slot,
+            "duration_ms": duration_ms,
+            "returns_to_idle": returns_to_idle,
+            "duration_within_2s": duration_ms <= 2000,
+            "asset_writes_allowed": false,
+            "renderer_mutation_allowed": false,
+            "codex_pet_package_mutation_allowed": false,
+        },
+    })
+}
+
+fn avatar_cortex_binding_fixture_from_plan(plan_preview: Value) -> Value {
+    let plan = plan_preview.get("binding_plan").unwrap_or(&Value::Null);
+    let records: Vec<Value> = plan
+        .get("selected")
+        .and_then(Value::as_array)
+        .map(|selected| {
+            selected
+                .iter()
+                .map(avatar_cortex_binding_fixture_record)
+                .collect()
+        })
+        .unwrap_or_default();
+    let first = records.first().cloned().unwrap_or(Value::Null);
+    let all_return_to_idle = records.iter().all(|record| {
+        record["golden_assertions"]["returns_to_idle"]
+            .as_bool()
+            .unwrap_or(false)
+    });
+    let all_duration_within_2s = records.iter().all(|record| {
+        record["golden_assertions"]["duration_within_2s"]
+            .as_bool()
+            .unwrap_or(false)
+    });
+    let fixture_count = records.len();
+
+    json!({
+        "surface": "avatar_cortex_binding_fixture",
+        "schema": 1,
+        "read_only": true,
+        "dry_run": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "fixture": {
+            "schema": 1,
+            "kind": "sidecar_renderer_preview_fixture",
+            "contract": "xiao_shu_renderer_slots_v1",
+            "source": "avatar_cortex_binding_plan.selected",
+            "fixture_count": fixture_count,
+            "first_fixture": first,
+            "golden_payloads": records,
+            "deferred_count": plan.get("deferred_count").cloned().unwrap_or(Value::Null),
+            "acceptance": {
+                "all_return_to_idle": all_return_to_idle,
+                "all_duration_within_2s": all_duration_within_2s,
+                "asset_writes_allowed": false,
+                "renderer_mutation_allowed": false,
+                "codex_pet_package_mutation_allowed": false,
+                "manual_visual_qa_required": true,
+            },
+            "next_step": "review these slot timelines in a sidecar visual adapter before any package binding",
+        },
+        "source_plan": plan_preview,
+    })
+}
+
+pub(crate) fn avatar_cortex_binding_fixture_from_status(status: Value) -> Value {
+    let plan = avatar_cortex_binding_plan_from_status(status);
+    avatar_cortex_binding_fixture_from_plan(plan)
+}
+
+pub fn avatar_cortex_binding_fixture(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_binding_fixture_from_status(status))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
@@ -2381,6 +2515,65 @@ mod tests {
             .unwrap()
             .iter()
             .any(|item| item == "needs_review and fallback_only tokens remain deferred"));
+    }
+
+    #[test]
+    fn avatar_cortex_binding_fixture_freezes_selected_slot_timelines() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        assert_eq!(fixture["surface"], "avatar_cortex_binding_fixture");
+        assert_eq!(fixture["read_only"], true);
+        assert_eq!(fixture["writes_files"], false);
+        assert_eq!(fixture["mutates_renderer"], false);
+        assert_eq!(fixture["codex_pet_package_mutation"], false);
+        assert_eq!(fixture["fixture"]["fixture_count"], 2);
+        assert_eq!(
+            fixture["fixture"]["first_fixture"]["token"],
+            "xiao_shu::soft_bounce::low"
+        );
+        assert_eq!(
+            fixture["fixture"]["golden_payloads"][0]["target"]["motion_slot"],
+            "soft_bounce"
+        );
+        assert_eq!(
+            fixture["fixture"]["golden_payloads"][1]["token"],
+            "xiao_shu::idle_breathe::low"
+        );
+    }
+
+    #[test]
+    fn avatar_cortex_binding_fixture_keeps_golden_assertions_safe() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        assert_eq!(
+            fixture["fixture"]["acceptance"]["all_return_to_idle"],
+            true
+        );
+        assert_eq!(
+            fixture["fixture"]["acceptance"]["all_duration_within_2s"],
+            true
+        );
+        assert_eq!(
+            fixture["fixture"]["acceptance"]["manual_visual_qa_required"],
+            true
+        );
+        assert_eq!(
+            fixture["fixture"]["first_fixture"]["golden_assertions"]["returns_to_idle"],
+            true
+        );
+        assert_eq!(
+            fixture["fixture"]["first_fixture"]["golden_assertions"]["duration_ms"],
+            1800
+        );
+        assert!(
+            !fixture["fixture"]["golden_payloads"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["token"] == "xiao_shu::sorting_glow::medium")
+        );
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
