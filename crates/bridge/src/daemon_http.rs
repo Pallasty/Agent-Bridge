@@ -547,6 +547,7 @@ struct AvatarCortexStatusQuery {
     output: Option<std::path::PathBuf>,
     track: Option<String>,
     track_index: Option<usize>,
+    variant: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -867,6 +868,7 @@ async fn avatar_cortex_renderer_view(
         unix_now(),
         q.track.as_deref(),
         q.track_index,
+        q.variant.as_deref(),
     )))
 }
 
@@ -2181,6 +2183,7 @@ fn avatar_surface_renderer_view_html(
     generated_at: i64,
     requested_track: Option<&str>,
     requested_track_index: Option<usize>,
+    requested_variant: Option<&str>,
 ) -> String {
     let view = renderer_view_preview
         .get("renderer_view")
@@ -2202,6 +2205,41 @@ fn avatar_surface_renderer_view_html(
         .and_then(|tracks| tracks.get(active_track_index))
         .or_else(|| view.get("first_track"))
         .unwrap_or(&Value::Null);
+    let active_variant = active
+        .get("semantic_variants")
+        .and_then(Value::as_array)
+        .and_then(|variants| {
+            requested_variant
+                .and_then(|variant_id| {
+                    variants.iter().find(|variant| {
+                        variant.get("variant_id").and_then(Value::as_str) == Some(variant_id)
+                    })
+                })
+                .or_else(|| {
+                    variants.iter().find(|variant| {
+                        variant
+                            .get("default")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false)
+                    })
+                })
+                .or_else(|| variants.first())
+        });
+    let active_variant_id_raw = active_variant
+        .and_then(|variant| variant.get("variant_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let active_variant_label_raw = active_variant
+        .and_then(|variant| variant.get("label"))
+        .and_then(Value::as_str)
+        .unwrap_or("default");
+    let active_variant_meta = if active_variant_id_raw.is_empty() {
+        "default".to_string()
+    } else {
+        format!("{active_variant_id_raw} / {active_variant_label_raw}")
+    };
+    let active_variant_label = html_escape(&active_variant_meta);
+    let active_variant_json = html_json_script(&json!(active_variant_id_raw));
     let initial = active.get("initial_frame").unwrap_or(&Value::Null);
     let initial_classes = avatar_surface_html_json_value(
         initial.get("css_classes"),
@@ -2474,6 +2512,17 @@ fn avatar_surface_renderer_view_html(
       filter: none;
       transform: translateY(8px) scale(1.46);
     }}
+    .xiao-shu[data-sprite-variant="waiting_peek_row"].sprite-alert .sprite-alert-mark {{
+      opacity: 0.58;
+      transform: scale(0.86);
+    }}
+    .xiao-shu[data-sprite-variant="focused_review_row"].sprite-alert .sprite-alert-mark {{
+      width: 18px;
+      height: 18px;
+      right: 88px;
+      top: 58px;
+      opacity: 0.66;
+    }}
     .xiao-shu-torso {{
       position: absolute;
       width: 132px;
@@ -2690,6 +2739,46 @@ fn avatar_surface_renderer_view_html(
       word-break: break-word;
     }}
     .track-button small {{ color: var(--muted); margin-top: 3px; }}
+    .variant-panel {{
+      margin-top: 18px;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+    }}
+    .variant-panel[hidden] {{
+      display: none;
+    }}
+    .variant-panel h2 {{
+      margin: 0 0 10px;
+      font-size: 15px;
+      letter-spacing: 0;
+    }}
+    .variant-options {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }}
+    .variant-button {{
+      min-height: 70px;
+      text-align: left;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--fg);
+      padding: 10px 12px;
+      cursor: pointer;
+      font: inherit;
+    }}
+    .variant-button.is-active {{
+      border-color: var(--coral);
+      box-shadow: inset 4px 0 0 var(--coral);
+    }}
+    .variant-button span,
+    .variant-button small {{
+      display: block;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .variant-button small {{ color: var(--muted); margin-top: 4px; }}
     @media (max-width: 820px) {{
       main {{ width: min(100vw - 20px, 1160px); margin-top: 14px; }}
       header {{ display: block; }}
@@ -2738,6 +2827,7 @@ fn avatar_surface_renderer_view_html(
         <dl>
           <dt>token</dt><dd data-token>{first_token}</dd>
           <dt>state</dt><dd data-state>{first_state}</dd>
+          <dt>variant</dt><dd data-variant>{active_variant_label}</dd>
           <dt>asset</dt><dd><span>pet={asset_pet_id}</span><span>route={sprite_route}</span><span>mode=read-only spritesheet</span></dd>
           <dt>safety</dt><dd><span>writes_files={writes_files}</span><span>mutates_renderer={mutates_renderer}</span><span>pet_package={pet_mutation}</span></dd>
           <dt>mode</dt><dd>sidecar-only browser view</dd>
@@ -2747,6 +2837,10 @@ fn avatar_surface_renderer_view_html(
     <nav class="tracks" aria-label="renderer tracks">
       {track_buttons}
     </nav>
+    <section class="variant-panel" data-variant-panel hidden>
+      <h2>Alert Peek Semantic Variants</h2>
+      <div class="variant-options" data-variant-options></div>
+    </section>
   </main>
   <script type="application/json" id="renderer-data">{data_json}</script>
   <script>
@@ -2757,8 +2851,12 @@ fn avatar_surface_renderer_view_html(
     const spriteFrame = document.querySelector("[data-sprite-frame]");
     const tokenEl = document.querySelector("[data-token]");
     const stateEl = document.querySelector("[data-state]");
+    const variantEl = document.querySelector("[data-variant]");
+    const variantPanel = document.querySelector("[data-variant-panel]");
+    const variantOptions = document.querySelector("[data-variant-options]");
     const buttons = Array.from(document.querySelectorAll("[data-track-index]"));
     let trackIndex = {active_track_index};
+    let variantId = {active_variant_json};
     let frameIndex = 0;
     let timer = null;
     const spriteRows = {{
@@ -2773,10 +2871,105 @@ fn avatar_surface_renderer_view_html(
       return tracks[trackIndex] || tracks[0] || {{ frames: [] }};
     }}
 
+    function trackVariants(track) {{
+      return Array.isArray(track.semantic_variants) ? track.semantic_variants : [];
+    }}
+
+    function defaultVariant(variants) {{
+      return variants.find((variant) => Boolean(variant.default)) || variants[0] || null;
+    }}
+
+    function activeVariant(track) {{
+      const variants = trackVariants(track);
+      if (!variants.length) {{
+        return null;
+      }}
+      return variants.find((variant) => variant.variant_id === variantId) || defaultVariant(variants);
+    }}
+
     function setActiveButton() {{
       buttons.forEach((button) => {{
         button.classList.toggle("is-active", Number(button.dataset.trackIndex) === trackIndex);
       }});
+    }}
+
+    function updateVariantLabel() {{
+      if (!variantEl) {{
+        return;
+      }}
+      const variant = activeVariant(activeTrack());
+      if (!variant) {{
+        variantEl.textContent = "default";
+        return;
+      }}
+      variantEl.textContent = `${{variant.variant_id || "variant"}} / ${{variant.label || "semantic option"}}`;
+    }}
+
+    function setActiveVariantButton() {{
+      if (!variantOptions) {{
+        return;
+      }}
+      Array.from(variantOptions.querySelectorAll("[data-variant-id]")).forEach((button) => {{
+        button.classList.toggle("is-active", button.dataset.variantId === variantId);
+      }});
+      updateVariantLabel();
+    }}
+
+    function updateUrl(track) {{
+      if (!track.token || !window.history || !window.URL) {{
+        return;
+      }}
+      const url = new URL(window.location.href);
+      url.searchParams.set("track", track.token);
+      const variant = activeVariant(track);
+      if (variant && variant.variant_id) {{
+        url.searchParams.set("variant", variant.variant_id);
+      }} else {{
+        url.searchParams.delete("variant");
+      }}
+      window.history.replaceState(null, "", url);
+    }}
+
+    function renderVariantButtons() {{
+      if (!variantPanel || !variantOptions) {{
+        updateVariantLabel();
+        return;
+      }}
+      const track = activeTrack();
+      const variants = trackVariants(track);
+      variantOptions.textContent = "";
+      if (!variants.length) {{
+        variantId = "";
+        variantPanel.hidden = true;
+        updateVariantLabel();
+        return;
+      }}
+      const selected = activeVariant(track) || defaultVariant(variants);
+      variantId = selected && selected.variant_id ? selected.variant_id : "";
+      variantPanel.hidden = false;
+      variants.forEach((variant) => {{
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "variant-button";
+        button.dataset.variantId = variant.variant_id || "";
+        const label = document.createElement("span");
+        label.textContent = variant.label || variant.variant_id || "variant";
+        const detail = document.createElement("small");
+        detail.textContent = `row=${{variant.sprite_row}} frames=${{variant.sprite_frames}} mark=${{Boolean(variant.alert_mark)}}`;
+        const intent = document.createElement("small");
+        intent.textContent = variant.intent || "";
+        button.append(label, detail, intent);
+        button.addEventListener("click", () => {{
+          variantId = button.dataset.variantId || "";
+          frameIndex = 0;
+          if (timer) window.clearTimeout(timer);
+          setActiveVariantButton();
+          applyFrame();
+          updateUrl(activeTrack());
+        }});
+        variantOptions.appendChild(button);
+      }});
+      setActiveVariantButton();
     }}
 
     function setStateLabel(value) {{
@@ -2795,11 +2988,18 @@ fn avatar_surface_renderer_view_html(
       if (!spriteFrame || !figure) {{
         return;
       }}
-      const config = spriteRows[track.token] || {{ row: 0, frames: 6, alert: false }};
+      const config = {{ ...(spriteRows[track.token] || {{ row: 0, frames: 6, alert: false }}) }};
+      const variant = activeVariant(track);
+      if (variant) {{
+        config.row = Number(variant.sprite_row || config.row || 0);
+        config.frames = Number(variant.sprite_frames || config.frames || 1);
+        config.alert = Boolean(variant.alert_mark);
+      }}
       const column = Number(ordinal || 0) % Number(config.frames || 1);
       const x = -column * 192;
       const y = -Number(config.row || 0) * 208;
       spriteFrame.style.backgroundPosition = `${{x}}px ${{y}}px`;
+      figure.dataset.spriteVariant = variant && variant.variant_id ? variant.variant_id : "default";
       figure.classList.toggle("sprite-backed", true);
       figure.classList.toggle("sprite-alert", Boolean(config.alert));
     }}
@@ -2817,6 +3017,7 @@ fn avatar_surface_renderer_view_html(
       figure.dataset.currentFrame = frame.frame_id || "";
       if (tokenEl) tokenEl.textContent = track.token || "xiao_shu::unknown";
       setStateLabel(frame.state_label || "");
+      updateVariantLabel();
       const nextFrame = frames[(frameIndex + 1) % frames.length] || frame;
       const currentAt = Number(frame.at_ms || 0);
       const nextAt = Number(nextFrame.at_ms || 0);
@@ -2833,16 +3034,13 @@ fn avatar_surface_renderer_view_html(
         frameIndex = 0;
         if (timer) window.clearTimeout(timer);
         setActiveButton();
+        renderVariantButtons();
         applyFrame();
-        const track = activeTrack();
-        if (track.token && window.history && window.URL) {{
-          const url = new URL(window.location.href);
-          url.searchParams.set("track", track.token);
-          window.history.replaceState(null, "", url);
-        }}
+        updateUrl(activeTrack());
       }});
     }});
     setActiveButton();
+    renderVariantButtons();
     applyFrame();
   </script>
 </body>
@@ -2856,6 +3054,8 @@ fn avatar_surface_renderer_view_html(
         initial_classes = initial_classes,
         first_token = first_token,
         first_state = first_state_html,
+        active_variant_label = active_variant_label,
+        active_variant_json = active_variant_json,
         asset_pet_id = asset_pet_id,
         active_track_index = active_track_index,
         writes_files = writes_files,
@@ -3750,7 +3950,7 @@ mod tests {
             }
         });
         let renderer_view = crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex);
-        let html = avatar_surface_renderer_view_html(&renderer_view, 1779193140, None, None);
+        let html = avatar_surface_renderer_view_html(&renderer_view, 1779193140, None, None, None);
 
         assert!(html.contains("Xiao Shu Sidecar Renderer"));
         assert!(html.contains("data-stage=\"xiao-shu-renderer-view\""));
@@ -3763,6 +3963,11 @@ mod tests {
         assert!(html.contains("xiao-shu-sprite"));
         assert!(html.contains("pet=xiao-shu-dev"));
         assert!(html.contains("/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev"));
+        assert!(html.contains("Alert Peek Semantic Variants"));
+        assert!(html.contains("data-variant-panel hidden"));
+        assert!(html.contains("\"variant_id\":\"current_alert_row\""));
+        assert!(html.contains("\"variant_id\":\"waiting_peek_row\""));
+        assert!(html.contains("\"variant_id\":\"focused_review_row\""));
         assert!(
             html.contains("\"xiao_shu::alert_peek::medium\": { row: 5, frames: 8, alert: true }")
         );
@@ -3783,8 +3988,13 @@ mod tests {
             1779193140,
             Some("xiao_shu::alert_peek::medium"),
             None,
+            Some("waiting_peek_row"),
         );
         assert!(focused.contains("<span>active=xiao_shu::alert_peek::medium</span>"));
+        assert!(focused.contains("waiting_peek_row / waiting peek row"));
+        assert!(focused.contains(r#"let variantId = "waiting_peek_row";"#));
+        assert!(focused.contains("data-sprite-variant=\"waiting_peek_row\""));
+        assert!(focused.contains("url.searchParams.set(\"variant\", variant.variant_id);"));
         assert!(focused.contains(r#"let trackIndex = 4;"#));
         assert!(focused.contains(r#"data-track-token="xiao_shu::alert_peek::medium""#));
     }

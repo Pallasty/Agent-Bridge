@@ -1759,6 +1759,47 @@ fn avatar_cortex_renderer_view_frame(frame: &Value, index: usize, duration_ms: i
     })
 }
 
+fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
+    match token {
+        "xiao_shu::alert_peek::medium" => vec![
+            json!({
+                "variant_id": "current_alert_row",
+                "label": "current alert row",
+                "sprite_row": 5,
+                "sprite_frames": 8,
+                "alert_mark": true,
+                "default": true,
+                "intent": "accepted original-sprite baseline; strongest attention read",
+                "review_question": "does this still feel like a gentle attention request rather than failure",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+            json!({
+                "variant_id": "waiting_peek_row",
+                "label": "waiting peek row",
+                "sprite_row": 6,
+                "sprite_frames": 6,
+                "alert_mark": true,
+                "default": false,
+                "intent": "softer waiting or inspection posture with the same muted attention mark",
+                "review_question": "does this read as supportively checking rather than alarmed",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+            json!({
+                "variant_id": "focused_review_row",
+                "label": "focused review row",
+                "sprite_row": 8,
+                "sprite_frames": 6,
+                "alert_mark": true,
+                "default": false,
+                "intent": "focused review posture for attention-needed states that should feel work-like",
+                "review_question": "does this make alert_peek feel too much like sorting_glow",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+        ],
+        _ => Vec::new(),
+    }
+}
+
 fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
     let token = vstr(preview.get("token")).unwrap_or("xiao_shu::unknown");
     let source_frames = preview
@@ -1797,6 +1838,8 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
         .collect();
     let initial_frame = frames.first().cloned().unwrap_or(Value::Null);
     let final_frame = frames.last().cloned().unwrap_or(Value::Null);
+    let semantic_variants = avatar_cortex_renderer_view_track_variants(token);
+    let has_semantic_variants = !semantic_variants.is_empty();
 
     json!({
         "track_id": format!("xiao_shu_sidecar_renderer_track_{}", index + 1),
@@ -1808,6 +1851,24 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
         "review_only": preview.get("review_only").cloned().unwrap_or(json!(false)),
         "risk_level": preview.get("risk_level").cloned().unwrap_or(Value::Null),
         "visual_intent": preview.get("visual_intent").cloned().unwrap_or(Value::Null),
+        "semantic_variant_count": semantic_variants.len(),
+        "has_semantic_variants": has_semantic_variants,
+        "semantic_variants": semantic_variants,
+        "semantic_variant_review": if has_semantic_variants {
+            json!({
+                "schema": 1,
+                "surface": "alert_peek_semantic_variant_review",
+                "read_only": true,
+                "default_variant": "current_alert_row",
+                "writes_approval": false,
+                "persists_record": false,
+                "can_promote_binding": false,
+                "emits_audio": false,
+                "next_step": "compare alert_peek posture variants before choosing any binding or sparse voice cue",
+            })
+        } else {
+            Value::Null
+        },
         "duration_ms": duration_ms,
         "frame_count": frames.len(),
         "renderer": {
@@ -3833,9 +3894,26 @@ mod tests {
         assert!(tracks
             .iter()
             .any(|track| track["token"] == "xiao_shu::look_sideways::medium"));
-        assert!(tracks
+        let alert_peek = tracks
             .iter()
-            .any(|track| track["token"] == "xiao_shu::alert_peek::medium"));
+            .find(|track| track["token"] == "xiao_shu::alert_peek::medium")
+            .unwrap();
+        assert_eq!(alert_peek["semantic_variant_count"], 3);
+        assert_eq!(alert_peek["has_semantic_variants"], true);
+        assert_eq!(
+            alert_peek["semantic_variants"][0]["variant_id"],
+            "current_alert_row"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][1]["variant_id"],
+            "waiting_peek_row"
+        );
+        assert_eq!(alert_peek["semantic_variants"][2]["sprite_row"], 8);
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["can_promote_binding"],
+            false
+        );
+        assert_eq!(alert_peek["semantic_variant_review"]["emits_audio"], false);
     }
 
     #[test]
