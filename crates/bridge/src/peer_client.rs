@@ -127,15 +127,20 @@ struct PostsResponse {
     posts: Vec<ForumPostRecord>,
 }
 
-pub async fn forum_read(
-    peer: &str,
+#[derive(Debug, Deserialize)]
+pub struct ProjectedPostsResponse {
+    pub posts: Vec<serde_json::Value>,
+    pub next_cursor: Option<i64>,
+    pub projection: Option<serde_json::Value>,
+}
+
+fn forum_read_query(
     thread_id: Option<i64>,
     board: Option<&str>,
     since_post_id: Option<i64>,
     unread_for: Option<&str>,
     limit: u32,
-) -> Result<Vec<ForumPostRecord>> {
-    let url = format!("{}/forum/posts", base_url(peer));
+) -> Vec<(&'static str, String)> {
     let mut q: Vec<(&str, String)> = vec![("limit", limit.to_string())];
     if let Some(t) = thread_id {
         q.push(("thread_id", t.to_string()));
@@ -149,12 +154,48 @@ pub async fn forum_read(
     if let Some(u) = unread_for {
         q.push(("unread_for", u.into()));
     }
+    q
+}
+
+pub async fn forum_read(
+    peer: &str,
+    thread_id: Option<i64>,
+    board: Option<&str>,
+    since_post_id: Option<i64>,
+    unread_for: Option<&str>,
+    limit: u32,
+) -> Result<Vec<ForumPostRecord>> {
+    let url = format!("{}/forum/posts", base_url(peer));
+    let q = forum_read_query(thread_id, board, since_post_id, unread_for, limit);
     let r = map_err(
         "forum_read.send",
         client()?.get(&url).query(&q).send().await,
     )?;
     let body: PostsResponse = json_body("forum_read", &url, r).await?;
     Ok(body.posts)
+}
+
+pub async fn forum_read_projected(
+    peer: &str,
+    thread_id: Option<i64>,
+    board: Option<&str>,
+    since_post_id: Option<i64>,
+    unread_for: Option<&str>,
+    limit: u32,
+    compact: bool,
+    body_max_chars: usize,
+    include_refs: bool,
+) -> Result<ProjectedPostsResponse> {
+    let url = format!("{}/forum/posts", base_url(peer));
+    let mut q = forum_read_query(thread_id, board, since_post_id, unread_for, limit);
+    q.push(("compact", compact.to_string()));
+    q.push(("body_max_chars", body_max_chars.to_string()));
+    q.push(("include_refs", include_refs.to_string()));
+    let r = map_err(
+        "forum_read.send",
+        client()?.get(&url).query(&q).send().await,
+    )?;
+    json_body("forum_read", &url, r).await
 }
 
 #[derive(Deserialize)]
@@ -307,6 +348,21 @@ mod tests {
         assert!(out.starts_with("ok "));
         assert!(out.ends_with("..."));
         assert!(!out.contains('\u{0000}'));
+    }
+
+    #[test]
+    fn forum_read_query_includes_cursor_and_scope() {
+        let q = forum_read_query(Some(18), Some("design"), Some(366), Some("codex"), 25);
+        assert_eq!(
+            q,
+            vec![
+                ("limit", "25".into()),
+                ("thread_id", "18".into()),
+                ("board", "design".into()),
+                ("since_post_id", "366".into()),
+                ("unread_for", "codex".into()),
+            ]
+        );
     }
 
     #[test]

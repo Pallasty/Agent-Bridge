@@ -613,7 +613,7 @@ fn compact_mcp_output_default_for_policy(policy: ToolPolicy) -> bool {
         || matches!(policy.profile(), ToolProfile::Compact)
 }
 
-fn truncate_chars(s: &str, max_chars: usize) -> (String, bool, usize) {
+pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> (String, bool, usize) {
     let total = s.chars().count();
     if max_chars == 0 || total <= max_chars {
         (s.to_string(), false, total)
@@ -624,7 +624,7 @@ fn truncate_chars(s: &str, max_chars: usize) -> (String, bool, usize) {
     }
 }
 
-fn project_forum_posts(
+pub(crate) fn project_forum_posts(
     posts: &[ForumPostRecord],
     body_max_chars: usize,
     include_refs: bool,
@@ -3214,24 +3214,70 @@ impl McpTool for ForumReadTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(!compact);
 
-        let posts = if let Some(p) = peer {
+        let (posts, next_cursor, truncated_posts) = if let Some(p) = peer {
             // Drop unread_for when going remote — cursor state is per-device.
-            crate::peer_client::forum_read(p, thread_id, board, since_post_id, None, limit)
-                .await
-                .map_err(|e| ab_core::Error::Backend(format!("forum_read peer: {e}")))?
+            let response = crate::peer_client::forum_read_projected(
+                p,
+                thread_id,
+                board,
+                since_post_id,
+                None,
+                limit,
+                compact,
+                body_max_chars,
+                include_refs,
+            )
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("forum_read peer: {e}")))?;
+            let next_cursor = response.next_cursor.or_else(|| {
+                response
+                    .posts
+                    .last()
+                    .and_then(|p| p.get("id"))
+                    .and_then(|v| v.as_i64())
+            });
+            if let Some(projection) = response.projection.as_ref() {
+                let truncated_posts = projection
+                    .get("truncated_posts")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                (response.posts, next_cursor, truncated_posts)
+            } else {
+                // Backward compatibility for peers older than the HTTP compact
+                // projection: they return full ForumPostRecord rows and ignore
+                // projection query params, so compact locally before replying to
+                // this MCP client.
+                let raw_posts: Vec<ForumPostRecord> = response
+                    .posts
+                    .into_iter()
+                    .map(|v| {
+                        serde_json::from_value(v).map_err(|e| {
+                            ab_core::Error::Backend(format!(
+                                "forum_read peer projection fallback: {e}"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let next_cursor = next_cursor.or_else(|| raw_posts.last().map(|p| p.id));
+                let (posts, truncated_posts) =
+                    project_forum_posts(&raw_posts, body_max_chars, include_refs);
+                (posts, next_cursor, truncated_posts)
+            }
         } else {
             let store = match &self.hub.store {
                 Some(s) => s.clone(),
                 None => return Ok(ToolResult::error("no memory store configured")),
             };
-            store
+            let raw_posts = store
                 .forum_read(thread_id, board, since_post_id, unread_for, limit)
                 .await
-                .map_err(|e| ab_core::Error::Backend(format!("forum_read: {e}")))?
+                .map_err(|e| ab_core::Error::Backend(format!("forum_read: {e}")))?;
+            let next_cursor = raw_posts.last().map(|p| p.id);
+            let (posts, truncated_posts) =
+                project_forum_posts(&raw_posts, body_max_chars, include_refs);
+            (posts, next_cursor, truncated_posts)
         };
 
-        let next_cursor = posts.last().map(|p| p.id);
-        let (posts, truncated_posts) = project_forum_posts(&posts, body_max_chars, include_refs);
         Ok(ToolResult::json_text(&json!({
             "thread_id": thread_id,
             "board": board,
