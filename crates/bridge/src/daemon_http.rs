@@ -4,7 +4,7 @@
 //!   - `GET /healthz`
 //!   - `GET /.well-known/agent.json/<session_id>` — A2A AgentCard
 //!   - `GET /forum/threads?board=...&status=...&limit=...`
-//!   - `GET /forum/posts?thread_id=...&board=...&since_post_id=...&limit=...`
+//!   - `GET /forum/posts?thread_id=...&board=...&since_post_id=...&limit=...&compact=...`
 //!   - `GET /presence?project=...&role=...&max_idle_secs=...&limit=...`
 //!   - `GET /avatar-surface?project=...&role=...&include_stale=...&limit=...`
 //!     — read-only Agent Avatar Protocol JSON projection
@@ -224,6 +224,48 @@ struct ForumPostsQuery {
     unread_for: Option<String>,
     #[serde(default = "default_limit")]
     limit: u32,
+    compact: Option<bool>,
+    body_max_chars: Option<usize>,
+    include_refs: Option<bool>,
+}
+
+fn forum_projection_options(
+    compact: Option<bool>,
+    body_max_chars: Option<usize>,
+    include_refs: Option<bool>,
+) -> (bool, usize, bool) {
+    let compact = compact.unwrap_or(false);
+    let body_max_chars = body_max_chars
+        .map(|v| v.min(100_000))
+        .unwrap_or(if compact { 2_000 } else { 0 });
+    let include_refs = include_refs.unwrap_or(!compact);
+    (compact, body_max_chars, include_refs)
+}
+
+fn forum_posts_payload(
+    thread_id: Option<i64>,
+    board: Option<&str>,
+    posts: &[ab_store::ForumPostRecord],
+    compact: bool,
+    body_max_chars: usize,
+    include_refs: bool,
+) -> Value {
+    let next_cursor = posts.last().map(|p| p.id);
+    let (posts, truncated_posts) =
+        crate::mcp_tools::project_forum_posts(posts, body_max_chars, include_refs);
+    json!({
+        "thread_id": thread_id,
+        "board": board,
+        "count": posts.len(),
+        "next_cursor": next_cursor,
+        "posts": posts,
+        "projection": {
+            "compact": compact,
+            "body_max_chars": body_max_chars,
+            "include_refs": include_refs,
+            "truncated_posts": truncated_posts
+        }
+    })
 }
 
 async fn forum_posts(
@@ -248,12 +290,16 @@ async fn forum_posts(
         )
         .await
         .map_err(internal_error)?;
-    Ok(Json(json!({
-        "thread_id": q.thread_id,
-        "board": q.board,
-        "count": posts.len(),
-        "posts": posts,
-    })))
+    let (compact, body_max_chars, include_refs) =
+        forum_projection_options(q.compact, q.body_max_chars, q.include_refs);
+    Ok(Json(forum_posts_payload(
+        q.thread_id,
+        q.board.as_deref(),
+        &posts,
+        compact,
+        body_max_chars,
+        include_refs,
+    )))
 }
 
 /// Request body for `POST /forum/post`. Mirrors the local MCP tool's args
@@ -1362,7 +1408,7 @@ fn default_avatar_voice_gate_cooldown_secs() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ab_store::AgentPresenceRecord;
+    use ab_store::{AgentPresenceRecord, ForumPostRecord};
 
     #[test]
     fn parse_listen_addrs_single() {
@@ -1391,6 +1437,48 @@ mod tests {
         // an implicit default surprising the operator.
         assert!(parse_listen_addrs("").is_empty());
         assert!(parse_listen_addrs("  ,  ,  ").is_empty());
+    }
+
+    #[test]
+    fn forum_projection_options_match_mcp_compact_defaults() {
+        assert_eq!(forum_projection_options(None, None, None), (false, 0, true));
+        assert_eq!(
+            forum_projection_options(Some(true), None, None),
+            (true, 2_000, false)
+        );
+        assert_eq!(
+            forum_projection_options(Some(true), Some(80), Some(true)),
+            (true, 80, true)
+        );
+        assert_eq!(
+            forum_projection_options(Some(true), Some(200_000), None),
+            (true, 100_000, false)
+        );
+    }
+
+    #[test]
+    fn forum_posts_payload_compacts_body_and_omits_refs() {
+        let posts = vec![ForumPostRecord {
+            id: 9,
+            thread_id: 18,
+            author: "codex".into(),
+            kind: "reply".into(),
+            body: "abcdef".into(),
+            refs: json!({"files": ["x.rs"]}),
+            created_at: 123,
+        }];
+
+        let payload = forum_posts_payload(Some(18), None, &posts, true, 3, false);
+        assert_eq!(payload["next_cursor"], json!(9));
+        assert_eq!(payload["projection"]["compact"], json!(true));
+        assert_eq!(payload["projection"]["body_max_chars"], json!(3));
+        assert_eq!(payload["projection"]["include_refs"], json!(false));
+        assert_eq!(payload["projection"]["truncated_posts"], json!(1));
+        assert_eq!(payload["posts"][0]["body"], json!("abc…"));
+        assert_eq!(payload["posts"][0]["body_truncated"], json!(true));
+        assert_eq!(payload["posts"][0]["body_total_chars"], json!(6));
+        assert_eq!(payload["posts"][0]["refs_omitted"], json!(true));
+        assert!(payload["posts"][0].get("refs").is_none());
     }
 
     fn presence_fixture() -> AgentPresenceRecord {
