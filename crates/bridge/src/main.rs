@@ -821,6 +821,24 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Build read-only human review packets for pending Xiao Shu renderer tracks.
+    CortexReviewPacket {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2544,6 +2562,22 @@ async fn main() -> Result<()> {
                 json: as_json,
             } => {
                 run_avatar_cortex_review_gate(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexReviewPacket {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_review_packet(
                     label.clone(),
                     heartbeat_label.clone(),
                     project.clone(),
@@ -4684,6 +4718,64 @@ async fn run_avatar_cortex_review_gate(
                 avatar_health_display(item.get("automatic_gate"), "-"),
                 avatar_health_display(item.get("manual_decision"), "-"),
                 avatar_health_display(item.get("can_promote_binding"), "false")
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn run_avatar_cortex_review_packet(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_review_packet(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let packet = payload.get("review_packet").unwrap_or(&Value::Null);
+    println!("avatar cortex review packet");
+    println!(
+        "packets={} baseline_refs={} pending={} approval_writes={} can_promote={}",
+        avatar_health_display(packet.get("packet_count"), "0"),
+        avatar_health_display(packet.get("baseline_reference_count"), "0"),
+        avatar_health_display(packet.get("manual_pending_count"), "0"),
+        avatar_health_display(
+            packet
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("approval_writes_allowed")),
+            "false"
+        ),
+        avatar_health_display(
+            packet
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+            "false"
+        )
+    );
+    if let Some(items) = packet.get("packets").and_then(Value::as_array) {
+        for item in items.iter().take(5) {
+            println!(
+                "- {} decision={} gate={} promote={} preview=track:{}",
+                avatar_health_display(item.get("token"), "-"),
+                avatar_health_display(item.get("default_decision"), "-"),
+                avatar_health_display(item.get("automatic_gate"), "-"),
+                avatar_health_display(item.get("can_promote_binding"), "false"),
+                avatar_health_display(
+                    item.get("renderer_view")
+                        .and_then(|renderer| renderer.get("track")),
+                    "-"
+                )
             );
         }
     }

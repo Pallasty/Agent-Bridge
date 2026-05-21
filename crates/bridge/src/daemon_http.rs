@@ -21,6 +21,7 @@
 //!   - `GET /avatar-surface/cortex-visual-adapter?...` — sidecar frame preview
 //!   - `GET /avatar-surface/cortex-renderer-view?...` — browser sidecar renderer view
 //!   - `GET /avatar-surface/cortex-review-gate?...` — read-only renderer review gate
+//!   - `GET /avatar-surface/cortex-review-packet?...` — read-only renderer review packets
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
@@ -143,6 +144,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-review-gate",
             get(avatar_cortex_review_gate),
+        )
+        .route(
+            "/avatar-surface/cortex-review-packet",
+            get(avatar_cortex_review_packet),
         )
         .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
         .route(
@@ -688,6 +693,8 @@ async fn avatar_surface_panel(
         crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex.clone());
     let cortex_review_gate =
         crate::avatar_cortex::avatar_cortex_renderer_review_gate_from_status(cortex.clone());
+    let cortex_review_packet =
+        crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(cortex.clone());
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
@@ -702,6 +709,7 @@ async fn avatar_surface_panel(
         &cortex_visual_adapter,
         &cortex_renderer_view,
         &cortex_review_gate,
+        &cortex_review_packet,
         &report,
         unix_now(),
     )))
@@ -848,6 +856,19 @@ async fn avatar_cortex_review_gate(
     Query(q): Query<AvatarCortexStatusQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let payload = crate::avatar_cortex::avatar_cortex_renderer_review_gate(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_review_packet(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_review_packet(
         q.label.as_deref(),
         q.heartbeat_label.as_deref(),
         q.project.as_deref(),
@@ -1086,7 +1107,7 @@ fn avatar_surface_route_href(
     track: Option<&str>,
 ) -> String {
     let mut href = route_raw.to_string();
-    let mut sep = "?";
+    let mut sep = if route_raw.contains('?') { "&" } else { "?" };
     if let Some(project) = project.filter(|value| !value.is_empty()) {
         href.push_str(sep);
         href.push_str("project=");
@@ -1888,6 +1909,90 @@ fn avatar_surface_review_gate_html(review_gate_preview: &Value, q: &AvatarSurfac
     )
 }
 
+fn avatar_surface_review_packet_html(
+    review_packet_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let packet = review_packet_preview
+        .get("review_packet")
+        .unwrap_or(&Value::Null);
+    let route_raw = packet
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-review-packet");
+    let renderer_route_raw = packet
+        .get("renderer_view_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-renderer-view");
+    let href_raw = avatar_surface_route_href(route_raw, q.project.as_deref(), None);
+    let href = html_escape(&href_raw);
+    let packets = avatar_surface_html_json_value(packet.get("packet_count"), "0");
+    let baseline_refs = avatar_surface_html_json_value(packet.get("baseline_reference_count"), "0");
+    let approval_writes = avatar_surface_html_json_value(
+        packet
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("approval_writes_allowed")),
+        "false",
+    );
+    let can_promote = avatar_surface_html_json_value(
+        packet
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+        "false",
+    );
+    let records_persisted = avatar_surface_html_json_value(
+        packet
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("records_persisted")),
+        "false",
+    );
+    let mut first_packet = "-".to_string();
+    let mut first_preview = "-".to_string();
+    if let Some(item) = packet
+        .get("packets")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+    {
+        let token = item.get("token").and_then(Value::as_str).unwrap_or("-");
+        first_packet = format!(
+            "{} decision={}",
+            html_escape(token),
+            avatar_surface_html_json_value(item.get("default_decision"), "-")
+        );
+        let href_raw =
+            avatar_surface_route_href(renderer_route_raw, q.project.as_deref(), Some(token));
+        first_preview = format!(
+            r#"<a href="{href}">{label}</a>"#,
+            href = html_escape(&href_raw),
+            label = html_escape(&avatar_surface_renderer_token_label(token)),
+        );
+    }
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">packet</span>
+        <strong>Xiao Shu Review Packet</strong>
+        <span>packets={packets} baseline_refs={baseline_refs}</span>
+      </div>
+      <dl>
+        <div><dt>safety</dt><dd>approval_writes={approval_writes} records_persisted={records_persisted} can_promote={can_promote}</dd></div>
+        <div><dt>first packet</dt><dd>{first_packet}</dd></div>
+        <div><dt>preview</dt><dd>{first_preview}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">review packet json</a></dd></div>
+      </dl>
+    </section>"#,
+        packets = packets,
+        baseline_refs = baseline_refs,
+        approval_writes = approval_writes,
+        records_persisted = records_persisted,
+        can_promote = can_promote,
+        first_packet = first_packet,
+        first_preview = first_preview,
+        href = href,
+    )
+}
+
 fn avatar_surface_renderer_view_html(
     renderer_view_preview: &Value,
     generated_at: i64,
@@ -2518,6 +2623,7 @@ fn avatar_surface_panel_html(
     cortex_visual_adapter: &Value,
     cortex_renderer_view: &Value,
     cortex_review_gate: &Value,
+    cortex_review_packet: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -2577,6 +2683,7 @@ fn avatar_surface_panel_html(
     let visual_adapter_html = avatar_surface_visual_adapter_html(cortex_visual_adapter);
     let renderer_view_html = avatar_surface_renderer_view_summary_html(cortex_renderer_view, q);
     let review_gate_html = avatar_surface_review_gate_html(cortex_review_gate, q);
+    let review_packet_html = avatar_surface_review_packet_html(cortex_review_packet, q);
     let quick_actions_html =
         avatar_surface_quick_actions_html(cortex_renderer_view, cortex_review_gate, q);
 
@@ -2822,6 +2929,7 @@ fn avatar_surface_panel_html(
     {visual_adapter_html}
     {renderer_view_html}
     {review_gate_html}
+    {review_packet_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -2847,6 +2955,7 @@ fn avatar_surface_panel_html(
         visual_adapter_html = visual_adapter_html,
         renderer_view_html = renderer_view_html,
         review_gate_html = review_gate_html,
+        review_packet_html = review_packet_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -3222,6 +3331,8 @@ mod tests {
             crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex.clone());
         let review_gate =
             crate::avatar_cortex::avatar_cortex_renderer_review_gate_from_status(cortex.clone());
+        let review_packet =
+            crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(cortex.clone());
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
@@ -3236,6 +3347,7 @@ mod tests {
             &visual_adapter,
             &renderer_view,
             &review_gate,
+            &review_packet,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -3287,6 +3399,11 @@ mod tests {
         assert!(html.contains("track=xiao_shu%3A%3Alook_sideways%3A%3Amedium"));
         assert!(html.contains("track=xiao_shu%3A%3Aalert_peek%3A%3Amedium"));
         assert!(html.contains("review gate json"));
+        assert!(html.contains("Xiao Shu Review Packet"));
+        assert!(html.contains("packets=3 baseline_refs=2"));
+        assert!(html.contains("approval_writes=false records_persisted=false can_promote=false"));
+        assert!(html.contains("decision=keep_pending"));
+        assert!(html.contains("review packet json"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));

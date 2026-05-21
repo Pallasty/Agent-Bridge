@@ -2102,6 +2102,167 @@ pub fn avatar_cortex_renderer_review_gate(
     Ok(avatar_cortex_renderer_review_gate_from_status(status))
 }
 
+fn avatar_cortex_renderer_review_packet_item(item: &Value) -> Value {
+    let token = vstr(item.get("token")).unwrap_or("xiao_shu::unknown");
+    let risk_level = vstr(item.get("risk_level")).unwrap_or("unknown");
+    let automatic_gate = vstr(item.get("automatic_gate")).unwrap_or("unknown");
+    let recommended_next_step = item
+        .get("recommended_next_step")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let mut operator_checks = vec![
+        json!("does this motion stay comfortable beside an active coding session"),
+        json!("does it remain readable at desktop pet size"),
+        json!("does it avoid implying failure unless the source signal is unhealthy"),
+    ];
+    if token.contains("alert") {
+        operator_checks.push(json!(
+            "should this ever pair with sparse voice output, or stay visual-only"
+        ));
+    } else {
+        operator_checks.push(json!(
+            "should this remain silent even when the same state repeats"
+        ));
+    }
+
+    json!({
+        "token": token,
+        "track_kind": item.get("track_kind").cloned().unwrap_or(Value::Null),
+        "risk_level": risk_level,
+        "automatic_gate": automatic_gate,
+        "manual_decision": item.get("manual_decision").cloned().unwrap_or(Value::Null),
+        "approval_state": "not_approved",
+        "proposed_decision": "keep_pending",
+        "default_decision": "keep_pending",
+        "can_promote_binding": false,
+        "writes_approval": false,
+        "persists_record": false,
+        "renderer_view": {
+            "route": "/avatar-surface/cortex-renderer-view",
+            "query_param": "track",
+            "track": token,
+        },
+        "review_packet": {
+            "schema": 1,
+            "required_human_checks": operator_checks,
+            "visual_questions": item
+                .get("review_questions")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+            "acceptance_criteria": item
+                .get("acceptance_criteria")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+            "evidence_to_capture": [
+                "desktop screenshot or live panel observation",
+                "whether the motion feels calm after repeated loops",
+                "whether it should remain visual-only or later pair with sparse voice",
+            ],
+            "allowed_future_decisions": [
+                "keep_pending",
+                "request_visual_revision",
+                "candidate_for_future_approval_design",
+            ],
+            "recommended_next_step": recommended_next_step,
+        },
+        "source_checks": {
+            "auto_checks": item.get("auto_checks").cloned().unwrap_or(Value::Null),
+            "blockers": item.get("blockers").cloned().unwrap_or_else(|| json!([])),
+        },
+    })
+}
+
+fn avatar_cortex_renderer_review_packet_from_review_gate_payload(
+    review_gate_payload: Value,
+) -> Value {
+    let gate = review_gate_payload
+        .get("review_gate")
+        .unwrap_or(&Value::Null);
+    let items = gate
+        .get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let packets: Vec<Value> = items
+        .iter()
+        .filter(|item| item.get("manual_decision").and_then(Value::as_str) == Some("pending"))
+        .map(avatar_cortex_renderer_review_packet_item)
+        .collect();
+    let baseline_references: Vec<Value> = items
+        .iter()
+        .filter(|item| item.get("manual_decision").and_then(Value::as_str) == Some("baseline"))
+        .map(|item| {
+            json!({
+                "token": item.get("token").cloned().unwrap_or(Value::Null),
+                "automatic_gate": item.get("automatic_gate").cloned().unwrap_or(Value::Null),
+                "can_promote_binding": false,
+            })
+        })
+        .collect();
+
+    json!({
+        "surface": "avatar_cortex_renderer_review_packet",
+        "schema": 1,
+        "read_only": true,
+        "dry_run": true,
+        "sidecar_only": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "renders_pixels": false,
+        "browser_renders_pixels": false,
+        "server_side_renders_pixels": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "writes_approval": false,
+        "persists_review_record": false,
+        "review_packet": {
+            "schema": 1,
+            "input": "avatar_cortex_renderer_review_gate.review_gate.items",
+            "html_route": "/avatar-surface/cortex-review-packet",
+            "renderer_view_route": gate
+                .get("renderer_view_route")
+                .cloned()
+                .unwrap_or(json!("/avatar-surface/cortex-renderer-view")),
+            "packet_count": packets.len(),
+            "manual_pending_count": packets.len(),
+            "baseline_reference_count": baseline_references.len(),
+            "packets": packets,
+            "baseline_references": baseline_references,
+            "acceptance": {
+                "manual_review_required": !packets.is_empty(),
+                "packets_are_approval_state": false,
+                "approval_writes_allowed": false,
+                "records_persisted": false,
+                "review_tracks_mutate_bindings": false,
+                "can_promote_review_tracks": false,
+                "asset_writes_allowed": false,
+                "renderer_mutation_allowed": false,
+                "codex_pet_package_mutation_allowed": false,
+            },
+            "decision": "review packets organize human inspection evidence but do not approve, persist, or bind tracks",
+            "next_step": "open each packet's focused renderer view, then record any human decision in a separately designed approval surface",
+        },
+        "source_review_gate": review_gate_payload,
+    })
+}
+
+pub(crate) fn avatar_cortex_renderer_review_packet_from_status(status: Value) -> Value {
+    let review_gate = avatar_cortex_renderer_review_gate_from_status(status);
+    avatar_cortex_renderer_review_packet_from_review_gate_payload(review_gate)
+}
+
+pub fn avatar_cortex_renderer_review_packet(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_renderer_review_packet_from_status(status))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
@@ -3427,6 +3588,57 @@ mod tests {
             .unwrap()
             .iter()
             .any(|question| question == "does the glow imply urgency"));
+    }
+
+    #[test]
+    fn avatar_cortex_renderer_review_packet_is_not_approval_state() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let gate = avatar_cortex_renderer_review_gate_from_renderer_view_payload(view);
+        let packet = avatar_cortex_renderer_review_packet_from_review_gate_payload(gate);
+        let review_packet = &packet["review_packet"];
+
+        assert_eq!(packet["surface"], "avatar_cortex_renderer_review_packet");
+        assert_eq!(packet["read_only"], true);
+        assert_eq!(packet["writes_files"], false);
+        assert_eq!(packet["mutates_renderer"], false);
+        assert_eq!(packet["codex_pet_package_mutation"], false);
+        assert_eq!(packet["writes_approval"], false);
+        assert_eq!(packet["persists_review_record"], false);
+        assert_eq!(review_packet["packet_count"], 3);
+        assert_eq!(review_packet["baseline_reference_count"], 2);
+        assert_eq!(
+            review_packet["acceptance"]["approval_writes_allowed"],
+            false
+        );
+        assert_eq!(
+            review_packet["acceptance"]["can_promote_review_tracks"],
+            false
+        );
+        assert_eq!(review_packet["acceptance"]["records_persisted"], false);
+
+        let packets = review_packet["packets"].as_array().unwrap();
+        let alert = packets
+            .iter()
+            .find(|item| item["token"] == "xiao_shu::alert_peek::medium")
+            .unwrap();
+        assert_eq!(alert["approval_state"], "not_approved");
+        assert_eq!(alert["default_decision"], "keep_pending");
+        assert_eq!(alert["can_promote_binding"], false);
+        assert_eq!(alert["writes_approval"], false);
+        assert_eq!(
+            alert["renderer_view"]["track"],
+            "xiao_shu::alert_peek::medium"
+        );
+        assert!(alert["review_packet"]["required_human_checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| check
+                == "should this ever pair with sparse voice output, or stay visual-only"));
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
