@@ -1891,6 +1891,217 @@ pub fn avatar_cortex_renderer_view(
     Ok(avatar_cortex_renderer_view_from_status(status))
 }
 
+fn avatar_cortex_value_array_strings(value: &Value) -> Vec<Value> {
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|item| json!(item))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn avatar_cortex_renderer_review_gate_item(track: &Value, index: usize) -> Value {
+    let token = vstr(track.get("token")).unwrap_or("xiao_shu::unknown");
+    let mapping = avatar_cortex_renderer_mapping(token);
+    let evidence = mapping.get("evidence").unwrap_or(&Value::Null);
+    let binding_stage = vstr(track.get("binding_stage")).unwrap_or("unknown");
+    let track_kind = vstr(track.get("track_kind")).unwrap_or("unknown");
+    let risk_level = vstr(track.get("risk_level")).unwrap_or("unknown");
+    let review_only = track
+        .get("review_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let duration_ms = track
+        .get("duration_ms")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let frame_count = track
+        .get("frame_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let final_frame = track.get("final_frame").unwrap_or(&Value::Null);
+    let final_motion = vstr(final_frame.get("motion_slot")).unwrap_or("unknown");
+    let returns_to_idle = final_motion == "idle_breathe";
+    let duration_within_2s = duration_ms <= 2000;
+    let has_frames = frame_count > 0;
+    let named_mapping_resolved = mapping
+        .get("resolved")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let official_package_binding = track
+        .get("renderer")
+        .and_then(|renderer| renderer.get("official_pet_package_binding"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let binding_stage_ok = if review_only {
+        binding_stage == "needs_review" && track_kind == "review_only"
+    } else {
+        binding_stage == "candidate" && track_kind == "selected"
+    };
+
+    let mut blockers = Vec::new();
+    if !has_frames {
+        blockers.push(json!("no_frames"));
+    }
+    if !returns_to_idle {
+        blockers.push(json!("does_not_return_to_idle_motion"));
+    }
+    if !duration_within_2s {
+        blockers.push(json!("duration_over_2s"));
+    }
+    if !named_mapping_resolved {
+        blockers.push(json!("unresolved_renderer_mapping"));
+    }
+    if official_package_binding {
+        blockers.push(json!("official_package_binding_detected"));
+    }
+    if !binding_stage_ok {
+        blockers.push(json!("binding_stage_mismatch"));
+    }
+
+    let automatic_gate = if blockers.is_empty() {
+        if review_only {
+            "ready_for_manual_review"
+        } else {
+            "selected_baseline_ready"
+        }
+    } else {
+        "blocked"
+    };
+    let manual_decision = if review_only { "pending" } else { "baseline" };
+
+    json!({
+        "index": index,
+        "token": token,
+        "track_kind": track_kind,
+        "review_only": review_only,
+        "binding_stage": binding_stage,
+        "risk_level": risk_level,
+        "duration_ms": duration_ms,
+        "frame_count": frame_count,
+        "automatic_gate": automatic_gate,
+        "manual_decision": manual_decision,
+        "can_promote_binding": false,
+        "blockers": blockers,
+        "auto_checks": {
+            "has_frames": has_frames,
+            "returns_to_idle": returns_to_idle,
+            "duration_within_2s": duration_within_2s,
+            "named_mapping_resolved": named_mapping_resolved,
+            "binding_stage_ok": binding_stage_ok,
+            "official_package_binding": official_package_binding,
+        },
+        "visual_intent": track.get("visual_intent").cloned().unwrap_or(Value::Null),
+        "acceptance_criteria": avatar_cortex_value_array_strings(
+            evidence.get("acceptance_criteria").unwrap_or(&Value::Null),
+        ),
+        "review_questions": avatar_cortex_value_array_strings(
+            evidence.get("review_questions").unwrap_or(&Value::Null),
+        ),
+        "recommended_next_step": evidence
+            .get("recommended_next_step")
+            .cloned()
+            .unwrap_or(Value::Null),
+    })
+}
+
+fn avatar_cortex_renderer_review_gate_from_renderer_view_payload(renderer_view: Value) -> Value {
+    let view = renderer_view.get("renderer_view").unwrap_or(&Value::Null);
+    let review_items: Vec<Value> = view
+        .get("tracks")
+        .and_then(Value::as_array)
+        .map(|tracks| {
+            tracks
+                .iter()
+                .enumerate()
+                .map(|(index, track)| avatar_cortex_renderer_review_gate_item(track, index))
+                .collect()
+        })
+        .unwrap_or_default();
+    let track_count = review_items.len();
+    let automatic_pass_count = review_items
+        .iter()
+        .filter(|item| {
+            item["blockers"]
+                .as_array()
+                .map(Vec::is_empty)
+                .unwrap_or(false)
+        })
+        .count();
+    let manual_pending_count = review_items
+        .iter()
+        .filter(|item| item["manual_decision"] == "pending")
+        .count();
+    let selected_baseline_count = review_items
+        .iter()
+        .filter(|item| item["manual_decision"] == "baseline")
+        .count();
+
+    json!({
+        "surface": "avatar_cortex_renderer_review_gate",
+        "schema": 1,
+        "read_only": true,
+        "dry_run": true,
+        "sidecar_only": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "renders_pixels": false,
+        "browser_renders_pixels": false,
+        "server_side_renders_pixels": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "review_gate": {
+            "schema": 1,
+            "input": "avatar_cortex_sidecar_renderer_view.renderer_view.tracks",
+            "html_route": "/avatar-surface/cortex-review-gate",
+            "renderer_view_route": view
+                .get("html_route")
+                .cloned()
+                .unwrap_or(json!("/avatar-surface/cortex-renderer-view")),
+            "track_count": track_count,
+            "selected_baseline_count": selected_baseline_count,
+            "manual_pending_count": manual_pending_count,
+            "automatic_pass_count": automatic_pass_count,
+            "automatic_blocked_count": track_count.saturating_sub(automatic_pass_count),
+            "items": review_items,
+            "acceptance": {
+                "all_automatic_checks_pass": automatic_pass_count == track_count,
+                "manual_review_required": manual_pending_count > 0,
+                "review_tracks_require_explicit_approval": manual_pending_count > 0,
+                "review_tracks_mutate_bindings": false,
+                "can_promote_review_tracks": false,
+                "asset_writes_allowed": false,
+                "renderer_mutation_allowed": false,
+                "codex_pet_package_mutation_allowed": false,
+            },
+            "decision": "review-only tracks remain inspection evidence until an explicit future approval gate is designed",
+            "next_step": "inspect each pending review-only track in the browser renderer view and record a human decision outside this dry-run surface",
+        },
+        "source_renderer_view": renderer_view,
+    })
+}
+
+pub(crate) fn avatar_cortex_renderer_review_gate_from_status(status: Value) -> Value {
+    let renderer_view = avatar_cortex_renderer_view_from_status(status);
+    avatar_cortex_renderer_review_gate_from_renderer_view_payload(renderer_view)
+}
+
+pub fn avatar_cortex_renderer_review_gate(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_renderer_review_gate_from_status(status))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
@@ -3170,6 +3381,52 @@ mod tests {
             view["renderer_view"]["next_step"],
             "manual browser visual QA for selected and review-only tracks before any official package binding"
         );
+    }
+
+    #[test]
+    fn avatar_cortex_renderer_review_gate_keeps_review_tracks_pending() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let gate = avatar_cortex_renderer_review_gate_from_renderer_view_payload(view);
+        let review_gate = &gate["review_gate"];
+
+        assert_eq!(gate["surface"], "avatar_cortex_renderer_review_gate");
+        assert_eq!(gate["read_only"], true);
+        assert_eq!(gate["writes_files"], false);
+        assert_eq!(gate["mutates_renderer"], false);
+        assert_eq!(gate["codex_pet_package_mutation"], false);
+        assert_eq!(gate["renders_pixels"], false);
+        assert_eq!(review_gate["track_count"], 5);
+        assert_eq!(review_gate["selected_baseline_count"], 2);
+        assert_eq!(review_gate["manual_pending_count"], 3);
+        assert_eq!(review_gate["automatic_pass_count"], 5);
+        assert_eq!(review_gate["acceptance"]["all_automatic_checks_pass"], true);
+        assert_eq!(
+            review_gate["acceptance"]["review_tracks_mutate_bindings"],
+            false
+        );
+        assert_eq!(
+            review_gate["acceptance"]["can_promote_review_tracks"],
+            false
+        );
+
+        let items = review_gate["items"].as_array().unwrap();
+        let sorting_glow = items
+            .iter()
+            .find(|item| item["token"] == "xiao_shu::sorting_glow::medium")
+            .unwrap();
+        assert_eq!(sorting_glow["manual_decision"], "pending");
+        assert_eq!(sorting_glow["automatic_gate"], "ready_for_manual_review");
+        assert_eq!(sorting_glow["can_promote_binding"], false);
+        assert_eq!(sorting_glow["auto_checks"]["returns_to_idle"], true);
+        assert!(sorting_glow["review_questions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|question| question == "does the glow imply urgency"));
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {

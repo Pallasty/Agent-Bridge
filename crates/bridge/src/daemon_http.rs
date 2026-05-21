@@ -20,6 +20,7 @@
 //!   - `GET /avatar-surface/cortex-binding-fixture?...` — sidecar preview fixtures
 //!   - `GET /avatar-surface/cortex-visual-adapter?...` — sidecar frame preview
 //!   - `GET /avatar-surface/cortex-renderer-view?...` — browser sidecar renderer view
+//!   - `GET /avatar-surface/cortex-review-gate?...` — read-only renderer review gate
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
@@ -138,6 +139,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-renderer-view",
             get(avatar_cortex_renderer_view),
+        )
+        .route(
+            "/avatar-surface/cortex-review-gate",
+            get(avatar_cortex_review_gate),
         )
         .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
         .route(
@@ -679,6 +684,8 @@ async fn avatar_surface_panel(
         crate::avatar_cortex::avatar_cortex_visual_adapter_from_status(cortex.clone());
     let cortex_renderer_view =
         crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex.clone());
+    let cortex_review_gate =
+        crate::avatar_cortex::avatar_cortex_renderer_review_gate_from_status(cortex.clone());
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
@@ -692,6 +699,7 @@ async fn avatar_surface_panel(
         &cortex_binding_fixture,
         &cortex_visual_adapter,
         &cortex_renderer_view,
+        &cortex_review_gate,
         &report,
         unix_now(),
     )))
@@ -830,6 +838,19 @@ async fn avatar_cortex_renderer_view(
         &payload,
         unix_now(),
     )))
+}
+
+async fn avatar_cortex_review_gate(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_review_gate(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
 }
 
 async fn avatar_cortex_preview(
@@ -1684,6 +1705,146 @@ fn avatar_surface_renderer_view_summary_html(
     )
 }
 
+fn avatar_surface_quick_actions_html(
+    renderer_view_preview: &Value,
+    review_gate_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let view = renderer_view_preview
+        .get("renderer_view")
+        .unwrap_or(&Value::Null);
+    let gate = review_gate_preview
+        .get("review_gate")
+        .unwrap_or(&Value::Null);
+    let renderer_route = view
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-renderer-view");
+    let review_route = gate
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-review-gate");
+    let renderer_href_raw = match q.project.as_deref() {
+        Some(project) if !project.is_empty() => {
+            format!("{renderer_route}?project={}", url_query_component(project))
+        }
+        _ => renderer_route.to_string(),
+    };
+    let review_href_raw = match q.project.as_deref() {
+        Some(project) if !project.is_empty() => {
+            format!("{review_route}?project={}", url_query_component(project))
+        }
+        _ => review_route.to_string(),
+    };
+
+    let tracks = avatar_surface_html_json_value(view.get("track_count"), "0");
+    let selected = avatar_surface_html_json_value(view.get("selected_track_count"), "0");
+    let review = avatar_surface_html_json_value(view.get("review_track_count"), "0");
+    let browser_pixels = avatar_surface_html_json_value(
+        renderer_view_preview.get("browser_renders_pixels"),
+        "false",
+    );
+    let pending = avatar_surface_html_json_value(gate.get("manual_pending_count"), "0");
+    let auto_pass = avatar_surface_html_json_value(gate.get("automatic_pass_count"), "0");
+    let can_promote = avatar_surface_html_json_value(
+        gate.get("acceptance")
+            .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+        "false",
+    );
+
+    format!(
+        r#"<nav class="quick-actions" aria-label="Avatar quick actions">
+      <a href="{renderer_href}" class="quick-action">
+        <strong>Renderer View</strong>
+        <span>tracks={tracks} selected={selected} review={review} browser={browser_pixels}</span>
+      </a>
+      <a href="{review_href}" class="quick-action">
+        <strong>Review Gate</strong>
+        <span>pending={pending} auto_pass={auto_pass} can_promote={can_promote}</span>
+      </a>
+    </nav>"#,
+        renderer_href = html_escape(&renderer_href_raw),
+        review_href = html_escape(&review_href_raw),
+        tracks = tracks,
+        selected = selected,
+        review = review,
+        browser_pixels = browser_pixels,
+        pending = pending,
+        auto_pass = auto_pass,
+        can_promote = can_promote,
+    )
+}
+
+fn avatar_surface_review_gate_html(review_gate_preview: &Value, q: &AvatarSurfaceQuery) -> String {
+    let gate = review_gate_preview
+        .get("review_gate")
+        .unwrap_or(&Value::Null);
+    let route_raw = gate
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-review-gate");
+    let href_raw = match q.project.as_deref() {
+        Some(project) if !project.is_empty() => {
+            format!("{route_raw}?project={}", url_query_component(project))
+        }
+        _ => route_raw.to_string(),
+    };
+    let href = html_escape(&href_raw);
+    let tracks = avatar_surface_html_json_value(gate.get("track_count"), "0");
+    let selected = avatar_surface_html_json_value(gate.get("selected_baseline_count"), "0");
+    let pending = avatar_surface_html_json_value(gate.get("manual_pending_count"), "0");
+    let auto_pass = avatar_surface_html_json_value(gate.get("automatic_pass_count"), "0");
+    let auto_blocked = avatar_surface_html_json_value(gate.get("automatic_blocked_count"), "0");
+    let manual_required = avatar_surface_html_json_value(
+        gate.get("acceptance")
+            .and_then(|acceptance| acceptance.get("manual_review_required")),
+        "false",
+    );
+    let can_promote = avatar_surface_html_json_value(
+        gate.get("acceptance")
+            .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+        "false",
+    );
+    let mut first_pending = "-".to_string();
+    if let Some(items) = gate.get("items").and_then(Value::as_array) {
+        if let Some(item) = items
+            .iter()
+            .find(|item| item.get("manual_decision").and_then(Value::as_str) == Some("pending"))
+        {
+            first_pending = format!(
+                "{} gate={}",
+                avatar_surface_html_json_value(item.get("token"), "-"),
+                avatar_surface_html_json_value(item.get("automatic_gate"), "-")
+            );
+        }
+    }
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">review</span>
+        <strong>Xiao Shu Review Gate</strong>
+        <span>tracks={tracks} selected={selected} pending={pending}</span>
+      </div>
+      <dl>
+        <div><dt>auto</dt><dd>pass={auto_pass} blocked={auto_blocked}</dd></div>
+        <div><dt>manual</dt><dd>required={manual_required} can_promote_review={can_promote}</dd></div>
+        <div><dt>first pending</dt><dd>{first_pending}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">review gate json</a></dd></div>
+      </dl>
+    </section>"#,
+        tracks = tracks,
+        selected = selected,
+        pending = pending,
+        auto_pass = auto_pass,
+        auto_blocked = auto_blocked,
+        manual_required = manual_required,
+        can_promote = can_promote,
+        first_pending = first_pending,
+        href = href,
+    )
+}
+
 fn avatar_surface_renderer_view_html(renderer_view_preview: &Value, generated_at: i64) -> String {
     let view = renderer_view_preview
         .get("renderer_view")
@@ -2287,6 +2448,7 @@ fn avatar_surface_panel_html(
     cortex_binding_fixture: &Value,
     cortex_visual_adapter: &Value,
     cortex_renderer_view: &Value,
+    cortex_review_gate: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -2345,6 +2507,9 @@ fn avatar_surface_panel_html(
     let binding_fixture_html = avatar_surface_binding_fixture_html(cortex_binding_fixture);
     let visual_adapter_html = avatar_surface_visual_adapter_html(cortex_visual_adapter);
     let renderer_view_html = avatar_surface_renderer_view_summary_html(cortex_renderer_view, q);
+    let review_gate_html = avatar_surface_review_gate_html(cortex_review_gate, q);
+    let quick_actions_html =
+        avatar_surface_quick_actions_html(cortex_renderer_view, cortex_review_gate, q);
 
     format!(
         r#"<!doctype html>
@@ -2463,6 +2628,35 @@ fn avatar_surface_panel_html(
       margin: 3px 0 0;
       overflow-wrap: anywhere;
     }}
+    .quick-actions {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }}
+    .quick-action {{
+      display: block;
+      padding: 10px 12px;
+      color: inherit;
+      text-decoration: none;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+    }}
+    .quick-action strong {{
+      display: block;
+      font-size: 14px;
+    }}
+    .quick-action span {{
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }}
+    .quick-action:hover {{
+      border-color: var(--accent);
+    }}
     table {{
       width: 100%;
       margin-top: 18px;
@@ -2528,6 +2722,7 @@ fn avatar_surface_panel_html(
       main {{ width: min(100vw - 20px, 1120px); margin-top: 14px; }}
       header {{ display: block; }}
       .count {{ display: block; margin-top: 10px; }}
+      .quick-actions {{ grid-template-columns: 1fr; }}
       .health dl {{ grid-template-columns: 1fr; }}
       table, thead, tbody, tr, th, td {{ display: block; }}
       thead {{ display: none; }}
@@ -2546,6 +2741,7 @@ fn avatar_surface_panel_html(
       </div>
       <div class="count">{count} avatars</div>
     </header>
+    {quick_actions_html}
     {health_html}
     {cortex_html}
     {language_html}
@@ -2556,6 +2752,7 @@ fn avatar_surface_panel_html(
     {binding_fixture_html}
     {visual_adapter_html}
     {renderer_view_html}
+    {review_gate_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -2569,6 +2766,7 @@ fn avatar_surface_panel_html(
         subtitle = html_escape(&subtitle),
         meta = html_escape(&meta),
         count = avatars.len(),
+        quick_actions_html = quick_actions_html,
         health_html = health_html,
         cortex_html = cortex_html,
         language_html = language_html,
@@ -2579,6 +2777,7 @@ fn avatar_surface_panel_html(
         binding_fixture_html = binding_fixture_html,
         visual_adapter_html = visual_adapter_html,
         renderer_view_html = renderer_view_html,
+        review_gate_html = review_gate_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -2952,6 +3151,8 @@ mod tests {
             crate::avatar_cortex::avatar_cortex_visual_adapter_from_status(cortex.clone());
         let renderer_view =
             crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex.clone());
+        let review_gate =
+            crate::avatar_cortex::avatar_cortex_renderer_review_gate_from_status(cortex.clone());
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
@@ -2965,6 +3166,7 @@ mod tests {
             &binding_fixture,
             &visual_adapter,
             &renderer_view,
+            &review_gate,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -3003,6 +3205,15 @@ mod tests {
         assert!(html.contains("xiao_shu::soft_bounce::low frames=4"));
         assert!(html.contains("browser=true"));
         assert!(html.contains("renderer view"));
+        assert!(html.contains("Avatar quick actions"));
+        assert!(html.contains("Renderer View</strong>"));
+        assert!(html.contains("Review Gate</strong>"));
+        assert!(html.contains("pending=3 auto_pass=5 can_promote=false"));
+        assert!(html.contains("Xiao Shu Review Gate"));
+        assert!(html.contains("tracks=5 selected=2 pending=3"));
+        assert!(html.contains("pass=5 blocked=0"));
+        assert!(html.contains("required=true can_promote_review=false"));
+        assert!(html.contains("review gate json"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));
