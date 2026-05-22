@@ -3162,6 +3162,7 @@ fn avatar_surface_voice_confirm_html(
     let actual_execution =
         avatar_surface_html_json_value(confirm.get("actual_execution_available_here"), "false");
     let command = avatar_surface_html_json_value(confirm.get("pending_command_preview"), "-");
+    let action = avatar_surface_html_json_value(confirm.get("pending_action_command_preview"), "-");
 
     format!(
         r#"<section class="health status-fresh">
@@ -3176,6 +3177,7 @@ fn avatar_surface_voice_confirm_html(
         <div><dt>confirm</dt><dd>confirm={confirm_requested} would_execute_cli={would_execute} reason_present={reason}</dd></div>
         <div><dt>safety</dt><dd>auto_emit={auto} http_emit_route={http_emit} actual_execution_here={actual_execution}</dd></div>
         <div><dt>command</dt><dd>{command}</dd></div>
+        <div><dt>action</dt><dd>{action}</dd></div>
         <div><dt>request</dt><dd><a href="{request_href}">voice request json</a></dd></div>
         <div><dt>open</dt><dd><a href="{href}">voice confirm json</a></dd></div>
       </dl>
@@ -3192,6 +3194,7 @@ fn avatar_surface_voice_confirm_html(
         http_emit = http_emit,
         actual_execution = actual_execution,
         command = command,
+        action = action,
         request_href = html_escape(&request_href_raw),
         href = html_escape(&href_raw),
     )
@@ -5118,6 +5121,7 @@ mod tests {
         ));
         assert!(html.contains("confirm=false would_execute_cli=false reason_present=true"));
         assert!(html.contains("auto_emit=false http_emit_route=null actual_execution_here=false"));
+        assert!(html.contains("agent-bridge avatar cortex-voice-action"));
         assert!(html.contains("voice confirm json"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));

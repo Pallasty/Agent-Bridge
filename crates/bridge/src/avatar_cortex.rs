@@ -53,6 +53,22 @@ pub struct AvatarCortexVoiceEmitOptions<'a> {
     pub tts_rate: Option<u64>,
 }
 
+#[derive(Clone, Copy)]
+pub struct AvatarCortexVoiceActionOptions<'a> {
+    pub label: Option<&'a str>,
+    pub heartbeat_label: Option<&'a str>,
+    pub project: Option<&'a str>,
+    pub output: Option<&'a Path>,
+    pub requested_track: Option<&'a str>,
+    pub reason: Option<&'a str>,
+    pub confirm: bool,
+    pub emit: bool,
+    pub force: bool,
+    pub cooldown_secs: i64,
+    pub tts_voice: Option<&'a str>,
+    pub tts_rate: Option<u64>,
+}
+
 fn home_dir() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -3173,6 +3189,7 @@ fn avatar_cortex_voice_request_from_policy_payload(
             .cloned()
             .unwrap_or_else(|| json!("/avatar-surface/cortex-voice-policy")),
         "request_state": request_state,
+        "project": project,
         "requested_track": requested_track,
         "selected_token": token,
         "line": if line.is_empty() { Value::Null } else { json!(line) },
@@ -3297,6 +3314,18 @@ fn avatar_cortex_voice_confirm_from_request_payload(
         .and_then(Value::as_array)
         .map(|args| !args.is_empty())
         .unwrap_or(false);
+    let project = vstr(request.get("project")).unwrap_or("agent-bridge");
+    let selected_token = vstr(request.get("selected_token")).unwrap_or("xiao_shu::unknown");
+    let suggested_voice = vstr(request.get("suggested_voice")).unwrap_or("Flo (中文（中国大陆）)");
+    let suggested_rate = request
+        .get("suggested_rate")
+        .and_then(Value::as_u64)
+        .unwrap_or(190);
+    let cooldown_secs = request
+        .get("cooldown_secs")
+        .and_then(Value::as_i64)
+        .unwrap_or(300);
+    let command_reason = vstr(request.get("operator_reason")).unwrap_or("<operator-reason>");
     let confirmation_state = if !request_ready || !manual_cli_allowed || !command_args_present {
         "blocked_by_request"
     } else if !confirm {
@@ -3307,6 +3336,36 @@ fn avatar_cortex_voice_confirm_from_request_payload(
         "would_execute_cli_emit_if_operator_runs_command"
     };
     let would_execute_cli = confirmation_state == "would_execute_cli_emit_if_operator_runs_command";
+    let action_command_args = if request_ready && manual_cli_allowed && command_args_present {
+        json!([
+            "agent-bridge",
+            "avatar",
+            "cortex-voice-action",
+            "--project",
+            project,
+            "--track",
+            selected_token,
+            "--confirm",
+            "--emit",
+            "--reason",
+            command_reason,
+            "--cooldown-secs",
+            cooldown_secs.to_string(),
+            "--tts-voice",
+            suggested_voice,
+            "--tts-rate",
+            suggested_rate.to_string(),
+        ])
+    } else {
+        Value::Null
+    };
+    let action_command_preview = if request_ready && manual_cli_allowed && command_args_present {
+        json!(format!(
+            "agent-bridge avatar cortex-voice-action --project {project} --track {selected_token:?} --confirm --emit --reason {command_reason:?} --cooldown-secs {cooldown_secs} --tts-voice {suggested_voice:?} --tts-rate {suggested_rate}"
+        ))
+    } else {
+        Value::Null
+    };
 
     let voice_confirm = json!({
         "schema": 1,
@@ -3345,8 +3404,21 @@ fn avatar_cortex_voice_confirm_from_request_payload(
         } else {
             Value::Null
         },
+        "action_surface": "agent-bridge avatar cortex-voice-action",
+        "action_command_args": if would_execute_cli {
+            action_command_args.clone()
+        } else {
+            Value::Null
+        },
+        "action_command_preview": if would_execute_cli {
+            action_command_preview.clone()
+        } else {
+            Value::Null
+        },
         "pending_command_args": request.get("command_args").cloned().unwrap_or(Value::Null),
         "pending_command_preview": request.get("command_preview").cloned().unwrap_or(Value::Null),
+        "pending_action_command_args": action_command_args,
+        "pending_action_command_preview": action_command_preview,
         "approval": {
             "writes_approval": false,
             "persists_confirmation_record": false,
@@ -3927,6 +3999,141 @@ pub fn avatar_cortex_voice_emit(opts: &AvatarCortexVoiceEmitOptions<'_>) -> Resu
         "tts": event.get("tts").cloned().unwrap_or(Value::Null),
         "event": event,
     }))
+}
+
+fn avatar_cortex_voice_action_from_confirm_payload(
+    confirm_payload: Value,
+    opts: &AvatarCortexVoiceActionOptions<'_>,
+) -> Result<Value> {
+    let confirm = confirm_payload
+        .get("voice_confirm")
+        .unwrap_or(&Value::Null);
+    let confirmation_state =
+        vstr(confirm.get("confirmation_state")).unwrap_or("blocked_by_request");
+    let confirmed = confirmation_state == "would_execute_cli_emit_if_operator_runs_command";
+    let operator_reason = opts.reason.map(str::trim).filter(|s| !s.is_empty());
+    let line = vstr(confirm.get("line")).unwrap_or("").to_string();
+    let selected_token = vstr(confirm.get("selected_token")).unwrap_or("xiao_shu::unknown");
+    let project = opts.project.unwrap_or_else(|| {
+        vstr(confirm.get("project"))
+            .or_else(|| {
+                confirm_payload
+                    .get("source_voice_request")
+                    .and_then(|request_payload| request_payload.get("voice_request"))
+                    .and_then(|request| vstr(request.get("project")))
+            })
+            .unwrap_or("agent-bridge")
+    });
+    let tts_voice = opts
+        .tts_voice
+        .or_else(|| vstr(confirm.get("suggested_voice")));
+    let tts_rate = opts
+        .tts_rate
+        .or_else(|| confirm.get("suggested_rate").and_then(Value::as_u64));
+
+    let mut blocked_reasons = Vec::new();
+    if !opts.confirm {
+        blocked_reasons.push("confirm_flag_missing");
+    }
+    if !confirmed {
+        blocked_reasons.push("confirmation_not_ready");
+    }
+    if !opts.emit {
+        blocked_reasons.push("emit_flag_missing");
+    }
+    if operator_reason.is_none() {
+        blocked_reasons.push("missing_reason");
+    }
+    if line.is_empty() {
+        blocked_reasons.push("missing_line");
+    }
+    let actual_emit_invoked = blocked_reasons.is_empty();
+    let emit_payload = if actual_emit_invoked {
+        let emit_opts = AvatarCortexVoiceEmitOptions {
+            label: opts.label,
+            heartbeat_label: opts.heartbeat_label,
+            project: Some(project),
+            output: opts.output,
+            preview_text: Some(line.as_str()),
+            enabled: true,
+            force: opts.force,
+            cooldown_secs: opts.cooldown_secs,
+            reason: opts.reason,
+            allow_policy_override: true,
+            tts_voice,
+            tts_rate,
+        };
+        avatar_cortex_voice_emit(&emit_opts)?
+    } else {
+        Value::Null
+    };
+    let emitted = vbool(emit_payload.get("emitted")).unwrap_or(false);
+    let would_emit = vbool(emit_payload.get("would_emit")).unwrap_or(false);
+    let emits_audio = vbool(emit_payload.get("emits_audio")).unwrap_or(false);
+    let command_preview = confirm
+        .get("action_command_preview")
+        .cloned()
+        .or_else(|| confirm.get("pending_action_command_preview").cloned())
+        .unwrap_or(Value::Null);
+    let command_args = confirm
+        .get("action_command_args")
+        .cloned()
+        .or_else(|| confirm.get("pending_action_command_args").cloned())
+        .unwrap_or(Value::Null);
+
+    Ok(json!({
+        "surface": "avatar_cortex_voice_action",
+        "schema": 1,
+        "generated_at": now_secs(),
+        "cli_only": true,
+        "http_available": false,
+        "read_only": !actual_emit_invoked,
+        "dry_run": !actual_emit_invoked,
+        "sidecar_only": true,
+        "mutates_global_substrate": false,
+        "writes_files": actual_emit_invoked,
+        "writes_cooldown_state": emitted,
+        "codex_pet_package_mutation": false,
+        "requested_emit": opts.emit,
+        "actual_emit_invoked": actual_emit_invoked,
+        "would_emit": would_emit,
+        "emitted": emitted,
+        "emits_audio": emits_audio,
+        "emits_notification": false,
+        "action": {
+            "confirmation_state": confirmation_state,
+            "confirmed": confirmed,
+            "confirm_flag": opts.confirm,
+            "emit_flag": opts.emit,
+            "blocked": !actual_emit_invoked,
+            "blocked_reasons": blocked_reasons,
+            "selected_token": selected_token,
+            "line": line,
+            "reason_present": operator_reason.is_some(),
+            "allow_policy_override": actual_emit_invoked,
+            "cooldown_secs": opts.cooldown_secs,
+            "force": opts.force,
+            "tts_voice": tts_voice,
+            "tts_rate": tts_rate,
+            "command_args": command_args,
+            "command_preview": command_preview,
+        },
+        "source_voice_confirm": confirm_payload,
+        "source_voice_emit": emit_payload,
+    }))
+}
+
+pub fn avatar_cortex_voice_action(opts: &AvatarCortexVoiceActionOptions<'_>) -> Result<Value> {
+    let confirm_payload = avatar_cortex_voice_confirm(
+        opts.label,
+        opts.heartbeat_label,
+        opts.project,
+        opts.output,
+        opts.requested_track,
+        opts.reason,
+        opts.confirm,
+    )?;
+    avatar_cortex_voice_action_from_confirm_payload(confirm_payload, opts)
 }
 
 #[cfg(test)]
@@ -5216,6 +5423,19 @@ mod tests {
             .unwrap()
             .iter()
             .any(|arg| arg == "--allow-policy-override"));
+        assert_eq!(
+            confirm["action_surface"],
+            "agent-bridge avatar cortex-voice-action"
+        );
+        assert!(confirm["action_command_args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|arg| arg == "cortex-voice-action"));
+        assert!(confirm["action_command_preview"]
+            .as_str()
+            .unwrap()
+            .contains("--confirm --emit"));
 
         let waiting = avatar_cortex_voice_confirm_from_request_payload(
             payload["source_voice_request"].clone(),
@@ -5241,6 +5461,80 @@ mod tests {
             "blocked_missing_operator_reason"
         );
         assert_eq!(missing_reason["voice_confirm"]["would_execute_cli"], false);
+    }
+
+    #[test]
+    fn avatar_cortex_voice_action_wraps_confirm_before_emit() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let policy = avatar_cortex_voice_policy_from_renderer_view_payload(view);
+        let request = avatar_cortex_voice_request_from_policy_payload(
+            policy,
+            Some("xiao_shu::alert_peek::medium"),
+            Some("agent-bridge"),
+            Some("manual confirmation"),
+        );
+        let confirm = avatar_cortex_voice_confirm_from_request_payload(request, true);
+        let opts = AvatarCortexVoiceActionOptions {
+            label: None,
+            heartbeat_label: None,
+            project: Some("agent-bridge"),
+            output: None,
+            requested_track: Some("xiao_shu::alert_peek::medium"),
+            reason: Some("manual confirmation"),
+            confirm: true,
+            emit: false,
+            force: false,
+            cooldown_secs: 300,
+            tts_voice: None,
+            tts_rate: None,
+        };
+        let action = avatar_cortex_voice_action_from_confirm_payload(confirm, &opts).unwrap();
+
+        assert_eq!(action["surface"], "avatar_cortex_voice_action");
+        assert_eq!(action["cli_only"], true);
+        assert_eq!(action["http_available"], false);
+        assert_eq!(action["read_only"], true);
+        assert_eq!(action["dry_run"], true);
+        assert_eq!(action["requested_emit"], false);
+        assert_eq!(action["actual_emit_invoked"], false);
+        assert_eq!(action["emitted"], false);
+        assert_eq!(action["emits_audio"], false);
+        assert_eq!(
+            action["action"]["confirmation_state"],
+            "would_execute_cli_emit_if_operator_runs_command"
+        );
+        assert_eq!(action["action"]["confirmed"], true);
+        assert_eq!(action["action"]["blocked"], true);
+        assert!(action["action"]["blocked_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason == "emit_flag_missing"));
+        assert!(action["action"]["command_preview"]
+            .as_str()
+            .unwrap()
+            .contains("cortex-voice-action"));
+        assert_eq!(action["source_voice_emit"], Value::Null);
+
+        let waiting = avatar_cortex_voice_confirm_from_request_payload(
+            action["source_voice_confirm"]["source_voice_request"].clone(),
+            false,
+        );
+        let blocked_opts = AvatarCortexVoiceActionOptions {
+            emit: true,
+            confirm: false,
+            ..opts
+        };
+        let blocked = avatar_cortex_voice_action_from_confirm_payload(waiting, &blocked_opts).unwrap();
+        let reasons = blocked["action"]["blocked_reasons"].as_array().unwrap();
+        assert!(reasons.iter().any(|reason| reason == "confirm_flag_missing"));
+        assert!(reasons.iter().any(|reason| reason == "confirmation_not_ready"));
+        assert_eq!(blocked["actual_emit_invoked"], false);
+        assert_eq!(blocked["emits_audio"], false);
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {

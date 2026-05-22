@@ -926,6 +926,48 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Run the confirmed Xiao Shu voice action through the CLI-only emit gate.
+    CortexVoiceAction {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Renderer token to confirm. Defaults to the first policy-approved manual voice rule.
+        #[arg(long)]
+        track: Option<String>,
+        /// Operator reason required before real audio can be invoked.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Mark the confirmation as explicitly requested.
+        #[arg(long)]
+        confirm: bool,
+        /// Actually invoke the existing CLI-only emit gate after confirmation passes.
+        #[arg(long)]
+        emit: bool,
+        /// Ignore cooldown state for this invocation.
+        #[arg(long)]
+        force: bool,
+        /// Cooldown seconds to evaluate and record after a successful emit.
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: i64,
+        /// Optional macOS say voice. Defaults to the policy suggestion or AB_PET_TTS_VOICE.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Optional macOS say rate. Defaults to the policy suggestion or AB_PET_TTS_RATE.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2749,6 +2791,38 @@ async fn main() -> Result<()> {
                     track.clone(),
                     reason.clone(),
                     *confirm,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoiceAction {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                track,
+                reason,
+                confirm,
+                emit,
+                force,
+                cooldown_secs,
+                tts_voice,
+                tts_rate,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_action(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    track.clone(),
+                    reason.clone(),
+                    *confirm,
+                    *emit,
+                    *force,
+                    *cooldown_secs,
+                    tts_voice.clone(),
+                    *tts_rate,
                     *as_json,
                 )
                 .await
@@ -5184,6 +5258,73 @@ async fn run_avatar_cortex_voice_confirm(
         "actual_execution_here={} command={}",
         avatar_health_display(confirm.get("actual_execution_available_here"), "false"),
         avatar_health_display(confirm.get("command_preview"), "-")
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_cortex_voice_action(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    track: Option<String>,
+    reason: Option<String>,
+    confirm: bool,
+    emit: bool,
+    force: bool,
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::AvatarCortexVoiceActionOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        requested_track: track.as_deref(),
+        reason: reason.as_deref(),
+        confirm,
+        emit,
+        force,
+        cooldown_secs,
+        tts_voice: tts_voice.as_deref(),
+        tts_rate,
+    };
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_action(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let action = payload.get("action").unwrap_or(&Value::Null);
+    let emit_payload = payload.get("source_voice_emit").unwrap_or(&Value::Null);
+    let tts = emit_payload.get("tts").unwrap_or(&Value::Null);
+    println!("avatar cortex voice action");
+    println!(
+        "state={} confirm={} emit={} actual_emit_invoked={} emitted={} emits_audio={}",
+        avatar_health_display(action.get("confirmation_state"), "-"),
+        avatar_health_display(action.get("confirm_flag"), "false"),
+        avatar_health_display(action.get("emit_flag"), "false"),
+        avatar_health_display(payload.get("actual_emit_invoked"), "false"),
+        avatar_health_display(payload.get("emitted"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false")
+    );
+    println!(
+        "blocked={} reasons={} token={} line={}",
+        avatar_health_display(action.get("blocked"), "true"),
+        avatar_health_display_list(action.get("blocked_reasons"), "none"),
+        avatar_health_display(action.get("selected_token"), "-"),
+        avatar_health_display(action.get("line"), "-")
+    );
+    println!(
+        "tts_ok={} voice={} rate={} command={}",
+        avatar_health_display(tts.get("ok"), "-"),
+        avatar_health_display(action.get("tts_voice"), "-"),
+        avatar_health_display(action.get("tts_rate"), "-"),
+        avatar_health_display(action.get("command_preview"), "-")
     );
     Ok(())
 }
