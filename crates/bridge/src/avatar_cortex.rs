@@ -980,13 +980,14 @@ fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
                 "should this ever pair with sparse voice output"
             ],
             "latest_human_feedback": {
-                "source": "desktop_visual_review_2026_05_21_alert_peek",
-                "outcome": "request_visual_revision",
+                "source": "desktop_visual_review_2026_05_22_sidecar_peek_v4",
+                "outcome": "accept_visual_motion_candidate",
                 "notes": [
-                    "too_bright",
-                    "aesthetic_needs_improvement",
+                    "sidecar_peek_v2_is_clear_raised_hand_motion_baseline",
+                    "sidecar_peek_v4_restores_xiao_shu_identity_cues",
+                    "motion_canonical_v4_reads_correctly",
                     "voice_linkage_desired",
-                    "slightly_thicker_shape_ok"
+                    "no_official_pet_package_mutation"
                 ]
             },
             "revision_response": [
@@ -995,14 +996,15 @@ fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
                 "soften alert_peek motion timing",
                 "add slight outline and body weight only in alert state",
                 "reduce alert-state body brightness without changing other tracks",
-                "keep voice linkage as future sparse voice design, not immediate emit"
+                "keep voice linkage as future sparse voice design, not immediate emit",
+                "add sidecar_peek_v4 as the accepted motion-canonical visual candidate using the sidecar_peek_v2 raised-hand skeleton"
             ],
             "voice_linkage": {
                 "requested": true,
                 "policy": "future_sparse_voice_after_visual_re_review",
                 "emits_audio_now": false
             },
-            "recommended_next_step": "re-review revised alert_peek before any voice or binding approval design"
+            "recommended_next_step": "use sidecar_peek_v4 as the alert_peek visual baseline before any sparse voice or binding approval design"
         }),
         _ => json!({
             "schema": 1,
@@ -1768,7 +1770,7 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "sprite_row": 5,
                 "sprite_frames": 8,
                 "alert_mark": true,
-                "default": true,
+                "default": false,
                 "intent": "accepted original-sprite baseline; strongest attention read",
                 "frame_choreography": {
                     "schema": 1,
@@ -1874,7 +1876,7 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "sprite_row": 0,
                 "sprite_frames": 8,
                 "alert_mark": true,
-                "default": false,
+                "default": true,
                 "intent": "motion-canonical redraw that keeps the readable v2 raised-hand geometry while adding Xiao Shu paper-charm identity cues",
                 "sidecar_asset": {
                     "asset_id": "xiao-shu-motion-canonical-peek-v4",
@@ -2048,12 +2050,14 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
                 "schema": 1,
                 "surface": "alert_peek_semantic_variant_review",
                 "read_only": true,
-                "default_variant": "current_alert_row",
+                "default_variant": "sidecar_peek_v4",
+                "preferred_variant": "sidecar_peek_v4",
+                "human_review_status": "visual_motion_candidate_accepted",
                 "writes_approval": false,
                 "persists_record": false,
                 "can_promote_binding": false,
                 "emits_audio": false,
-                "next_step": "compare alert_peek posture variants before choosing any binding or sparse voice cue",
+                "next_step": "keep sidecar_peek_v4 as the alert_peek visual baseline before choosing any binding or sparse voice cue",
             })
         } else {
             Value::Null
@@ -4093,6 +4097,7 @@ mod tests {
             alert_peek["semantic_variants"][0]["variant_id"],
             "current_alert_row"
         );
+        assert_eq!(alert_peek["semantic_variants"][0]["default"], false);
         assert_eq!(
             alert_peek["semantic_variants"][1]["variant_id"],
             "waiting_peek_row"
@@ -4132,6 +4137,7 @@ mod tests {
             alert_peek["semantic_variants"][3]["variant_id"],
             "sidecar_peek_v4"
         );
+        assert_eq!(alert_peek["semantic_variants"][3]["default"], true);
         assert_eq!(
             alert_peek["semantic_variants"][3]["sidecar_asset"]["asset_id"],
             "xiao-shu-motion-canonical-peek-v4"
@@ -4153,6 +4159,14 @@ mod tests {
             "alert_peek_sidecar_v3_frame_choreo"
         );
         assert_eq!(alert_peek["semantic_variants"][5]["sprite_row"], 8);
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["default_variant"],
+            "sidecar_peek_v4"
+        );
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["human_review_status"],
+            "visual_motion_candidate_accepted"
+        );
         assert_eq!(
             alert_peek["semantic_variant_review"]["can_promote_binding"],
             false
@@ -4277,7 +4291,7 @@ mod tests {
         );
         assert_eq!(
             alert["review_packet"]["latest_human_feedback"]["outcome"],
-            "request_visual_revision"
+            "accept_visual_motion_candidate"
         );
         assert_eq!(alert["review_packet"]["voice_linkage"]["requested"], true);
         assert_eq!(
@@ -4358,10 +4372,10 @@ mod tests {
         assert_eq!(alert["voice_linkage_requested"], true);
         assert_eq!(
             alert["latest_human_feedback"]["outcome"],
-            "request_visual_revision"
+            "accept_visual_motion_candidate"
         );
         assert_eq!(alert["voice_linkage"]["emits_audio_now"], false);
-        assert_eq!(alert["evidence_counts"]["revision_response"], 6);
+        assert_eq!(alert["evidence_counts"]["revision_response"], 7);
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
