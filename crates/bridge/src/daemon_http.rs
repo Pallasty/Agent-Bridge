@@ -1170,6 +1170,8 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
         mouth: &'static str,
         left_sleeve: i32,
         right_sleeve: i32,
+        sleeve_y: i32,
+        hand_lift: i32,
         ribbon: i32,
         cheek: &'static str,
     }
@@ -1185,6 +1187,8 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
             mouth: "small",
             left_sleeve: -8,
             right_sleeve: 8,
+            sleeve_y: 143,
+            hand_lift: 0,
             ribbon: -8,
             cheek: "0.10",
         },
@@ -1198,6 +1202,8 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
             mouth: "small",
             left_sleeve: -18,
             right_sleeve: 14,
+            sleeve_y: 139,
+            hand_lift: 0,
             ribbon: -18,
             cheek: "0.16",
         },
@@ -1209,8 +1215,10 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
             eye_shift: -4,
             blink: false,
             mouth: "open",
-            left_sleeve: -30,
-            right_sleeve: 18,
+            left_sleeve: -38,
+            right_sleeve: 28,
+            sleeve_y: 133,
+            hand_lift: 1,
             ribbon: -24,
             cheek: "0.22",
         },
@@ -1222,8 +1230,10 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
             eye_shift: 0,
             blink: false,
             mouth: "smile",
-            left_sleeve: -46,
-            right_sleeve: 25,
+            left_sleeve: -62,
+            right_sleeve: 46,
+            sleeve_y: 126,
+            hand_lift: 2,
             ribbon: -10,
             cheek: "0.30",
         },
@@ -1235,8 +1245,10 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
             eye_shift: 2,
             blink: false,
             mouth: "smile",
-            left_sleeve: -56,
-            right_sleeve: 28,
+            left_sleeve: -76,
+            right_sleeve: 56,
+            sleeve_y: 122,
+            hand_lift: 2,
             ribbon: 8,
             cheek: "0.34",
         },
@@ -1248,8 +1260,10 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
             eye_shift: 0,
             blink: true,
             mouth: "smile",
-            left_sleeve: -50,
-            right_sleeve: 24,
+            left_sleeve: -70,
+            right_sleeve: 50,
+            sleeve_y: 124,
+            hand_lift: 2,
             ribbon: 16,
             cheek: "0.36",
         },
@@ -1261,8 +1275,10 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
             eye_shift: -3,
             blink: false,
             mouth: "small",
-            left_sleeve: -28,
-            right_sleeve: 16,
+            left_sleeve: -44,
+            right_sleeve: 30,
+            sleeve_y: 133,
+            hand_lift: 1,
             ribbon: -5,
             cheek: "0.24",
         },
@@ -1276,6 +1292,8 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
             mouth: "small",
             left_sleeve: -12,
             right_sleeve: 10,
+            sleeve_y: 141,
+            hand_lift: 0,
             ribbon: -12,
             cheek: "0.16",
         },
@@ -1324,6 +1342,37 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
             "smile" => r##"<path d="M82 108 Q96 119 110 108" fill="none" stroke="#35251a" stroke-width="4.5" stroke-linecap="round"/>"##,
             _ => r##"<path d="M88 110 Q96 114 104 110" fill="none" stroke="#35251a" stroke-width="4" stroke-linecap="round"/>"##,
         };
+        let sleeves = match frame.hand_lift {
+            2 => r##"<path d="M60 146 C44 130 47 109 62 99 C72 111 76 132 68 151 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M57 124 L69 119" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+        <ellipse cx="61" cy="100" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+        <path d="M132 146 C150 130 147 109 132 99 C122 111 118 132 126 151 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M135 124 L123 119" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+        <ellipse cx="131" cy="100" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>"##
+                .to_string(),
+            1 => r##"<path d="M58 150 C43 137 46 117 60 109 C70 119 74 137 68 154 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M56 132 L68 128" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+        <ellipse cx="60" cy="111" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+        <path d="M134 150 C149 137 146 117 132 109 C122 119 118 137 124 154 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M136 132 L124 128" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+        <ellipse cx="132" cy="111" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>"##
+                .to_string(),
+            _ => format!(
+                r##"<g transform="translate(54 {sleeve_y}) rotate({left_sleeve})">
+          <path d="M0 -8 C-23 4 -31 34 -12 45 C8 53 23 20 18 -1 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+          <path d="M-8 14 L13 23" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+          <ellipse cx="-12" cy="33" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+        </g>
+        <g transform="translate(138 {sleeve_y}) rotate({right_sleeve})">
+          <path d="M0 -8 C23 4 31 34 12 45 C-8 53 -23 20 -18 -1 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+          <path d="M8 14 L-13 23" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+          <ellipse cx="12" cy="33" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+        </g>"##,
+                sleeve_y = frame.sleeve_y,
+                left_sleeve = frame.left_sleeve,
+                right_sleeve = frame.right_sleeve
+            ),
+        };
 
         writeln!(
             svg,
@@ -1332,20 +1381,13 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
     <ellipse cx="96" cy="190" rx="54" ry="12" fill="#2d2018" opacity="0.16"/>
     <g filter="url(#xs3-shadow)" transform="translate(96 118) scale({scale}) translate(-96 -118) translate(0 {rise})">
       <g transform="translate(96 96) rotate({tilt}) translate(-96 -96)">
-        <g transform="translate(54 145) rotate({left_sleeve})">
-          <path d="M0 -6 C-22 5 -28 36 -10 45 C8 51 20 21 17 1 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
-          <path d="M-7 14 L12 23" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
-        </g>
-        <g transform="translate(138 145) rotate({right_sleeve})">
-          <path d="M0 -6 C22 5 28 36 10 45 C-8 51 -20 21 -17 1 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
-          <path d="M8 14 L-12 23" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
-        </g>
         <path d="M56 123 C66 110 126 110 136 123 L150 189 C132 198 60 198 42 189 Z" fill="url(#xs3-robe)" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
         <path d="M71 122 L96 188 L121 122" fill="#ead9ad" stroke="#8f4a32" stroke-width="4" stroke-linejoin="round"/>
         <path d="M62 134 C82 145 111 145 130 134" fill="none" stroke="#b94735" stroke-width="7" stroke-linecap="round"/>
         <path d="M83 136 L108 163 L93 188" fill="none" stroke="#b94735" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="72" cy="160" r="3" fill="#8f6d38" opacity="0.8"/>
         <circle cx="122" cy="159" r="3" fill="#8f6d38" opacity="0.8"/>
+        {sleeves}
         <path d="M51 66 C51 41 69 27 96 27 C123 27 141 41 141 66 L141 91 C141 124 122 144 96 144 C70 144 51 124 51 91 Z" fill="url(#xs3-head)" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
         <path d="M73 31 C63 19 73 8 82 17 C90 26 79 38 65 33" fill="none" stroke="#9b6b32" stroke-width="5" stroke-linecap="round"/>
         <path d="M115 38 C130 22 155 29 153 52 C139 47 127 53 115 38 Z" fill="#b94735" stroke="#3a291c" stroke-width="4" stroke-linejoin="round" transform="rotate({ribbon} 134 42)"/>
@@ -1363,8 +1405,7 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
             scale = frame.scale,
             rise = frame.rise,
             tilt = frame.tilt,
-            left_sleeve = frame.left_sleeve,
-            right_sleeve = frame.right_sleeve,
+            sleeves = sleeves,
             ribbon = frame.ribbon,
             eyes = eyes,
             cheek = frame.cheek,
