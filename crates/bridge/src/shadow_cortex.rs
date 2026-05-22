@@ -15,9 +15,12 @@ const SIGNAL_SCHEMA_VERSION: u8 = 1;
 const SHORT_TTL_SECS: u64 = 3_600;
 const LONG_TTL_SECS: u64 = 86_400;
 const SALIENCE_SATURATION_TOP_K: usize = 4;
+// Saturation thresholds are lane-local proxies for each lane's salience cap.
+// Keep them below the corresponding clamp ceiling so guarded verdicts remain reachable.
 const HEURISTIC_SALIENCE_SATURATION_THRESHOLD: f64 = 0.75;
 const SEED_SHADOW_SALIENCE_SATURATION_THRESHOLD: f64 = 0.945;
-const SEED_RUNTIME_SALIENCE_SATURATION_THRESHOLD: f64 = 0.985;
+const SEED_RUNTIME_SALIENCE_MAX: f64 = 0.98;
+const SEED_RUNTIME_SALIENCE_SATURATION_THRESHOLD: f64 = 0.975;
 const SEED_RUNTIME_REPLAY_N: usize = 32;
 const SEED_RUNTIME_REPLAY_D: usize = 64;
 
@@ -1225,7 +1228,7 @@ fn seed_runtime_salience(
         + event_pressure
         + neighbor_pressure
         + order_tiebreak)
-        .clamp(0.0, 0.98)
+        .clamp(0.0, SEED_RUNTIME_SALIENCE_MAX)
 }
 
 fn seed_runtime_event_pressure(event: &ShadowCortexEvent) -> f64 {
@@ -2368,6 +2371,50 @@ mod tests {
         assert_eq!(coverage.rank_tie_state, "ok");
         assert_eq!(coverage.salience_saturation_state, "ok");
         assert_eq!(coverage.top_k_cap_hits, 0);
+    }
+
+    #[test]
+    fn seed_runtime_saturation_guard_is_reachable_below_runtime_cap() {
+        let mut events = Vec::new();
+        let mut signals = Vec::new();
+        let saliences = [0.980, 0.979, 0.978, 0.977, 0.940, 0.920];
+        for (idx, salience) in saliences.iter().enumerate() {
+            let subject = format!("tool_{idx}");
+            let event_id = format!("mcp_dispatch:{subject}:runtime");
+            events.push(shadow_event(
+                event_id.clone(),
+                1,
+                "mcp_dispatch",
+                SignalScope::Tool,
+                &subject,
+                json!({"p95_ms": 4_000 + idx}),
+            ));
+            signals.push(signal(
+                1,
+                SignalScope::Tool,
+                subject,
+                SignalType::Opportunity,
+                *salience,
+                &["seed_runtime"],
+                vec![event_id],
+                SHORT_TTL_SECS,
+                json!({}),
+                &[],
+                0.5,
+                "probe",
+                "probe",
+            ));
+        }
+        let coverage = lane_coverage("seed_runtime", &events, &signals, true);
+        assert_eq!(coverage.state, "covered");
+        assert_eq!(coverage.rank_tie_state, "ok");
+        assert_eq!(coverage.salience_saturation_state, "fully_saturated_top_k");
+        assert_eq!(coverage.top_k_cap_hits, 4);
+        assert_eq!(coverage.top_k_size, 4);
+        assert_eq!(
+            comparison_verdict(&events, &coverage, &coverage, &coverage, true),
+            "seed_runtime_salience_saturation_guarded"
+        );
     }
 
     #[test]
