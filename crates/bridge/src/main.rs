@@ -1055,6 +1055,27 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// List queued Xiao Shu action requests without emitting audio.
+    XiaoShuActionRequests {
+        /// Project used to derive the queue path.
+        #[arg(long)]
+        project: Option<String>,
+        /// Return one request id, if present.
+        #[arg(long)]
+        request_id: Option<String>,
+        /// State to filter. Defaults to pending_human_confirmation.
+        #[arg(long)]
+        state: Option<String>,
+        /// Include all queue states instead of only pending records.
+        #[arg(long)]
+        all_states: bool,
+        /// Maximum records to return, newest first.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2976,6 +2997,24 @@ async fn main() -> Result<()> {
                     *cooldown_secs,
                     tts_voice.clone(),
                     *tts_rate,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::XiaoShuActionRequests {
+                project,
+                request_id,
+                state,
+                all_states,
+                limit,
+                json: as_json,
+            } => {
+                run_xiao_shu_action_requests(
+                    project.clone(),
+                    request_id.clone(),
+                    state.clone(),
+                    *all_states,
+                    *limit,
                     *as_json,
                 )
                 .await
@@ -5612,6 +5651,69 @@ async fn run_xiao_shu_action_request(
         avatar_health_display(request.get("line"), "-"),
         avatar_health_display(request.get("emit_command"), "-")
     );
+    Ok(())
+}
+
+async fn run_xiao_shu_action_requests(
+    project: Option<String>,
+    request_id: Option<String>,
+    state: Option<String>,
+    all_states: bool,
+    limit: usize,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::XiaoShuActionRequestQueueOptions {
+        project: Some(&project),
+        request_id: request_id.as_deref(),
+        state: state.as_deref(),
+        include_all_states: all_states,
+        limit,
+    };
+    let payload = ab_bridge::avatar_cortex::xiao_shu_action_request_queue(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    let queue = payload.get("queue").unwrap_or(&Value::Null);
+    println!("xiao shu action requests");
+    println!(
+        "project={} exists={} path={}",
+        avatar_health_display(queue.get("project"), &project),
+        avatar_health_display(queue.get("exists"), "false"),
+        avatar_health_display(queue.get("path"), "-")
+    );
+    println!(
+        "filter request_id={} state={} all_states={} limit={} parsed={} matching={} returned={} parse_errors={}",
+        avatar_health_display(queue.get("request_id_filter"), "-"),
+        avatar_health_display(queue.get("state_filter"), "-"),
+        avatar_health_display(queue.get("include_all_states"), "false"),
+        avatar_health_display(queue.get("limit"), "20"),
+        avatar_health_display(queue.get("parsed_records"), "0"),
+        avatar_health_display(queue.get("matching_records"), "0"),
+        avatar_health_display(queue.get("returned_count"), "0"),
+        avatar_health_display(queue.get("parse_errors"), "0")
+    );
+    if let Some(records) = payload.get("records").and_then(Value::as_array) {
+        for record in records {
+            println!(
+                "- {} state={} actor={} intent={} track={} line={}",
+                avatar_health_display(record.get("request_id"), "-"),
+                avatar_health_display(record.get("state"), "-"),
+                avatar_health_display(record.get("actor"), "-"),
+                avatar_health_display(record.get("intent"), "-"),
+                avatar_health_display(record.get("mapped_track"), "-"),
+                avatar_health_display(
+                    record
+                        .get("action_request")
+                        .and_then(|request| request.get("line")),
+                    "-"
+                )
+            );
+        }
+    }
     Ok(())
 }
 

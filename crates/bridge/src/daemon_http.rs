@@ -191,6 +191,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
             get(xiao_shu_action_request),
         )
         .route(
+            "/avatar-surface/xiao-shu-action-requests",
+            get(xiao_shu_action_requests),
+        )
+        .route(
             "/avatar-surface/cortex-voice-gate",
             get(avatar_cortex_voice_gate),
         )
@@ -648,6 +652,22 @@ struct XiaoShuActionRequestQuery {
     tts_rate: Option<u64>,
 }
 
+#[derive(Deserialize, Debug)]
+struct XiaoShuActionRequestsQuery {
+    project: Option<String>,
+    request_id: Option<String>,
+    state: Option<String>,
+    #[serde(default)]
+    all_states: bool,
+    limit: Option<usize>,
+}
+
+impl XiaoShuActionRequestsQuery {
+    fn effective_limit(&self) -> usize {
+        self.limit.unwrap_or(20).clamp(1, 500)
+    }
+}
+
 impl AvatarHeartbeatHealthQuery {
     fn effective_stale_secs(&self) -> i64 {
         self.stale_secs.clamp(30, 86_400)
@@ -806,31 +826,30 @@ async fn avatar_surface_panel(
         Some("panel-dry-run"),
         false,
     );
-    let cortex_voice_action_preview =
-        crate::avatar_cortex::avatar_cortex_voice_action_preview(
-            &crate::avatar_cortex::AvatarCortexVoiceActionPreviewOptions {
-                label: None,
-                heartbeat_label: None,
-                project: q.project.as_deref(),
-                output: None,
-                requested_track: Some("xiao_shu::alert_peek::medium"),
-                reason: Some("panel-dry-run"),
-                confirm: true,
-                force: false,
-                cooldown_secs: default_avatar_voice_gate_cooldown_secs(),
-                tts_voice: None,
-                tts_rate: None,
-            },
-        )
-        .unwrap_or_else(|e| {
-            json!({
-                "surface": "avatar_cortex_voice_action_preview",
-                "read_only": true,
-                "dry_run": true,
-                "emits_audio": false,
-                "error": e.to_string(),
-            })
-        });
+    let cortex_voice_action_preview = crate::avatar_cortex::avatar_cortex_voice_action_preview(
+        &crate::avatar_cortex::AvatarCortexVoiceActionPreviewOptions {
+            label: None,
+            heartbeat_label: None,
+            project: q.project.as_deref(),
+            output: None,
+            requested_track: Some("xiao_shu::alert_peek::medium"),
+            reason: Some("panel-dry-run"),
+            confirm: true,
+            force: false,
+            cooldown_secs: default_avatar_voice_gate_cooldown_secs(),
+            tts_voice: None,
+            tts_rate: None,
+        },
+    )
+    .unwrap_or_else(|e| {
+        json!({
+            "surface": "avatar_cortex_voice_action_preview",
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "error": e.to_string(),
+        })
+    });
     let xiao_shu_action_request = crate::avatar_cortex::xiao_shu_action_request(
         &crate::avatar_cortex::XiaoShuActionRequestOptions {
             label: None,
@@ -858,6 +877,24 @@ async fn avatar_surface_panel(
             "error": e.to_string(),
         })
     });
+    let xiao_shu_action_requests = crate::avatar_cortex::xiao_shu_action_request_queue(
+        &crate::avatar_cortex::XiaoShuActionRequestQueueOptions {
+            project: q.project.as_deref(),
+            request_id: None,
+            state: None,
+            include_all_states: false,
+            limit: 5,
+        },
+    )
+    .unwrap_or_else(|e| {
+        json!({
+            "surface": "xiao_shu_action_request_queue",
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "error": e.to_string(),
+        })
+    });
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
@@ -879,6 +916,7 @@ async fn avatar_surface_panel(
         &cortex_voice_confirm,
         &cortex_voice_action_preview,
         &xiao_shu_action_request,
+        &xiao_shu_action_requests,
         &report,
         unix_now(),
     )))
@@ -1253,8 +1291,12 @@ fn avatar_sidecar_spritesheet_svg(asset: &str) -> Option<String> {
         };
         let mouth = match frame.mouth {
             "open" => r##"<ellipse cx="96" cy="112" rx="9" ry="7" fill="#26312f"/>"##,
-            "smile" => r##"<path d="M79 108 Q96 121 113 108" fill="none" stroke="#26312f" stroke-width="5" stroke-linecap="round"/>"##,
-            _ => r##"<path d="M87 110 Q96 115 105 110" fill="none" stroke="#26312f" stroke-width="4" stroke-linecap="round"/>"##,
+            "smile" => {
+                r##"<path d="M79 108 Q96 121 113 108" fill="none" stroke="#26312f" stroke-width="5" stroke-linecap="round"/>"##
+            }
+            _ => {
+                r##"<path d="M87 110 Q96 115 105 110" fill="none" stroke="#26312f" stroke-width="4" stroke-linecap="round"/>"##
+            }
         };
 
         writeln!(
@@ -1464,8 +1506,12 @@ fn avatar_sidecar_motion_canonical_peek_v4_svg() -> Option<String> {
         };
         let mouth = match frame.mouth {
             "open" => r##"<ellipse cx="96" cy="112" rx="9" ry="7" fill="#35251a"/>"##,
-            "smile" => r##"<path d="M79 108 Q96 121 113 108" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>"##,
-            _ => r##"<path d="M87 110 Q96 115 105 110" fill="none" stroke="#35251a" stroke-width="4" stroke-linecap="round"/>"##,
+            "smile" => {
+                r##"<path d="M79 108 Q96 121 113 108" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>"##
+            }
+            _ => {
+                r##"<path d="M87 110 Q96 115 105 110" fill="none" stroke="#35251a" stroke-width="4" stroke-linecap="round"/>"##
+            }
         };
 
         writeln!(
@@ -1704,8 +1750,12 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
         };
         let mouth = match frame.mouth {
             "open" => r##"<ellipse cx="96" cy="111" rx="8" ry="6" fill="#35251a"/>"##,
-            "smile" => r##"<path d="M82 108 Q96 119 110 108" fill="none" stroke="#35251a" stroke-width="4.5" stroke-linecap="round"/>"##,
-            _ => r##"<path d="M88 110 Q96 114 104 110" fill="none" stroke="#35251a" stroke-width="4" stroke-linecap="round"/>"##,
+            "smile" => {
+                r##"<path d="M82 108 Q96 119 110 108" fill="none" stroke="#35251a" stroke-width="4.5" stroke-linecap="round"/>"##
+            }
+            _ => {
+                r##"<path d="M88 110 Q96 114 104 110" fill="none" stroke="#35251a" stroke-width="4" stroke-linecap="round"/>"##
+            }
         };
         let sleeves = match frame.hand_lift {
             2 => r##"<path d="M60 146 C44 130 47 109 62 99 C72 111 76 132 68 151 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
@@ -1939,6 +1989,21 @@ async fn xiao_shu_action_request(
         tts_rate: q.tts_rate,
     };
     let payload = crate::avatar_cortex::xiao_shu_action_request(&opts).map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn xiao_shu_action_requests(
+    Query(q): Query<XiaoShuActionRequestsQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let opts = crate::avatar_cortex::XiaoShuActionRequestQueueOptions {
+        project: q.project.as_deref(),
+        request_id: q.request_id.as_deref(),
+        state: q.state.as_deref(),
+        include_all_states: q.all_states,
+        limit: q.effective_limit(),
+    };
+    let payload =
+        crate::avatar_cortex::xiao_shu_action_request_queue(&opts).map_err(internal_error)?;
     Ok(Json(payload))
 }
 
@@ -3128,7 +3193,10 @@ fn avatar_surface_review_report_html(
     )
 }
 
-fn avatar_surface_voice_policy_html(voice_policy_preview: &Value, q: &AvatarSurfaceQuery) -> String {
+fn avatar_surface_voice_policy_html(
+    voice_policy_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
     let policy = voice_policy_preview
         .get("voice_policy")
         .unwrap_or(&Value::Null);
@@ -3233,8 +3301,7 @@ fn avatar_surface_voice_request_html(
     let voice = avatar_surface_html_json_value(request.get("suggested_voice"), "-");
     let rate = avatar_surface_html_json_value(request.get("suggested_rate"), "-");
     let reason = avatar_surface_html_json_value(request.get("operator_reason_present"), "false");
-    let second_step =
-        avatar_surface_html_json_value(request.get("requires_second_step"), "true");
+    let second_step = avatar_surface_html_json_value(request.get("requires_second_step"), "true");
     let http_emit = avatar_surface_html_json_value(request.get("http_emit_route"), "null");
 
     format!(
@@ -3292,14 +3359,16 @@ fn avatar_surface_voice_confirm_html(
     let sep = if href_raw.contains('?') { "&" } else { "?" };
     href_raw.push_str(sep);
     href_raw.push_str("confirm=true&reason=panel-dry-run");
-    let request_href_raw =
-        avatar_surface_route_href(request_route_raw, q.project.as_deref(), Some(selected_token));
+    let request_href_raw = avatar_surface_route_href(
+        request_route_raw,
+        q.project.as_deref(),
+        Some(selected_token),
+    );
     let state = avatar_surface_html_json_value(confirm.get("confirmation_state"), "-");
     let token = avatar_surface_html_json_value(confirm.get("selected_token"), "-");
     let confirm_requested =
         avatar_surface_html_json_value(confirm.get("confirm_requested"), "false");
-    let would_execute =
-        avatar_surface_html_json_value(confirm.get("would_execute_cli"), "false");
+    let would_execute = avatar_surface_html_json_value(confirm.get("would_execute_cli"), "false");
     let reason = avatar_surface_html_json_value(confirm.get("operator_reason_present"), "false");
     let auto = avatar_surface_html_json_value(confirm.get("auto_emit_allowed"), "false");
     let http_emit = avatar_surface_html_json_value(confirm.get("http_emit_route"), "null");
@@ -3366,10 +3435,8 @@ fn avatar_surface_voice_action_preview_html(
     href_raw.push_str("confirm=true&reason=panel-dry-run");
     let state = avatar_surface_html_json_value(action.get("confirmation_state"), "-");
     let ready = avatar_surface_html_json_value(action.get("ready_to_emit_now"), "false");
-    let would = avatar_surface_html_json_value(
-        action.get("would_emit_if_operator_runs_command"),
-        "false",
-    );
+    let would =
+        avatar_surface_html_json_value(action.get("would_emit_if_operator_runs_command"), "false");
     let blocked = avatar_surface_html_json_value(action.get("blocked"), "true");
     let reasons = html_escape(
         &action
@@ -3388,10 +3455,8 @@ fn avatar_surface_voice_action_preview_html(
         .get("gate_dry_run")
         .unwrap_or(&Value::Null);
     let cooldown_block = gate.get("cooldown").unwrap_or(&Value::Null);
-    let cooldown_active =
-        avatar_surface_html_json_value(cooldown_block.get("active"), "false");
-    let next_allowed =
-        avatar_surface_html_json_value(cooldown_block.get("next_allowed_at"), "-");
+    let cooldown_active = avatar_surface_html_json_value(cooldown_block.get("active"), "false");
+    let next_allowed = avatar_surface_html_json_value(cooldown_block.get("next_allowed_at"), "-");
 
     format!(
         r#"<section class="health status-fresh">
@@ -3451,16 +3516,17 @@ fn avatar_surface_xiao_shu_action_request_html(
     let actor = avatar_surface_html_json_value(request.get("actor"), "-");
     let intent = avatar_surface_html_json_value(request.get("intent"), "-");
     let supported = avatar_surface_html_json_value(request.get("supported_intent"), "false");
-    let direct_control =
-        avatar_surface_html_json_value(action_request_preview.get("direct_pet_control_allowed"), "false");
+    let direct_control = avatar_surface_html_json_value(
+        action_request_preview.get("direct_pet_control_allowed"),
+        "false",
+    );
     let emit_audio =
         avatar_surface_html_json_value(action_request_preview.get("emits_audio"), "false");
     let human_required =
         avatar_surface_html_json_value(request.get("requires_human_confirmation"), "true");
     let confirmed =
         avatar_surface_html_json_value(request.get("human_confirmation_present"), "false");
-    let ready =
-        avatar_surface_html_json_value(request.get("ready_for_local_cli_emit"), "false");
+    let ready = avatar_surface_html_json_value(request.get("ready_for_local_cli_emit"), "false");
     let blocked = avatar_surface_html_json_value(request.get("blocked"), "true");
     let reasons = html_escape(
         &request
@@ -3510,6 +3576,75 @@ fn avatar_surface_xiao_shu_action_request_html(
         confirm_command = confirm_command,
         emit_command = emit_command,
         href = html_escape(&href_raw),
+    )
+}
+
+fn avatar_surface_xiao_shu_action_requests_html(
+    action_request_queue: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let queue = action_request_queue.get("queue").unwrap_or(&Value::Null);
+    let records = action_request_queue
+        .get("records")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let href_raw = avatar_surface_route_href(
+        "/avatar-surface/xiao-shu-action-requests",
+        q.project.as_deref(),
+        None,
+    );
+    let exists = avatar_surface_html_json_value(queue.get("exists"), "false");
+    let state_filter =
+        avatar_surface_html_json_value(queue.get("state_filter"), "pending_human_confirmation");
+    let matching = avatar_surface_html_json_value(queue.get("matching_records"), "0");
+    let returned = avatar_surface_html_json_value(queue.get("returned_count"), "0");
+    let path = avatar_surface_html_json_value(queue.get("path"), "-");
+    let mut rows = String::new();
+    for record in records {
+        let request_id = avatar_surface_html_json_value(record.get("request_id"), "-");
+        let state = avatar_surface_html_json_value(record.get("state"), "-");
+        let actor = avatar_surface_html_json_value(record.get("actor"), "-");
+        let intent = avatar_surface_html_json_value(record.get("intent"), "-");
+        let track = avatar_surface_html_json_value(record.get("mapped_track"), "-");
+        let line = avatar_surface_html_json_value(
+            record
+                .get("action_request")
+                .and_then(|request| request.get("line")),
+            "-",
+        );
+        let reason = avatar_surface_html_json_value(record.get("reason"), "-");
+        rows.push_str(&format!(
+            r#"<li><strong>{request_id}</strong><span>state={state} actor={actor} intent={intent}</span><span>track={track}</span><span>line={line}</span><span>reason={reason}</span></li>"#
+        ));
+    }
+    if rows.is_empty() {
+        rows.push_str(
+            r#"<li><strong>none</strong><span>no pending Xiao Shu action requests</span></li>"#,
+        );
+    }
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">queue</span>
+        <strong>Xiao Shu Action Requests</strong>
+        <span>pending={matching} returned={returned} exists={exists}</span>
+      </div>
+      <dl>
+        <div><dt>filter</dt><dd>state={state_filter}</dd></div>
+        <div><dt>path</dt><dd>{path}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">pending action request json</a></dd></div>
+      </dl>
+      <ul class="compact-list">{rows}</ul>
+    </section>"#,
+        matching = matching,
+        returned = returned,
+        exists = exists,
+        state_filter = state_filter,
+        path = path,
+        href = html_escape(&href_raw),
+        rows = rows,
     )
 }
 
@@ -4600,6 +4735,7 @@ fn avatar_surface_panel_html(
     cortex_voice_confirm: &Value,
     cortex_voice_action_preview: &Value,
     xiao_shu_action_request: &Value,
+    xiao_shu_action_requests: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -4668,6 +4804,8 @@ fn avatar_surface_panel_html(
         avatar_surface_voice_action_preview_html(cortex_voice_action_preview, q);
     let xiao_shu_action_request_html =
         avatar_surface_xiao_shu_action_request_html(xiao_shu_action_request, q);
+    let xiao_shu_action_requests_html =
+        avatar_surface_xiao_shu_action_requests_html(xiao_shu_action_requests, q);
     let quick_actions_html =
         avatar_surface_quick_actions_html(cortex_renderer_view, cortex_review_gate, q);
 
@@ -4786,6 +4924,23 @@ fn avatar_surface_panel_html(
     }}
     .health dd {{
       margin: 3px 0 0;
+      overflow-wrap: anywhere;
+    }}
+    .compact-list {{
+      display: grid;
+      gap: 8px;
+      margin: 12px 0 0;
+      padding: 0;
+      list-style: none;
+    }}
+    .compact-list li {{
+      display: grid;
+      gap: 2px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+    }}
+    .compact-list li span {{
+      color: var(--muted);
       overflow-wrap: anywhere;
     }}
     .quick-actions {{
@@ -4920,6 +5075,7 @@ fn avatar_surface_panel_html(
     {voice_confirm_html}
     {voice_action_preview_html}
     {xiao_shu_action_request_html}
+    {xiao_shu_action_requests_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -4952,6 +5108,7 @@ fn avatar_surface_panel_html(
         voice_confirm_html = voice_confirm_html,
         voice_action_preview_html = voice_action_preview_html,
         xiao_shu_action_request_html = xiao_shu_action_request_html,
+        xiao_shu_action_requests_html = xiao_shu_action_requests_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -5357,26 +5514,50 @@ mod tests {
                 300,
                 None,
             );
-        let xiao_shu_action_request =
-            crate::avatar_cortex::xiao_shu_action_request(
-                &crate::avatar_cortex::XiaoShuActionRequestOptions {
-                    label: None,
-                    heartbeat_label: None,
-                    project: Some("agent-bridge"),
-                    output: None,
-                    actor: Some("panel"),
-                    intent: Some("voice_alert"),
-                    message: Some("show the operator a safe Xiao Shu action request"),
-                    requested_track: Some("xiao_shu::alert_peek::medium"),
-                    reason: Some("panel-dry-run"),
-                    confirm: false,
-                    force: false,
-                    cooldown_secs: 300,
-                    tts_voice: None,
-                    tts_rate: None,
-                },
-            )
-            .unwrap();
+        let xiao_shu_action_request = crate::avatar_cortex::xiao_shu_action_request(
+            &crate::avatar_cortex::XiaoShuActionRequestOptions {
+                label: None,
+                heartbeat_label: None,
+                project: Some("agent-bridge"),
+                output: None,
+                actor: Some("panel"),
+                intent: Some("voice_alert"),
+                message: Some("show the operator a safe Xiao Shu action request"),
+                requested_track: Some("xiao_shu::alert_peek::medium"),
+                reason: Some("panel-dry-run"),
+                confirm: false,
+                force: false,
+                cooldown_secs: 300,
+                tts_voice: None,
+                tts_rate: None,
+            },
+        )
+        .unwrap();
+        let xiao_shu_action_requests = json!({
+            "surface": "xiao_shu_action_request_queue",
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "queue": {
+                "project": "agent-bridge",
+                "exists": true,
+                "path": "/tmp/requests.jsonl",
+                "state_filter": "pending_human_confirmation",
+                "matching_records": 1,
+                "returned_count": 1
+            },
+            "records": [{
+                "request_id": "xsr-test",
+                "state": "pending_human_confirmation",
+                "actor": "codex",
+                "intent": "voice_alert",
+                "mapped_track": "xiao_shu::alert_peek::medium",
+                "reason": "unit-test",
+                "action_request": {
+                    "line": "please look"
+                }
+            }]
+        });
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
@@ -5398,6 +5579,7 @@ mod tests {
             &voice_confirm,
             &voice_action_preview,
             &xiao_shu_action_request,
+            &xiao_shu_action_requests,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -5418,6 +5600,8 @@ mod tests {
         assert!(html.contains("xiao_shu::soft_bounce::low risk=low"));
         assert!(html.contains("writes_files=false mutates_renderer=false pet_package=false"));
         assert!(html.contains("Xiao Shu Binding Fixture"));
+        assert!(html.contains("Xiao Shu Action Requests"));
+        assert!(html.contains("xsr-test"));
         assert!(html.contains("fixtures=2 source=avatar_cortex_binding_plan.selected"));
         assert!(html.contains("xiao_shu::soft_bounce::low motion=soft_bounce"));
         assert!(html.contains("duration=1800ms returns_idle=true"));
@@ -5467,7 +5651,8 @@ mod tests {
         assert!(html.contains("http_emit_route_added=false auto_emit=0"));
         assert!(html.contains("voice policy json"));
         assert!(html.contains("Xiao Shu Voice Request"));
-        assert!(html.contains("state=ready_for_operator_confirmation token=xiao_shu::alert_peek::medium"));
+        assert!(html
+            .contains("state=ready_for_operator_confirmation token=xiao_shu::alert_peek::medium"));
         assert!(html.contains("manual_cli=true second_step=true reason_present=false"));
         assert!(html.contains("auto_emit=false http_emit_route=null"));
         assert!(html.contains("voice request json"));
@@ -5485,7 +5670,9 @@ mod tests {
         assert!(html.contains("voice action preview json"));
         assert!(html.contains("Xiao Shu Action Request"));
         assert!(html.contains("state=requires_human_confirmation actor=panel intent=voice_alert"));
-        assert!(html.contains("direct_control=false emits_audio=false human_required=true confirmed=false"));
+        assert!(html.contains(
+            "direct_control=false emits_audio=false human_required=true confirmed=false"
+        ));
         assert!(html.contains("ready=false blocked=true reasons="));
         assert!(html.contains("human_confirmation_required"));
         assert!(html.contains("xiao shu action request json"));
@@ -5572,9 +5759,12 @@ mod tests {
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v3\""));
         assert!(html.contains("\"variant_id\":\"focused_review_row\""));
         assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-alert-peek-v2"));
-        assert!(html
-            .contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-peek-v4"));
-        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-canonical-peek-v3"));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-peek-v4"
+        ));
+        assert!(
+            html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-canonical-peek-v3")
+        );
         assert!(html.contains("\"asset_id\":\"xiao-shu-alert-peek-v2\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-peek-v4\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-canonical-peek-v3\""));
@@ -5619,10 +5809,14 @@ mod tests {
         assert!(focused.contains("data-voice-linkage"));
         assert!(focused.contains("preview=小舒发现一点需要你看一下。"));
         assert!(focused.contains("gate=/avatar-surface/cortex-voice-gate?enabled=true&amp;reason=alert-peek-visual-review&amp;preview_text=%E5%B0%8F%E8%88%92%E5%8F%91%E7%8E%B0%E4%B8%80%E7%82%B9%E9%9C%80%E8%A6%81%E4%BD%A0%E7%9C%8B%E4%B8%80%E4%B8%8B%E3%80%82"));
-        assert!(focused.contains("choreo=${choreoFrames} css_motion=${Boolean(choreography.uses_css_motion)}${asset}"));
+        assert!(focused.contains(
+            "choreo=${choreoFrames} css_motion=${Boolean(choreography.uses_css_motion)}${asset}"
+        ));
         assert!(focused.contains(r#"let variantId = "waiting_peek_row";"#));
         assert!(focused.contains("data-sprite-variant=\"waiting_peek_row\""));
-        assert!(focused.contains("const defaultSpriteRoute = \"/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev\";"));
+        assert!(focused.contains(
+            "const defaultSpriteRoute = \"/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev\";"
+        ));
         assert!(focused.contains("const defaultAssetPetId = \"xiao-shu-dev\";"));
         assert!(focused.contains("function setAssetLabel(spriteRoute, sidecarAsset)"));
         assert!(focused.contains("figure.dataset.spriteAsset"));
@@ -5641,7 +5835,9 @@ mod tests {
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-peek-v4").unwrap();
         let canonical_svg = avatar_sidecar_spritesheet_svg("xiao-shu-canonical-peek-v3").unwrap();
 
-        assert!(svg.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872""#));
+        assert!(
+            svg.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872""#)
+        );
         assert!(svg.contains("Xiao Shu alert peek sidecar v2 sprite atlas"));
         assert!(svg.contains(r#"id="frame-0""#));
         assert!(svg.contains(r#"id="frame-7""#));

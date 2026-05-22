@@ -2776,20 +2776,20 @@ impl McpTool for AgentMessageTool {
                 tags: None,
                 refs: Some(&wake_refs),
             };
-            let (wake_status, wake_error) =
-                match crate::peer_client::forum_post(p, wake_req).await {
-                    Ok(v) => (
-                        json!({
-                            "ok": true,
-                            "post_id": v.get("post_id").cloned().unwrap_or(json!(null)),
-                            "thread_id": v.get("thread_id").cloned().unwrap_or(json!(null)),
-                            "board": "messaging",
-                            "title": wake_title.clone(),
-                        }),
-                        None,
-                    ),
-                    Err(e) => (json!({"ok": false}), Some(format!("{e}"))),
-                };
+            let (wake_status, wake_error) = match crate::peer_client::forum_post(p, wake_req).await
+            {
+                Ok(v) => (
+                    json!({
+                        "ok": true,
+                        "post_id": v.get("post_id").cloned().unwrap_or(json!(null)),
+                        "thread_id": v.get("thread_id").cloned().unwrap_or(json!(null)),
+                        "board": "messaging",
+                        "title": wake_title.clone(),
+                    }),
+                    None,
+                ),
+                Err(e) => (json!({"ok": false}), Some(format!("{e}"))),
+            };
 
             let mut resp = json!({
                 "status": "ok",
@@ -9066,6 +9066,7 @@ impl McpTool for XiaoShuActionRequestTool {
                  the existing read-only action preview chain. It never directly \
                  controls the pet, emits audio, writes request records, mutates \
                  cooldown state, or changes the official Codex pet package. \
+                 It can also read the pending-action queue when list_queue=true. \
                  Real audio still requires a separate local CLI confirmation."
                 .into(),
             input_schema: json!({
@@ -9122,6 +9123,31 @@ impl McpTool for XiaoShuActionRequestTool {
                         "default": false,
                         "description": "When true, append this request to Xiao Shu's sidecar pending-action queue. This writes only an auditable request record; it still does not emit audio, mutate cooldown state, or control the pet."
                     },
+                    "list_queue": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, read Xiao Shu's sidecar pending-action queue. This is read-only and cannot emit audio or control the pet."
+                    },
+                    "request_id": {
+                        "type": "string",
+                        "description": "Optional queue request id to inspect when list_queue=true."
+                    },
+                    "state": {
+                        "type": "string",
+                        "description": "Optional queue state filter when list_queue=true. Defaults to pending_human_confirmation."
+                    },
+                    "all_states": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When list_queue=true, include all queue states instead of only pending records."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 20,
+                        "description": "Maximum queue records to return when list_queue=true, newest first."
+                    },
                     "force": {
                         "type": "boolean",
                         "default": false,
@@ -9159,6 +9185,12 @@ impl McpTool for XiaoShuActionRequestTool {
         let track = xiao_shu_action_request_string_arg(&args, "track");
         let reason = xiao_shu_action_request_string_arg(&args, "reason");
         let tts_voice = xiao_shu_action_request_string_arg(&args, "tts_voice");
+        let request_id = xiao_shu_action_request_string_arg(&args, "request_id");
+        let state = xiao_shu_action_request_string_arg(&args, "state");
+        let list_queue = args
+            .get("list_queue")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let confirm = args
             .get("confirm")
             .and_then(Value::as_bool)
@@ -9167,7 +9199,16 @@ impl McpTool for XiaoShuActionRequestTool {
             .get("enqueue")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let all_states = args
+            .get("all_states")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(20)
+            .clamp(1, 500) as usize;
         let cooldown_secs = args
             .get("cooldown_secs")
             .and_then(Value::as_i64)
@@ -9177,6 +9218,20 @@ impl McpTool for XiaoShuActionRequestTool {
             .get("tts_rate")
             .and_then(Value::as_u64)
             .map(|rate| rate.clamp(80, 300));
+
+        if list_queue {
+            let opts = crate::avatar_cortex::XiaoShuActionRequestQueueOptions {
+                project: project.as_deref(),
+                request_id: request_id.as_deref(),
+                state: state.as_deref(),
+                include_all_states: all_states,
+                limit,
+            };
+            return match crate::avatar_cortex::xiao_shu_action_request_queue(&opts) {
+                Ok(payload) => Ok(ToolResult::json_text(&payload)),
+                Err(e) => Ok(ToolResult::error(format!("xiao_shu_action_request: {e}"))),
+            };
+        }
 
         let opts = crate::avatar_cortex::XiaoShuActionRequestOptions {
             label: label.as_deref(),
@@ -20597,11 +20652,25 @@ mod tests {
             schema.input_schema["properties"]["confirm"]["description"],
             "Dry-run confirmation flag. Even when true, this MCP tool does not emit audio."
         );
-        assert_eq!(schema.input_schema["properties"]["enqueue"]["default"], false);
+        assert_eq!(
+            schema.input_schema["properties"]["enqueue"]["default"],
+            false
+        );
         assert!(schema.input_schema["properties"]["enqueue"]["description"]
             .as_str()
             .unwrap()
             .contains("does not emit audio"));
+        assert_eq!(
+            schema.input_schema["properties"]["list_queue"]["default"],
+            false
+        );
+        assert!(
+            schema.input_schema["properties"]["list_queue"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("read-only")
+        );
+        assert_eq!(schema.input_schema["properties"]["limit"]["default"], 20);
         assert_eq!(
             schema.input_schema["properties"]["intent"]["enum"][0],
             "voice_alert"
