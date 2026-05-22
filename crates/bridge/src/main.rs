@@ -875,6 +875,30 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Preview a two-step Xiao Shu voice confirmation request without emitting audio.
+    CortexVoiceRequest {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Renderer token to request. Defaults to the first policy-approved manual voice rule.
+        #[arg(long)]
+        track: Option<String>,
+        /// Operator reason to preview in the future CLI emit command.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2656,6 +2680,26 @@ async fn main() -> Result<()> {
                     heartbeat_label.clone(),
                     project.clone(),
                     output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoiceRequest {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                track,
+                reason,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_request(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    track.clone(),
+                    reason.clone(),
                     *as_json,
                 )
                 .await
@@ -4985,6 +5029,62 @@ async fn run_avatar_cortex_voice_policy(
             );
         }
     }
+    Ok(())
+}
+
+async fn run_avatar_cortex_voice_request(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    track: Option<String>,
+    reason: Option<String>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_request(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+        track.as_deref(),
+        reason.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let request = payload.get("voice_request").unwrap_or(&Value::Null);
+    println!("avatar cortex voice request");
+    println!(
+        "state={} token={} manual_cli={} auto_emit={} emits_audio={} http_emit_route={}",
+        avatar_health_display(request.get("request_state"), "-"),
+        avatar_health_display(request.get("selected_token"), "-"),
+        avatar_health_display(request.get("manual_cli_emit_allowed"), "false"),
+        avatar_health_display(request.get("auto_emit_allowed"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false"),
+        avatar_health_display(request.get("http_emit_route"), "null")
+    );
+    println!(
+        "line={} voice={} rate={} reason_present={} cooldown={}",
+        avatar_health_display(request.get("line"), "-"),
+        avatar_health_display(request.get("suggested_voice"), "-"),
+        avatar_health_display(request.get("suggested_rate"), "-"),
+        avatar_health_display(request.get("operator_reason_present"), "false"),
+        avatar_health_display(request.get("cooldown_secs"), "300")
+    );
+    println!(
+        "second_step={} cli_only={} command={}",
+        avatar_health_display(request.get("requires_second_step"), "true"),
+        avatar_health_display(
+            request
+                .get("safety")
+                .and_then(|safety| safety.get("cli_only_real_emit")),
+            "true"
+        ),
+        avatar_health_display(request.get("command_preview"), "-")
+    );
     Ok(())
 }
 

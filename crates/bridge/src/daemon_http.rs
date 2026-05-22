@@ -27,6 +27,7 @@
 //!   - `GET /avatar-surface/cortex-review-report?...` — read-only review readiness report
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
 //!   - `GET /avatar-surface/cortex-voice-policy?...` — read-only sparse voice policy
+//!   - `GET /avatar-surface/cortex-voice-request?...` — read-only two-step voice request
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
 //!                              (same shape as `dream identity --json`)
@@ -169,6 +170,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-voice-policy",
             get(avatar_cortex_voice_policy),
+        )
+        .route(
+            "/avatar-surface/cortex-voice-request",
+            get(avatar_cortex_voice_request),
         )
         .route(
             "/avatar-surface/cortex-voice-gate",
@@ -558,6 +563,7 @@ struct AvatarCortexStatusQuery {
     track: Option<String>,
     track_index: Option<usize>,
     variant: Option<String>,
+    reason: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -731,6 +737,12 @@ async fn avatar_surface_panel(
         crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(cortex.clone());
     let cortex_voice_policy =
         crate::avatar_cortex::avatar_cortex_voice_policy_from_status(cortex.clone());
+    let cortex_voice_request = crate::avatar_cortex::avatar_cortex_voice_request_from_status(
+        cortex.clone(),
+        Some("xiao_shu::alert_peek::medium"),
+        q.project.as_deref(),
+        None,
+    );
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
@@ -748,6 +760,7 @@ async fn avatar_surface_panel(
         &cortex_review_packet,
         &cortex_review_report,
         &cortex_voice_policy,
+        &cortex_voice_request,
         &report,
         unix_now(),
     )))
@@ -1731,6 +1744,21 @@ async fn avatar_cortex_voice_policy(
         q.heartbeat_label.as_deref(),
         q.project.as_deref(),
         q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_voice_request(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_voice_request(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+        q.track.as_deref(),
+        q.reason.as_deref(),
     )
     .map_err(internal_error)?;
     Ok(Json(payload))
@@ -2998,6 +3026,70 @@ fn avatar_surface_voice_policy_html(voice_policy_preview: &Value, q: &AvatarSurf
     )
 }
 
+fn avatar_surface_voice_request_html(
+    voice_request_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let request = voice_request_preview
+        .get("voice_request")
+        .unwrap_or(&Value::Null);
+    let route_raw = request
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-voice-request");
+    let policy_route_raw = request
+        .get("policy_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-voice-policy");
+    let selected_token = request
+        .get("selected_token")
+        .and_then(Value::as_str)
+        .unwrap_or("xiao_shu::alert_peek::medium");
+    let href_raw = avatar_surface_route_href(route_raw, q.project.as_deref(), Some(selected_token));
+    let policy_href_raw = avatar_surface_route_href(policy_route_raw, q.project.as_deref(), None);
+    let state = avatar_surface_html_json_value(request.get("request_state"), "-");
+    let token = avatar_surface_html_json_value(request.get("selected_token"), "-");
+    let manual = avatar_surface_html_json_value(request.get("manual_cli_emit_allowed"), "false");
+    let auto = avatar_surface_html_json_value(request.get("auto_emit_allowed"), "false");
+    let line = avatar_surface_html_json_value(request.get("line"), "-");
+    let voice = avatar_surface_html_json_value(request.get("suggested_voice"), "-");
+    let rate = avatar_surface_html_json_value(request.get("suggested_rate"), "-");
+    let reason = avatar_surface_html_json_value(request.get("operator_reason_present"), "false");
+    let second_step =
+        avatar_surface_html_json_value(request.get("requires_second_step"), "true");
+    let http_emit = avatar_surface_html_json_value(request.get("http_emit_route"), "null");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">request</span>
+        <strong>Xiao Shu Voice Request</strong>
+        <span>state={state} token={token}</span>
+      </div>
+      <dl>
+        <div><dt>line</dt><dd>{line}</dd></div>
+        <div><dt>voice</dt><dd>{voice} rate={rate}</dd></div>
+        <div><dt>confirm</dt><dd>manual_cli={manual} second_step={second_step} reason_present={reason}</dd></div>
+        <div><dt>safety</dt><dd>auto_emit={auto} http_emit_route={http_emit}</dd></div>
+        <div><dt>policy</dt><dd><a href="{policy_href}">voice policy json</a></dd></div>
+        <div><dt>open</dt><dd><a href="{href}">voice request json</a></dd></div>
+      </dl>
+    </section>"#,
+        state = state,
+        token = token,
+        line = line,
+        voice = voice,
+        rate = rate,
+        manual = manual,
+        second_step = second_step,
+        reason = reason,
+        auto = auto,
+        http_emit = http_emit,
+        policy_href = html_escape(&policy_href_raw),
+        href = html_escape(&href_raw),
+    )
+}
+
 fn avatar_surface_renderer_view_html(
     renderer_view_preview: &Value,
     generated_at: i64,
@@ -4081,6 +4173,7 @@ fn avatar_surface_panel_html(
     cortex_review_packet: &Value,
     cortex_review_report: &Value,
     cortex_voice_policy: &Value,
+    cortex_voice_request: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -4143,6 +4236,7 @@ fn avatar_surface_panel_html(
     let review_packet_html = avatar_surface_review_packet_html(cortex_review_packet, q);
     let review_report_html = avatar_surface_review_report_html(cortex_review_report, q);
     let voice_policy_html = avatar_surface_voice_policy_html(cortex_voice_policy, q);
+    let voice_request_html = avatar_surface_voice_request_html(cortex_voice_request, q);
     let quick_actions_html =
         avatar_surface_quick_actions_html(cortex_renderer_view, cortex_review_gate, q);
 
@@ -4391,6 +4485,7 @@ fn avatar_surface_panel_html(
     {review_packet_html}
     {review_report_html}
     {voice_policy_html}
+    {voice_request_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -4419,6 +4514,7 @@ fn avatar_surface_panel_html(
         review_packet_html = review_packet_html,
         review_report_html = review_report_html,
         voice_policy_html = voice_policy_html,
+        voice_request_html = voice_request_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -4800,6 +4896,12 @@ mod tests {
             crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(cortex.clone());
         let voice_policy =
             crate::avatar_cortex::avatar_cortex_voice_policy_from_status(cortex.clone());
+        let voice_request = crate::avatar_cortex::avatar_cortex_voice_request_from_status(
+            cortex.clone(),
+            Some("xiao_shu::alert_peek::medium"),
+            Some("agent-bridge"),
+            None,
+        );
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
@@ -4817,6 +4919,7 @@ mod tests {
             &review_packet,
             &review_report,
             &voice_policy,
+            &voice_request,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -4885,6 +4988,11 @@ mod tests {
         assert!(html.contains("xiao_shu::alert_peek::medium line=小舒发现一点需要你看一下。"));
         assert!(html.contains("http_emit_route_added=false auto_emit=0"));
         assert!(html.contains("voice policy json"));
+        assert!(html.contains("Xiao Shu Voice Request"));
+        assert!(html.contains("state=ready_for_operator_confirmation token=xiao_shu::alert_peek::medium"));
+        assert!(html.contains("manual_cli=true second_step=true reason_present=false"));
+        assert!(html.contains("auto_emit=false http_emit_route=null"));
+        assert!(html.contains("voice request json"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));

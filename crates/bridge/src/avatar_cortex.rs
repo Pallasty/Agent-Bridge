@@ -3068,6 +3068,211 @@ pub fn avatar_cortex_voice_policy(
     Ok(avatar_cortex_voice_policy_from_status(status))
 }
 
+fn avatar_cortex_voice_request_from_policy_payload(
+    policy_payload: Value,
+    requested_track: Option<&str>,
+    project: Option<&str>,
+    reason: Option<&str>,
+) -> Value {
+    let policy = policy_payload
+        .get("voice_policy")
+        .unwrap_or(&Value::Null);
+    let rules = policy
+        .get("rules")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let requested_track = requested_track.map(str::trim).filter(|s| !s.is_empty());
+    let selected_rule = requested_track
+        .and_then(|token| {
+            rules
+                .iter()
+                .find(|rule| rule.get("token").and_then(Value::as_str) == Some(token))
+        })
+        .or_else(|| {
+            rules.iter().find(|rule| {
+                rule.get("manual_cli_emit_allowed")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            })
+        });
+    let selected_rule = selected_rule.cloned().unwrap_or_else(|| json!({}));
+    let token = vstr(selected_rule.get("token")).unwrap_or("xiao_shu::unknown");
+    let line = vstr(selected_rule.get("utterance")).unwrap_or("");
+    let manual_cli_allowed = selected_rule
+        .get("manual_cli_emit_allowed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let auto_emit_allowed = selected_rule
+        .get("auto_emit_allowed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let project = project.unwrap_or("agent-bridge");
+    let operator_reason = reason.map(str::trim).filter(|s| !s.is_empty());
+    let suggested_reason = format!("confirm-sparse-voice-{token}");
+    let command_reason = operator_reason.unwrap_or("<operator-reason>");
+    let voice = vstr(selected_rule.get("suggested_voice"))
+        .or_else(|| vstr(policy.get("default_voice")))
+        .unwrap_or("Flo (中文（中国大陆）)");
+    let rate = selected_rule
+        .get("suggested_rate")
+        .and_then(Value::as_u64)
+        .or_else(|| policy.get("default_rate").and_then(Value::as_u64))
+        .unwrap_or(190);
+    let cooldown_secs = selected_rule
+        .get("cooldown_secs")
+        .and_then(Value::as_i64)
+        .or_else(|| policy.get("default_cooldown_secs").and_then(Value::as_i64))
+        .unwrap_or(300);
+    let request_state = if manual_cli_allowed && !line.is_empty() {
+        "ready_for_operator_confirmation"
+    } else if line.is_empty() {
+        "blocked_missing_utterance"
+    } else {
+        "blocked_by_voice_policy"
+    };
+    let command_args = if manual_cli_allowed && !line.is_empty() {
+        json!([
+            "agent-bridge",
+            "avatar",
+            "cortex-voice-emit",
+            "--project",
+            project,
+            "--enabled",
+            "--allow-policy-override",
+            "--reason",
+            command_reason,
+            "--preview-text",
+            line,
+            "--tts-voice",
+            voice,
+            "--tts-rate",
+            rate.to_string(),
+        ])
+    } else {
+        Value::Null
+    };
+    let command_preview = if manual_cli_allowed && !line.is_empty() {
+        json!(format!(
+            "agent-bridge avatar cortex-voice-emit --project {project} --enabled --allow-policy-override --reason {command_reason:?} --preview-text {line:?} --tts-voice {voice:?} --tts-rate {rate}"
+        ))
+    } else {
+        Value::Null
+    };
+    let dry_run_route = selected_rule
+        .get("dry_run_route")
+        .cloned()
+        .unwrap_or(Value::Null);
+
+    let request = json!({
+        "schema": 1,
+        "input": "avatar_cortex_voice_policy.voice_policy.rules",
+        "html_route": "/avatar-surface/cortex-voice-request",
+        "policy_route": policy
+            .get("html_route")
+            .cloned()
+            .unwrap_or_else(|| json!("/avatar-surface/cortex-voice-policy")),
+        "request_state": request_state,
+        "requested_track": requested_track,
+        "selected_token": token,
+        "line": if line.is_empty() { Value::Null } else { json!(line) },
+        "visual_variant": selected_rule.get("visual_variant").cloned().unwrap_or(Value::Null),
+        "mode": selected_rule.get("mode").cloned().unwrap_or(Value::Null),
+        "manual_cli_emit_allowed": manual_cli_allowed,
+        "auto_emit_allowed": auto_emit_allowed,
+        "display_allowed": selected_rule
+            .get("display_allowed")
+            .cloned()
+            .unwrap_or_else(|| json!(false)),
+        "requires_second_step": true,
+        "requires_operator_confirmation": true,
+        "requires_operator_reason": true,
+        "operator_reason_present": operator_reason.is_some(),
+        "operator_reason": operator_reason,
+        "suggested_reason": suggested_reason,
+        "requires_policy_override": selected_rule
+            .get("requires_policy_override")
+            .cloned()
+            .unwrap_or_else(|| json!(manual_cli_allowed)),
+        "cooldown_secs": cooldown_secs,
+        "suggested_voice": voice,
+        "suggested_rate": rate,
+        "dry_run_route": dry_run_route,
+        "real_emit_surface": selected_rule
+            .get("real_emit_surface")
+            .cloned()
+            .unwrap_or_else(|| json!("agent-bridge avatar cortex-voice-emit")),
+        "http_emit_route": Value::Null,
+        "command_args": command_args,
+        "command_preview": command_preview,
+        "approval": {
+            "writes_approval": false,
+            "persists_request_record": false,
+            "records_persisted": false,
+            "approval_writes_allowed": false,
+        },
+        "safety": {
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "auto_emit_allowed": false,
+            "http_emit_route_added": false,
+            "cli_only_real_emit": true,
+            "codex_pet_package_mutation_allowed": false,
+        },
+        "next_step": "operator can copy the CLI args into a future explicit emit step, or a future slash command can present the same request",
+    });
+
+    json!({
+        "surface": "avatar_cortex_voice_request",
+        "schema": 1,
+        "read_only": true,
+        "dry_run": true,
+        "sidecar_only": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "renders_pixels": false,
+        "browser_renders_pixels": false,
+        "server_side_renders_pixels": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "http_emit_route_added": false,
+        "writes_approval": false,
+        "persists_request_record": false,
+        "voice_request": request,
+        "source_voice_policy": policy_payload,
+    })
+}
+
+pub(crate) fn avatar_cortex_voice_request_from_status(
+    status: Value,
+    requested_track: Option<&str>,
+    project: Option<&str>,
+    reason: Option<&str>,
+) -> Value {
+    let policy = avatar_cortex_voice_policy_from_status(status);
+    avatar_cortex_voice_request_from_policy_payload(policy, requested_track, project, reason)
+}
+
+pub fn avatar_cortex_voice_request(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+    requested_track: Option<&str>,
+    reason: Option<&str>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_voice_request_from_status(
+        status,
+        requested_track,
+        project,
+        reason,
+    ))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
@@ -4752,6 +4957,70 @@ mod tests {
             .unwrap();
         assert_eq!(idle["mode"], "silent_presence");
         assert_eq!(idle["manual_cli_emit_allowed"], false);
+    }
+
+    #[test]
+    fn avatar_cortex_voice_request_previews_second_step_without_audio() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let policy = avatar_cortex_voice_policy_from_renderer_view_payload(view);
+        let payload = avatar_cortex_voice_request_from_policy_payload(
+            policy,
+            Some("xiao_shu::alert_peek::medium"),
+            Some("agent-bridge"),
+            Some("manual confirmation"),
+        );
+        let request = &payload["voice_request"];
+
+        assert_eq!(payload["surface"], "avatar_cortex_voice_request");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["dry_run"], true);
+        assert_eq!(payload["emits_audio"], false);
+        assert_eq!(payload["http_emit_route_added"], false);
+        assert_eq!(payload["writes_approval"], false);
+        assert_eq!(payload["persists_request_record"], false);
+        assert_eq!(request["request_state"], "ready_for_operator_confirmation");
+        assert_eq!(request["selected_token"], "xiao_shu::alert_peek::medium");
+        assert_eq!(request["line"], "小舒发现一点需要你看一下。");
+        assert_eq!(request["visual_variant"], "sidecar_peek_v4");
+        assert_eq!(request["manual_cli_emit_allowed"], true);
+        assert_eq!(request["auto_emit_allowed"], false);
+        assert_eq!(request["requires_second_step"], true);
+        assert_eq!(request["operator_reason_present"], true);
+        assert_eq!(request["operator_reason"], "manual confirmation");
+        assert_eq!(request["http_emit_route"], Value::Null);
+        assert_eq!(request["safety"]["emits_audio"], false);
+        assert_eq!(request["safety"]["cli_only_real_emit"], true);
+        assert_eq!(
+            request["safety"]["codex_pet_package_mutation_allowed"],
+            false
+        );
+        assert!(request["command_args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|arg| arg == "--allow-policy-override"));
+        assert!(request["command_args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|arg| arg == "小舒发现一点需要你看一下。"));
+
+        let blocked = avatar_cortex_voice_request_from_policy_payload(
+            payload["source_voice_policy"].clone(),
+            Some("xiao_shu::idle_breathe::low"),
+            Some("agent-bridge"),
+            None,
+        );
+        assert_eq!(
+            blocked["voice_request"]["request_state"],
+            "blocked_missing_utterance"
+        );
+        assert_eq!(blocked["voice_request"]["manual_cli_emit_allowed"], false);
+        assert_eq!(blocked["voice_request"]["command_args"], Value::Null);
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
