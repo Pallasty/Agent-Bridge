@@ -1007,6 +1007,54 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Create an LLM-safe Xiao Shu action request without directly controlling the pet.
+    XiaoShuActionRequest {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path and voice cooldown state.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Requesting actor label, such as llm, panel, slash, or operator.
+        #[arg(long, default_value = "llm")]
+        actor: String,
+        /// High-level Xiao Shu action intent. Current supported intent: voice_alert.
+        #[arg(long, default_value = "voice_alert")]
+        intent: String,
+        /// Optional natural-language request from the caller.
+        #[arg(long)]
+        message: Option<String>,
+        /// Renderer token to target. Defaults to alert_peek.
+        #[arg(long)]
+        track: Option<String>,
+        /// Operator-facing reason for the request and generated command.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Preview as if a human/operator confirmation is present.
+        #[arg(long)]
+        confirm: bool,
+        /// Preview readiness as if cooldown state were ignored.
+        #[arg(long)]
+        force: bool,
+        /// Cooldown seconds to evaluate without mutating state.
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: i64,
+        /// Optional macOS say voice. Defaults to the policy suggestion or AB_PET_TTS_VOICE.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Optional macOS say rate. Defaults to the policy suggestion or AB_PET_TTS_RATE.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2885,6 +2933,42 @@ async fn main() -> Result<()> {
                     heartbeat_label.clone(),
                     project.clone(),
                     output.clone(),
+                    track.clone(),
+                    reason.clone(),
+                    *confirm,
+                    *force,
+                    *cooldown_secs,
+                    tts_voice.clone(),
+                    *tts_rate,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::XiaoShuActionRequest {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                actor,
+                intent,
+                message,
+                track,
+                reason,
+                confirm,
+                force,
+                cooldown_secs,
+                tts_voice,
+                tts_rate,
+                json: as_json,
+            } => {
+                run_xiao_shu_action_request(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    actor.clone(),
+                    intent.clone(),
+                    message.clone(),
                     track.clone(),
                     reason.clone(),
                     *confirm,
@@ -5458,6 +5542,75 @@ async fn run_avatar_cortex_voice_action_preview(
         avatar_health_display(cooldown.get("last_emit_at"), "-"),
         avatar_health_display(cooldown.get("next_allowed_at"), "-"),
         avatar_health_display(action.get("command_preview"), "-")
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_xiao_shu_action_request(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    actor: String,
+    intent: String,
+    message: Option<String>,
+    track: Option<String>,
+    reason: Option<String>,
+    confirm: bool,
+    force: bool,
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::XiaoShuActionRequestOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        actor: Some(actor.as_str()),
+        intent: Some(intent.as_str()),
+        message: message.as_deref(),
+        requested_track: track.as_deref(),
+        reason: reason.as_deref(),
+        confirm,
+        force,
+        cooldown_secs,
+        tts_voice: tts_voice.as_deref(),
+        tts_rate,
+    };
+    let payload = ab_bridge::avatar_cortex::xiao_shu_action_request(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let request = payload.get("action_request").unwrap_or(&Value::Null);
+    println!("xiao shu action request");
+    println!(
+        "state={} actor={} intent={} supported={} direct_control={} emits_audio={}",
+        avatar_health_display(request.get("request_state"), "-"),
+        avatar_health_display(request.get("actor"), "-"),
+        avatar_health_display(request.get("intent"), "-"),
+        avatar_health_display(request.get("supported_intent"), "false"),
+        avatar_health_display(payload.get("direct_pet_control_allowed"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false")
+    );
+    println!(
+        "confirmation_required={} confirmed={} ready={} blocked={} reasons={}",
+        avatar_health_display(request.get("requires_human_confirmation"), "true"),
+        avatar_health_display(request.get("human_confirmation_present"), "false"),
+        avatar_health_display(request.get("ready_for_local_cli_emit"), "false"),
+        avatar_health_display(request.get("blocked"), "true"),
+        avatar_health_display_list(request.get("blocked_reasons"), "none")
+    );
+    println!(
+        "track={} line={} command={}",
+        avatar_health_display(request.get("mapped_track"), "-"),
+        avatar_health_display(request.get("line"), "-"),
+        avatar_health_display(request.get("emit_command"), "-")
     );
     Ok(())
 }

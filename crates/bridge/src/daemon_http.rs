@@ -30,6 +30,7 @@
 //!   - `GET /avatar-surface/cortex-voice-request?...` — read-only two-step voice request
 //!   - `GET /avatar-surface/cortex-voice-confirm?...` — read-only confirmation action preview
 //!   - `GET /avatar-surface/cortex-voice-action-preview?...` — read-only action readiness runbook
+//!   - `GET /avatar-surface/xiao-shu-action-request?...` — LLM-safe Xiao Shu action request
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
 //!                              (same shape as `dream identity --json`)
@@ -184,6 +185,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-voice-action-preview",
             get(avatar_cortex_voice_action_preview),
+        )
+        .route(
+            "/avatar-surface/xiao-shu-action-request",
+            get(xiao_shu_action_request),
         )
         .route(
             "/avatar-surface/cortex-voice-gate",
@@ -622,6 +627,27 @@ struct AvatarCortexVoiceActionPreviewQuery {
     tts_rate: Option<u64>,
 }
 
+#[derive(Deserialize, Debug)]
+struct XiaoShuActionRequestQuery {
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<std::path::PathBuf>,
+    actor: Option<String>,
+    intent: Option<String>,
+    message: Option<String>,
+    track: Option<String>,
+    reason: Option<String>,
+    #[serde(default)]
+    confirm: bool,
+    #[serde(default)]
+    force: bool,
+    #[serde(default = "default_avatar_voice_gate_cooldown_secs")]
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+}
+
 impl AvatarHeartbeatHealthQuery {
     fn effective_stale_secs(&self) -> i64 {
         self.stale_secs.clamp(30, 86_400)
@@ -805,6 +831,33 @@ async fn avatar_surface_panel(
                 "error": e.to_string(),
             })
         });
+    let xiao_shu_action_request = crate::avatar_cortex::xiao_shu_action_request(
+        &crate::avatar_cortex::XiaoShuActionRequestOptions {
+            label: None,
+            heartbeat_label: None,
+            project: q.project.as_deref(),
+            output: None,
+            actor: Some("panel"),
+            intent: Some("voice_alert"),
+            message: Some("show the operator a safe Xiao Shu action request"),
+            requested_track: Some("xiao_shu::alert_peek::medium"),
+            reason: Some("panel-dry-run"),
+            confirm: false,
+            force: false,
+            cooldown_secs: default_avatar_voice_gate_cooldown_secs(),
+            tts_voice: None,
+            tts_rate: None,
+        },
+    )
+    .unwrap_or_else(|e| {
+        json!({
+            "surface": "xiao_shu_action_request",
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "error": e.to_string(),
+        })
+    });
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
@@ -825,6 +878,7 @@ async fn avatar_surface_panel(
         &cortex_voice_request,
         &cortex_voice_confirm,
         &cortex_voice_action_preview,
+        &xiao_shu_action_request,
         &report,
         unix_now(),
     )))
@@ -1862,6 +1916,29 @@ async fn avatar_cortex_voice_action_preview(
     };
     let payload =
         crate::avatar_cortex::avatar_cortex_voice_action_preview(&opts).map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn xiao_shu_action_request(
+    Query(q): Query<XiaoShuActionRequestQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let opts = crate::avatar_cortex::XiaoShuActionRequestOptions {
+        label: q.label.as_deref(),
+        heartbeat_label: q.heartbeat_label.as_deref(),
+        project: q.project.as_deref(),
+        output: q.output.as_deref(),
+        actor: q.actor.as_deref(),
+        intent: q.intent.as_deref(),
+        message: q.message.as_deref(),
+        requested_track: q.track.as_deref(),
+        reason: q.reason.as_deref(),
+        confirm: q.confirm,
+        force: q.force,
+        cooldown_secs: q.cooldown_secs,
+        tts_voice: q.tts_voice.as_deref(),
+        tts_rate: q.tts_rate,
+    };
+    let payload = crate::avatar_cortex::xiao_shu_action_request(&opts).map_err(internal_error)?;
     Ok(Json(payload))
 }
 
@@ -3351,6 +3428,91 @@ fn avatar_surface_voice_action_preview_html(
     )
 }
 
+fn avatar_surface_xiao_shu_action_request_html(
+    action_request_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let request = action_request_preview
+        .get("action_request")
+        .unwrap_or(&Value::Null);
+    let route_raw = "/avatar-surface/xiao-shu-action-request";
+    let mut href_raw = avatar_surface_route_href(
+        route_raw,
+        q.project.as_deref(),
+        request
+            .get("mapped_track")
+            .and_then(Value::as_str)
+            .or(Some("xiao_shu::alert_peek::medium")),
+    );
+    let sep = if href_raw.contains('?') { "&" } else { "?" };
+    href_raw.push_str(sep);
+    href_raw.push_str("actor=panel&intent=voice_alert&reason=panel-dry-run");
+    let state = avatar_surface_html_json_value(request.get("request_state"), "-");
+    let actor = avatar_surface_html_json_value(request.get("actor"), "-");
+    let intent = avatar_surface_html_json_value(request.get("intent"), "-");
+    let supported = avatar_surface_html_json_value(request.get("supported_intent"), "false");
+    let direct_control =
+        avatar_surface_html_json_value(action_request_preview.get("direct_pet_control_allowed"), "false");
+    let emit_audio =
+        avatar_surface_html_json_value(action_request_preview.get("emits_audio"), "false");
+    let human_required =
+        avatar_surface_html_json_value(request.get("requires_human_confirmation"), "true");
+    let confirmed =
+        avatar_surface_html_json_value(request.get("human_confirmation_present"), "false");
+    let ready =
+        avatar_surface_html_json_value(request.get("ready_for_local_cli_emit"), "false");
+    let blocked = avatar_surface_html_json_value(request.get("blocked"), "true");
+    let reasons = html_escape(
+        &request
+            .get("blocked_reasons")
+            .map(Value::to_string)
+            .unwrap_or_else(|| "[]".to_string()),
+    );
+    let track = avatar_surface_html_json_value(request.get("mapped_track"), "-");
+    let line = avatar_surface_html_json_value(request.get("line"), "-");
+    let preview_command = avatar_surface_html_json_value(request.get("preview_command"), "-");
+    let confirm_command =
+        avatar_surface_html_json_value(request.get("confirm_request_command"), "-");
+    let emit_command = avatar_surface_html_json_value(request.get("emit_command"), "-");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">request</span>
+        <strong>Xiao Shu Action Request</strong>
+        <span>state={state} actor={actor} intent={intent}</span>
+      </div>
+      <dl>
+        <div><dt>target</dt><dd>track={track} supported={supported}</dd></div>
+        <div><dt>line</dt><dd>{line}</dd></div>
+        <div><dt>policy</dt><dd>direct_control={direct_control} emits_audio={emit_audio} human_required={human_required} confirmed={confirmed}</dd></div>
+        <div><dt>readiness</dt><dd>ready={ready} blocked={blocked} reasons={reasons}</dd></div>
+        <div><dt>preview</dt><dd>{preview_command}</dd></div>
+        <div><dt>confirm</dt><dd>{confirm_command}</dd></div>
+        <div><dt>emit</dt><dd>{emit_command}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">xiao shu action request json</a></dd></div>
+      </dl>
+    </section>"#,
+        state = state,
+        actor = actor,
+        intent = intent,
+        track = track,
+        supported = supported,
+        line = line,
+        direct_control = direct_control,
+        emit_audio = emit_audio,
+        human_required = human_required,
+        confirmed = confirmed,
+        ready = ready,
+        blocked = blocked,
+        reasons = reasons,
+        preview_command = preview_command,
+        confirm_command = confirm_command,
+        emit_command = emit_command,
+        href = html_escape(&href_raw),
+    )
+}
+
 fn avatar_surface_renderer_view_html(
     renderer_view_preview: &Value,
     generated_at: i64,
@@ -4437,6 +4599,7 @@ fn avatar_surface_panel_html(
     cortex_voice_request: &Value,
     cortex_voice_confirm: &Value,
     cortex_voice_action_preview: &Value,
+    xiao_shu_action_request: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -4503,6 +4666,8 @@ fn avatar_surface_panel_html(
     let voice_confirm_html = avatar_surface_voice_confirm_html(cortex_voice_confirm, q);
     let voice_action_preview_html =
         avatar_surface_voice_action_preview_html(cortex_voice_action_preview, q);
+    let xiao_shu_action_request_html =
+        avatar_surface_xiao_shu_action_request_html(xiao_shu_action_request, q);
     let quick_actions_html =
         avatar_surface_quick_actions_html(cortex_renderer_view, cortex_review_gate, q);
 
@@ -4754,6 +4919,7 @@ fn avatar_surface_panel_html(
     {voice_request_html}
     {voice_confirm_html}
     {voice_action_preview_html}
+    {xiao_shu_action_request_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -4785,6 +4951,7 @@ fn avatar_surface_panel_html(
         voice_request_html = voice_request_html,
         voice_confirm_html = voice_confirm_html,
         voice_action_preview_html = voice_action_preview_html,
+        xiao_shu_action_request_html = xiao_shu_action_request_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -5190,6 +5357,26 @@ mod tests {
                 300,
                 None,
             );
+        let xiao_shu_action_request =
+            crate::avatar_cortex::xiao_shu_action_request(
+                &crate::avatar_cortex::XiaoShuActionRequestOptions {
+                    label: None,
+                    heartbeat_label: None,
+                    project: Some("agent-bridge"),
+                    output: None,
+                    actor: Some("panel"),
+                    intent: Some("voice_alert"),
+                    message: Some("show the operator a safe Xiao Shu action request"),
+                    requested_track: Some("xiao_shu::alert_peek::medium"),
+                    reason: Some("panel-dry-run"),
+                    confirm: false,
+                    force: false,
+                    cooldown_secs: 300,
+                    tts_voice: None,
+                    tts_rate: None,
+                },
+            )
+            .unwrap();
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
@@ -5210,6 +5397,7 @@ mod tests {
             &voice_request,
             &voice_confirm,
             &voice_action_preview,
+            &xiao_shu_action_request,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -5295,6 +5483,12 @@ mod tests {
         assert!(html.contains("ready=true token=xiao_shu::alert_peek::medium"));
         assert!(html.contains("would_emit=true blocked=false"));
         assert!(html.contains("voice action preview json"));
+        assert!(html.contains("Xiao Shu Action Request"));
+        assert!(html.contains("state=requires_human_confirmation actor=panel intent=voice_alert"));
+        assert!(html.contains("direct_control=false emits_audio=false human_required=true confirmed=false"));
+        assert!(html.contains("ready=false blocked=true reasons="));
+        assert!(html.contains("human_confirmation_required"));
+        assert!(html.contains("xiao shu action request json"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));

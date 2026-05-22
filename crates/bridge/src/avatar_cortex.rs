@@ -84,6 +84,24 @@ pub struct AvatarCortexVoiceActionPreviewOptions<'a> {
     pub tts_rate: Option<u64>,
 }
 
+#[derive(Clone, Copy)]
+pub struct XiaoShuActionRequestOptions<'a> {
+    pub label: Option<&'a str>,
+    pub heartbeat_label: Option<&'a str>,
+    pub project: Option<&'a str>,
+    pub output: Option<&'a Path>,
+    pub actor: Option<&'a str>,
+    pub intent: Option<&'a str>,
+    pub message: Option<&'a str>,
+    pub requested_track: Option<&'a str>,
+    pub reason: Option<&'a str>,
+    pub confirm: bool,
+    pub force: bool,
+    pub cooldown_secs: i64,
+    pub tts_voice: Option<&'a str>,
+    pub tts_rate: Option<u64>,
+}
+
 fn home_dir() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -4087,13 +4105,25 @@ fn avatar_cortex_voice_action_from_confirm_payload(
     let emits_audio = vbool(emit_payload.get("emits_audio")).unwrap_or(false);
     let command_preview = confirm
         .get("action_command_preview")
+        .filter(|value| !value.is_null())
         .cloned()
-        .or_else(|| confirm.get("pending_action_command_preview").cloned())
+        .or_else(|| {
+            confirm
+                .get("pending_action_command_preview")
+                .filter(|value| !value.is_null())
+                .cloned()
+        })
         .unwrap_or(Value::Null);
     let command_args = confirm
         .get("action_command_args")
+        .filter(|value| !value.is_null())
         .cloned()
-        .or_else(|| confirm.get("pending_action_command_args").cloned())
+        .or_else(|| {
+            confirm
+                .get("pending_action_command_args")
+                .filter(|value| !value.is_null())
+                .cloned()
+        })
         .unwrap_or(Value::Null);
 
     Ok(json!({
@@ -4240,13 +4270,25 @@ fn avatar_cortex_voice_action_preview_from_confirm_payload(
     let ready_to_emit_now = blocked_reasons.is_empty() && confirmed && gate_would_emit;
     let command_preview = confirm
         .get("action_command_preview")
+        .filter(|value| !value.is_null())
         .cloned()
-        .or_else(|| confirm.get("pending_action_command_preview").cloned())
+        .or_else(|| {
+            confirm
+                .get("pending_action_command_preview")
+                .filter(|value| !value.is_null())
+                .cloned()
+        })
         .unwrap_or(Value::Null);
     let command_args = confirm
         .get("action_command_args")
+        .filter(|value| !value.is_null())
         .cloned()
-        .or_else(|| confirm.get("pending_action_command_args").cloned())
+        .or_else(|| {
+            confirm
+                .get("pending_action_command_args")
+                .filter(|value| !value.is_null())
+                .cloned()
+        })
         .unwrap_or(Value::Null);
 
     json!({
@@ -4360,6 +4402,171 @@ pub fn avatar_cortex_voice_action_preview(
         Some(&state_path),
         Some(&events_path),
         now_secs(),
+    ))
+}
+
+fn xiao_shu_action_intent_supported(intent: &str) -> bool {
+    matches!(
+        intent,
+        "voice_alert" | "alert_peek" | "attention" | "review_attention" | "xiao_shu_alert_peek"
+    )
+}
+
+fn xiao_shu_action_request_from_preview(
+    action_preview_payload: Value,
+    opts: &XiaoShuActionRequestOptions<'_>,
+    project: &str,
+    intent: &str,
+    track: &str,
+    reason: &str,
+) -> Value {
+    let actor = opts
+        .actor
+        .map(str::trim)
+        .filter(|actor| !actor.is_empty())
+        .unwrap_or("llm");
+    let message = opts.message.map(str::trim).filter(|message| !message.is_empty());
+    let supported_intent = xiao_shu_action_intent_supported(intent);
+    let action = action_preview_payload
+        .get("action_preview")
+        .unwrap_or(&Value::Null);
+    let downstream_ready = vbool(action.get("ready_to_emit_now")).unwrap_or(false);
+    let request_state = if !supported_intent {
+        "blocked_unsupported_intent"
+    } else if !opts.confirm {
+        "requires_human_confirmation"
+    } else if downstream_ready {
+        "ready_for_local_cli_emit"
+    } else {
+        "confirmed_but_blocked"
+    };
+    let preview_command = format!(
+        "agent-bridge avatar cortex-voice-action-preview --project {project} --track {track:?} --reason {reason:?} --confirm"
+    );
+    let message_arg = message
+        .map(|message| format!(" --message {message:?}"))
+        .unwrap_or_default();
+    let request_command = format!(
+        "agent-bridge avatar xiao-shu-action-request --project {project} --actor {actor:?} --intent {intent:?}{message_arg} --reason {reason:?}"
+    );
+    let confirm_request_command = format!(
+        "agent-bridge avatar xiao-shu-action-request --project {project} --actor {actor:?} --intent {intent:?}{message_arg} --reason {reason:?} --confirm"
+    );
+    let emit_command = action
+        .get("command_preview")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let mut blocked_reasons = Vec::<String>::new();
+    if !supported_intent {
+        blocked_reasons.push("unsupported_intent".to_string());
+    }
+    if !opts.confirm {
+        blocked_reasons.push("human_confirmation_required".to_string());
+    }
+    if let Some(reasons) = action.get("blocked_reasons").and_then(Value::as_array) {
+        for reason in reasons.iter().filter_map(Value::as_str) {
+            if !blocked_reasons.iter().any(|existing| existing == reason) {
+                blocked_reasons.push(reason.to_string());
+            }
+        }
+    }
+
+    json!({
+        "surface": "xiao_shu_action_request",
+        "schema": 1,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "dry_run": true,
+        "llm_safe": true,
+        "sidecar_only": true,
+        "direct_pet_control_allowed": false,
+        "actual_emit_invoked": false,
+        "emits_audio": false,
+        "emits_notification": false,
+        "http_available": true,
+        "http_emit_route_added": false,
+        "writes_files": false,
+        "writes_request_record": false,
+        "writes_cooldown_state": false,
+        "codex_pet_package_mutation": false,
+        "mutates_global_substrate": false,
+        "action_request": {
+            "target": "xiao-shu",
+            "actor": actor,
+            "intent": intent,
+            "message": message,
+            "request_state": request_state,
+            "supported_intent": supported_intent,
+            "mapped_surface": "avatar_cortex_voice_action_preview",
+            "mapped_track": track,
+            "line": action.get("line").cloned().unwrap_or(Value::Null),
+            "reason": reason,
+            "requires_human_confirmation": true,
+            "human_confirmation_present": opts.confirm,
+            "real_emit_requires_local_cli": true,
+            "direct_llm_emit_allowed": false,
+            "ready_for_local_cli_emit": supported_intent && opts.confirm && downstream_ready,
+            "blocked": !supported_intent || !opts.confirm || !downstream_ready,
+            "blocked_reasons": blocked_reasons,
+            "request_command": request_command,
+            "confirm_request_command": confirm_request_command,
+            "preview_command": preview_command,
+            "emit_command": emit_command,
+            "next_step": "show this request to the operator; only a local CLI confirmation may run the emitted command",
+        },
+        "policy": {
+            "llm_can_request": true,
+            "llm_can_directly_control_pet": false,
+            "llm_can_emit_audio": false,
+            "operator_confirmation_required": true,
+            "local_cli_emit_only": true,
+            "http_emit_route_allowed": false,
+        },
+        "downstream_action_preview": action_preview_payload,
+    })
+}
+
+pub fn xiao_shu_action_request(opts: &XiaoShuActionRequestOptions<'_>) -> Result<Value> {
+    let project = opts.project.unwrap_or("agent-bridge");
+    let intent = opts
+        .intent
+        .map(str::trim)
+        .filter(|intent| !intent.is_empty())
+        .unwrap_or("voice_alert")
+        .to_string();
+    let track = opts
+        .requested_track
+        .map(str::trim)
+        .filter(|track| !track.is_empty())
+        .unwrap_or("xiao_shu::alert_peek::medium")
+        .to_string();
+    let reason = opts
+        .reason
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| format!("xiao-shu-action-request-{intent}"));
+    let preview_opts = AvatarCortexVoiceActionPreviewOptions {
+        label: opts.label,
+        heartbeat_label: opts.heartbeat_label,
+        project: opts.project,
+        output: opts.output,
+        requested_track: Some(track.as_str()),
+        reason: Some(reason.as_str()),
+        confirm: opts.confirm,
+        force: opts.force,
+        cooldown_secs: opts.cooldown_secs,
+        tts_voice: opts.tts_voice,
+        tts_rate: opts.tts_rate,
+    };
+    let action_preview = avatar_cortex_voice_action_preview(&preview_opts)?;
+    Ok(xiao_shu_action_request_from_preview(
+        action_preview,
+        opts,
+        project,
+        &intent,
+        &track,
+        &reason,
     ))
 }
 
@@ -5843,6 +6050,113 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn xiao_shu_action_request_keeps_llm_behind_confirmation() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let policy = avatar_cortex_voice_policy_from_renderer_view_payload(view);
+        let request = avatar_cortex_voice_request_from_policy_payload(
+            policy,
+            Some("xiao_shu::alert_peek::medium"),
+            Some("agent-bridge"),
+            Some("manual confirmation"),
+        );
+        let confirm = avatar_cortex_voice_confirm_from_request_payload(request, true);
+        let preview_opts = AvatarCortexVoiceActionPreviewOptions {
+            label: None,
+            heartbeat_label: None,
+            project: Some("agent-bridge"),
+            output: None,
+            requested_track: Some("xiao_shu::alert_peek::medium"),
+            reason: Some("manual confirmation"),
+            confirm: true,
+            force: true,
+            cooldown_secs: 300,
+            tts_voice: None,
+            tts_rate: None,
+        };
+        let action_preview = avatar_cortex_voice_action_preview_from_confirm_payload(
+            confirm,
+            &preview_opts,
+            None,
+            None,
+            None,
+            1_100,
+        );
+        let opts = XiaoShuActionRequestOptions {
+            label: None,
+            heartbeat_label: None,
+            project: Some("agent-bridge"),
+            output: None,
+            actor: Some("llm"),
+            intent: Some("voice_alert"),
+            message: Some("please alert the operator"),
+            requested_track: Some("xiao_shu::alert_peek::medium"),
+            reason: Some("manual confirmation"),
+            confirm: false,
+            force: false,
+            cooldown_secs: 300,
+            tts_voice: None,
+            tts_rate: None,
+        };
+        let request = xiao_shu_action_request_from_preview(
+            action_preview,
+            &opts,
+            "agent-bridge",
+            "voice_alert",
+            "xiao_shu::alert_peek::medium",
+            "manual confirmation",
+        );
+
+        assert_eq!(request["surface"], "xiao_shu_action_request");
+        assert_eq!(request["llm_safe"], true);
+        assert_eq!(request["read_only"], true);
+        assert_eq!(request["dry_run"], true);
+        assert_eq!(request["direct_pet_control_allowed"], false);
+        assert_eq!(request["actual_emit_invoked"], false);
+        assert_eq!(request["emits_audio"], false);
+        assert_eq!(request["http_emit_route_added"], false);
+        assert_eq!(
+            request["action_request"]["request_state"],
+            "requires_human_confirmation"
+        );
+        assert_eq!(request["action_request"]["actor"], "llm");
+        assert_eq!(request["action_request"]["supported_intent"], true);
+        assert_eq!(request["action_request"]["direct_llm_emit_allowed"], false);
+        assert_eq!(request["action_request"]["real_emit_requires_local_cli"], true);
+        assert_eq!(request["action_request"]["ready_for_local_cli_emit"], false);
+        assert!(request["action_request"]["blocked_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason == "human_confirmation_required"));
+        assert!(request["action_request"]["confirm_request_command"]
+            .as_str()
+            .unwrap()
+            .contains("--confirm"));
+        assert!(request["action_request"]["emit_command"]
+            .as_str()
+            .unwrap()
+            .contains("cortex-voice-action"));
+
+        let unsupported = xiao_shu_action_request_from_preview(
+            request["downstream_action_preview"].clone(),
+            &opts,
+            "agent-bridge",
+            "dance_now",
+            "xiao_shu::alert_peek::medium",
+            "manual confirmation",
+        );
+        assert_eq!(
+            unsupported["action_request"]["request_state"],
+            "blocked_unsupported_intent"
+        );
+        assert_eq!(unsupported["action_request"]["supported_intent"], false);
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
