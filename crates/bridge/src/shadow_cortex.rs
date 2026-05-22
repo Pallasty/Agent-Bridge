@@ -1,3 +1,5 @@
+use ab_seed_bridge::{SeedBackend, SubstrateConfig};
+use ab_store::embedding::{EmbeddingBackend, HashBackend};
 use ab_store::{IdentityWindow, McpToolCallFilter, McpToolCallStats, MemoryQueryStats, StateStore};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -6,14 +8,21 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SIGNAL_SCHEMA_VERSION: u8 = 1;
 const SHORT_TTL_SECS: u64 = 3_600;
 const LONG_TTL_SECS: u64 = 86_400;
 const SALIENCE_SATURATION_TOP_K: usize = 4;
+// Saturation thresholds are lane-local proxies for each lane's salience cap.
+// Keep them below the corresponding clamp ceiling so guarded verdicts remain reachable.
 const HEURISTIC_SALIENCE_SATURATION_THRESHOLD: f64 = 0.75;
 const SEED_SHADOW_SALIENCE_SATURATION_THRESHOLD: f64 = 0.945;
+const SEED_RUNTIME_SALIENCE_MAX: f64 = 0.98;
+const SEED_RUNTIME_SALIENCE_SATURATION_THRESHOLD: f64 = 0.975;
+const SEED_RUNTIME_REPLAY_N: usize = 32;
+const SEED_RUNTIME_REPLAY_D: usize = 64;
 
 #[derive(Debug, Clone)]
 pub struct ShadowCortexOptions {
@@ -109,6 +118,7 @@ pub struct ShadowCortexReport {
     pub comparison: ShadowCortexComparison,
     pub signals: Vec<AgentAttentionSignal>,
     pub seed_shadow_signals: Vec<AgentAttentionSignal>,
+    pub seed_runtime_signals: Vec<AgentAttentionSignal>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -124,6 +134,7 @@ pub struct ShadowCortexWeeklySummary {
     pub lane_coverage: Vec<ShadowCortexLaneCoverage>,
     pub top_signal: Option<ShadowCortexWeeklySignal>,
     pub seed_shadow_top_signal: Option<ShadowCortexWeeklySignal>,
+    pub seed_runtime_top_signal: Option<ShadowCortexWeeklySignal>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -435,10 +446,11 @@ pub fn build_shadow_cortex_report_from_fixture(
         comparison: ShadowCortexComparison::default(),
         signals: Vec::new(),
         seed_shadow_signals: Vec::new(),
+        seed_runtime_signals: Vec::new(),
     };
 
     if fixture.mode == ShadowCortexMode::Off {
-        report.comparison = build_shadow_comparison(fixture, &report.signals, &[]);
+        report.comparison = build_shadow_comparison(fixture, &report.signals, &[], &[]);
         return Ok(report);
     }
 
@@ -469,12 +481,20 @@ pub fn build_shadow_cortex_report_from_fixture(
     }
 
     let mut seed_shadow_signals = seed_shadow_signals_from_fixture(fixture);
-    report.comparison = build_shadow_comparison(fixture, &heuristic_signals, &seed_shadow_signals);
+    let mut seed_runtime_signals = seed_runtime_signals_from_fixture(fixture);
+    report.comparison = build_shadow_comparison(
+        fixture,
+        &heuristic_signals,
+        &seed_shadow_signals,
+        &seed_runtime_signals,
+    );
 
     report.signals = heuristic_signals;
     finalize_signals(&mut report.signals, max_signals);
     finalize_signals(&mut seed_shadow_signals, max_signals);
     report.seed_shadow_signals = seed_shadow_signals;
+    finalize_signals(&mut seed_runtime_signals, max_signals);
+    report.seed_runtime_signals = seed_runtime_signals;
     Ok(report)
 }
 
@@ -497,6 +517,7 @@ pub fn weekly_summary(report: &ShadowCortexReport) -> ShadowCortexWeeklySummary 
         lane_coverage: report.comparison.lane_coverage.clone(),
         top_signal: weekly_signal(&report.signals),
         seed_shadow_top_signal: weekly_signal(&report.seed_shadow_signals),
+        seed_runtime_top_signal: weekly_signal(&report.seed_runtime_signals),
     }
 }
 
@@ -567,6 +588,21 @@ pub fn print_shadow_cortex_report(report: &ShadowCortexReport, input_path: &Path
         println!();
         println!("# seed-shadow top signals (deterministic, no runtime)");
         for (idx, signal) in report.seed_shadow_signals.iter().take(3).enumerate() {
+            println!(
+                "{}. [{:?}/{:?}] {} ({:.2})",
+                idx + 1,
+                signal.scope,
+                signal.signal_type,
+                signal.subject_id,
+                signal.salience
+            );
+            println!("   {}", signal.summary);
+        }
+    }
+    if !report.seed_runtime_signals.is_empty() {
+        println!();
+        println!("# seed-runtime top signals (ephemeral in-process replay)");
+        for (idx, signal) in report.seed_runtime_signals.iter().take(3).enumerate() {
             println!(
                 "{}. [{:?}/{:?}] {} ({:.2})",
                 idx + 1,
@@ -1022,19 +1058,231 @@ fn seed_shadow_salience(base: f64, event: &ShadowCortexEvent) -> f64 {
     score.clamp(0.0, 0.95)
 }
 
+fn seed_runtime_signals_from_fixture(
+    fixture: &ShadowCortexReplayFixture,
+) -> Vec<AgentAttentionSignal> {
+    if fixture.mode != ShadowCortexMode::SeedRuntime || fixture.events.is_empty() {
+        return Vec::new();
+    }
+
+    // Feasibility probe only: local, ephemeral Seed runtime. This does
+    // not install the global substrate, does not write snapshots, and
+    // never calls the AiOT production daemon.
+    let backend = SeedBackend::wrap_with(
+        Arc::new(HashBackend),
+        SubstrateConfig {
+            n: SEED_RUNTIME_REPLAY_N,
+            d: SEED_RUNTIME_REPLAY_D,
+            state_noise: 0.0,
+            lr: 0.01,
+        },
+    );
+    let total_events = fixture.events.len().max(1);
+    let mut out = Vec::with_capacity(fixture.events.len());
+
+    for (idx, event) in fixture.events.iter().enumerate() {
+        let text = seed_runtime_event_text(event);
+        let _ = EmbeddingBackend::perceive(&backend, &text, &event.event_id);
+        let stats = backend.stats();
+        let neighbors = backend.neighbors_of(&event.event_id, 3);
+        let salience = seed_runtime_salience(
+            &stats,
+            event,
+            idx,
+            total_events,
+            neighbors.iter().map(|(_, weight)| *weight as f64).sum(),
+        );
+        let (signal_type, summary, recommendation) = seed_runtime_signal_copy(event);
+        out.push(signal(
+            fixture.captured_at,
+            event.scope,
+            event.subject_id.clone(),
+            signal_type,
+            salience,
+            &[
+                "seed_runtime",
+                "ephemeral_replay",
+                "runtime_surprise_attention",
+            ],
+            vec![event.event_id.clone()],
+            SHORT_TTL_SECS,
+            json!({
+                "source": event.source,
+                "source_event_id": event.event_id,
+                "scorer": "seed_runtime_ephemeral",
+                "features": event.features,
+                "substrate": {
+                    "backend": stats.backend_name,
+                    "n": stats.n,
+                    "d": stats.d,
+                    "step_count": stats.step_count,
+                    "last_surprise_mean": stats.last_surprise_mean,
+                    "last_surprise_max": stats.last_surprise_max,
+                    "connection_mean_abs": stats.connection_mean_abs,
+                    "neighbors": neighbors,
+                    "mutates_global_substrate": false,
+                    "writes_snapshot": false,
+                    "calls_daemon": false
+                }
+            }),
+            &["show_in_dream_weekly"],
+            0.46,
+            summary,
+            recommendation,
+        ));
+    }
+    finalize_signals(&mut out, 200);
+    out
+}
+
+fn seed_runtime_event_text(event: &ShadowCortexEvent) -> String {
+    format!(
+        "shadow-cortex event\nsource: {}\nscope: {:?}\nsubject: {}\nevent: {}\nfeatures: {}",
+        event.source,
+        event.scope,
+        event.subject_id,
+        event.event_id,
+        compact_json(&event.features)
+    )
+}
+
+fn seed_runtime_signal_copy(event: &ShadowCortexEvent) -> (SignalType, &'static str, &'static str) {
+    let event_id = event.event_id.as_str();
+    if event_id.ends_with(":empty") {
+        (
+            SignalType::Continuity,
+            "The in-process Seed replay saw an empty observation window.",
+            "Treat this as a low-evidence continuity signal, not a product hint.",
+        )
+    } else if event_id.contains(":errors") {
+        (
+            SignalType::Risk,
+            "The in-process Seed replay assigned attention to an error-bearing event.",
+            "Inspect whether the error is fresh, repeated, and actionable before changing routing.",
+        )
+    } else if event_id.contains(":latency") {
+        (
+            SignalType::Opportunity,
+            "The in-process Seed replay assigned attention to a latency-heavy event.",
+            "Compare against expected long-running work before optimizing the surface.",
+        )
+    } else if event_id.contains(":result_size") {
+        (
+            SignalType::Opportunity,
+            "The in-process Seed replay assigned attention to a context-pressure event.",
+            "Prefer compact result shaping only if the large payload is not carrying useful evidence.",
+        )
+    } else if event_id.contains(":native_overlap") {
+        (
+            SignalType::Opportunity,
+            "The in-process Seed replay assigned attention to native-tool overlap.",
+            "Keep Agent-Bridge exposure focused on capabilities Codex cannot already perform natively.",
+        )
+    } else if event_id.starts_with("memory_query_log:miss:") {
+        (
+            SignalType::Risk,
+            "The in-process Seed replay assigned attention to a repeated memory miss.",
+            "Only add aliases or compact memories when the miss reflects durable future intent.",
+        )
+    } else if event_id.starts_with("memory_query_log:") {
+        (
+            SignalType::Risk,
+            "The in-process Seed replay assigned attention to recall behavior.",
+            "Use this as a recall-fit probe before changing retrieval rankers.",
+        )
+    } else if event_id.starts_with("forum_posts:") {
+        (
+            SignalType::Handoff,
+            "The in-process Seed replay assigned attention to collaboration activity.",
+            "Check the board before taking ownership of nearby work.",
+        )
+    } else {
+        (
+            SignalType::Anomaly,
+            "The in-process Seed replay assigned attention to an uncategorized event.",
+            "Inspect the raw event before deriving a workflow decision.",
+        )
+    }
+}
+
+fn seed_runtime_salience(
+    stats: &ab_seed_bridge::SubstrateStats,
+    event: &ShadowCortexEvent,
+    idx: usize,
+    total_events: usize,
+    neighbor_weight_sum: f64,
+) -> f64 {
+    let surprise = stats.last_surprise_mean.max(0.0) as f64;
+    let surprise_spread = (stats.last_surprise_max - stats.last_surprise_mean).max(0.0) as f64;
+    let event_pressure = seed_runtime_event_pressure(event);
+    let neighbor_pressure = neighbor_weight_sum.min(1.0) * 0.08;
+    let order_tiebreak = if total_events > 1 {
+        (idx as f64 / (total_events - 1) as f64) * 0.03
+    } else {
+        0.0
+    };
+
+    (0.24
+        + surprise.min(1.0) * 0.24
+        + surprise_spread.min(1.0) * 0.10
+        + event_pressure
+        + neighbor_pressure
+        + order_tiebreak)
+        .clamp(0.0, SEED_RUNTIME_SALIENCE_MAX)
+}
+
+fn seed_runtime_event_pressure(event: &ShadowCortexEvent) -> f64 {
+    let mut score = 0.0;
+    score += number_feature(&event.features, "error_rate").unwrap_or(0.0) * 0.22;
+    if let Some(hit_rate) = number_feature(&event.features, "hit_rate") {
+        score += (0.55 - hit_rate).max(0.0) * 0.24;
+    }
+    if let Some(p95_ms) = number_feature(&event.features, "p95_duration_ms") {
+        score += (p95_ms / 12_000.0).min(0.12);
+    }
+    if let Some(p95_us) = number_feature(&event.features, "p95_duration_us") {
+        score += (p95_us / 1_250_000.0).min(0.12);
+    }
+    if let Some(miss_count) = number_feature(&event.features, "miss_count") {
+        score += (miss_count / 12.0).min(0.12);
+    }
+    if let Some(call_count) = number_feature(&event.features, "call_count").filter(|v| *v > 0.0) {
+        score += (call_count.log10() / 25.0).min(0.08);
+    }
+    if let Some(forum_posts) = number_feature(&event.features, "forum_posts").filter(|v| *v > 0.0) {
+        score += (forum_posts.log10() / 20.0).min(0.08);
+    }
+    score.min(0.28)
+}
+
 fn build_shadow_comparison(
     fixture: &ShadowCortexReplayFixture,
     heuristic_signals: &[AgentAttentionSignal],
     seed_shadow_signals: &[AgentAttentionSignal],
+    seed_runtime_signals: &[AgentAttentionSignal],
 ) -> ShadowCortexComparison {
     let heuristic = lane_coverage("heuristic", &fixture.events, heuristic_signals, true);
     let seed_shadow = lane_coverage("seed_shadow", &fixture.events, seed_shadow_signals, true);
-    let seed_runtime = lane_coverage("seed_runtime", &fixture.events, &[], false);
+    let seed_runtime_enabled = fixture.mode == ShadowCortexMode::SeedRuntime;
+    let seed_runtime = lane_coverage(
+        "seed_runtime",
+        &fixture.events,
+        seed_runtime_signals,
+        seed_runtime_enabled,
+    );
     let lane_coverage = vec![heuristic.clone(), seed_shadow.clone(), seed_runtime.clone()];
     let mut notes = Vec::new();
 
     if seed_runtime.state == "not_enabled" {
-        notes.push("seed_runtime is not evaluated in Gate B prep".to_string());
+        notes.push(
+            "seed_runtime is not evaluated unless AGENT_BRIDGE_SHADOW_CORTEX=seed-runtime"
+                .to_string(),
+        );
+    } else {
+        notes.push(
+            "seed_runtime used an ephemeral in-process SeedBackend replay; no global substrate, snapshot, or daemon was touched"
+                .to_string(),
+        );
     }
     if seed_shadow.state == "ablation_state" || seed_shadow.state == "insufficient_coverage" {
         notes.push(
@@ -1054,12 +1302,16 @@ fn build_shadow_comparison(
                 .to_string(),
         );
     }
-    notes.push(
-        "seed_shadow is deterministic and shadow-only; no Seed runtime was called".to_string(),
-    );
+    notes.push("seed_shadow remains deterministic and shadow-only".to_string());
 
     ShadowCortexComparison {
-        verdict: comparison_verdict(&fixture.events, &heuristic, &seed_shadow),
+        verdict: comparison_verdict(
+            &fixture.events,
+            &heuristic,
+            &seed_shadow,
+            &seed_runtime,
+            seed_runtime_enabled,
+        ),
         notes,
         lane_coverage,
         rank_deltas: rank_deltas(heuristic_signals, seed_shadow_signals, 12),
@@ -1140,6 +1392,7 @@ fn classify_salience_saturation(
 
     let saturation_threshold = match lane {
         "seed_shadow" => SEED_SHADOW_SALIENCE_SATURATION_THRESHOLD,
+        "seed_runtime" => SEED_RUNTIME_SALIENCE_SATURATION_THRESHOLD,
         _ => HEURISTIC_SALIENCE_SATURATION_THRESHOLD,
     };
     let cap_hits = saliences
@@ -1171,9 +1424,13 @@ fn comparison_verdict(
     events: &[ShadowCortexEvent],
     heuristic: &ShadowCortexLaneCoverage,
     seed_shadow: &ShadowCortexLaneCoverage,
+    seed_runtime: &ShadowCortexLaneCoverage,
+    seed_runtime_enabled: bool,
 ) -> String {
     if events.is_empty() {
         "no_events".to_string()
+    } else if seed_runtime_enabled {
+        seed_runtime_comparison_verdict(seed_runtime)
     } else if seed_shadow.state == "ablation_state" {
         "ablation_state".to_string()
     } else if seed_shadow.state == "insufficient_coverage" {
@@ -1186,6 +1443,20 @@ fn comparison_verdict(
         "salience_saturation_guarded".to_string()
     } else {
         "seed_shadow_ready_for_review".to_string()
+    }
+}
+
+fn seed_runtime_comparison_verdict(seed_runtime: &ShadowCortexLaneCoverage) -> String {
+    if seed_runtime.state == "ablation_state" {
+        "seed_runtime_ablation_state".to_string()
+    } else if seed_runtime.state == "insufficient_coverage" {
+        "seed_runtime_insufficient_coverage".to_string()
+    } else if seed_runtime.rank_tie_state != "ok" {
+        "seed_runtime_rank_tie_guarded".to_string()
+    } else if salience_saturation_is_guarded(seed_runtime) {
+        "seed_runtime_salience_saturation_guarded".to_string()
+    } else {
+        "seed_runtime_ready_for_review".to_string()
     }
 }
 
@@ -1913,7 +2184,7 @@ mod tests {
         let coverage = lane_coverage("seed_shadow", &fixture.events, &[], true);
         assert_eq!(coverage.state, "ablation_state");
         assert_eq!(
-            comparison_verdict(&fixture.events, &coverage, &coverage),
+            comparison_verdict(&fixture.events, &coverage, &coverage, &coverage, false),
             "ablation_state"
         );
     }
@@ -1974,7 +2245,7 @@ mod tests {
         assert_eq!(coverage.state, "covered");
         assert_eq!(coverage.rank_tie_state, "degenerate_rank_tie");
         assert_eq!(
-            comparison_verdict(&events, &coverage, &coverage),
+            comparison_verdict(&events, &coverage, &coverage, &coverage, false),
             "rank_tie_guarded"
         );
     }
@@ -2014,7 +2285,7 @@ mod tests {
         assert_eq!(coverage.state, "covered");
         assert_eq!(coverage.rank_tie_state, "low_resolution_rank_tie");
         assert_eq!(
-            comparison_verdict(&events, &coverage, &coverage),
+            comparison_verdict(&events, &coverage, &coverage, &coverage, false),
             "rank_tie_guarded"
         );
     }
@@ -2058,7 +2329,7 @@ mod tests {
         assert_eq!(coverage.top_k_cap_hits, 4);
         assert_eq!(coverage.top_k_size, 4);
         assert_eq!(
-            comparison_verdict(&events, &coverage, &coverage),
+            comparison_verdict(&events, &coverage, &coverage, &coverage, false),
             "salience_saturation_guarded"
         );
     }
@@ -2100,6 +2371,90 @@ mod tests {
         assert_eq!(coverage.rank_tie_state, "ok");
         assert_eq!(coverage.salience_saturation_state, "ok");
         assert_eq!(coverage.top_k_cap_hits, 0);
+    }
+
+    #[test]
+    fn seed_runtime_saturation_guard_is_reachable_below_runtime_cap() {
+        let mut events = Vec::new();
+        let mut signals = Vec::new();
+        let saliences = [0.980, 0.979, 0.978, 0.977, 0.940, 0.920];
+        for (idx, salience) in saliences.iter().enumerate() {
+            let subject = format!("tool_{idx}");
+            let event_id = format!("mcp_dispatch:{subject}:runtime");
+            events.push(shadow_event(
+                event_id.clone(),
+                1,
+                "mcp_dispatch",
+                SignalScope::Tool,
+                &subject,
+                json!({"p95_ms": 4_000 + idx}),
+            ));
+            signals.push(signal(
+                1,
+                SignalScope::Tool,
+                subject,
+                SignalType::Opportunity,
+                *salience,
+                &["seed_runtime"],
+                vec![event_id],
+                SHORT_TTL_SECS,
+                json!({}),
+                &[],
+                0.5,
+                "probe",
+                "probe",
+            ));
+        }
+        let coverage = lane_coverage("seed_runtime", &events, &signals, true);
+        assert_eq!(coverage.state, "covered");
+        assert_eq!(coverage.rank_tie_state, "ok");
+        assert_eq!(coverage.salience_saturation_state, "fully_saturated_top_k");
+        assert_eq!(coverage.top_k_cap_hits, 4);
+        assert_eq!(coverage.top_k_size, 4);
+        assert_eq!(
+            comparison_verdict(&events, &coverage, &coverage, &coverage, true),
+            "seed_runtime_salience_saturation_guarded"
+        );
+    }
+
+    #[test]
+    fn seed_runtime_mode_evaluates_ephemeral_seed_lane() {
+        let mut fixture = sample_fixture();
+        fixture.mode = ShadowCortexMode::SeedRuntime;
+        fixture.events = encode_shadow_events(&fixture);
+
+        let report = build_shadow_cortex_report_from_fixture(&fixture, 10).expect("report");
+
+        assert!(!report.seed_runtime_signals.is_empty());
+        assert_eq!(report.seed_runtime_signals.len(), fixture.events.len());
+        assert!(report
+            .seed_runtime_signals
+            .iter()
+            .all(|signal| signal.reason_codes.contains(&"seed_runtime".to_string())));
+        assert!(report
+            .seed_runtime_signals
+            .iter()
+            .all(|signal| signal.evidence["substrate"]["mutates_global_substrate"] == false));
+        assert!(ab_seed_bridge::current().is_none());
+
+        let runtime = report
+            .comparison
+            .lane_coverage
+            .iter()
+            .find(|lane| lane.lane == "seed_runtime")
+            .expect("seed runtime lane");
+        assert_eq!(runtime.state, "covered");
+        assert_eq!(runtime.covered_events, runtime.total_events);
+        assert_eq!(runtime.salience_saturation_state, "ok");
+        assert_eq!(report.comparison.verdict, "seed_runtime_ready_for_review");
+        assert!(report
+            .comparison
+            .notes
+            .iter()
+            .any(|note| { note.contains("ephemeral in-process SeedBackend replay") }));
+
+        let summary = weekly_summary(&report);
+        assert!(summary.seed_runtime_top_signal.is_some());
     }
 
     #[test]
