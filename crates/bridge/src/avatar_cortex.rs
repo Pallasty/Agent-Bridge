@@ -1869,6 +1869,49 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "voice_policy": "silent_now_review_sparse_voice_later",
             }),
             json!({
+                "variant_id": "sidecar_peek_v4",
+                "label": "sidecar peek v4",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": true,
+                "default": false,
+                "intent": "motion-canonical redraw that keeps the readable v2 raised-hand geometry while adding Xiao Shu paper-charm identity cues",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-motion-canonical-peek-v4",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-peek-v4",
+                    "format": "image/svg+xml",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "motion_canonical_v4"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-peek-v4",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "alert_peek_sidecar_v4_frame_choreo",
+                    "mode": "sidecar_sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "motion_canonical_peek_blink_return",
+                    "duration_ms": 1660,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 95, "phase": "hidden_entry", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 110, "phase": "peek_start", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 130, "phase": "notice", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 150, "phase": "hand_lift", "mark": true},
+                        {"row": 0, "col": 4, "hold_ms": 260, "phase": "attention_hold", "mark": true},
+                        {"row": 0, "col": 5, "hold_ms": 150, "phase": "blink", "mark": true},
+                        {"row": 0, "col": 4, "hold_ms": 150, "phase": "soften", "mark": true},
+                        {"row": 0, "col": 6, "hold_ms": 130, "phase": "returning", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 185, "phase": "settle", "mark": false},
+                        {"row": 0, "col": 0, "hold_ms": 300, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "keeps v2's visible raised-hand arm skeleton and layers Xiao Shu's canonical colors and small identity marks over it",
+                },
+                "review_question": "does this keep the v2 hand-lift read while feeling closer to Xiao Shu than the pure prototype",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+            json!({
                 "variant_id": "sidecar_peek_v3",
                 "label": "sidecar peek v3",
                 "sprite_row": 0,
@@ -4044,7 +4087,7 @@ mod tests {
             .iter()
             .find(|track| track["token"] == "xiao_shu::alert_peek::medium")
             .unwrap();
-        assert_eq!(alert_peek["semantic_variant_count"], 5);
+        assert_eq!(alert_peek["semantic_variant_count"], 6);
         assert_eq!(alert_peek["has_semantic_variants"], true);
         assert_eq!(
             alert_peek["semantic_variants"][0]["variant_id"],
@@ -4087,17 +4130,29 @@ mod tests {
         );
         assert_eq!(
             alert_peek["semantic_variants"][3]["variant_id"],
-            "sidecar_peek_v3"
+            "sidecar_peek_v4"
         );
         assert_eq!(
             alert_peek["semantic_variants"][3]["sidecar_asset"]["asset_id"],
-            "xiao-shu-canonical-peek-v3"
+            "xiao-shu-motion-canonical-peek-v4"
         );
         assert_eq!(
             alert_peek["semantic_variants"][3]["frame_choreography"]["choreography_id"],
+            "alert_peek_sidecar_v4_frame_choreo"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][4]["variant_id"],
+            "sidecar_peek_v3"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][4]["sidecar_asset"]["asset_id"],
+            "xiao-shu-canonical-peek-v3"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][4]["frame_choreography"]["choreography_id"],
             "alert_peek_sidecar_v3_frame_choreo"
         );
-        assert_eq!(alert_peek["semantic_variants"][4]["sprite_row"], 8);
+        assert_eq!(alert_peek["semantic_variants"][5]["sprite_row"], 8);
         assert_eq!(
             alert_peek["semantic_variant_review"]["can_promote_binding"],
             false

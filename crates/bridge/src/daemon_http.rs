@@ -955,6 +955,9 @@ fn avatar_sidecar_spritesheet_svg(asset: &str) -> Option<String> {
     if asset == "xiao-shu-canonical-peek-v3" {
         return avatar_sidecar_canonical_peek_v3_svg();
     }
+    if asset == "xiao-shu-motion-canonical-peek-v4" {
+        return avatar_sidecar_motion_canonical_peek_v4_svg();
+    }
     if asset != "xiao-shu-alert-peek-v2" {
         return None;
     }
@@ -1146,6 +1149,228 @@ fn avatar_sidecar_spritesheet_svg(asset: &str) -> Option<String> {
             tilt = frame.tilt,
             left_arm = frame.left_arm,
             right_arm = frame.right_arm,
+            eyes = eyes,
+            cheek = frame.cheek,
+            mouth = mouth
+        )
+        .ok()?;
+    }
+
+    svg.push_str("</svg>\n");
+    Some(svg)
+}
+
+fn avatar_sidecar_motion_canonical_peek_v4_svg() -> Option<String> {
+    use std::fmt::Write as _;
+
+    struct Frame {
+        col: i32,
+        rise: i32,
+        tilt: i32,
+        scale: &'static str,
+        eye_shift: i32,
+        blink: bool,
+        mouth: &'static str,
+        left_arm: i32,
+        right_arm: i32,
+        ribbon: i32,
+        cheek: &'static str,
+    }
+
+    let frames = [
+        Frame {
+            col: 0,
+            rise: 58,
+            tilt: -7,
+            scale: "0.92",
+            eye_shift: -2,
+            blink: false,
+            mouth: "small",
+            left_arm: 18,
+            right_arm: -18,
+            ribbon: -8,
+            cheek: "0.12",
+        },
+        Frame {
+            col: 1,
+            rise: 42,
+            tilt: -10,
+            scale: "0.96",
+            eye_shift: -6,
+            blink: false,
+            mouth: "small",
+            left_arm: 28,
+            right_arm: -24,
+            ribbon: -18,
+            cheek: "0.18",
+        },
+        Frame {
+            col: 2,
+            rise: 24,
+            tilt: -6,
+            scale: "1.00",
+            eye_shift: -4,
+            blink: false,
+            mouth: "open",
+            left_arm: 40,
+            right_arm: -28,
+            ribbon: -24,
+            cheek: "0.24",
+        },
+        Frame {
+            col: 3,
+            rise: 8,
+            tilt: 0,
+            scale: "1.03",
+            eye_shift: 0,
+            blink: false,
+            mouth: "smile",
+            left_arm: 58,
+            right_arm: -38,
+            ribbon: -10,
+            cheek: "0.30",
+        },
+        Frame {
+            col: 4,
+            rise: -2,
+            tilt: 5,
+            scale: "1.04",
+            eye_shift: 2,
+            blink: false,
+            mouth: "smile",
+            left_arm: 72,
+            right_arm: -44,
+            ribbon: 8,
+            cheek: "0.34",
+        },
+        Frame {
+            col: 5,
+            rise: 0,
+            tilt: 2,
+            scale: "1.04",
+            eye_shift: 0,
+            blink: true,
+            mouth: "smile",
+            left_arm: 64,
+            right_arm: -40,
+            ribbon: 16,
+            cheek: "0.36",
+        },
+        Frame {
+            col: 6,
+            rise: 18,
+            tilt: -4,
+            scale: "1.00",
+            eye_shift: -3,
+            blink: false,
+            mouth: "small",
+            left_arm: 40,
+            right_arm: -30,
+            ribbon: -5,
+            cheek: "0.24",
+        },
+        Frame {
+            col: 7,
+            rise: 46,
+            tilt: -8,
+            scale: "0.95",
+            eye_shift: -1,
+            blink: false,
+            mouth: "small",
+            left_arm: 22,
+            right_arm: -22,
+            ribbon: -12,
+            cheek: "0.16",
+        },
+    ];
+
+    let mut svg = String::new();
+    svg.push_str(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872" viewBox="0 0 1536 1872">
+  <title>Xiao Shu motion-canonical alert peek sidecar v4 sprite atlas</title>
+  <defs>
+    <linearGradient id="xs4-head" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f1d89f"/>
+      <stop offset="0.6" stop-color="#e4bd76"/>
+      <stop offset="1" stop-color="#b9803e"/>
+    </linearGradient>
+    <linearGradient id="xs4-robe" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f0dfb8"/>
+      <stop offset="1" stop-color="#cba35e"/>
+    </linearGradient>
+    <filter id="xs4-shadow" x="-24%" y="-24%" width="148%" height="148%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#2d2018" flood-opacity="0.20"/>
+    </filter>
+  </defs>
+"##,
+    );
+
+    for frame in frames {
+        let x = frame.col * 192;
+        let left_eye_x = 72 + frame.eye_shift;
+        let right_eye_x = 120 + frame.eye_shift;
+        let eyes = if frame.blink {
+            format!(
+                r##"<path d="M{left_eye_x} 93 h16" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>
+      <path d="M{right_eye_x} 93 h16" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>"##
+            )
+        } else {
+            format!(
+                r##"<ellipse cx="{left_eye_x}" cy="93" rx="7" ry="13" fill="#35251a"/>
+      <ellipse cx="{right_eye_x}" cy="93" rx="7" ry="13" fill="#35251a"/>
+      <circle cx="{left_eye_x}" cy="88" r="2" fill="#f8efd6"/>
+      <circle cx="{right_eye_x}" cy="88" r="2" fill="#f8efd6"/>"##
+            )
+        };
+        let mouth = match frame.mouth {
+            "open" => r##"<ellipse cx="96" cy="112" rx="9" ry="7" fill="#35251a"/>"##,
+            "smile" => r##"<path d="M79 108 Q96 121 113 108" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>"##,
+            _ => r##"<path d="M87 110 Q96 115 105 110" fill="none" stroke="#35251a" stroke-width="4" stroke-linecap="round"/>"##,
+        };
+
+        writeln!(
+            svg,
+            r##"  <g id="frame-{col}" transform="translate({x} 0)">
+    <rect width="192" height="208" fill="none"/>
+    <ellipse cx="96" cy="188" rx="54" ry="12" fill="#2d2018" opacity="0.15"/>
+    <g filter="url(#xs4-shadow)" transform="translate(96 118) scale({scale}) translate(-96 -118) translate(0 {rise})">
+      <g transform="translate(96 94) rotate({tilt}) translate(-96 -94)">
+        <ellipse cx="96" cy="154" rx="51" ry="44" fill="url(#xs4-robe)" stroke="#3a291c" stroke-width="5"/>
+        <path d="M58 133 C76 121 116 121 134 133" fill="none" stroke="#b94735" stroke-width="6" stroke-linecap="round"/>
+        <path d="M72 132 L96 187 L120 132" fill="#ead9ad" stroke="#8f4a32" stroke-width="4" stroke-linejoin="round"/>
+        <path d="M83 137 L108 163 L93 188" fill="none" stroke="#b94735" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="72" cy="160" r="3" fill="#8f6d38" opacity="0.8"/>
+        <circle cx="122" cy="159" r="3" fill="#8f6d38" opacity="0.8"/>
+        <g transform="translate(53 147) rotate({left_arm})">
+          <ellipse cx="0" cy="0" rx="14" ry="29" fill="#d4ad64" stroke="#3a291c" stroke-width="5"/>
+          <ellipse cx="0" cy="-19" rx="8" ry="6" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+          <path d="M-7 0 L7 0" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.72"/>
+        </g>
+        <g transform="translate(139 147) rotate({right_arm})">
+          <ellipse cx="0" cy="0" rx="14" ry="29" fill="#d4ad64" stroke="#3a291c" stroke-width="5"/>
+          <ellipse cx="0" cy="-19" rx="8" ry="6" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+          <path d="M-7 0 L7 0" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.72"/>
+        </g>
+        <path d="M42 82 C42 47 63 25 96 25 C129 25 150 47 150 82 C150 123 128 145 96 145 C64 145 42 123 42 82 Z" fill="url(#xs4-head)" stroke="#3a291c" stroke-width="5"/>
+        <path d="M73 31 C63 19 73 8 82 17 C90 26 79 38 65 33" fill="none" stroke="#9b6b32" stroke-width="5" stroke-linecap="round"/>
+        <path d="M112 35 C128 20 153 29 151 52 C137 47 125 52 112 35 Z" fill="#b94735" stroke="#3a291c" stroke-width="4" stroke-linejoin="round" transform="rotate({ribbon} 134 42)"/>
+        <circle cx="140" cy="61" r="6" fill="#56c6cc" stroke="#3a291c" stroke-width="3"/>
+        {eyes}
+        <ellipse cx="58" cy="112" rx="13" ry="7" fill="#c95f4a" opacity="{cheek}"/>
+        <ellipse cx="134" cy="112" rx="13" ry="7" fill="#c95f4a" opacity="{cheek}"/>
+        {mouth}
+      </g>
+    </g>
+  </g>
+"##,
+            col = frame.col,
+            x = x,
+            scale = frame.scale,
+            rise = frame.rise,
+            tilt = frame.tilt,
+            left_arm = frame.left_arm,
+            right_arm = frame.right_arm,
+            ribbon = frame.ribbon,
             eyes = eyes,
             cheek = frame.cheek,
             mouth = mouth
@@ -3020,7 +3245,8 @@ fn avatar_surface_renderer_view_html(
       opacity: 0.58;
       transform: scale(0.86);
     }}
-    .xiao-shu[data-sprite-variant="sidecar_peek_v2"].sprite-alert .sprite-alert-mark {{
+    .xiao-shu[data-sprite-variant="sidecar_peek_v2"].sprite-alert .sprite-alert-mark,
+    .xiao-shu[data-sprite-variant="sidecar_peek_v4"].sprite-alert .sprite-alert-mark {{
       width: 18px;
       height: 18px;
       right: 78px;
@@ -4568,14 +4794,19 @@ mod tests {
         assert!(html.contains("\"variant_id\":\"current_alert_row\""));
         assert!(html.contains("\"variant_id\":\"waiting_peek_row\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v2\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_peek_v4\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v3\""));
         assert!(html.contains("\"variant_id\":\"focused_review_row\""));
         assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-alert-peek-v2"));
+        assert!(html
+            .contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-peek-v4"));
         assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-canonical-peek-v3"));
         assert!(html.contains("\"asset_id\":\"xiao-shu-alert-peek-v2\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-peek-v4\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-canonical-peek-v3\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_frame_choreo_v1\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v2_frame_choreo\""));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v4_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v3_frame_choreo\""));
         assert!(html.contains("\"uses_css_motion\":false"));
         assert!(html.contains("\"phase\":\"attention_hold\""));
@@ -4623,6 +4854,8 @@ mod tests {
     #[test]
     fn avatar_sidecar_spritesheet_serves_prototype_atlas_contract() {
         let svg = avatar_sidecar_spritesheet_svg("xiao-shu-alert-peek-v2").unwrap();
+        let motion_svg =
+            avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-peek-v4").unwrap();
         let canonical_svg = avatar_sidecar_spritesheet_svg("xiao-shu-canonical-peek-v3").unwrap();
 
         assert!(svg.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872""#));
@@ -4631,6 +4864,11 @@ mod tests {
         assert!(svg.contains(r#"id="frame-7""#));
         assert!(svg.contains("rotate(72)"));
         assert!(svg.contains(r##"fill="#d45f4c""##));
+        assert!(motion_svg.contains("Xiao Shu motion-canonical alert peek sidecar v4 sprite atlas"));
+        assert!(motion_svg.contains(r#"id="frame-7""#));
+        assert!(motion_svg.contains("xs4-robe"));
+        assert!(motion_svg.contains("rotate(72)"));
+        assert!(motion_svg.contains(r##"fill="#56c6cc""##));
         assert!(canonical_svg.contains("Xiao Shu canonical alert peek sidecar v3 sprite atlas"));
         assert!(canonical_svg.contains(r#"id="frame-7""#));
         assert!(canonical_svg.contains("xs3-robe"));
