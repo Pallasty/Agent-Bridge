@@ -4906,6 +4906,7 @@ async fn run_avatar_cortex_voice_gate(
         heartbeat_label: heartbeat_label.as_deref(),
         project: Some(&project),
         output: output.as_deref(),
+        preview_text: None,
         enabled,
         force,
         cooldown_secs,

@@ -571,6 +571,7 @@ struct AvatarCortexVoiceGateQuery {
     heartbeat_label: Option<String>,
     project: Option<String>,
     output: Option<std::path::PathBuf>,
+    preview_text: Option<String>,
     #[serde(default)]
     enabled: bool,
     #[serde(default)]
@@ -1722,6 +1723,7 @@ async fn avatar_cortex_voice_gate(
         heartbeat_label: q.heartbeat_label.as_deref(),
         project: q.project.as_deref(),
         output: q.output.as_deref(),
+        preview_text: q.preview_text.as_deref(),
         enabled: q.enabled,
         force: q.force,
         cooldown_secs: q.cooldown_secs,
@@ -2961,6 +2963,28 @@ fn avatar_surface_renderer_view_html(
     };
     let active_variant_label = html_escape(&active_variant_meta);
     let active_variant_json = html_json_script(&json!(active_variant_id_raw));
+    let active_voice_linkage = active
+        .get("semantic_variant_review")
+        .and_then(|review| review.get("voice_linkage_preview"))
+        .unwrap_or(&Value::Null);
+    let active_voice_text = avatar_surface_html_json_value(
+        active_voice_linkage.get("utterance"),
+        "visual-only preview",
+    );
+    let active_voice_gate = avatar_surface_html_json_value(
+        active_voice_linkage
+            .get("gate")
+            .and_then(|gate| gate.get("dry_run_route")),
+        "-",
+    );
+    let active_voice_audio =
+        avatar_surface_html_json_value(active_voice_linkage.get("emits_audio"), "false");
+    let active_voice_required = avatar_surface_html_json_value(
+        active_voice_linkage
+            .get("voice")
+            .and_then(|voice| voice.get("requires_explicit_emit_gate")),
+        "true",
+    );
     let initial = active.get("initial_frame").unwrap_or(&Value::Null);
     let initial_classes = avatar_surface_html_json_value(
         initial.get("css_classes"),
@@ -3562,6 +3586,7 @@ fn avatar_surface_renderer_view_html(
           <dt>state</dt><dd data-state>{first_state}</dd>
           <dt>variant</dt><dd data-variant>{active_variant_label}</dd>
           <dt>asset</dt><dd data-asset><span>pet={asset_pet_id}</span><span>route={sprite_route}</span><span>mode=read-only spritesheet</span></dd>
+          <dt>voice</dt><dd data-voice-linkage><span>preview={active_voice_text}</span><span>gate={active_voice_gate}</span><span>requires_gate={active_voice_required}</span><span>emits_audio={active_voice_audio}</span></dd>
           <dt>safety</dt><dd><span>writes_files={writes_files}</span><span>mutates_renderer={mutates_renderer}</span><span>pet_package={pet_mutation}</span></dd>
           <dt>mode</dt><dd>sidecar-only browser view</dd>
         </dl>
@@ -3586,6 +3611,7 @@ fn avatar_surface_renderer_view_html(
     const stateEl = document.querySelector("[data-state]");
     const variantEl = document.querySelector("[data-variant]");
     const assetEl = document.querySelector("[data-asset]");
+    const voiceEl = document.querySelector("[data-voice-linkage]");
     const variantPanel = document.querySelector("[data-variant-panel]");
     const variantOptions = document.querySelector("[data-variant-options]");
     const buttons = Array.from(document.querySelectorAll("[data-track-index]"));
@@ -3783,6 +3809,35 @@ fn avatar_surface_renderer_view_html(
       }});
     }}
 
+    function setVoiceLinkageLabel(track) {{
+      if (!voiceEl) {{
+        return;
+      }}
+      const review = track && track.semantic_variant_review ? track.semantic_variant_review : null;
+      const preview = review && review.voice_linkage_preview ? review.voice_linkage_preview : null;
+      const gate = preview && preview.gate ? preview.gate : {{}};
+      const voice = preview && preview.voice ? preview.voice : {{}};
+      const parts = preview
+        ? [
+            `preview=${{preview.utterance || "visual-only preview"}}`,
+            `gate=${{gate.dry_run_route || "-"}}`,
+            `requires_gate=${{Boolean(voice.requires_explicit_emit_gate)}}`,
+            `emits_audio=${{Boolean(preview.emits_audio)}}`
+          ]
+        : [
+            "preview=none",
+            "gate=-",
+            "requires_gate=true",
+            "emits_audio=false"
+          ];
+      voiceEl.textContent = "";
+      parts.forEach((part) => {{
+        const span = document.createElement("span");
+        span.textContent = part;
+        voiceEl.appendChild(span);
+      }});
+    }}
+
     function applySpriteFrame(track, ordinal, choreoFrame) {{
       if (!spriteFrame || !figure) {{
         return;
@@ -3839,6 +3894,7 @@ fn avatar_surface_renderer_view_html(
       if (tokenEl) tokenEl.textContent = track.token || "xiao_shu::unknown";
       setStateLabel(frame.state_label || "");
       updateVariantLabel();
+      setVoiceLinkageLabel(track);
       const nextFrame = frames[Math.min(frames.length - 1, playbackOrdinal + 1)] || frame;
       const currentAt = Number(frame.at_ms || 0);
       const nextAt = Number(nextFrame.at_ms || 0);
@@ -3882,6 +3938,10 @@ fn avatar_surface_renderer_view_html(
         asset_pet_id = asset_pet_id,
         asset_pet_id_json = asset_pet_id_json,
         active_track_index = active_track_index,
+        active_voice_text = active_voice_text,
+        active_voice_gate = active_voice_gate,
+        active_voice_audio = active_voice_audio,
+        active_voice_required = active_voice_required,
         writes_files = writes_files,
         mutates_renderer = mutates_renderer,
         pet_mutation = pet_mutation,
@@ -4808,6 +4868,12 @@ mod tests {
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v2_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v4_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v3_frame_choreo\""));
+        assert!(html.contains("\"surface\":\"alert_peek_voice_linkage_preview\""));
+        assert!(html.contains("\"utterance\":\"小舒发现一点需要你看一下。\""));
+        assert!(html.contains("/avatar-surface/cortex-voice-gate?enabled=true&reason=alert-peek-visual-review&preview_text=%E5%B0%8F%E8%88%92%E5%8F%91%E7%8E%B0%E4%B8%80%E7%82%B9%E9%9C%80%E8%A6%81%E4%BD%A0%E7%9C%8B%E4%B8%80%E4%B8%8B%E3%80%82"));
+        assert!(html.contains("\"real_emit_surface\":\"agent-bridge avatar cortex-voice-emit\""));
+        assert!(html.contains("\"http_emit_route\":null"));
+        assert!(html.contains("function setVoiceLinkageLabel(track)"));
         assert!(html.contains("\"uses_css_motion\":false"));
         assert!(html.contains("\"phase\":\"attention_hold\""));
         assert!(
@@ -4836,6 +4902,9 @@ mod tests {
         );
         assert!(focused.contains("<span>active=xiao_shu::alert_peek::medium</span>"));
         assert!(focused.contains("waiting_peek_row / waiting peek row"));
+        assert!(focused.contains("data-voice-linkage"));
+        assert!(focused.contains("preview=小舒发现一点需要你看一下。"));
+        assert!(focused.contains("gate=/avatar-surface/cortex-voice-gate?enabled=true&amp;reason=alert-peek-visual-review&amp;preview_text=%E5%B0%8F%E8%88%92%E5%8F%91%E7%8E%B0%E4%B8%80%E7%82%B9%E9%9C%80%E8%A6%81%E4%BD%A0%E7%9C%8B%E4%B8%80%E4%B8%8B%E3%80%82"));
         assert!(focused.contains("choreo=${choreoFrames} css_motion=${Boolean(choreography.uses_css_motion)}${asset}"));
         assert!(focused.contains(r#"let variantId = "waiting_peek_row";"#));
         assert!(focused.contains("data-sprite-variant=\"waiting_peek_row\""));

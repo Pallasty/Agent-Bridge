@@ -31,6 +31,7 @@ pub struct AvatarCortexVoiceGateOptions<'a> {
     pub heartbeat_label: Option<&'a str>,
     pub project: Option<&'a str>,
     pub output: Option<&'a Path>,
+    pub preview_text: Option<&'a str>,
     pub enabled: bool,
     pub force: bool,
     pub cooldown_secs: i64,
@@ -2053,6 +2054,36 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
                 "default_variant": "sidecar_peek_v4",
                 "preferred_variant": "sidecar_peek_v4",
                 "human_review_status": "visual_motion_candidate_accepted",
+                "voice_linkage_preview": {
+                    "schema": 1,
+                    "surface": "alert_peek_voice_linkage_preview",
+                    "read_only": true,
+                    "selected_variant": "sidecar_peek_v4",
+                    "intent": "pair the accepted visual attention cue with a sparse spoken prompt after an explicit gate",
+                    "utterance": "小舒发现一点需要你看一下。",
+                    "alternatives": [
+                        "小舒看到一个需要注意的信号。",
+                        "这里可能需要你看一眼。"
+                    ],
+                    "voice": {
+                        "allowed_now": false,
+                        "reason": "visual_linkage_preview_only",
+                        "requires_explicit_emit_gate": true,
+                        "suggested_voice": "Flo",
+                        "suggested_rate": 190,
+                    },
+                    "gate": {
+                        "dry_run_route": "/avatar-surface/cortex-voice-gate?enabled=true&reason=alert-peek-visual-review&preview_text=%E5%B0%8F%E8%88%92%E5%8F%91%E7%8E%B0%E4%B8%80%E7%82%B9%E9%9C%80%E8%A6%81%E4%BD%A0%E7%9C%8B%E4%B8%80%E4%B8%8B%E3%80%82",
+                        "real_emit_surface": "agent-bridge avatar cortex-voice-emit",
+                        "http_emit_route": Value::Null,
+                        "requires_operator_reason": true,
+                        "requires_policy_or_manual_override": true,
+                        "cooldown_secs": 300,
+                    },
+                    "emits_audio": false,
+                    "emits_notification": false,
+                    "mutates_global_substrate": false,
+                },
                 "writes_approval": false,
                 "persists_record": false,
                 "can_promote_binding": false,
@@ -3147,6 +3178,10 @@ fn avatar_cortex_voice_gate_payload(
             "dry_run_no_state_mutation": dry_run,
         },
         "preview": preview_block.clone(),
+        "preview_text_override": preview
+            .get("preview_text_override")
+            .cloned()
+            .unwrap_or_else(|| json!({"provided": false})),
         "learning_state": preview.get("learning_state").cloned().unwrap_or(Value::Null),
         "behavior_policy": preview.get("behavior_policy").cloned().unwrap_or(Value::Null),
         "source_preview": preview,
@@ -3154,8 +3189,26 @@ fn avatar_cortex_voice_gate_payload(
 }
 
 pub fn avatar_cortex_voice_gate_dry_run(opts: &AvatarCortexVoiceGateOptions<'_>) -> Result<Value> {
-    let preview =
+    let mut preview =
         avatar_cortex_voice_preview(opts.label, opts.heartbeat_label, opts.project, opts.output)?;
+    if let Some(preview_text) = opts.preview_text.map(str::trim).filter(|text| !text.is_empty()) {
+        let mut preview_block = preview.get("preview").cloned().unwrap_or_else(|| json!({}));
+        if let Some(preview_obj) = preview_block.as_object_mut() {
+            preview_obj.insert("text".to_string(), json!(preview_text));
+            preview_obj.insert("source".to_string(), json!("operator_preview_text_override"));
+        }
+        if let Some(preview_obj) = preview.as_object_mut() {
+            preview_obj.insert("preview".to_string(), preview_block);
+            preview_obj.insert(
+                "preview_text_override".to_string(),
+                json!({
+                    "provided": true,
+                    "source": "voice_gate_query",
+                    "emits_audio": false,
+                }),
+            );
+        }
+    }
     Ok(avatar_cortex_voice_gate_from_preview(
         preview,
         opts.enabled,
@@ -4166,6 +4219,37 @@ mod tests {
         assert_eq!(
             alert_peek["semantic_variant_review"]["human_review_status"],
             "visual_motion_candidate_accepted"
+        );
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["surface"],
+            "alert_peek_voice_linkage_preview"
+        );
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["selected_variant"],
+            "sidecar_peek_v4"
+        );
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["utterance"],
+            "小舒发现一点需要你看一下。"
+        );
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["gate"]
+                ["real_emit_surface"],
+            "agent-bridge avatar cortex-voice-emit"
+        );
+        assert!(alert_peek["semantic_variant_review"]["voice_linkage_preview"]["gate"]
+            ["dry_run_route"]
+            .as_str()
+            .unwrap()
+            .contains("preview_text=%E5%B0%8F%E8%88%92"));
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["gate"]
+                ["http_emit_route"],
+            Value::Null
+        );
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["emits_audio"],
+            false
         );
         assert_eq!(
             alert_peek["semantic_variant_review"]["can_promote_binding"],
