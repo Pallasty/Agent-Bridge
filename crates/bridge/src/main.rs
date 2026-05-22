@@ -857,6 +857,24 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Show Xiao Shu's sparse voice policy without emitting audio.
+    CortexVoicePolicy {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2618,6 +2636,22 @@ async fn main() -> Result<()> {
                 json: as_json,
             } => {
                 run_avatar_cortex_review_report(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoicePolicy {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_policy(
                     label.clone(),
                     heartbeat_label.clone(),
                     project.clone(),
@@ -4892,6 +4926,62 @@ async fn run_avatar_cortex_review_report(
                 avatar_health_display(item.get("readiness"), "-"),
                 avatar_health_display(item.get("ready_for_approval"), "false"),
                 avatar_health_display(item.get("can_promote_binding"), "false")
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn run_avatar_cortex_voice_policy(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_policy(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let policy = payload.get("voice_policy").unwrap_or(&Value::Null);
+    println!("avatar cortex voice policy");
+    println!(
+        "tracks={} manual_cli_emit={} display_only={} auto_emit={} http_emit_route_added={}",
+        avatar_health_display(policy.get("track_count"), "0"),
+        avatar_health_display(policy.get("manual_cli_emit_count"), "0"),
+        avatar_health_display(policy.get("display_only_count"), "0"),
+        avatar_health_display(policy.get("auto_emit_count"), "0"),
+        avatar_health_display(payload.get("http_emit_route_added"), "false")
+    );
+    println!(
+        "default_voice={} rate={} cooldown={} real_emit={}",
+        avatar_health_display(policy.get("default_voice"), "-"),
+        avatar_health_display(policy.get("default_rate"), "-"),
+        avatar_health_display(policy.get("default_cooldown_secs"), "300"),
+        avatar_health_display(
+            policy
+                .get("gate")
+                .and_then(|gate| gate.get("real_emit_surface")),
+            "-"
+        )
+    );
+    if let Some(rules) = policy.get("rules").and_then(Value::as_array) {
+        for rule in rules.iter().take(8) {
+            println!(
+                "- {} mode={} manual_cli={} utterance={} variant={}",
+                avatar_health_display(rule.get("token"), "-"),
+                avatar_health_display(rule.get("mode"), "-"),
+                avatar_health_display(rule.get("manual_cli_emit_allowed"), "false"),
+                avatar_health_display(rule.get("utterance"), "-"),
+                avatar_health_display(rule.get("visual_variant"), "-")
             );
         }
     }

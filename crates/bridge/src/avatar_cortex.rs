@@ -2846,6 +2846,228 @@ pub fn avatar_cortex_renderer_review_report(
     Ok(avatar_cortex_renderer_review_report_from_status(status))
 }
 
+fn avatar_cortex_voice_policy_rule_from_track(track: &Value) -> Value {
+    let token = vstr(track.get("token")).unwrap_or("xiao_shu::unknown");
+    let review = track
+        .get("semantic_variant_review")
+        .unwrap_or(&Value::Null);
+    let voice_linkage = review
+        .get("voice_linkage_preview")
+        .unwrap_or(&Value::Null);
+    let has_voice_linkage = voice_linkage.is_object();
+    let default_variant = vstr(review.get("preferred_variant"))
+        .or_else(|| vstr(review.get("default_variant")))
+        .unwrap_or("-");
+    let visual_intent = vstr(track.get("visual_intent")).unwrap_or("-");
+    let utterance = vstr(voice_linkage.get("utterance"));
+    let dry_run_route = voice_linkage
+        .get("gate")
+        .and_then(|gate| gate.get("dry_run_route"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let real_emit_allowed = has_voice_linkage && default_variant == "sidecar_peek_v4";
+    let mode = match token {
+        "xiao_shu::idle_breathe::low" => "silent_presence",
+        "xiao_shu::soft_bounce::low" => "visual_only_completion",
+        "xiao_shu::sorting_glow::medium" => "display_only_processing",
+        "xiao_shu::look_sideways::medium" => "silent_visual_attention",
+        "xiao_shu::alert_peek::medium" if real_emit_allowed => {
+            "manual_cli_emit_after_attention"
+        }
+        "xiao_shu::alert_peek::medium" => "visual_attention_pending_voice_review",
+        _ => "silent_unknown",
+    };
+    let fallback_utterance = match token {
+        "xiao_shu::soft_bounce::low" => Some("小舒已跟上。"),
+        "xiao_shu::sorting_glow::medium" => Some("小舒正在整理信号。"),
+        _ => None,
+    };
+
+    json!({
+        "token": token,
+        "visual_intent": visual_intent,
+        "binding_stage": track.get("binding_stage").cloned().unwrap_or(Value::Null),
+        "risk_level": track.get("risk_level").cloned().unwrap_or(Value::Null),
+        "review_only": track.get("review_only").cloned().unwrap_or_else(|| json!(false)),
+        "mode": mode,
+        "default_silence": true,
+        "display_allowed": true,
+        "auto_emit_allowed": false,
+        "manual_cli_emit_allowed": real_emit_allowed,
+        "http_emit_route": Value::Null,
+        "real_emit_surface": if real_emit_allowed {
+            json!("agent-bridge avatar cortex-voice-emit")
+        } else {
+            Value::Null
+        },
+        "requires_operator_reason": true,
+        "requires_policy_override": real_emit_allowed,
+        "cooldown_secs": 300,
+        "utterance": utterance
+            .map(|line| json!(line))
+            .or_else(|| fallback_utterance.map(|line| json!(line)))
+            .unwrap_or(Value::Null),
+        "utterance_source": if has_voice_linkage {
+            "voice_linkage_preview"
+        } else if fallback_utterance.is_some() {
+            "policy_seed"
+        } else {
+            "none"
+        },
+        "dry_run_route": dry_run_route,
+        "suggested_voice": if real_emit_allowed { json!("Flo (中文（中国大陆）)") } else { Value::Null },
+        "suggested_rate": if real_emit_allowed { json!(190) } else { Value::Null },
+        "visual_variant": if default_variant == "-" { Value::Null } else { json!(default_variant) },
+        "binding_promotable": false,
+        "notes": if real_emit_allowed {
+            json!("visual motion accepted; voice remains manual CLI-only")
+        } else {
+            json!("kept silent or display-only until a later explicit review")
+        },
+    })
+}
+
+fn avatar_cortex_voice_policy_from_renderer_view_payload(renderer_view_payload: Value) -> Value {
+    let view = renderer_view_payload
+        .get("renderer_view")
+        .unwrap_or(&Value::Null);
+    let rules: Vec<Value> = view
+        .get("tracks")
+        .and_then(Value::as_array)
+        .map(|tracks| {
+            tracks
+                .iter()
+                .map(avatar_cortex_voice_policy_rule_from_track)
+                .collect()
+        })
+        .unwrap_or_default();
+    let manual_cli_emit_count = rules
+        .iter()
+        .filter(|rule| {
+            rule.get("manual_cli_emit_allowed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .count();
+    let display_only_count = rules
+        .iter()
+        .filter(|rule| {
+            !rule
+                .get("manual_cli_emit_allowed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                && rule
+                    .get("display_allowed")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+        })
+        .count();
+    let auto_emit_count = rules
+        .iter()
+        .filter(|rule| {
+            rule.get("auto_emit_allowed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .count();
+
+    let policy = json!({
+        "schema": 1,
+        "input": "avatar_cortex_renderer_view.renderer_view.tracks + accepted alert_peek voice dogfood",
+        "html_route": "/avatar-surface/cortex-voice-policy",
+        "renderer_view_route": view
+            .get("html_route")
+            .cloned()
+            .unwrap_or_else(|| json!("/avatar-surface/cortex-renderer-view")),
+        "summary": "sparse, purposeful Chinese voice; silent by default; real output is CLI-only",
+        "default_voice": "Flo (中文（中国大陆）)",
+        "default_rate": 190,
+        "default_cooldown_secs": 300,
+        "approved_sparse_cases": [
+            {
+                "case_id": "completion",
+                "default_mode": "display_first",
+                "example": "小舒已跟上。"
+            },
+            {
+                "case_id": "failure",
+                "default_mode": "manual_gate",
+                "example": "小舒遇到一个需要你看看的问题。"
+            },
+            {
+                "case_id": "waiting_for_user",
+                "default_mode": "manual_gate",
+                "example": "小舒需要你看一下。"
+            },
+            {
+                "case_id": "memory_or_session_handoff",
+                "default_mode": "display_first",
+                "example": "小舒已经记下这一步。"
+            },
+        ],
+        "rules": rules,
+        "track_count": rules.len(),
+        "manual_cli_emit_count": manual_cli_emit_count,
+        "display_only_count": display_only_count,
+        "auto_emit_count": auto_emit_count,
+        "gate": {
+            "explicit_enabled_required": true,
+            "operator_reason_required": true,
+            "policy_override_required_for_real_emit": true,
+            "cooldown_secs": 300,
+            "http_emit_route": Value::Null,
+            "real_emit_surface": "agent-bridge avatar cortex-voice-emit",
+        },
+        "acceptance": {
+            "read_only": true,
+            "dry_run": true,
+            "auto_emit_allowed": false,
+            "http_emit_route_added": false,
+            "approval_writes_allowed": false,
+            "records_persisted": false,
+            "asset_writes_allowed": false,
+            "renderer_mutation_allowed": false,
+            "codex_pet_package_mutation_allowed": false,
+        },
+        "next_step": "use this policy as the source of truth for a future slash command or two-step panel trigger",
+    });
+
+    json!({
+        "surface": "avatar_cortex_voice_policy",
+        "schema": 1,
+        "read_only": true,
+        "dry_run": true,
+        "sidecar_only": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "renders_pixels": false,
+        "browser_renders_pixels": false,
+        "server_side_renders_pixels": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "http_emit_route_added": false,
+        "voice_policy": policy,
+        "source_renderer_view": renderer_view_payload,
+    })
+}
+
+pub(crate) fn avatar_cortex_voice_policy_from_status(status: Value) -> Value {
+    let renderer_view = avatar_cortex_renderer_view_from_status(status);
+    avatar_cortex_voice_policy_from_renderer_view_payload(renderer_view)
+}
+
+pub fn avatar_cortex_voice_policy(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_voice_policy_from_status(status))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
@@ -4476,6 +4698,60 @@ mod tests {
         );
         assert_eq!(alert["voice_linkage"]["emits_audio_now"], false);
         assert_eq!(alert["evidence_counts"]["revision_response"], 7);
+    }
+
+    #[test]
+    fn avatar_cortex_voice_policy_keeps_real_audio_cli_only() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let payload = avatar_cortex_voice_policy_from_renderer_view_payload(view);
+        let policy = &payload["voice_policy"];
+
+        assert_eq!(payload["surface"], "avatar_cortex_voice_policy");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["dry_run"], true);
+        assert_eq!(payload["emits_audio"], false);
+        assert_eq!(payload["http_emit_route_added"], false);
+        assert_eq!(policy["track_count"], 5);
+        assert_eq!(policy["manual_cli_emit_count"], 1);
+        assert_eq!(policy["auto_emit_count"], 0);
+        assert_eq!(policy["gate"]["http_emit_route"], Value::Null);
+        assert_eq!(
+            policy["gate"]["real_emit_surface"],
+            "agent-bridge avatar cortex-voice-emit"
+        );
+        assert_eq!(policy["acceptance"]["http_emit_route_added"], false);
+        assert_eq!(
+            policy["acceptance"]["codex_pet_package_mutation_allowed"],
+            false
+        );
+
+        let rules = policy["rules"].as_array().unwrap();
+        assert!(rules
+            .iter()
+            .all(|rule| rule["auto_emit_allowed"] == false));
+        let alert = rules
+            .iter()
+            .find(|rule| rule["token"] == "xiao_shu::alert_peek::medium")
+            .unwrap();
+        assert_eq!(alert["mode"], "manual_cli_emit_after_attention");
+        assert_eq!(alert["manual_cli_emit_allowed"], true);
+        assert_eq!(alert["utterance"], "小舒发现一点需要你看一下。");
+        assert_eq!(alert["visual_variant"], "sidecar_peek_v4");
+        assert_eq!(alert["suggested_voice"], "Flo (中文（中国大陆）)");
+        assert_eq!(alert["suggested_rate"], 190);
+        assert_eq!(alert["http_emit_route"], Value::Null);
+        assert_eq!(alert["binding_promotable"], false);
+
+        let idle = rules
+            .iter()
+            .find(|rule| rule["token"] == "xiao_shu::idle_breathe::low")
+            .unwrap();
+        assert_eq!(idle["mode"], "silent_presence");
+        assert_eq!(idle["manual_cli_emit_allowed"], false);
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
