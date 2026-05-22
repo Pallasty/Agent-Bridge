@@ -43,6 +43,7 @@ pub struct AvatarCortexVoiceEmitOptions<'a> {
     pub heartbeat_label: Option<&'a str>,
     pub project: Option<&'a str>,
     pub output: Option<&'a Path>,
+    pub preview_text: Option<&'a str>,
     pub enabled: bool,
     pub force: bool,
     pub cooldown_secs: i64,
@@ -3188,27 +3189,39 @@ fn avatar_cortex_voice_gate_payload(
     })
 }
 
-pub fn avatar_cortex_voice_gate_dry_run(opts: &AvatarCortexVoiceGateOptions<'_>) -> Result<Value> {
-    let mut preview =
-        avatar_cortex_voice_preview(opts.label, opts.heartbeat_label, opts.project, opts.output)?;
-    if let Some(preview_text) = opts.preview_text.map(str::trim).filter(|text| !text.is_empty()) {
-        let mut preview_block = preview.get("preview").cloned().unwrap_or_else(|| json!({}));
-        if let Some(preview_obj) = preview_block.as_object_mut() {
-            preview_obj.insert("text".to_string(), json!(preview_text));
-            preview_obj.insert("source".to_string(), json!("operator_preview_text_override"));
-        }
-        if let Some(preview_obj) = preview.as_object_mut() {
-            preview_obj.insert("preview".to_string(), preview_block);
-            preview_obj.insert(
-                "preview_text_override".to_string(),
-                json!({
-                    "provided": true,
-                    "source": "voice_gate_query",
-                    "emits_audio": false,
-                }),
-            );
-        }
+fn avatar_cortex_voice_preview_with_override(
+    mut preview: Value,
+    preview_text: Option<&str>,
+    source: &str,
+) -> Value {
+    let Some(preview_text) = preview_text.map(str::trim).filter(|text| !text.is_empty()) else {
+        return preview;
+    };
+    let mut preview_block = preview.get("preview").cloned().unwrap_or_else(|| json!({}));
+    if let Some(preview_obj) = preview_block.as_object_mut() {
+        preview_obj.insert("text".to_string(), json!(preview_text));
+        preview_obj.insert("source".to_string(), json!("operator_preview_text_override"));
     }
+    if let Some(preview_obj) = preview.as_object_mut() {
+        preview_obj.insert("preview".to_string(), preview_block);
+        preview_obj.insert(
+            "preview_text_override".to_string(),
+            json!({
+                "provided": true,
+                "source": source,
+                "emits_audio": false,
+            }),
+        );
+    }
+    preview
+}
+
+pub fn avatar_cortex_voice_gate_dry_run(opts: &AvatarCortexVoiceGateOptions<'_>) -> Result<Value> {
+    let preview = avatar_cortex_voice_preview_with_override(
+        avatar_cortex_voice_preview(opts.label, opts.heartbeat_label, opts.project, opts.output)?,
+        opts.preview_text,
+        "voice_gate_query",
+    );
     Ok(avatar_cortex_voice_gate_from_preview(
         preview,
         opts.enabled,
@@ -3241,8 +3254,11 @@ fn tts_rate_or_env(rate: Option<u64>) -> Option<u64> {
 }
 
 pub fn avatar_cortex_voice_emit(opts: &AvatarCortexVoiceEmitOptions<'_>) -> Result<Value> {
-    let preview =
-        avatar_cortex_voice_preview(opts.label, opts.heartbeat_label, opts.project, opts.output)?;
+    let preview = avatar_cortex_voice_preview_with_override(
+        avatar_cortex_voice_preview(opts.label, opts.heartbeat_label, opts.project, opts.output)?,
+        opts.preview_text,
+        "voice_emit_cli",
+    );
     let project = vstr(preview.get("project"))
         .or(opts.project)
         .unwrap_or("agent-bridge")
@@ -4573,6 +4589,33 @@ mod tests {
             .as_array()
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn avatar_cortex_voice_preview_override_keeps_audio_gated() {
+        let preview = avatar_cortex_voice_preview_with_override(
+            sample_voice_preview(false),
+            Some("小舒发现一点需要你看一下。"),
+            "voice_emit_cli",
+        );
+        let gate = avatar_cortex_voice_gate_payload(
+            preview,
+            true,
+            false,
+            300,
+            Some("manual dogfood"),
+            true,
+            None,
+            false,
+            1_000,
+        );
+        assert_eq!(gate["preview"]["text"], "小舒发现一点需要你看一下。");
+        assert_eq!(gate["preview"]["source"], "operator_preview_text_override");
+        assert_eq!(gate["preview_text_override"]["provided"], true);
+        assert_eq!(gate["preview_text_override"]["source"], "voice_emit_cli");
+        assert_eq!(gate["preview_text_override"]["emits_audio"], false);
+        assert_eq!(gate["gate"]["allow_policy_override"], true);
+        assert_eq!(gate["would_emit"], true);
     }
 
     #[test]

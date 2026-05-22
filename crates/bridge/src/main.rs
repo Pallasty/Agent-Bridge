@@ -871,6 +871,9 @@ enum AvatarOp {
         /// Override cortex snapshot path.
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Override the preview line for this dry-run only.
+        #[arg(long)]
+        preview_text: Option<String>,
         /// Explicitly enable the dry-run gate for this invocation.
         #[arg(long)]
         enabled: bool,
@@ -901,6 +904,9 @@ enum AvatarOp {
         /// Override cortex snapshot path.
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Override the spoken preview line for this CLI-only emit.
+        #[arg(long)]
+        preview_text: Option<String>,
         /// Explicitly enable the emit gate for this invocation.
         #[arg(long)]
         enabled: bool,
@@ -2625,6 +2631,7 @@ async fn main() -> Result<()> {
                 heartbeat_label,
                 project,
                 output,
+                preview_text,
                 enabled,
                 force,
                 cooldown_secs,
@@ -2636,6 +2643,7 @@ async fn main() -> Result<()> {
                     heartbeat_label.clone(),
                     project.clone(),
                     output.clone(),
+                    preview_text.clone(),
                     *enabled,
                     *force,
                     *cooldown_secs,
@@ -2649,6 +2657,7 @@ async fn main() -> Result<()> {
                 heartbeat_label,
                 project,
                 output,
+                preview_text,
                 enabled,
                 force,
                 cooldown_secs,
@@ -2663,6 +2672,7 @@ async fn main() -> Result<()> {
                     heartbeat_label.clone(),
                     project.clone(),
                     output.clone(),
+                    preview_text.clone(),
                     *enabled,
                     *force,
                     *cooldown_secs,
@@ -4893,6 +4903,7 @@ async fn run_avatar_cortex_voice_gate(
     heartbeat_label: Option<String>,
     project: Option<String>,
     output: Option<PathBuf>,
+    preview_text: Option<String>,
     enabled: bool,
     force: bool,
     cooldown_secs: i64,
@@ -4906,7 +4917,7 @@ async fn run_avatar_cortex_voice_gate(
         heartbeat_label: heartbeat_label.as_deref(),
         project: Some(&project),
         output: output.as_deref(),
-        preview_text: None,
+        preview_text: preview_text.as_deref(),
         enabled,
         force,
         cooldown_secs,
@@ -4959,6 +4970,7 @@ async fn run_avatar_cortex_voice_emit(
     heartbeat_label: Option<String>,
     project: Option<String>,
     output: Option<PathBuf>,
+    preview_text: Option<String>,
     enabled: bool,
     force: bool,
     cooldown_secs: i64,
@@ -4975,6 +4987,7 @@ async fn run_avatar_cortex_voice_emit(
         heartbeat_label: heartbeat_label.as_deref(),
         project: Some(&project),
         output: output.as_deref(),
+        preview_text: preview_text.as_deref(),
         enabled,
         force,
         cooldown_secs,
