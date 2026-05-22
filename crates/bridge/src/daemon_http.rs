@@ -29,6 +29,7 @@
 //!   - `GET /avatar-surface/cortex-voice-policy?...` — read-only sparse voice policy
 //!   - `GET /avatar-surface/cortex-voice-request?...` — read-only two-step voice request
 //!   - `GET /avatar-surface/cortex-voice-confirm?...` — read-only confirmation action preview
+//!   - `GET /avatar-surface/cortex-voice-action-preview?...` — read-only action readiness runbook
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
 //!                              (same shape as `dream identity --json`)
@@ -179,6 +180,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-voice-confirm",
             get(avatar_cortex_voice_confirm),
+        )
+        .route(
+            "/avatar-surface/cortex-voice-action-preview",
+            get(avatar_cortex_voice_action_preview),
         )
         .route(
             "/avatar-surface/cortex-voice-gate",
@@ -599,6 +604,24 @@ struct AvatarCortexVoiceGateQuery {
     reason: Option<String>,
 }
 
+#[derive(Deserialize, Debug)]
+struct AvatarCortexVoiceActionPreviewQuery {
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<std::path::PathBuf>,
+    track: Option<String>,
+    reason: Option<String>,
+    #[serde(default)]
+    confirm: bool,
+    #[serde(default)]
+    force: bool,
+    #[serde(default = "default_avatar_voice_gate_cooldown_secs")]
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+}
+
 impl AvatarHeartbeatHealthQuery {
     fn effective_stale_secs(&self) -> i64 {
         self.stale_secs.clamp(30, 86_400)
@@ -757,6 +780,31 @@ async fn avatar_surface_panel(
         Some("panel-dry-run"),
         false,
     );
+    let cortex_voice_action_preview =
+        crate::avatar_cortex::avatar_cortex_voice_action_preview(
+            &crate::avatar_cortex::AvatarCortexVoiceActionPreviewOptions {
+                label: None,
+                heartbeat_label: None,
+                project: q.project.as_deref(),
+                output: None,
+                requested_track: Some("xiao_shu::alert_peek::medium"),
+                reason: Some("panel-dry-run"),
+                confirm: true,
+                force: false,
+                cooldown_secs: default_avatar_voice_gate_cooldown_secs(),
+                tts_voice: None,
+                tts_rate: None,
+            },
+        )
+        .unwrap_or_else(|e| {
+            json!({
+                "surface": "avatar_cortex_voice_action_preview",
+                "read_only": true,
+                "dry_run": true,
+                "emits_audio": false,
+                "error": e.to_string(),
+            })
+        });
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
@@ -776,6 +824,7 @@ async fn avatar_surface_panel(
         &cortex_voice_policy,
         &cortex_voice_request,
         &cortex_voice_confirm,
+        &cortex_voice_action_preview,
         &report,
         unix_now(),
     )))
@@ -1792,6 +1841,27 @@ async fn avatar_cortex_voice_confirm(
         q.confirm,
     )
     .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_voice_action_preview(
+    Query(q): Query<AvatarCortexVoiceActionPreviewQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let opts = crate::avatar_cortex::AvatarCortexVoiceActionPreviewOptions {
+        label: q.label.as_deref(),
+        heartbeat_label: q.heartbeat_label.as_deref(),
+        project: q.project.as_deref(),
+        output: q.output.as_deref(),
+        requested_track: q.track.as_deref(),
+        reason: q.reason.as_deref(),
+        confirm: q.confirm,
+        force: q.force,
+        cooldown_secs: q.cooldown_secs,
+        tts_voice: q.tts_voice.as_deref(),
+        tts_rate: q.tts_rate,
+    };
+    let payload =
+        crate::avatar_cortex::avatar_cortex_voice_action_preview(&opts).map_err(internal_error)?;
     Ok(Json(payload))
 }
 
@@ -3200,6 +3270,87 @@ fn avatar_surface_voice_confirm_html(
     )
 }
 
+fn avatar_surface_voice_action_preview_html(
+    voice_action_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let action = voice_action_preview
+        .get("action_preview")
+        .unwrap_or(&Value::Null);
+    let selected_token = action
+        .get("selected_token")
+        .and_then(Value::as_str)
+        .unwrap_or("xiao_shu::alert_peek::medium");
+    let route_raw = "/avatar-surface/cortex-voice-action-preview";
+    let mut href_raw =
+        avatar_surface_route_href(route_raw, q.project.as_deref(), Some(selected_token));
+    let sep = if href_raw.contains('?') { "&" } else { "?" };
+    href_raw.push_str(sep);
+    href_raw.push_str("confirm=true&reason=panel-dry-run");
+    let state = avatar_surface_html_json_value(action.get("confirmation_state"), "-");
+    let ready = avatar_surface_html_json_value(action.get("ready_to_emit_now"), "false");
+    let would = avatar_surface_html_json_value(
+        action.get("would_emit_if_operator_runs_command"),
+        "false",
+    );
+    let blocked = avatar_surface_html_json_value(action.get("blocked"), "true");
+    let reasons = html_escape(
+        &action
+            .get("blocked_reasons")
+            .map(Value::to_string)
+            .unwrap_or_else(|| "[]".to_string()),
+    );
+    let token = avatar_surface_html_json_value(action.get("selected_token"), "-");
+    let line = avatar_surface_html_json_value(action.get("line"), "-");
+    let voice = avatar_surface_html_json_value(action.get("tts_voice"), "-");
+    let rate = avatar_surface_html_json_value(action.get("tts_rate"), "-");
+    let cooldown = avatar_surface_html_json_value(action.get("cooldown_secs"), "300");
+    let state_path = avatar_surface_html_json_value(action.get("state_path"), "-");
+    let command = avatar_surface_html_json_value(action.get("command_preview"), "-");
+    let gate = voice_action_preview
+        .get("gate_dry_run")
+        .unwrap_or(&Value::Null);
+    let cooldown_block = gate.get("cooldown").unwrap_or(&Value::Null);
+    let cooldown_active =
+        avatar_surface_html_json_value(cooldown_block.get("active"), "false");
+    let next_allowed =
+        avatar_surface_html_json_value(cooldown_block.get("next_allowed_at"), "-");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">action</span>
+        <strong>Xiao Shu Voice Action Preview</strong>
+        <span>state={state} ready={ready} token={token}</span>
+      </div>
+      <dl>
+        <div><dt>line</dt><dd>{line}</dd></div>
+        <div><dt>voice</dt><dd>{voice} rate={rate}</dd></div>
+        <div><dt>readiness</dt><dd>would_emit={would} blocked={blocked} reasons={reasons}</dd></div>
+        <div><dt>cooldown</dt><dd>active={cooldown_active} secs={cooldown} next={next_allowed}</dd></div>
+        <div><dt>state</dt><dd>{state_path}</dd></div>
+        <div><dt>command</dt><dd>{command}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">voice action preview json</a></dd></div>
+      </dl>
+    </section>"#,
+        state = state,
+        ready = ready,
+        token = token,
+        line = line,
+        voice = voice,
+        rate = rate,
+        would = would,
+        blocked = blocked,
+        reasons = reasons,
+        cooldown_active = cooldown_active,
+        cooldown = cooldown,
+        next_allowed = next_allowed,
+        state_path = state_path,
+        command = command,
+        href = html_escape(&href_raw),
+    )
+}
+
 fn avatar_surface_renderer_view_html(
     renderer_view_preview: &Value,
     generated_at: i64,
@@ -4285,6 +4436,7 @@ fn avatar_surface_panel_html(
     cortex_voice_policy: &Value,
     cortex_voice_request: &Value,
     cortex_voice_confirm: &Value,
+    cortex_voice_action_preview: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -4349,6 +4501,8 @@ fn avatar_surface_panel_html(
     let voice_policy_html = avatar_surface_voice_policy_html(cortex_voice_policy, q);
     let voice_request_html = avatar_surface_voice_request_html(cortex_voice_request, q);
     let voice_confirm_html = avatar_surface_voice_confirm_html(cortex_voice_confirm, q);
+    let voice_action_preview_html =
+        avatar_surface_voice_action_preview_html(cortex_voice_action_preview, q);
     let quick_actions_html =
         avatar_surface_quick_actions_html(cortex_renderer_view, cortex_review_gate, q);
 
@@ -4599,6 +4753,7 @@ fn avatar_surface_panel_html(
     {voice_policy_html}
     {voice_request_html}
     {voice_confirm_html}
+    {voice_action_preview_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -4629,6 +4784,7 @@ fn avatar_surface_panel_html(
         voice_policy_html = voice_policy_html,
         voice_request_html = voice_request_html,
         voice_confirm_html = voice_confirm_html,
+        voice_action_preview_html = voice_action_preview_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -5023,6 +5179,17 @@ mod tests {
             Some("panel-dry-run"),
             false,
         );
+        let voice_action_preview =
+            crate::avatar_cortex::avatar_cortex_voice_action_preview_from_status(
+                cortex.clone(),
+                Some("xiao_shu::alert_peek::medium"),
+                Some("agent-bridge"),
+                Some("panel-dry-run"),
+                true,
+                false,
+                300,
+                None,
+            );
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
@@ -5042,6 +5209,7 @@ mod tests {
             &voice_policy,
             &voice_request,
             &voice_confirm,
+            &voice_action_preview,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -5123,6 +5291,10 @@ mod tests {
         assert!(html.contains("auto_emit=false http_emit_route=null actual_execution_here=false"));
         assert!(html.contains("agent-bridge avatar cortex-voice-action"));
         assert!(html.contains("voice confirm json"));
+        assert!(html.contains("Xiao Shu Voice Action Preview"));
+        assert!(html.contains("ready=true token=xiao_shu::alert_peek::medium"));
+        assert!(html.contains("would_emit=true blocked=false"));
+        assert!(html.contains("voice action preview json"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));

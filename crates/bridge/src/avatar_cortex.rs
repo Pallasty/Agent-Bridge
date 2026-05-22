@@ -69,6 +69,21 @@ pub struct AvatarCortexVoiceActionOptions<'a> {
     pub tts_rate: Option<u64>,
 }
 
+#[derive(Clone, Copy)]
+pub struct AvatarCortexVoiceActionPreviewOptions<'a> {
+    pub label: Option<&'a str>,
+    pub heartbeat_label: Option<&'a str>,
+    pub project: Option<&'a str>,
+    pub output: Option<&'a Path>,
+    pub requested_track: Option<&'a str>,
+    pub reason: Option<&'a str>,
+    pub confirm: bool,
+    pub force: bool,
+    pub cooldown_secs: i64,
+    pub tts_voice: Option<&'a str>,
+    pub tts_rate: Option<u64>,
+}
+
 fn home_dir() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -4136,6 +4151,218 @@ pub fn avatar_cortex_voice_action(opts: &AvatarCortexVoiceActionOptions<'_>) -> 
     avatar_cortex_voice_action_from_confirm_payload(confirm_payload, opts)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn avatar_cortex_voice_action_preview_from_confirm_payload(
+    confirm_payload: Value,
+    opts: &AvatarCortexVoiceActionPreviewOptions<'_>,
+    last_emit_at: Option<i64>,
+    state_path: Option<&Path>,
+    events_path: Option<&Path>,
+    now: i64,
+) -> Value {
+    let confirm = confirm_payload
+        .get("voice_confirm")
+        .unwrap_or(&Value::Null);
+    let confirmation_state =
+        vstr(confirm.get("confirmation_state")).unwrap_or("blocked_by_request");
+    let confirmed = confirmation_state == "would_execute_cli_emit_if_operator_runs_command";
+    let operator_reason = opts.reason.map(str::trim).filter(|s| !s.is_empty());
+    let line = vstr(confirm.get("line")).unwrap_or("");
+    let selected_token = vstr(confirm.get("selected_token")).unwrap_or("xiao_shu::unknown");
+    let project = opts.project.unwrap_or_else(|| {
+        confirm_payload
+            .get("source_voice_request")
+            .and_then(|request_payload| request_payload.get("voice_request"))
+            .and_then(|request| vstr(request.get("project")))
+            .unwrap_or("agent-bridge")
+    });
+    let heartbeat_label =
+        crate::avatar_health::heartbeat_label(opts.heartbeat_label, project);
+    let tts_voice = opts
+        .tts_voice
+        .or_else(|| vstr(confirm.get("suggested_voice")));
+    let tts_rate = opts
+        .tts_rate
+        .or_else(|| confirm.get("suggested_rate").and_then(Value::as_u64));
+    let preview = json!({
+        "surface": "avatar_cortex_voice_action_preview_input",
+        "schema": 1,
+        "project": project,
+        "heartbeat_label": heartbeat_label,
+        "preview": {
+            "text": line,
+            "voice_allowed": false,
+            "requires_explicit_emit_gate": true,
+            "source": "voice_action_preview_confirm",
+        },
+        "preview_text_override": {
+            "provided": true,
+            "source": "voice_action_preview",
+            "emits_audio": false,
+        },
+    });
+    let gate = avatar_cortex_voice_gate_payload(
+        preview,
+        opts.confirm,
+        opts.force,
+        opts.cooldown_secs,
+        opts.reason,
+        true,
+        last_emit_at,
+        true,
+        now,
+    );
+    let mut blocked_reasons = Vec::<String>::new();
+    fn push_reason(reasons: &mut Vec<String>, reason: &str) {
+        if !reasons.iter().any(|existing| existing == reason) {
+            reasons.push(reason.to_string());
+        }
+    }
+    if !opts.confirm {
+        push_reason(&mut blocked_reasons, "confirm_flag_missing");
+    }
+    if !confirmed {
+        push_reason(&mut blocked_reasons, "confirmation_not_ready");
+    }
+    if line.is_empty() {
+        push_reason(&mut blocked_reasons, "missing_line");
+    }
+    if let Some(gate_reasons) = gate
+        .get("gate")
+        .and_then(|gate| gate.get("blocked_reasons"))
+        .and_then(Value::as_array)
+    {
+        for reason in gate_reasons.iter().filter_map(Value::as_str) {
+            push_reason(&mut blocked_reasons, reason);
+        }
+    }
+    let gate_would_emit = vbool(gate.get("would_emit")).unwrap_or(false);
+    let ready_to_emit_now = blocked_reasons.is_empty() && confirmed && gate_would_emit;
+    let command_preview = confirm
+        .get("action_command_preview")
+        .cloned()
+        .or_else(|| confirm.get("pending_action_command_preview").cloned())
+        .unwrap_or(Value::Null);
+    let command_args = confirm
+        .get("action_command_args")
+        .cloned()
+        .or_else(|| confirm.get("pending_action_command_args").cloned())
+        .unwrap_or(Value::Null);
+
+    json!({
+        "surface": "avatar_cortex_voice_action_preview",
+        "schema": 1,
+        "generated_at": now,
+        "read_only": true,
+        "dry_run": true,
+        "cli_only_real_emit": true,
+        "http_available": true,
+        "http_emit_route_added": false,
+        "actual_emit_invoked": false,
+        "writes_files": false,
+        "writes_cooldown_state": false,
+        "codex_pet_package_mutation": false,
+        "mutates_global_substrate": false,
+        "emits_audio": false,
+        "would_emit_audio": ready_to_emit_now,
+        "emits_notification": false,
+        "action_preview": {
+            "confirmation_state": confirmation_state,
+            "confirmed": confirmed,
+            "confirm_flag": opts.confirm,
+            "force": opts.force,
+            "cooldown_secs": opts.cooldown_secs,
+            "ready_to_emit_now": ready_to_emit_now,
+            "would_emit_if_operator_runs_command": ready_to_emit_now,
+            "blocked": !ready_to_emit_now,
+            "blocked_reasons": blocked_reasons,
+            "selected_token": selected_token,
+            "line": line,
+            "reason_present": operator_reason.is_some(),
+            "allow_policy_override": true,
+            "tts_voice": tts_voice,
+            "tts_rate": tts_rate,
+            "state_path": state_path.map(|path| path.to_string_lossy().to_string()),
+            "events_path": events_path.map(|path| path.to_string_lossy().to_string()),
+            "command_args": command_args,
+            "command_preview": command_preview,
+        },
+        "gate_dry_run": gate,
+        "source_voice_confirm": confirm_payload,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+#[cfg(test)]
+pub(crate) fn avatar_cortex_voice_action_preview_from_status(
+    status: Value,
+    requested_track: Option<&str>,
+    project: Option<&str>,
+    reason: Option<&str>,
+    confirm: bool,
+    force: bool,
+    cooldown_secs: i64,
+    last_emit_at: Option<i64>,
+) -> Value {
+    let confirm_payload =
+        avatar_cortex_voice_confirm_from_status(status, requested_track, project, reason, confirm);
+    let opts = AvatarCortexVoiceActionPreviewOptions {
+        label: None,
+        heartbeat_label: None,
+        project,
+        output: None,
+        requested_track,
+        reason,
+        confirm,
+        force,
+        cooldown_secs,
+        tts_voice: None,
+        tts_rate: None,
+    };
+    avatar_cortex_voice_action_preview_from_confirm_payload(
+        confirm_payload,
+        &opts,
+        last_emit_at,
+        None,
+        None,
+        now_secs(),
+    )
+}
+
+pub fn avatar_cortex_voice_action_preview(
+    opts: &AvatarCortexVoiceActionPreviewOptions<'_>,
+) -> Result<Value> {
+    let confirm_payload = avatar_cortex_voice_confirm(
+        opts.label,
+        opts.heartbeat_label,
+        opts.project,
+        opts.output,
+        opts.requested_track,
+        opts.reason,
+        opts.confirm,
+    )?;
+    let project = opts.project.unwrap_or_else(|| {
+        confirm_payload
+            .get("source_voice_request")
+            .and_then(|request_payload| request_payload.get("voice_request"))
+            .and_then(|request| vstr(request.get("project")))
+            .unwrap_or("agent-bridge")
+    });
+    let heartbeat_label =
+        crate::avatar_health::heartbeat_label(opts.heartbeat_label, project);
+    let (state_path, events_path) = avatar_cortex_voice_paths(project, &heartbeat_label)?;
+    let state = read_json(&state_path);
+    let last_emit_at = vi64(state.get("last_emit_at"));
+    Ok(avatar_cortex_voice_action_preview_from_confirm_payload(
+        confirm_payload,
+        opts,
+        last_emit_at,
+        Some(&state_path),
+        Some(&events_path),
+        now_secs(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5535,6 +5762,87 @@ mod tests {
         assert!(reasons.iter().any(|reason| reason == "confirmation_not_ready"));
         assert_eq!(blocked["actual_emit_invoked"], false);
         assert_eq!(blocked["emits_audio"], false);
+    }
+
+    #[test]
+    fn avatar_cortex_voice_action_preview_reports_cooldown_without_audio() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let policy = avatar_cortex_voice_policy_from_renderer_view_payload(view);
+        let request = avatar_cortex_voice_request_from_policy_payload(
+            policy,
+            Some("xiao_shu::alert_peek::medium"),
+            Some("agent-bridge"),
+            Some("manual confirmation"),
+        );
+        let confirm = avatar_cortex_voice_confirm_from_request_payload(request, true);
+        let opts = AvatarCortexVoiceActionPreviewOptions {
+            label: None,
+            heartbeat_label: Some("com.agentbridge.avatar-heartbeat.agent-bridge"),
+            project: Some("agent-bridge"),
+            output: None,
+            requested_track: Some("xiao_shu::alert_peek::medium"),
+            reason: Some("manual confirmation"),
+            confirm: true,
+            force: false,
+            cooldown_secs: 300,
+            tts_voice: None,
+            tts_rate: None,
+        };
+        let preview = avatar_cortex_voice_action_preview_from_confirm_payload(
+            confirm.clone(),
+            &opts,
+            Some(1_000),
+            None,
+            None,
+            1_100,
+        );
+
+        assert_eq!(preview["surface"], "avatar_cortex_voice_action_preview");
+        assert_eq!(preview["read_only"], true);
+        assert_eq!(preview["dry_run"], true);
+        assert_eq!(preview["actual_emit_invoked"], false);
+        assert_eq!(preview["writes_files"], false);
+        assert_eq!(preview["emits_audio"], false);
+        assert_eq!(preview["would_emit_audio"], false);
+        assert_eq!(preview["action_preview"]["ready_to_emit_now"], false);
+        assert_eq!(preview["action_preview"]["blocked"], true);
+        assert!(preview["action_preview"]["blocked_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason == "cooldown_active"));
+        assert_eq!(preview["gate_dry_run"]["cooldown"]["active"], true);
+        assert!(preview["action_preview"]["command_preview"]
+            .as_str()
+            .unwrap()
+            .contains("cortex-voice-action"));
+
+        let forced_opts = AvatarCortexVoiceActionPreviewOptions {
+            force: true,
+            ..opts
+        };
+        let forced = avatar_cortex_voice_action_preview_from_confirm_payload(
+            confirm,
+            &forced_opts,
+            Some(1_000),
+            None,
+            None,
+            1_100,
+        );
+        assert_eq!(forced["action_preview"]["ready_to_emit_now"], true);
+        assert_eq!(forced["would_emit_audio"], true);
+        assert_eq!(forced["action_preview"]["blocked"], false);
+        assert_eq!(
+            forced["action_preview"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {

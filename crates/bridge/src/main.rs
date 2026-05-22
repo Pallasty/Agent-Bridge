@@ -968,6 +968,45 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Preview whether the confirmed Xiao Shu voice action would emit now.
+    CortexVoiceActionPreview {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path and voice cooldown state.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Renderer token to confirm. Defaults to the first policy-approved manual voice rule.
+        #[arg(long)]
+        track: Option<String>,
+        /// Operator reason used in the previewed action command.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Mark the confirmation as explicitly requested.
+        #[arg(long)]
+        confirm: bool,
+        /// Preview readiness as if cooldown state were ignored.
+        #[arg(long)]
+        force: bool,
+        /// Cooldown seconds to evaluate without mutating state.
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: i64,
+        /// Optional macOS say voice. Defaults to the policy suggestion or AB_PET_TTS_VOICE.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Optional macOS say rate. Defaults to the policy suggestion or AB_PET_TTS_RATE.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2819,6 +2858,36 @@ async fn main() -> Result<()> {
                     reason.clone(),
                     *confirm,
                     *emit,
+                    *force,
+                    *cooldown_secs,
+                    tts_voice.clone(),
+                    *tts_rate,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoiceActionPreview {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                track,
+                reason,
+                confirm,
+                force,
+                cooldown_secs,
+                tts_voice,
+                tts_rate,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_action_preview(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    track.clone(),
+                    reason.clone(),
+                    *confirm,
                     *force,
                     *cooldown_secs,
                     tts_voice.clone(),
@@ -5324,6 +5393,70 @@ async fn run_avatar_cortex_voice_action(
         avatar_health_display(tts.get("ok"), "-"),
         avatar_health_display(action.get("tts_voice"), "-"),
         avatar_health_display(action.get("tts_rate"), "-"),
+        avatar_health_display(action.get("command_preview"), "-")
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_cortex_voice_action_preview(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    track: Option<String>,
+    reason: Option<String>,
+    confirm: bool,
+    force: bool,
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::AvatarCortexVoiceActionPreviewOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        requested_track: track.as_deref(),
+        reason: reason.as_deref(),
+        confirm,
+        force,
+        cooldown_secs,
+        tts_voice: tts_voice.as_deref(),
+        tts_rate,
+    };
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_action_preview(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let action = payload.get("action_preview").unwrap_or(&Value::Null);
+    let gate = payload.get("gate_dry_run").unwrap_or(&Value::Null);
+    let cooldown = gate.get("cooldown").unwrap_or(&Value::Null);
+    println!("avatar cortex voice action preview");
+    println!(
+        "state={} confirm={} ready={} would_emit_audio={} emits_audio={} http_emit_route=false",
+        avatar_health_display(action.get("confirmation_state"), "-"),
+        avatar_health_display(action.get("confirm_flag"), "false"),
+        avatar_health_display(action.get("ready_to_emit_now"), "false"),
+        avatar_health_display(action.get("would_emit_if_operator_runs_command"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false")
+    );
+    println!(
+        "blocked={} reasons={} token={} line={}",
+        avatar_health_display(action.get("blocked"), "true"),
+        avatar_health_display_list(action.get("blocked_reasons"), "none"),
+        avatar_health_display(action.get("selected_token"), "-"),
+        avatar_health_display(action.get("line"), "-")
+    );
+    println!(
+        "cooldown_active={} last_emit_at={} next_allowed_at={} command={}",
+        avatar_health_display(cooldown.get("active"), "false"),
+        avatar_health_display(cooldown.get("last_emit_at"), "-"),
+        avatar_health_display(cooldown.get("next_allowed_at"), "-"),
         avatar_health_display(action.get("command_preview"), "-")
     );
     Ok(())
