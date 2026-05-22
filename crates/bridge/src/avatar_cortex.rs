@@ -143,6 +143,14 @@ fn avatar_cortex_voice_dir() -> Result<PathBuf> {
         .join("avatar_cortex_voice"))
 }
 
+fn avatar_cortex_action_request_dir() -> Result<PathBuf> {
+    Ok(home_dir()?
+        .join("Library")
+        .join("Application Support")
+        .join("agent-bridge")
+        .join("avatar_cortex_action_requests"))
+}
+
 fn avatar_cortex_voice_paths(project: &str, heartbeat_label: &str) -> Result<(PathBuf, PathBuf)> {
     let dir = avatar_cortex_voice_dir()?.join(label_component(project));
     let slug = label_component(heartbeat_label);
@@ -150,6 +158,12 @@ fn avatar_cortex_voice_paths(project: &str, heartbeat_label: &str) -> Result<(Pa
         dir.join(format!("{slug}.voice.json")),
         dir.join(format!("{slug}.events.jsonl")),
     ))
+}
+
+fn xiao_shu_action_request_queue_path(project: &str) -> Result<PathBuf> {
+    Ok(avatar_cortex_action_request_dir()?
+        .join(label_component(project))
+        .join("requests.jsonl"))
 }
 
 pub fn cortex_runner_label(label: Option<&str>, project: &str) -> String {
@@ -165,6 +179,15 @@ fn now_secs() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+fn fnv1a_hex16(value: &str) -> String {
+    let mut hash: u64 = 14695981039346656037;
+    for byte in value.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    format!("{hash:016x}")
 }
 
 fn records(value: &Value) -> &[Value] {
@@ -4570,6 +4593,108 @@ pub fn xiao_shu_action_request(opts: &XiaoShuActionRequestOptions<'_>) -> Result
     ))
 }
 
+fn xiao_shu_action_enqueue_record_from_request(
+    request_payload: Value,
+    project: &str,
+    queue_path: &Path,
+    now: i64,
+) -> Value {
+    let request = request_payload
+        .get("action_request")
+        .unwrap_or(&Value::Null);
+    let actor = vstr(request.get("actor")).unwrap_or("llm");
+    let intent = vstr(request.get("intent")).unwrap_or("voice_alert");
+    let reason = vstr(request.get("reason")).unwrap_or("xiao-shu-action-request");
+    let mapped_track = vstr(request.get("mapped_track")).unwrap_or("xiao_shu::alert_peek::medium");
+    let message = request.get("message").cloned().unwrap_or(Value::Null);
+    let seed = json!({
+        "created_at": now,
+        "project": project,
+        "actor": actor,
+        "intent": intent,
+        "reason": reason,
+        "mapped_track": mapped_track,
+        "message": message,
+    });
+    let seed_hash = fnv1a_hex16(&serde_json::to_string(&seed).unwrap_or_default());
+    let request_id = format!("xsr-{now}-{}", &seed_hash[..8]);
+
+    json!({
+        "schema": 1,
+        "request_id": request_id,
+        "created_at": now,
+        "updated_at": now,
+        "state": "pending_human_confirmation",
+        "project": project,
+        "target": "xiao-shu",
+        "actor": actor,
+        "intent": intent,
+        "message": message,
+        "reason": reason,
+        "mapped_track": mapped_track,
+        "source": "xiao_shu_action_request_enqueue",
+        "queue_path": queue_path.to_string_lossy(),
+        "llm_safe": true,
+        "sidecar_only": true,
+        "direct_pet_control_allowed": false,
+        "direct_llm_emit_allowed": false,
+        "requires_human_confirmation": true,
+        "human_confirmation_present": false,
+        "real_emit_requires_local_cli": true,
+        "actual_emit_invoked": false,
+        "emits_audio": false,
+        "emits_notification": false,
+        "writes_request_record": true,
+        "writes_cooldown_state": false,
+        "codex_pet_package_mutation": false,
+        "mutates_global_substrate": false,
+        "action_request": request.clone(),
+        "source_request": request_payload,
+    })
+}
+
+pub fn xiao_shu_action_request_enqueue(opts: &XiaoShuActionRequestOptions<'_>) -> Result<Value> {
+    let project = opts.project.unwrap_or("agent-bridge");
+    let queue_path = xiao_shu_action_request_queue_path(project)?;
+    let request_payload = xiao_shu_action_request(opts)?;
+    let now = now_secs();
+    let record =
+        xiao_shu_action_enqueue_record_from_request(request_payload, project, &queue_path, now);
+    append_jsonl(&queue_path, &record)?;
+
+    Ok(json!({
+        "surface": "xiao_shu_action_request_enqueue",
+        "schema": 1,
+        "generated_at": now,
+        "read_only": false,
+        "dry_run": false,
+        "llm_safe": true,
+        "sidecar_only": true,
+        "direct_pet_control_allowed": false,
+        "direct_llm_emit_allowed": false,
+        "requires_human_confirmation": true,
+        "real_emit_requires_local_cli": true,
+        "actual_emit_invoked": false,
+        "emits_audio": false,
+        "emits_notification": false,
+        "http_emit_route_added": false,
+        "writes_files": true,
+        "writes_request_record": true,
+        "writes_cooldown_state": false,
+        "codex_pet_package_mutation": false,
+        "mutates_global_substrate": false,
+        "queue": {
+            "project": project,
+            "path": queue_path.to_string_lossy(),
+            "request_id": record.get("request_id").cloned().unwrap_or(Value::Null),
+            "state": record.get("state").cloned().unwrap_or(Value::Null),
+            "append_only": true,
+        },
+        "record": record,
+        "next_step": "show this pending request in a human confirmation surface; only a later local CLI action may emit audio",
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6157,6 +6282,58 @@ mod tests {
             "blocked_unsupported_intent"
         );
         assert_eq!(unsupported["action_request"]["supported_intent"], false);
+    }
+
+    #[test]
+    fn xiao_shu_action_enqueue_record_is_pending_and_non_emitting() {
+        let request_payload = json!({
+            "surface": "xiao_shu_action_request",
+            "read_only": true,
+            "dry_run": true,
+            "llm_safe": true,
+            "action_request": {
+                "actor": "codex",
+                "intent": "voice_alert",
+                "message": "please look",
+                "reason": "unit-test",
+                "mapped_track": "xiao_shu::alert_peek::medium",
+                "request_state": "requires_human_confirmation",
+                "requires_human_confirmation": true,
+                "human_confirmation_present": false,
+                "direct_llm_emit_allowed": false
+            }
+        });
+        let queue_path = Path::new("/tmp/xiao-shu-requests.jsonl");
+        let record = xiao_shu_action_enqueue_record_from_request(
+            request_payload,
+            "agent-bridge",
+            queue_path,
+            1_779_470_000,
+        );
+
+        assert_eq!(record["schema"], 1);
+        assert!(record["request_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("xsr-1779470000-"));
+        assert_eq!(record["state"], "pending_human_confirmation");
+        assert_eq!(record["llm_safe"], true);
+        assert_eq!(record["sidecar_only"], true);
+        assert_eq!(record["direct_pet_control_allowed"], false);
+        assert_eq!(record["direct_llm_emit_allowed"], false);
+        assert_eq!(record["requires_human_confirmation"], true);
+        assert_eq!(record["human_confirmation_present"], false);
+        assert_eq!(record["actual_emit_invoked"], false);
+        assert_eq!(record["emits_audio"], false);
+        assert_eq!(record["writes_request_record"], true);
+        assert_eq!(record["writes_cooldown_state"], false);
+        assert_eq!(record["codex_pet_package_mutation"], false);
+        assert_eq!(record["queue_path"], queue_path.to_string_lossy().as_ref());
+        assert_eq!(record["action_request"]["actor"], "codex");
+        assert_eq!(
+            record["source_request"]["action_request"]["request_state"],
+            "requires_human_confirmation"
+        );
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {

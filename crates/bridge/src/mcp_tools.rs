@@ -9117,6 +9117,11 @@ impl McpTool for XiaoShuActionRequestTool {
                         "default": false,
                         "description": "Dry-run confirmation flag. Even when true, this MCP tool does not emit audio."
                     },
+                    "enqueue": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, append this request to Xiao Shu's sidecar pending-action queue. This writes only an auditable request record; it still does not emit audio, mutate cooldown state, or control the pet."
+                    },
                     "force": {
                         "type": "boolean",
                         "default": false,
@@ -9158,6 +9163,10 @@ impl McpTool for XiaoShuActionRequestTool {
             .get("confirm")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let enqueue = args
+            .get("enqueue")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
         let cooldown_secs = args
             .get("cooldown_secs")
@@ -9179,13 +9188,18 @@ impl McpTool for XiaoShuActionRequestTool {
             message: message.as_deref(),
             requested_track: track.as_deref(),
             reason: reason.as_deref(),
-            confirm,
+            confirm: if enqueue { false } else { confirm },
             force,
             cooldown_secs,
             tts_voice: tts_voice.as_deref(),
             tts_rate,
         };
-        match crate::avatar_cortex::xiao_shu_action_request(&opts) {
+        let result = if enqueue {
+            crate::avatar_cortex::xiao_shu_action_request_enqueue(&opts)
+        } else {
+            crate::avatar_cortex::xiao_shu_action_request(&opts)
+        };
+        match result {
             Ok(payload) => Ok(ToolResult::json_text(&payload)),
             Err(e) => Ok(ToolResult::error(format!("xiao_shu_action_request: {e}"))),
         }
@@ -20583,6 +20597,11 @@ mod tests {
             schema.input_schema["properties"]["confirm"]["description"],
             "Dry-run confirmation flag. Even when true, this MCP tool does not emit audio."
         );
+        assert_eq!(schema.input_schema["properties"]["enqueue"]["default"], false);
+        assert!(schema.input_schema["properties"]["enqueue"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("does not emit audio"));
         assert_eq!(
             schema.input_schema["properties"]["intent"]["enum"][0],
             "voice_alert"
