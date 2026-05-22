@@ -899,6 +899,33 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Dry-run a Xiao Shu voice confirmation action without emitting audio.
+    CortexVoiceConfirm {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Renderer token to confirm. Defaults to the first policy-approved manual voice rule.
+        #[arg(long)]
+        track: Option<String>,
+        /// Operator reason required before the future CLI emit command is previewed as executable.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Mark the dry-run confirmation as explicitly requested.
+        #[arg(long)]
+        confirm: bool,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2700,6 +2727,28 @@ async fn main() -> Result<()> {
                     output.clone(),
                     track.clone(),
                     reason.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoiceConfirm {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                track,
+                reason,
+                confirm,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_confirm(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    track.clone(),
+                    reason.clone(),
+                    *confirm,
                     *as_json,
                 )
                 .await
@@ -5084,6 +5133,57 @@ async fn run_avatar_cortex_voice_request(
             "true"
         ),
         avatar_health_display(request.get("command_preview"), "-")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_voice_confirm(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    track: Option<String>,
+    reason: Option<String>,
+    confirm: bool,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_confirm(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+        track.as_deref(),
+        reason.as_deref(),
+        confirm,
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let confirm = payload.get("voice_confirm").unwrap_or(&Value::Null);
+    println!("avatar cortex voice confirm dry-run");
+    println!(
+        "state={} confirm_requested={} would_execute_cli={} emits_audio={} http_emit_route={}",
+        avatar_health_display(confirm.get("confirmation_state"), "-"),
+        avatar_health_display(confirm.get("confirm_requested"), "false"),
+        avatar_health_display(confirm.get("would_execute_cli"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false"),
+        avatar_health_display(confirm.get("http_emit_route"), "null")
+    );
+    println!(
+        "token={} line={} reason_present={} voice={} rate={}",
+        avatar_health_display(confirm.get("selected_token"), "-"),
+        avatar_health_display(confirm.get("line"), "-"),
+        avatar_health_display(confirm.get("operator_reason_present"), "false"),
+        avatar_health_display(confirm.get("suggested_voice"), "-"),
+        avatar_health_display(confirm.get("suggested_rate"), "-")
+    );
+    println!(
+        "actual_execution_here={} command={}",
+        avatar_health_display(confirm.get("actual_execution_available_here"), "false"),
+        avatar_health_display(confirm.get("command_preview"), "-")
     );
     Ok(())
 }

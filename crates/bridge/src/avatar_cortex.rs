@@ -3273,6 +3273,152 @@ pub fn avatar_cortex_voice_request(
     ))
 }
 
+fn avatar_cortex_voice_confirm_from_request_payload(
+    request_payload: Value,
+    confirm: bool,
+) -> Value {
+    let request = request_payload
+        .get("voice_request")
+        .unwrap_or(&Value::Null);
+    let request_ready = request
+        .get("request_state")
+        .and_then(Value::as_str)
+        == Some("ready_for_operator_confirmation");
+    let operator_reason_present = request
+        .get("operator_reason_present")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let manual_cli_allowed = request
+        .get("manual_cli_emit_allowed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let command_args_present = request
+        .get("command_args")
+        .and_then(Value::as_array)
+        .map(|args| !args.is_empty())
+        .unwrap_or(false);
+    let confirmation_state = if !request_ready || !manual_cli_allowed || !command_args_present {
+        "blocked_by_request"
+    } else if !confirm {
+        "waiting_for_operator_confirmation"
+    } else if !operator_reason_present {
+        "blocked_missing_operator_reason"
+    } else {
+        "would_execute_cli_emit_if_operator_runs_command"
+    };
+    let would_execute_cli = confirmation_state == "would_execute_cli_emit_if_operator_runs_command";
+
+    let voice_confirm = json!({
+        "schema": 1,
+        "input": "avatar_cortex_voice_request.voice_request",
+        "html_route": "/avatar-surface/cortex-voice-confirm",
+        "request_route": request
+            .get("html_route")
+            .cloned()
+            .unwrap_or_else(|| json!("/avatar-surface/cortex-voice-request")),
+        "confirmation_state": confirmation_state,
+        "confirm_requested": confirm,
+        "would_execute_cli": would_execute_cli,
+        "would_emit_audio": false,
+        "actual_execution_available_here": false,
+        "selected_token": request.get("selected_token").cloned().unwrap_or(Value::Null),
+        "line": request.get("line").cloned().unwrap_or(Value::Null),
+        "visual_variant": request.get("visual_variant").cloned().unwrap_or(Value::Null),
+        "manual_cli_emit_allowed": manual_cli_allowed,
+        "auto_emit_allowed": request
+            .get("auto_emit_allowed")
+            .cloned()
+            .unwrap_or_else(|| json!(false)),
+        "operator_reason_present": operator_reason_present,
+        "operator_reason": request.get("operator_reason").cloned().unwrap_or(Value::Null),
+        "suggested_reason": request.get("suggested_reason").cloned().unwrap_or(Value::Null),
+        "suggested_voice": request.get("suggested_voice").cloned().unwrap_or(Value::Null),
+        "suggested_rate": request.get("suggested_rate").cloned().unwrap_or(Value::Null),
+        "http_emit_route": Value::Null,
+        "command_args": if would_execute_cli {
+            request.get("command_args").cloned().unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        },
+        "command_preview": if would_execute_cli {
+            request.get("command_preview").cloned().unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        },
+        "pending_command_args": request.get("command_args").cloned().unwrap_or(Value::Null),
+        "pending_command_preview": request.get("command_preview").cloned().unwrap_or(Value::Null),
+        "approval": {
+            "writes_approval": false,
+            "persists_confirmation_record": false,
+            "records_persisted": false,
+            "approval_writes_allowed": false,
+        },
+        "safety": {
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "would_emit_audio": false,
+            "auto_emit_allowed": false,
+            "http_emit_route_added": false,
+            "cli_only_real_emit": true,
+            "codex_pet_package_mutation_allowed": false,
+        },
+        "next_step": "future slash command or panel action can display this dry-run confirmation before invoking the CLI-only emit gate",
+    });
+
+    json!({
+        "surface": "avatar_cortex_voice_confirm",
+        "schema": 1,
+        "read_only": true,
+        "dry_run": true,
+        "sidecar_only": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "renders_pixels": false,
+        "browser_renders_pixels": false,
+        "server_side_renders_pixels": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "http_emit_route_added": false,
+        "writes_approval": false,
+        "persists_confirmation_record": false,
+        "voice_confirm": voice_confirm,
+        "source_voice_request": request_payload,
+    })
+}
+
+pub(crate) fn avatar_cortex_voice_confirm_from_status(
+    status: Value,
+    requested_track: Option<&str>,
+    project: Option<&str>,
+    reason: Option<&str>,
+    confirm: bool,
+) -> Value {
+    let request = avatar_cortex_voice_request_from_status(status, requested_track, project, reason);
+    avatar_cortex_voice_confirm_from_request_payload(request, confirm)
+}
+
+pub fn avatar_cortex_voice_confirm(
+    label: Option<&str>,
+    heartbeat_label: Option<&str>,
+    project: Option<&str>,
+    output: Option<&Path>,
+    requested_track: Option<&str>,
+    reason: Option<&str>,
+    confirm: bool,
+) -> Result<Value> {
+    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
+    Ok(avatar_cortex_voice_confirm_from_status(
+        status,
+        requested_track,
+        project,
+        reason,
+        confirm,
+    ))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
@@ -5021,6 +5167,80 @@ mod tests {
         );
         assert_eq!(blocked["voice_request"]["manual_cli_emit_allowed"], false);
         assert_eq!(blocked["voice_request"]["command_args"], Value::Null);
+    }
+
+    #[test]
+    fn avatar_cortex_voice_confirm_previews_cli_action_without_audio() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let policy = avatar_cortex_voice_policy_from_renderer_view_payload(view);
+        let request = avatar_cortex_voice_request_from_policy_payload(
+            policy,
+            Some("xiao_shu::alert_peek::medium"),
+            Some("agent-bridge"),
+            Some("manual confirmation"),
+        );
+        let payload = avatar_cortex_voice_confirm_from_request_payload(request, true);
+        let confirm = &payload["voice_confirm"];
+
+        assert_eq!(payload["surface"], "avatar_cortex_voice_confirm");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["dry_run"], true);
+        assert_eq!(payload["emits_audio"], false);
+        assert_eq!(payload["http_emit_route_added"], false);
+        assert_eq!(payload["writes_approval"], false);
+        assert_eq!(payload["persists_confirmation_record"], false);
+        assert_eq!(
+            confirm["confirmation_state"],
+            "would_execute_cli_emit_if_operator_runs_command"
+        );
+        assert_eq!(confirm["confirm_requested"], true);
+        assert_eq!(confirm["would_execute_cli"], true);
+        assert_eq!(confirm["would_emit_audio"], false);
+        assert_eq!(confirm["actual_execution_available_here"], false);
+        assert_eq!(confirm["selected_token"], "xiao_shu::alert_peek::medium");
+        assert_eq!(confirm["line"], "小舒发现一点需要你看一下。");
+        assert_eq!(confirm["operator_reason_present"], true);
+        assert_eq!(confirm["http_emit_route"], Value::Null);
+        assert_eq!(confirm["safety"]["emits_audio"], false);
+        assert_eq!(confirm["safety"]["http_emit_route_added"], false);
+        assert_eq!(
+            confirm["safety"]["codex_pet_package_mutation_allowed"],
+            false
+        );
+        assert!(confirm["command_args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|arg| arg == "--allow-policy-override"));
+
+        let waiting = avatar_cortex_voice_confirm_from_request_payload(
+            payload["source_voice_request"].clone(),
+            false,
+        );
+        assert_eq!(
+            waiting["voice_confirm"]["confirmation_state"],
+            "waiting_for_operator_confirmation"
+        );
+        assert_eq!(waiting["voice_confirm"]["would_execute_cli"], false);
+        assert_eq!(waiting["voice_confirm"]["command_args"], Value::Null);
+
+        let missing_reason_request = avatar_cortex_voice_request_from_policy_payload(
+            waiting["source_voice_request"]["source_voice_policy"].clone(),
+            Some("xiao_shu::alert_peek::medium"),
+            Some("agent-bridge"),
+            None,
+        );
+        let missing_reason =
+            avatar_cortex_voice_confirm_from_request_payload(missing_reason_request, true);
+        assert_eq!(
+            missing_reason["voice_confirm"]["confirmation_state"],
+            "blocked_missing_operator_reason"
+        );
+        assert_eq!(missing_reason["voice_confirm"]["would_execute_cli"], false);
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
