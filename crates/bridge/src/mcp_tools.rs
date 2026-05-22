@@ -9033,6 +9033,165 @@ impl McpTool for MemoryConsolidateTool {
     }
 }
 
+pub struct XiaoShuActionRequestTool;
+impl XiaoShuActionRequestTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+
+fn xiao_shu_action_request_string_arg(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+}
+
+fn xiao_shu_action_request_path_arg(args: &Value, key: &str) -> Option<PathBuf> {
+    xiao_shu_action_request_string_arg(args, key).map(PathBuf::from)
+}
+
+#[async_trait]
+impl McpTool for XiaoShuActionRequestTool {
+    fn name(&self) -> &'static str {
+        "xiao_shu_action_request"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "LLM-safe Xiao Shu action request surface. \
+                 Maps high-level intents such as voice_alert or alert_peek into \
+                 the existing read-only action preview chain. It never directly \
+                 controls the pet, emits audio, writes request records, mutates \
+                 cooldown state, or changes the official Codex pet package. \
+                 Real audio still requires a separate local CLI confirmation."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "description": "Optional launchd label override for the avatar cortex runner."
+                    },
+                    "heartbeat_label": {
+                        "type": "string",
+                        "description": "Optional heartbeat label override. Defaults to the project-scoped avatar heartbeat label."
+                    },
+                    "project": {
+                        "type": "string",
+                        "default": "agent-bridge",
+                        "description": "Project slug used for avatar cortex status and voice cooldown paths."
+                    },
+                    "output": {
+                        "type": "string",
+                        "description": "Optional avatar cortex snapshot path to inspect instead of the default project snapshot."
+                    },
+                    "actor": {
+                        "type": "string",
+                        "default": "llm",
+                        "description": "Who is requesting the action, for example codex, claude-code, panel, or llm."
+                    },
+                    "intent": {
+                        "type": "string",
+                        "default": "voice_alert",
+                        "enum": ["voice_alert", "alert_peek", "attention", "review_attention", "xiao_shu_alert_peek"],
+                        "description": "High-level Xiao Shu intent. Unsupported intents are blocked by the returned request state."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Optional human-readable request note from the caller."
+                    },
+                    "track": {
+                        "type": "string",
+                        "default": "xiao_shu::alert_peek::medium",
+                        "description": "Optional avatar cortex track token to preview."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Operator-facing reason. Required later by the local CLI emit gate, but this MCP tool remains dry-run."
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Dry-run confirmation flag. Even when true, this MCP tool does not emit audio."
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Dry-run force flag forwarded to the preview gate; it does not bypass the local CLI emit requirement."
+                    },
+                    "cooldown_secs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 86400,
+                        "default": 300
+                    },
+                    "tts_voice": {
+                        "type": "string",
+                        "description": "Optional suggested macOS TTS voice for the later local CLI command."
+                    },
+                    "tts_rate": {
+                        "type": "integer",
+                        "minimum": 80,
+                        "maximum": 300,
+                        "description": "Optional suggested macOS say words-per-minute rate for the later local CLI command."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let label = xiao_shu_action_request_string_arg(&args, "label");
+        let heartbeat_label = xiao_shu_action_request_string_arg(&args, "heartbeat_label");
+        let project = xiao_shu_action_request_string_arg(&args, "project");
+        let output = xiao_shu_action_request_path_arg(&args, "output");
+        let actor = xiao_shu_action_request_string_arg(&args, "actor");
+        let intent = xiao_shu_action_request_string_arg(&args, "intent");
+        let message = xiao_shu_action_request_string_arg(&args, "message");
+        let track = xiao_shu_action_request_string_arg(&args, "track");
+        let reason = xiao_shu_action_request_string_arg(&args, "reason");
+        let tts_voice = xiao_shu_action_request_string_arg(&args, "tts_voice");
+        let confirm = args
+            .get("confirm")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+        let cooldown_secs = args
+            .get("cooldown_secs")
+            .and_then(Value::as_i64)
+            .unwrap_or(300)
+            .clamp(0, 86_400);
+        let tts_rate = args
+            .get("tts_rate")
+            .and_then(Value::as_u64)
+            .map(|rate| rate.clamp(80, 300));
+
+        let opts = crate::avatar_cortex::XiaoShuActionRequestOptions {
+            label: label.as_deref(),
+            heartbeat_label: heartbeat_label.as_deref(),
+            project: project.as_deref(),
+            output: output.as_deref(),
+            actor: actor.as_deref(),
+            intent: intent.as_deref(),
+            message: message.as_deref(),
+            requested_track: track.as_deref(),
+            reason: reason.as_deref(),
+            confirm,
+            force,
+            cooldown_secs,
+            tts_voice: tts_voice.as_deref(),
+            tts_rate,
+        };
+        match crate::avatar_cortex::xiao_shu_action_request(&opts) {
+            Ok(payload) => Ok(ToolResult::json_text(&payload)),
+            Err(e) => Ok(ToolResult::error(format!("xiao_shu_action_request: {e}"))),
+        }
+    }
+}
+
 // ===========================================================================
 //                              pet_state_get / set
 // ===========================================================================
@@ -17757,6 +17916,7 @@ const CODEX_ESSENTIAL_EXTRAS: &[&str] = &[
     "forum_set_thread_status",
     "agent_presence_announce",
     "agent_presence_list",
+    "xiao_shu_action_request",
 ];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
@@ -17786,6 +17946,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "pet_state_get"
             | "pet_state_set"
             | "pet_state_ritual"
+            | "xiao_shu_action_request"
             | "project_detect"
             | "changes_digest"
             | "plan_save"
@@ -18441,6 +18602,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         policy,
         Tier::Standard,
         Arc::new(AvatarSurfaceReportTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(XiaoShuActionRequestTool::new(hub.clone())),
     );
     // Tailscale REST API: ACL editing without browser automation.
     reg_if(
@@ -19726,6 +19893,15 @@ mod tests {
     }
 
     #[test]
+    fn codex_essential_exposes_xiao_shu_action_request() {
+        assert!(codex_essential_tool(
+            Tier::Standard,
+            "xiao_shu_action_request"
+        ));
+        assert!(codex_lean_tool("xiao_shu_action_request"));
+    }
+
+    #[test]
     fn dispatch_window_from_args_uses_seconds_override_and_clamps() {
         assert_eq!(
             dispatch_window_from_args(&json!({"window_days": 7, "window_secs": 900})),
@@ -20392,6 +20568,25 @@ mod tests {
         assert!(report.contains("next: ship terminal report"));
         assert_eq!(payload["avatars"][0]["agent_id"], "codex-xiao-shu-dev");
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn xiao_shu_action_request_schema_is_dry_run_only() {
+        let tool = XiaoShuActionRequestTool::new(crate::Hub::builder().build());
+        let schema = tool.schema();
+
+        assert_eq!(schema.name, "xiao_shu_action_request");
+        assert!(schema.description.contains("LLM-safe"));
+        assert!(schema.description.contains("never directly"));
+        assert!(schema.description.contains("Real audio still requires"));
+        assert_eq!(
+            schema.input_schema["properties"]["confirm"]["description"],
+            "Dry-run confirmation flag. Even when true, this MCP tool does not emit audio."
+        );
+        assert_eq!(
+            schema.input_schema["properties"]["intent"]["enum"][0],
+            "voice_alert"
+        );
     }
 
     #[test]
