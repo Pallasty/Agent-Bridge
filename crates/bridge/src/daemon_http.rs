@@ -3603,6 +3603,7 @@ fn avatar_surface_xiao_shu_action_requests_html(
         avatar_surface_html_json_value(queue.get("state_filter"), "pending_human_confirmation");
     let matching = avatar_surface_html_json_value(queue.get("matching_records"), "0");
     let returned = avatar_surface_html_json_value(queue.get("returned_count"), "0");
+    let include_details = avatar_surface_html_json_value(queue.get("include_details"), "false");
     let path = avatar_surface_html_json_value(queue.get("path"), "-");
     let mut rows = String::new();
     for record in records {
@@ -3616,6 +3617,21 @@ fn avatar_surface_xiao_shu_action_requests_html(
             .get("reason")
             .and_then(Value::as_str)
             .unwrap_or("operator-confirmed-request");
+        let local_confirm_raw = record
+            .get("local_confirm_command")
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+            .or_else(|| {
+                record
+                    .get("action_preview_command")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "agent-bridge avatar xiao-shu-action-request-action --project {project_raw} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm"
+                )
+            });
         let local_command_raw = record
             .get("local_emit_command")
             .and_then(Value::as_str)
@@ -3625,6 +3641,11 @@ fn avatar_surface_xiao_shu_action_requests_html(
                     "agent-bridge avatar xiao-shu-action-request-action --project {project_raw} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm --emit"
                 )
             });
+        let detail_href_raw = format!(
+            "/avatar-surface/xiao-shu-action-requests?project={project}&request_id={request_id}&details=true",
+            project = url_query_component(project_raw),
+            request_id = url_query_component(request_id_raw)
+        );
         let request_id = avatar_surface_html_json_value(record.get("request_id"), "-");
         let state = avatar_surface_html_json_value(record.get("state"), "-");
         let actor = avatar_surface_html_json_value(record.get("actor"), "-");
@@ -3637,9 +3658,11 @@ fn avatar_surface_xiao_shu_action_requests_html(
             "-",
         );
         let reason = avatar_surface_html_json_value(record.get("reason"), "-");
+        let local_confirm = html_escape(&local_confirm_raw);
         let local_command = html_escape(&local_command_raw);
+        let detail_href = html_escape(&detail_href_raw);
         rows.push_str(&format!(
-            r#"<li><strong>{request_id}</strong><span>state={state} actor={actor} intent={intent}</span><span>track={track}</span><span>line={line}</span><span>reason={reason}</span><span>local={local_command}</span></li>"#
+            r#"<li><strong>{request_id}</strong><span>state={state} actor={actor} intent={intent}</span><span>track={track}</span><span>line={line}</span><span>reason={reason}</span><span><a href="{detail_href}">detail json</a></span><span>dry_run={local_confirm}</span><span>emit={local_command}</span></li>"#
         ));
     }
     if rows.is_empty() {
@@ -3656,7 +3679,7 @@ fn avatar_surface_xiao_shu_action_requests_html(
         <span>pending={matching} returned={returned} exists={exists}</span>
       </div>
       <dl>
-        <div><dt>filter</dt><dd>state={state_filter}</dd></div>
+        <div><dt>filter</dt><dd>state={state_filter} details={include_details}</dd></div>
         <div><dt>path</dt><dd>{path}</dd></div>
         <div><dt>open</dt><dd><a href="{href}">pending action request json</a></dd></div>
       </dl>
@@ -3666,6 +3689,7 @@ fn avatar_surface_xiao_shu_action_requests_html(
         returned = returned,
         exists = exists,
         state_filter = state_filter,
+        include_details = include_details,
         path = path,
         href = html_escape(&href_raw),
         rows = rows,
@@ -5567,6 +5591,7 @@ mod tests {
                 "exists": true,
                 "path": "/tmp/requests.jsonl",
                 "state_filter": "pending_human_confirmation",
+                "include_details": false,
                 "matching_records": 1,
                 "returned_count": 1
             },
@@ -5577,6 +5602,8 @@ mod tests {
                 "intent": "voice_alert",
                 "mapped_track": "xiao_shu::alert_peek::medium",
                 "reason": "unit-test",
+                "local_confirm_command": "agent-bridge avatar xiao-shu-action-request-action --project agent-bridge --request-id \"xsr-test\" --reason \"unit-test\" --confirm",
+                "local_emit_command": "agent-bridge avatar xiao-shu-action-request-action --project agent-bridge --request-id \"xsr-test\" --reason \"unit-test\" --confirm --emit",
                 "action_request": {
                     "line": "please look"
                 }
@@ -5700,6 +5727,12 @@ mod tests {
         assert!(html.contains("ready=false blocked=true reasons="));
         assert!(html.contains("human_confirmation_required"));
         assert!(html.contains("xiao shu action request json"));
+        assert!(html.contains("Xiao Shu Action Requests"));
+        assert!(html.contains("state=pending_human_confirmation details=false"));
+        assert!(html.contains("/avatar-surface/xiao-shu-action-requests?project=agent-bridge&amp;request_id=xsr-test&amp;details=true"));
+        assert!(html.contains("detail json"));
+        assert!(html.contains("dry_run=agent-bridge avatar xiao-shu-action-request-action"));
+        assert!(html.contains("emit=agent-bridge avatar xiao-shu-action-request-action"));
         assert!(html.contains("stage=candidate risk=low"));
         assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));
