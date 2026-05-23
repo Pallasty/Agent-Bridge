@@ -6656,6 +6656,524 @@ impl McpTool for MemoryDeleteTool {
     }
 }
 
+const WORK_MEMORY_KIND: &str = "work_memory";
+const WORK_MEMORY_DEFAULT_SLOT: &str = "active";
+const WORK_MEMORY_MAX_CONTENT_CHARS: usize = 12_000;
+const WORK_MEMORY_PRECOMPACT_CHARS: usize = 6_000;
+
+fn unix_now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+fn stable_fnv1a_hex(input: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in input.as_bytes() {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn sanitize_work_memory_component(value: &str, fallback: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in value.trim().chars() {
+        let mapped = if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            Some(ch.to_ascii_lowercase())
+        } else if ch.is_whitespace() || matches!(ch, '/' | ':' | '.' | '@') {
+            Some('-')
+        } else {
+            None
+        };
+        if let Some(ch) = mapped {
+            if ch == '-' {
+                if !last_dash && !out.is_empty() {
+                    out.push(ch);
+                    last_dash = true;
+                }
+            } else {
+                out.push(ch);
+                last_dash = false;
+            }
+        }
+        if out.chars().count() >= max_chars {
+            break;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        fallback.to_string()
+    } else {
+        out
+    }
+}
+
+fn work_memory_cwd(args: &Value) -> String {
+    args.get("cwd")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.display().to_string())
+        })
+        .unwrap_or_else(|| "/".to_string())
+}
+
+fn work_memory_scope(cwd: &str) -> String {
+    format!("project:{cwd}")
+}
+
+fn work_memory_key(cwd: &str, session_id: Option<&str>, slot: &str) -> String {
+    let scope_hash = stable_fnv1a_hex(cwd);
+    let slot = sanitize_work_memory_component(slot, WORK_MEMORY_DEFAULT_SLOT, 48);
+    let owner = session_id
+        .map(|s| sanitize_work_memory_component(s, "session", 48))
+        .unwrap_or_else(|| "shared".to_string());
+    format!("work_memory_{}_{}_{}", &scope_hash[..12], owner, slot)
+}
+
+fn json_string_array(args: &Value, key: &str) -> Vec<String> {
+    args.get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::trim))
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn tail_chars(s: &str, max_chars: usize) -> (String, bool, usize) {
+    let total = s.chars().count();
+    if max_chars == 0 || total <= max_chars {
+        (s.to_string(), false, total)
+    } else {
+        let start = total.saturating_sub(max_chars);
+        let tail: String = s.chars().skip(start).collect();
+        (
+            format!("[trimmed earlier context; total {total} chars]\n{tail}"),
+            true,
+            total,
+        )
+    }
+}
+
+fn build_work_memory_content(
+    args: &Value,
+    cwd: &str,
+    session_id: Option<&str>,
+    slot: &str,
+) -> std::result::Result<(String, bool, usize), String> {
+    if let Some(content) = args
+        .get("content")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let (content, truncated, total_chars) =
+            truncate_chars(content, WORK_MEMORY_MAX_CONTENT_CHARS);
+        return Ok((content, truncated, total_chars));
+    }
+
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Active Work Memory");
+    let summary = args
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let next_step = args
+        .get("next_step")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let evidence = args
+        .get("evidence")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let status = args
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("active");
+    let files = json_string_array(args, "files");
+
+    if summary.is_none() && next_step.is_none() && evidence.is_none() && files.is_empty() {
+        return Err(
+            "save requires either content or at least one of summary/next_step/evidence/files"
+                .to_string(),
+        );
+    }
+
+    let mut lines = vec![
+        format!("# {title}"),
+        format!("cwd: {cwd}"),
+        format!("slot: {slot}"),
+        format!("status: {status}"),
+        format!("updated_at: {}", unix_now_secs()),
+    ];
+    if let Some(session_id) = session_id {
+        lines.push(format!("session_id: {session_id}"));
+    }
+    if let Some(summary) = summary {
+        lines.extend([
+            "".to_string(),
+            "## Summary".to_string(),
+            summary.to_string(),
+        ]);
+    }
+    if let Some(next_step) = next_step {
+        lines.extend([
+            "".to_string(),
+            "## Next Step".to_string(),
+            next_step.to_string(),
+        ]);
+    }
+    if let Some(evidence) = evidence {
+        lines.extend([
+            "".to_string(),
+            "## Evidence".to_string(),
+            evidence.to_string(),
+        ]);
+    }
+    if !files.is_empty() {
+        lines.push(String::new());
+        lines.push("## Files".to_string());
+        lines.extend(files.iter().map(|f| format!("- {f}")));
+    }
+    let content = lines.join("\n");
+    let (content, truncated, total_chars) = truncate_chars(&content, WORK_MEMORY_MAX_CONTENT_CHARS);
+    Ok((content, truncated, total_chars))
+}
+
+fn build_precompact_work_memory_content(
+    conversation_text: &str,
+    cwd: &str,
+    session_id: Option<&str>,
+) -> (String, bool, usize) {
+    let (excerpt, truncated, total_chars) =
+        tail_chars(conversation_text, WORK_MEMORY_PRECOMPACT_CHARS);
+    let mut lines = vec![
+        "# PreCompact Work Memory".to_string(),
+        format!("cwd: {cwd}"),
+        "slot: precompact".to_string(),
+        "source: session_lifecycle_step(precompact)".to_string(),
+        format!("updated_at: {}", unix_now_secs()),
+    ];
+    if let Some(session_id) = session_id {
+        lines.push(format!("session_id: {session_id}"));
+    }
+    lines.extend([
+        String::new(),
+        "## Recent Context Excerpt".to_string(),
+        excerpt,
+    ]);
+    (lines.join("\n"), truncated, total_chars)
+}
+
+fn format_work_memory_block(
+    rows: &[MemoryRecord],
+    is_compact: bool,
+    snippet_len: usize,
+) -> Option<Vec<String>> {
+    let rows: Vec<MemoryRecord> = rows
+        .iter()
+        .filter(|r| r.status == "active")
+        .take(4)
+        .cloned()
+        .collect();
+    if rows.is_empty() {
+        return None;
+    }
+    let mut out = vec![
+        if is_compact {
+            "=== Active Work Memory ===".to_string()
+        } else {
+            "=== Active Work Memory (short-lived scratchpad) ===".to_string()
+        },
+        String::new(),
+    ];
+    out.extend(format_bootstrap_memory_rows(&rows, snippet_len));
+    out.push(String::new());
+    Some(out)
+}
+
+async fn save_precompact_work_memory_snapshot(
+    hub: &Hub,
+    cwd: &str,
+    session_id: Option<&str>,
+    conversation_text: &str,
+) -> Value {
+    let store = match &hub.store {
+        Some(s) => s.clone(),
+        None => return json!({ "saved": false, "reason": "no store configured" }),
+    };
+    let (content, truncated, source_chars) =
+        build_precompact_work_memory_content(conversation_text, cwd, session_id);
+    let key = work_memory_key(cwd, session_id, "precompact");
+    let scope = work_memory_scope(cwd);
+    let mut tags = vec![
+        "work_memory".to_string(),
+        "source:precompact".to_string(),
+        "ttl:14d".to_string(),
+    ];
+    if let Some(session_id) = session_id {
+        tags.push(format!("session:{session_id}"));
+    }
+    let mem = MemoryRecord {
+        key: key.clone(),
+        kind: WORK_MEMORY_KIND.to_string(),
+        content,
+        tags,
+        related_keys: vec![],
+        scope: Some(scope.clone()),
+        created_at: 0,
+        updated_at: 0,
+        last_accessed_at: 0,
+        access_count: 0,
+        importance: 0.62,
+        status: "active".to_string(),
+        trigger_pattern: None,
+        superseded_by: None,
+    };
+    match store.memory_save(&mem).await {
+        Ok(()) => json!({
+            "saved": true,
+            "key": key,
+            "scope": scope,
+            "source_chars": source_chars,
+            "truncated": truncated,
+        }),
+        Err(e) => json!({ "saved": false, "error": e.to_string() }),
+    }
+}
+
+pub struct WorkMemoryTool {
+    hub: Hub,
+}
+impl WorkMemoryTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for WorkMemoryTool {
+    fn name(&self) -> &'static str {
+        "work_memory"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Manage a short-lived project/session scratchpad outside the model \
+                 context. Use it to preserve active task state across context compaction; \
+                 durable lessons and decisions still belong in memory_save."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "op": {
+                        "type": "string",
+                        "enum": ["save", "list", "get", "clear"],
+                        "default": "list",
+                        "description": "save overwrites a project/session slot; list returns recent work memories; get reads one key; clear deletes one slot/key."
+                    },
+                    "cwd": { "type": "string", "description": "Project path for scoping. Defaults to current working directory." },
+                    "session_id": { "type": "string", "description": "Optional session namespace. Omit for a shared project slot." },
+                    "slot": { "type": "string", "default": "active", "description": "Short slot name, e.g. active, release, precompact." },
+                    "key": { "type": "string", "description": "Explicit key for get/clear. If omitted for clear, cwd/session_id/slot derives the key." },
+                    "title": { "type": "string" },
+                    "summary": { "type": "string" },
+                    "next_step": { "type": "string" },
+                    "evidence": { "type": "string" },
+                    "files": { "type": "array", "items": { "type": "string" }, "default": [] },
+                    "content": { "type": "string", "description": "Optional full Markdown content. Capped at 12000 chars." },
+                    "status": { "type": "string", "default": "active" },
+                    "tags": { "type": "array", "items": { "type": "string" }, "default": [] },
+                    "ttl_days": { "type": "integer", "minimum": 1, "maximum": 90, "default": 14 },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 8 },
+                    "compact": { "type": "boolean", "description": "When listing, return compact row summaries. Defaults true for Codex compact profiles." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let op = args
+            .get("op")
+            .and_then(|v| v.as_str())
+            .unwrap_or("list")
+            .trim()
+            .to_lowercase();
+        let cwd = work_memory_cwd(&args);
+        let session_id = args
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let slot = args
+            .get("slot")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(WORK_MEMORY_DEFAULT_SLOT);
+
+        match op.as_str() {
+            "save" => {
+                let (content, truncated, total_chars) =
+                    match build_work_memory_content(&args, &cwd, session_id, slot) {
+                        Ok(v) => v,
+                        Err(e) => return Ok(ToolResult::error(e)),
+                    };
+                let key = args
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| work_memory_key(&cwd, session_id, slot));
+                let scope = work_memory_scope(&cwd);
+                let ttl_days = args
+                    .get("ttl_days")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(14)
+                    .clamp(1, 90);
+                let mut tags = vec![
+                    "work_memory".to_string(),
+                    format!(
+                        "slot:{}",
+                        sanitize_work_memory_component(slot, WORK_MEMORY_DEFAULT_SLOT, 48)
+                    ),
+                    format!("ttl:{ttl_days}d"),
+                ];
+                if let Some(session_id) = session_id {
+                    tags.push(format!("session:{session_id}"));
+                }
+                tags.extend(json_string_array(&args, "tags"));
+                tags.sort();
+                tags.dedup();
+                let mem = MemoryRecord {
+                    key: key.clone(),
+                    kind: WORK_MEMORY_KIND.to_string(),
+                    content,
+                    tags,
+                    related_keys: vec![],
+                    scope: Some(scope.clone()),
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.65,
+                    status: "active".to_string(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                };
+                store.memory_save(&mem).await?;
+                Ok(ToolResult::json_text(&json!({
+                    "saved": true,
+                    "key": key,
+                    "scope": scope,
+                    "slot": slot,
+                    "content_chars": mem.content.chars().count(),
+                    "source_chars": total_chars,
+                    "truncated": truncated,
+                })))
+            }
+            "list" => {
+                let limit = args
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(8)
+                    .clamp(1, 50) as u32;
+                let compact = args
+                    .get("compact")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or_else(compact_mcp_output_default);
+                let rows = store
+                    .list_memories_in_scope(
+                        &cwd,
+                        Some(WORK_MEMORY_KIND),
+                        MemoryListSort::Recent,
+                        limit,
+                    )
+                    .await?;
+                if compact {
+                    let rows: Vec<Value> = rows
+                        .into_iter()
+                        .map(|r| {
+                            let (snippet, truncated, total_chars) = truncate_chars(&r.content, 240);
+                            json!({
+                                "key": r.key,
+                                "scope": r.scope,
+                                "updated_at": r.updated_at,
+                                "tags": r.tags,
+                                "snippet": snippet,
+                                "truncated": truncated,
+                                "content_chars": total_chars,
+                            })
+                        })
+                        .collect();
+                    Ok(ToolResult::json_text(&json!({
+                        "cwd": cwd,
+                        "kind": WORK_MEMORY_KIND,
+                        "rows": rows,
+                    })))
+                } else {
+                    Ok(ToolResult::json_text(
+                        &serde_json::to_value(rows).unwrap_or(Value::Null),
+                    ))
+                }
+            }
+            "get" => {
+                let key = match args.get("key").and_then(|v| v.as_str()) {
+                    Some(s) if !s.trim().is_empty() => s.trim(),
+                    _ => return Ok(ToolResult::error("get requires key")),
+                };
+                match store.memory_get(key).await? {
+                    Some(row) if row.kind == WORK_MEMORY_KIND => Ok(ToolResult::json_text(
+                        &serde_json::to_value(row).unwrap_or(Value::Null),
+                    )),
+                    Some(_) => Ok(ToolResult::error("key exists but is not work_memory")),
+                    None => Ok(ToolResult::error("work memory key not found")),
+                }
+            }
+            "clear" => {
+                let key = args
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| work_memory_key(&cwd, session_id, slot));
+                let deleted = store.memory_delete(&key).await?;
+                Ok(ToolResult::json_text(
+                    &json!({ "deleted": deleted, "key": key }),
+                ))
+            }
+            other => Ok(ToolResult::error(format!(
+                "unknown work_memory op: {other} (expected save|list|get|clear)"
+            ))),
+        }
+    }
+}
+
 pub struct MemoryCompactTool {
     hub: Hub,
 }
@@ -8216,6 +8734,7 @@ const BUDGET_SEED: usize = 200;
 const BUDGET_PERCEPTION: usize = 150;
 const BUDGET_LETTER_EACH: usize = 150;
 const BUDGET_FEEDBACK_PREAMBLE: usize = 300;
+const BUDGET_WORK_MEMORY: usize = 260;
 const BUDGET_DECISIONS_DUE: usize = 200;
 const BUDGET_ERROR_PATTERNS: usize = 200;
 const BUDGET_BOOTSTRAP_ROWS: usize = 500;
@@ -8574,6 +9093,19 @@ impl McpTool for SessionBootstrapTool {
             let picked = pick_top_feedback(feedback_pool, 5, now_ts);
             if let Some(block) = format_feedback_preamble_block(&picked, is_compact, snippet_len) {
                 lines.extend(cap_block_lines(block, BUDGET_FEEDBACK_PREAMBLE));
+            }
+        }
+
+        // Active work memory is a short-lived scratchpad for the task in
+        // flight. It is intentionally separate from durable lesson/decision
+        // rows so context-compaction recovery does not pollute long-term memory.
+        {
+            let work_rows = store
+                .list_memories_in_scope(&cwd, Some(WORK_MEMORY_KIND), MemoryListSort::Recent, 8)
+                .await
+                .unwrap_or_default();
+            if let Some(block) = format_work_memory_block(&work_rows, is_compact, 180) {
+                lines.extend(cap_block_lines(block, BUDGET_WORK_MEMORY));
             }
         }
 
@@ -14514,6 +15046,11 @@ impl McpTool for SessionLifecycleStepTool {
                     "frontend": { "type": "string" },
                     "conversation_text": { "type": "string" },
                     "session_id": { "type": "string" },
+                    "save_work_memory": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "For precompact, save a capped work_memory scratch snapshot before curation/finalize."
+                    },
                     "max_items": { "type": "integer" },
                     "dry_run": { "type": "boolean" },
                     "implicit_score_threshold": { "type": "number" },
@@ -14580,6 +15117,28 @@ impl McpTool for SessionLifecycleStepTool {
                         ));
                     }
                 };
+                let dry_run = args
+                    .get("dry_run")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let cwd = work_memory_cwd(&args);
+                let session_id = args
+                    .get("session_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty());
+                let save_work_memory = args
+                    .get("save_work_memory")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                let work_memory = if save_work_memory && !dry_run {
+                    save_precompact_work_memory_snapshot(&self.hub, &cwd, session_id, &conv).await
+                } else {
+                    json!({
+                        "saved": false,
+                        "reason": if dry_run { "dry_run" } else { "disabled" }
+                    })
+                };
                 let mut curate_args = json!({ "conversation_text": conv });
                 for k in [
                     "session_id",
@@ -14616,6 +15175,7 @@ impl McpTool for SessionLifecycleStepTool {
 
                 let merged = json!({
                     "step": "precompact",
+                    "work_memory": work_memory,
                     "session_curate": tool_result_first_json(&curate),
                     "session_finalize": tool_result_first_json(&finalize),
                 });
@@ -18305,6 +18865,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "memory_list"
             | "memory_delete"
             | "memory_neighbors"
+            | "work_memory"
             | "session_bootstrap"
             | "session_finalize"
             | "skills_recommend"
@@ -18353,6 +18914,7 @@ fn hook_lifecycle_tool(tool_name: &str) -> bool {
             | "session_curate"
             | "session_finalize"
             | "session_lifecycle_step"
+            | "work_memory"
             | "pet_state_get"
             | "pet_state_set"
             | "pet_state_ritual"
@@ -18598,6 +19160,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         policy,
         Tier::Essential,
         Arc::new(MemoryNeighborsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(WorkMemoryTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -20311,6 +20879,17 @@ fn unescape_keys(s: &str) -> String {
 mod tests {
     use super::*;
 
+    fn result_text(res: &ToolResult) -> String {
+        match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            other => panic!("expected text result, got {other:?}"),
+        }
+    }
+
+    fn result_json(res: &ToolResult) -> Value {
+        serde_json::from_str(&result_text(res)).expect("valid json result")
+    }
+
     #[test]
     fn compact_output_defaults_only_for_codex_or_compact_profile() {
         assert!(compact_mcp_output_default_for_policy(
@@ -20334,6 +20913,148 @@ mod tests {
             "xiao_shu_action_request"
         ));
         assert!(codex_lean_tool("xiao_shu_action_request"));
+    }
+
+    #[test]
+    fn work_memory_key_is_stable_and_sanitized() {
+        let a = work_memory_key(
+            "/Users/pallasting/Projects/agent-bridge",
+            Some("session/With Spaces"),
+            "Active Slot",
+        );
+        let b = work_memory_key(
+            "/Users/pallasting/Projects/agent-bridge",
+            Some("session/With Spaces"),
+            "Active Slot",
+        );
+        assert_eq!(a, b);
+        assert!(a.starts_with("work_memory_"));
+        assert!(a.contains("_session-with-spaces_active-slot"));
+    }
+
+    #[tokio::test]
+    async fn work_memory_save_list_get_clear_roundtrip() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let tool = WorkMemoryTool::new(hub);
+        let ctx = ToolContext::default();
+        let cwd = "/tmp/agent-bridge-work-memory-test";
+
+        let saved = tool
+            .execute(
+                json!({
+                    "op": "save",
+                    "cwd": cwd,
+                    "session_id": "sess-1",
+                    "slot": "active",
+                    "summary": "Preserve the active implementation state across compaction.",
+                    "next_step": "Run the targeted tests.",
+                    "files": ["crates/bridge/src/mcp_tools.rs"],
+                }),
+                &ctx,
+            )
+            .await
+            .expect("save ok");
+        let saved = result_json(&saved);
+        assert_eq!(saved["saved"], true);
+        let key = saved["key"].as_str().expect("key").to_string();
+
+        let listed = tool
+            .execute(
+                json!({"op": "list", "cwd": cwd, "compact": true, "limit": 4}),
+                &ctx,
+            )
+            .await
+            .expect("list ok");
+        let listed = result_json(&listed);
+        assert_eq!(listed["rows"].as_array().expect("rows").len(), 1);
+        assert!(listed["rows"][0]["snippet"]
+            .as_str()
+            .expect("snippet")
+            .contains("Preserve the active implementation state"));
+
+        let got = tool
+            .execute(json!({"op": "get", "key": key}), &ctx)
+            .await
+            .expect("get ok");
+        let got = result_json(&got);
+        assert_eq!(got["kind"], WORK_MEMORY_KIND);
+
+        let cleared = tool
+            .execute(
+                json!({
+                    "op": "clear",
+                    "cwd": cwd,
+                    "session_id": "sess-1",
+                    "slot": "active",
+                }),
+                &ctx,
+            )
+            .await
+            .expect("clear ok");
+        assert_eq!(result_json(&cleared)["deleted"], true);
+    }
+
+    #[tokio::test]
+    async fn session_bootstrap_surfaces_work_memory_block() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let ctx = ToolContext::default();
+        let cwd = "/tmp/agent-bridge-work-memory-bootstrap";
+
+        WorkMemoryTool::new(hub.clone())
+            .execute(
+                json!({
+                    "op": "save",
+                    "cwd": cwd,
+                    "slot": "active",
+                    "summary": "Bootstrap should surface this scratchpad note.",
+                    "next_step": "Continue from the work memory block.",
+                }),
+                &ctx,
+            )
+            .await
+            .expect("save work memory");
+
+        let boot = SessionBootstrapTool::new(hub)
+            .execute(
+                json!({"cwd": cwd, "frontend": "claude-code", "limit": 5}),
+                &ctx,
+            )
+            .await
+            .expect("bootstrap ok");
+        let text = result_text(&boot);
+        assert!(text.contains("Active Work Memory"));
+        assert!(text.contains("Bootstrap should surface this scratchpad note"));
+    }
+
+    #[tokio::test]
+    async fn lifecycle_precompact_saves_work_memory_snapshot() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let ctx = ToolContext::default();
+        let cwd = "/tmp/agent-bridge-work-memory-precompact";
+
+        let res = SessionLifecycleStepTool::new(hub.clone())
+            .execute(
+                json!({
+                    "step": "precompact",
+                    "cwd": cwd,
+                    "session_id": "sess-precompact",
+                    "conversation_text": "handoff: validate work_memory precompact preservation",
+                    "skip_decay": true,
+                    "max_items": 1,
+                }),
+                &ctx,
+            )
+            .await
+            .expect("precompact ok");
+        let body = result_json(&res);
+        assert_eq!(body["work_memory"]["saved"], true);
+
+        let listed = WorkMemoryTool::new(hub)
+            .execute(json!({"op": "list", "cwd": cwd, "compact": true}), &ctx)
+            .await
+            .expect("list work memory");
+        let listed = result_json(&listed);
+        assert_eq!(listed["rows"].as_array().expect("rows").len(), 1);
     }
 
     #[test]
@@ -22072,6 +22793,7 @@ mod tests {
             "memory_search",
             "memory_save",
             "memory_neighbors",
+            "work_memory",
             "session_bootstrap",
             "agent_spawn",
             "plan_save",
@@ -22133,6 +22855,7 @@ mod tests {
         assert!(p.includes(Tier::Essential, "memory_search"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "session_bootstrap"));
+        assert!(p.includes(Tier::Essential, "work_memory"));
         assert!(p.includes(Tier::Niche, "ide_snapshot"));
         // Minimum collab surface: lean keeps read+post+list-threads + presence_list
         // so a lean Codex can still see + reach the whiteboard.
@@ -22159,6 +22882,7 @@ mod tests {
         assert_eq!(p.profile().label(), "standard");
         assert!(p.includes(Tier::Standard, "memory_compact"));
         assert!(p.includes(Tier::Essential, "pet_state_ritual"));
+        assert!(p.includes(Tier::Essential, "work_memory"));
         assert!(!p.includes(Tier::Essential, "shell_exec"));
         assert!(!p.includes(Tier::Essential, "agent_spawn"));
     }
