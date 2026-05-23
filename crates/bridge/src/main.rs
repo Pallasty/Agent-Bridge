@@ -1087,6 +1087,48 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Preview or run one queued Xiao Shu action request through local CLI confirmation.
+    XiaoShuActionRequestAction {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path and voice cooldown state.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive the queue path and default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Queued request id to inspect or consume.
+        #[arg(long)]
+        request_id: String,
+        /// Operator-facing reason. Defaults to the queued request reason.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Mark the local confirmation as explicitly present.
+        #[arg(long)]
+        confirm: bool,
+        /// Invoke the existing CLI-only voice action after confirmation passes.
+        #[arg(long)]
+        emit: bool,
+        /// Ignore cooldown state for this invocation.
+        #[arg(long)]
+        force: bool,
+        /// Cooldown seconds to evaluate and record after a successful emit.
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: i64,
+        /// Optional macOS say voice. Defaults to the policy suggestion or AB_PET_TTS_VOICE.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Optional macOS say rate. Defaults to the policy suggestion or AB_PET_TTS_RATE.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -3026,6 +3068,38 @@ async fn main() -> Result<()> {
                     state.clone(),
                     *all_states,
                     *limit,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::XiaoShuActionRequestAction {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                request_id,
+                reason,
+                confirm,
+                emit,
+                force,
+                cooldown_secs,
+                tts_voice,
+                tts_rate,
+                json: as_json,
+            } => {
+                run_xiao_shu_action_request_action(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    request_id.clone(),
+                    reason.clone(),
+                    *confirm,
+                    *emit,
+                    *force,
+                    *cooldown_secs,
+                    tts_voice.clone(),
+                    *tts_rate,
                     *as_json,
                 )
                 .await
@@ -5731,6 +5805,80 @@ async fn run_xiao_shu_action_requests(
             );
         }
     }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_xiao_shu_action_request_action(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    request_id: String,
+    reason: Option<String>,
+    confirm: bool,
+    emit: bool,
+    force: bool,
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::XiaoShuActionRequestActionOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        request_id: Some(request_id.as_str()),
+        reason: reason.as_deref(),
+        confirm,
+        emit,
+        force,
+        cooldown_secs,
+        tts_voice: tts_voice.as_deref(),
+        tts_rate,
+    };
+    let payload = ab_bridge::avatar_cortex::xiao_shu_action_request_action(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    let action_payload = payload.get("action").unwrap_or(&Value::Null);
+    let action = action_payload.get("action").unwrap_or(&Value::Null);
+    let queue = payload.get("queue").unwrap_or(&Value::Null);
+    println!("xiao shu action request action");
+    println!(
+        "request_id={} state={} prior_state={} pending_before={} confirm={} emit={}",
+        avatar_health_display(payload.get("request_id"), "-"),
+        avatar_health_display(payload.get("state"), "-"),
+        avatar_health_display(payload.get("prior_state"), "-"),
+        avatar_health_display(payload.get("pending_before_action"), "false"),
+        avatar_health_display(payload.get("confirm_requested"), "false"),
+        avatar_health_display(payload.get("emit_requested"), "false")
+    );
+    println!(
+        "actual_emit_invoked={} would_emit={} emitted={} emits_audio={} writes_request_record={}",
+        avatar_health_display(payload.get("actual_emit_invoked"), "false"),
+        avatar_health_display(payload.get("would_emit"), "false"),
+        avatar_health_display(payload.get("emitted"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false"),
+        avatar_health_display(payload.get("writes_request_record"), "false")
+    );
+    println!(
+        "blocked={} reasons={} token={} line={}",
+        avatar_health_display(action.get("blocked"), "true"),
+        avatar_health_display_list(action.get("blocked_reasons"), "none"),
+        avatar_health_display(action.get("selected_token"), "-"),
+        avatar_health_display(action.get("line"), "-")
+    );
+    println!(
+        "queue={} next={}",
+        avatar_health_display(queue.get("path"), "-"),
+        avatar_health_display(payload.get("next_step"), "-")
+    );
     Ok(())
 }
 

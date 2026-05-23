@@ -111,6 +111,22 @@ pub struct XiaoShuActionRequestQueueOptions<'a> {
     pub limit: usize,
 }
 
+#[derive(Clone, Copy)]
+pub struct XiaoShuActionRequestActionOptions<'a> {
+    pub label: Option<&'a str>,
+    pub heartbeat_label: Option<&'a str>,
+    pub project: Option<&'a str>,
+    pub output: Option<&'a Path>,
+    pub request_id: Option<&'a str>,
+    pub reason: Option<&'a str>,
+    pub confirm: bool,
+    pub emit: bool,
+    pub force: bool,
+    pub cooldown_secs: i64,
+    pub tts_voice: Option<&'a str>,
+    pub tts_rate: Option<u64>,
+}
+
 fn home_dir() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -4615,6 +4631,12 @@ fn xiao_shu_action_enqueue_record_from_request(
     });
     let seed_hash = fnv1a_hex16(&serde_json::to_string(&seed).unwrap_or_default());
     let request_id = format!("xsr-{now}-{}", &seed_hash[..8]);
+    let action_preview_command = format!(
+        "agent-bridge avatar xiao-shu-action-request-action --project {project} --request-id {request_id:?} --reason {reason:?} --confirm"
+    );
+    let local_emit_command = format!(
+        "agent-bridge avatar xiao-shu-action-request-action --project {project} --request-id {request_id:?} --reason {reason:?} --confirm --emit"
+    );
 
     json!({
         "schema": 1,
@@ -4645,6 +4667,9 @@ fn xiao_shu_action_enqueue_record_from_request(
         "writes_cooldown_state": false,
         "codex_pet_package_mutation": false,
         "mutates_global_substrate": false,
+        "action_preview_command": action_preview_command,
+        "local_confirm_command": action_preview_command,
+        "local_emit_command": local_emit_command,
         "action_request": request.clone(),
         "source_request": request_payload,
     })
@@ -4714,7 +4739,7 @@ fn xiao_shu_action_request_queue_from_path(
             }
         });
     let queue_exists = queue_path.exists();
-    let mut records = Vec::<Value>::new();
+    let mut latest_by_request = BTreeMap::<String, (usize, Value)>::new();
     let mut state_counts = BTreeMap::<String, usize>::new();
     let mut total_lines = 0usize;
     let mut parsed_records = 0usize;
@@ -4734,21 +4759,34 @@ fn xiao_shu_action_request_queue_from_path(
                 continue;
             };
             parsed_records += 1;
-            let state = vstr(record.get("state")).unwrap_or("unknown").to_string();
-            *state_counts.entry(state.clone()).or_default() += 1;
-
-            if let Some(expected_request_id) = request_id_filter {
-                if vstr(record.get("request_id")) != Some(expected_request_id) {
-                    continue;
-                }
-            }
-            if let Some(expected_state) = state_filter {
-                if state != expected_state {
-                    continue;
-                }
-            }
-            records.push(record);
+            let request_key = vstr(record.get("request_id"))
+                .map(str::trim)
+                .filter(|request_id| !request_id.is_empty())
+                .map(ToString::to_string)
+                .unwrap_or_else(|| format!("line-{total_lines}"));
+            latest_by_request.insert(request_key, (total_lines, record));
         }
+    }
+
+    let mut current_records_by_line = latest_by_request.into_values().collect::<Vec<_>>();
+    current_records_by_line.sort_by_key(|(line_index, _record)| *line_index);
+    let current_records = current_records_by_line.len();
+    let mut records = Vec::<Value>::new();
+    for (_line_index, record) in current_records_by_line {
+        let state = vstr(record.get("state")).unwrap_or("unknown").to_string();
+        *state_counts.entry(state.clone()).or_default() += 1;
+
+        if let Some(expected_request_id) = request_id_filter {
+            if vstr(record.get("request_id")) != Some(expected_request_id) {
+                continue;
+            }
+        }
+        if let Some(expected_state) = state_filter {
+            if state != expected_state {
+                continue;
+            }
+        }
+        records.push(record);
     }
 
     let matching_records = records.len();
@@ -4787,6 +4825,7 @@ fn xiao_shu_action_request_queue_from_path(
             "limit": limit,
             "total_lines": total_lines,
             "parsed_records": parsed_records,
+            "current_records": current_records,
             "parse_errors": parse_errors,
             "matching_records": matching_records,
             "returned_count": records.len(),
@@ -4801,6 +4840,207 @@ pub fn xiao_shu_action_request_queue(opts: &XiaoShuActionRequestQueueOptions<'_>
     let project = opts.project.unwrap_or("agent-bridge");
     let queue_path = xiao_shu_action_request_queue_path(project)?;
     xiao_shu_action_request_queue_from_path(opts, project, &queue_path)
+}
+
+pub fn xiao_shu_action_request_action(
+    opts: &XiaoShuActionRequestActionOptions<'_>,
+) -> Result<Value> {
+    let project = opts.project.unwrap_or("agent-bridge");
+    let request_id = opts
+        .request_id
+        .map(str::trim)
+        .filter(|request_id| !request_id.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("request_id is required"))?;
+    let queue_path = xiao_shu_action_request_queue_path(project)?;
+    let queue_opts = XiaoShuActionRequestQueueOptions {
+        project: Some(project),
+        request_id: Some(request_id),
+        state: None,
+        include_all_states: true,
+        limit: 1,
+    };
+    let queue = xiao_shu_action_request_queue_from_path(&queue_opts, project, &queue_path)?;
+    let record = queue
+        .get("records")
+        .and_then(Value::as_array)
+        .and_then(|records| records.first())
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("xiao shu action request not found: {request_id}"))?;
+    let current_state = vstr(record.get("state")).unwrap_or("unknown");
+    let request = record.get("action_request").unwrap_or(&Value::Null);
+    let track = vstr(record.get("mapped_track"))
+        .or_else(|| vstr(request.get("mapped_track")))
+        .unwrap_or("xiao_shu::alert_peek::medium")
+        .to_string();
+    let reason = opts
+        .reason
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .or_else(|| vstr(record.get("reason")))
+        .unwrap_or("xiao-shu-action-request-action")
+        .to_string();
+    let pending = current_state == "pending_human_confirmation";
+    let action_payload = if pending {
+        let action_opts = AvatarCortexVoiceActionOptions {
+            label: opts.label,
+            heartbeat_label: opts.heartbeat_label,
+            project: Some(project),
+            output: opts.output,
+            requested_track: Some(track.as_str()),
+            reason: Some(reason.as_str()),
+            confirm: opts.confirm,
+            emit: opts.emit,
+            force: opts.force,
+            cooldown_secs: opts.cooldown_secs,
+            tts_voice: opts.tts_voice,
+            tts_rate: opts.tts_rate,
+        };
+        avatar_cortex_voice_action(&action_opts)?
+    } else {
+        json!({
+            "surface": "avatar_cortex_voice_action",
+            "schema": 1,
+            "generated_at": now_secs(),
+            "cli_only": true,
+            "http_available": false,
+            "read_only": true,
+            "dry_run": true,
+            "sidecar_only": true,
+            "mutates_global_substrate": false,
+            "writes_files": false,
+            "writes_cooldown_state": false,
+            "codex_pet_package_mutation": false,
+            "requested_emit": opts.emit,
+            "actual_emit_invoked": false,
+            "would_emit": false,
+            "emitted": false,
+            "emits_audio": false,
+            "emits_notification": false,
+            "action": {
+                "confirmation_state": "blocked_by_queue_state",
+                "confirmed": false,
+                "confirm_flag": opts.confirm,
+                "emit_flag": opts.emit,
+                "blocked": true,
+                "blocked_reasons": ["request_state_not_pending"],
+                "selected_token": track,
+                "line": request.get("line").cloned().unwrap_or(Value::Null),
+                "reason_present": !reason.trim().is_empty(),
+                "allow_policy_override": false,
+                "cooldown_secs": opts.cooldown_secs,
+                "force": opts.force,
+                "tts_voice": opts.tts_voice,
+                "tts_rate": opts.tts_rate,
+                "command_preview": Value::Null,
+            },
+            "source_queue_record": record,
+        })
+    };
+
+    let actual_emit_invoked = vbool(action_payload.get("actual_emit_invoked")).unwrap_or(false);
+    let would_emit = vbool(action_payload.get("would_emit")).unwrap_or(false);
+    let emitted = vbool(action_payload.get("emitted")).unwrap_or(false);
+    let emits_audio = vbool(action_payload.get("emits_audio")).unwrap_or(false);
+    let writes_cooldown_state =
+        vbool(action_payload.get("writes_cooldown_state")).unwrap_or(false);
+    let now = now_secs();
+    let transition_state = if emitted {
+        "emitted"
+    } else if actual_emit_invoked && would_emit {
+        "emit_failed"
+    } else if actual_emit_invoked {
+        "emit_blocked"
+    } else {
+        current_state
+    };
+    let transition_record = if actual_emit_invoked {
+        let record = json!({
+            "schema": 1,
+            "request_id": request_id,
+            "created_at": record.get("created_at").cloned().unwrap_or(Value::Null),
+            "updated_at": now,
+            "state": transition_state,
+            "prior_state": current_state,
+            "project": project,
+            "target": "xiao-shu",
+            "actor": "local-cli",
+            "intent": record.get("intent").cloned().unwrap_or_else(|| json!("voice_alert")),
+            "message": record.get("message").cloned().unwrap_or(Value::Null),
+            "reason": reason,
+            "mapped_track": track,
+            "source": "xiao_shu_action_request_action",
+            "queue_path": queue_path.to_string_lossy(),
+            "llm_safe": true,
+            "sidecar_only": true,
+            "direct_pet_control_allowed": false,
+            "direct_llm_emit_allowed": false,
+            "requires_human_confirmation": true,
+            "human_confirmation_present": opts.confirm,
+            "real_emit_requires_local_cli": true,
+            "actual_emit_invoked": actual_emit_invoked,
+            "would_emit": would_emit,
+            "emitted": emitted,
+            "emits_audio": emits_audio,
+            "emits_notification": false,
+            "writes_request_record": true,
+            "writes_cooldown_state": writes_cooldown_state,
+            "codex_pet_package_mutation": false,
+            "mutates_global_substrate": false,
+            "action_request": request.clone(),
+            "source_record": record.clone(),
+            "source_action": action_payload.clone(),
+        });
+        append_jsonl(&queue_path, &record)?;
+        record
+    } else {
+        Value::Null
+    };
+
+    Ok(json!({
+        "surface": "xiao_shu_action_request_action",
+        "schema": 1,
+        "generated_at": now,
+        "cli_only": true,
+        "http_available": false,
+        "read_only": !actual_emit_invoked,
+        "dry_run": !actual_emit_invoked,
+        "llm_safe": true,
+        "sidecar_only": true,
+        "direct_pet_control_allowed": false,
+        "direct_llm_emit_allowed": false,
+        "real_emit_requires_local_cli": true,
+        "http_emit_route_added": false,
+        "codex_pet_package_mutation": false,
+        "mutates_global_substrate": false,
+        "request_id": request_id,
+        "project": project,
+        "prior_state": current_state,
+        "state": transition_state,
+        "pending_before_action": pending,
+        "confirm_requested": opts.confirm,
+        "emit_requested": opts.emit,
+        "actual_emit_invoked": actual_emit_invoked,
+        "would_emit": would_emit,
+        "emitted": emitted,
+        "emits_audio": emits_audio,
+        "emits_notification": false,
+        "writes_files": actual_emit_invoked,
+        "writes_request_record": actual_emit_invoked,
+        "writes_cooldown_state": writes_cooldown_state,
+        "queue": {
+            "project": project,
+            "path": queue_path.to_string_lossy(),
+            "append_only": true,
+        },
+        "record": record,
+        "action": action_payload,
+        "transition_record": transition_record,
+        "next_step": if actual_emit_invoked {
+            "queue state transition appended; inspect xiao-shu-action-requests --all-states for audit history"
+        } else {
+            "review the pending request and rerun this local CLI action with --confirm --emit when the operator wants real audio"
+        },
+    }))
 }
 
 #[cfg(test)]
@@ -6444,6 +6684,14 @@ mod tests {
         assert_eq!(record["writes_cooldown_state"], false);
         assert_eq!(record["codex_pet_package_mutation"], false);
         assert_eq!(record["queue_path"], queue_path.to_string_lossy().as_ref());
+        assert!(record["local_confirm_command"]
+            .as_str()
+            .unwrap()
+            .contains("xiao-shu-action-request-action"));
+        assert!(record["local_emit_command"]
+            .as_str()
+            .unwrap()
+            .contains("--confirm --emit"));
         assert_eq!(record["action_request"]["actor"], "codex");
         assert_eq!(
             record["source_request"]["action_request"]["request_state"],
@@ -6512,6 +6760,7 @@ mod tests {
         assert_eq!(queue["queue"]["exists"], true);
         assert_eq!(queue["queue"]["state_filter"], "pending_human_confirmation");
         assert_eq!(queue["queue"]["parsed_records"], 2);
+        assert_eq!(queue["queue"]["current_records"], 2);
         assert_eq!(queue["queue"]["matching_records"], 2);
         assert_eq!(queue["queue"]["returned_count"], 1);
         assert_eq!(
@@ -6534,6 +6783,82 @@ mod tests {
         .unwrap();
         assert_eq!(one["queue"]["request_id_filter"], request_id);
         assert_eq!(one["records"][0]["request_id"], request_id);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn xiao_shu_action_queue_uses_latest_append_only_state() {
+        let root =
+            std::env::temp_dir().join(format!("agent-bridge-xiao-shu-action-current-{}", now_secs()));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let request_payload = json!({
+            "surface": "xiao_shu_action_request",
+            "read_only": true,
+            "dry_run": true,
+            "llm_safe": true,
+            "action_request": {
+                "actor": "codex",
+                "intent": "voice_alert",
+                "message": "please look",
+                "reason": "unit-test",
+                "mapped_track": "xiao_shu::alert_peek::medium",
+                "request_state": "requires_human_confirmation",
+                "requires_human_confirmation": true,
+                "human_confirmation_present": false,
+                "direct_llm_emit_allowed": false
+            }
+        });
+        let queue_path = root.join("requests.jsonl");
+        let pending = xiao_shu_action_enqueue_record_from_request(
+            request_payload,
+            "agent-bridge",
+            &queue_path,
+            1_779_470_000,
+        );
+        let mut emitted = pending.clone();
+        emitted["updated_at"] = json!(1_779_470_100);
+        emitted["prior_state"] = json!("pending_human_confirmation");
+        emitted["state"] = json!("emitted");
+        emitted["source"] = json!("xiao_shu_action_request_action");
+        emitted["actual_emit_invoked"] = json!(true);
+        emitted["emitted"] = json!(true);
+        append_jsonl(&queue_path, &pending).unwrap();
+        append_jsonl(&queue_path, &emitted).unwrap();
+
+        let pending_view = xiao_shu_action_request_queue_from_path(
+            &XiaoShuActionRequestQueueOptions {
+                project: Some("agent-bridge"),
+                request_id: None,
+                state: None,
+                include_all_states: false,
+                limit: 10,
+            },
+            "agent-bridge",
+            &queue_path,
+        )
+        .unwrap();
+        assert_eq!(pending_view["queue"]["parsed_records"], 2);
+        assert_eq!(pending_view["queue"]["current_records"], 1);
+        assert_eq!(pending_view["queue"]["matching_records"], 0);
+        assert_eq!(pending_view["queue"]["state_counts"]["emitted"], 1);
+
+        let current = xiao_shu_action_request_queue_from_path(
+            &XiaoShuActionRequestQueueOptions {
+                project: Some("agent-bridge"),
+                request_id: pending["request_id"].as_str(),
+                state: None,
+                include_all_states: true,
+                limit: 10,
+            },
+            "agent-bridge",
+            &queue_path,
+        )
+        .unwrap();
+        assert_eq!(current["queue"]["matching_records"], 1);
+        assert_eq!(current["records"][0]["state"], "emitted");
+        assert_eq!(current["records"][0]["request_id"], pending["request_id"]);
 
         let _ = std::fs::remove_dir_all(root);
     }

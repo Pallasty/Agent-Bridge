@@ -3602,6 +3602,25 @@ fn avatar_surface_xiao_shu_action_requests_html(
     let path = avatar_surface_html_json_value(queue.get("path"), "-");
     let mut rows = String::new();
     for record in records {
+        let request_id_raw = record.get("request_id").and_then(Value::as_str).unwrap_or("-");
+        let project_raw = record
+            .get("project")
+            .and_then(Value::as_str)
+            .or(q.project.as_deref())
+            .unwrap_or("agent-bridge");
+        let reason_raw = record
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("operator-confirmed-request");
+        let local_command_raw = record
+            .get("local_emit_command")
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| {
+                format!(
+                    "agent-bridge avatar xiao-shu-action-request-action --project {project_raw} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm --emit"
+                )
+            });
         let request_id = avatar_surface_html_json_value(record.get("request_id"), "-");
         let state = avatar_surface_html_json_value(record.get("state"), "-");
         let actor = avatar_surface_html_json_value(record.get("actor"), "-");
@@ -3614,8 +3633,9 @@ fn avatar_surface_xiao_shu_action_requests_html(
             "-",
         );
         let reason = avatar_surface_html_json_value(record.get("reason"), "-");
+        let local_command = html_escape(&local_command_raw);
         rows.push_str(&format!(
-            r#"<li><strong>{request_id}</strong><span>state={state} actor={actor} intent={intent}</span><span>track={track}</span><span>line={line}</span><span>reason={reason}</span></li>"#
+            r#"<li><strong>{request_id}</strong><span>state={state} actor={actor} intent={intent}</span><span>track={track}</span><span>line={line}</span><span>reason={reason}</span><span>local={local_command}</span></li>"#
         ));
     }
     if rows.is_empty() {

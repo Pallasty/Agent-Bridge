@@ -647,6 +647,7 @@ external watchdogs and non-MCP clients.
 | `agent-bridge avatar cortex-preview` | Voice preview text is visible without emitting audio or notifications |
 | `agent-bridge avatar cortex-voice-gate` | Explicit voice-gate dry-run reports whether a future emit would pass, without emitting audio |
 | `agent-bridge avatar cortex-voice-emit` | CLI-only manual voice adapter can speak one gated line and record cooldown state |
+| `agent-bridge avatar xiao-shu-action-request-action` | Local operator consumes one queued Xiao Shu request; default is dry-run, and `--confirm --emit` appends an audit transition only through the CLI-only voice gate |
 | Standard `avatar_adapter_capabilities` | Tool reports adapter/surface availability without mutating state |
 | Standard `avatar_state_get` | Existing pet sidecar projects to protocol v1 without mutating state |
 | Standard `avatar_surface_snapshot` | Presence rows project to compact read-only `avatars[]` entries |
