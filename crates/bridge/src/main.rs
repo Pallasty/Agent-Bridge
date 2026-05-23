@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing_subscriber::{EnvFilter, prelude::*};
 
+mod doctor;
 mod setup;
 mod shadow_cortex;
 mod skills;
@@ -33,6 +34,16 @@ enum Cmd {
     Daemon,
     /// Run as an MCP stdio server (for `claude mcp add agent-bridge ...`).
     Mcp,
+    /// Deployment self-check: verify the wrapper is intact (not clobbered by a
+    /// direct binary), agent-bridge.real exists, the SVD projection env is
+    /// injected + its artifact resolvable, the running daemon carries the SVD
+    /// env, and MCP servers exec the current binary. Catches silent
+    /// "deployed but didn't take effect" failures. Exits non-zero on any fail.
+    Doctor {
+        /// Emit a JSON report instead of the human-readable table.
+        #[arg(long)]
+        json: bool,
+    },
     /// Install agent-bridge for the chosen frontend.
     ///
     /// `--frontend claude-code` (default): copies the binary to
@@ -2573,6 +2584,11 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Deployment self-check — pure file/process inspection, no Hub.
+    if let Cmd::Doctor { json } = &cmd {
+        return doctor::run_doctor(*json).await;
+    }
+
     // ε-5: worktree-session subcommand. Doesn't need a Hub — pure git
     // CLI wrapping, runs to completion.
     if let Cmd::WorktreeSession { op } = &cmd {
@@ -2876,7 +2892,8 @@ async fn main() -> Result<()> {
         | Cmd::Palace { .. }
         | Cmd::ShellInit { .. }
         | Cmd::WorktreeSession { .. }
-        | Cmd::RescueSnapshot { .. } => unreachable!(),
+        | Cmd::RescueSnapshot { .. }
+        | Cmd::Doctor { .. } => unreachable!(),
     }
 }
 
