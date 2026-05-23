@@ -16052,6 +16052,66 @@ pub fn compute_link_suggestions(
     scored
 }
 
+fn memory_string_array_arg(args: &Value, key: &str, default: &[&str]) -> Vec<String> {
+    args.get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_else(|| default.iter().map(|s| (*s).to_string()).collect())
+}
+
+fn memory_has_any_tag(rec: &MemoryRecord, tags: &[String]) -> bool {
+    rec.tags
+        .iter()
+        .any(|tag| tags.iter().any(|skip| tag.eq_ignore_ascii_case(skip)))
+}
+
+fn memory_kind_is_any(rec: &MemoryRecord, kinds: &[String]) -> bool {
+    kinds.iter().any(|kind| rec.kind.eq_ignore_ascii_case(kind))
+}
+
+fn memory_scope_value(rec: &MemoryRecord) -> Option<&str> {
+    rec.scope
+        .as_deref()
+        .map(str::trim)
+        .filter(|scope| !scope.is_empty())
+}
+
+fn memory_scopes_compatible(source: &MemoryRecord, target: &MemoryRecord, required: bool) -> bool {
+    if !required {
+        return true;
+    }
+    match (memory_scope_value(source), memory_scope_value(target)) {
+        (Some(a), Some(b)) => a == b || a == "global" || b == "global",
+        _ => true,
+    }
+}
+
+fn memory_link_orphan_candidate_allowed(
+    source: &MemoryRecord,
+    target: &MemoryRecord,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    require_scope_compatible: bool,
+) -> bool {
+    source.key != target.key
+        && !memory_has_any_tag(target, skip_tags)
+        && !memory_kind_is_any(target, skip_kinds)
+        && memory_scopes_compatible(source, target, require_scope_compatible)
+}
+
+fn undirected_memory_pair_key(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
+}
+
 // ===========================================================================
 //          memory_link_orphans (ζ-7 — clear orphan backlog)
 // ===========================================================================
@@ -16091,10 +16151,11 @@ impl McpTool for MemoryLinkOrphansTool {
                         "type": "number",
                         "minimum": 0.0,
                         "maximum": 2.0,
-                        "default": 0.7,
+                        "default": 0.85,
                         "description": "Top candidate must score ≥ this to auto-link. \
-                            0.7 is conservative (tag_overlap ×0.4 + same_prefix ×0.3 + jaccard); \
-                            lower for higher recall, raise for higher precision."
+                            Default 0.85 is conservative after the 2026-05-23 PageRank-readiness \
+                            dry-run showed 0.7 would link too many volatile alert/work-memory \
+                            clusters. Lower for higher recall, raise for higher precision."
                     },
                     "min_content_len": {
                         "type": "integer",
@@ -16114,13 +16175,35 @@ impl McpTool for MemoryLinkOrphansTool {
                     "skip_tags": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "default": ["auto_curated"],
+                        "default": ["auto_curated", "alert", "ttl:7d"],
                         "description": "ζ-11 noise-hub fix. Orphans whose tags overlap this list \
                             are skipped (don't pick a target) AND candidates whose tags overlap \
-                            this list cannot be picked as targets. Default `['auto_curated']` \
-                            prevents `curated_implicit_*` stubs from collapsing onto a single \
-                            sibling — the ζ-9 wet-run showed 82 stubs all linking to the \
-                            lex-earliest auto_curated sibling, creating a degree-84 noise hub."
+                            this list cannot be picked as targets. Defaults skip auto-curated \
+                            stubs, alert bursts, and short-lived work-memory TTL rows before \
+                            graph centrality can amplify them."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["alert", "work_memory", "session_handoff", "snapshot"],
+                        "description": "ζ-20 conservative graph-hygiene guardrail. Source \
+                            orphans and candidate targets with these memory kinds are skipped. \
+                            Empty array disables. Defaults avoid linking volatile alerts, \
+                            scratch work memory, broad session handoffs, and snapshots."
+                    },
+                    "require_scope_compatible": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, candidates with a concrete non-global scope \
+                            must match the orphan's concrete non-global scope. Global or missing \
+                            scopes remain compatible so older memories still participate."
+                    },
+                    "dedupe_undirected_pairs": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, avoid writing both A→B and B→A `relates` \
+                            edges in the same run. `relates` is treated as symmetric for \
+                            hygiene purposes."
                     },
                     "max_inbound_per_target": {
                         "type": "integer",
@@ -16145,7 +16228,7 @@ impl McpTool for MemoryLinkOrphansTool {
         let threshold = args
             .get("threshold")
             .and_then(|v| v.as_f64())
-            .unwrap_or(0.7);
+            .unwrap_or(0.85);
         let min_content_len = args
             .get("min_content_len")
             .and_then(|v| v.as_u64())
@@ -16155,17 +16238,24 @@ impl McpTool for MemoryLinkOrphansTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(100)
             .min(500) as usize;
-        // ζ-11 skip_tags: default ["auto_curated"] excludes both source orphans
-        // AND candidate targets whose tags overlap. Empty array disables.
-        let skip_tags: Vec<String> = args
-            .get("skip_tags")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_else(|| vec!["auto_curated".to_string()]);
+        // ζ-20 defaults: keep volatile rows out of durable graph hygiene so
+        // later PageRank-like priors do not amplify alert/scratch clusters.
+        // Empty arrays intentionally disable the corresponding filters.
+        let skip_tags =
+            memory_string_array_arg(&args, "skip_tags", &["auto_curated", "alert", "ttl:7d"]);
+        let skip_kinds = memory_string_array_arg(
+            &args,
+            "skip_kinds",
+            &["alert", "work_memory", "session_handoff", "snapshot"],
+        );
+        let require_scope_compatible = args
+            .get("require_scope_compatible")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let dedupe_undirected_pairs = args
+            .get("dedupe_undirected_pairs")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
         let max_inbound_per_target = args
             .get("max_inbound_per_target")
             .and_then(|v| v.as_u64())
@@ -16190,6 +16280,7 @@ impl McpTool for MemoryLinkOrphansTool {
         let mut orphans: Vec<MemoryRecord> = Vec::new();
         let mut examined: u64 = 0;
         let mut skipped_blacklisted_orphan: u64 = 0;
+        let mut skipped_blacklisted_kind: u64 = 0;
         for rec in all.iter() {
             if rec.kind == "skill" {
                 continue;
@@ -16207,8 +16298,12 @@ impl McpTool for MemoryLinkOrphansTool {
             }
             // ζ-11 source-side blacklist: stubs tagged `auto_curated` should
             // decay/archive naturally, not get force-linked.
-            if !skip_tags.is_empty() && rec.tags.iter().any(|t| skip_tags.contains(t)) {
+            if memory_has_any_tag(rec, &skip_tags) {
                 skipped_blacklisted_orphan += 1;
+                continue;
+            }
+            if memory_kind_is_any(rec, &skip_kinds) {
+                skipped_blacklisted_kind += 1;
                 continue;
             }
             orphans.push(rec.clone());
@@ -16223,14 +16318,32 @@ impl McpTool for MemoryLinkOrphansTool {
         let mut linked = 0u64;
         let mut skipped_low_score = 0u64;
         let mut skipped_overloaded_target = 0u64;
+        let mut skipped_duplicate_pair = 0u64;
+        let mut skipped_no_compatible_target = 0u64;
         let mut target_inbound_this_run: std::collections::HashMap<String, u32> =
             std::collections::HashMap::new();
+        let mut linked_pairs_this_run: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
         let mut decisions: Vec<Value> = Vec::new();
         for orphan in &orphans {
             // already_linked is empty since orphan has no edges by definition.
             let already_linked: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
-            let sugg = compute_link_suggestions(orphan, &all, &already_linked, 5, &skip_tags);
+            let candidate_pool: Vec<MemoryRecord> = all
+                .iter()
+                .filter(|candidate| {
+                    memory_link_orphan_candidate_allowed(
+                        orphan,
+                        candidate,
+                        &skip_tags,
+                        &skip_kinds,
+                        require_scope_compatible,
+                    )
+                })
+                .cloned()
+                .collect();
+            let sugg =
+                compute_link_suggestions(orphan, &candidate_pool, &already_linked, 5, &skip_tags);
             if sugg.is_empty() {
                 skipped_low_score += 1;
                 continue;
@@ -16243,6 +16356,8 @@ impl McpTool for MemoryLinkOrphansTool {
             // Walk candidates in confidence order; pick the first that
             // still has headroom under the per-target inbound cap.
             let mut chosen: Option<(String, f64, String)> = None;
+            let mut saw_overloaded_target = false;
+            let mut saw_duplicate_pair = false;
             for (target, conf, reason) in sugg.iter() {
                 if *conf < threshold {
                     break;
@@ -16250,15 +16365,26 @@ impl McpTool for MemoryLinkOrphansTool {
                 if target == &orphan.key {
                     continue;
                 }
+                let pair = undirected_memory_pair_key(&orphan.key, target);
+                if dedupe_undirected_pairs && linked_pairs_this_run.contains(&pair) {
+                    saw_duplicate_pair = true;
+                    skipped_duplicate_pair += 1;
+                    continue;
+                }
                 let cur = target_inbound_this_run.get(target).copied().unwrap_or(0);
                 if cur >= max_inbound_per_target {
+                    saw_overloaded_target = true;
                     continue;
                 }
                 chosen = Some((target.clone(), *conf, reason.clone()));
                 break;
             }
             let Some((target, conf, reason)) = chosen else {
-                skipped_overloaded_target += 1;
+                if saw_overloaded_target {
+                    skipped_overloaded_target += 1;
+                } else if !saw_duplicate_pair {
+                    skipped_no_compatible_target += 1;
+                }
                 continue;
             };
             if !dry_run {
@@ -16266,6 +16392,9 @@ impl McpTool for MemoryLinkOrphansTool {
                     .memory_link(&orphan.key, &target, "relates", 1.0)
                     .await
                     .ok();
+            }
+            if dedupe_undirected_pairs {
+                linked_pairs_this_run.insert(undirected_memory_pair_key(&orphan.key, &target));
             }
             *target_inbound_this_run.entry(target.clone()).or_insert(0) += 1;
             linked += 1;
@@ -16282,13 +16411,19 @@ impl McpTool for MemoryLinkOrphansTool {
             "threshold": threshold,
             "min_content_len": min_content_len,
             "skip_tags": skip_tags,
+            "skip_kinds": skip_kinds,
+            "require_scope_compatible": require_scope_compatible,
+            "dedupe_undirected_pairs": dedupe_undirected_pairs,
             "max_inbound_per_target": max_inbound_per_target,
             "examined": examined,
             "eligible_orphans": orphans.len(),
             "linked": linked,
             "skipped_low_score": skipped_low_score,
             "skipped_blacklisted_orphan": skipped_blacklisted_orphan,
+            "skipped_blacklisted_kind": skipped_blacklisted_kind,
             "skipped_overloaded_target": skipped_overloaded_target,
+            "skipped_duplicate_pair": skipped_duplicate_pair,
+            "skipped_no_compatible_target": skipped_no_compatible_target,
             "links": decisions,
         })))
     }
@@ -24322,6 +24457,18 @@ mod tests {
         }
     }
 
+    fn mk_mem_scoped(
+        key: &str,
+        kind: &str,
+        content: &str,
+        tags: &[&str],
+        scope: Option<&str>,
+    ) -> MemoryRecord {
+        let mut rec = mk_mem(key, kind, content, tags);
+        rec.scope = scope.map(|s| s.to_string());
+        rec
+    }
+
     #[test]
     fn link_suggest_empty_blacklist_preserves_top_match() {
         // baseline: stubs tied by tag/prefix; no blacklist → highest still wins
@@ -24420,6 +24567,121 @@ mod tests {
             compute_link_suggestions(&src, &cands, &std::collections::HashSet::new(), 5, &skip);
         let keys: Vec<&str> = out.iter().map(|(k, _, _)| k.as_str()).collect();
         assert_eq!(keys, vec!["c3"]);
+    }
+
+    #[test]
+    fn link_orphan_candidate_guard_rejects_volatile_kinds_and_tags() {
+        let source = mk_mem(
+            "source",
+            "decision",
+            "shared shared shared shared",
+            &["topic"],
+        );
+        let skip_tags = vec!["alert".to_string(), "ttl:7d".to_string()];
+        let skip_kinds = vec!["alert".to_string(), "work_memory".to_string()];
+
+        let alert_target = mk_mem(
+            "alert_target",
+            "decision",
+            "shared shared shared shared",
+            &["topic", "alert"],
+        );
+        assert!(!memory_link_orphan_candidate_allowed(
+            &source,
+            &alert_target,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        ));
+
+        let work_memory_target = mk_mem(
+            "scratch_target",
+            "work_memory",
+            "shared shared shared shared",
+            &["topic"],
+        );
+        assert!(!memory_link_orphan_candidate_allowed(
+            &source,
+            &work_memory_target,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        ));
+
+        let durable_target = mk_mem(
+            "durable_target",
+            "decision",
+            "shared shared shared shared",
+            &["topic"],
+        );
+        assert!(memory_link_orphan_candidate_allowed(
+            &source,
+            &durable_target,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        ));
+    }
+
+    #[test]
+    fn link_orphan_candidate_guard_rejects_mismatched_project_scope() {
+        let source = mk_mem_scoped(
+            "source",
+            "decision",
+            "shared shared shared shared",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let mismatch = mk_mem_scoped(
+            "target_b",
+            "decision",
+            "shared shared shared shared",
+            &["topic"],
+            Some("project:/repo/b"),
+        );
+        let global = mk_mem_scoped(
+            "target_global",
+            "decision",
+            "shared shared shared shared",
+            &["topic"],
+            Some("global"),
+        );
+        let skip_tags: Vec<String> = Vec::new();
+        let skip_kinds: Vec<String> = Vec::new();
+
+        assert!(!memory_link_orphan_candidate_allowed(
+            &source,
+            &mismatch,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        ));
+        assert!(memory_link_orphan_candidate_allowed(
+            &source,
+            &mismatch,
+            &skip_tags,
+            &skip_kinds,
+            false,
+        ));
+        assert!(memory_link_orphan_candidate_allowed(
+            &source,
+            &global,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        ));
+    }
+
+    #[test]
+    fn undirected_memory_pair_key_is_order_independent() {
+        assert_eq!(
+            undirected_memory_pair_key("b", "a"),
+            undirected_memory_pair_key("a", "b")
+        );
+        assert_eq!(
+            undirected_memory_pair_key("a", "b"),
+            ("a".to_string(), "b".to_string())
+        );
     }
 
     #[test]

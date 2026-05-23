@@ -77,6 +77,44 @@ The tool is registered as `Tier::Standard` and explicitly allowed in the
 Codex-essential surface because search/ranking diagnosis is a core
 Agent-Bridge self-tuning workflow and has no Codex-native equivalent.
 
+## Graph Hygiene Guardrails
+
+The first dry-run of `memory_link_orphans` after the topology probe confirmed
+that graph hygiene can close many orphan gaps, but also exposed noise:
+
+- default-ish run: 149 likely links from 178 eligible orphans
+- stricter run with alert/snapshot/TTL tags skipped and threshold 0.85: 101
+  likely links from 150 eligible orphans
+- visible risk: repeated `alert-sync-failing-aio2-*` rows and broad
+  `session_handoff_*` rows can become durable graph edges even though they are
+  volatile or too generic for a future centrality prior
+
+Follow-up implementation hardens `memory_link_orphans` before any non-dry-run
+graph hygiene:
+
+- default threshold raised to 0.85
+- default skip tags: `auto_curated`, `alert`, `ttl:7d`
+- default skip kinds: `alert`, `work_memory`, `session_handoff`, `snapshot`
+- candidates must have compatible concrete scopes by default
+- one run will not write both directions of the same `relates` pair
+
+All guardrails are configurable through the tool arguments. The defaults are
+intentionally conservative because false graph edges are more expensive than
+missed edges once centrality is introduced.
+
+First dry-run after the guardrail patch, using new defaults:
+
+- examined: 415
+- eligible orphans: 140
+- candidate links: 85
+- skipped by volatile tag: 78
+- skipped by volatile kind: 14
+- skipped duplicate symmetric pairs: 16
+
+The sample no longer starts with alert/work-memory pairs; remaining candidates
+are mostly durable stage/design chains. This is good enough for continued
+dry-run review, but still not approval to run a write pass automatically.
+
 ## Future path
 
 If `memory_graph_topology` remains healthy over real use, the next experiment
