@@ -1119,6 +1119,9 @@ enum AvatarOp {
         /// Invoke the existing CLI-only voice action after confirmation passes.
         #[arg(long)]
         emit: bool,
+        /// Mark the queued request as reviewed without emitting audio.
+        #[arg(long)]
+        dismiss: bool,
         /// Ignore cooldown state for this invocation.
         #[arg(long)]
         force: bool,
@@ -3091,6 +3094,7 @@ async fn main() -> Result<()> {
                 reason,
                 confirm,
                 emit,
+                dismiss,
                 force,
                 cooldown_secs,
                 tts_voice,
@@ -3106,6 +3110,7 @@ async fn main() -> Result<()> {
                     reason.clone(),
                     *confirm,
                     *emit,
+                    *dismiss,
                     *force,
                     *cooldown_secs,
                     tts_voice.clone(),
@@ -5833,6 +5838,7 @@ async fn run_xiao_shu_action_request_action(
     reason: Option<String>,
     confirm: bool,
     emit: bool,
+    dismiss: bool,
     force: bool,
     cooldown_secs: i64,
     tts_voice: Option<String>,
@@ -5850,6 +5856,7 @@ async fn run_xiao_shu_action_request_action(
         reason: reason.as_deref(),
         confirm,
         emit,
+        dismiss,
         force,
         cooldown_secs,
         tts_voice: tts_voice.as_deref(),
@@ -5866,19 +5873,21 @@ async fn run_xiao_shu_action_request_action(
     let queue = payload.get("queue").unwrap_or(&Value::Null);
     println!("xiao shu action request action");
     println!(
-        "request_id={} state={} prior_state={} pending_before={} confirm={} emit={}",
+        "request_id={} state={} prior_state={} pending_before={} confirm={} emit={} dismiss={}",
         avatar_health_display(payload.get("request_id"), "-"),
         avatar_health_display(payload.get("state"), "-"),
         avatar_health_display(payload.get("prior_state"), "-"),
         avatar_health_display(payload.get("pending_before_action"), "false"),
         avatar_health_display(payload.get("confirm_requested"), "false"),
-        avatar_health_display(payload.get("emit_requested"), "false")
+        avatar_health_display(payload.get("emit_requested"), "false"),
+        avatar_health_display(payload.get("dismiss_requested"), "false")
     );
     println!(
-        "actual_emit_invoked={} would_emit={} emitted={} emits_audio={} writes_request_record={}",
+        "actual_emit_invoked={} would_emit={} emitted={} dismissed={} emits_audio={} writes_request_record={}",
         avatar_health_display(payload.get("actual_emit_invoked"), "false"),
         avatar_health_display(payload.get("would_emit"), "false"),
         avatar_health_display(payload.get("emitted"), "false"),
+        avatar_health_display(payload.get("dismissed"), "false"),
         avatar_health_display(payload.get("emits_audio"), "false"),
         avatar_health_display(payload.get("writes_request_record"), "false")
     );

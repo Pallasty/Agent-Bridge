@@ -123,6 +123,7 @@ pub struct XiaoShuActionRequestActionOptions<'a> {
     pub reason: Option<&'a str>,
     pub confirm: bool,
     pub emit: bool,
+    pub dismiss: bool,
     pub force: bool,
     pub cooldown_secs: i64,
     pub tts_voice: Option<&'a str>,
@@ -5080,7 +5081,64 @@ pub fn xiao_shu_action_request_action(
         .unwrap_or("xiao-shu-action-request-action")
         .to_string();
     let pending = current_state == "pending_human_confirmation";
-    let action_payload = if pending {
+    let action_payload = if opts.dismiss {
+        let mut blocked_reasons = Vec::new();
+        if !pending {
+            blocked_reasons.push(json!("request_state_not_pending"));
+        }
+        if !opts.confirm {
+            blocked_reasons.push(json!("confirm_flag_missing"));
+        }
+        if opts.emit {
+            blocked_reasons.push(json!("emit_flag_conflicts_with_dismiss"));
+        }
+        let blocked = !blocked_reasons.is_empty();
+        json!({
+            "surface": "xiao_shu_action_request_dismiss",
+            "schema": 1,
+            "generated_at": now_secs(),
+            "cli_only": true,
+            "http_available": false,
+            "read_only": blocked,
+            "dry_run": blocked,
+            "sidecar_only": true,
+            "mutates_global_substrate": false,
+            "writes_files": false,
+            "writes_cooldown_state": false,
+            "codex_pet_package_mutation": false,
+            "requested_emit": opts.emit,
+            "actual_emit_invoked": false,
+            "would_emit": false,
+            "emitted": false,
+            "emits_audio": false,
+            "emits_notification": false,
+            "dismiss_requested": true,
+            "dismissed": !blocked,
+            "action": {
+                "confirmation_state": if blocked {
+                    "dismiss_blocked"
+                } else {
+                    "dismissed_without_emit"
+                },
+                "confirmed": opts.confirm,
+                "confirm_flag": opts.confirm,
+                "emit_flag": opts.emit,
+                "dismiss_flag": opts.dismiss,
+                "blocked": blocked,
+                "blocked_reasons": blocked_reasons,
+                "selected_token": track,
+                "line": request.get("line").cloned().unwrap_or(Value::Null),
+                "reason_present": !reason.trim().is_empty(),
+                "allow_policy_override": false,
+                "cooldown_secs": opts.cooldown_secs,
+                "force": opts.force,
+                "tts_voice": opts.tts_voice,
+                "tts_rate": opts.tts_rate,
+                "command_preview": Value::Null,
+            },
+            "source_queue_record": record,
+        })
+    } else if pending {
         let action_opts = AvatarCortexVoiceActionOptions {
             label: opts.label,
             heartbeat_label: opts.heartbeat_label,
@@ -5141,11 +5199,13 @@ pub fn xiao_shu_action_request_action(
     let would_emit = vbool(action_payload.get("would_emit")).unwrap_or(false);
     let emitted = vbool(action_payload.get("emitted")).unwrap_or(false);
     let emits_audio = vbool(action_payload.get("emits_audio")).unwrap_or(false);
-    let writes_cooldown_state =
-        vbool(action_payload.get("writes_cooldown_state")).unwrap_or(false);
+    let dismissed = vbool(action_payload.get("dismissed")).unwrap_or(false);
+    let writes_cooldown_state = vbool(action_payload.get("writes_cooldown_state")).unwrap_or(false);
     let now = now_secs();
     let transition_state = if emitted {
         "emitted"
+    } else if dismissed {
+        "dismissed"
     } else if actual_emit_invoked && would_emit {
         "emit_failed"
     } else if actual_emit_invoked {
@@ -5153,7 +5213,8 @@ pub fn xiao_shu_action_request_action(
     } else {
         current_state
     };
-    let transition_record = if actual_emit_invoked {
+    let transition_written = actual_emit_invoked || dismissed;
+    let transition_record = if transition_written {
         let record = json!({
             "schema": 1,
             "request_id": request_id,
@@ -5180,6 +5241,8 @@ pub fn xiao_shu_action_request_action(
             "actual_emit_invoked": actual_emit_invoked,
             "would_emit": would_emit,
             "emitted": emitted,
+            "dismiss_requested": opts.dismiss,
+            "dismissed": dismissed,
             "emits_audio": emits_audio,
             "emits_notification": false,
             "writes_request_record": true,
@@ -5202,8 +5265,8 @@ pub fn xiao_shu_action_request_action(
         "generated_at": now,
         "cli_only": true,
         "http_available": false,
-        "read_only": !actual_emit_invoked,
-        "dry_run": !actual_emit_invoked,
+        "read_only": !transition_written,
+        "dry_run": !transition_written,
         "llm_safe": true,
         "sidecar_only": true,
         "direct_pet_control_allowed": false,
@@ -5219,13 +5282,15 @@ pub fn xiao_shu_action_request_action(
         "pending_before_action": pending,
         "confirm_requested": opts.confirm,
         "emit_requested": opts.emit,
+        "dismiss_requested": opts.dismiss,
         "actual_emit_invoked": actual_emit_invoked,
         "would_emit": would_emit,
         "emitted": emitted,
+        "dismissed": dismissed,
         "emits_audio": emits_audio,
         "emits_notification": false,
-        "writes_files": actual_emit_invoked,
-        "writes_request_record": actual_emit_invoked,
+        "writes_files": transition_written,
+        "writes_request_record": transition_written,
         "writes_cooldown_state": writes_cooldown_state,
         "queue": {
             "project": project,
@@ -5235,10 +5300,12 @@ pub fn xiao_shu_action_request_action(
         "record": record,
         "action": action_payload,
         "transition_record": transition_record,
-        "next_step": if actual_emit_invoked {
+        "next_step": if dismissed {
+            "queue dismissal transition appended; inspect xiao-shu-action-requests --all-states for audit history"
+        } else if actual_emit_invoked {
             "queue state transition appended; inspect xiao-shu-action-requests --all-states for audit history"
         } else {
-            "review the pending request and rerun this local CLI action with --confirm --emit when the operator wants real audio"
+            "review the pending request and rerun this local CLI action with --confirm --emit for audio or --confirm --dismiss to clear it"
         },
     }))
 }

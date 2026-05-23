@@ -3645,6 +3645,9 @@ fn avatar_surface_xiao_shu_action_requests_html(
                     "agent-bridge avatar xiao-shu-action-request-action --project {project_raw} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm --emit"
                 )
             });
+        let local_dismiss_raw = format!(
+            "agent-bridge avatar xiao-shu-action-request-action --project {project_raw} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm --dismiss"
+        );
         let detail_href_raw = format!(
             "/avatar-surface/xiao-shu-action-requests?project={project}&request_id={request_id}&details=true",
             project = url_query_component(project_raw),
@@ -3664,9 +3667,10 @@ fn avatar_surface_xiao_shu_action_requests_html(
         let reason = avatar_surface_html_json_value(record.get("reason"), "-");
         let local_confirm = html_escape(&local_confirm_raw);
         let local_command = html_escape(&local_command_raw);
+        let local_dismiss = html_escape(&local_dismiss_raw);
         let detail_href = html_escape(&detail_href_raw);
         rows.push_str(&format!(
-            r#"<li><strong>{request_id}</strong><span>state={state} actor={actor} intent={intent}</span><span>track={track}</span><span>line={line}</span><span>reason={reason}</span><span><a href="{detail_href}">detail json</a></span><span>dry_run={local_confirm}</span><span>emit={local_command}</span></li>"#
+            r#"<li><strong>{request_id}</strong><span>state={state} actor={actor} intent={intent}</span><span>track={track}</span><span>line={line}</span><span>reason={reason}</span><span><a href="{detail_href}">detail json</a></span><span>dry_run={local_confirm}</span><span>emit={local_command}</span><span>dismiss={local_dismiss}</span></li>"#
         ));
     }
     if rows.is_empty() {

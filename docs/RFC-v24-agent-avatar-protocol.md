@@ -649,7 +649,7 @@ external watchdogs and non-MCP clients.
 | `agent-bridge avatar cortex-voice-emit` | CLI-only manual voice adapter can speak one gated line and record cooldown state |
 | `agent-bridge avatar xiao-shu-action-request` | Xiao Shu request previews are compact by default; full recursive `source_*` provenance requires explicit `--details` / `details=true` |
 | `agent-bridge avatar xiao-shu-action-requests` | Queued Xiao Shu requests are compact by default; full nested records require `request_id`, all-state/full-detail mode, or `--details` |
-| `agent-bridge avatar xiao-shu-action-request-action` | Local operator consumes one queued Xiao Shu request; default is dry-run, and `--confirm --emit` appends an audit transition only through the CLI-only voice gate |
+| `agent-bridge avatar xiao-shu-action-request-action` | Local operator consumes one queued Xiao Shu request; default is dry-run, `--confirm --emit` appends an audio audit transition through the CLI-only voice gate, and `--confirm --dismiss` appends a non-emitting reviewed transition |
 | Standard `avatar_adapter_capabilities` | Tool reports adapter/surface availability without mutating state |
 | Standard `avatar_state_get` | Existing pet sidecar projects to protocol v1 without mutating state |
 | Standard `avatar_surface_snapshot` | Presence rows project to compact read-only `avatars[]` entries |
