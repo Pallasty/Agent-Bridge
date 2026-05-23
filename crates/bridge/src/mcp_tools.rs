@@ -9369,6 +9369,11 @@ impl McpTool for XiaoShuActionRequestTool {
                         "default": false,
                         "description": "When list_queue=true, include all queue states instead of only pending records."
                     },
+                    "details": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When list_queue=true, include full nested queue records. Defaults to compact records unless request_id or all_states is supplied."
+                    },
                     "limit": {
                         "type": "integer",
                         "minimum": 1,
@@ -9431,6 +9436,10 @@ impl McpTool for XiaoShuActionRequestTool {
             .get("all_states")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let details = args
+            .get("details")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
         let limit = args
             .get("limit")
@@ -9453,6 +9462,7 @@ impl McpTool for XiaoShuActionRequestTool {
                 request_id: request_id.as_deref(),
                 state: state.as_deref(),
                 include_all_states: all_states,
+                include_details: details,
                 limit,
             };
             return match crate::avatar_cortex::xiao_shu_action_request_queue(&opts) {

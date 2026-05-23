@@ -659,6 +659,8 @@ struct XiaoShuActionRequestsQuery {
     state: Option<String>,
     #[serde(default)]
     all_states: bool,
+    #[serde(default)]
+    details: bool,
     limit: Option<usize>,
 }
 
@@ -883,6 +885,7 @@ async fn avatar_surface_panel(
             request_id: None,
             state: None,
             include_all_states: false,
+            include_details: false,
             limit: 5,
         },
     )
@@ -2000,6 +2003,7 @@ async fn xiao_shu_action_requests(
         request_id: q.request_id.as_deref(),
         state: q.state.as_deref(),
         include_all_states: q.all_states,
+        include_details: q.details,
         limit: q.effective_limit(),
     };
     let payload =

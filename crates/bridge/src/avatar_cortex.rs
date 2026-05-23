@@ -108,6 +108,7 @@ pub struct XiaoShuActionRequestQueueOptions<'a> {
     pub request_id: Option<&'a str>,
     pub state: Option<&'a str>,
     pub include_all_states: bool,
+    pub include_details: bool,
     pub limit: usize,
 }
 
@@ -4675,6 +4676,148 @@ fn xiao_shu_action_enqueue_record_from_request(
     })
 }
 
+fn xiao_shu_action_request_compact_record(record: Value) -> Value {
+    let request = record.get("action_request").unwrap_or(&Value::Null);
+    let mut action_request = serde_json::Map::new();
+    action_request.insert(
+        "target".to_string(),
+        request
+            .get("target")
+            .cloned()
+            .unwrap_or_else(|| json!("xiao-shu")),
+    );
+    action_request.insert(
+        "actor".to_string(),
+        request
+            .get("actor")
+            .cloned()
+            .or_else(|| record.get("actor").cloned())
+            .unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "intent".to_string(),
+        request
+            .get("intent")
+            .cloned()
+            .or_else(|| record.get("intent").cloned())
+            .unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "message".to_string(),
+        request
+            .get("message")
+            .cloned()
+            .or_else(|| record.get("message").cloned())
+            .unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "request_state".to_string(),
+        request
+            .get("request_state")
+            .cloned()
+            .unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "mapped_track".to_string(),
+        request
+            .get("mapped_track")
+            .cloned()
+            .or_else(|| record.get("mapped_track").cloned())
+            .unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "line".to_string(),
+        request.get("line").cloned().unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "reason".to_string(),
+        request
+            .get("reason")
+            .cloned()
+            .or_else(|| record.get("reason").cloned())
+            .unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "blocked".to_string(),
+        request.get("blocked").cloned().unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "blocked_reasons".to_string(),
+        request
+            .get("blocked_reasons")
+            .cloned()
+            .unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "ready_for_local_cli_emit".to_string(),
+        request
+            .get("ready_for_local_cli_emit")
+            .cloned()
+            .unwrap_or(Value::Null),
+    );
+
+    let mut compact = serde_json::Map::new();
+    compact.insert(
+        "schema".to_string(),
+        record.get("schema").cloned().unwrap_or_else(|| json!(1)),
+    );
+    for key in [
+        "request_id",
+        "created_at",
+        "updated_at",
+        "state",
+        "prior_state",
+        "project",
+        "actor",
+        "intent",
+        "message",
+        "reason",
+        "mapped_track",
+        "source",
+        "would_emit",
+        "emitted",
+        "local_confirm_command",
+        "local_emit_command",
+    ] {
+        compact.insert(
+            key.to_string(),
+            record.get(key).cloned().unwrap_or(Value::Null),
+        );
+    }
+    compact.insert(
+        "target".to_string(),
+        record
+            .get("target")
+            .cloned()
+            .unwrap_or_else(|| json!("xiao-shu")),
+    );
+    for (key, fallback) in [
+        ("llm_safe", true),
+        ("sidecar_only", true),
+        ("direct_pet_control_allowed", false),
+        ("direct_llm_emit_allowed", false),
+        ("requires_human_confirmation", true),
+        ("human_confirmation_present", false),
+        ("real_emit_requires_local_cli", true),
+        ("actual_emit_invoked", false),
+        ("emits_audio", false),
+        ("writes_request_record", false),
+        ("writes_cooldown_state", false),
+        ("codex_pet_package_mutation", false),
+    ] {
+        compact.insert(
+            key.to_string(),
+            record.get(key).cloned().unwrap_or_else(|| json!(fallback)),
+        );
+    }
+    compact.insert(
+        "action_request".to_string(),
+        Value::Object(action_request),
+    );
+    compact.insert("compact".to_string(), json!(true));
+    Value::Object(compact)
+}
+
 pub fn xiao_shu_action_request_enqueue(opts: &XiaoShuActionRequestOptions<'_>) -> Result<Value> {
     let project = opts.project.unwrap_or("agent-bridge");
     let queue_path = xiao_shu_action_request_queue_path(project)?;
@@ -4738,6 +4881,8 @@ fn xiao_shu_action_request_queue_from_path(
                 Some("pending_human_confirmation")
             }
         });
+    let include_details =
+        opts.include_details || opts.include_all_states || request_id_filter.is_some();
     let queue_exists = queue_path.exists();
     let mut latest_by_request = BTreeMap::<String, (usize, Value)>::new();
     let mut state_counts = BTreeMap::<String, usize>::new();
@@ -4792,6 +4937,12 @@ fn xiao_shu_action_request_queue_from_path(
     let matching_records = records.len();
     records.reverse();
     records.truncate(limit);
+    if !include_details {
+        records = records
+            .into_iter()
+            .map(xiao_shu_action_request_compact_record)
+            .collect();
+    }
 
     Ok(json!({
         "surface": "xiao_shu_action_request_queue",
@@ -4822,6 +4973,7 @@ fn xiao_shu_action_request_queue_from_path(
             "request_id_filter": request_id_filter,
             "state_filter": state_filter,
             "include_all_states": opts.include_all_states,
+            "include_details": include_details,
             "limit": limit,
             "total_lines": total_lines,
             "parsed_records": parsed_records,
@@ -4857,6 +5009,7 @@ pub fn xiao_shu_action_request_action(
         request_id: Some(request_id),
         state: None,
         include_all_states: true,
+        include_details: true,
         limit: 1,
     };
     let queue = xiao_shu_action_request_queue_from_path(&queue_opts, project, &queue_path)?;
@@ -6744,6 +6897,7 @@ mod tests {
                 request_id: None,
                 state: None,
                 include_all_states: false,
+                include_details: false,
                 limit: 1,
             },
             "agent-bridge",
@@ -6759,10 +6913,13 @@ mod tests {
         assert_eq!(queue["writes_request_record"], false);
         assert_eq!(queue["queue"]["exists"], true);
         assert_eq!(queue["queue"]["state_filter"], "pending_human_confirmation");
+        assert_eq!(queue["queue"]["include_details"], false);
         assert_eq!(queue["queue"]["parsed_records"], 2);
         assert_eq!(queue["queue"]["current_records"], 2);
         assert_eq!(queue["queue"]["matching_records"], 2);
         assert_eq!(queue["queue"]["returned_count"], 1);
+        assert_eq!(queue["records"][0]["compact"], true);
+        assert_eq!(queue["records"][0]["source_request"], Value::Null);
         assert_eq!(
             queue["records"][0]["request_id"].as_str(),
             newer.get("request_id").and_then(Value::as_str)
@@ -6775,6 +6932,7 @@ mod tests {
                 request_id: Some(request_id),
                 state: None,
                 include_all_states: false,
+                include_details: false,
                 limit: 10,
             },
             "agent-bridge",
@@ -6782,7 +6940,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(one["queue"]["request_id_filter"], request_id);
+        assert_eq!(one["queue"]["include_details"], true);
         assert_eq!(one["records"][0]["request_id"], request_id);
+        assert_eq!(one["records"][0]["source_request"]["surface"], "xiao_shu_action_request");
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -6833,6 +6993,7 @@ mod tests {
                 request_id: None,
                 state: None,
                 include_all_states: false,
+                include_details: false,
                 limit: 10,
             },
             "agent-bridge",
@@ -6850,6 +7011,7 @@ mod tests {
                 request_id: pending["request_id"].as_str(),
                 state: None,
                 include_all_states: true,
+                include_details: true,
                 limit: 10,
             },
             "agent-bridge",

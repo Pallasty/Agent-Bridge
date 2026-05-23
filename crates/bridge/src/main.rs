@@ -1080,6 +1080,9 @@ enum AvatarOp {
         /// Include all queue states instead of only pending records.
         #[arg(long)]
         all_states: bool,
+        /// Include full nested queue records. Defaults to compact list records.
+        #[arg(long)]
+        details: bool,
         /// Maximum records to return, newest first.
         #[arg(long, default_value_t = 20)]
         limit: usize,
@@ -3059,6 +3062,7 @@ async fn main() -> Result<()> {
                 request_id,
                 state,
                 all_states,
+                details,
                 limit,
                 json: as_json,
             } => {
@@ -3067,6 +3071,7 @@ async fn main() -> Result<()> {
                     request_id.clone(),
                     state.clone(),
                     *all_states,
+                    *details,
                     *limit,
                     *as_json,
                 )
@@ -5750,6 +5755,7 @@ async fn run_xiao_shu_action_requests(
     request_id: Option<String>,
     state: Option<String>,
     all_states: bool,
+    details: bool,
     limit: usize,
     as_json: bool,
 ) -> Result<()> {
@@ -5760,6 +5766,7 @@ async fn run_xiao_shu_action_requests(
         request_id: request_id.as_deref(),
         state: state.as_deref(),
         include_all_states: all_states,
+        include_details: details,
         limit,
     };
     let payload = ab_bridge::avatar_cortex::xiao_shu_action_request_queue(&opts)?;
@@ -5777,10 +5784,11 @@ async fn run_xiao_shu_action_requests(
         avatar_health_display(queue.get("path"), "-")
     );
     println!(
-        "filter request_id={} state={} all_states={} limit={} parsed={} matching={} returned={} parse_errors={}",
+        "filter request_id={} state={} all_states={} details={} limit={} parsed={} matching={} returned={} parse_errors={}",
         avatar_health_display(queue.get("request_id_filter"), "-"),
         avatar_health_display(queue.get("state_filter"), "-"),
         avatar_health_display(queue.get("include_all_states"), "false"),
+        avatar_health_display(queue.get("include_details"), "false"),
         avatar_health_display(queue.get("limit"), "20"),
         avatar_health_display(queue.get("parsed_records"), "0"),
         avatar_health_display(queue.get("matching_records"), "0"),
