@@ -14698,6 +14698,88 @@ impl McpTool for MemoryQueryStatsTool {
 }
 
 // ===========================================================================
+//             memory_graph_topology — graph centrality readiness readout
+// ===========================================================================
+
+pub struct MemoryGraphTopologyTool {
+    hub: Hub,
+}
+impl MemoryGraphTopologyTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryGraphTopologyTool {
+    fn name(&self) -> &'static str {
+        "memory_graph_topology"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only memory graph topology snapshot for ranking experiments. \
+                 Reports orphan rate, degree buckets, top hubs, and evolved-edge coverage. \
+                 Use this before adding PageRank-like centrality into retrieval: it measures \
+                 whether the graph is healthy enough for a bounded centrality prior without \
+                 changing memory_search ranking."
+                .into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+
+        let topo = store.graph_topology().await?;
+        let active_total = topo.non_skill_active_total.max(1);
+        let orphan_fraction = topo.orphan_count as f64 / active_total as f64;
+        let p4_evolved_fraction = topo.p4_evolved_coverage as f64 / active_total as f64;
+        let top_hub_degree = topo.top_5_hubs.first().map(|(_, d)| *d).unwrap_or(0);
+        let top_hub_fraction = top_hub_degree as f64 / active_total as f64;
+
+        let pagerank_readiness = if topo.non_skill_active_total == 0 {
+            "empty_graph"
+        } else if orphan_fraction > 0.35 {
+            "needs_graph_hygiene_before_rank_prior"
+        } else if top_hub_fraction > 0.15 {
+            "hub_risk_cap_centrality_boost"
+        } else {
+            "observe_then_bound_centrality_boost"
+        };
+
+        let degree_histogram: Vec<Value> = topo
+            .degree_histogram
+            .iter()
+            .map(|(bucket, count)| json!({ "bucket": bucket, "count": count }))
+            .collect();
+        let top_5_hubs: Vec<Value> = topo
+            .top_5_hubs
+            .iter()
+            .map(|(key, degree)| json!({ "key": key, "degree": degree }))
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "non_skill_active_total": topo.non_skill_active_total,
+            "orphan_count": topo.orphan_count,
+            "orphan_fraction": (orphan_fraction * 1000.0).round() / 1000.0,
+            "degree_histogram": degree_histogram,
+            "top_5_hubs": top_5_hubs,
+            "top_hub_degree": top_hub_degree,
+            "top_hub_fraction": (top_hub_fraction * 1000.0).round() / 1000.0,
+            "p4_evolved_coverage": topo.p4_evolved_coverage,
+            "p4_evolved_fraction": (p4_evolved_fraction * 1000.0).round() / 1000.0,
+            "pagerank_readiness": pagerank_readiness,
+            "ranking_note": "This tool does not run PageRank and does not alter memory_search. \
+                It is the cheap preflight for deciding whether a bounded centrality prior \
+                is safe to test.",
+        })))
+    }
+}
+
+// ===========================================================================
 //        memory_substrate_audit — P-ε substrate-readiness aggregate
 // ===========================================================================
 
@@ -20978,6 +21060,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     "mobile_click",
     "mobile_input_text",
     "mobile_apple_status",
+    // Search-ranking diagnostics: read-only graph topology preflight for
+    // PageRank-like centrality experiments.
+    "memory_graph_topology",
 ];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
@@ -21669,6 +21754,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         policy,
         Tier::Standard,
         Arc::new(MemoryQueryStatsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryGraphTopologyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -25065,11 +25156,12 @@ mod tests {
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 22 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 23 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(12: xiao_shu_action_request + 11 mobile bridge tools).
+        //      + DIRECT(13: xiao_shu_action_request + 11 mobile bridge tools
+        //      + memory_graph_topology).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        assert_eq!(extras.len(), 22);
+        assert_eq!(extras.len(), 23);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -25087,6 +25179,7 @@ mod tests {
         assert!(extras.contains(&"mobile_ui_snapshot"));
         assert!(extras.contains(&"mobile_click"));
         assert!(extras.contains(&"mobile_apple_status"));
+        assert!(extras.contains(&"memory_graph_topology"));
     }
 
     #[test]
