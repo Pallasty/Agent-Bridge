@@ -7,13 +7,10 @@ use crate::warp_scheme::{
     scheme_new_tab as warp_scheme_new_tab, scheme_new_window as warp_scheme_new_window,
     scheme_open_settings_page as warp_scheme_open_settings_page,
 };
-use ab_agent::{oz::fetch_run_status, GitWorktreeManager, SpawnConfig};
+use ab_agent::{GitWorktreeManager, SpawnConfig, oz::fetch_run_status};
 use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
 use ab_mcp::{ContentBlock, McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
 use ab_store::{
-    cosine_similarity,
-    embed_text,
-    prioritize_session_handoff,
     // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
     AgentPresenceRecord,
     CompactPolicy,
@@ -30,11 +27,14 @@ use ab_store::{
     PlanStep,
     SessionFilter,
     StateStore,
+    cosine_similarity,
+    embed_text,
+    prioritize_session_handoff,
 };
 use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
 use async_trait::async_trait;
-use base64::{engine::general_purpose, Engine as _};
-use serde_json::{json, Map, Value};
+use base64::{Engine as _, engine::general_purpose};
+use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -45,7 +45,7 @@ use crate::context_budget::{
     budget_recommendation, estimate_tokens_from_text, estimated_usage_tokens, model_context_limit,
 };
 use crate::hub::Hub;
-use crate::ide::{queue_ide_command, read_ide_snapshot, IdeCommandOptions, IdeSnapshotOptions};
+use crate::ide::{IdeCommandOptions, IdeSnapshotOptions, queue_ide_command, read_ide_snapshot};
 use crate::project::{changes_digest, detect_project, resolve_cwd};
 use crate::security::Cap;
 use crate::session_handoff::build_handoff_brief;
@@ -3528,6 +3528,234 @@ impl McpTool for ForumSetThreadStatusTool {
             "thread_id": thread_id,
             "new_status": status
         })))
+    }
+}
+
+// ===========================================================================
+//                       forum_digest (read-efficiency at scale)
+// ===========================================================================
+//
+// See docs/DESIGN-forum-digest-and-sediment-triggers-2026-05-23.md.
+// Rule-based structural digest of open threads so the agent reads ~N compact
+// thread summaries instead of raw posts (verify: 736 open posts ≈ 455k tokens
+// full-scan; digest targets ≤1500). Pure SQL, no LLM (v0). pull-not-push.
+
+/// Extract a one-line title from a forum post body: first non-empty line with
+/// leading markdown header markers (`#`, `##`, …) and whitespace stripped,
+/// truncated to `max_chars`. Pure for testability.
+fn forum_digest_title(body: &str, max_chars: usize) -> String {
+    let first = body
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    let stripped = first.trim_start_matches('#').trim();
+    let (truncated, did_trunc, _) = truncate_chars(stripped, max_chars);
+    if did_trunc {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+/// Build the digest block for a single thread. Pure: caller supplies the
+/// thread record + its recent posts (newest-first NOT required; we sort).
+/// `my_sigil` (when set) flags posts that mention it with no later post
+/// authored by the same sigil = "needs reply".
+fn forum_digest_thread_block(
+    thread: &ab_store::ForumThreadRecord,
+    posts: &[ab_store::ForumPostRecord],
+    my_sigil: Option<&str>,
+    now_secs: i64,
+) -> Vec<String> {
+    let days_idle = ((now_secs - thread.last_post_at).max(0)) / 86_400;
+    let mut lines = vec![format!(
+        "[{}] {} ({} posts · {}d idle · {})",
+        thread.id,
+        forum_digest_title(&thread.title, 60),
+        thread.post_count,
+        days_idle,
+        thread.board,
+    )];
+
+    // Posts sorted ascending by id for lineage + latest-per-author.
+    let mut sorted: Vec<&ab_store::ForumPostRecord> = posts.iter().collect();
+    sorted.sort_by_key(|p| p.id);
+
+    // latest-per-author: last word from each distinct author (insertion order
+    // by most-recent post).
+    let mut latest: Vec<(String, i64)> = Vec::new();
+    for p in sorted.iter().rev() {
+        if !latest.iter().any(|(a, _)| a == &p.author) {
+            latest.push((p.author.clone(), p.id));
+        }
+    }
+    if !latest.is_empty() {
+        let who: Vec<String> = latest
+            .iter()
+            .take(5)
+            .map(|(a, id)| format!("{a}(#{id})"))
+            .collect();
+        lines.push(format!("  active: {}", who.join(", ")));
+    }
+
+    // decisions + findings = the durable spine (titles only).
+    let decisions: Vec<String> = sorted
+        .iter()
+        .filter(|p| p.kind == "decision")
+        .rev()
+        .take(4)
+        .map(|p| format!("«{}»", forum_digest_title(&p.body, 50)))
+        .collect();
+    if !decisions.is_empty() {
+        lines.push(format!("  decisions: {}", decisions.join(" ")));
+    }
+
+    // open questions (v0: list recent questions; answered-detection is v1).
+    let questions: Vec<String> = sorted
+        .iter()
+        .filter(|p| p.kind == "question")
+        .rev()
+        .take(3)
+        .map(|p| format!("«{}»", forum_digest_title(&p.body, 50)))
+        .collect();
+    if !questions.is_empty() {
+        lines.push(format!("  open-q: {}", questions.join(" ")));
+    }
+
+    // @me unaddressed: a post mentions my sigil, and no LATER post in this
+    // thread is authored by my sigil.
+    if let Some(sig) = my_sigil {
+        let my_last_authored: i64 = sorted
+            .iter()
+            .filter(|p| p.author.contains(sig))
+            .map(|p| p.id)
+            .max()
+            .unwrap_or(0);
+        let pending: Vec<String> = sorted
+            .iter()
+            .filter(|p| p.id > my_last_authored && !p.author.contains(sig) && p.body.contains(sig))
+            .map(|p| format!("#{} by {}", p.id, p.author))
+            .collect();
+        if !pending.is_empty() {
+            lines.push(format!("  ⚠ @me needs-reply: {}", pending.join(", ")));
+        }
+    }
+
+    lines
+}
+
+pub struct ForumDigestTool {
+    hub: Hub,
+}
+impl ForumDigestTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for ForumDigestTool {
+    fn name(&self) -> &'static str {
+        "forum_digest"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Compact rule-based digest of forum threads across ALL boards \
+                 (default status=open). One short block per thread: header \
+                 (id/title/post_count/days_idle/board), active authors, decision \
+                 + finding titles, open questions, and — when `my_sigil` is set — \
+                 posts mentioning you with no later reply from you (needs-reply). \
+                 Read this INSTEAD of forum_read for 'what's the board state'; use \
+                 forum_read to deep-dive one thread. Token-budgeted (default ≤1800)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "status":          { "type": "string", "enum": ["open", "resolved", "archived"], "default": "open" },
+                    "thread_limit":    { "type": "integer", "default": 30, "description": "Max threads to digest (1–200)." },
+                    "posts_per_thread":{ "type": "integer", "default": 60, "description": "Recent posts scanned per thread for extraction (1–200)." },
+                    "my_sigil":        { "type": "string", "description": "Your author sigil (e.g. '#3b568a5f' or full id) — enables needs-reply detection." },
+                    "max_tokens":      { "type": "integer", "default": 1800, "description": "Hard cap on digest output tokens." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let status = args
+            .get("status")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("open");
+        let thread_limit = args
+            .get("thread_limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30)
+            .clamp(1, 200) as u32;
+        let posts_per_thread = args
+            .get("posts_per_thread")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(60)
+            .clamp(1, 200) as u32;
+        let my_sigil = args
+            .get("my_sigil")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let max_tokens = args
+            .get("max_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1800)
+            .clamp(200, 20_000) as usize;
+
+        let threads = store
+            .forum_digest_threads(Some(status), thread_limit)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("forum_digest_threads: {e}")))?;
+
+        if threads.is_empty() {
+            return Ok(ToolResult::text(format!("(no {status} threads)")));
+        }
+
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        let mut lines: Vec<String> = vec![
+            format!("=== Forum Digest ({} {status} threads) ===", threads.len()),
+            String::new(),
+        ];
+        let mut budget_hit = false;
+        let mut rendered = 0usize;
+        for thread in &threads {
+            let posts = store
+                .forum_recent_posts(thread.id, posts_per_thread)
+                .await
+                .unwrap_or_default();
+            let block = forum_digest_thread_block(thread, &posts, my_sigil, now_secs);
+            // Stop before exceeding budget; note how many threads were skipped.
+            let projected = estimate_tokens_from_text(&lines.join("\n")) as usize
+                + estimate_tokens_from_text(&block.join("\n")) as usize;
+            if projected > max_tokens && rendered > 0 {
+                budget_hit = true;
+                break;
+            }
+            lines.extend(block);
+            lines.push(String::new());
+            rendered += 1;
+        }
+        if budget_hit {
+            lines.push(format!(
+                "[…{} more threads omitted for token budget — raise max_tokens or filter status]",
+                threads.len() - rendered
+            ));
+        }
+
+        Ok(ToolResult::text(lines.join("\n")))
     }
 }
 
@@ -7606,12 +7834,12 @@ impl McpTool for MemoryCorrectionTool {
             Ok(None) => {
                 return Ok(ToolResult::error(format!(
                     "memory_correction: target_key '{target_key}' not found"
-                )))
+                )));
             }
             Err(e) => {
                 return Ok(ToolResult::error(format!(
                     "memory_correction: lookup error for '{target_key}': {e}"
-                )))
+                )));
             }
         }
 
@@ -9781,13 +10009,13 @@ impl McpTool for PetStateRitualTool {
                 return Ok(ToolResult::error(format!(
                     "pet_state_ritual: no state file at {}",
                     state_path.display()
-                )))
+                )));
             }
             Err(e) => {
                 return Ok(ToolResult::error(format!(
                     "pet_state_ritual: failed to read {}: {e}",
                     state_path.display()
-                )))
+                )));
             }
         };
 
@@ -9801,7 +10029,7 @@ impl McpTool for PetStateRitualTool {
                     "reason": "mode has no ritual cue",
                     "pet_id": pet_id,
                     "mode": mode,
-                })))
+                })));
             }
         };
 
@@ -11186,6 +11414,7 @@ impl McpTool for McpConfigAuditTool {
                 "claude_code": claude
             },
             "stdio_smoke": smoke,
+            "tool_profile_divergence": collab_group_divergence(),
             "recommendations": mcp_audit_recommendations(&codex, &gemini, &claude)
         })))
     }
@@ -11335,7 +11564,7 @@ async fn audit_stdio_smoke(command: &str, args: &[String], timeout: Duration) ->
                 "args": args,
                 "ok": false,
                 "error": e.to_string()
-            })
+            });
         }
     };
 
@@ -11352,7 +11581,7 @@ async fn audit_stdio_smoke(command: &str, args: &[String], timeout: Duration) ->
                 "args": args,
                 "ok": false,
                 "error": e.to_string()
-            })
+            });
         }
         Err(_) => {
             return json!({
@@ -11360,7 +11589,7 @@ async fn audit_stdio_smoke(command: &str, args: &[String], timeout: Duration) ->
                 "args": args,
                 "ok": false,
                 "error": "timeout"
-            })
+            });
         }
     };
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -13891,11 +14120,10 @@ impl McpTool for ChangesDigestTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description:
-                "Structured git diff summary: file counts, total insertions/deletions, \
+            description: "Structured git diff summary: file counts, total insertions/deletions, \
                  per-file numstat summary, and name-status rows. scope=working_tree (default), \
                  staged, last_commit, or branch_vs_main (diff against merge-base with main/master)."
-                    .into(),
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -14129,7 +14357,7 @@ impl McpTool for SessionReflectTool {
             None => {
                 return Ok(ToolResult::error(
                     "missing or invalid 'focus' (must be decisions | process | tooling)",
-                ))
+                ));
             }
         };
 
@@ -14447,7 +14675,11 @@ impl McpTool for OzRunGetTool {
                 .await?;
             match session.and_then(|s| s.cloud_run_id) {
                 Some(rid) => rid,
-                None => return Ok(ToolResult::error("session has no cloud_run_id (not a warp-oz session, or run_id not yet persisted)")),
+                None => {
+                    return Ok(ToolResult::error(
+                        "session has no cloud_run_id (not a warp-oz session, or run_id not yet persisted)",
+                    ));
+                }
             }
         } else {
             return Ok(ToolResult::error(
@@ -14603,7 +14835,7 @@ impl McpTool for OzRunCancelTool {
                     "WARP_API_KEY env var not set. \
                  Generate an API key at Warp Settings → Platform \
                  (warp://settings/platform), then export WARP_API_KEY=<key>.",
-                ))
+                ));
             }
         };
 
@@ -17888,10 +18120,14 @@ impl ToolSet {
         }
     }
 
-    fn extras(self) -> &'static [&'static str] {
+    fn extras(self) -> Vec<&'static str> {
         match self {
-            Self::CodexEssential => CODEX_ESSENTIAL_EXTRAS,
-            _ => &[],
+            Self::CodexEssential => CODEX_ESSENTIAL_GROUPS
+                .iter()
+                .flat_map(|g| g.iter().copied())
+                .chain(CODEX_ESSENTIAL_DIRECT_EXTRAS.iter().copied())
+                .collect(),
+            _ => Vec::new(),
         }
     }
 }
@@ -17947,7 +18183,7 @@ impl ToolPolicy {
     /// but exposed anyway so Codex agents can use the cross-process whiteboard.
     /// Returned as `&'static [&'static str]` so capabilities serialization can
     /// surface the list verbatim.
-    fn extras(self) -> &'static [&'static str] {
+    fn extras(self) -> Vec<&'static str> {
         self.set.extras()
     }
 
@@ -17972,28 +18208,84 @@ fn normalize_tool_policy_value(value: &str) -> String {
         .replace(' ', "-")
 }
 
-/// Tools allowlisted into the `codex-essential` surface beyond Tier::Essential.
-/// Single source of truth — `codex_essential_tool` matches against this and
-/// `ToolSet::extras` returns it so capabilities can surface the list to clients.
-const CODEX_ESSENTIAL_EXTRAS: &[&str] = &[
-    "ide_snapshot",
-    "ide_command",
-    "forum_post",
-    "forum_read",
-    "forum_list_threads",
-    "forum_subscribe",
-    "forum_set_thread_status",
-    "agent_presence_announce",
-    "agent_presence_list",
-    "xiao_shu_action_request",
+/// Capability groups — single source of truth for cross-client SHARED tool
+/// families that are prone to silent drift. Named-allowlist profiles
+/// (codex-essential / codex-lean / …) compose their collab surface from these
+/// groups, so a NEW tool added to a group auto-propagates to every profile
+/// that includes it. This closes the drift that hid `forum_digest` from codex
+/// clients (it was Tier::Standard → auto-visible to Claude profiles, but the
+/// codex allowlists listed the other 5 forum tools by name and never gained
+/// the 6th). See `lesson_wrapper_clobbered_orphans_real_deploys_2026_05_23`.
+///
+/// NOTE: this groups only the *cross-client collab core* (forum / presence /
+/// ide). Per-client curation of memory/session/pet/etc. subsets stays explicit
+/// below — that divergence is INTENTIONAL (token budget), not drift.
+mod capgroups {
+    /// Forum read surface — list/read/digest. A new forum *read* tool added
+    /// here propagates to every profile that exposes forum reads.
+    pub const FORUM_READ: &[&str] = &["forum_read", "forum_list_threads", "forum_digest"];
+    /// Forum write — posting.
+    pub const FORUM_POST: &[&str] = &["forum_post"];
+    /// Forum lifecycle management — subscriptions + thread status.
+    pub const FORUM_MANAGE: &[&str] = &["forum_subscribe", "forum_set_thread_status"];
+    /// Presence registry.
+    pub const PRESENCE_ANNOUNCE: &[&str] = &["agent_presence_announce"];
+    pub const PRESENCE_LIST: &[&str] = &["agent_presence_list"];
+    /// IDE bridge pair.
+    pub const IDE: &[&str] = &["ide_snapshot", "ide_command"];
+
+    /// Every tool that belongs to a collab group — used by the drift-guardrail
+    /// test to assert no registered forum_*/presence/ide tool is left ungrouped.
+    #[cfg(test)]
+    pub const ALL_COLLAB: &[&[&str]] = &[
+        FORUM_READ,
+        FORUM_POST,
+        FORUM_MANAGE,
+        PRESENCE_ANNOUNCE,
+        PRESENCE_LIST,
+        IDE,
+    ];
+}
+
+/// True if `name` is a member of any of the given capability groups.
+fn in_groups(name: &str, groups: &[&[&str]]) -> bool {
+    groups.iter().any(|g| g.contains(&name))
+}
+
+/// Collab groups exposed by the `codex-essential` surface (beyond Essential
+/// tier). Single source of truth for both `codex_essential_tool` and
+/// `ToolSet::extras` (capabilities surfacing).
+const CODEX_ESSENTIAL_GROUPS: &[&[&str]] = &[
+    capgroups::IDE,
+    capgroups::FORUM_READ,
+    capgroups::FORUM_POST,
+    capgroups::FORUM_MANAGE,
+    capgroups::PRESENCE_ANNOUNCE,
+    capgroups::PRESENCE_LIST,
 ];
 
+/// Codex-essential extras that are intentionally not in the cross-client
+/// collab capability groups. Keep these explicit so the group drift guardrails
+/// stay about forum/presence/IDE families only.
+const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &["xiao_shu_action_request"];
+
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
-    matches!(tier, Tier::Essential) || CODEX_ESSENTIAL_EXTRAS.contains(&tool_name)
+    matches!(tier, Tier::Essential)
+        || in_groups(tool_name, CODEX_ESSENTIAL_GROUPS)
+        || CODEX_ESSENTIAL_DIRECT_EXTRAS.contains(&tool_name)
 }
 
 fn codex_lean_tool(tool_name: &str) -> bool {
-    matches!(
+    // Collab core via groups (gains forum_digest automatically); per-client
+    // curated non-collab tools stay explicit (intentional token-budget choice).
+    in_groups(
+        tool_name,
+        &[
+            capgroups::FORUM_READ,
+            capgroups::FORUM_POST,
+            capgroups::PRESENCE_LIST,
+        ],
+    ) || matches!(
         tool_name,
         "capabilities"
             | "mcp_dispatch_audit"
@@ -18021,14 +18313,11 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "plan_save"
             | "plan_load"
             | "plan_update"
-            | "forum_post"
-            | "forum_read"
-            | "forum_list_threads"
-            | "agent_presence_list"
     )
 }
 
 fn gemini_lean_tool(tool_name: &str) -> bool {
+    // gemini-lean is deliberately collab-free (no forum/presence/ide).
     matches!(
         tool_name,
         "capabilities"
@@ -18058,6 +18347,67 @@ fn hook_lifecycle_tool(tool_name: &str) -> bool {
             | "pet_state_set"
             | "pet_state_ritual"
     )
+}
+
+/// (d) Cross-profile divergence audit. For each named-allowlist profile and
+/// each collab capability group, report full / partial / none coverage.
+/// **Partial coverage is a drift smell** — it means the profile lists some
+/// members of a group by name but not all, which is exactly how `forum_digest`
+/// went missing from codex clients. Surfaced in `mcp_config_audit` and pinned
+/// by `collab_groups_no_partial_coverage` test.
+fn collab_group_divergence() -> Value {
+    // (profile-label, name-membership predicate). Tier::Niche forces the
+    // name-allowlist path for tier-gated sets (collab tools are never Essential).
+    let profiles: [(&str, fn(&str) -> bool); 4] = [
+        ("codex-essential", |n| codex_essential_tool(Tier::Niche, n)),
+        ("codex-lean", codex_lean_tool),
+        ("gemini-lean", gemini_lean_tool),
+        ("hook-lifecycle", hook_lifecycle_tool),
+    ];
+    let group_names: [(&str, &[&str]); 6] = [
+        ("forum_read", capgroups::FORUM_READ),
+        ("forum_post", capgroups::FORUM_POST),
+        ("forum_manage", capgroups::FORUM_MANAGE),
+        ("presence_announce", capgroups::PRESENCE_ANNOUNCE),
+        ("presence_list", capgroups::PRESENCE_LIST),
+        ("ide", capgroups::IDE),
+    ];
+
+    let mut rows = Vec::new();
+    let mut partial_flags = Vec::new();
+    for (plabel, pred) in profiles {
+        for (gname, members) in group_names {
+            let exposed: Vec<&str> = members.iter().copied().filter(|m| pred(m)).collect();
+            let coverage = if exposed.is_empty() {
+                "none"
+            } else if exposed.len() == members.len() {
+                "full"
+            } else {
+                "partial"
+            };
+            if coverage == "partial" {
+                let missing: Vec<&str> = members.iter().copied().filter(|m| !pred(m)).collect();
+                partial_flags.push(json!({
+                    "profile": plabel,
+                    "group": gname,
+                    "exposed": exposed,
+                    "missing": missing,
+                }));
+            }
+            rows.push(json!({
+                "profile": plabel,
+                "group": gname,
+                "coverage": coverage,
+            }));
+        }
+    }
+    json!({
+        "matrix": rows,
+        "drift_flags": partial_flags,
+        "ok": partial_flags.is_empty(),
+        "note": "partial group coverage = a profile lists some-but-not-all members \
+                 of a collab group; usually a new tool that wasn't added to the group",
+    })
 }
 
 fn reg_if(reg: &mut ToolRegistry, policy: ToolPolicy, tier: Tier, tool: Arc<dyn McpTool>) {
@@ -18622,6 +18972,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         policy,
         Tier::Standard,
         Arc::new(ForumSetThreadStatusTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(ForumDigestTool::new(hub.clone())),
     );
     // Presence (v19): identity convention + agent registry (A2A AgentCard-aligned).
     reg_if(
@@ -20656,10 +21012,12 @@ mod tests {
             schema.input_schema["properties"]["enqueue"]["default"],
             false
         );
-        assert!(schema.input_schema["properties"]["enqueue"]["description"]
-            .as_str()
-            .unwrap()
-            .contains("does not emit audio"));
+        assert!(
+            schema.input_schema["properties"]["enqueue"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("does not emit audio")
+        );
         assert_eq!(
             schema.input_schema["properties"]["list_queue"]["default"],
             false
@@ -21613,6 +21971,7 @@ mod tests {
         assert!(p.includes(Tier::Standard, "forum_set_thread_status"));
         assert!(p.includes(Tier::Standard, "agent_presence_announce"));
         assert!(p.includes(Tier::Standard, "agent_presence_list"));
+        assert!(p.includes(Tier::Standard, "xiao_shu_action_request"));
         assert!(!p.includes(Tier::Standard, "avatar_state_get"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
@@ -21622,16 +21981,22 @@ mod tests {
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        assert_eq!(extras.len(), 9);
+        // 11 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
+        //      + DIRECT(1: xiao_shu_action_request).
+        // forum_digest joined via the FORUM_READ capability group (2026-05-23).
+        assert_eq!(extras.len(), 11);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
         assert!(extras.contains(&"forum_read"));
         assert!(extras.contains(&"forum_list_threads"));
+        assert!(extras.contains(&"forum_digest"));
         assert!(extras.contains(&"forum_subscribe"));
         assert!(extras.contains(&"forum_set_thread_status"));
         assert!(extras.contains(&"agent_presence_announce"));
         assert!(extras.contains(&"agent_presence_list"));
+        assert!(extras.contains(&"xiao_shu_action_request"));
     }
 
     #[test]
@@ -21649,6 +22014,96 @@ mod tests {
                 0,
                 "extras should be empty for {label} (only codex-essential surfaces them today)"
             );
+        }
+    }
+
+    // ── capability-group drift guardrails (c+d, 2026-05-23) ─────────────
+
+    #[test]
+    fn codex_clients_expose_forum_digest_via_group() {
+        // The fix: forum_digest propagates to codex profiles through the
+        // FORUM_READ capability group (was invisible when allowlists listed
+        // forum tools by name).
+        let ess = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        let lean = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        assert!(
+            ess.includes(Tier::Standard, "forum_digest"),
+            "codex-essential"
+        );
+        assert!(lean.includes(Tier::Standard, "forum_digest"), "codex-lean");
+    }
+
+    #[test]
+    fn codex_essential_preserves_legacy_collab_surface() {
+        // Regression: the group recompose must keep every collab tool that
+        // was in the old hardcoded CODEX_ESSENTIAL_EXTRAS.
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        for t in [
+            "ide_snapshot",
+            "ide_command",
+            "forum_post",
+            "forum_read",
+            "forum_list_threads",
+            "forum_subscribe",
+            "forum_set_thread_status",
+            "agent_presence_announce",
+            "agent_presence_list",
+        ] {
+            assert!(p.includes(Tier::Niche, t), "lost legacy collab tool: {t}");
+        }
+    }
+
+    #[test]
+    fn codex_lean_preserves_curated_surface() {
+        // Regression: non-collab curated tools must survive the recompose;
+        // collab subset = FORUM_READ + FORUM_POST + PRESENCE_LIST (NOT manage).
+        let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        for t in [
+            "memory_search",
+            "memory_save",
+            "memory_neighbors",
+            "session_bootstrap",
+            "agent_spawn",
+            "plan_save",
+            "project_detect",
+            "pet_state_ritual",
+            "forum_post",
+            "forum_read",
+            "forum_list_threads",
+            "agent_presence_list",
+        ] {
+            assert!(p.includes(Tier::Niche, t), "lost curated tool: {t}");
+        }
+        // codex-lean does NOT get forum management or presence_announce.
+        assert!(!p.includes(Tier::Niche, "forum_subscribe"));
+        assert!(!p.includes(Tier::Niche, "forum_set_thread_status"));
+        assert!(!p.includes(Tier::Niche, "agent_presence_announce"));
+    }
+
+    #[test]
+    fn collab_groups_no_partial_coverage() {
+        // (d) The drift guardrail: no profile may list SOME-but-not-all members
+        // of a collab group. Partial coverage = a new tool that wasn't added to
+        // the group (exactly the forum_digest bug). If this fails, add the new
+        // tool to the right capgroups:: constant.
+        let report = collab_group_divergence();
+        let ok = report.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+        assert!(
+            ok,
+            "collab group drift detected: {}",
+            serde_json::to_string_pretty(report.get("drift_flags").unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn every_collab_group_member_is_unique() {
+        // Sanity: no tool appears in two collab groups (would double-count in
+        // extras + confuse coverage math).
+        let mut seen = std::collections::HashSet::new();
+        for group in capgroups::ALL_COLLAB {
+            for &name in *group {
+                assert!(seen.insert(name), "tool {name} in multiple collab groups");
+            }
         }
     }
 
@@ -21760,9 +22215,11 @@ mod tests {
             codex_host: None,
         };
         let suggestions = dispatch_profile_suggestions(&[s], &[]);
-        assert!(suggestions
-            .iter()
-            .any(|s| s.contains("hot tools overlap Codex native surfaces")));
+        assert!(
+            suggestions
+                .iter()
+                .any(|s| s.contains("hot tools overlap Codex native surfaces"))
+        );
     }
 
     #[test]
@@ -22311,10 +22768,12 @@ mod tests {
         let v: Value = serde_json::from_str(&text).expect("valid json");
         assert_eq!(v["installed"], json!(false));
         assert_eq!(v["env_var"], json!(ab_seed_bridge::SUBSTRATE_ENV_VAR));
-        assert!(v["neighbors"]
-            .as_array()
-            .map(|a| a.is_empty())
-            .unwrap_or(false));
+        assert!(
+            v["neighbors"]
+                .as_array()
+                .map(|a| a.is_empty())
+                .unwrap_or(false)
+        );
         assert!(v.get("hint").is_some());
         assert_eq!(v["key"], json!("anything"));
         assert_eq!(v["k"], json!(5));
@@ -22648,9 +23107,11 @@ mod tests {
         assert_eq!(saved.kind, "feedback");
         assert!(saved.tags.contains(&"correction".to_string()));
         assert!(saved.tags.contains(&"l5".to_string()));
-        assert!(saved
-            .related_keys
-            .contains(&"tests:target_for_correction".to_string()));
+        assert!(
+            saved
+                .related_keys
+                .contains(&"tests:target_for_correction".to_string())
+        );
 
         // Verify the edge.
         let edges = store
@@ -22959,6 +23420,106 @@ mod tests {
         );
     }
 
+    // ── forum_digest (read-efficiency at scale, 2026-05-23) ─────────────
+
+    fn mk_fpost(id: i64, author: &str, kind: &str, body: &str) -> ab_store::ForumPostRecord {
+        ab_store::ForumPostRecord {
+            id,
+            thread_id: 6,
+            author: author.into(),
+            kind: kind.into(),
+            body: body.into(),
+            refs: json!({}),
+            created_at: 1_700_000_000 + id,
+        }
+    }
+
+    fn mk_fthread(
+        id: i64,
+        title: &str,
+        post_count: i64,
+        last_post_at: i64,
+    ) -> ab_store::ForumThreadRecord {
+        ab_store::ForumThreadRecord {
+            id,
+            board: "general".into(),
+            title: title.into(),
+            created_by: "x".into(),
+            created_at: 1_700_000_000,
+            last_post_at,
+            status: "open".into(),
+            tags: vec![],
+            post_count,
+            unread_count: None,
+        }
+    }
+
+    #[test]
+    fn forum_digest_title_strips_markdown_and_truncates() {
+        assert_eq!(
+            forum_digest_title("## Decision A — ship it", 60),
+            "Decision A — ship it"
+        );
+        assert_eq!(forum_digest_title("plain line\nsecond", 60), "plain line");
+        assert_eq!(
+            forum_digest_title("   \n\n## After blanks", 60),
+            "After blanks"
+        );
+        let long = "#".repeat(1) + " " + &"x".repeat(100);
+        assert!(forum_digest_title(&long, 10).ends_with('…'));
+    }
+
+    #[test]
+    fn forum_digest_block_extracts_decisions_active_questions() {
+        let thread = mk_fthread(6, "v22 RFC substrate", 5, 1_700_000_100);
+        let posts = vec![
+            mk_fpost(1, "alice", "decision", "## Pick SVD projection"),
+            mk_fpost(2, "bob", "finding", "## M7 reversed"),
+            mk_fpost(3, "alice", "question", "## Should we tune tau?"),
+            mk_fpost(4, "bob", "decision", "## Defer to Day-14"),
+        ];
+        let block = forum_digest_thread_block(&thread, &posts, None, 1_700_000_200);
+        let joined = block.join("\n");
+        assert!(joined.contains("[6] v22 RFC substrate"), "header: {joined}");
+        assert!(joined.contains("active:"), "active line: {joined}");
+        assert!(joined.contains("decisions:"), "decisions line: {joined}");
+        assert!(
+            joined.contains("Defer to Day-14"),
+            "decision title: {joined}"
+        );
+        assert!(joined.contains("open-q:"), "questions line: {joined}");
+        // No my_sigil → no needs-reply line.
+        assert!(!joined.contains("needs-reply"));
+    }
+
+    #[test]
+    fn forum_digest_block_flags_at_me_when_unaddressed() {
+        let thread = mk_fthread(6, "t", 3, 1_700_000_100);
+        let posts = vec![
+            mk_fpost(1, "me#abc", "msg", "my own post"),
+            mk_fpost(2, "other", "reply", "hey me#abc what about X?"),
+        ];
+        let block = forum_digest_thread_block(&thread, &posts, Some("me#abc"), 1_700_000_200);
+        let joined = block.join("\n");
+        assert!(joined.contains("needs-reply"), "should flag: {joined}");
+        assert!(joined.contains("#2 by other"), "names the post: {joined}");
+    }
+
+    #[test]
+    fn forum_digest_block_no_at_me_when_replied_after() {
+        let thread = mk_fthread(6, "t", 3, 1_700_000_100);
+        let posts = vec![
+            mk_fpost(1, "other", "reply", "ping me#abc please respond"),
+            mk_fpost(2, "me#abc", "reply", "responded"),
+        ];
+        let block = forum_digest_thread_block(&thread, &posts, Some("me#abc"), 1_700_000_200);
+        let joined = block.join("\n");
+        assert!(
+            !joined.contains("needs-reply"),
+            "replied after → no flag: {joined}"
+        );
+    }
+
     // ── L7 P1 — session_reflect ─────────────────────────────────────────
 
     #[test]
@@ -23023,9 +23584,11 @@ mod tests {
         assert!(saved.tags.iter().any(|t| t == "severity:high"));
         // applicability appended as a footer in content.
         assert!(saved.content.contains("Applicability:"));
-        assert!(saved
-            .content
-            .contains("any solo work session expected to run >30min"));
+        assert!(
+            saved
+                .content
+                .contains("any solo work session expected to run >30min")
+        );
 
         // Second lesson — no applicability → no footer.
         let key2 = written[1]["key"].as_str().expect("key").to_string();

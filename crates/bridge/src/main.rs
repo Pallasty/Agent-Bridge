@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
+mod doctor;
 mod setup;
 mod shadow_cortex;
 mod skills;
@@ -33,6 +34,16 @@ enum Cmd {
     Daemon,
     /// Run as an MCP stdio server (for `claude mcp add agent-bridge ...`).
     Mcp,
+    /// Deployment self-check: verify the wrapper is intact (not clobbered by a
+    /// direct binary), agent-bridge.real exists, the SVD projection env is
+    /// injected + its artifact resolvable, the running daemon carries the SVD
+    /// env, and MCP servers exec the current binary. Catches silent
+    /// "deployed but didn't take effect" failures. Exits non-zero on any fail.
+    Doctor {
+        /// Emit a JSON report instead of the human-readable table.
+        #[arg(long)]
+        json: bool,
+    },
     /// Install agent-bridge for the chosen frontend.
     ///
     /// `--frontend claude-code` (default): copies the binary to
@@ -3350,6 +3361,11 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Deployment self-check — pure file/process inspection, no Hub.
+    if let Cmd::Doctor { json } = &cmd {
+        return doctor::run_doctor(*json).await;
+    }
+
     // ε-5: worktree-session subcommand. Doesn't need a Hub — pure git
     // CLI wrapping, runs to completion.
     if let Cmd::WorktreeSession { op } = &cmd {
@@ -3653,7 +3669,8 @@ async fn main() -> Result<()> {
         | Cmd::Palace { .. }
         | Cmd::ShellInit { .. }
         | Cmd::WorktreeSession { .. }
-        | Cmd::RescueSnapshot { .. } => unreachable!(),
+        | Cmd::RescueSnapshot { .. }
+        | Cmd::Doctor { .. } => unreachable!(),
     }
 }
 
@@ -10301,13 +10318,16 @@ fn print_shadow_cortex_weekly_bonus(
     );
     for lane in &summary.lane_coverage {
         println!(
-            "  {}: {} ({}/{}, {:.0}%) rank_tie={}",
+            "  {}: {} ({}/{}, {:.0}%) rank_tie={} saturation={} top_k_cap_hits={}/{}",
             lane.lane,
             lane.state,
             lane.covered_events,
             lane.total_events,
             lane.coverage * 100.0,
             lane.rank_tie_state,
+            lane.salience_saturation_state,
+            lane.top_k_cap_hits,
+            lane.top_k_size,
         );
     }
     if let Some(signal) = &summary.top_signal {
@@ -10320,6 +10340,13 @@ fn print_shadow_cortex_weekly_bonus(
     if let Some(signal) = &summary.seed_shadow_top_signal {
         println!(
             "  seed-shadow top: {:?}/{:?} {} ({:.2})",
+            signal.scope, signal.signal_type, signal.subject_id, signal.salience,
+        );
+        println!("    {}", signal.summary);
+    }
+    if let Some(signal) = &summary.seed_runtime_top_signal {
+        println!(
+            "  seed-runtime top: {:?}/{:?} {} ({:.2})",
             signal.scope, signal.signal_type, signal.subject_id, signal.salience,
         );
         println!("    {}", signal.summary);

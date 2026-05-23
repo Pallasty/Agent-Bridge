@@ -2340,6 +2340,37 @@ pub trait StateStore: Send + Sync {
         Ok(None)
     }
 
+    /// List threads across ALL boards, status-filtered, ordered by
+    /// `last_post_at DESC`. Powers `forum_digest` — unlike `forum_list_threads`
+    /// it has no board filter and no per-session unread bookkeeping (the digest
+    /// is a stateless cross-board snapshot). Default impl returns an error.
+    async fn forum_digest_threads(
+        &self,
+        status: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<ForumThreadRecord>> {
+        let _ = (status, limit);
+        Err(ab_core::Error::Backend(
+            "forum_digest_threads not implemented".into(),
+        ))
+    }
+
+    /// The most RECENT `limit` posts in a thread (id DESC, capped). Unlike
+    /// `forum_read` (which returns the OLDEST window from a cursor), this powers
+    /// `forum_digest`'s per-thread extraction so high-volume threads reflect
+    /// current state, not their opening posts. Returned newest-first; callers
+    /// that need chronological order should sort by id. Default impl errors.
+    async fn forum_recent_posts(
+        &self,
+        thread_id: i64,
+        limit: u32,
+    ) -> Result<Vec<ForumPostRecord>> {
+        let _ = (thread_id, limit);
+        Err(ab_core::Error::Backend(
+            "forum_recent_posts not implemented".into(),
+        ))
+    }
+
     /// Update thread status (`open` | `resolved` | `archived`).
     /// Export every forum thread (with its posts) to a JSONL file. One thread
     /// per line; posts are nested inside their thread. Subscriptions are not
