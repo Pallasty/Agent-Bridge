@@ -7872,6 +7872,125 @@ impl StateStore for SqliteStore {
         Ok(out)
     }
 
+    async fn forum_digest_threads(
+        &self,
+        status: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<ForumThreadRecord>> {
+        let status_f = status.map(|s| s.to_string());
+        let lim = i64::from(limit.clamp(1, 500));
+
+        let rows = self
+            .conn
+            .call(
+                move |c| -> RusqliteResult<Vec<(i64, String, String, String, i64, i64, String, Option<String>, i64)>> {
+                    let mut stmt = c.prepare(
+                        "SELECT id, board, title, created_by, created_at, last_post_at, \
+                                status, tags_json, \
+                                (SELECT COUNT(*) FROM forum_posts WHERE thread_id = forum_threads.id) AS post_count \
+                         FROM forum_threads \
+                         WHERE (?1 IS NULL OR status = ?1) \
+                         ORDER BY last_post_at DESC LIMIT ?2",
+                    )?;
+                    let mut q = stmt.query(params![status_f, lim])?;
+                    let mut out = Vec::new();
+                    while let Some(r) = q.next()? {
+                        out.push((
+                            r.get::<_, i64>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?,
+                            r.get::<_, String>(3)?,
+                            r.get::<_, i64>(4)?,
+                            r.get::<_, i64>(5)?,
+                            r.get::<_, String>(6)?,
+                            r.get::<_, Option<String>>(7)?,
+                            r.get::<_, i64>(8)?,
+                        ));
+                    }
+                    Ok(out)
+                },
+            )
+            .await
+            .map_err(|e| Error::Backend(format!("forum_digest_threads: {e}")))?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for (id, board, title, created_by, created_at, last_post_at, status, tags_json, post_count) in
+            rows
+        {
+            let tags: Vec<String> = match tags_json {
+                Some(s) => serde_json::from_str(&s).unwrap_or_default(),
+                None => Vec::new(),
+            };
+            out.push(ForumThreadRecord {
+                id,
+                board,
+                title,
+                created_by,
+                created_at,
+                last_post_at,
+                status,
+                tags,
+                post_count,
+                unread_count: None,
+            });
+        }
+        Ok(out)
+    }
+
+    async fn forum_recent_posts(
+        &self,
+        thread_id: i64,
+        limit: u32,
+    ) -> Result<Vec<ForumPostRecord>> {
+        let lim = i64::from(limit.clamp(1, 500));
+        let rows = self
+            .conn
+            .call(
+                move |c| -> RusqliteResult<Vec<(i64, i64, String, String, String, Option<String>, i64)>> {
+                    let mut stmt = c.prepare(
+                        "SELECT p.id, p.thread_id, p.author, p.kind, p.body, p.refs_json, p.created_at \
+                         FROM forum_posts p \
+                         WHERE p.thread_id = ?1 \
+                         ORDER BY p.id DESC LIMIT ?2",
+                    )?;
+                    let mut q = stmt.query(params![thread_id, lim])?;
+                    let mut out = Vec::new();
+                    while let Some(r) = q.next()? {
+                        out.push((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                            r.get(6)?,
+                        ));
+                    }
+                    Ok(out)
+                },
+            )
+            .await
+            .map_err(|e| Error::Backend(format!("forum_recent_posts: {e}")))?;
+
+        let mut posts = Vec::with_capacity(rows.len());
+        for (id, thread_id, author, kind, body, refs_json, created_at) in rows {
+            let refs = match refs_json {
+                Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::Null),
+                None => serde_json::Value::Null,
+            };
+            posts.push(ForumPostRecord {
+                id,
+                thread_id,
+                author,
+                kind,
+                body,
+                refs,
+                created_at,
+            });
+        }
+        Ok(posts)
+    }
+
     async fn forum_export(
         &self,
         out_path: &std::path::Path,

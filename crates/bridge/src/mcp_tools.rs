@@ -3532,6 +3532,240 @@ impl McpTool for ForumSetThreadStatusTool {
 }
 
 // ===========================================================================
+//                       forum_digest (read-efficiency at scale)
+// ===========================================================================
+//
+// See docs/DESIGN-forum-digest-and-sediment-triggers-2026-05-23.md.
+// Rule-based structural digest of open threads so the agent reads ~N compact
+// thread summaries instead of raw posts (verify: 736 open posts ≈ 455k tokens
+// full-scan; digest targets ≤1500). Pure SQL, no LLM (v0). pull-not-push.
+
+/// Extract a one-line title from a forum post body: first non-empty line with
+/// leading markdown header markers (`#`, `##`, …) and whitespace stripped,
+/// truncated to `max_chars`. Pure for testability.
+fn forum_digest_title(body: &str, max_chars: usize) -> String {
+    let first = body
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    let stripped = first.trim_start_matches('#').trim();
+    let (truncated, did_trunc, _) = truncate_chars(stripped, max_chars);
+    if did_trunc {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+/// Build the digest block for a single thread. Pure: caller supplies the
+/// thread record + its recent posts (newest-first NOT required; we sort).
+/// `my_sigil` (when set) flags posts that mention it with no later post
+/// authored by the same sigil = "needs reply".
+fn forum_digest_thread_block(
+    thread: &ab_store::ForumThreadRecord,
+    posts: &[ab_store::ForumPostRecord],
+    my_sigil: Option<&str>,
+    now_secs: i64,
+) -> Vec<String> {
+    let days_idle = ((now_secs - thread.last_post_at).max(0)) / 86_400;
+    let mut lines = vec![format!(
+        "[{}] {} ({} posts · {}d idle · {})",
+        thread.id,
+        forum_digest_title(&thread.title, 60),
+        thread.post_count,
+        days_idle,
+        thread.board,
+    )];
+
+    // Posts sorted ascending by id for lineage + latest-per-author.
+    let mut sorted: Vec<&ab_store::ForumPostRecord> = posts.iter().collect();
+    sorted.sort_by_key(|p| p.id);
+
+    // latest-per-author: last word from each distinct author (insertion order
+    // by most-recent post).
+    let mut latest: Vec<(String, i64)> = Vec::new();
+    for p in sorted.iter().rev() {
+        if !latest.iter().any(|(a, _)| a == &p.author) {
+            latest.push((p.author.clone(), p.id));
+        }
+    }
+    if !latest.is_empty() {
+        let who: Vec<String> = latest
+            .iter()
+            .take(5)
+            .map(|(a, id)| format!("{a}(#{id})"))
+            .collect();
+        lines.push(format!("  active: {}", who.join(", ")));
+    }
+
+    // decisions + findings = the durable spine (titles only).
+    let decisions: Vec<String> = sorted
+        .iter()
+        .filter(|p| p.kind == "decision")
+        .rev()
+        .take(4)
+        .map(|p| format!("«{}»", forum_digest_title(&p.body, 50)))
+        .collect();
+    if !decisions.is_empty() {
+        lines.push(format!("  decisions: {}", decisions.join(" ")));
+    }
+
+    // open questions (v0: list recent questions; answered-detection is v1).
+    let questions: Vec<String> = sorted
+        .iter()
+        .filter(|p| p.kind == "question")
+        .rev()
+        .take(3)
+        .map(|p| format!("«{}»", forum_digest_title(&p.body, 50)))
+        .collect();
+    if !questions.is_empty() {
+        lines.push(format!("  open-q: {}", questions.join(" ")));
+    }
+
+    // @me unaddressed: a post mentions my sigil, and no LATER post in this
+    // thread is authored by my sigil.
+    if let Some(sig) = my_sigil {
+        let my_last_authored: i64 = sorted
+            .iter()
+            .filter(|p| p.author.contains(sig))
+            .map(|p| p.id)
+            .max()
+            .unwrap_or(0);
+        let pending: Vec<String> = sorted
+            .iter()
+            .filter(|p| {
+                p.id > my_last_authored
+                    && !p.author.contains(sig)
+                    && p.body.contains(sig)
+            })
+            .map(|p| format!("#{} by {}", p.id, p.author))
+            .collect();
+        if !pending.is_empty() {
+            lines.push(format!("  ⚠ @me needs-reply: {}", pending.join(", ")));
+        }
+    }
+
+    lines
+}
+
+pub struct ForumDigestTool {
+    hub: Hub,
+}
+impl ForumDigestTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for ForumDigestTool {
+    fn name(&self) -> &'static str {
+        "forum_digest"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Compact rule-based digest of forum threads across ALL boards \
+                 (default status=open). One short block per thread: header \
+                 (id/title/post_count/days_idle/board), active authors, decision \
+                 + finding titles, open questions, and — when `my_sigil` is set — \
+                 posts mentioning you with no later reply from you (needs-reply). \
+                 Read this INSTEAD of forum_read for 'what's the board state'; use \
+                 forum_read to deep-dive one thread. Token-budgeted (default ≤1800)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "status":          { "type": "string", "enum": ["open", "resolved", "archived"], "default": "open" },
+                    "thread_limit":    { "type": "integer", "default": 30, "description": "Max threads to digest (1–200)." },
+                    "posts_per_thread":{ "type": "integer", "default": 60, "description": "Recent posts scanned per thread for extraction (1–200)." },
+                    "my_sigil":        { "type": "string", "description": "Your author sigil (e.g. '#3b568a5f' or full id) — enables needs-reply detection." },
+                    "max_tokens":      { "type": "integer", "default": 1800, "description": "Hard cap on digest output tokens." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let status = args
+            .get("status")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("open");
+        let thread_limit = args
+            .get("thread_limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30)
+            .clamp(1, 200) as u32;
+        let posts_per_thread = args
+            .get("posts_per_thread")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(60)
+            .clamp(1, 200) as u32;
+        let my_sigil = args
+            .get("my_sigil")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let max_tokens = args
+            .get("max_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1800)
+            .clamp(200, 20_000) as usize;
+
+        let threads = store
+            .forum_digest_threads(Some(status), thread_limit)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("forum_digest_threads: {e}")))?;
+
+        if threads.is_empty() {
+            return Ok(ToolResult::text(format!(
+                "(no {status} threads)"
+            )));
+        }
+
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        let mut lines: Vec<String> = vec![
+            format!("=== Forum Digest ({} {status} threads) ===", threads.len()),
+            String::new(),
+        ];
+        let mut budget_hit = false;
+        let mut rendered = 0usize;
+        for thread in &threads {
+            let posts = store
+                .forum_recent_posts(thread.id, posts_per_thread)
+                .await
+                .unwrap_or_default();
+            let block = forum_digest_thread_block(thread, &posts, my_sigil, now_secs);
+            // Stop before exceeding budget; note how many threads were skipped.
+            let projected = estimate_tokens_from_text(&lines.join("\n")) as usize
+                + estimate_tokens_from_text(&block.join("\n")) as usize;
+            if projected > max_tokens && rendered > 0 {
+                budget_hit = true;
+                break;
+            }
+            lines.extend(block);
+            lines.push(String::new());
+            rendered += 1;
+        }
+        if budget_hit {
+            lines.push(format!(
+                "[…{} more threads omitted for token budget — raise max_tokens or filter status]",
+                threads.len() - rendered
+            ));
+        }
+
+        Ok(ToolResult::text(lines.join("\n")))
+    }
+}
+
+// ===========================================================================
 //                       presence (v19) — identity + heartbeat
 // ===========================================================================
 
@@ -18393,6 +18627,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         Tier::Standard,
         Arc::new(ForumSetThreadStatusTool::new(hub.clone())),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(ForumDigestTool::new(hub.clone())),
+    );
     // Presence (v19): identity convention + agent registry (A2A AgentCard-aligned).
     reg_if(
         &mut reg,
@@ -22674,6 +22914,89 @@ mod tests {
             "exact trim marker shape, got {:?}",
             last
         );
+    }
+
+    // ── forum_digest (read-efficiency at scale, 2026-05-23) ─────────────
+
+    fn mk_fpost(id: i64, author: &str, kind: &str, body: &str) -> ab_store::ForumPostRecord {
+        ab_store::ForumPostRecord {
+            id,
+            thread_id: 6,
+            author: author.into(),
+            kind: kind.into(),
+            body: body.into(),
+            refs: json!({}),
+            created_at: 1_700_000_000 + id,
+        }
+    }
+
+    fn mk_fthread(id: i64, title: &str, post_count: i64, last_post_at: i64) -> ab_store::ForumThreadRecord {
+        ab_store::ForumThreadRecord {
+            id,
+            board: "general".into(),
+            title: title.into(),
+            created_by: "x".into(),
+            created_at: 1_700_000_000,
+            last_post_at,
+            status: "open".into(),
+            tags: vec![],
+            post_count,
+            unread_count: None,
+        }
+    }
+
+    #[test]
+    fn forum_digest_title_strips_markdown_and_truncates() {
+        assert_eq!(forum_digest_title("## Decision A — ship it", 60), "Decision A — ship it");
+        assert_eq!(forum_digest_title("plain line\nsecond", 60), "plain line");
+        assert_eq!(forum_digest_title("   \n\n## After blanks", 60), "After blanks");
+        let long = "#".repeat(1) + " " + &"x".repeat(100);
+        assert!(forum_digest_title(&long, 10).ends_with('…'));
+    }
+
+    #[test]
+    fn forum_digest_block_extracts_decisions_active_questions() {
+        let thread = mk_fthread(6, "v22 RFC substrate", 5, 1_700_000_100);
+        let posts = vec![
+            mk_fpost(1, "alice", "decision", "## Pick SVD projection"),
+            mk_fpost(2, "bob", "finding", "## M7 reversed"),
+            mk_fpost(3, "alice", "question", "## Should we tune tau?"),
+            mk_fpost(4, "bob", "decision", "## Defer to Day-14"),
+        ];
+        let block = forum_digest_thread_block(&thread, &posts, None, 1_700_000_200);
+        let joined = block.join("\n");
+        assert!(joined.contains("[6] v22 RFC substrate"), "header: {joined}");
+        assert!(joined.contains("active:"), "active line: {joined}");
+        assert!(joined.contains("decisions:"), "decisions line: {joined}");
+        assert!(joined.contains("Defer to Day-14"), "decision title: {joined}");
+        assert!(joined.contains("open-q:"), "questions line: {joined}");
+        // No my_sigil → no needs-reply line.
+        assert!(!joined.contains("needs-reply"));
+    }
+
+    #[test]
+    fn forum_digest_block_flags_at_me_when_unaddressed() {
+        let thread = mk_fthread(6, "t", 3, 1_700_000_100);
+        let posts = vec![
+            mk_fpost(1, "me#abc", "msg", "my own post"),
+            mk_fpost(2, "other", "reply", "hey me#abc what about X?"),
+        ];
+        let block = forum_digest_thread_block(&thread, &posts, Some("me#abc"), 1_700_000_200);
+        let joined = block.join("\n");
+        assert!(joined.contains("needs-reply"), "should flag: {joined}");
+        assert!(joined.contains("#2 by other"), "names the post: {joined}");
+    }
+
+    #[test]
+    fn forum_digest_block_no_at_me_when_replied_after() {
+        let thread = mk_fthread(6, "t", 3, 1_700_000_100);
+        let posts = vec![
+            mk_fpost(1, "other", "reply", "ping me#abc please respond"),
+            mk_fpost(2, "me#abc", "reply", "responded"),
+        ];
+        let block = forum_digest_thread_block(&thread, &posts, Some("me#abc"), 1_700_000_200);
+        let joined = block.join("\n");
+        assert!(!joined.contains("needs-reply"), "replied after → no flag: {joined}");
     }
 
     // ── L7 P1 — session_reflect ─────────────────────────────────────────
