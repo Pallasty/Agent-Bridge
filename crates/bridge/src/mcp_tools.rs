@@ -11192,6 +11192,7 @@ impl McpTool for McpConfigAuditTool {
                 "claude_code": claude
             },
             "stdio_smoke": smoke,
+            "tool_profile_divergence": collab_group_divergence(),
             "recommendations": mcp_audit_recommendations(&codex, &gemini, &claude)
         })))
     }
@@ -17894,10 +17895,13 @@ impl ToolSet {
         }
     }
 
-    fn extras(self) -> &'static [&'static str] {
+    fn extras(self) -> Vec<&'static str> {
         match self {
-            Self::CodexEssential => CODEX_ESSENTIAL_EXTRAS,
-            _ => &[],
+            Self::CodexEssential => CODEX_ESSENTIAL_GROUPS
+                .iter()
+                .flat_map(|g| g.iter().copied())
+                .collect(),
+            _ => Vec::new(),
         }
     }
 }
@@ -17953,7 +17957,7 @@ impl ToolPolicy {
     /// but exposed anyway so Codex agents can use the cross-process whiteboard.
     /// Returned as `&'static [&'static str]` so capabilities serialization can
     /// surface the list verbatim.
-    fn extras(self) -> &'static [&'static str] {
+    fn extras(self) -> Vec<&'static str> {
         self.set.extras()
     }
 
@@ -17978,27 +17982,76 @@ fn normalize_tool_policy_value(value: &str) -> String {
         .replace(' ', "-")
 }
 
-/// Tools allowlisted into the `codex-essential` surface beyond Tier::Essential.
-/// Single source of truth — `codex_essential_tool` matches against this and
-/// `ToolSet::extras` returns it so capabilities can surface the list to clients.
-const CODEX_ESSENTIAL_EXTRAS: &[&str] = &[
-    "ide_snapshot",
-    "ide_command",
-    "forum_post",
-    "forum_read",
-    "forum_list_threads",
-    "forum_subscribe",
-    "forum_set_thread_status",
-    "agent_presence_announce",
-    "agent_presence_list",
+/// Capability groups — single source of truth for cross-client SHARED tool
+/// families that are prone to silent drift. Named-allowlist profiles
+/// (codex-essential / codex-lean / …) compose their collab surface from these
+/// groups, so a NEW tool added to a group auto-propagates to every profile
+/// that includes it. This closes the drift that hid `forum_digest` from codex
+/// clients (it was Tier::Standard → auto-visible to Claude profiles, but the
+/// codex allowlists listed the other 5 forum tools by name and never gained
+/// the 6th). See `lesson_wrapper_clobbered_orphans_real_deploys_2026_05_23`.
+///
+/// NOTE: this groups only the *cross-client collab core* (forum / presence /
+/// ide). Per-client curation of memory/session/pet/etc. subsets stays explicit
+/// below — that divergence is INTENTIONAL (token budget), not drift.
+mod capgroups {
+    /// Forum read surface — list/read/digest. A new forum *read* tool added
+    /// here propagates to every profile that exposes forum reads.
+    pub const FORUM_READ: &[&str] = &["forum_read", "forum_list_threads", "forum_digest"];
+    /// Forum write — posting.
+    pub const FORUM_POST: &[&str] = &["forum_post"];
+    /// Forum lifecycle management — subscriptions + thread status.
+    pub const FORUM_MANAGE: &[&str] = &["forum_subscribe", "forum_set_thread_status"];
+    /// Presence registry.
+    pub const PRESENCE_ANNOUNCE: &[&str] = &["agent_presence_announce"];
+    pub const PRESENCE_LIST: &[&str] = &["agent_presence_list"];
+    /// IDE bridge pair.
+    pub const IDE: &[&str] = &["ide_snapshot", "ide_command"];
+
+    /// Every tool that belongs to a collab group — used by the drift-guardrail
+    /// test to assert no registered forum_*/presence/ide tool is left ungrouped.
+    pub const ALL_COLLAB: &[&[&str]] = &[
+        FORUM_READ,
+        FORUM_POST,
+        FORUM_MANAGE,
+        PRESENCE_ANNOUNCE,
+        PRESENCE_LIST,
+        IDE,
+    ];
+}
+
+/// True if `name` is a member of any of the given capability groups.
+fn in_groups(name: &str, groups: &[&[&str]]) -> bool {
+    groups.iter().any(|g| g.contains(&name))
+}
+
+/// Collab groups exposed by the `codex-essential` surface (beyond Essential
+/// tier). Single source of truth for both `codex_essential_tool` and
+/// `ToolSet::extras` (capabilities surfacing).
+const CODEX_ESSENTIAL_GROUPS: &[&[&str]] = &[
+    capgroups::IDE,
+    capgroups::FORUM_READ,
+    capgroups::FORUM_POST,
+    capgroups::FORUM_MANAGE,
+    capgroups::PRESENCE_ANNOUNCE,
+    capgroups::PRESENCE_LIST,
 ];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
-    matches!(tier, Tier::Essential) || CODEX_ESSENTIAL_EXTRAS.contains(&tool_name)
+    matches!(tier, Tier::Essential) || in_groups(tool_name, CODEX_ESSENTIAL_GROUPS)
 }
 
 fn codex_lean_tool(tool_name: &str) -> bool {
-    matches!(
+    // Collab core via groups (gains forum_digest automatically); per-client
+    // curated non-collab tools stay explicit (intentional token-budget choice).
+    in_groups(
+        tool_name,
+        &[
+            capgroups::FORUM_READ,
+            capgroups::FORUM_POST,
+            capgroups::PRESENCE_LIST,
+        ],
+    ) || matches!(
         tool_name,
         "capabilities"
             | "mcp_dispatch_audit"
@@ -18025,14 +18078,11 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "plan_save"
             | "plan_load"
             | "plan_update"
-            | "forum_post"
-            | "forum_read"
-            | "forum_list_threads"
-            | "agent_presence_list"
     )
 }
 
 fn gemini_lean_tool(tool_name: &str) -> bool {
+    // gemini-lean is deliberately collab-free (no forum/presence/ide).
     matches!(
         tool_name,
         "capabilities"
@@ -18062,6 +18112,70 @@ fn hook_lifecycle_tool(tool_name: &str) -> bool {
             | "pet_state_set"
             | "pet_state_ritual"
     )
+}
+
+/// (d) Cross-profile divergence audit. For each named-allowlist profile and
+/// each collab capability group, report full / partial / none coverage.
+/// **Partial coverage is a drift smell** — it means the profile lists some
+/// members of a group by name but not all, which is exactly how `forum_digest`
+/// went missing from codex clients. Surfaced in `mcp_config_audit` and pinned
+/// by `collab_groups_no_partial_coverage` test.
+fn collab_group_divergence() -> Value {
+    // (profile-label, name-membership predicate). Tier::Niche forces the
+    // name-allowlist path for tier-gated sets (collab tools are never Essential).
+    let profiles: [(&str, fn(&str) -> bool); 4] = [
+        ("codex-essential", |n| {
+            codex_essential_tool(Tier::Niche, n)
+        }),
+        ("codex-lean", codex_lean_tool),
+        ("gemini-lean", gemini_lean_tool),
+        ("hook-lifecycle", hook_lifecycle_tool),
+    ];
+    let group_names: [(&str, &[&str]); 6] = [
+        ("forum_read", capgroups::FORUM_READ),
+        ("forum_post", capgroups::FORUM_POST),
+        ("forum_manage", capgroups::FORUM_MANAGE),
+        ("presence_announce", capgroups::PRESENCE_ANNOUNCE),
+        ("presence_list", capgroups::PRESENCE_LIST),
+        ("ide", capgroups::IDE),
+    ];
+
+    let mut rows = Vec::new();
+    let mut partial_flags = Vec::new();
+    for (plabel, pred) in profiles {
+        for (gname, members) in group_names {
+            let exposed: Vec<&str> = members.iter().copied().filter(|m| pred(m)).collect();
+            let coverage = if exposed.is_empty() {
+                "none"
+            } else if exposed.len() == members.len() {
+                "full"
+            } else {
+                "partial"
+            };
+            if coverage == "partial" {
+                let missing: Vec<&str> =
+                    members.iter().copied().filter(|m| !pred(m)).collect();
+                partial_flags.push(json!({
+                    "profile": plabel,
+                    "group": gname,
+                    "exposed": exposed,
+                    "missing": missing,
+                }));
+            }
+            rows.push(json!({
+                "profile": plabel,
+                "group": gname,
+                "coverage": coverage,
+            }));
+        }
+    }
+    json!({
+        "matrix": rows,
+        "drift_flags": partial_flags,
+        "ok": partial_flags.is_empty(),
+        "note": "partial group coverage = a profile lists some-but-not-all members \
+                 of a collab group; usually a new tool that wasn't added to the group",
+    })
 }
 
 fn reg_if(reg: &mut ToolRegistry, policy: ToolPolicy, tier: Tier, tool: Arc<dyn McpTool>) {
@@ -21579,12 +21693,16 @@ mod tests {
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        assert_eq!(extras.len(), 9);
+        // 10 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1).
+        // forum_digest joined via the FORUM_READ capability group (2026-05-23).
+        assert_eq!(extras.len(), 10);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
         assert!(extras.contains(&"forum_read"));
         assert!(extras.contains(&"forum_list_threads"));
+        assert!(extras.contains(&"forum_digest"));
         assert!(extras.contains(&"forum_subscribe"));
         assert!(extras.contains(&"forum_set_thread_status"));
         assert!(extras.contains(&"agent_presence_announce"));
@@ -21606,6 +21724,84 @@ mod tests {
                 0,
                 "extras should be empty for {label} (only codex-essential surfaces them today)"
             );
+        }
+    }
+
+    // ── capability-group drift guardrails (c+d, 2026-05-23) ─────────────
+
+    #[test]
+    fn codex_clients_expose_forum_digest_via_group() {
+        // The fix: forum_digest propagates to codex profiles through the
+        // FORUM_READ capability group (was invisible when allowlists listed
+        // forum tools by name).
+        let ess = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        let lean = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        assert!(ess.includes(Tier::Standard, "forum_digest"), "codex-essential");
+        assert!(lean.includes(Tier::Standard, "forum_digest"), "codex-lean");
+    }
+
+    #[test]
+    fn codex_essential_preserves_legacy_collab_surface() {
+        // Regression: the group recompose must keep every collab tool that
+        // was in the old hardcoded CODEX_ESSENTIAL_EXTRAS.
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        for t in [
+            "ide_snapshot",
+            "ide_command",
+            "forum_post",
+            "forum_read",
+            "forum_list_threads",
+            "forum_subscribe",
+            "forum_set_thread_status",
+            "agent_presence_announce",
+            "agent_presence_list",
+        ] {
+            assert!(p.includes(Tier::Niche, t), "lost legacy collab tool: {t}");
+        }
+    }
+
+    #[test]
+    fn codex_lean_preserves_curated_surface() {
+        // Regression: non-collab curated tools must survive the recompose;
+        // collab subset = FORUM_READ + FORUM_POST + PRESENCE_LIST (NOT manage).
+        let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        for t in [
+            "memory_search", "memory_save", "memory_neighbors", "session_bootstrap",
+            "agent_spawn", "plan_save", "project_detect", "pet_state_ritual",
+            "forum_post", "forum_read", "forum_list_threads", "agent_presence_list",
+        ] {
+            assert!(p.includes(Tier::Niche, t), "lost curated tool: {t}");
+        }
+        // codex-lean does NOT get forum management or presence_announce.
+        assert!(!p.includes(Tier::Niche, "forum_subscribe"));
+        assert!(!p.includes(Tier::Niche, "forum_set_thread_status"));
+        assert!(!p.includes(Tier::Niche, "agent_presence_announce"));
+    }
+
+    #[test]
+    fn collab_groups_no_partial_coverage() {
+        // (d) The drift guardrail: no profile may list SOME-but-not-all members
+        // of a collab group. Partial coverage = a new tool that wasn't added to
+        // the group (exactly the forum_digest bug). If this fails, add the new
+        // tool to the right capgroups:: constant.
+        let report = collab_group_divergence();
+        let ok = report.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+        assert!(
+            ok,
+            "collab group drift detected: {}",
+            serde_json::to_string_pretty(report.get("drift_flags").unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn every_collab_group_member_is_unique() {
+        // Sanity: no tool appears in two collab groups (would double-count in
+        // extras + confuse coverage math).
+        let mut seen = std::collections::HashSet::new();
+        for group in capgroups::ALL_COLLAB {
+            for &name in *group {
+                assert!(seen.insert(name), "tool {name} in multiple collab groups");
+            }
         }
     }
 
