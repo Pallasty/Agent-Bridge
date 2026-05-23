@@ -13,6 +13,9 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+
 use anyhow::Result;
 use serde_json::json;
 
@@ -51,7 +54,12 @@ pub struct Check {
 
 impl Check {
     fn ok(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, status: Status::Ok, detail: detail.into(), fix: None }
+        Self {
+            name,
+            status: Status::Ok,
+            detail: detail.into(),
+            fix: None,
+        }
     }
     fn warn(name: &'static str, detail: impl Into<String>, fix: impl Into<String>) -> Self {
         Self {
@@ -78,7 +86,6 @@ pub enum FileKind {
     Elf,
     MachO,
     Script,
-    Missing,
     Other,
 }
 
@@ -184,7 +191,10 @@ fn check_wrapper(dir: &Path) -> Check {
         }
         _ => Check::warn(
             "wrapper",
-            format!("{} is neither a known binary nor a script", wrapper.display()),
+            format!(
+                "{} is neither a known binary nor a script",
+                wrapper.display()
+            ),
             "inspect manually",
         ),
     }
@@ -247,6 +257,131 @@ fn pgrep(pattern: &str) -> Vec<i64> {
         .unwrap_or_default()
 }
 
+#[cfg(unix)]
+fn file_inode(path: &Path) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|m| m.ino())
+}
+
+#[cfg(not(unix))]
+fn file_inode(_path: &Path) -> Option<u64> {
+    None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProcessTextFile {
+    path: String,
+    inode: Option<u64>,
+}
+
+fn basename(path: &str) -> &str {
+    path.trim_end_matches(" (deleted)")
+        .rsplit('/')
+        .next()
+        .unwrap_or(path)
+}
+
+fn process_command(pid: i64) -> Option<String> {
+    let out = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+fn process_text_file_from_proc(pid: i64) -> Option<ProcessTextFile> {
+    let path = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+    let inode = std::fs::metadata(&path)
+        .ok()
+        .and_then(|m| file_inode_from_metadata(&m));
+    Some(ProcessTextFile {
+        path: path.to_string_lossy().to_string(),
+        inode,
+    })
+}
+
+#[cfg(unix)]
+fn file_inode_from_metadata(meta: &std::fs::Metadata) -> Option<u64> {
+    Some(meta.ino())
+}
+
+#[cfg(not(unix))]
+fn file_inode_from_metadata(_meta: &std::fs::Metadata) -> Option<u64> {
+    None
+}
+
+fn process_text_file_from_lsof(pid: i64) -> Option<ProcessTextFile> {
+    let out = std::process::Command::new("lsof")
+        .args(["-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    for line in String::from_utf8_lossy(&out.stdout).lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 9 || parts.get(3).copied() != Some("txt") {
+            continue;
+        }
+        let path = parts[8..].join(" ");
+        let base = basename(&path);
+        if base == "agent-bridge" || base == "agent-bridge.real" {
+            let inode = parts.get(7).and_then(|s| s.parse::<u64>().ok());
+            return Some(ProcessTextFile { path, inode });
+        }
+    }
+    None
+}
+
+fn process_text_file(pid: i64) -> Option<ProcessTextFile> {
+    // macOS has no /proc; Linux may not have lsof. Try both and prefer lsof
+    // because it can report deleted/replaced executable inodes on macOS.
+    process_text_file_from_lsof(pid).or_else(|| process_text_file_from_proc(pid))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum McpProcessKind {
+    CurrentReal,
+    StaleReal,
+    DirectBinary,
+    Unknown,
+}
+
+fn classify_mcp_process(
+    text_file: Option<&ProcessTextFile>,
+    command: Option<&str>,
+    current_real_inode: Option<u64>,
+) -> McpProcessKind {
+    if let Some(text) = text_file {
+        match basename(&text.path) {
+            "agent-bridge.real" => {
+                if let (Some(actual), Some(current)) = (text.inode, current_real_inode) {
+                    if actual != current {
+                        return McpProcessKind::StaleReal;
+                    }
+                }
+                return McpProcessKind::CurrentReal;
+            }
+            "agent-bridge" => return McpProcessKind::DirectBinary,
+            _ => {}
+        }
+    }
+
+    let Some(command) = command else {
+        return McpProcessKind::Unknown;
+    };
+    if command.contains("agent-bridge.real mcp") {
+        McpProcessKind::CurrentReal
+    } else if command.contains("agent-bridge mcp") {
+        McpProcessKind::Unknown
+    } else {
+        McpProcessKind::Unknown
+    }
+}
+
 /// Check 5: running daemon has the SVD env (catches the silent regression at
 /// runtime, not just on disk).
 fn check_daemon_runtime() -> Check {
@@ -276,60 +411,65 @@ fn check_daemon_runtime() -> Check {
     }
 }
 
-/// Check 6: running MCP servers went through the wrapper (exe basename =
-/// `agent-bridge.real`), NOT the clobbered direct binary. This catches the
-/// integrity problem (wrapper bypassed) without false-positiving on normal
-/// post-deploy inode churn — an MCP server execing an *older inode* of
-/// `agent-bridge.real` is fine (a `/mcp` reconnect refreshes tools); an MCP
-/// server execing `agent-bridge` (no `.real`) means the wrapper was bypassed.
-fn check_mcp_servers(_dir: &Path) -> Check {
-    let pids = pgrep(r"agent-bridge mcp");
+/// Check 6: running MCP servers should execute the current `agent-bridge.real`.
+/// On macOS, old replaced binaries can keep running from orphaned inodes even
+/// after the path has been repaired. That serves stale tool manifests until the
+/// client reconnects, which is exactly the failure mode this check catches.
+fn check_mcp_servers(dir: &Path) -> Check {
+    let pids = pgrep(r"agent-bridge(\.real)? mcp");
     if pids.is_empty() {
         return Check::ok("mcp_servers", "no agent-bridge mcp processes running");
     }
-    let mut bypassed = Vec::new();
+
+    let real_inode = file_inode(&dir.join("agent-bridge.real"));
+    let mut current_real = Vec::new();
+    let mut stale_real = Vec::new();
+    let mut direct_binary = Vec::new();
+    let mut unknown = Vec::new();
+
     for pid in &pids {
-        if let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe")) {
-            let s = exe.to_string_lossy();
-            // bash = still in wrapper before exec (transient); .real = went
-            // through wrapper (good). Anything ending in /agent-bridge (no
-            // .real) = direct binary = wrapper bypassed.
-            let base = exe
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let base = base.trim_end_matches(" (deleted)");
-            if base == "agent-bridge" && !s.contains("bash") {
-                bypassed.push(*pid);
-            }
+        let text = process_text_file(*pid);
+        let command = process_command(*pid);
+        match classify_mcp_process(text.as_ref(), command.as_deref(), real_inode) {
+            McpProcessKind::CurrentReal => current_real.push(*pid),
+            McpProcessKind::StaleReal => stale_real.push(*pid),
+            McpProcessKind::DirectBinary => direct_binary.push(*pid),
+            McpProcessKind::Unknown => unknown.push(*pid),
         }
     }
-    if bypassed.is_empty() {
+
+    if stale_real.is_empty() && direct_binary.is_empty() && unknown.is_empty() {
         Check::ok(
             "mcp_servers",
             format!(
-                "{} MCP server(s) — all went through the wrapper (exec agent-bridge.real)",
+                "{} MCP server(s) — all executing current agent-bridge.real",
                 pids.len()
             ),
         )
     } else {
         // WARN not FAIL: the authoritative integrity gate is the `wrapper`
         // check. These are MCP servers spawned while the wrapper was clobbered
-        // (or before a redeploy) — they serve a stale tool surface (e.g. miss
-        // forum_digest) until the client reconnects. Lingering old servers from
-        // past sessions are expected churn, not a current-deployment failure.
+        // or before a redeploy. They can serve stale tool surfaces (e.g. miss
+        // forum_digest/mobile_*) until the client reconnects. Lingering old
+        // servers from past sessions are expected churn, not a current-deploy
+        // integrity failure.
         Check::warn(
             "mcp_servers",
             format!(
-                "{} of {} MCP server(s) exec the direct agent-bridge binary, not \
-                 the wrapper→.real path (PIDs {:?}) — spawned before the wrapper \
-                 was (re)installed; they serve a stale tool surface",
-                bypassed.len(),
+                "{} MCP server(s): {} current .real, {} stale .real, {} direct \
+                 agent-bridge binary, {} unknown (current {:?}, stale {:?}, direct {:?}, unknown {:?})",
                 pids.len(),
-                bypassed
+                current_real.len(),
+                stale_real.len(),
+                direct_binary.len(),
+                unknown.len(),
+                current_real,
+                stale_real,
+                direct_binary,
+                unknown
             ),
             "restart the MCP client(s) so they respawn from the current wrapper \
-             (the `wrapper` check above is the authoritative integrity gate)",
+             and re-read tools/list; this refreshes newly added tool manifests",
         )
     }
 }
@@ -370,7 +510,13 @@ pub async fn run_doctor(json: bool) -> Result<()> {
     } else {
         println!("=== agent-bridge doctor ({}) ===", dir.display());
         for c in &checks {
-            println!("{} [{}] {}: {}", c.status.glyph(), c.status.label(), c.name, c.detail);
+            println!(
+                "{} [{}] {}: {}",
+                c.status.glyph(),
+                c.status.label(),
+                c.name,
+                c.detail
+            );
             if let Some(fix) = &c.fix {
                 println!("    fix: {fix}");
             }
@@ -394,8 +540,14 @@ mod tests {
     #[test]
     fn classify_elf_vs_script() {
         assert_eq!(classify_file_head(b"\x7fELF\x02\x01"), FileKind::Elf);
-        assert_eq!(classify_file_head(b"#!/usr/bin/env bash\n"), FileKind::Script);
-        assert_eq!(classify_file_head(&[0xCF, 0xFA, 0xED, 0xFE]), FileKind::MachO);
+        assert_eq!(
+            classify_file_head(b"#!/usr/bin/env bash\n"),
+            FileKind::Script
+        );
+        assert_eq!(
+            classify_file_head(&[0xCF, 0xFA, 0xED, 0xFE]),
+            FileKind::MachO
+        );
         assert_eq!(classify_file_head(b"random text"), FileKind::Other);
         assert_eq!(classify_file_head(b""), FileKind::Other);
     }
@@ -410,6 +562,45 @@ mod tests {
         assert!(wrapper_execs_real(no_svd));
         let elf_text = "not a wrapper";
         assert!(!wrapper_execs_real(elf_text));
+    }
+
+    #[test]
+    fn mcp_process_classification_detects_stale_and_direct_binaries() {
+        let current = ProcessTextFile {
+            path: "/Users/me/.local/bin/agent-bridge.real".into(),
+            inode: Some(42),
+        };
+        assert_eq!(
+            classify_mcp_process(Some(&current), None, Some(42)),
+            McpProcessKind::CurrentReal
+        );
+
+        let stale = ProcessTextFile {
+            path: "/Users/me/.local/bin/agent-bridge.real".into(),
+            inode: Some(41),
+        };
+        assert_eq!(
+            classify_mcp_process(Some(&stale), None, Some(42)),
+            McpProcessKind::StaleReal
+        );
+
+        let direct = ProcessTextFile {
+            path: "/Users/me/.local/bin/agent-bridge".into(),
+            inode: Some(7),
+        };
+        assert_eq!(
+            classify_mcp_process(Some(&direct), None, Some(42)),
+            McpProcessKind::DirectBinary
+        );
+
+        assert_eq!(
+            classify_mcp_process(
+                None,
+                Some("/Users/me/.local/bin/agent-bridge.real mcp"),
+                None
+            ),
+            McpProcessKind::CurrentReal
+        );
     }
 
     #[test]
