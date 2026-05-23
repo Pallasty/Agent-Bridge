@@ -1062,6 +1062,9 @@ enum AvatarOp {
         /// Optional macOS say rate. Defaults to the policy suggestion or AB_PET_TTS_RATE.
         #[arg(long)]
         tts_rate: Option<u64>,
+        /// Include full nested downstream provenance instead of compact preview output.
+        #[arg(long)]
+        details: bool,
         /// Emit raw JSON payload.
         #[arg(long)]
         json: bool,
@@ -3036,6 +3039,7 @@ async fn main() -> Result<()> {
                 cooldown_secs,
                 tts_voice,
                 tts_rate,
+                details,
                 json: as_json,
             } => {
                 run_xiao_shu_action_request(
@@ -3053,6 +3057,7 @@ async fn main() -> Result<()> {
                     *cooldown_secs,
                     tts_voice.clone(),
                     *tts_rate,
+                    *details,
                     *as_json,
                 )
                 .await
@@ -5697,6 +5702,7 @@ async fn run_xiao_shu_action_request(
     cooldown_secs: i64,
     tts_voice: Option<String>,
     tts_rate: Option<u64>,
+    details: bool,
     as_json: bool,
 ) -> Result<()> {
     let cwd = avatar_current_cwd()?;
@@ -5716,6 +5722,7 @@ async fn run_xiao_shu_action_request(
         cooldown_secs,
         tts_voice: tts_voice.as_deref(),
         tts_rate,
+        include_details: details,
     };
     let payload = ab_bridge::avatar_cortex::xiao_shu_action_request(&opts)?;
     if as_json {

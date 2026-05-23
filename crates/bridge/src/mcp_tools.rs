@@ -12029,7 +12029,7 @@ impl McpTool for XiaoShuActionRequestTool {
                     "details": {
                         "type": "boolean",
                         "default": false,
-                        "description": "When list_queue=true, include full nested queue records. Defaults to compact records unless request_id or all_states is supplied."
+                        "description": "Include full nested records. Plain preview requests and broad queue reads default to compact records; request_id or all_states queue reads are always detailed."
                     },
                     "limit": {
                         "type": "integer",
@@ -12143,6 +12143,7 @@ impl McpTool for XiaoShuActionRequestTool {
             cooldown_secs,
             tts_voice: tts_voice.as_deref(),
             tts_rate,
+            include_details: details,
         };
         let result = if enqueue {
             crate::avatar_cortex::xiao_shu_action_request_enqueue(&opts)

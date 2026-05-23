@@ -100,6 +100,7 @@ pub struct XiaoShuActionRequestOptions<'a> {
     pub cooldown_secs: i64,
     pub tts_voice: Option<&'a str>,
     pub tts_rate: Option<u64>,
+    pub include_details: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -4446,6 +4447,46 @@ fn xiao_shu_action_intent_supported(intent: &str) -> bool {
     )
 }
 
+fn strip_recursive_provenance(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut compact = serde_json::Map::new();
+            for (key, child) in map {
+                if key.starts_with("source_") {
+                    continue;
+                }
+                compact.insert(key.clone(), strip_recursive_provenance(child));
+            }
+            Value::Object(compact)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(strip_recursive_provenance).collect()),
+        _ => value.clone(),
+    }
+}
+
+fn xiao_shu_action_downstream_preview_payload(
+    action_preview_payload: &Value,
+    include_details: bool,
+) -> Value {
+    if include_details {
+        return action_preview_payload.clone();
+    }
+
+    let mut compact = strip_recursive_provenance(action_preview_payload);
+    if let Some(obj) = compact.as_object_mut() {
+        obj.insert("compact".to_string(), json!(true));
+        obj.insert("include_details".to_string(), json!(false));
+        obj.insert(
+            "provenance_ref".to_string(),
+            json!({
+                "full_available_with_details": true,
+                "omitted": "recursive source_* provenance",
+            }),
+        );
+    }
+    compact
+}
+
 fn xiao_shu_action_request_from_preview(
     action_preview_payload: Value,
     opts: &XiaoShuActionRequestOptions<'_>,
@@ -4507,6 +4548,40 @@ fn xiao_shu_action_request_from_preview(
             }
         }
     }
+    let downstream_action_preview =
+        xiao_shu_action_downstream_preview_payload(&action_preview_payload, opts.include_details);
+    let action_request = json!({
+        "target": "xiao-shu",
+        "actor": actor,
+        "intent": intent,
+        "message": message,
+        "request_state": request_state,
+        "supported_intent": supported_intent,
+        "mapped_surface": "avatar_cortex_voice_action_preview",
+        "mapped_track": track,
+        "line": action.get("line").cloned().unwrap_or(Value::Null),
+        "reason": reason,
+        "requires_human_confirmation": true,
+        "human_confirmation_present": opts.confirm,
+        "real_emit_requires_local_cli": true,
+        "direct_llm_emit_allowed": false,
+        "ready_for_local_cli_emit": supported_intent && opts.confirm && downstream_ready,
+        "blocked": !supported_intent || !opts.confirm || !downstream_ready,
+        "blocked_reasons": blocked_reasons,
+        "request_command": request_command,
+        "confirm_request_command": confirm_request_command,
+        "preview_command": preview_command,
+        "emit_command": emit_command,
+        "next_step": "show this request to the operator; only a local CLI confirmation may run the emitted command",
+    });
+    let policy = json!({
+        "llm_can_request": true,
+        "llm_can_directly_control_pet": false,
+        "llm_can_emit_audio": false,
+        "operator_confirmation_required": true,
+        "local_cli_emit_only": true,
+        "http_emit_route_allowed": false,
+    });
 
     json!({
         "surface": "xiao_shu_action_request",
@@ -4527,39 +4602,11 @@ fn xiao_shu_action_request_from_preview(
         "writes_cooldown_state": false,
         "codex_pet_package_mutation": false,
         "mutates_global_substrate": false,
-        "action_request": {
-            "target": "xiao-shu",
-            "actor": actor,
-            "intent": intent,
-            "message": message,
-            "request_state": request_state,
-            "supported_intent": supported_intent,
-            "mapped_surface": "avatar_cortex_voice_action_preview",
-            "mapped_track": track,
-            "line": action.get("line").cloned().unwrap_or(Value::Null),
-            "reason": reason,
-            "requires_human_confirmation": true,
-            "human_confirmation_present": opts.confirm,
-            "real_emit_requires_local_cli": true,
-            "direct_llm_emit_allowed": false,
-            "ready_for_local_cli_emit": supported_intent && opts.confirm && downstream_ready,
-            "blocked": !supported_intent || !opts.confirm || !downstream_ready,
-            "blocked_reasons": blocked_reasons,
-            "request_command": request_command,
-            "confirm_request_command": confirm_request_command,
-            "preview_command": preview_command,
-            "emit_command": emit_command,
-            "next_step": "show this request to the operator; only a local CLI confirmation may run the emitted command",
-        },
-        "policy": {
-            "llm_can_request": true,
-            "llm_can_directly_control_pet": false,
-            "llm_can_emit_audio": false,
-            "operator_confirmation_required": true,
-            "local_cli_emit_only": true,
-            "http_emit_route_allowed": false,
-        },
-        "downstream_action_preview": action_preview_payload,
+        "include_details": opts.include_details,
+        "compact_downstream_action_preview": !opts.include_details,
+        "action_request": action_request,
+        "policy": policy,
+        "downstream_action_preview": downstream_action_preview,
     })
 }
 
@@ -6718,6 +6765,7 @@ mod tests {
             None,
             1_100,
         );
+        let action_preview_for_details = action_preview.clone();
         let opts = XiaoShuActionRequestOptions {
             label: None,
             heartbeat_label: None,
@@ -6733,6 +6781,7 @@ mod tests {
             cooldown_secs: 300,
             tts_voice: None,
             tts_rate: None,
+            include_details: false,
         };
         let request = xiao_shu_action_request_from_preview(
             action_preview,
@@ -6751,6 +6800,16 @@ mod tests {
         assert_eq!(request["actual_emit_invoked"], false);
         assert_eq!(request["emits_audio"], false);
         assert_eq!(request["http_emit_route_added"], false);
+        assert_eq!(request["include_details"], false);
+        assert_eq!(request["compact_downstream_action_preview"], true);
+        assert_eq!(request["downstream_action_preview"]["compact"], true);
+        assert!(request["downstream_action_preview"]["source_voice_confirm"].is_null());
+        assert!(
+            request["downstream_action_preview"]["action_preview"]["command_preview"]
+                .as_str()
+                .unwrap()
+                .contains("cortex-voice-action")
+        );
         assert_eq!(
             request["action_request"]["request_state"],
             "requires_human_confirmation"
@@ -6790,6 +6849,28 @@ mod tests {
             "blocked_unsupported_intent"
         );
         assert_eq!(unsupported["action_request"]["supported_intent"], false);
+
+        let detailed_opts = XiaoShuActionRequestOptions {
+            include_details: true,
+            ..opts
+        };
+        let detailed = xiao_shu_action_request_from_preview(
+            action_preview_for_details,
+            &detailed_opts,
+            "agent-bridge",
+            "voice_alert",
+            "xiao_shu::alert_peek::medium",
+            "manual confirmation",
+        );
+        assert_eq!(detailed["include_details"], true);
+        assert_eq!(detailed["compact_downstream_action_preview"], false);
+        assert_eq!(
+            detailed["downstream_action_preview"]["source_voice_confirm"]["surface"],
+            "avatar_cortex_voice_confirm"
+        );
+        let compact_len = serde_json::to_string(&request).unwrap().len();
+        let detailed_len = serde_json::to_string(&detailed).unwrap().len();
+        assert!(compact_len < detailed_len / 2);
     }
 
     #[test]

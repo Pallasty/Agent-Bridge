@@ -646,6 +646,8 @@ struct XiaoShuActionRequestQuery {
     confirm: bool,
     #[serde(default)]
     force: bool,
+    #[serde(default)]
+    details: bool,
     #[serde(default = "default_avatar_voice_gate_cooldown_secs")]
     cooldown_secs: i64,
     tts_voice: Option<String>,
@@ -868,6 +870,7 @@ async fn avatar_surface_panel(
             cooldown_secs: default_avatar_voice_gate_cooldown_secs(),
             tts_voice: None,
             tts_rate: None,
+            include_details: false,
         },
     )
     .unwrap_or_else(|e| {
@@ -1990,6 +1993,7 @@ async fn xiao_shu_action_request(
         cooldown_secs: q.cooldown_secs,
         tts_voice: q.tts_voice.as_deref(),
         tts_rate: q.tts_rate,
+        include_details: q.details,
     };
     let payload = crate::avatar_cortex::xiao_shu_action_request(&opts).map_err(internal_error)?;
     Ok(Json(payload))
@@ -5578,6 +5582,7 @@ mod tests {
                 cooldown_secs: 300,
                 tts_voice: None,
                 tts_rate: None,
+                include_details: false,
             },
         )
         .unwrap();
