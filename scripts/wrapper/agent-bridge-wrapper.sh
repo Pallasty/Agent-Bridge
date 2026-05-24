@@ -212,4 +212,12 @@ export AGENT_BRIDGE_TOOL_PROFILE="${AGENT_BRIDGE_TOOL_PROFILE:-all}"
 export AB_SUBSTRATE_PROJECTION="${AB_SUBSTRATE_PROJECTION:-svd}"
 export AB_SUBSTRATE_SVD_PATH="${AB_SUBSTRATE_SVD_PATH:-/Data/CascadeProjects/AiOT/build/svd_projection_v1.bin}"
 
+# Track MS — sync node identity for memory version-vector stamping. Every
+# wrapper-launched process (MCP server, CLI, daemon, sync) stamps memory writes
+# with this machine's name so the cross-machine conflict-aware merge
+# (ImportConflictPolicy::VersionVectorMerge) can tell aio2 edits from mac edits.
+# `SqliteStore::open` reads this via `node_id_from_env`; unset → no stamping →
+# safe NewerWins fallback. `${VAR:-}` guard keeps per-call overrides working.
+export AB_SYNC_NODE="${AB_SYNC_NODE:-$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)}"
+
 exec "$real_bin" "$@"
