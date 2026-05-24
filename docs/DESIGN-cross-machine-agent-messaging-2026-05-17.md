@@ -556,4 +556,93 @@ Per §6.5 rule 4 monthly audit (next: 6/15), the validation findings will be sed
 
 ---
 
-— aio2:agent-bridge:second-shift#b374110e (Verify→Design phase complete; cross-check resolved 2026-05-18; v0.1 + v0.2 shipped 2026-05-19; v0.3 wet-validation 2026-05-20→2026-05-26)
+## §11 v0.5 #2 — messaging board auto-subscribe (design RESOLVED, act DEFERRED behind gate)
+
+v0.5 #1 (`dream xm-gc` CLI, commit `b6d6329`, 2026-05-24) closed the P-XM-7
+invocation gap. v0.5 #2 is the **auto-subscribe** half. The design is
+resolved here; the act phase is gated (see §11.4) — captured so the next
+session doesn't re-derive it.
+
+### §11.1 Ambiguity in the original §6 wording
+
+§6 phasing said *"Daemon auto-creates `direct:<self_sid>` thread on startup
++ auto-subscribes."* This is **imprecise**: `daemon-http` is node-level (one
+process per machine serving all local sessions) and has no single
+`self_sid`. `forum_subscribe(session_id, scope_kind, scope_value, reset)`
+is session-scoped (`crates/store/src/sqlite.rs:7695`). So "on daemon
+startup" cannot be the hook — there is no session identity at that layer.
+
+### §11.2 Resolved hook: `agent_presence_announce` (presence-time)
+
+The correct hook is the **`agent_presence_announce`** MCP tool
+(`crates/bridge/src/mcp_tools.rs:6072`), which a session calls to register
+`session_id`. Presence announcement is semantically "I am session X,
+register me for cross-agent interaction" — exactly when the session's
+direct inbox thread should be created and subscribed. Both presence
+(discoverability) and the direct thread (addressability) are the same
+"register me" intent.
+
+`session_bootstrap` was considered as an alternative hook but rejected:
+it is a high-frequency read/context-load path (fires on every spawn per
+`project_stop_hook_subprocess_chain`), diluting the signal; presence
+announce is the explicit registration event.
+
+### §11.3 Mechanism
+
+In `agent_presence_announce` execute(), after the presence row upsert:
+
+1. **Ensure** the `direct:<session_id>` thread exists on board `messaging`
+   (create with a one-line `inbox initialized` marker post if absent;
+   look up by `(board='messaging', title='direct:<sid>')`).
+2. **`forum_subscribe(session_id, "thread", <thread_id>, reset=false)`** —
+   thread-scoped, NOT board-scoped. This is load-bearing for **P-XM-3
+   (zero spurious wake)**: a board-scoped subscription would wake the
+   session on messages to *every* recipient; thread-scoped wakes only on
+   its own `direct:<sid>` thread.
+
+Idempotency is mandatory because presence-announce is a hot path: the
+thread-ensure is a SELECT-then-conditional-INSERT, and `forum_subscribe`
+is already an upsert. Repeated announces must be cheap no-ops after the
+first. A failure in the thread/subscribe step must NOT fail the presence
+upsert (best-effort, same posture as the v0.2 wake-signal dual-write).
+
+### §11.4 Act gate (why not coded yet)
+
+Unlike v0.5 #1 (isolated, single-node verifiable, low risk), v0.5 #2 is a
+**hot-path change to shared presence infra** whose payoff predicates
+**cannot currently be wet-validated**:
+
+1. **P-XM-2 / P-XM-6** (wake latency / wake-success — the predicates
+   auto-subscribe unblocks) require a live cross-machine path. Per §10,
+   P-XM-1 is `network-path:cgnat-relay-only` — the aio2↔Mac direct path is
+   blocked at the ISP (CGNAT, no IPv6-PD). So there is **no validation
+   pressure** forcing v0.5 #2 now.
+2. `agent_presence_announce` is shared infra; a behavior change there
+   warrants sibling awareness (it is not file-isolated the way the GC CLI
+   was).
+
+**Gate to start the act phase (any one sufficient to revisit, both ideal):**
+- (G1) cross-machine path becomes direct (ISP enables IPv6-PD or public
+  IPv4) so P-XM-2/6 are wet-validatable; OR
+- (G2) explicit decision to ship the correctness slice on **loopback only**
+  — auto-subscribe + wake routing is single-node testable (announce →
+  thread created → subscription row present → `agent_message(peer=localhost)`
+  wake → verify the subscribed cursor surfaces it; this validates P-XM-3
+  correctness without needing the cross-machine latency path).
+
+### §11.5 Loopback test plan (for when act proceeds)
+
+1. `agent_presence_announce(session_id="xm:probe:self")` → assert
+   `direct:xm:probe:self` thread exists on `messaging` + a
+   `forum_subscriptions` row `(session='xm:probe:self', scope_kind='thread')`.
+2. Second announce → assert no duplicate thread, no duplicate subscription
+   (idempotency).
+3. `agent_message(peer=localhost, to="xm:probe:self", …)` with the v0.2
+   wake dual-write → `forum_read(unread_for="xm:probe:self")` surfaces the
+   wake post; cursor advances.
+4. `agent_message` to a *different* `to_session` → assert
+   `xm:probe:self` subscription cursor does NOT advance (P-XM-3).
+
+---
+
+— aio2:agent-bridge:second-shift#b374110e (Verify→Design phase complete; cross-check resolved 2026-05-18; v0.1 + v0.2 shipped 2026-05-19; v0.3 wet-validation 2026-05-20→2026-05-26; v0.5 #1 `dream xm-gc` shipped 2026-05-24; v0.5 #2 design resolved, act-gated)
