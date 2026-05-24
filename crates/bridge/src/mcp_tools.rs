@@ -14476,6 +14476,16 @@ fn which_binary(name: &str) -> bool {
 }
 
 fn detect_frontend() -> &'static str {
+    if let Ok(frontend) = std::env::var("AGENT_BRIDGE_FRONTEND") {
+        match normalize_tool_policy_value(&frontend).as_str() {
+            "cursor" => return "cursor",
+            "codex" | "codex-desktop" | "codex-ide" => return "codex",
+            "claude" | "claude-code" => return "claude-code",
+            "warp" | "warp-terminal" => return "warp",
+            "auggie" | "augment" | "augment-code" => return "auggie",
+            _ => {}
+        }
+    }
     // Cursor sets VSCODE_GIT_IPC_HANDLE or similar VS Code env vars
     if std::env::var("VSCODE_GIT_IPC_HANDLE").is_ok()
         || std::env::var("VSCODE_IPC_HOOK_CLI").is_ok()
@@ -14503,6 +14513,16 @@ fn detect_frontend() -> &'static str {
             .unwrap_or(false)
     {
         return "warp";
+    }
+    // MCP clients can outlive their hosting IDE shell and lose VS Code env
+    // hints. Prefer the active Codex client marker over installed-tool
+    // heuristics such as `~/.augment`, which caused Cursor/Codex sessions on
+    // Linux to be mislabelled as Auggie simply because Augment was installed.
+    if std::env::var("AGENT_BRIDGE_CLIENT")
+        .map(|v| normalize_tool_policy_value(&v) == "codex")
+        .unwrap_or(false)
+    {
+        return "codex";
     }
     // Augment Code: session auth env or ~/.augment config directory.
     if std::env::var("AUGMENT_SESSION_AUTH").is_ok()
@@ -23333,6 +23353,18 @@ mod tests {
         serde_json::from_str(&result_text(res)).expect("valid json result")
     }
 
+    fn frontend_env_test_setup() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().expect("frontend env test lock")
+    }
+
+    fn restore_env_var(key: &str, value: Option<String>) {
+        match value {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+    }
+
     #[test]
     fn compact_output_defaults_only_for_codex_or_compact_profile() {
         assert!(compact_mcp_output_default_for_policy(
@@ -23375,6 +23407,44 @@ mod tests {
                 !codex_lean_tool(tool),
                 "codex-lean keeps avatar observation out of the minimal surface: {tool}"
             );
+        }
+    }
+
+    #[test]
+    fn detect_frontend_prefers_codex_client_over_installed_auggie() {
+        let _guard = frontend_env_test_setup();
+        let keys = [
+            "AGENT_BRIDGE_FRONTEND",
+            "AGENT_BRIDGE_CLIENT",
+            "VSCODE_GIT_IPC_HANDLE",
+            "VSCODE_IPC_HOOK_CLI",
+            "CURSOR_TRACE_ID",
+            "CLAUDE_SESSION_ID",
+            "CLAUDE_CODE_ENTRYPOINT",
+            "TERM_PROGRAM",
+            "WARP_IS_LOCAL_SHELL_SESSION",
+            "WARP_HONOR_PS1",
+            "AUGMENT_SESSION_AUTH",
+            "AUGMENT_CLIENT_VERSION",
+            "HOME",
+        ];
+        let saved: Vec<_> = keys
+            .iter()
+            .map(|key| (*key, std::env::var(key).ok()))
+            .collect();
+        let temp_dir = tempfile::tempdir().expect("temp home");
+        std::fs::create_dir(temp_dir.path().join(".augment")).expect("augment marker");
+
+        for key in keys {
+            std::env::remove_var(key);
+        }
+        std::env::set_var("HOME", temp_dir.path());
+        std::env::set_var("AGENT_BRIDGE_CLIENT", "codex");
+
+        assert_eq!(detect_frontend(), "codex");
+
+        for (key, value) in saved {
+            restore_env_var(key, value);
         }
     }
 
