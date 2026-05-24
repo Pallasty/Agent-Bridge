@@ -459,6 +459,98 @@ emit voice, trigger notifications, or mutate the Seed substrate.
 `trend.behavior_policy` is also advisory: it can provide a panel badge, hint,
 recommended action, and voice preview text, but `voice.allowed` and
 `notification.allowed` default to false in the read-only HTTP/panel surface.
+`avatar cortex-language` and `/avatar-surface/cortex-language` add the first
+dynamic Xiao Shu language layer on top of that state. It is a deterministic
+phrase composer, not an LLM and not a voice model: it reads the cortex state,
+latest health event, event-window counters, and project slug, then returns a
+short Chinese utterance, alternatives, slots, generator metadata, and safety
+flags. The optional `language.memory` block is also read-only: it summarizes the
+visible `events.recent` window as stable, transitioning, mixed, or unhealthy
+short-term context, but does not write to persistent Agent-Bridge memory or the
+global Seed substrate. The surface reports `emits_audio=false` and preserves the
+explicit emit gate as the only path toward future spoken output.
+`avatar cortex-motion` and `/avatar-surface/cortex-motion` add the matching
+renderer-neutral behavior layer. They derive `gesture`, `mood`, `attention`, and
+`animation_hint` from the cortex/language state, but keep
+`codex_pet_package_mutation=false` and `requires_renderer_mapping=true` so
+official Pet assets remain a packaging boundary rather than an internal
+extension point.
+`avatar cortex-renderer` and `/avatar-surface/cortex-renderer` are the first
+adapter dry-run on that boundary: they map `motion.animation_hint.renderer_token`
+into `pose`, `expression`, `motion`, `accessory`, and timeline slots, while
+reporting `writes_files=false`, `mutates_renderer=false`, and
+`codex_pet_package_mutation=false`. Each mapping can carry
+`mapping.evidence`, a review block with visual intent, acceptance criteria,
+risk level, review questions, binding stage, and the recommended next step.
+`avatar cortex-renderer-registry` and
+`/avatar-surface/cortex-renderer-registry` summarize those mappings as a
+read-only candidate registry with counts by binding stage and risk level plus
+the current live renderer token.
+`avatar cortex-binding-plan` and `/avatar-surface/cortex-binding-plan` turn the
+registry into the first safe implementation plan. They select only low-risk
+resolved candidates, defer `needs_review` and fallback tokens, and expose the
+phases, validation checklist, rollback points, and safety flags required before
+any real renderer binding. The surface remains read-only and reports
+`writes_files=false`, `mutates_renderer=false`, and
+`codex_pet_package_mutation=false`.
+`avatar cortex-binding-fixture` and `/avatar-surface/cortex-binding-fixture`
+freeze the selected plan candidates into deterministic sidecar preview fixtures.
+The surface emits slot-timeline golden payloads for `soft_bounce` and
+`idle_breathe`, per-token assertions, return-to-idle and under-2s acceptance
+gates, and the same mutation safety flags. These fixtures are review evidence
+for a later sidecar visual adapter, not official package writes.
+`avatar cortex-visual-adapter` and `/avatar-surface/cortex-visual-adapter`
+consume those fixtures and project each slot timeline into observable preview
+frames. The surface reports pose/expression/motion/accessory state labels,
+final-state checks, and acceptance summaries while keeping `renders_pixels=false`,
+`writes_files=false`, `mutates_renderer=false`, and
+`codex_pet_package_mutation=false`.
+`avatar cortex-renderer-view` and `/avatar-surface/cortex-renderer-view`
+convert the same preview frames into a browser-only sidecar renderer view. This
+is allowed to report `browser_renders_pixels=true`, but it keeps
+`server_side_renders_pixels=false`, `writes_files=false`,
+`mutates_renderer=false`, and `codex_pet_package_mutation=false`; the view can
+also project resolved medium-risk deferred tokens as `review_only` tracks for
+manual inspection. The browser view may read an installed Codex pet spritesheet
+through `/avatar-surface/pet-spritesheet` as a visual source, but that route is
+read-only, allowlists known Xiao Shu package ids, and does not mutate or bind
+the official package. Those review tracks must not promote themselves into the
+selected binding fixture or mutate the official package. Focused review tracks
+may expose read-only semantic variants such as alternate `alert_peek` sprite
+rows through a `variant` query parameter; those variants are comparison
+evidence only and cannot write approval, promote bindings, or emit voice. A
+variant may also carry a `frame_choreography` table (`row`, `col`, `hold_ms`,
+`phase`, `mark`) so the browser can play atlas columns as an action sequence
+instead of faking motion through CSS transforms. If the installed atlas does not
+carry enough expressive difference, a variant may reference a read-only sidecar
+asset route such as `/avatar-surface/sidecar-spritesheet`; that resource remains
+prototype review evidence, not an official package write or binding. The view
+remains a manual visual-QA surface before any official package binding.
+`avatar cortex-review-gate` and `/avatar-surface/cortex-review-gate` add a
+read-only review gate over that browser view. The gate can report automatic
+checks and pending manual decisions, but it does not write approval state or
+promote `review_only` tracks into selected bindings. `can_promote_review_tracks`
+must remain false until a separate explicit approval design exists. The browser
+renderer view may accept `track` or `track_index` query parameters, and the
+panel may link pending review tokens to those focused previews; these links are
+navigation evidence only and do not approve, persist, or bind any track.
+`avatar cortex-review-packet` and `/avatar-surface/cortex-review-packet` turn
+pending review-only tracks into human inspection packets. Each packet can carry
+visual questions, acceptance criteria, operator checks, and a focused renderer
+route, but `writes_approval`, `persists_review_record`,
+`approval_writes_allowed`, and `can_promote_review_tracks` must remain false
+until a separate approval surface is designed.
+`avatar cortex-review-report` and `/avatar-surface/cortex-review-report`
+summarize whether those packets are ready for human visual review. The report
+can mark implementation evidence ready for a human pass, but it must keep
+`human_decision_count=0`, `ready_for_approval=false`,
+`approval_writes_allowed=false`, `records_persisted=false`, and
+`merge_without_human_review_allowed=false`. Packets and reports may include
+`latest_human_feedback`, `revision_response`, and `voice_linkage` so a visual
+review can request lower brightness, thicker shape, aesthetic revision, or
+future sparse voice linkage. Those fields are evidence and design intent only:
+they do not approve a track, persist a review decision, bind a renderer, mutate
+the official pet package, or emit audio.
 `avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
 as a dedicated read-only surface with `emits_audio=false`,
 `emits_notification=false`, and `requires_explicit_emit_gate=true`.
@@ -541,9 +633,23 @@ external watchdogs and non-MCP clients.
 | `agent-bridge avatar cortex-replay` | Avatar Seed events replay into an isolated Xiao Shu cortex snapshot without touching the global substrate |
 | `agent-bridge avatar install-cortex-runner` | A separate per-user launchd job keeps the isolated Xiao Shu cortex snapshot refreshed |
 | `agent-bridge avatar cortex-status` | Launchd runner state and the latest cortex snapshot row/fingerprint are visible from one read-only command |
+| `agent-bridge avatar cortex-language` | Dynamic Xiao Shu phrase composition is visible without LLM, voice model, audio, or notifications |
+| `agent-bridge avatar cortex-motion` | Gesture/mood/attention semantics are visible without renderer mutation or official Pet package changes |
+| `agent-bridge avatar cortex-renderer` | Renderer slot mapping is visible as a dry-run without writing files or mutating assets |
+| `agent-bridge avatar cortex-renderer-registry` | Renderer token candidates and review stages are visible as a read-only registry |
+| `agent-bridge avatar cortex-binding-plan` | First safe renderer binding candidates, validation gates, and rollback points are visible without mutation |
+| `agent-bridge avatar cortex-binding-fixture` | Selected binding candidates are frozen as deterministic sidecar preview fixtures without mutation |
+| `agent-bridge avatar cortex-visual-adapter` | Fixture timelines become observable sidecar preview frames without pixel rendering or mutation |
+| `agent-bridge avatar cortex-renderer-view` | Preview frames and review-only deferred medium tracks become a browser sidecar renderer view without asset writes or package mutation |
+| `agent-bridge avatar cortex-review-gate` | Renderer tracks are scored for manual visual review without approval writes or binding promotion |
+| `agent-bridge avatar cortex-review-packet` | Pending review-only renderer tracks become human inspection packets without approval persistence or binding promotion |
+| `agent-bridge avatar cortex-review-report` | Pending-track packets are summarized for human visual-review readiness without recording decisions, approval state, or merge readiness |
 | `agent-bridge avatar cortex-preview` | Voice preview text is visible without emitting audio or notifications |
 | `agent-bridge avatar cortex-voice-gate` | Explicit voice-gate dry-run reports whether a future emit would pass, without emitting audio |
 | `agent-bridge avatar cortex-voice-emit` | CLI-only manual voice adapter can speak one gated line and record cooldown state |
+| `agent-bridge avatar xiao-shu-action-request` | Xiao Shu request previews are compact by default; full recursive `source_*` provenance requires explicit `--details` / `details=true` |
+| `agent-bridge avatar xiao-shu-action-requests` | Queued Xiao Shu requests are compact by default; full nested records require `request_id`, all-state/full-detail mode, or `--details` |
+| `agent-bridge avatar xiao-shu-action-request-action` | Local operator consumes one queued Xiao Shu request; default is dry-run, `--confirm --emit` appends an audio audit transition through the CLI-only voice gate, and `--confirm --dismiss` appends a non-emitting reviewed transition |
 | Standard `avatar_adapter_capabilities` | Tool reports adapter/surface availability without mutating state |
 | Standard `avatar_state_get` | Existing pet sidecar projects to protocol v1 without mutating state |
 | Standard `avatar_surface_snapshot` | Presence rows project to compact read-only `avatars[]` entries |
@@ -552,6 +658,19 @@ external watchdogs and non-MCP clients.
 | daemon HTTP `/avatar-surface*` | Same projection is available as JSON, text, and a read-only HTML panel with refresh/stale markers plus heartbeat health |
 | daemon HTTP `/avatar-surface/heartbeat-health` | Same heartbeat health payload is available to browser and non-MCP clients |
 | daemon HTTP `/avatar-surface/cortex-status` | Same shadow-cortex runner/snapshot/event-trend/policy payload is available to browser and non-MCP clients |
+| daemon HTTP `/avatar-surface/cortex-language` | Same deterministic language preview is available to browser and non-MCP clients without emission |
+| daemon HTTP `/avatar-surface/cortex-motion` | Same gesture/mood/attention preview is available to browser and non-MCP clients without renderer mutation |
+| daemon HTTP `/avatar-surface/cortex-renderer` | Same renderer slot mapping dry-run is available to browser and non-MCP clients without asset mutation |
+| daemon HTTP `/avatar-surface/cortex-renderer-registry` | Same renderer token registry is available to browser and non-MCP clients without asset mutation |
+| daemon HTTP `/avatar-surface/cortex-binding-plan` | Same first-binding plan is available to browser and non-MCP clients without asset mutation |
+| daemon HTTP `/avatar-surface/cortex-binding-fixture` | Same sidecar preview fixture payload is available to browser and non-MCP clients without asset mutation |
+| daemon HTTP `/avatar-surface/cortex-visual-adapter` | Same sidecar preview frame payload is available to browser and non-MCP clients without pixel rendering |
+| daemon HTTP `/avatar-surface/cortex-renderer-view` | Browser-only sidecar renderer view, including focused `track` / `track_index` previews and read-only semantic `variant` comparisons for review-only deferred medium tracks, is available for manual visual QA without package mutation |
+| daemon HTTP `/avatar-surface/pet-spritesheet` | Installed Xiao Shu pet spritesheets can be served as read-only browser assets for sidecar review without package mutation |
+| daemon HTTP `/avatar-surface/sidecar-spritesheet` | Prototype Xiao Shu spritesheets can be served as read-only sidecar review assets without official package mutation or binding promotion |
+| daemon HTTP `/avatar-surface/cortex-review-gate` | Same read-only renderer review gate is available to browser and non-MCP clients without approval writes; panel links can open pending tracks for focused inspection only |
+| daemon HTTP `/avatar-surface/cortex-review-packet` | Same pending-track human inspection packets are available without approval persistence, record writes, or binding promotion |
+| daemon HTTP `/avatar-surface/cortex-review-report` | Same packet-readiness report is available without human decision writes, approval persistence, or merge readiness |
 | daemon HTTP `/avatar-surface/cortex-preview` | Same voice preview is available to browser and non-MCP clients without emission |
 | daemon HTTP `/avatar-surface/cortex-voice-gate` | Same explicit voice-gate dry-run is available to browser and non-MCP clients without emission |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |

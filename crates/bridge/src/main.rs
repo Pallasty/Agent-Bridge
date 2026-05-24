@@ -3,17 +3,17 @@ use ab_agent::{
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
 use ab_bridge::warp_scheme;
-use ab_bridge::{Hub, Router, build_registry, default_socket_path, serve};
+use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
-use ab_store::{SqliteStore, StateStore, default_db_path};
-use ab_terminal::{TerminalBackend, auto_backend};
+use ab_store::{default_db_path, SqliteStore, StateStore};
+use ab_terminal::{auto_backend, TerminalBackend};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing_subscriber::{EnvFilter, prelude::*};
+use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod doctor;
 mod setup;
@@ -670,6 +670,474 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Preview Xiao Shu's dynamic language line without emitting audio.
+    CortexLanguage {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview Xiao Shu's gesture/mood/attention semantics without touching renderer assets.
+    CortexMotion {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Dry-run Xiao Shu's motion renderer slot mapping without mutating renderer assets.
+    CortexRenderer {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the renderer binding candidate registry without mutating renderer assets.
+    CortexRendererRegistry {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Plan the first safe Xiao Shu renderer bindings without mutating renderer assets.
+    CortexBindingPlan {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Build sidecar renderer preview fixtures for the first safe Xiao Shu bindings.
+    CortexBindingFixture {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview Xiao Shu sidecar visual frames without rendering pixels or mutating assets.
+    CortexVisualAdapter {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Build a browser sidecar renderer view without writing assets or package bindings.
+    CortexRendererView {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Score Xiao Shu renderer tracks for manual visual review without approving bindings.
+    CortexReviewGate {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Build read-only human review packets for pending Xiao Shu renderer tracks.
+    CortexReviewPacket {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Summarize whether pending Xiao Shu renderer packets are ready for human review.
+    CortexReviewReport {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show Xiao Shu's sparse voice policy without emitting audio.
+    CortexVoicePolicy {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview a two-step Xiao Shu voice confirmation request without emitting audio.
+    CortexVoiceRequest {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Renderer token to request. Defaults to the first policy-approved manual voice rule.
+        #[arg(long)]
+        track: Option<String>,
+        /// Operator reason to preview in the future CLI emit command.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Dry-run a Xiao Shu voice confirmation action without emitting audio.
+    CortexVoiceConfirm {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Renderer token to confirm. Defaults to the first policy-approved manual voice rule.
+        #[arg(long)]
+        track: Option<String>,
+        /// Operator reason required before the future CLI emit command is previewed as executable.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Mark the dry-run confirmation as explicitly requested.
+        #[arg(long)]
+        confirm: bool,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run the confirmed Xiao Shu voice action through the CLI-only emit gate.
+    CortexVoiceAction {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Renderer token to confirm. Defaults to the first policy-approved manual voice rule.
+        #[arg(long)]
+        track: Option<String>,
+        /// Operator reason required before real audio can be invoked.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Mark the confirmation as explicitly requested.
+        #[arg(long)]
+        confirm: bool,
+        /// Actually invoke the existing CLI-only emit gate after confirmation passes.
+        #[arg(long)]
+        emit: bool,
+        /// Ignore cooldown state for this invocation.
+        #[arg(long)]
+        force: bool,
+        /// Cooldown seconds to evaluate and record after a successful emit.
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: i64,
+        /// Optional macOS say voice. Defaults to the policy suggestion or AB_PET_TTS_VOICE.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Optional macOS say rate. Defaults to the policy suggestion or AB_PET_TTS_RATE.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview whether the confirmed Xiao Shu voice action would emit now.
+    CortexVoiceActionPreview {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path and voice cooldown state.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Renderer token to confirm. Defaults to the first policy-approved manual voice rule.
+        #[arg(long)]
+        track: Option<String>,
+        /// Operator reason used in the previewed action command.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Mark the confirmation as explicitly requested.
+        #[arg(long)]
+        confirm: bool,
+        /// Preview readiness as if cooldown state were ignored.
+        #[arg(long)]
+        force: bool,
+        /// Cooldown seconds to evaluate without mutating state.
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: i64,
+        /// Optional macOS say voice. Defaults to the policy suggestion or AB_PET_TTS_VOICE.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Optional macOS say rate. Defaults to the policy suggestion or AB_PET_TTS_RATE.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create an LLM-safe Xiao Shu action request without directly controlling the pet.
+    XiaoShuActionRequest {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path and voice cooldown state.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Requesting actor label, such as llm, panel, slash, or operator.
+        #[arg(long, default_value = "llm")]
+        actor: String,
+        /// High-level Xiao Shu action intent. Current supported intent: voice_alert.
+        #[arg(long, default_value = "voice_alert")]
+        intent: String,
+        /// Optional natural-language request from the caller.
+        #[arg(long)]
+        message: Option<String>,
+        /// Renderer token to target. Defaults to alert_peek.
+        #[arg(long)]
+        track: Option<String>,
+        /// Operator-facing reason for the request and generated command.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Preview as if a human/operator confirmation is present.
+        #[arg(long)]
+        confirm: bool,
+        /// Preview readiness as if cooldown state were ignored.
+        #[arg(long)]
+        force: bool,
+        /// Cooldown seconds to evaluate without mutating state.
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: i64,
+        /// Optional macOS say voice. Defaults to the policy suggestion or AB_PET_TTS_VOICE.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Optional macOS say rate. Defaults to the policy suggestion or AB_PET_TTS_RATE.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Include full nested downstream provenance instead of compact preview output.
+        #[arg(long)]
+        details: bool,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List queued Xiao Shu action requests without emitting audio.
+    XiaoShuActionRequests {
+        /// Project used to derive the queue path.
+        #[arg(long)]
+        project: Option<String>,
+        /// Return one request id, if present.
+        #[arg(long)]
+        request_id: Option<String>,
+        /// State to filter. Defaults to pending_human_confirmation.
+        #[arg(long)]
+        state: Option<String>,
+        /// Include all queue states instead of only pending records.
+        #[arg(long)]
+        all_states: bool,
+        /// Include full nested queue records. Defaults to compact list records.
+        #[arg(long)]
+        details: bool,
+        /// Maximum records to return, newest first.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview or run one queued Xiao Shu action request through local CLI confirmation.
+    XiaoShuActionRequestAction {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path and voice cooldown state.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive the queue path and default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Queued request id to inspect or consume.
+        #[arg(long)]
+        request_id: String,
+        /// Operator-facing reason. Defaults to the queued request reason.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Mark the local confirmation as explicitly present.
+        #[arg(long)]
+        confirm: bool,
+        /// Invoke the existing CLI-only voice action after confirmation passes.
+        #[arg(long)]
+        emit: bool,
+        /// Mark the queued request as reviewed without emitting audio.
+        #[arg(long)]
+        dismiss: bool,
+        /// Ignore cooldown state for this invocation.
+        #[arg(long)]
+        force: bool,
+        /// Cooldown seconds to evaluate and record after a successful emit.
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: i64,
+        /// Optional macOS say voice. Defaults to the policy suggestion or AB_PET_TTS_VOICE.
+        #[arg(long)]
+        tts_voice: Option<String>,
+        /// Optional macOS say rate. Defaults to the policy suggestion or AB_PET_TTS_RATE.
+        #[arg(long)]
+        tts_rate: Option<u64>,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Dry-run Xiao Shu's explicit cortex voice gate without emitting audio.
     CortexVoiceGate {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -684,6 +1152,9 @@ enum AvatarOp {
         /// Override cortex snapshot path.
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Override the preview line for this dry-run only.
+        #[arg(long)]
+        preview_text: Option<String>,
         /// Explicitly enable the dry-run gate for this invocation.
         #[arg(long)]
         enabled: bool,
@@ -714,6 +1185,9 @@ enum AvatarOp {
         /// Override cortex snapshot path.
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Override the spoken preview line for this CLI-only emit.
+        #[arg(long)]
+        preview_text: Option<String>,
         /// Explicitly enable the emit gate for this invocation.
         #[arg(long)]
         enabled: bool,
@@ -2257,11 +2731,400 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
+            AvatarOp::CortexLanguage {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_language(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexMotion {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_motion(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexRenderer {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_renderer(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexRendererRegistry {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_renderer_registry(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexBindingPlan {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_binding_plan(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexBindingFixture {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_binding_fixture(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVisualAdapter {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_visual_adapter(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexRendererView {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_renderer_view(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexReviewGate {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_review_gate(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexReviewPacket {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_review_packet(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexReviewReport {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_review_report(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoicePolicy {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_policy(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoiceRequest {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                track,
+                reason,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_request(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    track.clone(),
+                    reason.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoiceConfirm {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                track,
+                reason,
+                confirm,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_confirm(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    track.clone(),
+                    reason.clone(),
+                    *confirm,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoiceAction {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                track,
+                reason,
+                confirm,
+                emit,
+                force,
+                cooldown_secs,
+                tts_voice,
+                tts_rate,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_action(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    track.clone(),
+                    reason.clone(),
+                    *confirm,
+                    *emit,
+                    *force,
+                    *cooldown_secs,
+                    tts_voice.clone(),
+                    *tts_rate,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexVoiceActionPreview {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                track,
+                reason,
+                confirm,
+                force,
+                cooldown_secs,
+                tts_voice,
+                tts_rate,
+                json: as_json,
+            } => {
+                run_avatar_cortex_voice_action_preview(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    track.clone(),
+                    reason.clone(),
+                    *confirm,
+                    *force,
+                    *cooldown_secs,
+                    tts_voice.clone(),
+                    *tts_rate,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::XiaoShuActionRequest {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                actor,
+                intent,
+                message,
+                track,
+                reason,
+                confirm,
+                force,
+                cooldown_secs,
+                tts_voice,
+                tts_rate,
+                details,
+                json: as_json,
+            } => {
+                run_xiao_shu_action_request(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    actor.clone(),
+                    intent.clone(),
+                    message.clone(),
+                    track.clone(),
+                    reason.clone(),
+                    *confirm,
+                    *force,
+                    *cooldown_secs,
+                    tts_voice.clone(),
+                    *tts_rate,
+                    *details,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::XiaoShuActionRequests {
+                project,
+                request_id,
+                state,
+                all_states,
+                details,
+                limit,
+                json: as_json,
+            } => {
+                run_xiao_shu_action_requests(
+                    project.clone(),
+                    request_id.clone(),
+                    state.clone(),
+                    *all_states,
+                    *details,
+                    *limit,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::XiaoShuActionRequestAction {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                request_id,
+                reason,
+                confirm,
+                emit,
+                dismiss,
+                force,
+                cooldown_secs,
+                tts_voice,
+                tts_rate,
+                json: as_json,
+            } => {
+                run_xiao_shu_action_request_action(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    request_id.clone(),
+                    reason.clone(),
+                    *confirm,
+                    *emit,
+                    *dismiss,
+                    *force,
+                    *cooldown_secs,
+                    tts_voice.clone(),
+                    *tts_rate,
+                    *as_json,
+                )
+                .await
+            }
             AvatarOp::CortexVoiceGate {
                 label,
                 heartbeat_label,
                 project,
                 output,
+                preview_text,
                 enabled,
                 force,
                 cooldown_secs,
@@ -2273,6 +3136,7 @@ async fn main() -> Result<()> {
                     heartbeat_label.clone(),
                     project.clone(),
                     output.clone(),
+                    preview_text.clone(),
                     *enabled,
                     *force,
                     *cooldown_secs,
@@ -2286,6 +3150,7 @@ async fn main() -> Result<()> {
                 heartbeat_label,
                 project,
                 output,
+                preview_text,
                 enabled,
                 force,
                 cooldown_secs,
@@ -2300,6 +3165,7 @@ async fn main() -> Result<()> {
                     heartbeat_label.clone(),
                     project.clone(),
                     output.clone(),
+                    preview_text.clone(),
                     *enabled,
                     *force,
                     *cooldown_secs,
@@ -3971,11 +4837,1081 @@ async fn run_avatar_cortex_preview(
     Ok(())
 }
 
+async fn run_avatar_cortex_language(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_language_preview(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let language = payload.get("language").unwrap_or(&Value::Null);
+    let slots = language.get("slots").unwrap_or(&Value::Null);
+    let memory = language.get("memory").unwrap_or(&Value::Null);
+    let safety = language.get("safety").unwrap_or(&Value::Null);
+    let generator = language.get("generator").unwrap_or(&Value::Null);
+    println!("avatar cortex language preview");
+    println!(
+        "line={}",
+        avatar_health_display(language.get("utterance"), "-")
+    );
+    println!(
+        "intent={} style={} state={} latest_status={}",
+        avatar_health_display(language.get("intent"), "-"),
+        avatar_health_display(language.get("style"), "-"),
+        avatar_health_display(slots.get("state"), "-"),
+        avatar_health_display(slots.get("latest_status"), "-")
+    );
+    println!(
+        "memory={} window={} transitions={}",
+        avatar_health_display(memory.get("summary"), "-"),
+        avatar_health_display(memory.get("window_size"), "0"),
+        avatar_health_display(memory.get("transition_count"), "0")
+    );
+    println!(
+        "voice_allowed={} notification_allowed={} uses_llm={} uses_voice_model={}",
+        avatar_health_display(safety.get("voice_allowed"), "false"),
+        avatar_health_display(safety.get("notification_allowed"), "false"),
+        avatar_health_display(generator.get("uses_llm"), "false"),
+        avatar_health_display(generator.get("uses_voice_model"), "false")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_motion(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_motion_preview(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let motion = payload.get("motion").unwrap_or(&Value::Null);
+    let hint = motion.get("animation_hint").unwrap_or(&Value::Null);
+    let source = motion.get("source").unwrap_or(&Value::Null);
+    let safety = motion.get("safety").unwrap_or(&Value::Null);
+    println!("avatar cortex motion preview");
+    println!(
+        "gesture={} mood={} attention={}",
+        avatar_health_display(motion.get("gesture"), "-"),
+        avatar_health_display(motion.get("mood"), "-"),
+        avatar_health_display(motion.get("attention"), "-")
+    );
+    println!(
+        "animation={} intensity={} reason={}",
+        avatar_health_display(hint.get("loop"), "-"),
+        avatar_health_display(hint.get("intensity"), "-"),
+        avatar_health_display(motion.get("reason"), "-")
+    );
+    println!(
+        "state={} memory={} sidecar_only={} renderer_mapping={}",
+        avatar_health_display(source.get("state"), "-"),
+        avatar_health_display(source.get("memory_observation"), "-"),
+        avatar_health_display(safety.get("sidecar_only"), "true"),
+        avatar_health_display(safety.get("requires_renderer_mapping"), "true")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_renderer(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_preview(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let renderer = payload.get("renderer").unwrap_or(&Value::Null);
+    let mapping = renderer.get("mapping").unwrap_or(&Value::Null);
+    let evidence = mapping.get("evidence").unwrap_or(&Value::Null);
+    let target = mapping.get("target").unwrap_or(&Value::Null);
+    let safety = renderer.get("safety").unwrap_or(&Value::Null);
+    println!("avatar cortex renderer preview");
+    println!(
+        "token={} resolved={}",
+        avatar_health_display(mapping.get("input_token"), "-"),
+        avatar_health_display(mapping.get("resolved"), "false")
+    );
+    println!(
+        "pose={} expression={} motion={} accessory={}",
+        avatar_health_display(target.get("pose_slot"), "-"),
+        avatar_health_display(target.get("expression_slot"), "-"),
+        avatar_health_display(target.get("motion_slot"), "-"),
+        avatar_health_display(target.get("accessory_slot"), "-")
+    );
+    println!(
+        "evidence_stage={} risk={} intent={}",
+        avatar_health_display(evidence.get("binding_stage"), "-"),
+        avatar_health_display(evidence.get("risk_level"), "-"),
+        avatar_health_display(evidence.get("visual_intent"), "-")
+    );
+    println!(
+        "dry_run={} writes_files={} mutates_renderer={} codex_pet_package_mutation={}",
+        avatar_health_display(payload.get("dry_run"), "true"),
+        avatar_health_display(safety.get("writes_files"), "false"),
+        avatar_health_display(safety.get("mutates_renderer"), "false"),
+        avatar_health_display(safety.get("codex_pet_package_mutation"), "false")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_renderer_registry(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_registry(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let registry = payload.get("registry").unwrap_or(&Value::Null);
+    let current = registry.get("current").unwrap_or(&Value::Null);
+    let stage_counts = registry.get("stage_counts").unwrap_or(&Value::Null);
+    let risk_counts = registry.get("risk_counts").unwrap_or(&Value::Null);
+    println!("avatar cortex renderer registry");
+    println!(
+        "known={} candidate={} needs_review={} fallback={}",
+        avatar_health_display(registry.get("known_token_count"), "0"),
+        avatar_health_display(stage_counts.get("candidate"), "0"),
+        avatar_health_display(stage_counts.get("needs_review"), "0"),
+        avatar_health_display(stage_counts.get("fallback_only"), "0")
+    );
+    println!(
+        "risk_low={} risk_medium={} risk_high={}",
+        avatar_health_display(risk_counts.get("low"), "0"),
+        avatar_health_display(risk_counts.get("medium"), "0"),
+        avatar_health_display(risk_counts.get("high"), "0")
+    );
+    println!(
+        "current={} stage={} risk={}",
+        avatar_health_display(current.get("token"), "-"),
+        avatar_health_display(current.get("binding_stage"), "-"),
+        avatar_health_display(current.get("risk_level"), "-")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_binding_plan(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_binding_plan(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let plan = payload.get("binding_plan").unwrap_or(&Value::Null);
+    let first = plan.get("first_candidate").unwrap_or(&Value::Null);
+    println!("avatar cortex binding plan");
+    println!(
+        "selected={} deferred={}",
+        avatar_health_display(plan.get("selected_count"), "0"),
+        avatar_health_display(plan.get("deferred_count"), "0")
+    );
+    println!(
+        "first={} risk={}",
+        avatar_health_display(first.get("token"), "-"),
+        avatar_health_display(first.get("risk_level"), "-")
+    );
+    println!(
+        "writes_files={} mutates_renderer={} pet_package={}",
+        avatar_health_display(payload.get("writes_files"), "false"),
+        avatar_health_display(payload.get("mutates_renderer"), "false"),
+        avatar_health_display(payload.get("codex_pet_package_mutation"), "false")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_binding_fixture(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_binding_fixture(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let fixture = payload.get("fixture").unwrap_or(&Value::Null);
+    let first = fixture.get("first_fixture").unwrap_or(&Value::Null);
+    let first_assertions = first.get("golden_assertions").unwrap_or(&Value::Null);
+    println!("avatar cortex binding fixture");
+    println!(
+        "fixtures={} source={}",
+        avatar_health_display(fixture.get("fixture_count"), "0"),
+        avatar_health_display(fixture.get("source"), "-")
+    );
+    println!(
+        "first={} motion={} returns_idle={} duration_ms={}",
+        avatar_health_display(first.get("token"), "-"),
+        avatar_health_display(first_assertions.get("motion_slot"), "-"),
+        avatar_health_display(first_assertions.get("returns_to_idle"), "false"),
+        avatar_health_display(first_assertions.get("duration_ms"), "0")
+    );
+    println!(
+        "writes_files={} mutates_renderer={} pet_package={}",
+        avatar_health_display(payload.get("writes_files"), "false"),
+        avatar_health_display(payload.get("mutates_renderer"), "false"),
+        avatar_health_display(payload.get("codex_pet_package_mutation"), "false")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_visual_adapter(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_visual_adapter(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let adapter = payload.get("visual_adapter").unwrap_or(&Value::Null);
+    let first = adapter.get("first_preview").unwrap_or(&Value::Null);
+    let first_final = first.get("final_state").unwrap_or(&Value::Null);
+    println!("avatar cortex visual adapter");
+    println!(
+        "previews={} input={}",
+        avatar_health_display(adapter.get("preview_count"), "0"),
+        avatar_health_display(adapter.get("input"), "-")
+    );
+    println!(
+        "first={} frames={} final_motion={}",
+        avatar_health_display(first.get("token"), "-"),
+        avatar_health_display(first.get("frame_count"), "0"),
+        avatar_health_display(first_final.get("motion_slot"), "-")
+    );
+    println!(
+        "renders_pixels={} writes_files={} mutates_renderer={} pet_package={}",
+        avatar_health_display(payload.get("renders_pixels"), "false"),
+        avatar_health_display(payload.get("writes_files"), "false"),
+        avatar_health_display(payload.get("mutates_renderer"), "false"),
+        avatar_health_display(payload.get("codex_pet_package_mutation"), "false")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_renderer_view(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_view(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let view = payload.get("renderer_view").unwrap_or(&Value::Null);
+    let first = view.get("first_track").unwrap_or(&Value::Null);
+    println!("avatar cortex renderer view");
+    println!(
+        "tracks={} route={} input={}",
+        avatar_health_display(view.get("track_count"), "0"),
+        avatar_health_display(view.get("html_route"), "-"),
+        avatar_health_display(view.get("input"), "-")
+    );
+    println!(
+        "first={} frames={} browser_pixels={}",
+        avatar_health_display(first.get("token"), "-"),
+        avatar_health_display(first.get("frame_count"), "0"),
+        avatar_health_display(payload.get("browser_renders_pixels"), "false")
+    );
+    println!(
+        "writes_files={} mutates_renderer={} pet_package={}",
+        avatar_health_display(payload.get("writes_files"), "false"),
+        avatar_health_display(payload.get("mutates_renderer"), "false"),
+        avatar_health_display(payload.get("codex_pet_package_mutation"), "false")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_review_gate(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_review_gate(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let gate = payload.get("review_gate").unwrap_or(&Value::Null);
+    println!("avatar cortex review gate");
+    println!(
+        "tracks={} selected={} pending={} auto_pass={} blocked={}",
+        avatar_health_display(gate.get("track_count"), "0"),
+        avatar_health_display(gate.get("selected_baseline_count"), "0"),
+        avatar_health_display(gate.get("manual_pending_count"), "0"),
+        avatar_health_display(gate.get("automatic_pass_count"), "0"),
+        avatar_health_display(gate.get("automatic_blocked_count"), "0")
+    );
+    println!(
+        "manual_required={} can_promote_review={} mutates_bindings={}",
+        avatar_health_display(
+            gate.get("acceptance")
+                .and_then(|acceptance| acceptance.get("manual_review_required")),
+            "false"
+        ),
+        avatar_health_display(
+            gate.get("acceptance")
+                .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+            "false"
+        ),
+        avatar_health_display(
+            gate.get("acceptance")
+                .and_then(|acceptance| acceptance.get("review_tracks_mutate_bindings")),
+            "false"
+        )
+    );
+    if let Some(items) = gate.get("items").and_then(Value::as_array) {
+        for item in items.iter().take(5) {
+            println!(
+                "- {} gate={} manual={} promote={}",
+                avatar_health_display(item.get("token"), "-"),
+                avatar_health_display(item.get("automatic_gate"), "-"),
+                avatar_health_display(item.get("manual_decision"), "-"),
+                avatar_health_display(item.get("can_promote_binding"), "false")
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn run_avatar_cortex_review_packet(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_review_packet(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let packet = payload.get("review_packet").unwrap_or(&Value::Null);
+    println!("avatar cortex review packet");
+    println!(
+        "packets={} baseline_refs={} pending={} approval_writes={} can_promote={}",
+        avatar_health_display(packet.get("packet_count"), "0"),
+        avatar_health_display(packet.get("baseline_reference_count"), "0"),
+        avatar_health_display(packet.get("manual_pending_count"), "0"),
+        avatar_health_display(
+            packet
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("approval_writes_allowed")),
+            "false"
+        ),
+        avatar_health_display(
+            packet
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+            "false"
+        )
+    );
+    if let Some(items) = packet.get("packets").and_then(Value::as_array) {
+        for item in items.iter().take(5) {
+            println!(
+                "- {} decision={} gate={} promote={} preview=track:{}",
+                avatar_health_display(item.get("token"), "-"),
+                avatar_health_display(item.get("default_decision"), "-"),
+                avatar_health_display(item.get("automatic_gate"), "-"),
+                avatar_health_display(item.get("can_promote_binding"), "false"),
+                avatar_health_display(
+                    item.get("renderer_view")
+                        .and_then(|renderer| renderer.get("track")),
+                    "-"
+                )
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn run_avatar_cortex_review_report(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_review_report(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let report = payload.get("review_report").unwrap_or(&Value::Null);
+    println!("avatar cortex review report");
+    println!(
+        "state={} packets={} ready={} blocked={} feedback={} voice_requests={} human_decisions={}",
+        avatar_health_display(report.get("report_state"), "-"),
+        avatar_health_display(report.get("packet_count"), "0"),
+        avatar_health_display(report.get("ready_packet_count"), "0"),
+        avatar_health_display(report.get("blocked_packet_count"), "0"),
+        avatar_health_display(report.get("human_feedback_count"), "0"),
+        avatar_health_display(report.get("voice_linkage_requested_count"), "0"),
+        avatar_health_display(report.get("human_decision_count"), "0")
+    );
+    println!(
+        "ready_for_human_review={} ready_for_approval={} can_promote={} merge_without_review={}",
+        avatar_health_display(
+            report
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("ready_for_human_visual_review")),
+            "false"
+        ),
+        avatar_health_display(
+            report
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("ready_for_approval")),
+            "false"
+        ),
+        avatar_health_display(
+            report
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+            "false"
+        ),
+        avatar_health_display(
+            report
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("merge_without_human_review_allowed")),
+            "false"
+        )
+    );
+    if let Some(items) = report.get("items").and_then(Value::as_array) {
+        for item in items.iter().take(5) {
+            println!(
+                "- {} readiness={} approval={} promote={}",
+                avatar_health_display(item.get("token"), "-"),
+                avatar_health_display(item.get("readiness"), "-"),
+                avatar_health_display(item.get("ready_for_approval"), "false"),
+                avatar_health_display(item.get("can_promote_binding"), "false")
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn run_avatar_cortex_voice_policy(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_policy(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let policy = payload.get("voice_policy").unwrap_or(&Value::Null);
+    println!("avatar cortex voice policy");
+    println!(
+        "tracks={} manual_cli_emit={} display_only={} auto_emit={} http_emit_route_added={}",
+        avatar_health_display(policy.get("track_count"), "0"),
+        avatar_health_display(policy.get("manual_cli_emit_count"), "0"),
+        avatar_health_display(policy.get("display_only_count"), "0"),
+        avatar_health_display(policy.get("auto_emit_count"), "0"),
+        avatar_health_display(payload.get("http_emit_route_added"), "false")
+    );
+    println!(
+        "default_voice={} rate={} cooldown={} real_emit={}",
+        avatar_health_display(policy.get("default_voice"), "-"),
+        avatar_health_display(policy.get("default_rate"), "-"),
+        avatar_health_display(policy.get("default_cooldown_secs"), "300"),
+        avatar_health_display(
+            policy
+                .get("gate")
+                .and_then(|gate| gate.get("real_emit_surface")),
+            "-"
+        )
+    );
+    if let Some(rules) = policy.get("rules").and_then(Value::as_array) {
+        for rule in rules.iter().take(8) {
+            println!(
+                "- {} mode={} manual_cli={} utterance={} variant={}",
+                avatar_health_display(rule.get("token"), "-"),
+                avatar_health_display(rule.get("mode"), "-"),
+                avatar_health_display(rule.get("manual_cli_emit_allowed"), "false"),
+                avatar_health_display(rule.get("utterance"), "-"),
+                avatar_health_display(rule.get("visual_variant"), "-")
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn run_avatar_cortex_voice_request(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    track: Option<String>,
+    reason: Option<String>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_request(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+        track.as_deref(),
+        reason.as_deref(),
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let request = payload.get("voice_request").unwrap_or(&Value::Null);
+    println!("avatar cortex voice request");
+    println!(
+        "state={} token={} manual_cli={} auto_emit={} emits_audio={} http_emit_route={}",
+        avatar_health_display(request.get("request_state"), "-"),
+        avatar_health_display(request.get("selected_token"), "-"),
+        avatar_health_display(request.get("manual_cli_emit_allowed"), "false"),
+        avatar_health_display(request.get("auto_emit_allowed"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false"),
+        avatar_health_display(request.get("http_emit_route"), "null")
+    );
+    println!(
+        "line={} voice={} rate={} reason_present={} cooldown={}",
+        avatar_health_display(request.get("line"), "-"),
+        avatar_health_display(request.get("suggested_voice"), "-"),
+        avatar_health_display(request.get("suggested_rate"), "-"),
+        avatar_health_display(request.get("operator_reason_present"), "false"),
+        avatar_health_display(request.get("cooldown_secs"), "300")
+    );
+    println!(
+        "second_step={} cli_only={} command={}",
+        avatar_health_display(request.get("requires_second_step"), "true"),
+        avatar_health_display(
+            request
+                .get("safety")
+                .and_then(|safety| safety.get("cli_only_real_emit")),
+            "true"
+        ),
+        avatar_health_display(request.get("command_preview"), "-")
+    );
+    Ok(())
+}
+
+async fn run_avatar_cortex_voice_confirm(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    track: Option<String>,
+    reason: Option<String>,
+    confirm: bool,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_confirm(
+        label.as_deref(),
+        heartbeat_label.as_deref(),
+        Some(&project),
+        output.as_deref(),
+        track.as_deref(),
+        reason.as_deref(),
+        confirm,
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let confirm = payload.get("voice_confirm").unwrap_or(&Value::Null);
+    println!("avatar cortex voice confirm dry-run");
+    println!(
+        "state={} confirm_requested={} would_execute_cli={} emits_audio={} http_emit_route={}",
+        avatar_health_display(confirm.get("confirmation_state"), "-"),
+        avatar_health_display(confirm.get("confirm_requested"), "false"),
+        avatar_health_display(confirm.get("would_execute_cli"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false"),
+        avatar_health_display(confirm.get("http_emit_route"), "null")
+    );
+    println!(
+        "token={} line={} reason_present={} voice={} rate={}",
+        avatar_health_display(confirm.get("selected_token"), "-"),
+        avatar_health_display(confirm.get("line"), "-"),
+        avatar_health_display(confirm.get("operator_reason_present"), "false"),
+        avatar_health_display(confirm.get("suggested_voice"), "-"),
+        avatar_health_display(confirm.get("suggested_rate"), "-")
+    );
+    println!(
+        "actual_execution_here={} command={}",
+        avatar_health_display(confirm.get("actual_execution_available_here"), "false"),
+        avatar_health_display(confirm.get("command_preview"), "-")
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_cortex_voice_action(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    track: Option<String>,
+    reason: Option<String>,
+    confirm: bool,
+    emit: bool,
+    force: bool,
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::AvatarCortexVoiceActionOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        requested_track: track.as_deref(),
+        reason: reason.as_deref(),
+        confirm,
+        emit,
+        force,
+        cooldown_secs,
+        tts_voice: tts_voice.as_deref(),
+        tts_rate,
+    };
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_action(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let action = payload.get("action").unwrap_or(&Value::Null);
+    let emit_payload = payload.get("source_voice_emit").unwrap_or(&Value::Null);
+    let tts = emit_payload.get("tts").unwrap_or(&Value::Null);
+    println!("avatar cortex voice action");
+    println!(
+        "state={} confirm={} emit={} actual_emit_invoked={} emitted={} emits_audio={}",
+        avatar_health_display(action.get("confirmation_state"), "-"),
+        avatar_health_display(action.get("confirm_flag"), "false"),
+        avatar_health_display(action.get("emit_flag"), "false"),
+        avatar_health_display(payload.get("actual_emit_invoked"), "false"),
+        avatar_health_display(payload.get("emitted"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false")
+    );
+    println!(
+        "blocked={} reasons={} token={} line={}",
+        avatar_health_display(action.get("blocked"), "true"),
+        avatar_health_display_list(action.get("blocked_reasons"), "none"),
+        avatar_health_display(action.get("selected_token"), "-"),
+        avatar_health_display(action.get("line"), "-")
+    );
+    println!(
+        "tts_ok={} voice={} rate={} command={}",
+        avatar_health_display(tts.get("ok"), "-"),
+        avatar_health_display(action.get("tts_voice"), "-"),
+        avatar_health_display(action.get("tts_rate"), "-"),
+        avatar_health_display(action.get("command_preview"), "-")
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_cortex_voice_action_preview(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    track: Option<String>,
+    reason: Option<String>,
+    confirm: bool,
+    force: bool,
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::AvatarCortexVoiceActionPreviewOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        requested_track: track.as_deref(),
+        reason: reason.as_deref(),
+        confirm,
+        force,
+        cooldown_secs,
+        tts_voice: tts_voice.as_deref(),
+        tts_rate,
+    };
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_voice_action_preview(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let action = payload.get("action_preview").unwrap_or(&Value::Null);
+    let gate = payload.get("gate_dry_run").unwrap_or(&Value::Null);
+    let cooldown = gate.get("cooldown").unwrap_or(&Value::Null);
+    println!("avatar cortex voice action preview");
+    println!(
+        "state={} confirm={} ready={} would_emit_audio={} emits_audio={} http_emit_route=false",
+        avatar_health_display(action.get("confirmation_state"), "-"),
+        avatar_health_display(action.get("confirm_flag"), "false"),
+        avatar_health_display(action.get("ready_to_emit_now"), "false"),
+        avatar_health_display(action.get("would_emit_if_operator_runs_command"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false")
+    );
+    println!(
+        "blocked={} reasons={} token={} line={}",
+        avatar_health_display(action.get("blocked"), "true"),
+        avatar_health_display_list(action.get("blocked_reasons"), "none"),
+        avatar_health_display(action.get("selected_token"), "-"),
+        avatar_health_display(action.get("line"), "-")
+    );
+    println!(
+        "cooldown_active={} last_emit_at={} next_allowed_at={} command={}",
+        avatar_health_display(cooldown.get("active"), "false"),
+        avatar_health_display(cooldown.get("last_emit_at"), "-"),
+        avatar_health_display(cooldown.get("next_allowed_at"), "-"),
+        avatar_health_display(action.get("command_preview"), "-")
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_xiao_shu_action_request(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    actor: String,
+    intent: String,
+    message: Option<String>,
+    track: Option<String>,
+    reason: Option<String>,
+    confirm: bool,
+    force: bool,
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    details: bool,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::XiaoShuActionRequestOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        actor: Some(actor.as_str()),
+        intent: Some(intent.as_str()),
+        message: message.as_deref(),
+        requested_track: track.as_deref(),
+        reason: reason.as_deref(),
+        confirm,
+        force,
+        cooldown_secs,
+        tts_voice: tts_voice.as_deref(),
+        tts_rate,
+        include_details: details,
+    };
+    let payload = ab_bridge::avatar_cortex::xiao_shu_action_request(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let request = payload.get("action_request").unwrap_or(&Value::Null);
+    println!("xiao shu action request");
+    println!(
+        "state={} actor={} intent={} supported={} direct_control={} emits_audio={}",
+        avatar_health_display(request.get("request_state"), "-"),
+        avatar_health_display(request.get("actor"), "-"),
+        avatar_health_display(request.get("intent"), "-"),
+        avatar_health_display(request.get("supported_intent"), "false"),
+        avatar_health_display(payload.get("direct_pet_control_allowed"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false")
+    );
+    println!(
+        "confirmation_required={} confirmed={} ready={} blocked={} reasons={}",
+        avatar_health_display(request.get("requires_human_confirmation"), "true"),
+        avatar_health_display(request.get("human_confirmation_present"), "false"),
+        avatar_health_display(request.get("ready_for_local_cli_emit"), "false"),
+        avatar_health_display(request.get("blocked"), "true"),
+        avatar_health_display_list(request.get("blocked_reasons"), "none")
+    );
+    println!(
+        "track={} line={} command={}",
+        avatar_health_display(request.get("mapped_track"), "-"),
+        avatar_health_display(request.get("line"), "-"),
+        avatar_health_display(request.get("emit_command"), "-")
+    );
+    Ok(())
+}
+
+async fn run_xiao_shu_action_requests(
+    project: Option<String>,
+    request_id: Option<String>,
+    state: Option<String>,
+    all_states: bool,
+    details: bool,
+    limit: usize,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::XiaoShuActionRequestQueueOptions {
+        project: Some(&project),
+        request_id: request_id.as_deref(),
+        state: state.as_deref(),
+        include_all_states: all_states,
+        include_details: details,
+        limit,
+    };
+    let payload = ab_bridge::avatar_cortex::xiao_shu_action_request_queue(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    let queue = payload.get("queue").unwrap_or(&Value::Null);
+    println!("xiao shu action requests");
+    println!(
+        "project={} exists={} path={}",
+        avatar_health_display(queue.get("project"), &project),
+        avatar_health_display(queue.get("exists"), "false"),
+        avatar_health_display(queue.get("path"), "-")
+    );
+    println!(
+        "filter request_id={} state={} all_states={} details={} limit={} parsed={} matching={} returned={} parse_errors={}",
+        avatar_health_display(queue.get("request_id_filter"), "-"),
+        avatar_health_display(queue.get("state_filter"), "-"),
+        avatar_health_display(queue.get("include_all_states"), "false"),
+        avatar_health_display(queue.get("include_details"), "false"),
+        avatar_health_display(queue.get("limit"), "20"),
+        avatar_health_display(queue.get("parsed_records"), "0"),
+        avatar_health_display(queue.get("matching_records"), "0"),
+        avatar_health_display(queue.get("returned_count"), "0"),
+        avatar_health_display(queue.get("parse_errors"), "0")
+    );
+    if let Some(records) = payload.get("records").and_then(Value::as_array) {
+        for record in records {
+            println!(
+                "- {} state={} actor={} intent={} track={} line={}",
+                avatar_health_display(record.get("request_id"), "-"),
+                avatar_health_display(record.get("state"), "-"),
+                avatar_health_display(record.get("actor"), "-"),
+                avatar_health_display(record.get("intent"), "-"),
+                avatar_health_display(record.get("mapped_track"), "-"),
+                avatar_health_display(
+                    record
+                        .get("action_request")
+                        .and_then(|request| request.get("line")),
+                    "-"
+                )
+            );
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_xiao_shu_action_request_action(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    request_id: String,
+    reason: Option<String>,
+    confirm: bool,
+    emit: bool,
+    dismiss: bool,
+    force: bool,
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::XiaoShuActionRequestActionOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        request_id: Some(request_id.as_str()),
+        reason: reason.as_deref(),
+        confirm,
+        emit,
+        dismiss,
+        force,
+        cooldown_secs,
+        tts_voice: tts_voice.as_deref(),
+        tts_rate,
+    };
+    let payload = ab_bridge::avatar_cortex::xiao_shu_action_request_action(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    let action_payload = payload.get("action").unwrap_or(&Value::Null);
+    let action = action_payload.get("action").unwrap_or(&Value::Null);
+    let queue = payload.get("queue").unwrap_or(&Value::Null);
+    println!("xiao shu action request action");
+    println!(
+        "request_id={} state={} prior_state={} pending_before={} confirm={} emit={} dismiss={}",
+        avatar_health_display(payload.get("request_id"), "-"),
+        avatar_health_display(payload.get("state"), "-"),
+        avatar_health_display(payload.get("prior_state"), "-"),
+        avatar_health_display(payload.get("pending_before_action"), "false"),
+        avatar_health_display(payload.get("confirm_requested"), "false"),
+        avatar_health_display(payload.get("emit_requested"), "false"),
+        avatar_health_display(payload.get("dismiss_requested"), "false")
+    );
+    println!(
+        "actual_emit_invoked={} would_emit={} emitted={} dismissed={} emits_audio={} writes_request_record={}",
+        avatar_health_display(payload.get("actual_emit_invoked"), "false"),
+        avatar_health_display(payload.get("would_emit"), "false"),
+        avatar_health_display(payload.get("emitted"), "false"),
+        avatar_health_display(payload.get("dismissed"), "false"),
+        avatar_health_display(payload.get("emits_audio"), "false"),
+        avatar_health_display(payload.get("writes_request_record"), "false")
+    );
+    println!(
+        "blocked={} reasons={} token={} line={}",
+        avatar_health_display(action.get("blocked"), "true"),
+        avatar_health_display_list(action.get("blocked_reasons"), "none"),
+        avatar_health_display(action.get("selected_token"), "-"),
+        avatar_health_display(action.get("line"), "-")
+    );
+    println!(
+        "queue={} next={}",
+        avatar_health_display(queue.get("path"), "-"),
+        avatar_health_display(payload.get("next_step"), "-")
+    );
+    Ok(())
+}
+
 async fn run_avatar_cortex_voice_gate(
     label: Option<String>,
     heartbeat_label: Option<String>,
     project: Option<String>,
     output: Option<PathBuf>,
+    preview_text: Option<String>,
     enabled: bool,
     force: bool,
     cooldown_secs: i64,
@@ -3989,6 +5925,7 @@ async fn run_avatar_cortex_voice_gate(
         heartbeat_label: heartbeat_label.as_deref(),
         project: Some(&project),
         output: output.as_deref(),
+        preview_text: preview_text.as_deref(),
         enabled,
         force,
         cooldown_secs,
@@ -4041,6 +5978,7 @@ async fn run_avatar_cortex_voice_emit(
     heartbeat_label: Option<String>,
     project: Option<String>,
     output: Option<PathBuf>,
+    preview_text: Option<String>,
     enabled: bool,
     force: bool,
     cooldown_secs: i64,
@@ -4057,6 +5995,7 @@ async fn run_avatar_cortex_voice_emit(
         heartbeat_label: heartbeat_label.as_deref(),
         project: Some(&project),
         output: output.as_deref(),
+        preview_text: preview_text.as_deref(),
         enabled,
         force,
         cooldown_secs,
@@ -4409,7 +6348,7 @@ fn summarize_snapshot_rows(
     file_bytes: Option<u64>,
     rows: &[ab_seed_bridge::SnapshotRow],
 ) -> SnapshotSummary {
-    use ab_seed_bridge::{SnapshotTier, snapshot};
+    use ab_seed_bridge::{snapshot, SnapshotTier};
     let mut hot_rows = 0usize;
     let mut long_rows = 0usize;
     for r in rows {
@@ -4478,7 +6417,7 @@ async fn run_dream_substrate_corr_audit(
     as_json: bool,
 ) -> Result<()> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     use std::collections::HashMap;
 
     let snap_path = snapshot_path_override.or_else(snapshot::default_snapshot_path);
@@ -5121,7 +7060,7 @@ fish_prompt_osc133
 /// (or raw JSON with `--json`). The β trigger metric (top10/median ratio)
 /// is annotated inline so the user / future-Claude can read it at a glance.
 async fn run_dream_stats(as_json: bool) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -5388,7 +7327,7 @@ async fn run_worktree_session_list() -> Result<()> {
 /// This is vision principle 5's literal landing: a measurable anchor for
 /// "today-self vs last-week-self" across the non-continuous medium.
 async fn run_dream_identity(days: u32, as_json: bool) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     if days == 0 {
@@ -5587,7 +7526,7 @@ async fn run_dream_promote(
     tier: u8,
     tier2_edge: &str,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     use std::collections::HashSet;
 
     // Tier semantics:
@@ -6457,7 +8396,7 @@ async fn run_dream_decay_unused(
     floor: f64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let window_days = window_days.max(0.0);
     let step = step.clamp(0.0, 1.0);
@@ -6519,7 +8458,7 @@ async fn run_dream_reinforce_active(
     ceiling: f64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let window_days = window_days.max(0.0);
     let step = step.clamp(0.0, 1.0);
@@ -6578,7 +8517,7 @@ async fn run_dream_reinforce_active(
 /// longitudinal study: re-run weekly, compare. If the closure works,
 /// `spearman_r` should drift from ≈ 0 (decay-flattened) toward 0.4+.
 async fn run_dream_signal_fidelity(top_n: u32, as_json: bool) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -6712,7 +8651,7 @@ async fn run_dream_prune_coact_noise(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let max_count = max_count.max(0);
     let older_than_days = older_than_days.max(0);
@@ -6760,7 +8699,7 @@ async fn run_dream_prune_degenerate_relates(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let path = default_db_path();
     let store = SqliteStore::open(&path)
         .await
@@ -6805,7 +8744,7 @@ async fn run_dream_archive_orphan_stubs(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{MemoryRecord, SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, MemoryRecord, SqliteStore, StateStore};
     use std::time::{SystemTime, UNIX_EPOCH};
     let older_than_days = older_than_days.max(0);
     let max_archive = max_archive.clamp(1, 1000);
@@ -6930,7 +8869,7 @@ fn archive_alarm_should_fire(archived: u64, threshold: i64, dry_run: bool) -> bo
 /// Operator escape hatch when ζ-14 retires a row that turns out to
 /// still carry signal. Single-key, status-gated, returns bool.
 async fn run_dream_restore_archived(key: &str, as_json: bool) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let path = default_db_path();
     let store = SqliteStore::open(&path)
         .await
@@ -6975,7 +8914,7 @@ async fn run_dream_tombstone_aged_archived(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let older_than_days = older_than_days.max(0);
     let max_count = max_count.clamp(1, 5000);
     let path = default_db_path();
@@ -7027,7 +8966,7 @@ async fn run_dream_cluster_probe(
     preview: i64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let min_size = min_size.max(2);
     let top_k = top_k.max(1) as usize;
     let preview = preview.max(1) as usize;
@@ -7116,7 +9055,7 @@ async fn run_dream_purge_tombstones(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let path = default_db_path();
     let store = SqliteStore::open(&path)
         .await
@@ -7179,7 +9118,7 @@ async fn run_dream_decay_coactivation(
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let tau_days = tau_days.clamp(0.5, 30.0);
     let tau_secs = (tau_days * 86_400.0) as i64;
@@ -7268,7 +9207,7 @@ async fn run_dream_replay_audit(
     overlap_min: f64,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -7472,7 +9411,7 @@ async fn run_dream_snapshot(
     print_only: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{MemoryRecord, SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, MemoryRecord, SqliteStore, StateStore};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     let path = default_db_path();
@@ -7830,7 +9769,7 @@ async fn run_dream_diff(
     auto: bool,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -8215,7 +10154,7 @@ async fn run_dream_diff(
 ///   3. snapshot key (if not --no-snapshot; identifies the freshly-saved
 ///      `kind=snapshot` memory the next `dream weekly` can diff against)
 async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let path = default_db_path();
     let store = SqliteStore::open(&path)
@@ -8377,7 +10316,7 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
     println!("[bonus] substrate-readiness (P-ε)");
     println!("─────────────────────────────────────────");
     match {
-        use ab_store::{SqliteStore, StateStore as _, default_db_path};
+        use ab_store::{default_db_path, SqliteStore, StateStore as _};
         let path = default_db_path();
         let store_res = SqliteStore::open(&path).await;
         match store_res {
@@ -8587,10 +10526,7 @@ fn print_shadow_cortex_weekly_bonus(
     if let Some(feedback) = feedback {
         println!(
             "  feedback 7d: {} accepted / {} ignored ({} in-window, {} total)",
-            feedback.accepted,
-            feedback.ignored,
-            feedback.window_records,
-            feedback.total_records,
+            feedback.accepted, feedback.ignored, feedback.window_records, feedback.total_records,
         );
         if let Some(latest) = &feedback.latest {
             println!(
@@ -8624,7 +10560,7 @@ async fn substrate_corr_weekly_one_liner(
     min_cofires: u32,
 ) -> Result<SubstrateCorrOneLiner> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     use std::collections::HashMap;
 
     let snap_path = snapshot::default_snapshot_path();
@@ -9189,7 +11125,7 @@ async fn run_dream_codebase_report(
     html_path: Option<&std::path::Path>,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
 
     let cwd = std::env::current_dir().map_err(|e| anyhow::anyhow!("current_dir: {e}"))?;
     let root_path = root.map(|p| p.to_path_buf()).unwrap_or(cwd);
@@ -9345,7 +11281,7 @@ async fn run_dream_substrate_audit(
     as_json: bool,
     exclude_kinds: Vec<String>,
 ) -> Result<()> {
-    use ab_store::{SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, SqliteStore, StateStore};
     let db_path = default_db_path();
     let store = SqliteStore::open(&db_path)
         .await
@@ -9837,7 +11773,7 @@ async fn run_dream_agent_md_drift(
     agent_md_path_override: Option<PathBuf>,
     as_json: bool,
 ) -> Result<()> {
-    use ab_store::{MemoryListSort, MemoryRecord, SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, MemoryListSort, MemoryRecord, SqliteStore, StateStore};
 
     let agent_md_path =
         agent_md_path_override.unwrap_or_else(ab_bridge::mcp_tools::agent_profile_path);
@@ -10061,7 +11997,7 @@ fn aggregate_skill_retro(
 }
 
 async fn run_dream_skill_retro(days: u32, as_json: bool) -> Result<()> {
-    use ab_store::{MemoryListSort, MemoryRecord, SqliteStore, StateStore, default_db_path};
+    use ab_store::{default_db_path, MemoryListSort, MemoryRecord, SqliteStore, StateStore};
 
     let db_path = default_db_path();
     let store = SqliteStore::open(&db_path)
@@ -10763,7 +12699,7 @@ pqr1357 random free-form subject without prefix
         // Use a fixed `now` from the canonical audit baseline date to make
         // this deterministic across CI clock drift. 2026-05-16 UTC midnight.
         let now_unix: u64 = 1_778_975_200; // approx 2026-05-16 03:46 UTC
-        // L5-P1 opens 2026-06-14 → ~29 days from now (anchor day).
+                                           // L5-P1 opens 2026-06-14 → ~29 days from now (anchor day).
         let days = super::iso_days_until_now("2026-06-14", now_unix).expect("valid iso");
         assert!(
             (28..=30).contains(&days),

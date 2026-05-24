@@ -12,7 +12,25 @@
 //!   - `GET /avatar-surface/panel?...` — minimal read-only HTML status panel
 //!   - `GET /avatar-surface/heartbeat-health?...` — launchd + presence health
 //!   - `GET /avatar-surface/cortex-status?...` — launchd + cortex snapshot status
+//!   - `GET /avatar-surface/cortex-language?...` — dynamic language preview
+//!   - `GET /avatar-surface/cortex-motion?...` — gesture/mood/attention preview
+//!   - `GET /avatar-surface/cortex-renderer?...` — renderer slot mapping dry-run
+//!   - `GET /avatar-surface/cortex-renderer-registry?...` — renderer binding registry
+//!   - `GET /avatar-surface/cortex-binding-plan?...` — first safe binding plan
+//!   - `GET /avatar-surface/cortex-binding-fixture?...` — sidecar preview fixtures
+//!   - `GET /avatar-surface/cortex-visual-adapter?...` — sidecar frame preview
+//!   - `GET /avatar-surface/cortex-renderer-view?...` — browser sidecar renderer view
+//!   - `GET /avatar-surface/pet-spritesheet?...` — read-only installed pet sprite source
+//!   - `GET /avatar-surface/sidecar-spritesheet?...` — read-only prototype sprite source
+//!   - `GET /avatar-surface/cortex-review-gate?...` — read-only renderer review gate
+//!   - `GET /avatar-surface/cortex-review-packet?...` — read-only renderer review packets
+//!   - `GET /avatar-surface/cortex-review-report?...` — read-only review readiness report
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
+//!   - `GET /avatar-surface/cortex-voice-policy?...` — read-only sparse voice policy
+//!   - `GET /avatar-surface/cortex-voice-request?...` — read-only two-step voice request
+//!   - `GET /avatar-surface/cortex-voice-confirm?...` — read-only confirmation action preview
+//!   - `GET /avatar-surface/cortex-voice-action-preview?...` — read-only action readiness runbook
+//!   - `GET /avatar-surface/xiao-shu-action-request?...` — LLM-safe Xiao Shu action request
 //!   - `GET /avatar-surface/cortex-voice-gate?...` — dry-run explicit voice gate
 //!   - `GET /identity?days=N` — δ-1 cross-node identity fingerprint
 //!                              (same shape as `dream identity --json`)
@@ -40,14 +58,14 @@ use ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend};
 use ab_store::{AgentPresenceRecord, StateStore};
 use anyhow::{Context, Result};
 use axum::{
-    Json, Router,
     extract::{Path, Query, State},
-    http::{StatusCode, header},
+    http::{header, StatusCode},
     response::{Html, IntoResponse},
     routing::{get, post},
+    Json, Router,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -102,7 +120,80 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
             get(avatar_heartbeat_health),
         )
         .route("/avatar-surface/cortex-status", get(avatar_cortex_status))
+        .route(
+            "/avatar-surface/cortex-language",
+            get(avatar_cortex_language),
+        )
+        .route("/avatar-surface/cortex-motion", get(avatar_cortex_motion))
+        .route(
+            "/avatar-surface/cortex-renderer",
+            get(avatar_cortex_renderer),
+        )
+        .route(
+            "/avatar-surface/cortex-renderer-registry",
+            get(avatar_cortex_renderer_registry),
+        )
+        .route(
+            "/avatar-surface/cortex-binding-plan",
+            get(avatar_cortex_binding_plan),
+        )
+        .route(
+            "/avatar-surface/cortex-binding-fixture",
+            get(avatar_cortex_binding_fixture),
+        )
+        .route(
+            "/avatar-surface/cortex-visual-adapter",
+            get(avatar_cortex_visual_adapter),
+        )
+        .route(
+            "/avatar-surface/cortex-renderer-view",
+            get(avatar_cortex_renderer_view),
+        )
+        .route(
+            "/avatar-surface/pet-spritesheet",
+            get(avatar_pet_spritesheet),
+        )
+        .route(
+            "/avatar-surface/sidecar-spritesheet",
+            get(avatar_sidecar_spritesheet),
+        )
+        .route(
+            "/avatar-surface/cortex-review-gate",
+            get(avatar_cortex_review_gate),
+        )
+        .route(
+            "/avatar-surface/cortex-review-packet",
+            get(avatar_cortex_review_packet),
+        )
+        .route(
+            "/avatar-surface/cortex-review-report",
+            get(avatar_cortex_review_report),
+        )
         .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
+        .route(
+            "/avatar-surface/cortex-voice-policy",
+            get(avatar_cortex_voice_policy),
+        )
+        .route(
+            "/avatar-surface/cortex-voice-request",
+            get(avatar_cortex_voice_request),
+        )
+        .route(
+            "/avatar-surface/cortex-voice-confirm",
+            get(avatar_cortex_voice_confirm),
+        )
+        .route(
+            "/avatar-surface/cortex-voice-action-preview",
+            get(avatar_cortex_voice_action_preview),
+        )
+        .route(
+            "/avatar-surface/xiao-shu-action-request",
+            get(xiao_shu_action_request),
+        )
+        .route(
+            "/avatar-surface/xiao-shu-action-requests",
+            get(xiao_shu_action_requests),
+        )
         .route(
             "/avatar-surface/cortex-voice-gate",
             get(avatar_cortex_voice_gate),
@@ -488,6 +579,22 @@ struct AvatarCortexStatusQuery {
     heartbeat_label: Option<String>,
     project: Option<String>,
     output: Option<std::path::PathBuf>,
+    track: Option<String>,
+    track_index: Option<usize>,
+    variant: Option<String>,
+    reason: Option<String>,
+    #[serde(default)]
+    confirm: bool,
+}
+
+#[derive(Deserialize, Debug)]
+struct AvatarPetSpritesheetQuery {
+    pet_id: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct AvatarSidecarSpritesheetQuery {
+    asset: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -496,6 +603,7 @@ struct AvatarCortexVoiceGateQuery {
     heartbeat_label: Option<String>,
     project: Option<String>,
     output: Option<std::path::PathBuf>,
+    preview_text: Option<String>,
     #[serde(default)]
     enabled: bool,
     #[serde(default)]
@@ -503,6 +611,65 @@ struct AvatarCortexVoiceGateQuery {
     #[serde(default = "default_avatar_voice_gate_cooldown_secs")]
     cooldown_secs: i64,
     reason: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct AvatarCortexVoiceActionPreviewQuery {
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<std::path::PathBuf>,
+    track: Option<String>,
+    reason: Option<String>,
+    #[serde(default)]
+    confirm: bool,
+    #[serde(default)]
+    force: bool,
+    #[serde(default = "default_avatar_voice_gate_cooldown_secs")]
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+}
+
+#[derive(Deserialize, Debug)]
+struct XiaoShuActionRequestQuery {
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<std::path::PathBuf>,
+    actor: Option<String>,
+    intent: Option<String>,
+    message: Option<String>,
+    track: Option<String>,
+    reason: Option<String>,
+    #[serde(default)]
+    confirm: bool,
+    #[serde(default)]
+    force: bool,
+    #[serde(default)]
+    details: bool,
+    #[serde(default = "default_avatar_voice_gate_cooldown_secs")]
+    cooldown_secs: i64,
+    tts_voice: Option<String>,
+    tts_rate: Option<u64>,
+}
+
+#[derive(Deserialize, Debug)]
+struct XiaoShuActionRequestsQuery {
+    project: Option<String>,
+    request_id: Option<String>,
+    state: Option<String>,
+    #[serde(default)]
+    all_states: bool,
+    #[serde(default)]
+    details: bool,
+    limit: Option<usize>,
+}
+
+impl XiaoShuActionRequestsQuery {
+    fn effective_limit(&self) -> usize {
+        self.limit.unwrap_or(20).clamp(1, 500)
+    }
 }
 
 impl AvatarHeartbeatHealthQuery {
@@ -626,11 +793,136 @@ async fn avatar_surface_panel(
                 },
             })
         });
+    let cortex_language =
+        crate::avatar_cortex::avatar_cortex_language_preview_from_status(cortex.clone());
+    let cortex_motion =
+        crate::avatar_cortex::avatar_cortex_motion_preview_from_status(cortex.clone());
+    let cortex_renderer =
+        crate::avatar_cortex::avatar_cortex_renderer_preview_from_status(cortex.clone());
+    let cortex_renderer_registry =
+        crate::avatar_cortex::avatar_cortex_renderer_registry_from_status(cortex.clone());
+    let cortex_binding_plan =
+        crate::avatar_cortex::avatar_cortex_binding_plan_from_status(cortex.clone());
+    let cortex_binding_fixture =
+        crate::avatar_cortex::avatar_cortex_binding_fixture_from_status(cortex.clone());
+    let cortex_visual_adapter =
+        crate::avatar_cortex::avatar_cortex_visual_adapter_from_status(cortex.clone());
+    let cortex_renderer_view =
+        crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex.clone());
+    let cortex_review_gate =
+        crate::avatar_cortex::avatar_cortex_renderer_review_gate_from_status(cortex.clone());
+    let cortex_review_packet =
+        crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(cortex.clone());
+    let cortex_review_report =
+        crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(cortex.clone());
+    let cortex_voice_policy =
+        crate::avatar_cortex::avatar_cortex_voice_policy_from_status(cortex.clone());
+    let cortex_voice_request = crate::avatar_cortex::avatar_cortex_voice_request_from_status(
+        cortex.clone(),
+        Some("xiao_shu::alert_peek::medium"),
+        q.project.as_deref(),
+        None,
+    );
+    let cortex_voice_confirm = crate::avatar_cortex::avatar_cortex_voice_confirm_from_status(
+        cortex.clone(),
+        Some("xiao_shu::alert_peek::medium"),
+        q.project.as_deref(),
+        Some("panel-dry-run"),
+        false,
+    );
+    let cortex_voice_action_preview = crate::avatar_cortex::avatar_cortex_voice_action_preview(
+        &crate::avatar_cortex::AvatarCortexVoiceActionPreviewOptions {
+            label: None,
+            heartbeat_label: None,
+            project: q.project.as_deref(),
+            output: None,
+            requested_track: Some("xiao_shu::alert_peek::medium"),
+            reason: Some("panel-dry-run"),
+            confirm: true,
+            force: false,
+            cooldown_secs: default_avatar_voice_gate_cooldown_secs(),
+            tts_voice: None,
+            tts_rate: None,
+        },
+    )
+    .unwrap_or_else(|e| {
+        json!({
+            "surface": "avatar_cortex_voice_action_preview",
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "error": e.to_string(),
+        })
+    });
+    let xiao_shu_action_request = crate::avatar_cortex::xiao_shu_action_request(
+        &crate::avatar_cortex::XiaoShuActionRequestOptions {
+            label: None,
+            heartbeat_label: None,
+            project: q.project.as_deref(),
+            output: None,
+            actor: Some("panel"),
+            intent: Some("voice_alert"),
+            message: Some("show the operator a safe Xiao Shu action request"),
+            requested_track: Some("xiao_shu::alert_peek::medium"),
+            reason: Some("panel-dry-run"),
+            confirm: false,
+            force: false,
+            cooldown_secs: default_avatar_voice_gate_cooldown_secs(),
+            tts_voice: None,
+            tts_rate: None,
+            include_details: false,
+        },
+    )
+    .unwrap_or_else(|e| {
+        json!({
+            "surface": "xiao_shu_action_request",
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "error": e.to_string(),
+        })
+    });
+    let xiao_shu_action_requests = crate::avatar_cortex::xiao_shu_action_request_queue(
+        &crate::avatar_cortex::XiaoShuActionRequestQueueOptions {
+            project: q.project.as_deref(),
+            request_id: None,
+            state: None,
+            include_all_states: false,
+            include_details: false,
+            limit: 5,
+        },
+    )
+    .unwrap_or_else(|e| {
+        json!({
+            "surface": "xiao_shu_action_request_queue",
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "error": e.to_string(),
+        })
+    });
     Ok(Html(avatar_surface_panel_html(
         &q,
         &avatars,
         &health,
         &cortex,
+        &cortex_language,
+        &cortex_motion,
+        &cortex_renderer,
+        &cortex_renderer_registry,
+        &cortex_binding_plan,
+        &cortex_binding_fixture,
+        &cortex_visual_adapter,
+        &cortex_renderer_view,
+        &cortex_review_gate,
+        &cortex_review_packet,
+        &cortex_review_report,
+        &cortex_voice_policy,
+        &cortex_voice_request,
+        &cortex_voice_confirm,
+        &cortex_voice_action_preview,
+        &xiao_shu_action_request,
+        &xiao_shu_action_requests,
         &report,
         unix_now(),
     )))
@@ -664,6 +956,947 @@ async fn avatar_cortex_status(
     Ok(Json(payload))
 }
 
+async fn avatar_cortex_language(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_language_preview(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_motion(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_motion_preview(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_renderer(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_preview(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_renderer_registry(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_registry(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_binding_plan(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_binding_plan(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_binding_fixture(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_binding_fixture(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_visual_adapter(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_visual_adapter(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_renderer_view(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_view(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Html(avatar_surface_renderer_view_html(
+        &payload,
+        unix_now(),
+        q.track.as_deref(),
+        q.track_index,
+        q.variant.as_deref(),
+    )))
+}
+
+fn avatar_pet_package_dir(pet_id: &str) -> Result<std::path::PathBuf, (StatusCode, String)> {
+    match pet_id {
+        "xiao-shu-dev" | "xiao-shu-v2" | "xiao-shu" => {}
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("unsupported pet_id: {pet_id}"),
+            ));
+        }
+    }
+    let home = std::env::var("HOME").map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("HOME is not available: {e}"),
+        )
+    })?;
+    Ok(std::path::PathBuf::from(home)
+        .join(".codex")
+        .join("pets")
+        .join(pet_id))
+}
+
+fn avatar_pet_spritesheet_content_type(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("webp") => "image/webp",
+        _ => "image/png",
+    }
+}
+
+async fn avatar_pet_spritesheet(
+    Query(q): Query<AvatarPetSpritesheetQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let pet_id = q.pet_id.as_deref().unwrap_or("xiao-shu-dev");
+    let package_dir = avatar_pet_package_dir(pet_id)?;
+    let manifest_path = package_dir.join("pet.json");
+    let manifest_bytes = tokio::fs::read(&manifest_path).await.map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("read {}: {e}", manifest_path.display()),
+        )
+    })?;
+    let manifest: Value = serde_json::from_slice(&manifest_bytes).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("parse {}: {e}", manifest_path.display()),
+        )
+    })?;
+    let sprite_name = manifest
+        .get("spritesheetPath")
+        .and_then(Value::as_str)
+        .unwrap_or("spritesheet.png");
+    let sprite_rel = std::path::Path::new(sprite_name);
+    if sprite_rel.components().count() != 1 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("unsafe spritesheetPath in {pet_id}: {sprite_name}"),
+        ));
+    }
+    let sprite_path = package_dir.join(sprite_rel);
+    let content_type = avatar_pet_spritesheet_content_type(&sprite_path);
+    let bytes = tokio::fs::read(&sprite_path).await.map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("read {}: {e}", sprite_path.display()),
+        )
+    })?;
+    Ok(([(header::CONTENT_TYPE, content_type)], bytes))
+}
+
+fn avatar_sidecar_spritesheet_svg(asset: &str) -> Option<String> {
+    if asset == "xiao-shu-canonical-peek-v3" {
+        return avatar_sidecar_canonical_peek_v3_svg();
+    }
+    if asset == "xiao-shu-motion-canonical-peek-v4" {
+        return avatar_sidecar_motion_canonical_peek_v4_svg();
+    }
+    if asset != "xiao-shu-alert-peek-v2" {
+        return None;
+    }
+
+    use std::fmt::Write as _;
+
+    struct Frame {
+        col: i32,
+        rise: i32,
+        tilt: i32,
+        scale: &'static str,
+        eye_shift: i32,
+        blink: bool,
+        mouth: &'static str,
+        left_arm: i32,
+        right_arm: i32,
+        cheek: &'static str,
+    }
+
+    let frames = [
+        Frame {
+            col: 0,
+            rise: 58,
+            tilt: -7,
+            scale: "0.92",
+            eye_shift: -2,
+            blink: false,
+            mouth: "small",
+            left_arm: 18,
+            right_arm: -18,
+            cheek: "0.12",
+        },
+        Frame {
+            col: 1,
+            rise: 42,
+            tilt: -10,
+            scale: "0.96",
+            eye_shift: -6,
+            blink: false,
+            mouth: "small",
+            left_arm: 28,
+            right_arm: -24,
+            cheek: "0.18",
+        },
+        Frame {
+            col: 2,
+            rise: 24,
+            tilt: -6,
+            scale: "1.00",
+            eye_shift: -4,
+            blink: false,
+            mouth: "open",
+            left_arm: 40,
+            right_arm: -28,
+            cheek: "0.24",
+        },
+        Frame {
+            col: 3,
+            rise: 8,
+            tilt: 0,
+            scale: "1.03",
+            eye_shift: 0,
+            blink: false,
+            mouth: "smile",
+            left_arm: 58,
+            right_arm: -38,
+            cheek: "0.30",
+        },
+        Frame {
+            col: 4,
+            rise: -2,
+            tilt: 5,
+            scale: "1.04",
+            eye_shift: 2,
+            blink: false,
+            mouth: "smile",
+            left_arm: 72,
+            right_arm: -44,
+            cheek: "0.34",
+        },
+        Frame {
+            col: 5,
+            rise: 0,
+            tilt: 2,
+            scale: "1.04",
+            eye_shift: 0,
+            blink: true,
+            mouth: "smile",
+            left_arm: 64,
+            right_arm: -40,
+            cheek: "0.36",
+        },
+        Frame {
+            col: 6,
+            rise: 18,
+            tilt: -4,
+            scale: "1.00",
+            eye_shift: -3,
+            blink: false,
+            mouth: "small",
+            left_arm: 40,
+            right_arm: -30,
+            cheek: "0.24",
+        },
+        Frame {
+            col: 7,
+            rise: 46,
+            tilt: -8,
+            scale: "0.95",
+            eye_shift: -1,
+            blink: false,
+            mouth: "small",
+            left_arm: 22,
+            right_arm: -22,
+            cheek: "0.16",
+        },
+    ];
+
+    let mut svg = String::new();
+    svg.push_str(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872" viewBox="0 0 1536 1872">
+  <title>Xiao Shu alert peek sidecar v2 sprite atlas</title>
+  <defs>
+    <linearGradient id="xs-body" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f0dfc8"/>
+      <stop offset="1" stop-color="#d8e5d6"/>
+    </linearGradient>
+    <linearGradient id="xs-head" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f2dec4"/>
+      <stop offset="1" stop-color="#e0c8ac"/>
+    </linearGradient>
+    <filter id="xs-soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#26312f" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+"##,
+    );
+
+    for frame in frames {
+        let x = frame.col * 192;
+        let left_eye_x = 72 + frame.eye_shift;
+        let right_eye_x = 120 + frame.eye_shift;
+        let eyes = if frame.blink {
+            format!(
+                r##"<rect x="{left_eye_x}" y="93" width="18" height="5" rx="3" fill="#26312f"/>
+      <rect x="{right_eye_x}" y="93" width="18" height="5" rx="3" fill="#26312f"/>"##
+            )
+        } else {
+            format!(
+                r##"<ellipse cx="{left_eye_x}" cy="93" rx="7" ry="13" fill="#26312f"/>
+      <ellipse cx="{right_eye_x}" cy="93" rx="7" ry="13" fill="#26312f"/>"##
+            )
+        };
+        let mouth = match frame.mouth {
+            "open" => r##"<ellipse cx="96" cy="112" rx="9" ry="7" fill="#26312f"/>"##,
+            "smile" => {
+                r##"<path d="M79 108 Q96 121 113 108" fill="none" stroke="#26312f" stroke-width="5" stroke-linecap="round"/>"##
+            }
+            _ => {
+                r##"<path d="M87 110 Q96 115 105 110" fill="none" stroke="#26312f" stroke-width="4" stroke-linecap="round"/>"##
+            }
+        };
+
+        writeln!(
+            svg,
+            r##"  <g id="frame-{col}" transform="translate({x} 0)">
+    <rect width="192" height="208" fill="none"/>
+    <ellipse cx="96" cy="188" rx="54" ry="12" fill="#26312f" opacity="0.14"/>
+    <g filter="url(#xs-soft-shadow)" transform="translate(96 118) scale({scale}) translate(-96 -118) translate(0 {rise})">
+      <g transform="translate(96 94) rotate({tilt}) translate(-96 -94)">
+        <ellipse cx="96" cy="154" rx="50" ry="43" fill="url(#xs-body)" stroke="#26312f" stroke-width="5"/>
+        <path d="M58 133 C76 121 116 121 134 133" fill="none" stroke="#147a74" stroke-width="6" stroke-linecap="round"/>
+        <g transform="translate(53 147) rotate({left_arm})">
+          <ellipse cx="0" cy="0" rx="14" ry="29" fill="#ead7bd" stroke="#26312f" stroke-width="5"/>
+        </g>
+        <g transform="translate(139 147) rotate({right_arm})">
+          <ellipse cx="0" cy="0" rx="14" ry="29" fill="#ead7bd" stroke="#26312f" stroke-width="5"/>
+        </g>
+        <path d="M42 82 C42 47 63 25 96 25 C129 25 150 47 150 82 C150 123 128 145 96 145 C64 145 42 123 42 82 Z" fill="url(#xs-head)" stroke="#26312f" stroke-width="5"/>
+        <path d="M89 26 C100 6 126 10 124 34 C111 29 99 33 89 26 Z" fill="#d45f4c" stroke="#26312f" stroke-width="5" stroke-linejoin="round"/>
+        {eyes}
+        <ellipse cx="58" cy="112" rx="13" ry="7" fill="#d45f4c" opacity="{cheek}"/>
+        <ellipse cx="134" cy="112" rx="13" ry="7" fill="#d45f4c" opacity="{cheek}"/>
+        {mouth}
+      </g>
+    </g>
+  </g>
+"##,
+            col = frame.col,
+            x = x,
+            scale = frame.scale,
+            rise = frame.rise,
+            tilt = frame.tilt,
+            left_arm = frame.left_arm,
+            right_arm = frame.right_arm,
+            eyes = eyes,
+            cheek = frame.cheek,
+            mouth = mouth
+        )
+        .ok()?;
+    }
+
+    svg.push_str("</svg>\n");
+    Some(svg)
+}
+
+fn avatar_sidecar_motion_canonical_peek_v4_svg() -> Option<String> {
+    use std::fmt::Write as _;
+
+    struct Frame {
+        col: i32,
+        rise: i32,
+        tilt: i32,
+        scale: &'static str,
+        eye_shift: i32,
+        blink: bool,
+        mouth: &'static str,
+        left_arm: i32,
+        right_arm: i32,
+        ribbon: i32,
+        cheek: &'static str,
+    }
+
+    let frames = [
+        Frame {
+            col: 0,
+            rise: 58,
+            tilt: -7,
+            scale: "0.92",
+            eye_shift: -2,
+            blink: false,
+            mouth: "small",
+            left_arm: 18,
+            right_arm: -18,
+            ribbon: -8,
+            cheek: "0.12",
+        },
+        Frame {
+            col: 1,
+            rise: 42,
+            tilt: -10,
+            scale: "0.96",
+            eye_shift: -6,
+            blink: false,
+            mouth: "small",
+            left_arm: 28,
+            right_arm: -24,
+            ribbon: -18,
+            cheek: "0.18",
+        },
+        Frame {
+            col: 2,
+            rise: 24,
+            tilt: -6,
+            scale: "1.00",
+            eye_shift: -4,
+            blink: false,
+            mouth: "open",
+            left_arm: 40,
+            right_arm: -28,
+            ribbon: -24,
+            cheek: "0.24",
+        },
+        Frame {
+            col: 3,
+            rise: 8,
+            tilt: 0,
+            scale: "1.03",
+            eye_shift: 0,
+            blink: false,
+            mouth: "smile",
+            left_arm: 58,
+            right_arm: -38,
+            ribbon: -10,
+            cheek: "0.30",
+        },
+        Frame {
+            col: 4,
+            rise: -2,
+            tilt: 5,
+            scale: "1.04",
+            eye_shift: 2,
+            blink: false,
+            mouth: "smile",
+            left_arm: 72,
+            right_arm: -44,
+            ribbon: 8,
+            cheek: "0.34",
+        },
+        Frame {
+            col: 5,
+            rise: 0,
+            tilt: 2,
+            scale: "1.04",
+            eye_shift: 0,
+            blink: true,
+            mouth: "smile",
+            left_arm: 64,
+            right_arm: -40,
+            ribbon: 16,
+            cheek: "0.36",
+        },
+        Frame {
+            col: 6,
+            rise: 18,
+            tilt: -4,
+            scale: "1.00",
+            eye_shift: -3,
+            blink: false,
+            mouth: "small",
+            left_arm: 40,
+            right_arm: -30,
+            ribbon: -5,
+            cheek: "0.24",
+        },
+        Frame {
+            col: 7,
+            rise: 46,
+            tilt: -8,
+            scale: "0.95",
+            eye_shift: -1,
+            blink: false,
+            mouth: "small",
+            left_arm: 22,
+            right_arm: -22,
+            ribbon: -12,
+            cheek: "0.16",
+        },
+    ];
+
+    let mut svg = String::new();
+    svg.push_str(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872" viewBox="0 0 1536 1872">
+  <title>Xiao Shu motion-canonical alert peek sidecar v4 sprite atlas</title>
+  <defs>
+    <linearGradient id="xs4-head" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f1d89f"/>
+      <stop offset="0.6" stop-color="#e4bd76"/>
+      <stop offset="1" stop-color="#b9803e"/>
+    </linearGradient>
+    <linearGradient id="xs4-robe" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f0dfb8"/>
+      <stop offset="1" stop-color="#cba35e"/>
+    </linearGradient>
+    <filter id="xs4-shadow" x="-24%" y="-24%" width="148%" height="148%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#2d2018" flood-opacity="0.20"/>
+    </filter>
+  </defs>
+"##,
+    );
+
+    for frame in frames {
+        let x = frame.col * 192;
+        let left_eye_x = 72 + frame.eye_shift;
+        let right_eye_x = 120 + frame.eye_shift;
+        let eyes = if frame.blink {
+            format!(
+                r##"<path d="M{left_eye_x} 93 h16" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>
+      <path d="M{right_eye_x} 93 h16" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>"##
+            )
+        } else {
+            format!(
+                r##"<ellipse cx="{left_eye_x}" cy="93" rx="7" ry="13" fill="#35251a"/>
+      <ellipse cx="{right_eye_x}" cy="93" rx="7" ry="13" fill="#35251a"/>
+      <circle cx="{left_eye_x}" cy="88" r="2" fill="#f8efd6"/>
+      <circle cx="{right_eye_x}" cy="88" r="2" fill="#f8efd6"/>"##
+            )
+        };
+        let mouth = match frame.mouth {
+            "open" => r##"<ellipse cx="96" cy="112" rx="9" ry="7" fill="#35251a"/>"##,
+            "smile" => {
+                r##"<path d="M79 108 Q96 121 113 108" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>"##
+            }
+            _ => {
+                r##"<path d="M87 110 Q96 115 105 110" fill="none" stroke="#35251a" stroke-width="4" stroke-linecap="round"/>"##
+            }
+        };
+
+        writeln!(
+            svg,
+            r##"  <g id="frame-{col}" transform="translate({x} 0)">
+    <rect width="192" height="208" fill="none"/>
+    <ellipse cx="96" cy="188" rx="54" ry="12" fill="#2d2018" opacity="0.15"/>
+    <g filter="url(#xs4-shadow)" transform="translate(96 118) scale({scale}) translate(-96 -118) translate(0 {rise})">
+      <g transform="translate(96 94) rotate({tilt}) translate(-96 -94)">
+        <ellipse cx="96" cy="154" rx="51" ry="44" fill="url(#xs4-robe)" stroke="#3a291c" stroke-width="5"/>
+        <path d="M58 133 C76 121 116 121 134 133" fill="none" stroke="#b94735" stroke-width="6" stroke-linecap="round"/>
+        <path d="M72 132 L96 187 L120 132" fill="#ead9ad" stroke="#8f4a32" stroke-width="4" stroke-linejoin="round"/>
+        <path d="M83 137 L108 163 L93 188" fill="none" stroke="#b94735" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="72" cy="160" r="3" fill="#8f6d38" opacity="0.8"/>
+        <circle cx="122" cy="159" r="3" fill="#8f6d38" opacity="0.8"/>
+        <g transform="translate(53 147) rotate({left_arm})">
+          <ellipse cx="0" cy="0" rx="14" ry="29" fill="#d4ad64" stroke="#3a291c" stroke-width="5"/>
+          <ellipse cx="0" cy="-19" rx="8" ry="6" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+          <path d="M-7 0 L7 0" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.72"/>
+        </g>
+        <g transform="translate(139 147) rotate({right_arm})">
+          <ellipse cx="0" cy="0" rx="14" ry="29" fill="#d4ad64" stroke="#3a291c" stroke-width="5"/>
+          <ellipse cx="0" cy="-19" rx="8" ry="6" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+          <path d="M-7 0 L7 0" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.72"/>
+        </g>
+        <path d="M42 82 C42 47 63 25 96 25 C129 25 150 47 150 82 C150 123 128 145 96 145 C64 145 42 123 42 82 Z" fill="url(#xs4-head)" stroke="#3a291c" stroke-width="5"/>
+        <path d="M73 31 C63 19 73 8 82 17 C90 26 79 38 65 33" fill="none" stroke="#9b6b32" stroke-width="5" stroke-linecap="round"/>
+        <path d="M112 35 C128 20 153 29 151 52 C137 47 125 52 112 35 Z" fill="#b94735" stroke="#3a291c" stroke-width="4" stroke-linejoin="round" transform="rotate({ribbon} 134 42)"/>
+        <circle cx="140" cy="61" r="6" fill="#56c6cc" stroke="#3a291c" stroke-width="3"/>
+        {eyes}
+        <ellipse cx="58" cy="112" rx="13" ry="7" fill="#c95f4a" opacity="{cheek}"/>
+        <ellipse cx="134" cy="112" rx="13" ry="7" fill="#c95f4a" opacity="{cheek}"/>
+        {mouth}
+      </g>
+    </g>
+  </g>
+"##,
+            col = frame.col,
+            x = x,
+            scale = frame.scale,
+            rise = frame.rise,
+            tilt = frame.tilt,
+            left_arm = frame.left_arm,
+            right_arm = frame.right_arm,
+            ribbon = frame.ribbon,
+            eyes = eyes,
+            cheek = frame.cheek,
+            mouth = mouth
+        )
+        .ok()?;
+    }
+
+    svg.push_str("</svg>\n");
+    Some(svg)
+}
+
+fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
+    use std::fmt::Write as _;
+
+    struct Frame {
+        col: i32,
+        rise: i32,
+        tilt: i32,
+        scale: &'static str,
+        eye_shift: i32,
+        blink: bool,
+        mouth: &'static str,
+        left_sleeve: i32,
+        right_sleeve: i32,
+        sleeve_y: i32,
+        hand_lift: i32,
+        ribbon: i32,
+        cheek: &'static str,
+    }
+
+    let frames = [
+        Frame {
+            col: 0,
+            rise: 58,
+            tilt: -7,
+            scale: "0.92",
+            eye_shift: -2,
+            blink: false,
+            mouth: "small",
+            left_sleeve: -8,
+            right_sleeve: 8,
+            sleeve_y: 143,
+            hand_lift: 0,
+            ribbon: -8,
+            cheek: "0.10",
+        },
+        Frame {
+            col: 1,
+            rise: 42,
+            tilt: -10,
+            scale: "0.96",
+            eye_shift: -6,
+            blink: false,
+            mouth: "small",
+            left_sleeve: -18,
+            right_sleeve: 14,
+            sleeve_y: 139,
+            hand_lift: 0,
+            ribbon: -18,
+            cheek: "0.16",
+        },
+        Frame {
+            col: 2,
+            rise: 24,
+            tilt: -6,
+            scale: "1.00",
+            eye_shift: -4,
+            blink: false,
+            mouth: "open",
+            left_sleeve: -38,
+            right_sleeve: 28,
+            sleeve_y: 133,
+            hand_lift: 1,
+            ribbon: -24,
+            cheek: "0.22",
+        },
+        Frame {
+            col: 3,
+            rise: 8,
+            tilt: 0,
+            scale: "1.03",
+            eye_shift: 0,
+            blink: false,
+            mouth: "smile",
+            left_sleeve: -62,
+            right_sleeve: 46,
+            sleeve_y: 126,
+            hand_lift: 2,
+            ribbon: -10,
+            cheek: "0.30",
+        },
+        Frame {
+            col: 4,
+            rise: -2,
+            tilt: 5,
+            scale: "1.04",
+            eye_shift: 2,
+            blink: false,
+            mouth: "smile",
+            left_sleeve: -76,
+            right_sleeve: 56,
+            sleeve_y: 122,
+            hand_lift: 2,
+            ribbon: 8,
+            cheek: "0.34",
+        },
+        Frame {
+            col: 5,
+            rise: 0,
+            tilt: 2,
+            scale: "1.04",
+            eye_shift: 0,
+            blink: true,
+            mouth: "smile",
+            left_sleeve: -70,
+            right_sleeve: 50,
+            sleeve_y: 124,
+            hand_lift: 2,
+            ribbon: 16,
+            cheek: "0.36",
+        },
+        Frame {
+            col: 6,
+            rise: 18,
+            tilt: -4,
+            scale: "1.00",
+            eye_shift: -3,
+            blink: false,
+            mouth: "small",
+            left_sleeve: -44,
+            right_sleeve: 30,
+            sleeve_y: 133,
+            hand_lift: 1,
+            ribbon: -5,
+            cheek: "0.24",
+        },
+        Frame {
+            col: 7,
+            rise: 46,
+            tilt: -8,
+            scale: "0.95",
+            eye_shift: -1,
+            blink: false,
+            mouth: "small",
+            left_sleeve: -12,
+            right_sleeve: 10,
+            sleeve_y: 141,
+            hand_lift: 0,
+            ribbon: -12,
+            cheek: "0.16",
+        },
+    ];
+
+    let mut svg = String::new();
+    svg.push_str(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872" viewBox="0 0 1536 1872">
+  <title>Xiao Shu canonical alert peek sidecar v3 sprite atlas</title>
+  <defs>
+    <linearGradient id="xs3-head" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f1d89f"/>
+      <stop offset="0.58" stop-color="#e4bd76"/>
+      <stop offset="1" stop-color="#b9803e"/>
+    </linearGradient>
+    <linearGradient id="xs3-robe" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f0dfb8"/>
+      <stop offset="1" stop-color="#cba35e"/>
+    </linearGradient>
+    <filter id="xs3-shadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#2d2018" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+"##,
+    );
+
+    for frame in frames {
+        let x = frame.col * 192;
+        let left_eye_x = 74 + frame.eye_shift;
+        let right_eye_x = 119 + frame.eye_shift;
+        let eyes = if frame.blink {
+            format!(
+                r##"<path d="M{left_eye_x} 92 h15" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>
+      <path d="M{right_eye_x} 92 h15" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>"##
+            )
+        } else {
+            format!(
+                r##"<ellipse cx="{left_eye_x}" cy="91" rx="7" ry="12" fill="#35251a"/>
+      <ellipse cx="{right_eye_x}" cy="91" rx="7" ry="12" fill="#35251a"/>
+      <circle cx="{left_eye_x}" cy="86" r="2.2" fill="#f8efd6"/>
+      <circle cx="{right_eye_x}" cy="86" r="2.2" fill="#f8efd6"/>"##
+            )
+        };
+        let mouth = match frame.mouth {
+            "open" => r##"<ellipse cx="96" cy="111" rx="8" ry="6" fill="#35251a"/>"##,
+            "smile" => {
+                r##"<path d="M82 108 Q96 119 110 108" fill="none" stroke="#35251a" stroke-width="4.5" stroke-linecap="round"/>"##
+            }
+            _ => {
+                r##"<path d="M88 110 Q96 114 104 110" fill="none" stroke="#35251a" stroke-width="4" stroke-linecap="round"/>"##
+            }
+        };
+        let sleeves = match frame.hand_lift {
+            2 => r##"<path d="M60 146 C44 130 47 109 62 99 C72 111 76 132 68 151 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M57 124 L69 119" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+        <ellipse cx="61" cy="100" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+        <path d="M132 146 C150 130 147 109 132 99 C122 111 118 132 126 151 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M135 124 L123 119" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+        <ellipse cx="131" cy="100" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>"##
+                .to_string(),
+            1 => r##"<path d="M58 150 C43 137 46 117 60 109 C70 119 74 137 68 154 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M56 132 L68 128" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+        <ellipse cx="60" cy="111" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+        <path d="M134 150 C149 137 146 117 132 109 C122 119 118 137 124 154 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M136 132 L124 128" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+        <ellipse cx="132" cy="111" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>"##
+                .to_string(),
+            _ => format!(
+                r##"<g transform="translate(54 {sleeve_y}) rotate({left_sleeve})">
+          <path d="M0 -8 C-23 4 -31 34 -12 45 C8 53 23 20 18 -1 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+          <path d="M-8 14 L13 23" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+          <ellipse cx="-12" cy="33" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+        </g>
+        <g transform="translate(138 {sleeve_y}) rotate({right_sleeve})">
+          <path d="M0 -8 C23 4 31 34 12 45 C-8 53 -23 20 -18 -1 Z" fill="#d4ad64" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+          <path d="M8 14 L-13 23" stroke="#8f4a32" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+          <ellipse cx="12" cy="33" rx="7" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+        </g>"##,
+                sleeve_y = frame.sleeve_y,
+                left_sleeve = frame.left_sleeve,
+                right_sleeve = frame.right_sleeve
+            ),
+        };
+
+        writeln!(
+            svg,
+            r##"  <g id="frame-{col}" transform="translate({x} 0)">
+    <rect width="192" height="208" fill="none"/>
+    <ellipse cx="96" cy="190" rx="54" ry="12" fill="#2d2018" opacity="0.16"/>
+    <g filter="url(#xs3-shadow)" transform="translate(96 118) scale({scale}) translate(-96 -118) translate(0 {rise})">
+      <g transform="translate(96 96) rotate({tilt}) translate(-96 -96)">
+        <path d="M56 123 C66 110 126 110 136 123 L150 189 C132 198 60 198 42 189 Z" fill="url(#xs3-robe)" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M71 122 L96 188 L121 122" fill="#ead9ad" stroke="#8f4a32" stroke-width="4" stroke-linejoin="round"/>
+        <path d="M62 134 C82 145 111 145 130 134" fill="none" stroke="#b94735" stroke-width="7" stroke-linecap="round"/>
+        <path d="M83 136 L108 163 L93 188" fill="none" stroke="#b94735" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="72" cy="160" r="3" fill="#8f6d38" opacity="0.8"/>
+        <circle cx="122" cy="159" r="3" fill="#8f6d38" opacity="0.8"/>
+        {sleeves}
+        <path d="M51 66 C51 41 69 27 96 27 C123 27 141 41 141 66 L141 91 C141 124 122 144 96 144 C70 144 51 124 51 91 Z" fill="url(#xs3-head)" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M73 31 C63 19 73 8 82 17 C90 26 79 38 65 33" fill="none" stroke="#9b6b32" stroke-width="5" stroke-linecap="round"/>
+        <path d="M115 38 C130 22 155 29 153 52 C139 47 127 53 115 38 Z" fill="#b94735" stroke="#3a291c" stroke-width="4" stroke-linejoin="round" transform="rotate({ribbon} 134 42)"/>
+        <circle cx="140" cy="61" r="6" fill="#56c6cc" stroke="#3a291c" stroke-width="3"/>
+        {eyes}
+        <ellipse cx="60" cy="111" rx="12" ry="7" fill="#c95f4a" opacity="{cheek}"/>
+        <ellipse cx="132" cy="111" rx="12" ry="7" fill="#c95f4a" opacity="{cheek}"/>
+        {mouth}
+      </g>
+    </g>
+  </g>
+"##,
+            col = frame.col,
+            x = x,
+            scale = frame.scale,
+            rise = frame.rise,
+            tilt = frame.tilt,
+            sleeves = sleeves,
+            ribbon = frame.ribbon,
+            eyes = eyes,
+            cheek = frame.cheek,
+            mouth = mouth
+        )
+        .ok()?;
+    }
+
+    svg.push_str("</svg>\n");
+    Some(svg)
+}
+
+async fn avatar_sidecar_spritesheet(
+    Query(q): Query<AvatarSidecarSpritesheetQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let asset = q.asset.as_deref().unwrap_or("xiao-shu-alert-peek-v2");
+    let svg = avatar_sidecar_spritesheet_svg(asset).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("unsupported sidecar spritesheet asset: {asset}"),
+        )
+    })?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/svg+xml; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        svg,
+    ))
+}
+
+async fn avatar_cortex_review_gate(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_review_gate(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_review_packet(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_review_packet(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_review_report(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_review_report(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
 async fn avatar_cortex_preview(
     Query(q): Query<AvatarCortexStatusQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
@@ -677,6 +1910,111 @@ async fn avatar_cortex_preview(
     Ok(Json(payload))
 }
 
+async fn avatar_cortex_voice_policy(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_voice_policy(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_voice_request(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_voice_request(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+        q.track.as_deref(),
+        q.reason.as_deref(),
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_voice_confirm(
+    Query(q): Query<AvatarCortexStatusQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let payload = crate::avatar_cortex::avatar_cortex_voice_confirm(
+        q.label.as_deref(),
+        q.heartbeat_label.as_deref(),
+        q.project.as_deref(),
+        q.output.as_deref(),
+        q.track.as_deref(),
+        q.reason.as_deref(),
+        q.confirm,
+    )
+    .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_voice_action_preview(
+    Query(q): Query<AvatarCortexVoiceActionPreviewQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let opts = crate::avatar_cortex::AvatarCortexVoiceActionPreviewOptions {
+        label: q.label.as_deref(),
+        heartbeat_label: q.heartbeat_label.as_deref(),
+        project: q.project.as_deref(),
+        output: q.output.as_deref(),
+        requested_track: q.track.as_deref(),
+        reason: q.reason.as_deref(),
+        confirm: q.confirm,
+        force: q.force,
+        cooldown_secs: q.cooldown_secs,
+        tts_voice: q.tts_voice.as_deref(),
+        tts_rate: q.tts_rate,
+    };
+    let payload =
+        crate::avatar_cortex::avatar_cortex_voice_action_preview(&opts).map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn xiao_shu_action_request(
+    Query(q): Query<XiaoShuActionRequestQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let opts = crate::avatar_cortex::XiaoShuActionRequestOptions {
+        label: q.label.as_deref(),
+        heartbeat_label: q.heartbeat_label.as_deref(),
+        project: q.project.as_deref(),
+        output: q.output.as_deref(),
+        actor: q.actor.as_deref(),
+        intent: q.intent.as_deref(),
+        message: q.message.as_deref(),
+        requested_track: q.track.as_deref(),
+        reason: q.reason.as_deref(),
+        confirm: q.confirm,
+        force: q.force,
+        cooldown_secs: q.cooldown_secs,
+        tts_voice: q.tts_voice.as_deref(),
+        tts_rate: q.tts_rate,
+        include_details: q.details,
+    };
+    let payload = crate::avatar_cortex::xiao_shu_action_request(&opts).map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn xiao_shu_action_requests(
+    Query(q): Query<XiaoShuActionRequestsQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let opts = crate::avatar_cortex::XiaoShuActionRequestQueueOptions {
+        project: q.project.as_deref(),
+        request_id: q.request_id.as_deref(),
+        state: q.state.as_deref(),
+        include_all_states: q.all_states,
+        include_details: q.details,
+        limit: q.effective_limit(),
+    };
+    let payload =
+        crate::avatar_cortex::xiao_shu_action_request_queue(&opts).map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
 async fn avatar_cortex_voice_gate(
     Query(q): Query<AvatarCortexVoiceGateQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
@@ -685,6 +2023,7 @@ async fn avatar_cortex_voice_gate(
         heartbeat_label: q.heartbeat_label.as_deref(),
         project: q.project.as_deref(),
         output: q.output.as_deref(),
+        preview_text: q.preview_text.as_deref(),
         enabled: q.enabled,
         force: q.force,
         cooldown_secs: q.cooldown_secs,
@@ -866,6 +2205,55 @@ fn html_escape(input: &str) -> String {
         }
     }
     out
+}
+
+fn html_json_script(value: &Value) -> String {
+    serde_json::to_string(value)
+        .unwrap_or_else(|_| "{}".to_string())
+        .replace("</", "<\\/")
+}
+
+fn url_query_component(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for byte in input.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+fn avatar_surface_route_href(
+    route_raw: &str,
+    project: Option<&str>,
+    track: Option<&str>,
+) -> String {
+    let mut href = route_raw.to_string();
+    let mut sep = if route_raw.contains('?') { "&" } else { "?" };
+    if let Some(project) = project.filter(|value| !value.is_empty()) {
+        href.push_str(sep);
+        href.push_str("project=");
+        href.push_str(&url_query_component(project));
+        sep = "&";
+    }
+    if let Some(track) = track.filter(|value| !value.is_empty()) {
+        href.push_str(sep);
+        href.push_str("track=");
+        href.push_str(&url_query_component(track));
+    }
+    href
+}
+
+fn avatar_surface_renderer_token_label(token: &str) -> String {
+    let parts = token.split("::").collect::<Vec<_>>();
+    if parts.len() >= 2 {
+        format!("{}::{}", parts[parts.len() - 2], parts[parts.len() - 1])
+    } else {
+        token.to_string()
+    }
 }
 
 fn avatar_surface_html_value(entry: &Value, key: &str, fallback: &str) -> String {
@@ -1091,6 +2479,2281 @@ fn avatar_surface_cortex_html(cortex: &Value) -> String {
     )
 }
 
+fn avatar_surface_language_html(language_preview: &Value) -> String {
+    let language = language_preview.get("language").unwrap_or(&Value::Null);
+    let safety = language.get("safety").unwrap_or(&Value::Null);
+    let generator = language.get("generator").unwrap_or(&Value::Null);
+    let memory = language.get("memory").unwrap_or(&Value::Null);
+    let slots = language.get("slots").unwrap_or(&Value::Null);
+    let utterance = avatar_surface_html_json_value(language.get("utterance"), "-");
+    let intent = avatar_surface_html_json_value(language.get("intent"), "-");
+    let style = avatar_surface_html_json_value(language.get("style"), "-");
+    let state = avatar_surface_html_json_value(slots.get("state"), "-");
+    let latest_status = avatar_surface_html_json_value(slots.get("latest_status"), "-");
+    let memory_summary = avatar_surface_html_json_value(memory.get("summary"), "-");
+    let memory_window = avatar_surface_html_json_value(memory.get("window_size"), "0");
+    let memory_transitions = avatar_surface_html_json_value(memory.get("transition_count"), "0");
+    let voice_allowed = avatar_surface_html_json_value(safety.get("voice_allowed"), "false");
+    let uses_llm = avatar_surface_html_json_value(generator.get("uses_llm"), "false");
+    let uses_voice_model =
+        avatar_surface_html_json_value(generator.get("uses_voice_model"), "false");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">preview</span>
+        <strong>Xiao Shu Language</strong>
+        <span>{utterance}</span>
+      </div>
+      <dl>
+        <div><dt>intent</dt><dd>{intent}</dd></div>
+        <div><dt>style</dt><dd>{style}</dd></div>
+        <div><dt>state</dt><dd>{state}</dd></div>
+        <div><dt>latest</dt><dd>{latest_status}</dd></div>
+        <div><dt>memory</dt><dd>{memory_summary} window={memory_window} transitions={memory_transitions}</dd></div>
+        <div><dt>safety</dt><dd>voice={voice_allowed}</dd></div>
+        <div><dt>generator</dt><dd>llm={uses_llm} voice_model={uses_voice_model}</dd></div>
+      </dl>
+    </section>"#,
+        utterance = utterance,
+        intent = intent,
+        style = style,
+        state = state,
+        latest_status = latest_status,
+        memory_summary = memory_summary,
+        memory_window = memory_window,
+        memory_transitions = memory_transitions,
+        voice_allowed = voice_allowed,
+        uses_llm = uses_llm,
+        uses_voice_model = uses_voice_model,
+    )
+}
+
+fn avatar_surface_motion_html(motion_preview: &Value) -> String {
+    let motion = motion_preview.get("motion").unwrap_or(&Value::Null);
+    let hint = motion.get("animation_hint").unwrap_or(&Value::Null);
+    let source = motion.get("source").unwrap_or(&Value::Null);
+    let safety = motion.get("safety").unwrap_or(&Value::Null);
+    let gesture = avatar_surface_html_json_value(motion.get("gesture"), "-");
+    let mood = avatar_surface_html_json_value(motion.get("mood"), "-");
+    let attention = avatar_surface_html_json_value(motion.get("attention"), "-");
+    let reason = avatar_surface_html_json_value(motion.get("reason"), "-");
+    let animation = avatar_surface_html_json_value(hint.get("loop"), "-");
+    let intensity = avatar_surface_html_json_value(hint.get("intensity"), "-");
+    let state = avatar_surface_html_json_value(source.get("state"), "-");
+    let memory = avatar_surface_html_json_value(source.get("memory_observation"), "-");
+    let sidecar_only = avatar_surface_html_json_value(safety.get("sidecar_only"), "true");
+    let renderer_mapping =
+        avatar_surface_html_json_value(safety.get("requires_renderer_mapping"), "true");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">motion</span>
+        <strong>Xiao Shu Motion</strong>
+        <span>{gesture} / {mood} / {attention}</span>
+      </div>
+      <dl>
+        <div><dt>animation</dt><dd>{animation} intensity={intensity}</dd></div>
+        <div><dt>reason</dt><dd>{reason}</dd></div>
+        <div><dt>source</dt><dd>state={state} memory={memory}</dd></div>
+        <div><dt>safety</dt><dd>sidecar={sidecar_only} renderer_mapping={renderer_mapping}</dd></div>
+      </dl>
+    </section>"#,
+        gesture = gesture,
+        mood = mood,
+        attention = attention,
+        animation = animation,
+        intensity = intensity,
+        reason = reason,
+        state = state,
+        memory = memory,
+        sidecar_only = sidecar_only,
+        renderer_mapping = renderer_mapping,
+    )
+}
+
+fn avatar_surface_renderer_html(renderer_preview: &Value) -> String {
+    let renderer = renderer_preview.get("renderer").unwrap_or(&Value::Null);
+    let mapping = renderer.get("mapping").unwrap_or(&Value::Null);
+    let evidence = mapping.get("evidence").unwrap_or(&Value::Null);
+    let target = mapping.get("target").unwrap_or(&Value::Null);
+    let safety = renderer.get("safety").unwrap_or(&Value::Null);
+    let token = avatar_surface_html_json_value(mapping.get("input_token"), "-");
+    let resolved = avatar_surface_html_json_value(mapping.get("resolved"), "false");
+    let pose = avatar_surface_html_json_value(target.get("pose_slot"), "-");
+    let expression = avatar_surface_html_json_value(target.get("expression_slot"), "-");
+    let motion = avatar_surface_html_json_value(target.get("motion_slot"), "-");
+    let accessory = avatar_surface_html_json_value(target.get("accessory_slot"), "-");
+    let writes_files = avatar_surface_html_json_value(safety.get("writes_files"), "false");
+    let mutates_renderer = avatar_surface_html_json_value(safety.get("mutates_renderer"), "false");
+    let pet_mutation =
+        avatar_surface_html_json_value(safety.get("codex_pet_package_mutation"), "false");
+    let binding_stage = avatar_surface_html_json_value(evidence.get("binding_stage"), "-");
+    let risk_level = avatar_surface_html_json_value(evidence.get("risk_level"), "-");
+    let visual_intent = avatar_surface_html_json_value(evidence.get("visual_intent"), "-");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">dry-run</span>
+        <strong>Xiao Shu Renderer</strong>
+        <span>{token}</span>
+      </div>
+      <dl>
+        <div><dt>resolved</dt><dd>{resolved}</dd></div>
+        <div><dt>slots</dt><dd>pose={pose} expression={expression} motion={motion} accessory={accessory}</dd></div>
+        <div><dt>evidence</dt><dd>stage={binding_stage} risk={risk_level}</dd></div>
+        <div><dt>intent</dt><dd>{visual_intent}</dd></div>
+        <div><dt>safety</dt><dd>writes_files={writes_files} mutates_renderer={mutates_renderer} pet_package={pet_mutation}</dd></div>
+      </dl>
+    </section>"#,
+        token = token,
+        resolved = resolved,
+        pose = pose,
+        expression = expression,
+        motion = motion,
+        accessory = accessory,
+        binding_stage = binding_stage,
+        risk_level = risk_level,
+        visual_intent = visual_intent,
+        writes_files = writes_files,
+        mutates_renderer = mutates_renderer,
+        pet_mutation = pet_mutation,
+    )
+}
+
+fn avatar_surface_renderer_registry_html(registry_preview: &Value) -> String {
+    let registry = registry_preview.get("registry").unwrap_or(&Value::Null);
+    let current = registry.get("current").unwrap_or(&Value::Null);
+    let stage_counts = registry.get("stage_counts").unwrap_or(&Value::Null);
+    let risk_counts = registry.get("risk_counts").unwrap_or(&Value::Null);
+    let known = avatar_surface_html_json_value(registry.get("known_token_count"), "0");
+    let candidate = avatar_surface_html_json_value(stage_counts.get("candidate"), "0");
+    let needs_review = avatar_surface_html_json_value(stage_counts.get("needs_review"), "0");
+    let fallback = avatar_surface_html_json_value(stage_counts.get("fallback_only"), "0");
+    let risk_low = avatar_surface_html_json_value(risk_counts.get("low"), "0");
+    let risk_medium = avatar_surface_html_json_value(risk_counts.get("medium"), "0");
+    let risk_high = avatar_surface_html_json_value(risk_counts.get("high"), "0");
+    let current_token = avatar_surface_html_json_value(current.get("token"), "-");
+    let current_stage = avatar_surface_html_json_value(current.get("binding_stage"), "-");
+    let current_risk = avatar_surface_html_json_value(current.get("risk_level"), "-");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">registry</span>
+        <strong>Xiao Shu Renderer Registry</strong>
+        <span>known={known} candidate={candidate} review={needs_review} fallback={fallback}</span>
+      </div>
+      <dl>
+        <div><dt>risk</dt><dd>low={risk_low} medium={risk_medium} high={risk_high}</dd></div>
+        <div><dt>current</dt><dd>{current_token} stage={current_stage} risk={current_risk}</dd></div>
+      </dl>
+    </section>"#,
+        known = known,
+        candidate = candidate,
+        needs_review = needs_review,
+        fallback = fallback,
+        risk_low = risk_low,
+        risk_medium = risk_medium,
+        risk_high = risk_high,
+        current_token = current_token,
+        current_stage = current_stage,
+        current_risk = current_risk,
+    )
+}
+
+fn avatar_surface_binding_plan_html(binding_plan_preview: &Value) -> String {
+    let plan = binding_plan_preview
+        .get("binding_plan")
+        .unwrap_or(&Value::Null);
+    let first = plan.get("first_candidate").unwrap_or(&Value::Null);
+    let current = plan.get("current").unwrap_or(&Value::Null);
+    let safety = plan.get("safety").unwrap_or(&Value::Null);
+    let selected = avatar_surface_html_json_value(plan.get("selected_count"), "0");
+    let deferred = avatar_surface_html_json_value(plan.get("deferred_count"), "0");
+    let first_token = avatar_surface_html_json_value(first.get("token"), "-");
+    let first_risk = avatar_surface_html_json_value(first.get("risk_level"), "-");
+    let current_token = avatar_surface_html_json_value(current.get("token"), "-");
+    let current_stage = avatar_surface_html_json_value(current.get("binding_stage"), "-");
+    let writes_files = avatar_surface_html_json_value(safety.get("writes_files"), "false");
+    let mutates_renderer = avatar_surface_html_json_value(safety.get("mutates_renderer"), "false");
+    let pet_mutation =
+        avatar_surface_html_json_value(safety.get("codex_pet_package_mutation"), "false");
+    let decision = avatar_surface_html_json_value(plan.get("decision"), "-");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">plan</span>
+        <strong>Xiao Shu Binding Plan</strong>
+        <span>selected={selected} deferred={deferred}</span>
+      </div>
+      <dl>
+        <div><dt>first</dt><dd>{first_token} risk={first_risk}</dd></div>
+        <div><dt>current</dt><dd>{current_token} stage={current_stage}</dd></div>
+        <div><dt>safety</dt><dd>writes_files={writes_files} mutates_renderer={mutates_renderer} pet_package={pet_mutation}</dd></div>
+        <div><dt>decision</dt><dd>{decision}</dd></div>
+      </dl>
+    </section>"#,
+        selected = selected,
+        deferred = deferred,
+        first_token = first_token,
+        first_risk = first_risk,
+        current_token = current_token,
+        current_stage = current_stage,
+        writes_files = writes_files,
+        mutates_renderer = mutates_renderer,
+        pet_mutation = pet_mutation,
+        decision = decision,
+    )
+}
+
+fn avatar_surface_binding_fixture_html(binding_fixture_preview: &Value) -> String {
+    let fixture = binding_fixture_preview
+        .get("fixture")
+        .unwrap_or(&Value::Null);
+    let first = fixture.get("first_fixture").unwrap_or(&Value::Null);
+    let assertions = first.get("golden_assertions").unwrap_or(&Value::Null);
+    let acceptance = fixture.get("acceptance").unwrap_or(&Value::Null);
+    let count = avatar_surface_html_json_value(fixture.get("fixture_count"), "0");
+    let source = avatar_surface_html_json_value(fixture.get("source"), "-");
+    let first_token = avatar_surface_html_json_value(first.get("token"), "-");
+    let motion = avatar_surface_html_json_value(assertions.get("motion_slot"), "-");
+    let duration = avatar_surface_html_json_value(assertions.get("duration_ms"), "0");
+    let returns_idle = avatar_surface_html_json_value(assertions.get("returns_to_idle"), "false");
+    let all_idle = avatar_surface_html_json_value(acceptance.get("all_return_to_idle"), "false");
+    let all_duration =
+        avatar_surface_html_json_value(acceptance.get("all_duration_within_2s"), "false");
+    let writes_files =
+        avatar_surface_html_json_value(acceptance.get("asset_writes_allowed"), "false");
+    let mutates_renderer =
+        avatar_surface_html_json_value(acceptance.get("renderer_mutation_allowed"), "false");
+    let pet_mutation = avatar_surface_html_json_value(
+        acceptance.get("codex_pet_package_mutation_allowed"),
+        "false",
+    );
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">fixture</span>
+        <strong>Xiao Shu Binding Fixture</strong>
+        <span>fixtures={count} source={source}</span>
+      </div>
+      <dl>
+        <div><dt>first</dt><dd>{first_token} motion={motion}</dd></div>
+        <div><dt>timing</dt><dd>duration={duration}ms returns_idle={returns_idle}</dd></div>
+        <div><dt>acceptance</dt><dd>all_idle={all_idle} all_under_2s={all_duration}</dd></div>
+        <div><dt>safety</dt><dd>writes_files={writes_files} mutates_renderer={mutates_renderer} pet_package={pet_mutation}</dd></div>
+      </dl>
+    </section>"#,
+        count = count,
+        source = source,
+        first_token = first_token,
+        motion = motion,
+        duration = duration,
+        returns_idle = returns_idle,
+        all_idle = all_idle,
+        all_duration = all_duration,
+        writes_files = writes_files,
+        mutates_renderer = mutates_renderer,
+        pet_mutation = pet_mutation,
+    )
+}
+
+fn avatar_surface_visual_adapter_html(visual_adapter_preview: &Value) -> String {
+    let adapter = visual_adapter_preview
+        .get("visual_adapter")
+        .unwrap_or(&Value::Null);
+    let first = adapter.get("first_preview").unwrap_or(&Value::Null);
+    let final_state = first.get("final_state").unwrap_or(&Value::Null);
+    let acceptance = adapter.get("acceptance").unwrap_or(&Value::Null);
+    let previews = avatar_surface_html_json_value(adapter.get("preview_count"), "0");
+    let input = avatar_surface_html_json_value(adapter.get("input"), "-");
+    let first_token = avatar_surface_html_json_value(first.get("token"), "-");
+    let frames = avatar_surface_html_json_value(first.get("frame_count"), "0");
+    let final_motion = avatar_surface_html_json_value(final_state.get("motion_slot"), "-");
+    let final_expression = avatar_surface_html_json_value(final_state.get("expression_slot"), "-");
+    let all_idle = avatar_surface_html_json_value(acceptance.get("all_return_to_idle"), "false");
+    let all_duration =
+        avatar_surface_html_json_value(acceptance.get("all_duration_within_2s"), "false");
+    let renders_pixels =
+        avatar_surface_html_json_value(visual_adapter_preview.get("renders_pixels"), "false");
+    let writes_files =
+        avatar_surface_html_json_value(visual_adapter_preview.get("writes_files"), "false");
+    let mutates_renderer =
+        avatar_surface_html_json_value(visual_adapter_preview.get("mutates_renderer"), "false");
+    let pet_mutation = avatar_surface_html_json_value(
+        visual_adapter_preview.get("codex_pet_package_mutation"),
+        "false",
+    );
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">adapter</span>
+        <strong>Xiao Shu Visual Adapter</strong>
+        <span>previews={previews} input={input}</span>
+      </div>
+      <dl>
+        <div><dt>first</dt><dd>{first_token} frames={frames}</dd></div>
+        <div><dt>final</dt><dd>motion={final_motion} expression={final_expression}</dd></div>
+        <div><dt>acceptance</dt><dd>all_idle={all_idle} all_under_2s={all_duration}</dd></div>
+        <div><dt>safety</dt><dd>pixels={renders_pixels} writes_files={writes_files} mutates_renderer={mutates_renderer} pet_package={pet_mutation}</dd></div>
+      </dl>
+    </section>"#,
+        previews = previews,
+        input = input,
+        first_token = first_token,
+        frames = frames,
+        final_motion = final_motion,
+        final_expression = final_expression,
+        all_idle = all_idle,
+        all_duration = all_duration,
+        renders_pixels = renders_pixels,
+        writes_files = writes_files,
+        mutates_renderer = mutates_renderer,
+        pet_mutation = pet_mutation,
+    )
+}
+
+fn avatar_surface_renderer_view_summary_html(
+    renderer_view_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let view = renderer_view_preview
+        .get("renderer_view")
+        .unwrap_or(&Value::Null);
+    let first = view.get("first_track").unwrap_or(&Value::Null);
+    let route_raw = view
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-renderer-view");
+    let href_raw = avatar_surface_route_href(route_raw, q.project.as_deref(), None);
+    let href = html_escape(&href_raw);
+    let tracks = avatar_surface_html_json_value(view.get("track_count"), "0");
+    let selected_tracks = avatar_surface_html_json_value(view.get("selected_track_count"), "0");
+    let review_tracks = avatar_surface_html_json_value(view.get("review_track_count"), "0");
+    let route = html_escape(route_raw);
+    let first_token = avatar_surface_html_json_value(first.get("token"), "-");
+    let frames = avatar_surface_html_json_value(first.get("frame_count"), "0");
+    let browser_pixels = avatar_surface_html_json_value(
+        renderer_view_preview.get("browser_renders_pixels"),
+        "false",
+    );
+    let writes_files =
+        avatar_surface_html_json_value(renderer_view_preview.get("writes_files"), "false");
+    let mutates_renderer =
+        avatar_surface_html_json_value(renderer_view_preview.get("mutates_renderer"), "false");
+    let pet_mutation = avatar_surface_html_json_value(
+        renderer_view_preview.get("codex_pet_package_mutation"),
+        "false",
+    );
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">view</span>
+        <strong>Xiao Shu Renderer View</strong>
+        <span>tracks={tracks} selected={selected_tracks} review={review_tracks} route={route}</span>
+      </div>
+      <dl>
+        <div><dt>first</dt><dd>{first_token} frames={frames}</dd></div>
+        <div><dt>pixels</dt><dd>browser={browser_pixels}</dd></div>
+        <div><dt>safety</dt><dd>writes_files={writes_files} mutates_renderer={mutates_renderer} pet_package={pet_mutation}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">renderer view</a></dd></div>
+      </dl>
+    </section>"#,
+        tracks = tracks,
+        selected_tracks = selected_tracks,
+        review_tracks = review_tracks,
+        route = route,
+        first_token = first_token,
+        frames = frames,
+        browser_pixels = browser_pixels,
+        writes_files = writes_files,
+        mutates_renderer = mutates_renderer,
+        pet_mutation = pet_mutation,
+        href = href,
+    )
+}
+
+fn avatar_surface_quick_actions_html(
+    renderer_view_preview: &Value,
+    review_gate_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let view = renderer_view_preview
+        .get("renderer_view")
+        .unwrap_or(&Value::Null);
+    let gate = review_gate_preview
+        .get("review_gate")
+        .unwrap_or(&Value::Null);
+    let renderer_route = view
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-renderer-view");
+    let review_route = gate
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-review-gate");
+    let renderer_href_raw = avatar_surface_route_href(renderer_route, q.project.as_deref(), None);
+    let review_href_raw = avatar_surface_route_href(review_route, q.project.as_deref(), None);
+
+    let tracks = avatar_surface_html_json_value(view.get("track_count"), "0");
+    let selected = avatar_surface_html_json_value(view.get("selected_track_count"), "0");
+    let review = avatar_surface_html_json_value(view.get("review_track_count"), "0");
+    let browser_pixels = avatar_surface_html_json_value(
+        renderer_view_preview.get("browser_renders_pixels"),
+        "false",
+    );
+    let pending = avatar_surface_html_json_value(gate.get("manual_pending_count"), "0");
+    let auto_pass = avatar_surface_html_json_value(gate.get("automatic_pass_count"), "0");
+    let can_promote = avatar_surface_html_json_value(
+        gate.get("acceptance")
+            .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+        "false",
+    );
+
+    format!(
+        r#"<nav class="quick-actions" aria-label="Avatar quick actions">
+      <a href="{renderer_href}" class="quick-action">
+        <strong>Renderer View</strong>
+        <span>tracks={tracks} selected={selected} review={review} browser={browser_pixels}</span>
+      </a>
+      <a href="{review_href}" class="quick-action">
+        <strong>Review Gate</strong>
+        <span>pending={pending} auto_pass={auto_pass} can_promote={can_promote}</span>
+      </a>
+    </nav>"#,
+        renderer_href = html_escape(&renderer_href_raw),
+        review_href = html_escape(&review_href_raw),
+        tracks = tracks,
+        selected = selected,
+        review = review,
+        browser_pixels = browser_pixels,
+        pending = pending,
+        auto_pass = auto_pass,
+        can_promote = can_promote,
+    )
+}
+
+fn avatar_surface_review_gate_html(review_gate_preview: &Value, q: &AvatarSurfaceQuery) -> String {
+    let gate = review_gate_preview
+        .get("review_gate")
+        .unwrap_or(&Value::Null);
+    let route_raw = gate
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-review-gate");
+    let href_raw = avatar_surface_route_href(route_raw, q.project.as_deref(), None);
+    let href = html_escape(&href_raw);
+    let renderer_route_raw = gate
+        .get("renderer_view_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-renderer-view");
+    let tracks = avatar_surface_html_json_value(gate.get("track_count"), "0");
+    let selected = avatar_surface_html_json_value(gate.get("selected_baseline_count"), "0");
+    let pending = avatar_surface_html_json_value(gate.get("manual_pending_count"), "0");
+    let auto_pass = avatar_surface_html_json_value(gate.get("automatic_pass_count"), "0");
+    let auto_blocked = avatar_surface_html_json_value(gate.get("automatic_blocked_count"), "0");
+    let manual_required = avatar_surface_html_json_value(
+        gate.get("acceptance")
+            .and_then(|acceptance| acceptance.get("manual_review_required")),
+        "false",
+    );
+    let can_promote = avatar_surface_html_json_value(
+        gate.get("acceptance")
+            .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+        "false",
+    );
+    let mut first_pending = "-".to_string();
+    let mut pending_links = String::new();
+    if let Some(items) = gate.get("items").and_then(Value::as_array) {
+        if let Some(item) = items
+            .iter()
+            .find(|item| item.get("manual_decision").and_then(Value::as_str) == Some("pending"))
+        {
+            first_pending = format!(
+                "{} gate={}",
+                avatar_surface_html_json_value(item.get("token"), "-"),
+                avatar_surface_html_json_value(item.get("automatic_gate"), "-")
+            );
+        }
+        for item in items
+            .iter()
+            .filter(|item| item.get("manual_decision").and_then(Value::as_str) == Some("pending"))
+        {
+            let Some(token) = item.get("token").and_then(Value::as_str) else {
+                continue;
+            };
+            let href_raw =
+                avatar_surface_route_href(renderer_route_raw, q.project.as_deref(), Some(token));
+            let label = avatar_surface_renderer_token_label(token);
+            if !pending_links.is_empty() {
+                pending_links.push(' ');
+            }
+            pending_links.push_str(&format!(
+                r#"<a href="{href}">{label}</a>"#,
+                href = html_escape(&href_raw),
+                label = html_escape(&label),
+            ));
+        }
+    }
+    if pending_links.is_empty() {
+        pending_links.push('-');
+    }
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">review</span>
+        <strong>Xiao Shu Review Gate</strong>
+        <span>tracks={tracks} selected={selected} pending={pending}</span>
+      </div>
+      <dl>
+        <div><dt>auto</dt><dd>pass={auto_pass} blocked={auto_blocked}</dd></div>
+        <div><dt>manual</dt><dd>required={manual_required} can_promote_review={can_promote}</dd></div>
+        <div><dt>first pending</dt><dd>{first_pending}</dd></div>
+        <div><dt>pending links</dt><dd class="pending-links">{pending_links}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">review gate json</a></dd></div>
+      </dl>
+    </section>"#,
+        tracks = tracks,
+        selected = selected,
+        pending = pending,
+        auto_pass = auto_pass,
+        auto_blocked = auto_blocked,
+        manual_required = manual_required,
+        can_promote = can_promote,
+        first_pending = first_pending,
+        pending_links = pending_links,
+        href = href,
+    )
+}
+
+fn avatar_surface_review_packet_html(
+    review_packet_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let packet = review_packet_preview
+        .get("review_packet")
+        .unwrap_or(&Value::Null);
+    let route_raw = packet
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-review-packet");
+    let renderer_route_raw = packet
+        .get("renderer_view_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-renderer-view");
+    let href_raw = avatar_surface_route_href(route_raw, q.project.as_deref(), None);
+    let href = html_escape(&href_raw);
+    let packets = avatar_surface_html_json_value(packet.get("packet_count"), "0");
+    let baseline_refs = avatar_surface_html_json_value(packet.get("baseline_reference_count"), "0");
+    let approval_writes = avatar_surface_html_json_value(
+        packet
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("approval_writes_allowed")),
+        "false",
+    );
+    let can_promote = avatar_surface_html_json_value(
+        packet
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+        "false",
+    );
+    let records_persisted = avatar_surface_html_json_value(
+        packet
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("records_persisted")),
+        "false",
+    );
+    let mut first_packet = "-".to_string();
+    let mut first_preview = "-".to_string();
+    if let Some(item) = packet
+        .get("packets")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+    {
+        let token = item.get("token").and_then(Value::as_str).unwrap_or("-");
+        first_packet = format!(
+            "{} decision={}",
+            html_escape(token),
+            avatar_surface_html_json_value(item.get("default_decision"), "-")
+        );
+        let href_raw =
+            avatar_surface_route_href(renderer_route_raw, q.project.as_deref(), Some(token));
+        first_preview = format!(
+            r#"<a href="{href}">{label}</a>"#,
+            href = html_escape(&href_raw),
+            label = html_escape(&avatar_surface_renderer_token_label(token)),
+        );
+    }
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">packet</span>
+        <strong>Xiao Shu Review Packet</strong>
+        <span>packets={packets} baseline_refs={baseline_refs}</span>
+      </div>
+      <dl>
+        <div><dt>safety</dt><dd>approval_writes={approval_writes} records_persisted={records_persisted} can_promote={can_promote}</dd></div>
+        <div><dt>first packet</dt><dd>{first_packet}</dd></div>
+        <div><dt>preview</dt><dd>{first_preview}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">review packet json</a></dd></div>
+      </dl>
+    </section>"#,
+        packets = packets,
+        baseline_refs = baseline_refs,
+        approval_writes = approval_writes,
+        records_persisted = records_persisted,
+        can_promote = can_promote,
+        first_packet = first_packet,
+        first_preview = first_preview,
+        href = href,
+    )
+}
+
+fn avatar_surface_review_report_html(
+    review_report_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let report = review_report_preview
+        .get("review_report")
+        .unwrap_or(&Value::Null);
+    let route_raw = report
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-review-report");
+    let packet_route_raw = report
+        .get("packet_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-review-packet");
+    let href_raw = avatar_surface_route_href(route_raw, q.project.as_deref(), None);
+    let packet_href_raw = avatar_surface_route_href(packet_route_raw, q.project.as_deref(), None);
+    let href = html_escape(&href_raw);
+    let packet_href = html_escape(&packet_href_raw);
+    let state = avatar_surface_html_json_value(report.get("report_state"), "-");
+    let packets = avatar_surface_html_json_value(report.get("packet_count"), "0");
+    let ready = avatar_surface_html_json_value(report.get("ready_packet_count"), "0");
+    let blocked = avatar_surface_html_json_value(report.get("blocked_packet_count"), "0");
+    let feedback = avatar_surface_html_json_value(report.get("human_feedback_count"), "0");
+    let voice_requests =
+        avatar_surface_html_json_value(report.get("voice_linkage_requested_count"), "0");
+    let human_decisions = avatar_surface_html_json_value(report.get("human_decision_count"), "0");
+    let ready_for_human = avatar_surface_html_json_value(
+        report
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("ready_for_human_visual_review")),
+        "false",
+    );
+    let ready_for_approval = avatar_surface_html_json_value(
+        report
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("ready_for_approval")),
+        "false",
+    );
+    let can_promote = avatar_surface_html_json_value(
+        report
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+        "false",
+    );
+    let merge_without_review = avatar_surface_html_json_value(
+        report
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("merge_without_human_review_allowed")),
+        "false",
+    );
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">report</span>
+        <strong>Xiao Shu Review Report</strong>
+        <span>state={state} packets={packets} ready={ready} blocked={blocked}</span>
+      </div>
+      <dl>
+        <div><dt>readiness</dt><dd>human={ready_for_human} approval={ready_for_approval} decisions={human_decisions}</dd></div>
+        <div><dt>feedback</dt><dd>items={feedback} voice_requests={voice_requests}</dd></div>
+        <div><dt>safety</dt><dd>can_promote={can_promote} merge_without_review={merge_without_review}</dd></div>
+        <div><dt>packet</dt><dd><a href="{packet_href}">review packet json</a></dd></div>
+        <div><dt>open</dt><dd><a href="{href}">review report json</a></dd></div>
+      </dl>
+    </section>"#,
+        state = state,
+        packets = packets,
+        ready = ready,
+        blocked = blocked,
+        feedback = feedback,
+        voice_requests = voice_requests,
+        ready_for_human = ready_for_human,
+        ready_for_approval = ready_for_approval,
+        human_decisions = human_decisions,
+        can_promote = can_promote,
+        merge_without_review = merge_without_review,
+        packet_href = packet_href,
+        href = href,
+    )
+}
+
+fn avatar_surface_voice_policy_html(
+    voice_policy_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let policy = voice_policy_preview
+        .get("voice_policy")
+        .unwrap_or(&Value::Null);
+    let route_raw = policy
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-voice-policy");
+    let renderer_route_raw = policy
+        .get("renderer_view_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-renderer-view");
+    let href_raw = avatar_surface_route_href(route_raw, q.project.as_deref(), None);
+    let renderer_href_raw =
+        avatar_surface_route_href(renderer_route_raw, q.project.as_deref(), None);
+    let tracks = avatar_surface_html_json_value(policy.get("track_count"), "0");
+    let manual = avatar_surface_html_json_value(policy.get("manual_cli_emit_count"), "0");
+    let display = avatar_surface_html_json_value(policy.get("display_only_count"), "0");
+    let auto = avatar_surface_html_json_value(policy.get("auto_emit_count"), "0");
+    let voice = avatar_surface_html_json_value(policy.get("default_voice"), "-");
+    let rate = avatar_surface_html_json_value(policy.get("default_rate"), "-");
+    let cooldown = avatar_surface_html_json_value(policy.get("default_cooldown_secs"), "300");
+    let http_emit = avatar_surface_html_json_value(
+        policy
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("http_emit_route_added")),
+        "false",
+    );
+    let mut first_manual = "-".to_string();
+    if let Some(rule) = policy
+        .get("rules")
+        .and_then(Value::as_array)
+        .and_then(|rules| {
+            rules.iter().find(|rule| {
+                rule.get("manual_cli_emit_allowed")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            })
+        })
+    {
+        first_manual = format!(
+            "{} line={}",
+            avatar_surface_html_json_value(rule.get("token"), "-"),
+            avatar_surface_html_json_value(rule.get("utterance"), "-")
+        );
+    }
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">voice</span>
+        <strong>Xiao Shu Voice Policy</strong>
+        <span>tracks={tracks} manual_cli={manual} display_only={display} auto={auto}</span>
+      </div>
+      <dl>
+        <div><dt>default</dt><dd>{voice} rate={rate} cooldown={cooldown}s</dd></div>
+        <div><dt>first manual</dt><dd>{first_manual}</dd></div>
+        <div><dt>safety</dt><dd>http_emit_route_added={http_emit} auto_emit={auto}</dd></div>
+        <div><dt>renderer</dt><dd><a href="{renderer_href}">renderer view</a></dd></div>
+        <div><dt>open</dt><dd><a href="{href}">voice policy json</a></dd></div>
+      </dl>
+    </section>"#,
+        tracks = tracks,
+        manual = manual,
+        display = display,
+        auto = auto,
+        voice = voice,
+        rate = rate,
+        cooldown = cooldown,
+        first_manual = first_manual,
+        http_emit = http_emit,
+        renderer_href = html_escape(&renderer_href_raw),
+        href = html_escape(&href_raw),
+    )
+}
+
+fn avatar_surface_voice_request_html(
+    voice_request_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let request = voice_request_preview
+        .get("voice_request")
+        .unwrap_or(&Value::Null);
+    let route_raw = request
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-voice-request");
+    let policy_route_raw = request
+        .get("policy_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-voice-policy");
+    let selected_token = request
+        .get("selected_token")
+        .and_then(Value::as_str)
+        .unwrap_or("xiao_shu::alert_peek::medium");
+    let href_raw = avatar_surface_route_href(route_raw, q.project.as_deref(), Some(selected_token));
+    let policy_href_raw = avatar_surface_route_href(policy_route_raw, q.project.as_deref(), None);
+    let state = avatar_surface_html_json_value(request.get("request_state"), "-");
+    let token = avatar_surface_html_json_value(request.get("selected_token"), "-");
+    let manual = avatar_surface_html_json_value(request.get("manual_cli_emit_allowed"), "false");
+    let auto = avatar_surface_html_json_value(request.get("auto_emit_allowed"), "false");
+    let line = avatar_surface_html_json_value(request.get("line"), "-");
+    let voice = avatar_surface_html_json_value(request.get("suggested_voice"), "-");
+    let rate = avatar_surface_html_json_value(request.get("suggested_rate"), "-");
+    let reason = avatar_surface_html_json_value(request.get("operator_reason_present"), "false");
+    let second_step = avatar_surface_html_json_value(request.get("requires_second_step"), "true");
+    let http_emit = avatar_surface_html_json_value(request.get("http_emit_route"), "null");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">request</span>
+        <strong>Xiao Shu Voice Request</strong>
+        <span>state={state} token={token}</span>
+      </div>
+      <dl>
+        <div><dt>line</dt><dd>{line}</dd></div>
+        <div><dt>voice</dt><dd>{voice} rate={rate}</dd></div>
+        <div><dt>confirm</dt><dd>manual_cli={manual} second_step={second_step} reason_present={reason}</dd></div>
+        <div><dt>safety</dt><dd>auto_emit={auto} http_emit_route={http_emit}</dd></div>
+        <div><dt>policy</dt><dd><a href="{policy_href}">voice policy json</a></dd></div>
+        <div><dt>open</dt><dd><a href="{href}">voice request json</a></dd></div>
+      </dl>
+    </section>"#,
+        state = state,
+        token = token,
+        line = line,
+        voice = voice,
+        rate = rate,
+        manual = manual,
+        second_step = second_step,
+        reason = reason,
+        auto = auto,
+        http_emit = http_emit,
+        policy_href = html_escape(&policy_href_raw),
+        href = html_escape(&href_raw),
+    )
+}
+
+fn avatar_surface_voice_confirm_html(
+    voice_confirm_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let confirm = voice_confirm_preview
+        .get("voice_confirm")
+        .unwrap_or(&Value::Null);
+    let route_raw = confirm
+        .get("html_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-voice-confirm");
+    let request_route_raw = confirm
+        .get("request_route")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/cortex-voice-request");
+    let selected_token = confirm
+        .get("selected_token")
+        .and_then(Value::as_str)
+        .unwrap_or("xiao_shu::alert_peek::medium");
+    let mut href_raw =
+        avatar_surface_route_href(route_raw, q.project.as_deref(), Some(selected_token));
+    let sep = if href_raw.contains('?') { "&" } else { "?" };
+    href_raw.push_str(sep);
+    href_raw.push_str("confirm=true&reason=panel-dry-run");
+    let request_href_raw = avatar_surface_route_href(
+        request_route_raw,
+        q.project.as_deref(),
+        Some(selected_token),
+    );
+    let state = avatar_surface_html_json_value(confirm.get("confirmation_state"), "-");
+    let token = avatar_surface_html_json_value(confirm.get("selected_token"), "-");
+    let confirm_requested =
+        avatar_surface_html_json_value(confirm.get("confirm_requested"), "false");
+    let would_execute = avatar_surface_html_json_value(confirm.get("would_execute_cli"), "false");
+    let reason = avatar_surface_html_json_value(confirm.get("operator_reason_present"), "false");
+    let auto = avatar_surface_html_json_value(confirm.get("auto_emit_allowed"), "false");
+    let http_emit = avatar_surface_html_json_value(confirm.get("http_emit_route"), "null");
+    let line = avatar_surface_html_json_value(confirm.get("line"), "-");
+    let voice = avatar_surface_html_json_value(confirm.get("suggested_voice"), "-");
+    let rate = avatar_surface_html_json_value(confirm.get("suggested_rate"), "-");
+    let actual_execution =
+        avatar_surface_html_json_value(confirm.get("actual_execution_available_here"), "false");
+    let command = avatar_surface_html_json_value(confirm.get("pending_command_preview"), "-");
+    let action = avatar_surface_html_json_value(confirm.get("pending_action_command_preview"), "-");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">confirm</span>
+        <strong>Xiao Shu Voice Confirm</strong>
+        <span>state={state} token={token}</span>
+      </div>
+      <dl>
+        <div><dt>line</dt><dd>{line}</dd></div>
+        <div><dt>voice</dt><dd>{voice} rate={rate}</dd></div>
+        <div><dt>confirm</dt><dd>confirm={confirm_requested} would_execute_cli={would_execute} reason_present={reason}</dd></div>
+        <div><dt>safety</dt><dd>auto_emit={auto} http_emit_route={http_emit} actual_execution_here={actual_execution}</dd></div>
+        <div><dt>command</dt><dd>{command}</dd></div>
+        <div><dt>action</dt><dd>{action}</dd></div>
+        <div><dt>request</dt><dd><a href="{request_href}">voice request json</a></dd></div>
+        <div><dt>open</dt><dd><a href="{href}">voice confirm json</a></dd></div>
+      </dl>
+    </section>"#,
+        state = state,
+        token = token,
+        line = line,
+        voice = voice,
+        rate = rate,
+        confirm_requested = confirm_requested,
+        would_execute = would_execute,
+        reason = reason,
+        auto = auto,
+        http_emit = http_emit,
+        actual_execution = actual_execution,
+        command = command,
+        action = action,
+        request_href = html_escape(&request_href_raw),
+        href = html_escape(&href_raw),
+    )
+}
+
+fn avatar_surface_voice_action_preview_html(
+    voice_action_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let action = voice_action_preview
+        .get("action_preview")
+        .unwrap_or(&Value::Null);
+    let selected_token = action
+        .get("selected_token")
+        .and_then(Value::as_str)
+        .unwrap_or("xiao_shu::alert_peek::medium");
+    let route_raw = "/avatar-surface/cortex-voice-action-preview";
+    let mut href_raw =
+        avatar_surface_route_href(route_raw, q.project.as_deref(), Some(selected_token));
+    let sep = if href_raw.contains('?') { "&" } else { "?" };
+    href_raw.push_str(sep);
+    href_raw.push_str("confirm=true&reason=panel-dry-run");
+    let state = avatar_surface_html_json_value(action.get("confirmation_state"), "-");
+    let ready = avatar_surface_html_json_value(action.get("ready_to_emit_now"), "false");
+    let would =
+        avatar_surface_html_json_value(action.get("would_emit_if_operator_runs_command"), "false");
+    let blocked = avatar_surface_html_json_value(action.get("blocked"), "true");
+    let reasons = html_escape(
+        &action
+            .get("blocked_reasons")
+            .map(Value::to_string)
+            .unwrap_or_else(|| "[]".to_string()),
+    );
+    let token = avatar_surface_html_json_value(action.get("selected_token"), "-");
+    let line = avatar_surface_html_json_value(action.get("line"), "-");
+    let voice = avatar_surface_html_json_value(action.get("tts_voice"), "-");
+    let rate = avatar_surface_html_json_value(action.get("tts_rate"), "-");
+    let cooldown = avatar_surface_html_json_value(action.get("cooldown_secs"), "300");
+    let state_path = avatar_surface_html_json_value(action.get("state_path"), "-");
+    let command = avatar_surface_html_json_value(action.get("command_preview"), "-");
+    let gate = voice_action_preview
+        .get("gate_dry_run")
+        .unwrap_or(&Value::Null);
+    let cooldown_block = gate.get("cooldown").unwrap_or(&Value::Null);
+    let cooldown_active = avatar_surface_html_json_value(cooldown_block.get("active"), "false");
+    let next_allowed = avatar_surface_html_json_value(cooldown_block.get("next_allowed_at"), "-");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">action</span>
+        <strong>Xiao Shu Voice Action Preview</strong>
+        <span>state={state} ready={ready} token={token}</span>
+      </div>
+      <dl>
+        <div><dt>line</dt><dd>{line}</dd></div>
+        <div><dt>voice</dt><dd>{voice} rate={rate}</dd></div>
+        <div><dt>readiness</dt><dd>would_emit={would} blocked={blocked} reasons={reasons}</dd></div>
+        <div><dt>cooldown</dt><dd>active={cooldown_active} secs={cooldown} next={next_allowed}</dd></div>
+        <div><dt>state</dt><dd>{state_path}</dd></div>
+        <div><dt>command</dt><dd>{command}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">voice action preview json</a></dd></div>
+      </dl>
+    </section>"#,
+        state = state,
+        ready = ready,
+        token = token,
+        line = line,
+        voice = voice,
+        rate = rate,
+        would = would,
+        blocked = blocked,
+        reasons = reasons,
+        cooldown_active = cooldown_active,
+        cooldown = cooldown,
+        next_allowed = next_allowed,
+        state_path = state_path,
+        command = command,
+        href = html_escape(&href_raw),
+    )
+}
+
+fn avatar_surface_xiao_shu_action_request_html(
+    action_request_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let request = action_request_preview
+        .get("action_request")
+        .unwrap_or(&Value::Null);
+    let route_raw = "/avatar-surface/xiao-shu-action-request";
+    let mut href_raw = avatar_surface_route_href(
+        route_raw,
+        q.project.as_deref(),
+        request
+            .get("mapped_track")
+            .and_then(Value::as_str)
+            .or(Some("xiao_shu::alert_peek::medium")),
+    );
+    let sep = if href_raw.contains('?') { "&" } else { "?" };
+    href_raw.push_str(sep);
+    href_raw.push_str("actor=panel&intent=voice_alert&reason=panel-dry-run");
+    let state = avatar_surface_html_json_value(request.get("request_state"), "-");
+    let actor = avatar_surface_html_json_value(request.get("actor"), "-");
+    let intent = avatar_surface_html_json_value(request.get("intent"), "-");
+    let supported = avatar_surface_html_json_value(request.get("supported_intent"), "false");
+    let direct_control = avatar_surface_html_json_value(
+        action_request_preview.get("direct_pet_control_allowed"),
+        "false",
+    );
+    let emit_audio =
+        avatar_surface_html_json_value(action_request_preview.get("emits_audio"), "false");
+    let human_required =
+        avatar_surface_html_json_value(request.get("requires_human_confirmation"), "true");
+    let confirmed =
+        avatar_surface_html_json_value(request.get("human_confirmation_present"), "false");
+    let ready = avatar_surface_html_json_value(request.get("ready_for_local_cli_emit"), "false");
+    let blocked = avatar_surface_html_json_value(request.get("blocked"), "true");
+    let reasons = html_escape(
+        &request
+            .get("blocked_reasons")
+            .map(Value::to_string)
+            .unwrap_or_else(|| "[]".to_string()),
+    );
+    let track = avatar_surface_html_json_value(request.get("mapped_track"), "-");
+    let line = avatar_surface_html_json_value(request.get("line"), "-");
+    let preview_command = avatar_surface_html_json_value(request.get("preview_command"), "-");
+    let confirm_command =
+        avatar_surface_html_json_value(request.get("confirm_request_command"), "-");
+    let emit_command = avatar_surface_html_json_value(request.get("emit_command"), "-");
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">request</span>
+        <strong>Xiao Shu Action Request</strong>
+        <span>state={state} actor={actor} intent={intent}</span>
+      </div>
+      <dl>
+        <div><dt>target</dt><dd>track={track} supported={supported}</dd></div>
+        <div><dt>line</dt><dd>{line}</dd></div>
+        <div><dt>policy</dt><dd>direct_control={direct_control} emits_audio={emit_audio} human_required={human_required} confirmed={confirmed}</dd></div>
+        <div><dt>readiness</dt><dd>ready={ready} blocked={blocked} reasons={reasons}</dd></div>
+        <div><dt>preview</dt><dd>{preview_command}</dd></div>
+        <div><dt>confirm</dt><dd>{confirm_command}</dd></div>
+        <div><dt>emit</dt><dd>{emit_command}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">xiao shu action request json</a></dd></div>
+      </dl>
+    </section>"#,
+        state = state,
+        actor = actor,
+        intent = intent,
+        track = track,
+        supported = supported,
+        line = line,
+        direct_control = direct_control,
+        emit_audio = emit_audio,
+        human_required = human_required,
+        confirmed = confirmed,
+        ready = ready,
+        blocked = blocked,
+        reasons = reasons,
+        preview_command = preview_command,
+        confirm_command = confirm_command,
+        emit_command = emit_command,
+        href = html_escape(&href_raw),
+    )
+}
+
+fn avatar_surface_xiao_shu_action_requests_html(
+    action_request_queue: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let queue = action_request_queue.get("queue").unwrap_or(&Value::Null);
+    let records = action_request_queue
+        .get("records")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let href_raw = avatar_surface_route_href(
+        "/avatar-surface/xiao-shu-action-requests",
+        q.project.as_deref(),
+        None,
+    );
+    let exists = avatar_surface_html_json_value(queue.get("exists"), "false");
+    let state_filter =
+        avatar_surface_html_json_value(queue.get("state_filter"), "pending_human_confirmation");
+    let matching = avatar_surface_html_json_value(queue.get("matching_records"), "0");
+    let returned = avatar_surface_html_json_value(queue.get("returned_count"), "0");
+    let include_details = avatar_surface_html_json_value(queue.get("include_details"), "false");
+    let path = avatar_surface_html_json_value(queue.get("path"), "-");
+    let mut rows = String::new();
+    for record in records {
+        let request_id_raw = record.get("request_id").and_then(Value::as_str).unwrap_or("-");
+        let project_raw = record
+            .get("project")
+            .and_then(Value::as_str)
+            .or(q.project.as_deref())
+            .unwrap_or("agent-bridge");
+        let reason_raw = record
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("operator-confirmed-request");
+        let local_confirm_raw = record
+            .get("local_confirm_command")
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+            .or_else(|| {
+                record
+                    .get("action_preview_command")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "agent-bridge avatar xiao-shu-action-request-action --project {project_raw} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm"
+                )
+            });
+        let local_command_raw = record
+            .get("local_emit_command")
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| {
+                format!(
+                    "agent-bridge avatar xiao-shu-action-request-action --project {project_raw} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm --emit"
+                )
+            });
+        let local_dismiss_raw = format!(
+            "agent-bridge avatar xiao-shu-action-request-action --project {project_raw} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm --dismiss"
+        );
+        let detail_href_raw = format!(
+            "/avatar-surface/xiao-shu-action-requests?project={project}&request_id={request_id}&details=true",
+            project = url_query_component(project_raw),
+            request_id = url_query_component(request_id_raw)
+        );
+        let request_id = avatar_surface_html_json_value(record.get("request_id"), "-");
+        let state = avatar_surface_html_json_value(record.get("state"), "-");
+        let actor = avatar_surface_html_json_value(record.get("actor"), "-");
+        let intent = avatar_surface_html_json_value(record.get("intent"), "-");
+        let track = avatar_surface_html_json_value(record.get("mapped_track"), "-");
+        let line = avatar_surface_html_json_value(
+            record
+                .get("action_request")
+                .and_then(|request| request.get("line")),
+            "-",
+        );
+        let reason = avatar_surface_html_json_value(record.get("reason"), "-");
+        let local_confirm = html_escape(&local_confirm_raw);
+        let local_command = html_escape(&local_command_raw);
+        let local_dismiss = html_escape(&local_dismiss_raw);
+        let detail_href = html_escape(&detail_href_raw);
+        rows.push_str(&format!(
+            r#"<li><strong>{request_id}</strong><span>state={state} actor={actor} intent={intent}</span><span>track={track}</span><span>line={line}</span><span>reason={reason}</span><span><a href="{detail_href}">detail json</a></span><span>dry_run={local_confirm}</span><span>emit={local_command}</span><span>dismiss={local_dismiss}</span></li>"#
+        ));
+    }
+    if rows.is_empty() {
+        rows.push_str(
+            r#"<li><strong>none</strong><span>no pending Xiao Shu action requests</span></li>"#,
+        );
+    }
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">queue</span>
+        <strong>Xiao Shu Action Requests</strong>
+        <span>pending={matching} returned={returned} exists={exists}</span>
+      </div>
+      <dl>
+        <div><dt>filter</dt><dd>state={state_filter} details={include_details}</dd></div>
+        <div><dt>path</dt><dd>{path}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">pending action request json</a></dd></div>
+      </dl>
+      <ul class="compact-list">{rows}</ul>
+    </section>"#,
+        matching = matching,
+        returned = returned,
+        exists = exists,
+        state_filter = state_filter,
+        include_details = include_details,
+        path = path,
+        href = html_escape(&href_raw),
+        rows = rows,
+    )
+}
+
+fn avatar_surface_renderer_view_html(
+    renderer_view_preview: &Value,
+    generated_at: i64,
+    requested_track: Option<&str>,
+    requested_track_index: Option<usize>,
+    requested_variant: Option<&str>,
+) -> String {
+    let view = renderer_view_preview
+        .get("renderer_view")
+        .unwrap_or(&Value::Null);
+    let tracks = view.get("tracks").and_then(Value::as_array);
+    let active_track_index = tracks
+        .map(|tracks| {
+            requested_track
+                .and_then(|token| {
+                    tracks
+                        .iter()
+                        .position(|track| track.get("token").and_then(Value::as_str) == Some(token))
+                })
+                .or_else(|| requested_track_index.filter(|index| *index < tracks.len()))
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+    let active = tracks
+        .and_then(|tracks| tracks.get(active_track_index))
+        .or_else(|| view.get("first_track"))
+        .unwrap_or(&Value::Null);
+    let active_variant = active
+        .get("semantic_variants")
+        .and_then(Value::as_array)
+        .and_then(|variants| {
+            requested_variant
+                .and_then(|variant_id| {
+                    variants.iter().find(|variant| {
+                        variant.get("variant_id").and_then(Value::as_str) == Some(variant_id)
+                    })
+                })
+                .or_else(|| {
+                    variants.iter().find(|variant| {
+                        variant
+                            .get("default")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false)
+                    })
+                })
+                .or_else(|| variants.first())
+        });
+    let active_variant_id_raw = active_variant
+        .and_then(|variant| variant.get("variant_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let active_variant_label_raw = active_variant
+        .and_then(|variant| variant.get("label"))
+        .and_then(Value::as_str)
+        .unwrap_or("default");
+    let active_variant_meta = if active_variant_id_raw.is_empty() {
+        "default".to_string()
+    } else {
+        format!("{active_variant_id_raw} / {active_variant_label_raw}")
+    };
+    let active_variant_label = html_escape(&active_variant_meta);
+    let active_variant_json = html_json_script(&json!(active_variant_id_raw));
+    let active_voice_linkage = active
+        .get("semantic_variant_review")
+        .and_then(|review| review.get("voice_linkage_preview"))
+        .unwrap_or(&Value::Null);
+    let active_voice_text = avatar_surface_html_json_value(
+        active_voice_linkage.get("utterance"),
+        "visual-only preview",
+    );
+    let active_voice_gate = avatar_surface_html_json_value(
+        active_voice_linkage
+            .get("gate")
+            .and_then(|gate| gate.get("dry_run_route")),
+        "-",
+    );
+    let active_voice_audio =
+        avatar_surface_html_json_value(active_voice_linkage.get("emits_audio"), "false");
+    let active_voice_required = avatar_surface_html_json_value(
+        active_voice_linkage
+            .get("voice")
+            .and_then(|voice| voice.get("requires_explicit_emit_gate")),
+        "true",
+    );
+    let initial = active.get("initial_frame").unwrap_or(&Value::Null);
+    let initial_classes = avatar_surface_html_json_value(
+        initial.get("css_classes"),
+        "pose-neutral-idle expression-calm-eyes motion-idle-breathe accessory-none",
+    );
+    let first_token = avatar_surface_html_json_value(active.get("token"), "xiao_shu::unknown");
+    let first_state = avatar_surface_html_json_value(initial.get("state_label"), "ready");
+    let first_state_html = first_state
+        .split_whitespace()
+        .map(|part| format!("<span>{part}</span>"))
+        .collect::<String>();
+    let track_count = avatar_surface_html_json_value(view.get("track_count"), "0");
+    let input = avatar_surface_html_json_value(view.get("input"), "-");
+    let input_label = {
+        input
+            .split('+')
+            .map(|part| {
+                let trimmed = part.trim();
+                let parts = trimmed.split('.').collect::<Vec<_>>();
+                if parts.len() >= 2 {
+                    format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1])
+                } else {
+                    trimmed.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
+    let writes_files =
+        avatar_surface_html_json_value(renderer_view_preview.get("writes_files"), "false");
+    let mutates_renderer =
+        avatar_surface_html_json_value(renderer_view_preview.get("mutates_renderer"), "false");
+    let pet_mutation = avatar_surface_html_json_value(
+        renderer_view_preview.get("codex_pet_package_mutation"),
+        "false",
+    );
+    let browser_pixels = avatar_surface_html_json_value(
+        renderer_view_preview.get("browser_renders_pixels"),
+        "false",
+    );
+    let asset_source = view.get("asset_source").unwrap_or(&Value::Null);
+    let asset_pet_id = avatar_surface_html_json_value(asset_source.get("pet_id"), "xiao-shu-dev");
+    let sprite_route = avatar_surface_html_json_value(
+        asset_source.get("route"),
+        "/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev",
+    );
+    let data_json = html_json_script(renderer_view_preview);
+    let sprite_route_json = html_json_script(&json!(sprite_route.clone()));
+    let asset_pet_id_json = html_json_script(&json!(asset_pet_id.clone()));
+    let mut track_buttons = String::new();
+    if let Some(tracks) = view.get("tracks").and_then(Value::as_array) {
+        for (index, track) in tracks.iter().enumerate() {
+            let active = if index == active_track_index {
+                " is-active"
+            } else {
+                ""
+            };
+            let review = if track
+                .get("review_only")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                " is-review"
+            } else {
+                ""
+            };
+            let token_raw = track.get("token").and_then(Value::as_str).unwrap_or("-");
+            let token = html_escape(token_raw);
+            let token_label = html_escape(&avatar_surface_renderer_token_label(token_raw));
+            let track_kind = avatar_surface_html_json_value(track.get("track_kind"), "selected");
+            let frames = avatar_surface_html_json_value(track.get("frame_count"), "0");
+            let duration = avatar_surface_html_json_value(track.get("duration_ms"), "0");
+            track_buttons.push_str(&format!(
+                r#"<button type="button" class="track-button{active}{review}" data-track-index="{index}" data-track-token="{token}">
+          <span title="{token}">{token_label}</span>
+          <small>{track_kind} / {frames} frames / {duration}ms</small>
+        </button>"#,
+                active = active,
+                review = review,
+                index = index,
+                token = token,
+                token_label = token_label,
+                track_kind = track_kind,
+                frames = frames,
+                duration = duration,
+            ));
+        }
+    }
+    if track_buttons.is_empty() {
+        track_buttons.push_str(
+            r#"<button type="button" class="track-button is-active" data-track-index="0">
+          <span>xiao_shu::unknown</span>
+          <small>0 frames / 0ms</small>
+        </button>"#,
+        );
+    }
+
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Xiao Shu Sidecar Renderer</title>
+  <style>
+    :root {{
+      color-scheme: light dark;
+      --bg: #fbfaf5;
+      --fg: #1c1d18;
+      --muted: #687066;
+      --line: #d9ddd1;
+      --teal: #147a74;
+      --coral: #d45f4c;
+      --gold: #d69b2d;
+      --alert-soft: #c97968;
+      --ink: #26312f;
+      --stage: #eef5ef;
+      --surface: #ffffff;
+      --soft: #f7efe6;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root {{
+        --bg: #151711;
+        --fg: #eff2e6;
+        --muted: #a7ad9f;
+        --line: #32382f;
+        --teal: #5bd0c3;
+        --coral: #ff907d;
+        --gold: #f3c66b;
+        --alert-soft: #d58c7f;
+        --ink: #f4f7ed;
+        --stage: #20261f;
+        --surface: #1d211b;
+        --soft: #29251d;
+      }}
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    main {{
+      width: min(1160px, calc(100vw - 32px));
+      margin: 22px auto 40px;
+    }}
+    header {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-end;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 14px;
+    }}
+    h1 {{
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.1;
+      font-weight: 760;
+      letter-spacing: 0;
+    }}
+    .meta {{
+      margin-top: 7px;
+      color: var(--muted);
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .meta span {{
+      display: block;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-all;
+    }}
+    .badge {{
+      color: var(--teal);
+      font-weight: 800;
+      white-space: nowrap;
+    }}
+    .stage-grid {{
+      display: grid;
+      grid-template-columns: minmax(320px, 1.2fr) minmax(280px, 0.8fr);
+      gap: 18px;
+      margin-top: 22px;
+      align-items: stretch;
+    }}
+    .stage {{
+      min-height: 460px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      background:
+        radial-gradient(circle at 22% 18%, rgba(212, 95, 76, 0.18), transparent 26%),
+        radial-gradient(circle at 80% 12%, rgba(214, 155, 45, 0.18), transparent 28%),
+        linear-gradient(180deg, var(--stage), var(--soft));
+      overflow: hidden;
+      position: relative;
+    }}
+    .stage::after {{
+      content: "";
+      position: absolute;
+      inset: auto 8% 42px;
+      height: 1px;
+      background: var(--line);
+      opacity: 0.75;
+    }}
+    .xiao-shu {{
+      position: relative;
+      width: min(320px, 72vw);
+      height: min(320px, 72vw);
+      display: grid;
+      place-items: center;
+      isolation: isolate;
+    }}
+    .xiao-shu-shadow {{
+      position: absolute;
+      width: 170px;
+      height: 26px;
+      bottom: 38px;
+      border-radius: 999px;
+      background: rgba(38, 49, 47, 0.18);
+      filter: blur(1px);
+    }}
+    .xiao-shu-body {{
+      position: relative;
+      width: 188px;
+      height: 226px;
+      transform: translateY(0) rotate(0deg);
+      transition: transform 180ms ease, filter 180ms ease;
+    }}
+    .xiao-shu-inner {{
+      position: absolute;
+      inset: 0;
+      transform-origin: 50% 82%;
+    }}
+    .xiao-shu-sprite {{
+      width: 192px;
+      height: 208px;
+      background-image: url("{sprite_route}");
+      background-repeat: no-repeat;
+      background-size: 1536px 1872px;
+      background-position: 0 0;
+      transform: translateY(8px) scale(1.42);
+      transform-origin: 50% 88%;
+      filter: none;
+      transition: filter 180ms ease, transform 180ms ease;
+      z-index: 2;
+    }}
+    .xiao-shu.sprite-choreographed .xiao-shu-sprite {{
+      transition: none;
+    }}
+    .xiao-shu.sprite-backed .xiao-shu-body {{
+      display: none;
+    }}
+    .sprite-alert-mark {{
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      right: 82px;
+      top: 54px;
+      border-radius: 999px;
+      background: var(--alert-soft);
+      border: 3px solid rgba(244, 247, 237, 0.82);
+      opacity: 0;
+      transform: scale(0.9);
+      transition: opacity 180ms ease, transform 180ms ease;
+      z-index: 3;
+    }}
+    .sprite-alert.sprite-attention-visible .sprite-alert-mark {{
+      opacity: 0.78;
+      transform: scale(1);
+    }}
+    .sprite-alert .xiao-shu-sprite {{
+      filter: none;
+      transform: translateY(8px) scale(1.42);
+    }}
+    .xiao-shu[data-sprite-variant="current_alert_row"].sprite-alert .xiao-shu-sprite {{
+      transform: translateY(8px) scale(1.46);
+    }}
+    .xiao-shu[data-sprite-variant="waiting_peek_row"].sprite-alert .sprite-alert-mark {{
+      opacity: 0.58;
+      transform: scale(0.86);
+    }}
+    .xiao-shu[data-sprite-variant="sidecar_peek_v2"].sprite-alert .sprite-alert-mark,
+    .xiao-shu[data-sprite-variant="sidecar_peek_v4"].sprite-alert .sprite-alert-mark {{
+      width: 18px;
+      height: 18px;
+      right: 78px;
+      top: 56px;
+      opacity: 0.62;
+      transform: scale(0.9);
+    }}
+    .xiao-shu[data-sprite-variant="focused_review_row"].sprite-alert .sprite-alert-mark {{
+      width: 18px;
+      height: 18px;
+      right: 88px;
+      top: 58px;
+      opacity: 0.66;
+    }}
+    .xiao-shu-torso {{
+      position: absolute;
+      width: 132px;
+      height: 132px;
+      left: 28px;
+      bottom: 8px;
+      border-radius: 44% 44% 40% 40%;
+      background: linear-gradient(180deg, #f6ead7, #dfeadf);
+      border: 3px solid var(--ink);
+      box-shadow: inset 0 -10px 0 rgba(20, 122, 116, 0.12);
+    }}
+    .xiao-shu-head {{
+      position: absolute;
+      width: 152px;
+      height: 138px;
+      left: 18px;
+      top: 18px;
+      border-radius: 45% 45% 42% 42%;
+      background: linear-gradient(180deg, #fff5e7, #f1ddc3);
+      border: 3px solid var(--ink);
+      box-shadow: inset 0 -12px 0 rgba(212, 95, 76, 0.1);
+    }}
+    .xiao-shu-hair {{
+      position: absolute;
+      width: 44px;
+      height: 26px;
+      top: 0;
+      left: 72px;
+      border-radius: 70% 30% 70% 30%;
+      background: var(--coral);
+      transform: rotate(-10deg);
+      border: 3px solid var(--ink);
+    }}
+    .eye {{
+      position: absolute;
+      width: 16px;
+      height: 23px;
+      top: 66px;
+      border-radius: 999px;
+      background: var(--ink);
+      transition: height 160ms ease, transform 160ms ease;
+    }}
+    .eye.left {{ left: 46px; }}
+    .eye.right {{ right: 46px; }}
+    .cheek {{
+      position: absolute;
+      width: 24px;
+      height: 12px;
+      top: 90px;
+      border-radius: 999px;
+      background: rgba(212, 95, 76, 0.28);
+    }}
+    .cheek.left {{ left: 28px; }}
+    .cheek.right {{ right: 28px; }}
+    .mouth {{
+      position: absolute;
+      width: 34px;
+      height: 16px;
+      left: 59px;
+      top: 92px;
+      border: 3px solid var(--ink);
+      border-top: 0;
+      border-radius: 0 0 34px 34px;
+      transition: width 160ms ease, height 160ms ease, left 160ms ease;
+    }}
+    .hand {{
+      position: absolute;
+      width: 34px;
+      height: 50px;
+      top: 126px;
+      border-radius: 999px;
+      background: #fff0db;
+      border: 3px solid var(--ink);
+      transform-origin: 50% 12%;
+    }}
+    .hand.left {{ left: 8px; transform: rotate(18deg); }}
+    .hand.right {{ right: 8px; transform: rotate(-18deg); }}
+    .status-dot {{
+      position: absolute;
+      width: 38px;
+      height: 38px;
+      right: 16px;
+      top: 22px;
+      border-radius: 999px;
+      background: var(--gold);
+      border: 3px solid var(--ink);
+      opacity: 0;
+      transform: scale(0.84);
+      transition: opacity 180ms ease, transform 180ms ease;
+    }}
+    .pose-upright-ready .xiao-shu-body {{ transform: translateY(-8px) rotate(-1deg); }}
+    .pose-neutral-idle .xiao-shu-body {{ transform: translateY(0) rotate(0deg); }}
+    .pose-lean-forward .xiao-shu-body {{ transform: translateY(4px) rotate(3deg); }}
+    .pose-inspect-tilt .xiao-shu-body {{ transform: translateY(1px) rotate(-5deg); }}
+    .pose-peek-forward .xiao-shu-body {{ transform: translateY(6px) scale(1.02); }}
+    .expression-bright-smile .mouth {{ width: 44px; height: 22px; left: 54px; }}
+    .expression-focused-eyes .eye {{ height: 13px; transform: translateY(5px); }}
+    .expression-checking-eyes .eye.left {{ transform: translateX(-4px); }}
+    .expression-checking-eyes .eye.right {{ transform: translateX(-4px); }}
+    .expression-concerned-eyes .eye {{ height: 18px; transform: rotate(6deg); }}
+    .accessory-soft-status-glow .status-dot,
+    .accessory-small-attention-mark .status-dot {{
+      opacity: 1;
+      transform: scale(1);
+    }}
+    .accessory-small-attention-mark .status-dot {{
+      width: 34px;
+      height: 34px;
+      background: var(--alert-soft);
+      opacity: 0.68;
+      transform: scale(0.9);
+    }}
+    .motion-alert-peek .xiao-shu-head,
+    .motion-alert-peek .xiao-shu-torso,
+    .motion-alert-peek .hand,
+    .motion-alert-peek .status-dot {{
+      border-width: 4px;
+    }}
+    .motion-alert-peek .xiao-shu-body {{
+      filter: saturate(0.88) brightness(0.94) contrast(0.96);
+    }}
+    .motion-idle-breathe .xiao-shu-inner {{ animation: breathe 2400ms ease-in-out infinite; }}
+    .motion-soft-bounce .xiao-shu-inner {{ animation: soft-bounce 900ms ease-in-out infinite; }}
+    .motion-sorting-glow .status-dot {{ animation: glow 1200ms ease-in-out infinite; }}
+    .motion-look-sideways .xiao-shu-inner {{ animation: look-sideways 1600ms ease-in-out infinite; }}
+    @keyframes breathe {{
+      0%, 100% {{ transform: translateY(0) scale(1); }}
+      50% {{ transform: translateY(-3px) scale(1.01); }}
+    }}
+    @keyframes soft-bounce {{
+      0%, 100% {{ transform: translateY(0); }}
+      45% {{ transform: translateY(-14px); }}
+    }}
+    @keyframes glow {{
+      0%, 100% {{ box-shadow: 0 0 0 rgba(214, 155, 45, 0.15); }}
+      50% {{ box-shadow: 0 0 28px rgba(214, 155, 45, 0.55); }}
+    }}
+    @keyframes look-sideways {{
+      0%, 100% {{ transform: translateX(0); }}
+      50% {{ transform: translateX(-8px); }}
+    }}
+    .inspector {{
+      border-top: 4px solid var(--teal);
+      border-bottom: 1px solid var(--line);
+      padding: 0 0 10px;
+      min-width: 0;
+    }}
+    .inspector h2 {{
+      margin: 0 0 10px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }}
+    .inspector dl {{
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr);
+      gap: 9px 12px;
+      margin: 0;
+      min-width: 0;
+    }}
+    .inspector dt {{
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }}
+    .inspector dd {{
+      margin: 0;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .inspector dd span {{
+      display: block;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .inspector dd[data-state] span {{
+      word-break: break-all;
+    }}
+    .tracks {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }}
+    .track-button {{
+      min-height: 58px;
+      text-align: left;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--fg);
+      padding: 10px 12px;
+      cursor: pointer;
+      font: inherit;
+    }}
+    .track-button.is-active {{
+      border-color: var(--teal);
+      box-shadow: inset 4px 0 0 var(--teal);
+    }}
+    .track-button.is-review:not(.is-active) {{
+      box-shadow: inset 4px 0 0 var(--gold);
+    }}
+    .track-button span,
+    .track-button small {{
+      display: block;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .track-button small {{ color: var(--muted); margin-top: 3px; }}
+    .variant-panel {{
+      margin-top: 18px;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+    }}
+    .variant-panel[hidden] {{
+      display: none;
+    }}
+    .variant-panel h2 {{
+      margin: 0 0 10px;
+      font-size: 15px;
+      letter-spacing: 0;
+    }}
+    .variant-options {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }}
+    .variant-button {{
+      min-height: 70px;
+      text-align: left;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--fg);
+      padding: 10px 12px;
+      cursor: pointer;
+      font: inherit;
+    }}
+    .variant-button.is-active {{
+      border-color: var(--coral);
+      box-shadow: inset 4px 0 0 var(--coral);
+    }}
+    .variant-button span,
+    .variant-button small {{
+      display: block;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .variant-button small {{ color: var(--muted); margin-top: 4px; }}
+    @media (max-width: 820px) {{
+      main {{ width: min(100vw - 20px, 1160px); margin-top: 14px; }}
+      header {{ display: block; }}
+      .badge {{ display: block; margin-top: 10px; }}
+      .stage-grid {{ grid-template-columns: 1fr; }}
+      .stage {{ min-height: 380px; }}
+      .inspector dl {{ grid-template-columns: 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Xiao Shu Sidecar Renderer</h1>
+        <div class="meta"><span>tracks={track_count}</span><span>active={first_token}</span><span title="{input_title}">input={input}</span><span>generated_at={generated_at}</span></div>
+      </div>
+      <div class="badge">browser pixels={browser_pixels}</div>
+    </header>
+    <section class="stage-grid" data-stage="xiao-shu-renderer-view">
+      <div class="stage">
+        <div class="xiao-shu sprite-backed {initial_classes}" data-xiao-shu data-current-frame="">
+          <div class="xiao-shu-shadow"></div>
+          <div class="xiao-shu-sprite" data-sprite-frame aria-hidden="true"></div>
+          <div class="sprite-alert-mark" aria-hidden="true"></div>
+          <div class="xiao-shu-body">
+            <div class="xiao-shu-inner">
+              <div class="xiao-shu-torso"></div>
+              <div class="hand left"></div>
+              <div class="hand right"></div>
+              <div class="xiao-shu-head">
+                <div class="xiao-shu-hair"></div>
+                <div class="eye left"></div>
+                <div class="eye right"></div>
+                <div class="cheek left"></div>
+                <div class="cheek right"></div>
+                <div class="mouth"></div>
+              </div>
+              <div class="status-dot"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <aside class="inspector">
+        <h2>Renderer State</h2>
+        <dl>
+          <dt>token</dt><dd data-token>{first_token}</dd>
+          <dt>state</dt><dd data-state>{first_state}</dd>
+          <dt>variant</dt><dd data-variant>{active_variant_label}</dd>
+          <dt>asset</dt><dd data-asset><span>pet={asset_pet_id}</span><span>route={sprite_route}</span><span>mode=read-only spritesheet</span></dd>
+          <dt>voice</dt><dd data-voice-linkage><span>preview={active_voice_text}</span><span>gate={active_voice_gate}</span><span>requires_gate={active_voice_required}</span><span>emits_audio={active_voice_audio}</span></dd>
+          <dt>safety</dt><dd><span>writes_files={writes_files}</span><span>mutates_renderer={mutates_renderer}</span><span>pet_package={pet_mutation}</span></dd>
+          <dt>mode</dt><dd>sidecar-only browser view</dd>
+        </dl>
+      </aside>
+    </section>
+    <nav class="tracks" aria-label="renderer tracks">
+      {track_buttons}
+    </nav>
+    <section class="variant-panel" data-variant-panel hidden>
+      <h2>Alert Peek Semantic Variants</h2>
+      <div class="variant-options" data-variant-options></div>
+    </section>
+  </main>
+  <script type="application/json" id="renderer-data">{data_json}</script>
+  <script>
+    const payload = JSON.parse(document.getElementById("renderer-data").textContent);
+    const view = payload.renderer_view || {{}};
+    const tracks = Array.isArray(view.tracks) ? view.tracks : [];
+    const figure = document.querySelector("[data-xiao-shu]");
+    const spriteFrame = document.querySelector("[data-sprite-frame]");
+    const tokenEl = document.querySelector("[data-token]");
+    const stateEl = document.querySelector("[data-state]");
+    const variantEl = document.querySelector("[data-variant]");
+    const assetEl = document.querySelector("[data-asset]");
+    const voiceEl = document.querySelector("[data-voice-linkage]");
+    const variantPanel = document.querySelector("[data-variant-panel]");
+    const variantOptions = document.querySelector("[data-variant-options]");
+    const buttons = Array.from(document.querySelectorAll("[data-track-index]"));
+    let trackIndex = {active_track_index};
+    let variantId = {active_variant_json};
+    let frameIndex = 0;
+    let timer = null;
+    const defaultSpriteRoute = {sprite_route_json};
+    const defaultAssetPetId = {asset_pet_id_json};
+    const spriteRows = {{
+      "xiao_shu::soft_bounce::low": {{ row: 0, frames: 6, alert: false }},
+      "xiao_shu::idle_breathe::low": {{ row: 0, frames: 6, alert: false }},
+      "xiao_shu::sorting_glow::medium": {{ row: 8, frames: 6, alert: false }},
+      "xiao_shu::look_sideways::medium": {{ row: 6, frames: 6, alert: false }},
+      "xiao_shu::alert_peek::medium": {{ row: 5, frames: 8, alert: true }}
+    }};
+
+    function activeTrack() {{
+      return tracks[trackIndex] || tracks[0] || {{ frames: [] }};
+    }}
+
+    function trackVariants(track) {{
+      return Array.isArray(track.semantic_variants) ? track.semantic_variants : [];
+    }}
+
+    function defaultVariant(variants) {{
+      return variants.find((variant) => Boolean(variant.default)) || variants[0] || null;
+    }}
+
+    function activeVariant(track) {{
+      const variants = trackVariants(track);
+      if (!variants.length) {{
+        return null;
+      }}
+      return variants.find((variant) => variant.variant_id === variantId) || defaultVariant(variants);
+    }}
+
+    function variantChoreography(track) {{
+      const variant = activeVariant(track);
+      const choreography = variant && variant.frame_choreography;
+      if (!choreography || !Array.isArray(choreography.frames) || choreography.frames.length === 0) {{
+        return null;
+      }}
+      return choreography;
+    }}
+
+    function choreographyFrames(track) {{
+      const choreography = variantChoreography(track);
+      return choreography ? choreography.frames : null;
+    }}
+
+    function playbackFrameCount(track, stateFrames) {{
+      const spriteFrames = choreographyFrames(track);
+      if (spriteFrames) {{
+        return spriteFrames.length;
+      }}
+      return Math.max(1, stateFrames.length);
+    }}
+
+    function stateFrameForOrdinal(stateFrames, ordinal, playbackCount) {{
+      if (!stateFrames.length) {{
+        return null;
+      }}
+      if (playbackCount <= 1) {{
+        return stateFrames[0];
+      }}
+      const stateIndex = Math.min(
+        stateFrames.length - 1,
+        Math.round((Number(ordinal || 0) / (playbackCount - 1)) * (stateFrames.length - 1))
+      );
+      return stateFrames[stateIndex] || stateFrames[0];
+    }}
+
+    function setActiveButton() {{
+      buttons.forEach((button) => {{
+        button.classList.toggle("is-active", Number(button.dataset.trackIndex) === trackIndex);
+      }});
+    }}
+
+    function updateVariantLabel() {{
+      if (!variantEl) {{
+        return;
+      }}
+      const variant = activeVariant(activeTrack());
+      if (!variant) {{
+        variantEl.textContent = "default";
+        return;
+      }}
+      variantEl.textContent = `${{variant.variant_id || "variant"}} / ${{variant.label || "semantic option"}}`;
+    }}
+
+    function setActiveVariantButton() {{
+      if (!variantOptions) {{
+        return;
+      }}
+      Array.from(variantOptions.querySelectorAll("[data-variant-id]")).forEach((button) => {{
+        button.classList.toggle("is-active", button.dataset.variantId === variantId);
+      }});
+      updateVariantLabel();
+    }}
+
+    function updateUrl(track) {{
+      if (!track.token || !window.history || !window.URL) {{
+        return;
+      }}
+      const url = new URL(window.location.href);
+      url.searchParams.set("track", track.token);
+      const variant = activeVariant(track);
+      if (variant && variant.variant_id) {{
+        url.searchParams.set("variant", variant.variant_id);
+      }} else {{
+        url.searchParams.delete("variant");
+      }}
+      window.history.replaceState(null, "", url);
+    }}
+
+    function renderVariantButtons() {{
+      if (!variantPanel || !variantOptions) {{
+        updateVariantLabel();
+        return;
+      }}
+      const track = activeTrack();
+      const variants = trackVariants(track);
+      variantOptions.textContent = "";
+      if (!variants.length) {{
+        variantId = "";
+        variantPanel.hidden = true;
+        updateVariantLabel();
+        return;
+      }}
+      const selected = activeVariant(track) || defaultVariant(variants);
+      variantId = selected && selected.variant_id ? selected.variant_id : "";
+      variantPanel.hidden = false;
+      variants.forEach((variant) => {{
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "variant-button";
+        button.dataset.variantId = variant.variant_id || "";
+        const label = document.createElement("span");
+        label.textContent = variant.label || variant.variant_id || "variant";
+        const detail = document.createElement("small");
+        const choreography = variant.frame_choreography || {{}};
+        const choreoFrames = Array.isArray(choreography.frames) ? choreography.frames.length : 0;
+        const asset = variant.sidecar_asset && variant.sidecar_asset.asset_id ? ` asset=${{variant.sidecar_asset.asset_id}}` : "";
+        detail.textContent = `row=${{variant.sprite_row}} frames=${{variant.sprite_frames}} choreo=${{choreoFrames}} css_motion=${{Boolean(choreography.uses_css_motion)}}${{asset}}`;
+        const intent = document.createElement("small");
+        intent.textContent = variant.intent || "";
+        button.append(label, detail, intent);
+        button.addEventListener("click", () => {{
+          variantId = button.dataset.variantId || "";
+          frameIndex = 0;
+          if (timer) window.clearTimeout(timer);
+          setActiveVariantButton();
+          applyFrame();
+          updateUrl(activeTrack());
+        }});
+        variantOptions.appendChild(button);
+      }});
+      setActiveVariantButton();
+    }}
+
+    function setStateLabel(value) {{
+      if (!stateEl) {{
+        return;
+      }}
+      stateEl.textContent = "";
+      String(value || "").split(/\s+/).filter(Boolean).forEach((part) => {{
+        const span = document.createElement("span");
+        span.textContent = part;
+        stateEl.appendChild(span);
+      }});
+    }}
+
+    function setAssetLabel(spriteRoute, sidecarAsset) {{
+      if (!assetEl) {{
+        return;
+      }}
+      assetEl.textContent = "";
+      const parts = sidecarAsset
+        ? [
+            `sidecar=${{sidecarAsset.asset_id || "prototype"}}`,
+            `route=${{spriteRoute || ""}}`,
+            `format=${{sidecarAsset.format || "image/svg+xml"}}`,
+            "mode=read-only sidecar spritesheet"
+          ]
+        : [
+            `pet=${{defaultAssetPetId || "xiao-shu-dev"}}`,
+            `route=${{spriteRoute || defaultSpriteRoute}}`,
+            "mode=read-only spritesheet"
+          ];
+      parts.forEach((part) => {{
+        const span = document.createElement("span");
+        span.textContent = part;
+        assetEl.appendChild(span);
+      }});
+    }}
+
+    function setVoiceLinkageLabel(track) {{
+      if (!voiceEl) {{
+        return;
+      }}
+      const review = track && track.semantic_variant_review ? track.semantic_variant_review : null;
+      const preview = review && review.voice_linkage_preview ? review.voice_linkage_preview : null;
+      const gate = preview && preview.gate ? preview.gate : {{}};
+      const voice = preview && preview.voice ? preview.voice : {{}};
+      const parts = preview
+        ? [
+            `preview=${{preview.utterance || "visual-only preview"}}`,
+            `gate=${{gate.dry_run_route || "-"}}`,
+            `requires_gate=${{Boolean(voice.requires_explicit_emit_gate)}}`,
+            `emits_audio=${{Boolean(preview.emits_audio)}}`
+          ]
+        : [
+            "preview=none",
+            "gate=-",
+            "requires_gate=true",
+            "emits_audio=false"
+          ];
+      voiceEl.textContent = "";
+      parts.forEach((part) => {{
+        const span = document.createElement("span");
+        span.textContent = part;
+        voiceEl.appendChild(span);
+      }});
+    }}
+
+    function applySpriteFrame(track, ordinal, choreoFrame) {{
+      if (!spriteFrame || !figure) {{
+        return;
+      }}
+      const config = {{ ...(spriteRows[track.token] || {{ row: 0, frames: 6, alert: false }}) }};
+      const variant = activeVariant(track);
+      const sidecarAsset = variant && variant.sidecar_asset ? variant.sidecar_asset : null;
+      const spriteRoute = variant && (variant.asset_route || (sidecarAsset && sidecarAsset.route))
+        ? variant.asset_route || sidecarAsset.route
+        : defaultSpriteRoute;
+      if (variant) {{
+        config.row = Number(variant.sprite_row || config.row || 0);
+        config.frames = Number(variant.sprite_frames || config.frames || 1);
+        config.alert = Boolean(variant.alert_mark);
+      }}
+      if (choreoFrame) {{
+        config.row = Number(choreoFrame.row ?? config.row ?? 0);
+        config.frames = Number(config.frames || 1);
+        config.alert = Boolean(config.alert);
+      }}
+      const column = choreoFrame
+        ? Number(choreoFrame.col ?? 0)
+        : Number(ordinal || 0) % Number(config.frames || 1);
+      const x = -column * 192;
+      const y = -Number(config.row || 0) * 208;
+      spriteFrame.style.backgroundImage = "url(" + JSON.stringify(String(spriteRoute || defaultSpriteRoute)) + ")";
+      spriteFrame.style.backgroundPosition = `${{x}}px ${{y}}px`;
+      setAssetLabel(spriteRoute, sidecarAsset);
+      figure.dataset.spriteVariant = variant && variant.variant_id ? variant.variant_id : "default";
+      figure.dataset.spriteAsset = sidecarAsset && sidecarAsset.asset_id ? sidecarAsset.asset_id : "official_pet";
+      figure.dataset.spritePhase = choreoFrame && choreoFrame.phase ? choreoFrame.phase : "";
+      figure.classList.toggle("sprite-backed", true);
+      figure.classList.toggle("sprite-choreographed", Boolean(choreoFrame));
+      figure.classList.toggle("sprite-sidecar-asset", Boolean(sidecarAsset));
+      figure.classList.toggle("sprite-alert", Boolean(config.alert));
+      const markVisible = Boolean(config.alert) && (!choreoFrame || choreoFrame.mark !== false);
+      figure.classList.toggle("sprite-attention-visible", markVisible);
+    }}
+
+    function applyFrame() {{
+      const track = activeTrack();
+      const frames = Array.isArray(track.frames) ? track.frames : [];
+      if (!figure || frames.length === 0) {{
+        return;
+      }}
+      const spriteFrames = choreographyFrames(track);
+      const playbackCount = playbackFrameCount(track, frames);
+      const playbackOrdinal = frameIndex % playbackCount;
+      const frame = stateFrameForOrdinal(frames, playbackOrdinal, playbackCount) || frames[0];
+      const choreoFrame = spriteFrames ? spriteFrames[playbackOrdinal] : null;
+      figure.className = "xiao-shu sprite-backed " + (frame.css_classes || "pose-neutral-idle expression-calm-eyes motion-idle-breathe accessory-none");
+      applySpriteFrame(track, playbackOrdinal, choreoFrame);
+      figure.dataset.currentFrame = frame.frame_id || "";
+      if (tokenEl) tokenEl.textContent = track.token || "xiao_shu::unknown";
+      setStateLabel(frame.state_label || "");
+      updateVariantLabel();
+      setVoiceLinkageLabel(track);
+      const nextFrame = frames[Math.min(frames.length - 1, playbackOrdinal + 1)] || frame;
+      const currentAt = Number(frame.at_ms || 0);
+      const nextAt = Number(nextFrame.at_ms || 0);
+      const duration = Number(track.duration_ms || 1000);
+      let delay = choreoFrame && choreoFrame.hold_ms
+        ? Number(choreoFrame.hold_ms)
+        : playbackOrdinal < frames.length - 1 ? nextAt - currentAt : duration - currentAt;
+      delay = Math.max(choreoFrame ? 80 : 180, delay);
+      frameIndex = (frameIndex + 1) % playbackCount;
+      timer = window.setTimeout(applyFrame, delay);
+    }}
+
+    buttons.forEach((button) => {{
+      button.addEventListener("click", () => {{
+        trackIndex = Number(button.dataset.trackIndex || 0);
+        frameIndex = 0;
+        if (timer) window.clearTimeout(timer);
+        setActiveButton();
+        renderVariantButtons();
+        applyFrame();
+        updateUrl(activeTrack());
+      }});
+    }});
+    setActiveButton();
+    renderVariantButtons();
+    applyFrame();
+  </script>
+</body>
+</html>"#,
+        track_count = track_count,
+        input = input_label,
+        input_title = input,
+        generated_at = generated_at,
+        browser_pixels = browser_pixels,
+        sprite_route = sprite_route,
+        initial_classes = initial_classes,
+        first_token = first_token,
+        first_state = first_state_html,
+        active_variant_label = active_variant_label,
+        active_variant_json = active_variant_json,
+        asset_pet_id = asset_pet_id,
+        asset_pet_id_json = asset_pet_id_json,
+        active_track_index = active_track_index,
+        active_voice_text = active_voice_text,
+        active_voice_gate = active_voice_gate,
+        active_voice_audio = active_voice_audio,
+        active_voice_required = active_voice_required,
+        writes_files = writes_files,
+        mutates_renderer = mutates_renderer,
+        pet_mutation = pet_mutation,
+        track_buttons = track_buttons,
+        data_json = data_json,
+        sprite_route_json = sprite_route_json,
+    )
+}
+
 fn avatar_surface_payload(q: &AvatarSurfaceQuery, avatars: Vec<Value>, generated_at: i64) -> Value {
     json!({
         "agent_avatar_protocol": crate::avatar_surface::AGENT_AVATAR_PROTOCOL_VERSION,
@@ -1112,6 +4775,23 @@ fn avatar_surface_panel_html(
     avatars: &[Value],
     heartbeat_health: &Value,
     cortex_status: &Value,
+    cortex_language: &Value,
+    cortex_motion: &Value,
+    cortex_renderer: &Value,
+    cortex_renderer_registry: &Value,
+    cortex_binding_plan: &Value,
+    cortex_binding_fixture: &Value,
+    cortex_visual_adapter: &Value,
+    cortex_renderer_view: &Value,
+    cortex_review_gate: &Value,
+    cortex_review_packet: &Value,
+    cortex_review_report: &Value,
+    cortex_voice_policy: &Value,
+    cortex_voice_request: &Value,
+    cortex_voice_confirm: &Value,
+    cortex_voice_action_preview: &Value,
+    xiao_shu_action_request: &Value,
+    xiao_shu_action_requests: &Value,
     report: &str,
     generated_at: i64,
 ) -> String {
@@ -1162,6 +4842,28 @@ fn avatar_surface_panel_html(
     }
     let health_html = avatar_surface_health_html(heartbeat_health);
     let cortex_html = avatar_surface_cortex_html(cortex_status);
+    let language_html = avatar_surface_language_html(cortex_language);
+    let motion_html = avatar_surface_motion_html(cortex_motion);
+    let renderer_html = avatar_surface_renderer_html(cortex_renderer);
+    let renderer_registry_html = avatar_surface_renderer_registry_html(cortex_renderer_registry);
+    let binding_plan_html = avatar_surface_binding_plan_html(cortex_binding_plan);
+    let binding_fixture_html = avatar_surface_binding_fixture_html(cortex_binding_fixture);
+    let visual_adapter_html = avatar_surface_visual_adapter_html(cortex_visual_adapter);
+    let renderer_view_html = avatar_surface_renderer_view_summary_html(cortex_renderer_view, q);
+    let review_gate_html = avatar_surface_review_gate_html(cortex_review_gate, q);
+    let review_packet_html = avatar_surface_review_packet_html(cortex_review_packet, q);
+    let review_report_html = avatar_surface_review_report_html(cortex_review_report, q);
+    let voice_policy_html = avatar_surface_voice_policy_html(cortex_voice_policy, q);
+    let voice_request_html = avatar_surface_voice_request_html(cortex_voice_request, q);
+    let voice_confirm_html = avatar_surface_voice_confirm_html(cortex_voice_confirm, q);
+    let voice_action_preview_html =
+        avatar_surface_voice_action_preview_html(cortex_voice_action_preview, q);
+    let xiao_shu_action_request_html =
+        avatar_surface_xiao_shu_action_request_html(xiao_shu_action_request, q);
+    let xiao_shu_action_requests_html =
+        avatar_surface_xiao_shu_action_requests_html(xiao_shu_action_requests, q);
+    let quick_actions_html =
+        avatar_surface_quick_actions_html(cortex_renderer_view, cortex_review_gate, q);
 
     format!(
         r#"<!doctype html>
@@ -1280,6 +4982,52 @@ fn avatar_surface_panel_html(
       margin: 3px 0 0;
       overflow-wrap: anywhere;
     }}
+    .compact-list {{
+      display: grid;
+      gap: 8px;
+      margin: 12px 0 0;
+      padding: 0;
+      list-style: none;
+    }}
+    .compact-list li {{
+      display: grid;
+      gap: 2px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+    }}
+    .compact-list li span {{
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }}
+    .quick-actions {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }}
+    .quick-action {{
+      display: block;
+      padding: 10px 12px;
+      color: inherit;
+      text-decoration: none;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+    }}
+    .quick-action strong {{
+      display: block;
+      font-size: 14px;
+    }}
+    .quick-action span {{
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }}
+    .quick-action:hover {{
+      border-color: var(--accent);
+    }}
     table {{
       width: 100%;
       margin-top: 18px;
@@ -1345,6 +5093,7 @@ fn avatar_surface_panel_html(
       main {{ width: min(100vw - 20px, 1120px); margin-top: 14px; }}
       header {{ display: block; }}
       .count {{ display: block; margin-top: 10px; }}
+      .quick-actions {{ grid-template-columns: 1fr; }}
       .health dl {{ grid-template-columns: 1fr; }}
       table, thead, tbody, tr, th, td {{ display: block; }}
       thead {{ display: none; }}
@@ -1363,8 +5112,26 @@ fn avatar_surface_panel_html(
       </div>
       <div class="count">{count} avatars</div>
     </header>
+    {quick_actions_html}
     {health_html}
     {cortex_html}
+    {language_html}
+    {motion_html}
+    {renderer_html}
+    {renderer_registry_html}
+    {binding_plan_html}
+    {binding_fixture_html}
+    {visual_adapter_html}
+    {renderer_view_html}
+    {review_gate_html}
+    {review_packet_html}
+    {review_report_html}
+    {voice_policy_html}
+    {voice_request_html}
+    {voice_confirm_html}
+    {voice_action_preview_html}
+    {xiao_shu_action_request_html}
+    {xiao_shu_action_requests_html}
     <table>
       <thead>
         <tr><th>Agent</th><th>Mode</th><th>Focus</th><th>Next</th><th>Heartbeat</th></tr>
@@ -1378,8 +5145,26 @@ fn avatar_surface_panel_html(
         subtitle = html_escape(&subtitle),
         meta = html_escape(&meta),
         count = avatars.len(),
+        quick_actions_html = quick_actions_html,
         health_html = health_html,
         cortex_html = cortex_html,
+        language_html = language_html,
+        motion_html = motion_html,
+        renderer_html = renderer_html,
+        renderer_registry_html = renderer_registry_html,
+        binding_plan_html = binding_plan_html,
+        binding_fixture_html = binding_fixture_html,
+        visual_adapter_html = visual_adapter_html,
+        renderer_view_html = renderer_view_html,
+        review_gate_html = review_gate_html,
+        review_packet_html = review_packet_html,
+        review_report_html = review_report_html,
+        voice_policy_html = voice_policy_html,
+        voice_request_html = voice_request_html,
+        voice_confirm_html = voice_confirm_html,
+        voice_action_preview_html = voice_action_preview_html,
+        xiao_shu_action_request_html = xiao_shu_action_request_html,
+        xiao_shu_action_requests_html = xiao_shu_action_requests_html,
         rows = rows,
         report = html_escape(report)
     )
@@ -1738,11 +5523,123 @@ mod tests {
                 }
             }
         });
+        let language =
+            crate::avatar_cortex::avatar_cortex_language_preview_from_status(cortex.clone());
+        let motion = crate::avatar_cortex::avatar_cortex_motion_preview_from_status(cortex.clone());
+        let renderer =
+            crate::avatar_cortex::avatar_cortex_renderer_preview_from_status(cortex.clone());
+        let renderer_registry =
+            crate::avatar_cortex::avatar_cortex_renderer_registry_from_status(cortex.clone());
+        let binding_plan =
+            crate::avatar_cortex::avatar_cortex_binding_plan_from_status(cortex.clone());
+        let binding_fixture =
+            crate::avatar_cortex::avatar_cortex_binding_fixture_from_status(cortex.clone());
+        let visual_adapter =
+            crate::avatar_cortex::avatar_cortex_visual_adapter_from_status(cortex.clone());
+        let renderer_view =
+            crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex.clone());
+        let review_gate =
+            crate::avatar_cortex::avatar_cortex_renderer_review_gate_from_status(cortex.clone());
+        let review_packet =
+            crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(cortex.clone());
+        let review_report =
+            crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(cortex.clone());
+        let voice_policy =
+            crate::avatar_cortex::avatar_cortex_voice_policy_from_status(cortex.clone());
+        let voice_request = crate::avatar_cortex::avatar_cortex_voice_request_from_status(
+            cortex.clone(),
+            Some("xiao_shu::alert_peek::medium"),
+            Some("agent-bridge"),
+            None,
+        );
+        let voice_confirm = crate::avatar_cortex::avatar_cortex_voice_confirm_from_status(
+            cortex.clone(),
+            Some("xiao_shu::alert_peek::medium"),
+            Some("agent-bridge"),
+            Some("panel-dry-run"),
+            false,
+        );
+        let voice_action_preview =
+            crate::avatar_cortex::avatar_cortex_voice_action_preview_from_status(
+                cortex.clone(),
+                Some("xiao_shu::alert_peek::medium"),
+                Some("agent-bridge"),
+                Some("panel-dry-run"),
+                true,
+                false,
+                300,
+                None,
+            );
+        let xiao_shu_action_request = crate::avatar_cortex::xiao_shu_action_request(
+            &crate::avatar_cortex::XiaoShuActionRequestOptions {
+                label: None,
+                heartbeat_label: None,
+                project: Some("agent-bridge"),
+                output: None,
+                actor: Some("panel"),
+                intent: Some("voice_alert"),
+                message: Some("show the operator a safe Xiao Shu action request"),
+                requested_track: Some("xiao_shu::alert_peek::medium"),
+                reason: Some("panel-dry-run"),
+                confirm: false,
+                force: false,
+                cooldown_secs: 300,
+                tts_voice: None,
+                tts_rate: None,
+                include_details: false,
+            },
+        )
+        .unwrap();
+        let xiao_shu_action_requests = json!({
+            "surface": "xiao_shu_action_request_queue",
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "queue": {
+                "project": "agent-bridge",
+                "exists": true,
+                "path": "/tmp/requests.jsonl",
+                "state_filter": "pending_human_confirmation",
+                "include_details": false,
+                "matching_records": 1,
+                "returned_count": 1
+            },
+            "records": [{
+                "request_id": "xsr-test",
+                "state": "pending_human_confirmation",
+                "actor": "codex",
+                "intent": "voice_alert",
+                "mapped_track": "xiao_shu::alert_peek::medium",
+                "reason": "unit-test",
+                "local_confirm_command": "agent-bridge avatar xiao-shu-action-request-action --project agent-bridge --request-id \"xsr-test\" --reason \"unit-test\" --confirm",
+                "local_emit_command": "agent-bridge avatar xiao-shu-action-request-action --project agent-bridge --request-id \"xsr-test\" --reason \"unit-test\" --confirm --emit",
+                "action_request": {
+                    "line": "please look"
+                }
+            }]
+        });
         let html = avatar_surface_panel_html(
             &q,
             &[avatar],
             &health,
             &cortex,
+            &language,
+            &motion,
+            &renderer,
+            &renderer_registry,
+            &binding_plan,
+            &binding_fixture,
+            &visual_adapter,
+            &renderer_view,
+            &review_gate,
+            &review_packet,
+            &review_report,
+            &voice_policy,
+            &voice_request,
+            &voice_confirm,
+            &voice_action_preview,
+            &xiao_shu_action_request,
+            &xiao_shu_action_requests,
             "Agent <Avatar> Surface",
             1779193140,
         );
@@ -1752,6 +5649,101 @@ mod tests {
         assert!(html.contains("Agent &lt;Avatar&gt; Surface"));
         assert!(html.contains("Heartbeat Health"));
         assert!(html.contains("Cortex Status"));
+        assert!(html.contains("Xiao Shu Language"));
+        assert!(html.contains("Xiao Shu Motion"));
+        assert!(html.contains("Xiao Shu Renderer"));
+        assert!(html.contains("Xiao Shu Renderer Registry"));
+        assert!(html.contains("known=5 candidate=2 review=3 fallback=1"));
+        assert!(html.contains("Xiao Shu Binding Plan"));
+        assert!(html.contains("selected=2 deferred=4"));
+        assert!(html.contains("first"));
+        assert!(html.contains("xiao_shu::soft_bounce::low risk=low"));
+        assert!(html.contains("writes_files=false mutates_renderer=false pet_package=false"));
+        assert!(html.contains("Xiao Shu Binding Fixture"));
+        assert!(html.contains("Xiao Shu Action Requests"));
+        assert!(html.contains("xsr-test"));
+        assert!(html.contains("fixtures=2 source=avatar_cortex_binding_plan.selected"));
+        assert!(html.contains("xiao_shu::soft_bounce::low motion=soft_bounce"));
+        assert!(html.contains("duration=1800ms returns_idle=true"));
+        assert!(html.contains("all_idle=true all_under_2s=true"));
+        assert!(html.contains("Xiao Shu Visual Adapter"));
+        assert!(
+            html.contains("previews=2 input=avatar_cortex_binding_fixture.fixture.golden_payloads")
+        );
+        assert!(html.contains("xiao_shu::soft_bounce::low frames=4"));
+        assert!(html.contains("motion=idle_breathe expression=bright_smile"));
+        assert!(html
+            .contains("pixels=false writes_files=false mutates_renderer=false pet_package=false"));
+        assert!(html.contains("Xiao Shu Renderer View"));
+        assert!(html
+            .contains("tracks=5 selected=2 review=3 route=/avatar-surface/cortex-renderer-view"));
+        assert!(html.contains("xiao_shu::soft_bounce::low frames=4"));
+        assert!(html.contains("browser=true"));
+        assert!(html.contains("renderer view"));
+        assert!(html.contains("Avatar quick actions"));
+        assert!(html.contains("Renderer View</strong>"));
+        assert!(html.contains("Review Gate</strong>"));
+        assert!(html.contains("pending=3 auto_pass=5 can_promote=false"));
+        assert!(html.contains("Xiao Shu Review Gate"));
+        assert!(html.contains("tracks=5 selected=2 pending=3"));
+        assert!(html.contains("pass=5 blocked=0"));
+        assert!(html.contains("required=true can_promote_review=false"));
+        assert!(html.contains("pending links"));
+        assert!(html.contains("track=xiao_shu%3A%3Asorting_glow%3A%3Amedium"));
+        assert!(html.contains("track=xiao_shu%3A%3Alook_sideways%3A%3Amedium"));
+        assert!(html.contains("track=xiao_shu%3A%3Aalert_peek%3A%3Amedium"));
+        assert!(html.contains("review gate json"));
+        assert!(html.contains("Xiao Shu Review Packet"));
+        assert!(html.contains("packets=3 baseline_refs=2"));
+        assert!(html.contains("approval_writes=false records_persisted=false can_promote=false"));
+        assert!(html.contains("decision=keep_pending"));
+        assert!(html.contains("review packet json"));
+        assert!(html.contains("Xiao Shu Review Report"));
+        assert!(html.contains("state=ready_for_human_visual_review packets=3 ready=3 blocked=0"));
+        assert!(html.contains("human=true approval=false decisions=0"));
+        assert!(html.contains("items=1 voice_requests=1"));
+        assert!(html.contains("can_promote=false merge_without_review=false"));
+        assert!(html.contains("review report json"));
+        assert!(html.contains("Xiao Shu Voice Policy"));
+        assert!(html.contains("tracks=5 manual_cli=1 display_only=4 auto=0"));
+        assert!(html.contains("Flo (中文（中国大陆）) rate=190 cooldown=300s"));
+        assert!(html.contains("xiao_shu::alert_peek::medium line=小舒发现一点需要你看一下。"));
+        assert!(html.contains("http_emit_route_added=false auto_emit=0"));
+        assert!(html.contains("voice policy json"));
+        assert!(html.contains("Xiao Shu Voice Request"));
+        assert!(html
+            .contains("state=ready_for_operator_confirmation token=xiao_shu::alert_peek::medium"));
+        assert!(html.contains("manual_cli=true second_step=true reason_present=false"));
+        assert!(html.contains("auto_emit=false http_emit_route=null"));
+        assert!(html.contains("voice request json"));
+        assert!(html.contains("Xiao Shu Voice Confirm"));
+        assert!(html.contains(
+            "state=waiting_for_operator_confirmation token=xiao_shu::alert_peek::medium"
+        ));
+        assert!(html.contains("confirm=false would_execute_cli=false reason_present=true"));
+        assert!(html.contains("auto_emit=false http_emit_route=null actual_execution_here=false"));
+        assert!(html.contains("agent-bridge avatar cortex-voice-action"));
+        assert!(html.contains("voice confirm json"));
+        assert!(html.contains("Xiao Shu Voice Action Preview"));
+        assert!(html.contains("ready=true token=xiao_shu::alert_peek::medium"));
+        assert!(html.contains("would_emit=true blocked=false"));
+        assert!(html.contains("voice action preview json"));
+        assert!(html.contains("Xiao Shu Action Request"));
+        assert!(html.contains("state=requires_human_confirmation actor=panel intent=voice_alert"));
+        assert!(html.contains(
+            "direct_control=false emits_audio=false human_required=true confirmed=false"
+        ));
+        assert!(html.contains("ready=false blocked=true reasons="));
+        assert!(html.contains("human_confirmation_required"));
+        assert!(html.contains("xiao shu action request json"));
+        assert!(html.contains("Xiao Shu Action Requests"));
+        assert!(html.contains("state=pending_human_confirmation details=false"));
+        assert!(html.contains("/avatar-surface/xiao-shu-action-requests?project=agent-bridge&amp;request_id=xsr-test&amp;details=true"));
+        assert!(html.contains("detail json"));
+        assert!(html.contains("dry_run=agent-bridge avatar xiao-shu-action-request-action"));
+        assert!(html.contains("emit=agent-bridge avatar xiao-shu-action-request-action"));
+        assert!(html.contains("stage=candidate risk=low"));
+        assert!(html.contains("no recent event window"));
         assert!(html.contains("healthy &lt;binary&gt;"));
         assert!(html.contains("step=16"));
         assert!(html.contains("records=16 latest=healthy reason=unchanged"));
@@ -1766,5 +5758,166 @@ mod tests {
         assert!(html.contains("status-fresh"));
         assert!(html.contains("5m 0s ago"));
         assert!(!html.contains("<script>alert(1)</script>"));
+    }
+
+    #[test]
+    fn avatar_surface_renderer_view_html_embeds_sidecar_view() {
+        let cortex = json!({
+            "surface": "avatar_cortex_status",
+            "read_only": true,
+            "launchd": { "loaded": true, "last_exit_code": 0, "runs": 1 },
+            "snapshot": {
+                "path": "/Users/me/.local/share/agent-bridge/avatar_cortex/test.parquet",
+                "total_rows": 1,
+                "latest_long": {
+                    "step": 16,
+                    "cycle_ts": 1779193100,
+                    "fingerprint": "abc123"
+                }
+            },
+            "events": {
+                "records_count": 16,
+                "unhealthy_count": 0,
+                "latest": {
+                    "ts": 1779193080,
+                    "status": "healthy",
+                    "reason": "unchanged"
+                }
+            },
+            "trend": {
+                "step_records_delta": 0,
+                "snapshot_event_lag_secs": 20,
+                "latest_status": "healthy",
+                "learning_state": {
+                    "state": "caught_up",
+                    "reason": "step_matches_records"
+                },
+                "behavior_policy": {
+                    "badge": "caught up",
+                    "recommended_action": "none",
+                    "voice": {
+                        "allowed": false
+                    }
+                }
+            }
+        });
+        let renderer_view = crate::avatar_cortex::avatar_cortex_renderer_view_from_status(cortex);
+        let html = avatar_surface_renderer_view_html(&renderer_view, 1779193140, None, None, None);
+
+        assert!(html.contains("Xiao Shu Sidecar Renderer"));
+        assert!(html.contains("data-stage=\"xiao-shu-renderer-view\""));
+        assert!(html.contains("xiao_shu::soft_bounce::low"));
+        assert!(html.contains("xiao_shu::sorting_glow::medium"));
+        assert!(html.contains("review_only / 8 frames / 1440ms"));
+        assert!(html.contains("motion-soft-bounce"));
+        assert!(html.contains("motion-sorting-glow"));
+        assert!(html.contains("xiao-shu sprite-backed"));
+        assert!(html.contains("xiao-shu-sprite"));
+        assert!(html.contains("pet=xiao-shu-dev"));
+        assert!(html.contains("<dd data-asset>"));
+        assert!(html.contains("/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev"));
+        assert!(html.contains("Alert Peek Semantic Variants"));
+        assert!(html.contains("data-variant-panel hidden"));
+        assert!(html.contains("\"variant_id\":\"current_alert_row\""));
+        assert!(html.contains("\"variant_id\":\"waiting_peek_row\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_peek_v2\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_peek_v4\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_peek_v3\""));
+        assert!(html.contains("\"variant_id\":\"focused_review_row\""));
+        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-alert-peek-v2"));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-peek-v4"
+        ));
+        assert!(
+            html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-canonical-peek-v3")
+        );
+        assert!(html.contains("\"asset_id\":\"xiao-shu-alert-peek-v2\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-peek-v4\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-canonical-peek-v3\""));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_frame_choreo_v1\""));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v2_frame_choreo\""));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v4_frame_choreo\""));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v3_frame_choreo\""));
+        assert!(html.contains("\"surface\":\"alert_peek_voice_linkage_preview\""));
+        assert!(html.contains("\"utterance\":\"小舒发现一点需要你看一下。\""));
+        assert!(html.contains("/avatar-surface/cortex-voice-gate?enabled=true&reason=alert-peek-visual-review&preview_text=%E5%B0%8F%E8%88%92%E5%8F%91%E7%8E%B0%E4%B8%80%E7%82%B9%E9%9C%80%E8%A6%81%E4%BD%A0%E7%9C%8B%E4%B8%80%E4%B8%8B%E3%80%82"));
+        assert!(html.contains("\"real_emit_surface\":\"agent-bridge avatar cortex-voice-emit\""));
+        assert!(html.contains("\"http_emit_route\":null"));
+        assert!(html.contains("function setVoiceLinkageLabel(track)"));
+        assert!(html.contains("\"uses_css_motion\":false"));
+        assert!(html.contains("\"phase\":\"attention_hold\""));
+        assert!(
+            html.contains("\"xiao_shu::alert_peek::medium\": { row: 5, frames: 8, alert: true }")
+        );
+        assert!(html.contains("filter: none;"));
+        assert!(html.contains("--alert-soft: #c97968;"));
+        assert!(html.contains("border-width: 4px;"));
+        assert!(html.contains("brightness(0.94)"));
+        assert!(html.contains("sprite-choreographed"));
+        assert!(html.contains("sprite-attention-visible"));
+        assert!(html.contains("function choreographyFrames(track)"));
+        assert!(!html.contains("animation: alert-peek 1400ms ease-in-out infinite;"));
+        assert!(html.contains("browser pixels=true"));
+        assert!(html.contains("<span>writes_files=false</span>"));
+        assert!(html.contains("<span>mutates_renderer=false</span>"));
+        assert!(html.contains("<span>pet_package=false</span>"));
+        assert!(html.contains("\"surface\":\"avatar_cortex_sidecar_renderer_view\""));
+
+        let focused = avatar_surface_renderer_view_html(
+            &renderer_view,
+            1779193140,
+            Some("xiao_shu::alert_peek::medium"),
+            None,
+            Some("waiting_peek_row"),
+        );
+        assert!(focused.contains("<span>active=xiao_shu::alert_peek::medium</span>"));
+        assert!(focused.contains("waiting_peek_row / waiting peek row"));
+        assert!(focused.contains("data-voice-linkage"));
+        assert!(focused.contains("preview=小舒发现一点需要你看一下。"));
+        assert!(focused.contains("gate=/avatar-surface/cortex-voice-gate?enabled=true&amp;reason=alert-peek-visual-review&amp;preview_text=%E5%B0%8F%E8%88%92%E5%8F%91%E7%8E%B0%E4%B8%80%E7%82%B9%E9%9C%80%E8%A6%81%E4%BD%A0%E7%9C%8B%E4%B8%80%E4%B8%8B%E3%80%82"));
+        assert!(focused.contains(
+            "choreo=${choreoFrames} css_motion=${Boolean(choreography.uses_css_motion)}${asset}"
+        ));
+        assert!(focused.contains(r#"let variantId = "waiting_peek_row";"#));
+        assert!(focused.contains("data-sprite-variant=\"waiting_peek_row\""));
+        assert!(focused.contains(
+            "const defaultSpriteRoute = \"/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev\";"
+        ));
+        assert!(focused.contains("const defaultAssetPetId = \"xiao-shu-dev\";"));
+        assert!(focused.contains("function setAssetLabel(spriteRoute, sidecarAsset)"));
+        assert!(focused.contains("figure.dataset.spriteAsset"));
+        assert!(focused.contains("sprite-sidecar-asset"));
+        assert!(focused.contains("figure.dataset.spritePhase"));
+        assert!(focused.contains("choreoFrame.hold_ms"));
+        assert!(focused.contains("url.searchParams.set(\"variant\", variant.variant_id);"));
+        assert!(focused.contains(r#"let trackIndex = 4;"#));
+        assert!(focused.contains(r#"data-track-token="xiao_shu::alert_peek::medium""#));
+    }
+
+    #[test]
+    fn avatar_sidecar_spritesheet_serves_prototype_atlas_contract() {
+        let svg = avatar_sidecar_spritesheet_svg("xiao-shu-alert-peek-v2").unwrap();
+        let motion_svg =
+            avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-peek-v4").unwrap();
+        let canonical_svg = avatar_sidecar_spritesheet_svg("xiao-shu-canonical-peek-v3").unwrap();
+
+        assert!(
+            svg.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872""#)
+        );
+        assert!(svg.contains("Xiao Shu alert peek sidecar v2 sprite atlas"));
+        assert!(svg.contains(r#"id="frame-0""#));
+        assert!(svg.contains(r#"id="frame-7""#));
+        assert!(svg.contains("rotate(72)"));
+        assert!(svg.contains(r##"fill="#d45f4c""##));
+        assert!(motion_svg.contains("Xiao Shu motion-canonical alert peek sidecar v4 sprite atlas"));
+        assert!(motion_svg.contains(r#"id="frame-7""#));
+        assert!(motion_svg.contains("xs4-robe"));
+        assert!(motion_svg.contains("rotate(72)"));
+        assert!(motion_svg.contains(r##"fill="#56c6cc""##));
+        assert!(canonical_svg.contains("Xiao Shu canonical alert peek sidecar v3 sprite atlas"));
+        assert!(canonical_svg.contains(r#"id="frame-7""#));
+        assert!(canonical_svg.contains("xs3-robe"));
+        assert!(!canonical_svg.contains("xiao-shu-canonical-peek-v3"));
+        assert!(avatar_sidecar_spritesheet_svg("unknown").is_none());
     }
 }

@@ -945,6 +945,2131 @@ fn lossy_truncate(bytes: &[u8]) -> (String, bool) {
 }
 
 // ===========================================================================
+//                        mobile / Android ADB tools
+// ===========================================================================
+
+const MOBILE_UI_DUMP_PATH: &str = "/sdcard/agent_bridge_window.xml";
+const MOBILE_DEFAULT_TIMEOUT_MS: u64 = 30_000;
+
+#[derive(Debug, Clone)]
+struct AdbCommandOutput {
+    exit_code: i32,
+    stdout: String,
+    stderr: String,
+    duration_ms: u64,
+    truncated: bool,
+}
+
+impl AdbCommandOutput {
+    fn ok(&self) -> bool {
+        self.exit_code == 0
+    }
+
+    fn as_json(&self) -> Value {
+        json!({
+            "exit_code": self.exit_code,
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "duration_ms": self.duration_ms,
+            "truncated": self.truncated,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AdbBinaryOutput {
+    exit_code: i32,
+    stdout: Vec<u8>,
+    stderr: String,
+    duration_ms: u64,
+    stderr_truncated: bool,
+}
+
+impl AdbBinaryOutput {
+    fn ok(&self) -> bool {
+        self.exit_code == 0
+    }
+
+    fn as_json(&self) -> Value {
+        json!({
+            "exit_code": self.exit_code,
+            "stdout_bytes": self.stdout.len(),
+            "stderr": self.stderr,
+            "duration_ms": self.duration_ms,
+            "stderr_truncated": self.stderr_truncated,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MobileDevice {
+    serial: String,
+    state: String,
+    attrs: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MobileBounds {
+    left: i64,
+    top: i64,
+    right: i64,
+    bottom: i64,
+}
+
+impl MobileBounds {
+    fn center(self) -> (i64, i64) {
+        ((self.left + self.right) / 2, (self.top + self.bottom) / 2)
+    }
+
+    fn as_json(self) -> Value {
+        let (x, y) = self.center();
+        json!({
+            "left": self.left,
+            "top": self.top,
+            "right": self.right,
+            "bottom": self.bottom,
+            "center": { "x": x, "y": y },
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MobileUiNode {
+    ordinal: usize,
+    index: String,
+    text: String,
+    resource_id: String,
+    class_name: String,
+    package_name: String,
+    content_desc: String,
+    clickable: bool,
+    enabled: bool,
+    focusable: bool,
+    focused: bool,
+    scrollable: bool,
+    bounds: Option<MobileBounds>,
+}
+
+impl MobileUiNode {
+    fn has_semantic_label(&self) -> bool {
+        !self.text.is_empty() || !self.resource_id.is_empty() || !self.content_desc.is_empty()
+    }
+
+    fn is_actionable(&self) -> bool {
+        self.clickable || self.focusable || self.scrollable || self.has_semantic_label()
+    }
+
+    fn is_surface_view(&self) -> bool {
+        self.class_name == "android.view.SurfaceView"
+    }
+
+    fn compact_json(&self) -> Value {
+        let mut obj = Map::new();
+        obj.insert("ordinal".into(), json!(self.ordinal));
+        if !self.index.is_empty() {
+            obj.insert("index".into(), json!(self.index));
+        }
+        if !self.text.is_empty() {
+            obj.insert("text".into(), json!(self.text));
+        }
+        if !self.resource_id.is_empty() {
+            obj.insert("resource_id".into(), json!(self.resource_id));
+        }
+        if !self.class_name.is_empty() {
+            obj.insert("class".into(), json!(self.class_name));
+        }
+        if !self.package_name.is_empty() {
+            obj.insert("package".into(), json!(self.package_name));
+        }
+        if !self.content_desc.is_empty() {
+            obj.insert("content_desc".into(), json!(self.content_desc));
+        }
+        if self.clickable {
+            obj.insert("clickable".into(), json!(true));
+        }
+        if self.focusable {
+            obj.insert("focusable".into(), json!(true));
+        }
+        if self.focused {
+            obj.insert("focused".into(), json!(true));
+        }
+        if self.scrollable {
+            obj.insert("scrollable".into(), json!(true));
+        }
+        obj.insert("enabled".into(), json!(self.enabled));
+        if let Some(bounds) = self.bounds {
+            obj.insert("bounds".into(), bounds.as_json());
+        }
+        Value::Object(obj)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MobileUiAnalysis {
+    node_count: usize,
+    semantic_node_count: usize,
+    actionable_node_count: usize,
+    surface_view_count: usize,
+    focused_surface_view_count: usize,
+    semantic_nodes: bool,
+    canvas_only: bool,
+    surface_dominated: bool,
+}
+
+impl MobileUiAnalysis {
+    fn from_nodes(nodes: &[MobileUiNode]) -> Self {
+        let semantic_node_count = nodes.iter().filter(|n| n.has_semantic_label()).count();
+        let actionable_node_count = nodes.iter().filter(|n| n.is_actionable()).count();
+        let surface_view_count = nodes.iter().filter(|n| n.is_surface_view()).count();
+        let focused_surface_view_count = nodes
+            .iter()
+            .filter(|n| n.is_surface_view() && n.focused)
+            .count();
+        let semantic_nodes = semantic_node_count > 0;
+        let canvas_only = surface_view_count > 0 && !semantic_nodes;
+        let surface_dominated = surface_view_count > 0 && semantic_node_count <= 2;
+        Self {
+            node_count: nodes.len(),
+            semantic_node_count,
+            actionable_node_count,
+            surface_view_count,
+            focused_surface_view_count,
+            semantic_nodes,
+            canvas_only,
+            surface_dominated,
+        }
+    }
+
+    fn as_json(self) -> Value {
+        json!({
+            "node_count": self.node_count,
+            "semantic_node_count": self.semantic_node_count,
+            "actionable_node_count": self.actionable_node_count,
+            "surface_view_count": self.surface_view_count,
+            "focused_surface_view_count": self.focused_surface_view_count,
+            "semantic_nodes": self.semantic_nodes,
+            "canvas_only": self.canvas_only,
+            "surface_dominated": self.surface_dominated,
+            "hint": if self.canvas_only {
+                "UIAutomator sees a SurfaceView/canvas shell but no semantic child controls; use screenshot or engine-side hooks for in-canvas targets."
+            } else if self.surface_dominated {
+                "UIAutomator sees a SurfaceView/canvas app with limited semantic overlays; selector actions may only work for native overlays."
+            } else {
+                "UIAutomator exposes semantic nodes; prefer selectors over coordinates when possible."
+            },
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct MobileSelector {
+    text: Option<String>,
+    text_contains: Option<String>,
+    resource_id: Option<String>,
+    content_desc: Option<String>,
+    class_name: Option<String>,
+    package_name: Option<String>,
+    clickable: Option<bool>,
+    focused: Option<bool>,
+    enabled: Option<bool>,
+}
+
+impl MobileSelector {
+    fn from_value(value: &Value) -> std::result::Result<Self, String> {
+        let Some(obj) = value.as_object() else {
+            return Err("'selector' must be an object".to_string());
+        };
+        let selector = Self {
+            text: obj
+                .get("text")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            text_contains: obj
+                .get("text_contains")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            resource_id: obj
+                .get("resource_id")
+                .or_else(|| obj.get("resource-id"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            content_desc: obj
+                .get("content_desc")
+                .or_else(|| obj.get("content-desc"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            class_name: obj
+                .get("class")
+                .or_else(|| obj.get("class_name"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            package_name: obj
+                .get("package")
+                .or_else(|| obj.get("package_name"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            clickable: obj.get("clickable").and_then(|v| v.as_bool()),
+            focused: obj.get("focused").and_then(|v| v.as_bool()),
+            enabled: obj.get("enabled").and_then(|v| v.as_bool()),
+        };
+        if selector.is_empty() {
+            return Err("selector must include at least one matching field".to_string());
+        }
+        Ok(selector)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.text.is_none()
+            && self.text_contains.is_none()
+            && self.resource_id.is_none()
+            && self.content_desc.is_none()
+            && self.class_name.is_none()
+            && self.package_name.is_none()
+            && self.clickable.is_none()
+            && self.focused.is_none()
+            && self.enabled.is_none()
+    }
+
+    fn matches(&self, node: &MobileUiNode) -> bool {
+        if let Some(expected) = &self.text {
+            if &node.text != expected {
+                return false;
+            }
+        }
+        if let Some(expected) = &self.text_contains {
+            if !node.text.contains(expected) {
+                return false;
+            }
+        }
+        if let Some(expected) = &self.resource_id {
+            if &node.resource_id != expected {
+                return false;
+            }
+        }
+        if let Some(expected) = &self.content_desc {
+            if &node.content_desc != expected {
+                return false;
+            }
+        }
+        if let Some(expected) = &self.class_name {
+            if &node.class_name != expected {
+                return false;
+            }
+        }
+        if let Some(expected) = &self.package_name {
+            if &node.package_name != expected {
+                return false;
+            }
+        }
+        if let Some(expected) = self.clickable {
+            if node.clickable != expected {
+                return false;
+            }
+        }
+        if let Some(expected) = self.focused {
+            if node.focused != expected {
+                return false;
+            }
+        }
+        if let Some(expected) = self.enabled {
+            if node.enabled != expected {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn mobile_schema_serial() -> Value {
+    json!({
+        "type": "string",
+        "description": "ADB serial. Required when multiple online devices are connected."
+    })
+}
+
+fn mobile_schema_selector() -> Value {
+    json!({
+        "type": "object",
+        "description": "UI Automator node selector. All supplied fields must match.",
+        "properties": {
+            "text": { "type": "string" },
+            "text_contains": { "type": "string" },
+            "resource_id": { "type": "string" },
+            "resource-id": { "type": "string" },
+            "content_desc": { "type": "string" },
+            "content-desc": { "type": "string" },
+            "class": { "type": "string" },
+            "package": { "type": "string" },
+            "clickable": { "type": "boolean" },
+            "focused": { "type": "boolean" },
+            "enabled": { "type": "boolean" }
+        }
+    })
+}
+
+fn adb_args(parts: &[&str]) -> Vec<String> {
+    parts.iter().map(|s| (*s).to_string()).collect()
+}
+
+fn mobile_timeout_ms(args: &Value) -> u64 {
+    args.get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(MOBILE_DEFAULT_TIMEOUT_MS)
+        .clamp(1_000, 120_000)
+}
+
+fn resolve_adb_bin() -> String {
+    if let Ok(v) = std::env::var("AGENT_BRIDGE_ADB") {
+        if !v.trim().is_empty() {
+            return v;
+        }
+    }
+    if let Ok(v) = std::env::var("ADB") {
+        if !v.trim().is_empty() {
+            return v;
+        }
+    }
+    if let Ok(home) = std::env::var("ANDROID_HOME") {
+        let candidate = PathBuf::from(home).join("platform-tools").join("adb");
+        if candidate.exists() {
+            return candidate.to_string_lossy().into_owned();
+        }
+    }
+    for candidate in [
+        "/opt/homebrew/share/android-commandlinetools/platform-tools/adb",
+        "/opt/homebrew/bin/adb",
+        "/usr/local/bin/adb",
+    ] {
+        if PathBuf::from(candidate).exists() {
+            return candidate.to_string();
+        }
+    }
+    "adb".to_string()
+}
+
+async fn run_adb_command(
+    serial: Option<&str>,
+    args: &[String],
+    timeout_ms: u64,
+) -> std::result::Result<AdbCommandOutput, String> {
+    let mut cmd = TokioCommand::new(resolve_adb_bin());
+    if let Some(serial) = serial.filter(|s| !s.trim().is_empty()) {
+        cmd.arg("-s").arg(serial);
+    }
+    cmd.args(args);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let started = Instant::now();
+    let out = tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+    let output = match out {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => return Err(format!("spawn adb failed: {e}")),
+        Err(_) => {
+            return Ok(AdbCommandOutput {
+                exit_code: -1,
+                stdout: String::new(),
+                stderr: format!("killed after {timeout_ms} ms timeout"),
+                duration_ms,
+                truncated: false,
+            });
+        }
+    };
+    let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+    let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+    Ok(AdbCommandOutput {
+        exit_code: output.status.code().unwrap_or(-1),
+        stdout,
+        stderr,
+        duration_ms,
+        truncated: stdout_truncated || stderr_truncated,
+    })
+}
+
+async fn run_adb_binary_command(
+    serial: Option<&str>,
+    args: &[String],
+    timeout_ms: u64,
+) -> std::result::Result<AdbBinaryOutput, String> {
+    let mut cmd = TokioCommand::new(resolve_adb_bin());
+    if let Some(serial) = serial.filter(|s| !s.trim().is_empty()) {
+        cmd.arg("-s").arg(serial);
+    }
+    cmd.args(args);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let started = Instant::now();
+    let out = tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+    let output = match out {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => return Err(format!("spawn adb failed: {e}")),
+        Err(_) => {
+            return Ok(AdbBinaryOutput {
+                exit_code: -1,
+                stdout: Vec::new(),
+                stderr: format!("killed after {timeout_ms} ms timeout"),
+                duration_ms,
+                stderr_truncated: false,
+            });
+        }
+    };
+    let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+    Ok(AdbBinaryOutput {
+        exit_code: output.status.code().unwrap_or(-1),
+        stdout: output.stdout,
+        stderr,
+        duration_ms,
+        stderr_truncated,
+    })
+}
+
+fn parse_adb_devices(stdout: &str) -> Vec<MobileDevice> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with("List of devices") {
+                return None;
+            }
+            let mut parts = line.split_whitespace();
+            let serial = parts.next()?.to_string();
+            let state = parts.next()?.to_string();
+            let attrs = parts
+                .filter_map(|part| {
+                    let (k, v) = part.split_once(':')?;
+                    Some((k.to_string(), v.to_string()))
+                })
+                .collect();
+            Some(MobileDevice {
+                serial,
+                state,
+                attrs,
+            })
+        })
+        .collect()
+}
+
+fn mobile_device_json(device: &MobileDevice, android_version: Option<String>) -> Value {
+    let mut obj = Map::new();
+    obj.insert("serial".into(), json!(device.serial));
+    obj.insert("state".into(), json!(device.state));
+    for (k, v) in &device.attrs {
+        obj.insert(k.clone(), json!(v));
+    }
+    if let Some(version) = android_version.filter(|s| !s.is_empty()) {
+        obj.insert("android_version".into(), json!(version));
+    }
+    Value::Object(obj)
+}
+
+async fn mobile_online_devices(timeout_ms: u64) -> std::result::Result<Vec<MobileDevice>, String> {
+    let out = run_adb_command(None, &adb_args(&["devices", "-l"]), timeout_ms).await?;
+    if !out.ok() {
+        return Err(format!("adb devices failed: {}", out.stderr.trim()));
+    }
+    Ok(parse_adb_devices(&out.stdout)
+        .into_iter()
+        .filter(|d| d.state == "device")
+        .collect())
+}
+
+async fn resolve_mobile_serial(
+    args: &Value,
+    timeout_ms: u64,
+) -> std::result::Result<String, String> {
+    if let Some(serial) = args
+        .get("serial")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+    {
+        return Ok(serial.to_string());
+    }
+    let devices = mobile_online_devices(timeout_ms).await?;
+    match devices.len() {
+        0 => Err("no online ADB devices found".to_string()),
+        1 => Ok(devices[0].serial.clone()),
+        _ => Err(format!(
+            "multiple online devices found; pass serial (available: {})",
+            devices
+                .iter()
+                .map(|d| d.serial.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+async fn mobile_getprop(serial: &str, prop: &str, timeout_ms: u64) -> Option<String> {
+    let args = vec!["shell".to_string(), "getprop".to_string(), prop.to_string()];
+    let out = run_adb_command(Some(serial), &args, timeout_ms)
+        .await
+        .ok()?;
+    if out.ok() {
+        Some(out.stdout.trim().to_string())
+    } else {
+        None
+    }
+}
+
+fn parse_focus_lines(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            line.contains("mCurrentFocus")
+                || line.contains("mFocusedApp")
+                || line.contains("topResumedActivity")
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+fn focus_token_package(token: &str) -> Option<String> {
+    let clean = token.trim_matches(|c: char| {
+        c == '{' || c == '}' || c == ')' || c == '(' || c == ',' || c == ';'
+    });
+    let (pkg, _) = clean.split_once('/')?;
+    if pkg.contains('.')
+        && pkg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+    {
+        Some(pkg.to_string())
+    } else {
+        None
+    }
+}
+
+fn parse_foreground_package(focus_lines: &[String]) -> Option<String> {
+    for line in focus_lines {
+        for token in line.split_whitespace() {
+            if let Some(pkg) = focus_token_package(token) {
+                return Some(pkg);
+            }
+        }
+    }
+    None
+}
+
+fn summarize_mobile_logcat(stdout: &str, package: Option<&str>) -> Value {
+    let mut fatal_count = 0usize;
+    let mut error_count = 0usize;
+    let mut warning_count = 0usize;
+    let mut surface_line_count = 0usize;
+    let mut package_mentions = 0usize;
+    let mut markers = Vec::new();
+    let mut push_marker = |kind: &str, line: &str| {
+        if markers.len() >= 30 {
+            return;
+        }
+        let (text, truncated, total_chars) = truncate_chars(line, 500);
+        markers.push(json!({
+            "kind": kind,
+            "line": text,
+            "truncated": truncated,
+            "total_chars": total_chars,
+        }));
+    };
+
+    for line in stdout.lines() {
+        let lower = line.to_ascii_lowercase();
+        let package_hit = package.map(|pkg| line.contains(pkg)).unwrap_or(false);
+        if package_hit {
+            package_mentions += 1;
+        }
+
+        let is_fatal = line.contains("FATAL EXCEPTION")
+            || lower.contains("fatal signal")
+            || lower.contains("androidruntime")
+            || lower.contains(" anr ")
+            || lower.contains(" crash");
+        let is_error = is_fatal
+            || line.contains(" E ")
+            || line.contains(" E/")
+            || (lower.contains("exception") && (line.contains(" E ") || package_hit));
+        let is_warning = line.contains(" W ") || line.contains(" W/");
+        let is_surface = lower.contains("surfaceview")
+            || lower.contains("surfaceflinger")
+            || lower.contains("choreographer")
+            || lower.contains("fps")
+            || lower.contains("godot");
+
+        if is_fatal {
+            fatal_count += 1;
+            push_marker("fatal", line);
+        } else if is_error {
+            error_count += 1;
+            push_marker("error", line);
+        } else if is_warning {
+            warning_count += 1;
+        }
+        if is_surface {
+            surface_line_count += 1;
+        }
+    }
+
+    json!({
+        "line_count": stdout.lines().count(),
+        "fatal_count": fatal_count,
+        "error_count": error_count,
+        "warning_count": warning_count,
+        "surface_line_count": surface_line_count,
+        "package_mentions": package_mentions,
+        "has_crash_markers": fatal_count > 0,
+        "markers": markers,
+    })
+}
+
+fn parse_mobile_bounds(raw: &str) -> Option<MobileBounds> {
+    let nums: Vec<i64> = raw
+        .split(|c| matches!(c, '[' | ']' | ','))
+        .filter(|s| !s.trim().is_empty())
+        .filter_map(|s| s.trim().parse::<i64>().ok())
+        .collect();
+    if nums.len() == 4 {
+        Some(MobileBounds {
+            left: nums[0],
+            top: nums[1],
+            right: nums[2],
+            bottom: nums[3],
+        })
+    } else {
+        None
+    }
+}
+
+fn attr_bool(attrs: &HashMap<String, String>, key: &str) -> bool {
+    attrs.get(key).map(|v| v == "true").unwrap_or(false)
+}
+
+fn decode_xml_attr_value(raw: &str) -> String {
+    raw.replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+fn parse_xml_attrs(tag_body: &str) -> HashMap<String, String> {
+    let mut attrs = HashMap::new();
+    let bytes = tag_body.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        while i < bytes.len() && (bytes[i].is_ascii_whitespace() || bytes[i] == b'/') {
+            i += 1;
+        }
+        let key_start = i;
+        while i < bytes.len()
+            && !bytes[i].is_ascii_whitespace()
+            && bytes[i] != b'='
+            && bytes[i] != b'/'
+        {
+            i += 1;
+        }
+        if key_start == i {
+            i += 1;
+            continue;
+        }
+        let key = &tag_body[key_start..i];
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] != b'=' {
+            continue;
+        }
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() || (bytes[i] != b'"' && bytes[i] != b'\'') {
+            continue;
+        }
+        let quote = bytes[i];
+        i += 1;
+        let value_start = i;
+        while i < bytes.len() && bytes[i] != quote {
+            i += 1;
+        }
+        if i > bytes.len() {
+            break;
+        }
+        let value = decode_xml_attr_value(&tag_body[value_start..i]);
+        attrs.insert(key.to_string(), value);
+        i += 1;
+    }
+    attrs
+}
+
+fn node_from_attrs(ordinal: usize, attrs: HashMap<String, String>) -> MobileUiNode {
+    let bounds = attrs.get("bounds").and_then(|s| parse_mobile_bounds(s));
+    MobileUiNode {
+        ordinal,
+        index: attrs.get("index").cloned().unwrap_or_default(),
+        text: attrs.get("text").cloned().unwrap_or_default(),
+        resource_id: attrs.get("resource-id").cloned().unwrap_or_default(),
+        class_name: attrs.get("class").cloned().unwrap_or_default(),
+        package_name: attrs.get("package").cloned().unwrap_or_default(),
+        content_desc: attrs.get("content-desc").cloned().unwrap_or_default(),
+        clickable: attr_bool(&attrs, "clickable"),
+        enabled: attrs.get("enabled").map(|v| v == "true").unwrap_or(true),
+        focusable: attr_bool(&attrs, "focusable"),
+        focused: attr_bool(&attrs, "focused"),
+        scrollable: attr_bool(&attrs, "scrollable"),
+        bounds,
+    }
+}
+
+fn parse_uiautomator_nodes(xml: &str) -> std::result::Result<Vec<MobileUiNode>, String> {
+    let mut nodes = Vec::new();
+    let mut search_start = 0usize;
+    while let Some(rel) = xml[search_start..].find("<node") {
+        let tag_start = search_start + rel;
+        let after_name = tag_start + "<node".len();
+        let next = xml[after_name..].chars().next();
+        if !matches!(next, Some(c) if c.is_ascii_whitespace() || c == '/' || c == '>') {
+            search_start = after_name;
+            continue;
+        }
+        let Some(tag_end_rel) = xml[tag_start..].find('>') else {
+            return Err("unterminated <node> tag in UI XML".to_string());
+        };
+        let tag_end = tag_start + tag_end_rel;
+        let tag_body = &xml[after_name..tag_end];
+        let attrs = parse_xml_attrs(tag_body);
+        let ordinal = nodes.len();
+        nodes.push(node_from_attrs(ordinal, attrs));
+        search_start = tag_end + 1;
+    }
+    Ok(nodes)
+}
+
+async fn mobile_dump_ui_xml(
+    serial: &str,
+    timeout_ms: u64,
+) -> std::result::Result<(AdbCommandOutput, AdbCommandOutput), String> {
+    let dump_args = vec![
+        "shell".to_string(),
+        "uiautomator".to_string(),
+        "dump".to_string(),
+        MOBILE_UI_DUMP_PATH.to_string(),
+    ];
+    let dump = run_adb_command(Some(serial), &dump_args, timeout_ms).await?;
+    if !dump.ok() {
+        return Err(format!("uiautomator dump failed: {}", dump.stderr.trim()));
+    }
+    let cat_args = vec![
+        "exec-out".to_string(),
+        "cat".to_string(),
+        MOBILE_UI_DUMP_PATH.to_string(),
+    ];
+    let cat = run_adb_command(Some(serial), &cat_args, timeout_ms).await?;
+    if !cat.ok() {
+        return Err(format!("read UI XML failed: {}", cat.stderr.trim()));
+    }
+    Ok((dump, cat))
+}
+
+fn sanitize_mobile_path_component(s: &str) -> String {
+    let sanitized: String = s
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "device".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn mobile_screenshot_path(args: &Value, serial: &str) -> PathBuf {
+    if let Some(path) = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+    {
+        return PathBuf::from(path);
+    }
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!(
+        "agent-bridge-mobile-screenshot-{}-{ts}.png",
+        sanitize_mobile_path_component(serial)
+    ))
+}
+
+fn adb_input_text_arg(text: &str) -> String {
+    text.replace(' ', "%s")
+}
+
+macro_rules! mobile_tool_struct {
+    ($name:ident) => {
+        pub struct $name {
+            hub: Hub,
+        }
+        impl $name {
+            pub fn new(hub: Hub) -> Self {
+                Self { hub }
+            }
+        }
+    };
+}
+
+mobile_tool_struct!(MobileListDevicesTool);
+#[async_trait]
+impl McpTool for MobileListDevicesTool {
+    fn name(&self) -> &'static str {
+        "mobile_list_devices"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "List Android devices visible to ADB. Returns serials, connection \
+                 state, `adb devices -l` attributes, and optional Android version/model \
+                 properties. Use before any mobile_* action when multiple devices may be \
+                 connected."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "include_props": { "type": "boolean", "default": true, "description": "Read model and Android version via getprop for online devices." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let include_props = args
+            .get("include_props")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let out = match run_adb_command(None, &adb_args(&["devices", "-l"]), timeout_ms).await {
+            Ok(out) => out,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        if !out.ok() {
+            return Ok(ToolResult::json_text(&json!({
+                "status": "error",
+                "adb": out.as_json(),
+            })));
+        }
+        let devices = parse_adb_devices(&out.stdout);
+        let mut rows = Vec::new();
+        for device in &devices {
+            let android_version = if include_props && device.state == "device" {
+                mobile_getprop(&device.serial, "ro.build.version.release", timeout_ms).await
+            } else {
+                None
+            };
+            rows.push(mobile_device_json(device, android_version));
+        }
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "adb_bin": resolve_adb_bin(),
+            "count": rows.len(),
+            "devices": rows,
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileCurrentFocusTool);
+#[async_trait]
+impl McpTool for MobileCurrentFocusTool {
+    fn name(&self) -> &'static str {
+        "mobile_current_focus"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read the current Android foreground window/activity via `dumpsys \
+                 window`, without taking a screenshot."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(s) => s,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let out = match run_adb_command(
+            Some(&serial),
+            &adb_args(&["shell", "dumpsys", "window"]),
+            timeout_ms,
+        )
+        .await
+        {
+            Ok(out) => out,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        if !out.ok() {
+            return Ok(ToolResult::json_text(&json!({
+                "status": "error",
+                "serial": serial,
+                "adb": out.as_json(),
+            })));
+        }
+        let focus_lines = parse_focus_lines(&out.stdout);
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "serial": serial,
+            "focus_lines": focus_lines,
+            "duration_ms": out.duration_ms,
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileScreenshotTool);
+#[async_trait]
+impl McpTool for MobileScreenshotTool {
+    fn name(&self) -> &'static str {
+        "mobile_screenshot"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Capture an Android device screenshot through `adb exec-out screencap \
+                 -p`. Returns a saved PNG path by default, or an inline image block when \
+                 `inline=true`."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "path": { "type": "string", "description": "Optional local output path. Defaults to a PNG under the system temp directory when inline=false." },
+                    "inline": { "type": "boolean", "default": false, "description": "Return the PNG as an MCP image block instead of only saving it to disk." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(s) => s,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let out = match run_adb_binary_command(
+            Some(&serial),
+            &adb_args(&["exec-out", "screencap", "-p"]),
+            timeout_ms,
+        )
+        .await
+        {
+            Ok(out) => out,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        if !out.ok() {
+            return Ok(ToolResult::json_text(&json!({
+                "status": "error",
+                "serial": serial,
+                "adb": out.as_json(),
+            })));
+        }
+        const PNG_SIGNATURE: &[u8] = &[137, 80, 78, 71, 13, 10, 26, 10];
+        if !out.stdout.starts_with(PNG_SIGNATURE) {
+            return Ok(ToolResult::json_text(&json!({
+                "status": "error",
+                "serial": serial,
+                "error": "screencap output did not start with a PNG signature",
+                "adb": out.as_json(),
+            })));
+        }
+
+        let inline = args
+            .get("inline")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let explicit_path = args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .is_some();
+        let should_write = explicit_path || !inline;
+        let mut path_value = Value::Null;
+        if should_write {
+            let path = mobile_screenshot_path(&args, &serial);
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() && !parent.exists() {
+                    return Ok(ToolResult::error(format!(
+                        "screenshot parent directory does not exist: {}",
+                        parent.to_string_lossy()
+                    )));
+                }
+            }
+            if let Err(e) = std::fs::write(&path, &out.stdout) {
+                return Ok(ToolResult::error(format!("write screenshot failed: {e}")));
+            }
+            path_value = json!(path.to_string_lossy());
+        }
+
+        let meta = json!({
+            "status": "ok",
+            "serial": serial,
+            "mime_type": "image/png",
+            "bytes": out.stdout.len(),
+            "path": path_value,
+            "duration_ms": out.duration_ms,
+        });
+        if inline {
+            let b64 = general_purpose::STANDARD.encode(&out.stdout);
+            return Ok(ToolResult {
+                content: vec![
+                    ContentBlock::image(b64, "image/png"),
+                    ContentBlock::text(
+                        serde_json::to_string_pretty(&meta).unwrap_or_else(|_| meta.to_string()),
+                    ),
+                ],
+                is_error: false,
+                backend_id: None,
+            });
+        }
+        Ok(ToolResult::json_text(&meta))
+    }
+}
+
+mobile_tool_struct!(MobileHealthTool);
+#[async_trait]
+impl McpTool for MobileHealthTool {
+    fn name(&self) -> &'static str {
+        "mobile_health"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Collect a compact Android device/app health snapshot: foreground \
+                 package, focus lines, recent crash/error logcat markers, and optional \
+                 UIAutomator canvas/semantic-node analysis."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "package": { "type": "string", "description": "Optional expected foreground Android package." },
+                    "log_lines": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 200 },
+                    "include_ui": { "type": "boolean", "default": true },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(s) => s,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let expected_package = args
+            .get("package")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty());
+        let log_lines = args
+            .get("log_lines")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 5000)
+            .to_string();
+        let include_ui = args
+            .get("include_ui")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let mut partial = false;
+        let focus_out = run_adb_command(
+            Some(&serial),
+            &adb_args(&["shell", "dumpsys", "window"]),
+            timeout_ms,
+        )
+        .await;
+        let (focus_lines, focus_status) = match focus_out {
+            Ok(out) if out.ok() => {
+                let lines = parse_focus_lines(&out.stdout);
+                (
+                    lines,
+                    json!({ "status": "ok", "duration_ms": out.duration_ms }),
+                )
+            }
+            Ok(out) => {
+                partial = true;
+                (
+                    Vec::new(),
+                    json!({ "status": "error", "adb": out.as_json() }),
+                )
+            }
+            Err(e) => {
+                partial = true;
+                (Vec::new(), json!({ "status": "error", "error": e }))
+            }
+        };
+        let foreground_package = parse_foreground_package(&focus_lines);
+        let log_package = expected_package.or(foreground_package.as_deref());
+
+        let log_out = run_adb_command(
+            Some(&serial),
+            &vec!["logcat".into(), "-d".into(), "-t".into(), log_lines.clone()],
+            timeout_ms,
+        )
+        .await;
+        let logcat = match log_out {
+            Ok(out) if out.ok() => {
+                let mut summary = summarize_mobile_logcat(&out.stdout, log_package);
+                summary["status"] = json!("ok");
+                summary["package"] = json!(log_package);
+                summary["requested_lines"] = json!(log_lines);
+                summary["duration_ms"] = json!(out.duration_ms);
+                summary["truncated"] = json!(out.truncated);
+                summary
+            }
+            Ok(out) => {
+                partial = true;
+                json!({ "status": "error", "adb": out.as_json() })
+            }
+            Err(e) => {
+                partial = true;
+                json!({ "status": "error", "error": e })
+            }
+        };
+
+        let ui = if include_ui {
+            match mobile_dump_ui_xml(&serial, timeout_ms).await {
+                Ok((dump, cat)) => match parse_uiautomator_nodes(&cat.stdout) {
+                    Ok(nodes) => json!({
+                        "status": "ok",
+                        "analysis": MobileUiAnalysis::from_nodes(&nodes).as_json(),
+                        "dump": dump.as_json(),
+                    }),
+                    Err(e) => {
+                        partial = true;
+                        json!({ "status": "error", "error": e })
+                    }
+                },
+                Err(e) => {
+                    partial = true;
+                    json!({ "status": "error", "error": e })
+                }
+            }
+        } else {
+            json!({ "status": "skipped" })
+        };
+
+        let package_match = match (expected_package, foreground_package.as_deref()) {
+            (Some(expected), Some(actual)) => Some(expected == actual),
+            (Some(_), None) => Some(false),
+            (None, _) => None,
+        };
+        Ok(ToolResult::json_text(&json!({
+            "status": if partial { "partial" } else { "ok" },
+            "serial": serial,
+            "expected_package": expected_package,
+            "foreground_package": foreground_package,
+            "package_match": package_match,
+            "focus_lines": focus_lines,
+            "focus": focus_status,
+            "logcat": logcat,
+            "ui": ui,
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileUiSnapshotTool);
+#[async_trait]
+impl McpTool for MobileUiSnapshotTool {
+    fn name(&self) -> &'static str {
+        "mobile_ui_snapshot"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Run `uiautomator dump` and return a compact structured Android UI \
+                 node summary. Optionally include truncated raw XML. Prefer this over \
+                 screenshot reading when native Android controls are visible."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "max_nodes": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 },
+                    "include_xml": { "type": "boolean", "default": false },
+                    "xml_max_chars": { "type": "integer", "minimum": 0, "maximum": 200000, "default": 20000 },
+                    "selector": mobile_schema_selector(),
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(s) => s,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let (dump, cat) = match mobile_dump_ui_xml(&serial, timeout_ms).await {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let nodes = match parse_uiautomator_nodes(&cat.stdout) {
+            Ok(nodes) => nodes,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let selector = match args.get("selector") {
+            Some(v) => match MobileSelector::from_value(v) {
+                Ok(s) => Some(s),
+                Err(e) => return Ok(ToolResult::error(e)),
+            },
+            None => None,
+        };
+        let max_nodes = args
+            .get("max_nodes")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100)
+            .clamp(1, 500) as usize;
+        let visible_nodes: Vec<Value> = nodes
+            .iter()
+            .filter(|n| selector.as_ref().map(|s| s.matches(n)).unwrap_or(true))
+            .take(max_nodes)
+            .map(MobileUiNode::compact_json)
+            .collect();
+        let analysis = MobileUiAnalysis::from_nodes(&nodes);
+        let include_xml = args
+            .get("include_xml")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let mut resp = json!({
+            "status": "ok",
+            "serial": serial,
+            "node_count": nodes.len(),
+            "returned_nodes": visible_nodes.len(),
+            "analysis": analysis.as_json(),
+            "nodes": visible_nodes,
+            "dump": dump.as_json(),
+        });
+        if include_xml {
+            let xml_max = args
+                .get("xml_max_chars")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(20_000)
+                .min(200_000) as usize;
+            let (xml, xml_truncated, xml_total_chars) = truncate_chars(&cat.stdout, xml_max);
+            resp["xml"] = json!(xml);
+            resp["xml_truncated"] = json!(xml_truncated);
+            resp["xml_total_chars"] = json!(xml_total_chars);
+        }
+        Ok(ToolResult::json_text(&resp))
+    }
+}
+
+mobile_tool_struct!(MobileLogcatTailTool);
+#[async_trait]
+impl McpTool for MobileLogcatTailTool {
+    fn name(&self) -> &'static str {
+        "mobile_logcat_tail"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Return recent Android logcat lines from a selected device. Optional \
+                 substring filtering happens after capture so callers can quickly inspect app \
+                 crashes or runtime warnings."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "lines": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 200 },
+                    "filter": { "type": "string", "description": "Optional substring filter applied to captured lines." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(s) => s,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let lines = args
+            .get("lines")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 5000)
+            .to_string();
+        let out = match run_adb_command(
+            Some(&serial),
+            &vec!["logcat".into(), "-d".into(), "-t".into(), lines],
+            timeout_ms,
+        )
+        .await
+        {
+            Ok(out) => out,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        if !out.ok() {
+            return Ok(ToolResult::json_text(&json!({
+                "status": "error",
+                "serial": serial,
+                "adb": out.as_json(),
+            })));
+        }
+        let filter = args.get("filter").and_then(|v| v.as_str()).unwrap_or("");
+        let rows: Vec<&str> = out
+            .stdout
+            .lines()
+            .filter(|line| filter.is_empty() || line.contains(filter))
+            .collect();
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "serial": serial,
+            "line_count": rows.len(),
+            "filter": if filter.is_empty() { Value::Null } else { json!(filter) },
+            "lines": rows,
+            "duration_ms": out.duration_ms,
+            "truncated": out.truncated,
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileInstallApkTool);
+#[async_trait]
+impl McpTool for MobileInstallApkTool {
+    fn name(&self) -> &'static str {
+        "mobile_install_apk"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Install an APK on an Android device via ADB. This mutates the \
+                 selected device and returns the raw install result."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "apk": { "type": "string", "description": "Absolute or daemon-cwd-relative path to the APK." },
+                    "reinstall": { "type": "boolean", "default": true, "description": "Pass -r to adb install." },
+                    "downgrade": { "type": "boolean", "default": false, "description": "Pass -d to adb install." },
+                    "grant_permissions": { "type": "boolean", "default": false, "description": "Pass -g to adb install." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": 120000 }
+                },
+                "required": ["apk"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(120_000)
+            .clamp(1_000, 120_000);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(s) => s,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let apk = match args.get("apk").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s,
+            _ => return Ok(ToolResult::error("missing 'apk'")),
+        };
+        let apk_path = PathBuf::from(apk);
+        if !apk_path.exists() {
+            return Ok(ToolResult::error(format!("apk not found: {apk}")));
+        }
+        let mut cmd = vec!["install".to_string()];
+        if args
+            .get("reinstall")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true)
+        {
+            cmd.push("-r".to_string());
+        }
+        if args
+            .get("downgrade")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            cmd.push("-d".to_string());
+        }
+        if args
+            .get("grant_permissions")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            cmd.push("-g".to_string());
+        }
+        cmd.push(apk_path.to_string_lossy().into_owned());
+        let out = match run_adb_command(Some(&serial), &cmd, timeout_ms).await {
+            Ok(out) => out,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        Ok(ToolResult::json_text(&json!({
+            "status": if out.ok() { "ok" } else { "error" },
+            "serial": serial,
+            "apk": apk,
+            "adb": out.as_json(),
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileLaunchAppTool);
+#[async_trait]
+impl McpTool for MobileLaunchAppTool {
+    fn name(&self) -> &'static str {
+        "mobile_launch_app"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Launch an Android app. Pass `component` for an exact activity, \
+                 or pass `package` only to use the launcher category through `monkey`."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "package": { "type": "string", "description": "Android package name, e.g. com.example.app." },
+                    "activity": { "type": "string", "description": "Optional activity class. Relative values starting with '.' are joined with package." },
+                    "component": { "type": "string", "description": "Exact component, e.g. com.example/.MainActivity." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(s) => s,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let package = args.get("package").and_then(|v| v.as_str()).unwrap_or("");
+        let component_arg = args
+            .get("component")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let activity = args
+            .get("activity")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let cmd = if let Some(component) = component_arg {
+            vec![
+                "shell".to_string(),
+                "am".to_string(),
+                "start".to_string(),
+                "-n".to_string(),
+                component.to_string(),
+            ]
+        } else if let Some(activity) = activity {
+            if package.is_empty() {
+                return Ok(ToolResult::error(
+                    "package is required when activity is provided without component",
+                ));
+            }
+            let component = if activity.starts_with('.') {
+                format!("{package}/{activity}")
+            } else if activity.contains('/') {
+                activity.to_string()
+            } else {
+                format!("{package}/{activity}")
+            };
+            vec![
+                "shell".to_string(),
+                "am".to_string(),
+                "start".to_string(),
+                "-n".to_string(),
+                component,
+            ]
+        } else {
+            if package.is_empty() {
+                return Ok(ToolResult::error(
+                    "missing 'package' or exact 'component' to launch",
+                ));
+            }
+            vec![
+                "shell".to_string(),
+                "monkey".to_string(),
+                "-p".to_string(),
+                package.to_string(),
+                "-c".to_string(),
+                "android.intent.category.LAUNCHER".to_string(),
+                "1".to_string(),
+            ]
+        };
+        let out = match run_adb_command(Some(&serial), &cmd, timeout_ms).await {
+            Ok(out) => out,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        Ok(ToolResult::json_text(&json!({
+            "status": if out.ok() { "ok" } else { "error" },
+            "serial": serial,
+            "adb": out.as_json(),
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileClickTool);
+#[async_trait]
+impl McpTool for MobileClickTool {
+    fn name(&self) -> &'static str {
+        "mobile_click"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Tap an Android device by coordinates, or resolve a UI Automator \
+                 selector and tap the center of the selected node's bounds. This performs a \
+                 real GUI tap through `adb shell input tap`."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "x": { "type": "integer", "description": "Tap X coordinate. Use with y." },
+                    "y": { "type": "integer", "description": "Tap Y coordinate. Use with x." },
+                    "selector": mobile_schema_selector(),
+                    "match_index": { "type": "integer", "minimum": 0, "default": 0, "description": "When selector matches multiple nodes, choose this zero-based match." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(s) => s,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let explicit_x = args.get("x").and_then(|v| v.as_i64());
+        let explicit_y = args.get("y").and_then(|v| v.as_i64());
+        let (x, y, selected_node) = match (explicit_x, explicit_y) {
+            (Some(x), Some(y)) => (x, y, Value::Null),
+            (Some(_), None) | (None, Some(_)) => {
+                return Ok(ToolResult::error(
+                    "both x and y are required for coordinate tap",
+                ));
+            }
+            (None, None) => {
+                let selector_value = match args.get("selector") {
+                    Some(v) => v,
+                    None => return Ok(ToolResult::error("pass coordinates or selector")),
+                };
+                let selector = match MobileSelector::from_value(selector_value) {
+                    Ok(s) => s,
+                    Err(e) => return Ok(ToolResult::error(e)),
+                };
+                let (_, cat) = match mobile_dump_ui_xml(&serial, timeout_ms).await {
+                    Ok(v) => v,
+                    Err(e) => return Ok(ToolResult::error(e)),
+                };
+                let nodes = match parse_uiautomator_nodes(&cat.stdout) {
+                    Ok(nodes) => nodes,
+                    Err(e) => return Ok(ToolResult::error(e)),
+                };
+                let matches: Vec<&MobileUiNode> =
+                    nodes.iter().filter(|n| selector.matches(n)).collect();
+                let match_index = args
+                    .get("match_index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                let Some(node) = matches.get(match_index).copied() else {
+                    return Ok(ToolResult::error(format!(
+                        "selector matched {} node(s), no match_index {match_index}",
+                        matches.len()
+                    )));
+                };
+                let Some(bounds) = node.bounds else {
+                    return Ok(ToolResult::error("selected node has no bounds"));
+                };
+                let (x, y) = bounds.center();
+                (x, y, node.compact_json())
+            }
+        };
+        let cmd = vec![
+            "shell".to_string(),
+            "input".to_string(),
+            "tap".to_string(),
+            x.to_string(),
+            y.to_string(),
+        ];
+        let out = match run_adb_command(Some(&serial), &cmd, timeout_ms).await {
+            Ok(out) => out,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        Ok(ToolResult::json_text(&json!({
+            "status": if out.ok() { "ok" } else { "error" },
+            "serial": serial,
+            "tap": { "x": x, "y": y },
+            "selected_node": selected_node,
+            "adb": out.as_json(),
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileInputTextTool);
+#[async_trait]
+impl McpTool for MobileInputTextTool {
+    fn name(&self) -> &'static str {
+        "mobile_input_text"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Send text to the focused Android control via `adb shell input text`. \
+                 Spaces are encoded as `%s`, matching Android input command conventions."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "text": { "type": "string", "description": "Text to send to the focused control." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                },
+                "required": ["text"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(s) => s,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let text = match args.get("text").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s,
+            _ => return Ok(ToolResult::error("missing or empty 'text'")),
+        };
+        let encoded = adb_input_text_arg(text);
+        let cmd = vec![
+            "shell".to_string(),
+            "input".to_string(),
+            "text".to_string(),
+            encoded.clone(),
+        ];
+        let out = match run_adb_command(Some(&serial), &cmd, timeout_ms).await {
+            Ok(out) => out,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        Ok(ToolResult::json_text(&json!({
+            "status": if out.ok() { "ok" } else { "error" },
+            "serial": serial,
+            "encoded_text": encoded,
+            "adb": out.as_json(),
+        })))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppleUsbDevice {
+    product_name: String,
+    vendor_name: String,
+    serial: String,
+    udid: String,
+    vendor_id: Option<u64>,
+    product_id: Option<u64>,
+    location_id: Option<u64>,
+    supports_iphone_os: bool,
+}
+
+fn parse_ioreg_value(line: &str, key: &str) -> Option<String> {
+    let prefix = format!("\"{key}\" = ");
+    let value = line.split_once(&prefix)?.1.trim();
+    if let Some(s) = value.strip_prefix('"') {
+        return Some(s.split('"').next().unwrap_or_default().to_string());
+    }
+    Some(
+        value
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches(',')
+            .to_string(),
+    )
+}
+
+fn parse_ioreg_bool(line: &str, key: &str) -> Option<bool> {
+    parse_ioreg_value(line, key).and_then(|v| match v.as_str() {
+        "Yes" | "true" | "1" => Some(true),
+        "No" | "false" | "0" => Some(false),
+        _ => None,
+    })
+}
+
+fn parse_ioreg_u64(line: &str, key: &str) -> Option<u64> {
+    parse_ioreg_value(line, key).and_then(|v| v.parse::<u64>().ok())
+}
+
+fn apple_usb_device_json(device: &AppleUsbDevice) -> Value {
+    json!({
+        "product_name": device.product_name,
+        "vendor_name": device.vendor_name,
+        "serial": device.serial,
+        "udid": device.udid,
+        "vendor_id": device.vendor_id,
+        "product_id": device.product_id,
+        "location_id": device.location_id,
+        "supports_iphone_os": device.supports_iphone_os,
+    })
+}
+
+fn parse_apple_usb_devices_from_ioreg(stdout: &str) -> Vec<AppleUsbDevice> {
+    #[derive(Default)]
+    struct Builder {
+        in_device: bool,
+        product_name: Option<String>,
+        vendor_name: Option<String>,
+        serial: Option<String>,
+        udid: Option<String>,
+        vendor_id: Option<u64>,
+        product_id: Option<u64>,
+        location_id: Option<u64>,
+        supports_iphone_os: Option<bool>,
+    }
+
+    impl Builder {
+        fn finish(&mut self, out: &mut Vec<AppleUsbDevice>) {
+            if !self.in_device {
+                return;
+            }
+            let product_name = self.product_name.take().unwrap_or_default();
+            let vendor_name = self.vendor_name.take().unwrap_or_default();
+            let serial = self.serial.take().unwrap_or_default();
+            let udid = self.udid.take().unwrap_or_else(|| serial.clone());
+            let supports_iphone_os = self.supports_iphone_os.unwrap_or(false);
+            let is_apple_mobile =
+                vendor_name == "Apple Inc." && (supports_iphone_os || product_name.contains("iP"));
+            if is_apple_mobile {
+                out.push(AppleUsbDevice {
+                    product_name,
+                    vendor_name,
+                    serial,
+                    udid,
+                    vendor_id: self.vendor_id.take(),
+                    product_id: self.product_id.take(),
+                    location_id: self.location_id.take(),
+                    supports_iphone_os,
+                });
+            }
+            *self = Builder::default();
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut current = Builder::default();
+    for line in stdout.lines() {
+        let starts_device = line.contains("+-o ")
+            && line.contains("<class IOUSBHostDevice")
+            && (line.contains("iPhone@") || line.contains("iPad@") || line.contains("iPod@"));
+        let starts_other_device = line.contains("+-o ") && line.contains("<class IOUSBHostDevice");
+        if starts_other_device && current.in_device {
+            current.finish(&mut out);
+        }
+        if starts_device {
+            current.in_device = true;
+            if line.contains("iPhone@") {
+                current.product_name = Some("iPhone".to_string());
+            } else if line.contains("iPad@") {
+                current.product_name = Some("iPad".to_string());
+            } else if line.contains("iPod@") {
+                current.product_name = Some("iPod".to_string());
+            }
+            continue;
+        }
+        if !current.in_device {
+            continue;
+        }
+        if let Some(v) = parse_ioreg_value(line, "USB Product Name")
+            .or_else(|| parse_ioreg_value(line, "kUSBProductString"))
+        {
+            current.product_name = Some(v);
+        }
+        if let Some(v) = parse_ioreg_value(line, "USB Vendor Name")
+            .or_else(|| parse_ioreg_value(line, "kUSBVendorString"))
+        {
+            current.vendor_name = Some(v);
+        }
+        if let Some(v) = parse_ioreg_value(line, "USB Serial Number")
+            .or_else(|| parse_ioreg_value(line, "kUSBSerialNumberString"))
+        {
+            current.serial = Some(v);
+        }
+        if let Some(v) = parse_ioreg_value(line, "UsbAppleDeviceUDID") {
+            current.udid = Some(v);
+        }
+        if let Some(v) = parse_ioreg_u64(line, "idVendor") {
+            current.vendor_id = Some(v);
+        }
+        if let Some(v) = parse_ioreg_u64(line, "idProduct") {
+            current.product_id = Some(v);
+        }
+        if let Some(v) = parse_ioreg_u64(line, "locationID") {
+            current.location_id = Some(v);
+        }
+        if let Some(v) = parse_ioreg_bool(line, "SupportsIPhoneOS") {
+            current.supports_iphone_os = Some(v);
+        }
+    }
+    current.finish(&mut out);
+    out
+}
+
+async fn run_local_mobile_command(
+    program: &str,
+    args: &[&str],
+    timeout_ms: u64,
+) -> std::result::Result<AdbCommandOutput, String> {
+    let started = Instant::now();
+    let output = tokio::time::timeout(Duration::from_millis(timeout_ms), async {
+        TokioCommand::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+    })
+    .await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+    let output = match output {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => return Err(format!("spawn {program} failed: {e}")),
+        Err(_) => {
+            return Ok(AdbCommandOutput {
+                exit_code: -1,
+                stdout: String::new(),
+                stderr: format!("killed after {timeout_ms} ms timeout"),
+                duration_ms,
+                truncated: false,
+            });
+        }
+    };
+    let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+    let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+    Ok(AdbCommandOutput {
+        exit_code: output.status.code().unwrap_or(-1),
+        stdout,
+        stderr,
+        duration_ms,
+        truncated: stdout_truncated || stderr_truncated,
+    })
+}
+
+async fn command_path(program: &str, args: &[&str], timeout_ms: u64) -> Value {
+    match run_local_mobile_command(program, args, timeout_ms).await {
+        Ok(out) if out.ok() => {
+            let path = out.stdout.lines().next().unwrap_or_default().trim();
+            if path.is_empty() {
+                json!({ "available": false, "path": Value::Null })
+            } else {
+                json!({ "available": true, "path": path })
+            }
+        }
+        Ok(out) => json!({
+            "available": false,
+            "path": Value::Null,
+            "error": out.stderr.trim(),
+        }),
+        Err(e) => json!({ "available": false, "path": Value::Null, "error": e }),
+    }
+}
+
+async fn shell_command_path(tool: &str, timeout_ms: u64) -> Value {
+    command_path("sh", &["-lc", &format!("command -v {tool}")], timeout_ms).await
+}
+
+mobile_tool_struct!(MobileAppleStatusTool);
+#[async_trait]
+impl McpTool for MobileAppleStatusTool {
+    fn name(&self) -> &'static str {
+        "mobile_apple_status"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Apple mobile readiness probe. Reports Xcode/devicectl/simctl, \
+                 optional third-party iOS tooling, and iPhone/iPad/iPod devices visible over USB. \
+                 Use this before deciding whether to add or use iOS install/debug/UI automation."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "include_usb": { "type": "boolean", "default": true },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let include_usb = args
+            .get("include_usb")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let xcode_select = run_local_mobile_command("xcode-select", &["-p"], timeout_ms).await;
+        let developer_dir = xcode_select
+            .as_ref()
+            .ok()
+            .filter(|out| out.ok())
+            .and_then(|out| out.stdout.lines().next())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let has_full_xcode = developer_dir
+            .as_deref()
+            .map(|p| {
+                p.ends_with("/Xcode.app/Contents/Developer")
+                    || p.contains(".app/Contents/Developer")
+            })
+            .unwrap_or(false);
+
+        let devicectl = command_path("xcrun", &["--find", "devicectl"], timeout_ms).await;
+        let simctl = command_path("xcrun", &["--find", "simctl"], timeout_ms).await;
+        let xctrace = command_path("xcrun", &["--find", "xctrace"], timeout_ms).await;
+        let xcdevice = command_path("xcrun", &["--find", "xcdevice"], timeout_ms).await;
+        let third_party = json!({
+            "cfgutil": shell_command_path("cfgutil", timeout_ms).await,
+            "ios-deploy": shell_command_path("ios-deploy", timeout_ms).await,
+            "idevice_id": shell_command_path("idevice_id", timeout_ms).await,
+            "ideviceinfo": shell_command_path("ideviceinfo", timeout_ms).await,
+            "idevicesyslog": shell_command_path("idevicesyslog", timeout_ms).await,
+            "pymobiledevice3": shell_command_path("pymobiledevice3", timeout_ms).await,
+            "tidevice": shell_command_path("tidevice", timeout_ms).await,
+            "idb": shell_command_path("idb", timeout_ms).await,
+            "idb_companion": shell_command_path("idb_companion", timeout_ms).await,
+        });
+
+        let usb_devices = if include_usb {
+            match run_local_mobile_command("ioreg", &["-p", "IOUSB", "-l", "-w0"], timeout_ms).await
+            {
+                Ok(out) if out.ok() => parse_apple_usb_devices_from_ioreg(&out.stdout)
+                    .iter()
+                    .map(apple_usb_device_json)
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        let has_usb_device = !usb_devices.is_empty();
+        let devicectl_ready = devicectl
+            .get("available")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let simctl_ready = simctl
+            .get("available")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let libimobiledevice_ready = third_party
+            .get("idevice_id")
+            .and_then(|v| v.get("available"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let mut recommendations = Vec::new();
+        if !has_full_xcode {
+            recommendations.push(
+                "Install/select full Xcode before expecting devicectl/simctl workflows."
+                    .to_string(),
+            );
+        }
+        if has_usb_device && !devicectl_ready && !libimobiledevice_ready {
+            recommendations.push(
+                "USB sees Apple mobile hardware, but no devicectl/libimobiledevice bridge is available."
+                    .to_string(),
+            );
+        }
+        if !has_usb_device {
+            recommendations.push("No iPhone/iPad/iPod is visible over USB.".to_string());
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "xcode": {
+                "developer_dir": developer_dir,
+                "full_xcode_selected": has_full_xcode,
+                "raw": xcode_select.map(|out| out.as_json()).unwrap_or_else(|e| json!({ "error": e })),
+            },
+            "apple_tools": {
+                "devicectl": devicectl,
+                "simctl": simctl,
+                "xctrace": xctrace,
+                "xcdevice": xcdevice,
+            },
+            "third_party_tools": third_party,
+            "usb": {
+                "checked": include_usb,
+                "apple_mobile_count": usb_devices.len(),
+                "devices": usb_devices,
+            },
+            "readiness": {
+                "physical_usb_visible": has_usb_device,
+                "physical_devicectl_ready": has_usb_device && devicectl_ready,
+                "physical_libimobiledevice_ready": has_usb_device && libimobiledevice_ready,
+                "simulator_ready": simctl_ready,
+                "ui_automation_ready": false,
+            },
+            "recommendations": recommendations,
+        })))
+    }
+}
+
+// ===========================================================================
 //                        terminal_read_blocks tool
 // ===========================================================================
 
@@ -2776,20 +4901,20 @@ impl McpTool for AgentMessageTool {
                 tags: None,
                 refs: Some(&wake_refs),
             };
-            let (wake_status, wake_error) =
-                match crate::peer_client::forum_post(p, wake_req).await {
-                    Ok(v) => (
-                        json!({
-                            "ok": true,
-                            "post_id": v.get("post_id").cloned().unwrap_or(json!(null)),
-                            "thread_id": v.get("thread_id").cloned().unwrap_or(json!(null)),
-                            "board": "messaging",
-                            "title": wake_title.clone(),
-                        }),
-                        None,
-                    ),
-                    Err(e) => (json!({"ok": false}), Some(format!("{e}"))),
-                };
+            let (wake_status, wake_error) = match crate::peer_client::forum_post(p, wake_req).await
+            {
+                Ok(v) => (
+                    json!({
+                        "ok": true,
+                        "post_id": v.get("post_id").cloned().unwrap_or(json!(null)),
+                        "thread_id": v.get("thread_id").cloned().unwrap_or(json!(null)),
+                        "board": "messaging",
+                        "title": wake_title.clone(),
+                    }),
+                    None,
+                ),
+                Err(e) => (json!({"ok": false}), Some(format!("{e}"))),
+            };
 
             let mut resp = json!({
                 "status": "ok",
@@ -3634,11 +5759,7 @@ fn forum_digest_thread_block(
             .unwrap_or(0);
         let pending: Vec<String> = sorted
             .iter()
-            .filter(|p| {
-                p.id > my_last_authored
-                    && !p.author.contains(sig)
-                    && p.body.contains(sig)
-            })
+            .filter(|p| p.id > my_last_authored && !p.author.contains(sig) && p.body.contains(sig))
             .map(|p| format!("#{} by {}", p.id, p.author))
             .collect();
         if !pending.is_empty() {
@@ -3721,9 +5842,7 @@ impl McpTool for ForumDigestTool {
             .map_err(|e| ab_core::Error::Backend(format!("forum_digest_threads: {e}")))?;
 
         if threads.is_empty() {
-            return Ok(ToolResult::text(format!(
-                "(no {status} threads)"
-            )));
+            return Ok(ToolResult::text(format!("(no {status} threads)")));
         }
 
         let now_secs = std::time::SystemTime::now()
@@ -6662,6 +8781,524 @@ impl McpTool for MemoryDeleteTool {
     }
 }
 
+const WORK_MEMORY_KIND: &str = "work_memory";
+const WORK_MEMORY_DEFAULT_SLOT: &str = "active";
+const WORK_MEMORY_MAX_CONTENT_CHARS: usize = 12_000;
+const WORK_MEMORY_PRECOMPACT_CHARS: usize = 6_000;
+
+fn unix_now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+fn stable_fnv1a_hex(input: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in input.as_bytes() {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn sanitize_work_memory_component(value: &str, fallback: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in value.trim().chars() {
+        let mapped = if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            Some(ch.to_ascii_lowercase())
+        } else if ch.is_whitespace() || matches!(ch, '/' | ':' | '.' | '@') {
+            Some('-')
+        } else {
+            None
+        };
+        if let Some(ch) = mapped {
+            if ch == '-' {
+                if !last_dash && !out.is_empty() {
+                    out.push(ch);
+                    last_dash = true;
+                }
+            } else {
+                out.push(ch);
+                last_dash = false;
+            }
+        }
+        if out.chars().count() >= max_chars {
+            break;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        fallback.to_string()
+    } else {
+        out
+    }
+}
+
+fn work_memory_cwd(args: &Value) -> String {
+    args.get("cwd")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.display().to_string())
+        })
+        .unwrap_or_else(|| "/".to_string())
+}
+
+fn work_memory_scope(cwd: &str) -> String {
+    format!("project:{cwd}")
+}
+
+fn work_memory_key(cwd: &str, session_id: Option<&str>, slot: &str) -> String {
+    let scope_hash = stable_fnv1a_hex(cwd);
+    let slot = sanitize_work_memory_component(slot, WORK_MEMORY_DEFAULT_SLOT, 48);
+    let owner = session_id
+        .map(|s| sanitize_work_memory_component(s, "session", 48))
+        .unwrap_or_else(|| "shared".to_string());
+    format!("work_memory_{}_{}_{}", &scope_hash[..12], owner, slot)
+}
+
+fn json_string_array(args: &Value, key: &str) -> Vec<String> {
+    args.get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::trim))
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn tail_chars(s: &str, max_chars: usize) -> (String, bool, usize) {
+    let total = s.chars().count();
+    if max_chars == 0 || total <= max_chars {
+        (s.to_string(), false, total)
+    } else {
+        let start = total.saturating_sub(max_chars);
+        let tail: String = s.chars().skip(start).collect();
+        (
+            format!("[trimmed earlier context; total {total} chars]\n{tail}"),
+            true,
+            total,
+        )
+    }
+}
+
+fn build_work_memory_content(
+    args: &Value,
+    cwd: &str,
+    session_id: Option<&str>,
+    slot: &str,
+) -> std::result::Result<(String, bool, usize), String> {
+    if let Some(content) = args
+        .get("content")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let (content, truncated, total_chars) =
+            truncate_chars(content, WORK_MEMORY_MAX_CONTENT_CHARS);
+        return Ok((content, truncated, total_chars));
+    }
+
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Active Work Memory");
+    let summary = args
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let next_step = args
+        .get("next_step")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let evidence = args
+        .get("evidence")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let status = args
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("active");
+    let files = json_string_array(args, "files");
+
+    if summary.is_none() && next_step.is_none() && evidence.is_none() && files.is_empty() {
+        return Err(
+            "save requires either content or at least one of summary/next_step/evidence/files"
+                .to_string(),
+        );
+    }
+
+    let mut lines = vec![
+        format!("# {title}"),
+        format!("cwd: {cwd}"),
+        format!("slot: {slot}"),
+        format!("status: {status}"),
+        format!("updated_at: {}", unix_now_secs()),
+    ];
+    if let Some(session_id) = session_id {
+        lines.push(format!("session_id: {session_id}"));
+    }
+    if let Some(summary) = summary {
+        lines.extend([
+            "".to_string(),
+            "## Summary".to_string(),
+            summary.to_string(),
+        ]);
+    }
+    if let Some(next_step) = next_step {
+        lines.extend([
+            "".to_string(),
+            "## Next Step".to_string(),
+            next_step.to_string(),
+        ]);
+    }
+    if let Some(evidence) = evidence {
+        lines.extend([
+            "".to_string(),
+            "## Evidence".to_string(),
+            evidence.to_string(),
+        ]);
+    }
+    if !files.is_empty() {
+        lines.push(String::new());
+        lines.push("## Files".to_string());
+        lines.extend(files.iter().map(|f| format!("- {f}")));
+    }
+    let content = lines.join("\n");
+    let (content, truncated, total_chars) = truncate_chars(&content, WORK_MEMORY_MAX_CONTENT_CHARS);
+    Ok((content, truncated, total_chars))
+}
+
+fn build_precompact_work_memory_content(
+    conversation_text: &str,
+    cwd: &str,
+    session_id: Option<&str>,
+) -> (String, bool, usize) {
+    let (excerpt, truncated, total_chars) =
+        tail_chars(conversation_text, WORK_MEMORY_PRECOMPACT_CHARS);
+    let mut lines = vec![
+        "# PreCompact Work Memory".to_string(),
+        format!("cwd: {cwd}"),
+        "slot: precompact".to_string(),
+        "source: session_lifecycle_step(precompact)".to_string(),
+        format!("updated_at: {}", unix_now_secs()),
+    ];
+    if let Some(session_id) = session_id {
+        lines.push(format!("session_id: {session_id}"));
+    }
+    lines.extend([
+        String::new(),
+        "## Recent Context Excerpt".to_string(),
+        excerpt,
+    ]);
+    (lines.join("\n"), truncated, total_chars)
+}
+
+fn format_work_memory_block(
+    rows: &[MemoryRecord],
+    is_compact: bool,
+    snippet_len: usize,
+) -> Option<Vec<String>> {
+    let rows: Vec<MemoryRecord> = rows
+        .iter()
+        .filter(|r| r.status == "active")
+        .take(4)
+        .cloned()
+        .collect();
+    if rows.is_empty() {
+        return None;
+    }
+    let mut out = vec![
+        if is_compact {
+            "=== Active Work Memory ===".to_string()
+        } else {
+            "=== Active Work Memory (short-lived scratchpad) ===".to_string()
+        },
+        String::new(),
+    ];
+    out.extend(format_bootstrap_memory_rows(&rows, snippet_len));
+    out.push(String::new());
+    Some(out)
+}
+
+async fn save_precompact_work_memory_snapshot(
+    hub: &Hub,
+    cwd: &str,
+    session_id: Option<&str>,
+    conversation_text: &str,
+) -> Value {
+    let store = match &hub.store {
+        Some(s) => s.clone(),
+        None => return json!({ "saved": false, "reason": "no store configured" }),
+    };
+    let (content, truncated, source_chars) =
+        build_precompact_work_memory_content(conversation_text, cwd, session_id);
+    let key = work_memory_key(cwd, session_id, "precompact");
+    let scope = work_memory_scope(cwd);
+    let mut tags = vec![
+        "work_memory".to_string(),
+        "source:precompact".to_string(),
+        "ttl:14d".to_string(),
+    ];
+    if let Some(session_id) = session_id {
+        tags.push(format!("session:{session_id}"));
+    }
+    let mem = MemoryRecord {
+        key: key.clone(),
+        kind: WORK_MEMORY_KIND.to_string(),
+        content,
+        tags,
+        related_keys: vec![],
+        scope: Some(scope.clone()),
+        created_at: 0,
+        updated_at: 0,
+        last_accessed_at: 0,
+        access_count: 0,
+        importance: 0.62,
+        status: "active".to_string(),
+        trigger_pattern: None,
+        superseded_by: None,
+    };
+    match store.memory_save(&mem).await {
+        Ok(()) => json!({
+            "saved": true,
+            "key": key,
+            "scope": scope,
+            "source_chars": source_chars,
+            "truncated": truncated,
+        }),
+        Err(e) => json!({ "saved": false, "error": e.to_string() }),
+    }
+}
+
+pub struct WorkMemoryTool {
+    hub: Hub,
+}
+impl WorkMemoryTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for WorkMemoryTool {
+    fn name(&self) -> &'static str {
+        "work_memory"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Manage a short-lived project/session scratchpad outside the model \
+                 context. Use it to preserve active task state across context compaction; \
+                 durable lessons and decisions still belong in memory_save."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "op": {
+                        "type": "string",
+                        "enum": ["save", "list", "get", "clear"],
+                        "default": "list",
+                        "description": "save overwrites a project/session slot; list returns recent work memories; get reads one key; clear deletes one slot/key."
+                    },
+                    "cwd": { "type": "string", "description": "Project path for scoping. Defaults to current working directory." },
+                    "session_id": { "type": "string", "description": "Optional session namespace. Omit for a shared project slot." },
+                    "slot": { "type": "string", "default": "active", "description": "Short slot name, e.g. active, release, precompact." },
+                    "key": { "type": "string", "description": "Explicit key for get/clear. If omitted for clear, cwd/session_id/slot derives the key." },
+                    "title": { "type": "string" },
+                    "summary": { "type": "string" },
+                    "next_step": { "type": "string" },
+                    "evidence": { "type": "string" },
+                    "files": { "type": "array", "items": { "type": "string" }, "default": [] },
+                    "content": { "type": "string", "description": "Optional full Markdown content. Capped at 12000 chars." },
+                    "status": { "type": "string", "default": "active" },
+                    "tags": { "type": "array", "items": { "type": "string" }, "default": [] },
+                    "ttl_days": { "type": "integer", "minimum": 1, "maximum": 90, "default": 14 },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 8 },
+                    "compact": { "type": "boolean", "description": "When listing, return compact row summaries. Defaults true for Codex compact profiles." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let op = args
+            .get("op")
+            .and_then(|v| v.as_str())
+            .unwrap_or("list")
+            .trim()
+            .to_lowercase();
+        let cwd = work_memory_cwd(&args);
+        let session_id = args
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let slot = args
+            .get("slot")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(WORK_MEMORY_DEFAULT_SLOT);
+
+        match op.as_str() {
+            "save" => {
+                let (content, truncated, total_chars) =
+                    match build_work_memory_content(&args, &cwd, session_id, slot) {
+                        Ok(v) => v,
+                        Err(e) => return Ok(ToolResult::error(e)),
+                    };
+                let key = args
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| work_memory_key(&cwd, session_id, slot));
+                let scope = work_memory_scope(&cwd);
+                let ttl_days = args
+                    .get("ttl_days")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(14)
+                    .clamp(1, 90);
+                let mut tags = vec![
+                    "work_memory".to_string(),
+                    format!(
+                        "slot:{}",
+                        sanitize_work_memory_component(slot, WORK_MEMORY_DEFAULT_SLOT, 48)
+                    ),
+                    format!("ttl:{ttl_days}d"),
+                ];
+                if let Some(session_id) = session_id {
+                    tags.push(format!("session:{session_id}"));
+                }
+                tags.extend(json_string_array(&args, "tags"));
+                tags.sort();
+                tags.dedup();
+                let mem = MemoryRecord {
+                    key: key.clone(),
+                    kind: WORK_MEMORY_KIND.to_string(),
+                    content,
+                    tags,
+                    related_keys: vec![],
+                    scope: Some(scope.clone()),
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.65,
+                    status: "active".to_string(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                };
+                store.memory_save(&mem).await?;
+                Ok(ToolResult::json_text(&json!({
+                    "saved": true,
+                    "key": key,
+                    "scope": scope,
+                    "slot": slot,
+                    "content_chars": mem.content.chars().count(),
+                    "source_chars": total_chars,
+                    "truncated": truncated,
+                })))
+            }
+            "list" => {
+                let limit = args
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(8)
+                    .clamp(1, 50) as u32;
+                let compact = args
+                    .get("compact")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or_else(compact_mcp_output_default);
+                let rows = store
+                    .list_memories_in_scope(
+                        &cwd,
+                        Some(WORK_MEMORY_KIND),
+                        MemoryListSort::Recent,
+                        limit,
+                    )
+                    .await?;
+                if compact {
+                    let rows: Vec<Value> = rows
+                        .into_iter()
+                        .map(|r| {
+                            let (snippet, truncated, total_chars) = truncate_chars(&r.content, 240);
+                            json!({
+                                "key": r.key,
+                                "scope": r.scope,
+                                "updated_at": r.updated_at,
+                                "tags": r.tags,
+                                "snippet": snippet,
+                                "truncated": truncated,
+                                "content_chars": total_chars,
+                            })
+                        })
+                        .collect();
+                    Ok(ToolResult::json_text(&json!({
+                        "cwd": cwd,
+                        "kind": WORK_MEMORY_KIND,
+                        "rows": rows,
+                    })))
+                } else {
+                    Ok(ToolResult::json_text(
+                        &serde_json::to_value(rows).unwrap_or(Value::Null),
+                    ))
+                }
+            }
+            "get" => {
+                let key = match args.get("key").and_then(|v| v.as_str()) {
+                    Some(s) if !s.trim().is_empty() => s.trim(),
+                    _ => return Ok(ToolResult::error("get requires key")),
+                };
+                match store.memory_get(key).await? {
+                    Some(row) if row.kind == WORK_MEMORY_KIND => Ok(ToolResult::json_text(
+                        &serde_json::to_value(row).unwrap_or(Value::Null),
+                    )),
+                    Some(_) => Ok(ToolResult::error("key exists but is not work_memory")),
+                    None => Ok(ToolResult::error("work memory key not found")),
+                }
+            }
+            "clear" => {
+                let key = args
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| work_memory_key(&cwd, session_id, slot));
+                let deleted = store.memory_delete(&key).await?;
+                Ok(ToolResult::json_text(
+                    &json!({ "deleted": deleted, "key": key }),
+                ))
+            }
+            other => Ok(ToolResult::error(format!(
+                "unknown work_memory op: {other} (expected save|list|get|clear)"
+            ))),
+        }
+    }
+}
+
 pub struct MemoryCompactTool {
     hub: Hub,
 }
@@ -7840,12 +10477,12 @@ impl McpTool for MemoryCorrectionTool {
             Ok(None) => {
                 return Ok(ToolResult::error(format!(
                     "memory_correction: target_key '{target_key}' not found"
-                )))
+                )));
             }
             Err(e) => {
                 return Ok(ToolResult::error(format!(
                     "memory_correction: lookup error for '{target_key}': {e}"
-                )))
+                )));
             }
         }
 
@@ -8222,6 +10859,7 @@ const BUDGET_SEED: usize = 200;
 const BUDGET_PERCEPTION: usize = 150;
 const BUDGET_LETTER_EACH: usize = 150;
 const BUDGET_FEEDBACK_PREAMBLE: usize = 300;
+const BUDGET_WORK_MEMORY: usize = 260;
 const BUDGET_DECISIONS_DUE: usize = 200;
 const BUDGET_ERROR_PATTERNS: usize = 200;
 const BUDGET_BOOTSTRAP_ROWS: usize = 500;
@@ -8580,6 +11218,19 @@ impl McpTool for SessionBootstrapTool {
             let picked = pick_top_feedback(feedback_pool, 5, now_ts);
             if let Some(block) = format_feedback_preamble_block(&picked, is_compact, snippet_len) {
                 lines.extend(cap_block_lines(block, BUDGET_FEEDBACK_PREAMBLE));
+            }
+        }
+
+        // Active work memory is a short-lived scratchpad for the task in
+        // flight. It is intentionally separate from durable lesson/decision
+        // rows so context-compaction recovery does not pollute long-term memory.
+        {
+            let work_rows = store
+                .list_memories_in_scope(&cwd, Some(WORK_MEMORY_KIND), MemoryListSort::Recent, 8)
+                .await
+                .unwrap_or_default();
+            if let Some(block) = format_work_memory_block(&work_rows, is_compact, 180) {
+                lines.extend(cap_block_lines(block, BUDGET_WORK_MEMORY));
             }
         }
 
@@ -9267,6 +11918,245 @@ impl McpTool for MemoryConsolidateTool {
     }
 }
 
+pub struct XiaoShuActionRequestTool;
+impl XiaoShuActionRequestTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+
+fn xiao_shu_action_request_string_arg(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+}
+
+fn xiao_shu_action_request_path_arg(args: &Value, key: &str) -> Option<PathBuf> {
+    xiao_shu_action_request_string_arg(args, key).map(PathBuf::from)
+}
+
+#[async_trait]
+impl McpTool for XiaoShuActionRequestTool {
+    fn name(&self) -> &'static str {
+        "xiao_shu_action_request"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "LLM-safe Xiao Shu action request surface. \
+                 Maps high-level intents such as voice_alert or alert_peek into \
+                 the existing read-only action preview chain. It never directly \
+                 controls the pet, emits audio, writes request records, mutates \
+                 cooldown state, or changes the official Codex pet package. \
+                 It can also read the pending-action queue when list_queue=true. \
+                 Real audio still requires a separate local CLI confirmation."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "description": "Optional launchd label override for the avatar cortex runner."
+                    },
+                    "heartbeat_label": {
+                        "type": "string",
+                        "description": "Optional heartbeat label override. Defaults to the project-scoped avatar heartbeat label."
+                    },
+                    "project": {
+                        "type": "string",
+                        "default": "agent-bridge",
+                        "description": "Project slug used for avatar cortex status and voice cooldown paths."
+                    },
+                    "output": {
+                        "type": "string",
+                        "description": "Optional avatar cortex snapshot path to inspect instead of the default project snapshot."
+                    },
+                    "actor": {
+                        "type": "string",
+                        "default": "llm",
+                        "description": "Who is requesting the action, for example codex, claude-code, panel, or llm."
+                    },
+                    "intent": {
+                        "type": "string",
+                        "default": "voice_alert",
+                        "enum": ["voice_alert", "alert_peek", "attention", "review_attention", "xiao_shu_alert_peek"],
+                        "description": "High-level Xiao Shu intent. Unsupported intents are blocked by the returned request state."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Optional human-readable request note from the caller."
+                    },
+                    "track": {
+                        "type": "string",
+                        "default": "xiao_shu::alert_peek::medium",
+                        "description": "Optional avatar cortex track token to preview."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Operator-facing reason. Required later by the local CLI emit gate, but this MCP tool remains dry-run."
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Dry-run confirmation flag. Even when true, this MCP tool does not emit audio."
+                    },
+                    "enqueue": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, append this request to Xiao Shu's sidecar pending-action queue. This writes only an auditable request record; it still does not emit audio, mutate cooldown state, or control the pet."
+                    },
+                    "list_queue": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, read Xiao Shu's sidecar pending-action queue. This is read-only and cannot emit audio or control the pet."
+                    },
+                    "request_id": {
+                        "type": "string",
+                        "description": "Optional queue request id to inspect when list_queue=true."
+                    },
+                    "state": {
+                        "type": "string",
+                        "description": "Optional queue state filter when list_queue=true. Defaults to pending_human_confirmation."
+                    },
+                    "all_states": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When list_queue=true, include all queue states instead of only pending records."
+                    },
+                    "details": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include full nested records. Plain preview requests and broad queue reads default to compact records; request_id or all_states queue reads are always detailed."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 20,
+                        "description": "Maximum queue records to return when list_queue=true, newest first."
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Dry-run force flag forwarded to the preview gate; it does not bypass the local CLI emit requirement."
+                    },
+                    "cooldown_secs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 86400,
+                        "default": 300
+                    },
+                    "tts_voice": {
+                        "type": "string",
+                        "description": "Optional suggested macOS TTS voice for the later local CLI command."
+                    },
+                    "tts_rate": {
+                        "type": "integer",
+                        "minimum": 80,
+                        "maximum": 300,
+                        "description": "Optional suggested macOS say words-per-minute rate for the later local CLI command."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let label = xiao_shu_action_request_string_arg(&args, "label");
+        let heartbeat_label = xiao_shu_action_request_string_arg(&args, "heartbeat_label");
+        let project = xiao_shu_action_request_string_arg(&args, "project");
+        let output = xiao_shu_action_request_path_arg(&args, "output");
+        let actor = xiao_shu_action_request_string_arg(&args, "actor");
+        let intent = xiao_shu_action_request_string_arg(&args, "intent");
+        let message = xiao_shu_action_request_string_arg(&args, "message");
+        let track = xiao_shu_action_request_string_arg(&args, "track");
+        let reason = xiao_shu_action_request_string_arg(&args, "reason");
+        let tts_voice = xiao_shu_action_request_string_arg(&args, "tts_voice");
+        let request_id = xiao_shu_action_request_string_arg(&args, "request_id");
+        let state = xiao_shu_action_request_string_arg(&args, "state");
+        let list_queue = args
+            .get("list_queue")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let confirm = args
+            .get("confirm")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let enqueue = args
+            .get("enqueue")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let all_states = args
+            .get("all_states")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let details = args
+            .get("details")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(20)
+            .clamp(1, 500) as usize;
+        let cooldown_secs = args
+            .get("cooldown_secs")
+            .and_then(Value::as_i64)
+            .unwrap_or(300)
+            .clamp(0, 86_400);
+        let tts_rate = args
+            .get("tts_rate")
+            .and_then(Value::as_u64)
+            .map(|rate| rate.clamp(80, 300));
+
+        if list_queue {
+            let opts = crate::avatar_cortex::XiaoShuActionRequestQueueOptions {
+                project: project.as_deref(),
+                request_id: request_id.as_deref(),
+                state: state.as_deref(),
+                include_all_states: all_states,
+                include_details: details,
+                limit,
+            };
+            return match crate::avatar_cortex::xiao_shu_action_request_queue(&opts) {
+                Ok(payload) => Ok(ToolResult::json_text(&payload)),
+                Err(e) => Ok(ToolResult::error(format!("xiao_shu_action_request: {e}"))),
+            };
+        }
+
+        let opts = crate::avatar_cortex::XiaoShuActionRequestOptions {
+            label: label.as_deref(),
+            heartbeat_label: heartbeat_label.as_deref(),
+            project: project.as_deref(),
+            output: output.as_deref(),
+            actor: actor.as_deref(),
+            intent: intent.as_deref(),
+            message: message.as_deref(),
+            requested_track: track.as_deref(),
+            reason: reason.as_deref(),
+            confirm: if enqueue { false } else { confirm },
+            force,
+            cooldown_secs,
+            tts_voice: tts_voice.as_deref(),
+            tts_rate,
+            include_details: details,
+        };
+        let result = if enqueue {
+            crate::avatar_cortex::xiao_shu_action_request_enqueue(&opts)
+        } else {
+            crate::avatar_cortex::xiao_shu_action_request(&opts)
+        };
+        match result {
+            Ok(payload) => Ok(ToolResult::json_text(&payload)),
+            Err(e) => Ok(ToolResult::error(format!("xiao_shu_action_request: {e}"))),
+        }
+    }
+}
+
 // ===========================================================================
 //                              pet_state_get / set
 // ===========================================================================
@@ -9787,13 +12677,13 @@ impl McpTool for PetStateRitualTool {
                 return Ok(ToolResult::error(format!(
                     "pet_state_ritual: no state file at {}",
                     state_path.display()
-                )))
+                )));
             }
             Err(e) => {
                 return Ok(ToolResult::error(format!(
                     "pet_state_ritual: failed to read {}: {e}",
                     state_path.display()
-                )))
+                )));
             }
         };
 
@@ -9807,7 +12697,7 @@ impl McpTool for PetStateRitualTool {
                     "reason": "mode has no ritual cue",
                     "pet_id": pet_id,
                     "mode": mode,
-                })))
+                })));
             }
         };
 
@@ -11342,7 +14232,7 @@ async fn audit_stdio_smoke(command: &str, args: &[String], timeout: Duration) ->
                 "args": args,
                 "ok": false,
                 "error": e.to_string()
-            })
+            });
         }
     };
 
@@ -11359,7 +14249,7 @@ async fn audit_stdio_smoke(command: &str, args: &[String], timeout: Duration) ->
                 "args": args,
                 "ok": false,
                 "error": e.to_string()
-            })
+            });
         }
         Err(_) => {
             return json!({
@@ -11367,7 +14257,7 @@ async fn audit_stdio_smoke(command: &str, args: &[String], timeout: Duration) ->
                 "args": args,
                 "ok": false,
                 "error": "timeout"
-            })
+            });
         }
     };
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -11804,6 +14694,88 @@ impl McpTool for MemoryQueryStatsTool {
             "top_miss_queries": top_misses_json,
             "note": "Empty / low total_queries means the MCP layer hasn't logged enough \
                 yet — exercise memory_search/get and re-run.",
+        })))
+    }
+}
+
+// ===========================================================================
+//             memory_graph_topology — graph centrality readiness readout
+// ===========================================================================
+
+pub struct MemoryGraphTopologyTool {
+    hub: Hub,
+}
+impl MemoryGraphTopologyTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryGraphTopologyTool {
+    fn name(&self) -> &'static str {
+        "memory_graph_topology"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only memory graph topology snapshot for ranking experiments. \
+                 Reports orphan rate, degree buckets, top hubs, and evolved-edge coverage. \
+                 Use this before adding PageRank-like centrality into retrieval: it measures \
+                 whether the graph is healthy enough for a bounded centrality prior without \
+                 changing memory_search ranking."
+                .into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+
+        let topo = store.graph_topology().await?;
+        let active_total = topo.non_skill_active_total.max(1);
+        let orphan_fraction = topo.orphan_count as f64 / active_total as f64;
+        let p4_evolved_fraction = topo.p4_evolved_coverage as f64 / active_total as f64;
+        let top_hub_degree = topo.top_5_hubs.first().map(|(_, d)| *d).unwrap_or(0);
+        let top_hub_fraction = top_hub_degree as f64 / active_total as f64;
+
+        let pagerank_readiness = if topo.non_skill_active_total == 0 {
+            "empty_graph"
+        } else if orphan_fraction > 0.35 {
+            "needs_graph_hygiene_before_rank_prior"
+        } else if top_hub_fraction > 0.15 {
+            "hub_risk_cap_centrality_boost"
+        } else {
+            "observe_then_bound_centrality_boost"
+        };
+
+        let degree_histogram: Vec<Value> = topo
+            .degree_histogram
+            .iter()
+            .map(|(bucket, count)| json!({ "bucket": bucket, "count": count }))
+            .collect();
+        let top_5_hubs: Vec<Value> = topo
+            .top_5_hubs
+            .iter()
+            .map(|(key, degree)| json!({ "key": key, "degree": degree }))
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "non_skill_active_total": topo.non_skill_active_total,
+            "orphan_count": topo.orphan_count,
+            "orphan_fraction": (orphan_fraction * 1000.0).round() / 1000.0,
+            "degree_histogram": degree_histogram,
+            "top_5_hubs": top_5_hubs,
+            "top_hub_degree": top_hub_degree,
+            "top_hub_fraction": (top_hub_fraction * 1000.0).round() / 1000.0,
+            "p4_evolved_coverage": topo.p4_evolved_coverage,
+            "p4_evolved_fraction": (p4_evolved_fraction * 1000.0).round() / 1000.0,
+            "pagerank_readiness": pagerank_readiness,
+            "ranking_note": "This tool does not run PageRank and does not alter memory_search. \
+                It is the cheap preflight for deciding whether a bounded centrality prior \
+                is safe to test.",
         })))
     }
 }
@@ -13081,6 +16053,66 @@ pub fn compute_link_suggestions(
     scored
 }
 
+fn memory_string_array_arg(args: &Value, key: &str, default: &[&str]) -> Vec<String> {
+    args.get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_else(|| default.iter().map(|s| (*s).to_string()).collect())
+}
+
+fn memory_has_any_tag(rec: &MemoryRecord, tags: &[String]) -> bool {
+    rec.tags
+        .iter()
+        .any(|tag| tags.iter().any(|skip| tag.eq_ignore_ascii_case(skip)))
+}
+
+fn memory_kind_is_any(rec: &MemoryRecord, kinds: &[String]) -> bool {
+    kinds.iter().any(|kind| rec.kind.eq_ignore_ascii_case(kind))
+}
+
+fn memory_scope_value(rec: &MemoryRecord) -> Option<&str> {
+    rec.scope
+        .as_deref()
+        .map(str::trim)
+        .filter(|scope| !scope.is_empty())
+}
+
+fn memory_scopes_compatible(source: &MemoryRecord, target: &MemoryRecord, required: bool) -> bool {
+    if !required {
+        return true;
+    }
+    match (memory_scope_value(source), memory_scope_value(target)) {
+        (Some(a), Some(b)) => a == b || a == "global" || b == "global",
+        _ => true,
+    }
+}
+
+fn memory_link_orphan_candidate_allowed(
+    source: &MemoryRecord,
+    target: &MemoryRecord,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    require_scope_compatible: bool,
+) -> bool {
+    source.key != target.key
+        && !memory_has_any_tag(target, skip_tags)
+        && !memory_kind_is_any(target, skip_kinds)
+        && memory_scopes_compatible(source, target, require_scope_compatible)
+}
+
+fn undirected_memory_pair_key(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
+}
+
 // ===========================================================================
 //          memory_link_orphans (ζ-7 — clear orphan backlog)
 // ===========================================================================
@@ -13120,10 +16152,11 @@ impl McpTool for MemoryLinkOrphansTool {
                         "type": "number",
                         "minimum": 0.0,
                         "maximum": 2.0,
-                        "default": 0.7,
+                        "default": 0.85,
                         "description": "Top candidate must score ≥ this to auto-link. \
-                            0.7 is conservative (tag_overlap ×0.4 + same_prefix ×0.3 + jaccard); \
-                            lower for higher recall, raise for higher precision."
+                            Default 0.85 is conservative after the 2026-05-23 PageRank-readiness \
+                            dry-run showed 0.7 would link too many volatile alert/work-memory \
+                            clusters. Lower for higher recall, raise for higher precision."
                     },
                     "min_content_len": {
                         "type": "integer",
@@ -13143,13 +16176,35 @@ impl McpTool for MemoryLinkOrphansTool {
                     "skip_tags": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "default": ["auto_curated"],
+                        "default": ["auto_curated", "alert", "ttl:7d"],
                         "description": "ζ-11 noise-hub fix. Orphans whose tags overlap this list \
                             are skipped (don't pick a target) AND candidates whose tags overlap \
-                            this list cannot be picked as targets. Default `['auto_curated']` \
-                            prevents `curated_implicit_*` stubs from collapsing onto a single \
-                            sibling — the ζ-9 wet-run showed 82 stubs all linking to the \
-                            lex-earliest auto_curated sibling, creating a degree-84 noise hub."
+                            this list cannot be picked as targets. Defaults skip auto-curated \
+                            stubs, alert bursts, and short-lived work-memory TTL rows before \
+                            graph centrality can amplify them."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["alert", "work_memory", "session_handoff", "snapshot"],
+                        "description": "ζ-20 conservative graph-hygiene guardrail. Source \
+                            orphans and candidate targets with these memory kinds are skipped. \
+                            Empty array disables. Defaults avoid linking volatile alerts, \
+                            scratch work memory, broad session handoffs, and snapshots."
+                    },
+                    "require_scope_compatible": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, candidates with a concrete non-global scope \
+                            must match the orphan's concrete non-global scope. Global or missing \
+                            scopes remain compatible so older memories still participate."
+                    },
+                    "dedupe_undirected_pairs": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, avoid writing both A→B and B→A `relates` \
+                            edges in the same run. `relates` is treated as symmetric for \
+                            hygiene purposes."
                     },
                     "max_inbound_per_target": {
                         "type": "integer",
@@ -13174,7 +16229,7 @@ impl McpTool for MemoryLinkOrphansTool {
         let threshold = args
             .get("threshold")
             .and_then(|v| v.as_f64())
-            .unwrap_or(0.7);
+            .unwrap_or(0.85);
         let min_content_len = args
             .get("min_content_len")
             .and_then(|v| v.as_u64())
@@ -13184,17 +16239,24 @@ impl McpTool for MemoryLinkOrphansTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(100)
             .min(500) as usize;
-        // ζ-11 skip_tags: default ["auto_curated"] excludes both source orphans
-        // AND candidate targets whose tags overlap. Empty array disables.
-        let skip_tags: Vec<String> = args
-            .get("skip_tags")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_else(|| vec!["auto_curated".to_string()]);
+        // ζ-20 defaults: keep volatile rows out of durable graph hygiene so
+        // later PageRank-like priors do not amplify alert/scratch clusters.
+        // Empty arrays intentionally disable the corresponding filters.
+        let skip_tags =
+            memory_string_array_arg(&args, "skip_tags", &["auto_curated", "alert", "ttl:7d"]);
+        let skip_kinds = memory_string_array_arg(
+            &args,
+            "skip_kinds",
+            &["alert", "work_memory", "session_handoff", "snapshot"],
+        );
+        let require_scope_compatible = args
+            .get("require_scope_compatible")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let dedupe_undirected_pairs = args
+            .get("dedupe_undirected_pairs")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
         let max_inbound_per_target = args
             .get("max_inbound_per_target")
             .and_then(|v| v.as_u64())
@@ -13219,6 +16281,7 @@ impl McpTool for MemoryLinkOrphansTool {
         let mut orphans: Vec<MemoryRecord> = Vec::new();
         let mut examined: u64 = 0;
         let mut skipped_blacklisted_orphan: u64 = 0;
+        let mut skipped_blacklisted_kind: u64 = 0;
         for rec in all.iter() {
             if rec.kind == "skill" {
                 continue;
@@ -13236,8 +16299,12 @@ impl McpTool for MemoryLinkOrphansTool {
             }
             // ζ-11 source-side blacklist: stubs tagged `auto_curated` should
             // decay/archive naturally, not get force-linked.
-            if !skip_tags.is_empty() && rec.tags.iter().any(|t| skip_tags.contains(t)) {
+            if memory_has_any_tag(rec, &skip_tags) {
                 skipped_blacklisted_orphan += 1;
+                continue;
+            }
+            if memory_kind_is_any(rec, &skip_kinds) {
+                skipped_blacklisted_kind += 1;
                 continue;
             }
             orphans.push(rec.clone());
@@ -13252,14 +16319,32 @@ impl McpTool for MemoryLinkOrphansTool {
         let mut linked = 0u64;
         let mut skipped_low_score = 0u64;
         let mut skipped_overloaded_target = 0u64;
+        let mut skipped_duplicate_pair = 0u64;
+        let mut skipped_no_compatible_target = 0u64;
         let mut target_inbound_this_run: std::collections::HashMap<String, u32> =
             std::collections::HashMap::new();
+        let mut linked_pairs_this_run: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
         let mut decisions: Vec<Value> = Vec::new();
         for orphan in &orphans {
             // already_linked is empty since orphan has no edges by definition.
             let already_linked: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
-            let sugg = compute_link_suggestions(orphan, &all, &already_linked, 5, &skip_tags);
+            let candidate_pool: Vec<MemoryRecord> = all
+                .iter()
+                .filter(|candidate| {
+                    memory_link_orphan_candidate_allowed(
+                        orphan,
+                        candidate,
+                        &skip_tags,
+                        &skip_kinds,
+                        require_scope_compatible,
+                    )
+                })
+                .cloned()
+                .collect();
+            let sugg =
+                compute_link_suggestions(orphan, &candidate_pool, &already_linked, 5, &skip_tags);
             if sugg.is_empty() {
                 skipped_low_score += 1;
                 continue;
@@ -13272,6 +16357,8 @@ impl McpTool for MemoryLinkOrphansTool {
             // Walk candidates in confidence order; pick the first that
             // still has headroom under the per-target inbound cap.
             let mut chosen: Option<(String, f64, String)> = None;
+            let mut saw_overloaded_target = false;
+            let mut saw_duplicate_pair = false;
             for (target, conf, reason) in sugg.iter() {
                 if *conf < threshold {
                     break;
@@ -13279,15 +16366,26 @@ impl McpTool for MemoryLinkOrphansTool {
                 if target == &orphan.key {
                     continue;
                 }
+                let pair = undirected_memory_pair_key(&orphan.key, target);
+                if dedupe_undirected_pairs && linked_pairs_this_run.contains(&pair) {
+                    saw_duplicate_pair = true;
+                    skipped_duplicate_pair += 1;
+                    continue;
+                }
                 let cur = target_inbound_this_run.get(target).copied().unwrap_or(0);
                 if cur >= max_inbound_per_target {
+                    saw_overloaded_target = true;
                     continue;
                 }
                 chosen = Some((target.clone(), *conf, reason.clone()));
                 break;
             }
             let Some((target, conf, reason)) = chosen else {
-                skipped_overloaded_target += 1;
+                if saw_overloaded_target {
+                    skipped_overloaded_target += 1;
+                } else if !saw_duplicate_pair {
+                    skipped_no_compatible_target += 1;
+                }
                 continue;
             };
             if !dry_run {
@@ -13295,6 +16393,9 @@ impl McpTool for MemoryLinkOrphansTool {
                     .memory_link(&orphan.key, &target, "relates", 1.0)
                     .await
                     .ok();
+            }
+            if dedupe_undirected_pairs {
+                linked_pairs_this_run.insert(undirected_memory_pair_key(&orphan.key, &target));
             }
             *target_inbound_this_run.entry(target.clone()).or_insert(0) += 1;
             linked += 1;
@@ -13311,13 +16412,19 @@ impl McpTool for MemoryLinkOrphansTool {
             "threshold": threshold,
             "min_content_len": min_content_len,
             "skip_tags": skip_tags,
+            "skip_kinds": skip_kinds,
+            "require_scope_compatible": require_scope_compatible,
+            "dedupe_undirected_pairs": dedupe_undirected_pairs,
             "max_inbound_per_target": max_inbound_per_target,
             "examined": examined,
             "eligible_orphans": orphans.len(),
             "linked": linked,
             "skipped_low_score": skipped_low_score,
             "skipped_blacklisted_orphan": skipped_blacklisted_orphan,
+            "skipped_blacklisted_kind": skipped_blacklisted_kind,
             "skipped_overloaded_target": skipped_overloaded_target,
+            "skipped_duplicate_pair": skipped_duplicate_pair,
+            "skipped_no_compatible_target": skipped_no_compatible_target,
             "links": decisions,
         })))
     }
@@ -14136,7 +17243,7 @@ impl McpTool for SessionReflectTool {
             None => {
                 return Ok(ToolResult::error(
                     "missing or invalid 'focus' (must be decisions | process | tooling)",
-                ))
+                ));
             }
         };
 
@@ -14283,6 +17390,11 @@ impl McpTool for SessionLifecycleStepTool {
                     "frontend": { "type": "string" },
                     "conversation_text": { "type": "string" },
                     "session_id": { "type": "string" },
+                    "save_work_memory": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "For precompact, save a capped work_memory scratch snapshot before curation/finalize."
+                    },
                     "max_items": { "type": "integer" },
                     "dry_run": { "type": "boolean" },
                     "implicit_score_threshold": { "type": "number" },
@@ -14349,6 +17461,28 @@ impl McpTool for SessionLifecycleStepTool {
                         ));
                     }
                 };
+                let dry_run = args
+                    .get("dry_run")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let cwd = work_memory_cwd(&args);
+                let session_id = args
+                    .get("session_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty());
+                let save_work_memory = args
+                    .get("save_work_memory")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                let work_memory = if save_work_memory && !dry_run {
+                    save_precompact_work_memory_snapshot(&self.hub, &cwd, session_id, &conv).await
+                } else {
+                    json!({
+                        "saved": false,
+                        "reason": if dry_run { "dry_run" } else { "disabled" }
+                    })
+                };
                 let mut curate_args = json!({ "conversation_text": conv });
                 for k in [
                     "session_id",
@@ -14385,6 +17519,7 @@ impl McpTool for SessionLifecycleStepTool {
 
                 let merged = json!({
                     "step": "precompact",
+                    "work_memory": work_memory,
                     "session_curate": tool_result_first_json(&curate),
                     "session_finalize": tool_result_first_json(&finalize),
                 });
@@ -14454,7 +17589,11 @@ impl McpTool for OzRunGetTool {
                 .await?;
             match session.and_then(|s| s.cloud_run_id) {
                 Some(rid) => rid,
-                None => return Ok(ToolResult::error("session has no cloud_run_id (not a warp-oz session, or run_id not yet persisted)")),
+                None => {
+                    return Ok(ToolResult::error(
+                        "session has no cloud_run_id (not a warp-oz session, or run_id not yet persisted)",
+                    ));
+                }
             }
         } else {
             return Ok(ToolResult::error(
@@ -14610,7 +17749,7 @@ impl McpTool for OzRunCancelTool {
                     "WARP_API_KEY env var not set. \
                  Generate an API key at Warp Settings → Platform \
                  (warp://settings/platform), then export WARP_API_KEY=<key>.",
-                ))
+                ));
             }
         };
 
@@ -17900,6 +21039,7 @@ impl ToolSet {
             Self::CodexEssential => CODEX_ESSENTIAL_GROUPS
                 .iter()
                 .flat_map(|g| g.iter().copied())
+                .chain(CODEX_ESSENTIAL_DIRECT_EXTRAS.iter().copied())
                 .collect(),
             _ => Vec::new(),
         }
@@ -18010,6 +21150,7 @@ mod capgroups {
 
     /// Every tool that belongs to a collab group — used by the drift-guardrail
     /// test to assert no registered forum_*/presence/ide tool is left ungrouped.
+    #[cfg(test)]
     pub const ALL_COLLAB: &[&[&str]] = &[
         FORUM_READ,
         FORUM_POST,
@@ -18037,8 +21178,33 @@ const CODEX_ESSENTIAL_GROUPS: &[&[&str]] = &[
     capgroups::PRESENCE_LIST,
 ];
 
+/// Codex-essential extras that are intentionally not in the cross-client
+/// collab capability groups. Keep these explicit so the group drift guardrails
+/// stay about forum/presence/IDE families only.
+const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
+    "xiao_shu_action_request",
+    // Mobile bridge: compact enough to expose directly during Android
+    // install/debug lanes; mutation remains explicit per tool.
+    "mobile_list_devices",
+    "mobile_current_focus",
+    "mobile_screenshot",
+    "mobile_health",
+    "mobile_ui_snapshot",
+    "mobile_logcat_tail",
+    "mobile_install_apk",
+    "mobile_launch_app",
+    "mobile_click",
+    "mobile_input_text",
+    "mobile_apple_status",
+    // Search-ranking diagnostics: read-only graph topology preflight for
+    // PageRank-like centrality experiments.
+    "memory_graph_topology",
+];
+
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
-    matches!(tier, Tier::Essential) || in_groups(tool_name, CODEX_ESSENTIAL_GROUPS)
+    matches!(tier, Tier::Essential)
+        || in_groups(tool_name, CODEX_ESSENTIAL_GROUPS)
+        || CODEX_ESSENTIAL_DIRECT_EXTRAS.contains(&tool_name)
 }
 
 fn codex_lean_tool(tool_name: &str) -> bool {
@@ -18061,6 +21227,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "memory_list"
             | "memory_delete"
             | "memory_neighbors"
+            | "work_memory"
             | "session_bootstrap"
             | "session_finalize"
             | "skills_recommend"
@@ -18073,6 +21240,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "pet_state_get"
             | "pet_state_set"
             | "pet_state_ritual"
+            | "xiao_shu_action_request"
             | "project_detect"
             | "changes_digest"
             | "plan_save"
@@ -18108,6 +21276,7 @@ fn hook_lifecycle_tool(tool_name: &str) -> bool {
             | "session_curate"
             | "session_finalize"
             | "session_lifecycle_step"
+            | "work_memory"
             | "pet_state_get"
             | "pet_state_set"
             | "pet_state_ritual"
@@ -18124,9 +21293,7 @@ fn collab_group_divergence() -> Value {
     // (profile-label, name-membership predicate). Tier::Niche forces the
     // name-allowlist path for tier-gated sets (collab tools are never Essential).
     let profiles: [(&str, fn(&str) -> bool); 4] = [
-        ("codex-essential", |n| {
-            codex_essential_tool(Tier::Niche, n)
-        }),
+        ("codex-essential", |n| codex_essential_tool(Tier::Niche, n)),
         ("codex-lean", codex_lean_tool),
         ("gemini-lean", gemini_lean_tool),
         ("hook-lifecycle", hook_lifecycle_tool),
@@ -18153,8 +21320,7 @@ fn collab_group_divergence() -> Value {
                 "partial"
             };
             if coverage == "partial" {
-                let missing: Vec<&str> =
-                    members.iter().copied().filter(|m| !pred(m)).collect();
+                let missing: Vec<&str> = members.iter().copied().filter(|m| !pred(m)).collect();
                 partial_flags.push(json!({
                     "profile": plabel,
                     "group": gname,
@@ -18356,6 +21522,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         policy,
         Tier::Essential,
         Arc::new(MemoryNeighborsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(WorkMemoryTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -18565,6 +21737,75 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         Arc::new(CodebaseImpactTool::new(hub.clone())),
     );
 
+    // Mobile Device Bridge: Android-first install/debug/control via ADB.
+    // Read tools give structure before screenshot; action tools remain explicit.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileListDevicesTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileCurrentFocusTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileScreenshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileHealthTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileUiSnapshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileLogcatTailTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileInstallApkTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileLaunchAppTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileClickTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileInputTextTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileAppleStatusTool::new(hub.clone())),
+    );
+
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
     reg_if(
         &mut reg,
@@ -18649,6 +21890,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         policy,
         Tier::Standard,
         Arc::new(MemoryQueryStatsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryGraphTopologyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -18795,6 +22042,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         policy,
         Tier::Standard,
         Arc::new(AvatarSurfaceReportTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(XiaoShuActionRequestTool::new(hub.clone())),
     );
     // Tailscale REST API: ACL editing without browser automation.
     reg_if(
@@ -20063,6 +23316,17 @@ fn unescape_keys(s: &str) -> String {
 mod tests {
     use super::*;
 
+    fn result_text(res: &ToolResult) -> String {
+        match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            other => panic!("expected text result, got {other:?}"),
+        }
+    }
+
+    fn result_json(res: &ToolResult) -> Value {
+        serde_json::from_str(&result_text(res)).expect("valid json result")
+    }
+
     #[test]
     fn compact_output_defaults_only_for_codex_or_compact_profile() {
         assert!(compact_mcp_output_default_for_policy(
@@ -20077,6 +23341,302 @@ mod tests {
         assert!(!compact_mcp_output_default_for_policy(
             ToolPolicy::from_values(Some("claude-standard"), None, None, Some("compact"))
         ));
+    }
+
+    #[test]
+    fn codex_essential_exposes_xiao_shu_action_request() {
+        assert!(codex_essential_tool(
+            Tier::Standard,
+            "xiao_shu_action_request"
+        ));
+        assert!(codex_lean_tool("xiao_shu_action_request"));
+    }
+
+    #[test]
+    fn mobile_parsers_extract_devices_bounds_and_nodes() {
+        let devices = parse_adb_devices(
+            "List of devices attached\n\
+             3K661F0178H00000       device usb:2-1 product:PKW110 model:PKW110 device:OP5DF5L1 transport_id:5\n\
+             emulator-5554          offline transport_id:1\n",
+        );
+        assert_eq!(devices.len(), 2);
+        assert_eq!(devices[0].serial, "3K661F0178H00000");
+        assert_eq!(devices[0].state, "device");
+        assert_eq!(
+            devices[0].attrs.get("model").map(String::as_str),
+            Some("PKW110")
+        );
+
+        let bounds = parse_mobile_bounds("[0,96][720,1604]").expect("bounds");
+        assert_eq!(bounds.center(), (360, 850));
+
+        let xml = r#"<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+            <hierarchy rotation="0">
+              <node index="0" text="AutoCity" resource-id="pkg:id/name" class="android.widget.EditText"
+                package="com.nexuscivilization.game" content-desc="City name" clickable="true"
+                enabled="true" focusable="true" focused="false" scrollable="false"
+                bounds="[0,0][720,96]" />
+            </hierarchy>"#;
+        let nodes = parse_uiautomator_nodes(xml).expect("nodes");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].text, "AutoCity");
+        assert_eq!(nodes[0].resource_id, "pkg:id/name");
+        assert!(nodes[0].clickable);
+        assert_eq!(nodes[0].bounds.expect("node bounds").center(), (360, 48));
+
+        let selector = MobileSelector::from_value(&json!({
+            "text": "AutoCity",
+            "class": "android.widget.EditText"
+        }))
+        .expect("selector");
+        assert!(selector.matches(&nodes[0]));
+    }
+
+    #[test]
+    fn mobile_ui_analysis_flags_canvas_only_surface_views() {
+        let xml = r#"<hierarchy rotation="0">
+              <node index="0" text="" resource-id="" class="android.view.SurfaceView"
+                package="com.nexuscivilization.game" content-desc="" clickable="false"
+                enabled="true" focusable="true" focused="true" scrollable="false"
+                bounds="[0,0][1080,2400]" />
+            </hierarchy>"#;
+        let nodes = parse_uiautomator_nodes(xml).expect("nodes");
+        let analysis = MobileUiAnalysis::from_nodes(&nodes);
+        assert_eq!(analysis.surface_view_count, 1);
+        assert_eq!(analysis.focused_surface_view_count, 1);
+        assert!(!analysis.semantic_nodes);
+        assert!(analysis.canvas_only);
+        assert!(analysis.surface_dominated);
+
+        let with_overlay = r#"<hierarchy rotation="0">
+              <node index="0" text="" resource-id="" class="android.view.SurfaceView"
+                package="com.nexuscivilization.game" content-desc="" clickable="false"
+                enabled="true" focusable="true" focused="true" scrollable="false"
+                bounds="[0,0][1080,2400]" />
+              <node index="1" text="AutoCity" resource-id="pkg:id/name" class="android.widget.EditText"
+                package="com.nexuscivilization.game" content-desc="City name" clickable="true"
+                enabled="true" focusable="true" focused="false" scrollable="false"
+                bounds="[0,0][720,96]" />
+            </hierarchy>"#;
+        let nodes = parse_uiautomator_nodes(with_overlay).expect("nodes");
+        let analysis = MobileUiAnalysis::from_nodes(&nodes);
+        assert!(analysis.semantic_nodes);
+        assert!(!analysis.canvas_only);
+        assert!(analysis.surface_dominated);
+    }
+
+    #[test]
+    fn mobile_health_parses_focus_package_and_logcat_markers() {
+        let focus_lines = vec![
+            "mCurrentFocus=Window{b67b3a9 u0 com.nexuscivilization.game/com.godot.game.GodotAppLauncher}".to_string(),
+            "mFocusedApp=ActivityRecord{4d2 u0 com.nexuscivilization.game/.MainActivity t42}".to_string(),
+        ];
+        assert_eq!(
+            parse_foreground_package(&focus_lines).as_deref(),
+            Some("com.nexuscivilization.game")
+        );
+
+        let summary = summarize_mobile_logcat(
+            "05-23 09:00:00.000  1000  1001 E AndroidRuntime: FATAL EXCEPTION: main\n\
+             05-23 09:00:01.000  1000  1001 W Godot: low frame rate fps=18\n\
+             05-23 09:00:02.000  1000  1001 I SurfaceView: surface changed\n",
+            Some("com.nexuscivilization.game"),
+        );
+        assert_eq!(summary["fatal_count"], 1);
+        assert_eq!(summary["warning_count"], 1);
+        assert_eq!(summary["surface_line_count"], 2);
+        assert_eq!(summary["has_crash_markers"], true);
+    }
+
+    #[test]
+    fn apple_mobile_status_parses_ioreg_usb_devices() {
+        let ioreg = r#"
+        | +-o iPhone@03100000  <class IOUSBHostDevice, id 0x1000b1fa0, registered, matched, active, busy 0 (40 ms), retain 46>
+        |     {
+        |       "USB Serial Number" = "ebd641971f7214cab624b784740ddd288b340f90"
+        |       "USB Vendor Name" = "Apple Inc."
+        |       "USB Product Name" = "iPhone"
+        |       "idVendor" = 1452
+        |       "idProduct" = 4776
+        |       "locationID" = 51445760
+        |       "UsbAppleDeviceUDID" = "ebd641971f7214cab624b784740ddd288b340f90"
+        |       "SupportsIPhoneOS" = Yes
+        |     }
+        | +-o PKW110@02100000  <class IOUSBHostDevice, id 0x1000b1fb0, registered, matched, active, busy 0 (40 ms), retain 46>
+        |     {
+        |       "USB Vendor Name" = "OPPO"
+        |       "USB Product Name" = "PKW110"
+        |     }
+        "#;
+        let devices = parse_apple_usb_devices_from_ioreg(ioreg);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].product_name, "iPhone");
+        assert_eq!(devices[0].vendor_name, "Apple Inc.");
+        assert_eq!(devices[0].udid, "ebd641971f7214cab624b784740ddd288b340f90");
+        assert_eq!(devices[0].vendor_id, Some(1452));
+        assert_eq!(devices[0].product_id, Some(4776));
+        assert!(devices[0].supports_iphone_os);
+    }
+
+    #[test]
+    fn codex_essential_exposes_mobile_bridge_tools() {
+        for t in [
+            "mobile_list_devices",
+            "mobile_current_focus",
+            "mobile_screenshot",
+            "mobile_health",
+            "mobile_ui_snapshot",
+            "mobile_logcat_tail",
+            "mobile_install_apk",
+            "mobile_launch_app",
+            "mobile_click",
+            "mobile_input_text",
+            "mobile_apple_status",
+        ] {
+            assert!(codex_essential_tool(Tier::Standard, t), "{t}");
+        }
+    }
+
+    #[test]
+    fn work_memory_key_is_stable_and_sanitized() {
+        let a = work_memory_key(
+            "/Users/pallasting/Projects/agent-bridge",
+            Some("session/With Spaces"),
+            "Active Slot",
+        );
+        let b = work_memory_key(
+            "/Users/pallasting/Projects/agent-bridge",
+            Some("session/With Spaces"),
+            "Active Slot",
+        );
+        assert_eq!(a, b);
+        assert!(a.starts_with("work_memory_"));
+        assert!(a.contains("_session-with-spaces_active-slot"));
+    }
+
+    #[tokio::test]
+    async fn work_memory_save_list_get_clear_roundtrip() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let tool = WorkMemoryTool::new(hub);
+        let ctx = ToolContext::default();
+        let cwd = "/tmp/agent-bridge-work-memory-test";
+
+        let saved = tool
+            .execute(
+                json!({
+                    "op": "save",
+                    "cwd": cwd,
+                    "session_id": "sess-1",
+                    "slot": "active",
+                    "summary": "Preserve the active implementation state across compaction.",
+                    "next_step": "Run the targeted tests.",
+                    "files": ["crates/bridge/src/mcp_tools.rs"],
+                }),
+                &ctx,
+            )
+            .await
+            .expect("save ok");
+        let saved = result_json(&saved);
+        assert_eq!(saved["saved"], true);
+        let key = saved["key"].as_str().expect("key").to_string();
+
+        let listed = tool
+            .execute(
+                json!({"op": "list", "cwd": cwd, "compact": true, "limit": 4}),
+                &ctx,
+            )
+            .await
+            .expect("list ok");
+        let listed = result_json(&listed);
+        assert_eq!(listed["rows"].as_array().expect("rows").len(), 1);
+        assert!(listed["rows"][0]["snippet"]
+            .as_str()
+            .expect("snippet")
+            .contains("Preserve the active implementation state"));
+
+        let got = tool
+            .execute(json!({"op": "get", "key": key}), &ctx)
+            .await
+            .expect("get ok");
+        let got = result_json(&got);
+        assert_eq!(got["kind"], WORK_MEMORY_KIND);
+
+        let cleared = tool
+            .execute(
+                json!({
+                    "op": "clear",
+                    "cwd": cwd,
+                    "session_id": "sess-1",
+                    "slot": "active",
+                }),
+                &ctx,
+            )
+            .await
+            .expect("clear ok");
+        assert_eq!(result_json(&cleared)["deleted"], true);
+    }
+
+    #[tokio::test]
+    async fn session_bootstrap_surfaces_work_memory_block() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let ctx = ToolContext::default();
+        let cwd = "/tmp/agent-bridge-work-memory-bootstrap";
+
+        WorkMemoryTool::new(hub.clone())
+            .execute(
+                json!({
+                    "op": "save",
+                    "cwd": cwd,
+                    "slot": "active",
+                    "summary": "Bootstrap should surface this scratchpad note.",
+                    "next_step": "Continue from the work memory block.",
+                }),
+                &ctx,
+            )
+            .await
+            .expect("save work memory");
+
+        let boot = SessionBootstrapTool::new(hub)
+            .execute(
+                json!({"cwd": cwd, "frontend": "claude-code", "limit": 5}),
+                &ctx,
+            )
+            .await
+            .expect("bootstrap ok");
+        let text = result_text(&boot);
+        assert!(text.contains("Active Work Memory"));
+        assert!(text.contains("Bootstrap should surface this scratchpad note"));
+    }
+
+    #[tokio::test]
+    async fn lifecycle_precompact_saves_work_memory_snapshot() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let ctx = ToolContext::default();
+        let cwd = "/tmp/agent-bridge-work-memory-precompact";
+
+        let res = SessionLifecycleStepTool::new(hub.clone())
+            .execute(
+                json!({
+                    "step": "precompact",
+                    "cwd": cwd,
+                    "session_id": "sess-precompact",
+                    "conversation_text": "handoff: validate work_memory precompact preservation",
+                    "skip_decay": true,
+                    "max_items": 1,
+                }),
+                &ctx,
+            )
+            .await
+            .expect("precompact ok");
+        let body = result_json(&res);
+        assert_eq!(body["work_memory"]["saved"], true);
+
+        let listed = WorkMemoryTool::new(hub)
+            .execute(json!({"op": "list", "cwd": cwd, "compact": true}), &ctx)
+            .await
+            .expect("list work memory");
+        let listed = result_json(&listed);
+        assert_eq!(listed["rows"].as_array().expect("rows").len(), 1);
     }
 
     #[test]
@@ -20749,6 +24309,44 @@ mod tests {
     }
 
     #[test]
+    fn xiao_shu_action_request_schema_is_dry_run_only() {
+        let tool = XiaoShuActionRequestTool::new(crate::Hub::builder().build());
+        let schema = tool.schema();
+
+        assert_eq!(schema.name, "xiao_shu_action_request");
+        assert!(schema.description.contains("LLM-safe"));
+        assert!(schema.description.contains("never directly"));
+        assert!(schema.description.contains("Real audio still requires"));
+        assert_eq!(
+            schema.input_schema["properties"]["confirm"]["description"],
+            "Dry-run confirmation flag. Even when true, this MCP tool does not emit audio."
+        );
+        assert_eq!(
+            schema.input_schema["properties"]["enqueue"]["default"],
+            false
+        );
+        assert!(schema.input_schema["properties"]["enqueue"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("does not emit audio"));
+        assert_eq!(
+            schema.input_schema["properties"]["list_queue"]["default"],
+            false
+        );
+        assert!(
+            schema.input_schema["properties"]["list_queue"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("read-only")
+        );
+        assert_eq!(schema.input_schema["properties"]["limit"]["default"], 20);
+        assert_eq!(
+            schema.input_schema["properties"]["intent"]["enum"][0],
+            "voice_alert"
+        );
+    }
+
+    #[test]
     fn drift_ratio_first_write_is_zero() {
         // Empty old → first write, no constraint.
         assert_eq!(
@@ -20860,6 +24458,18 @@ mod tests {
         }
     }
 
+    fn mk_mem_scoped(
+        key: &str,
+        kind: &str,
+        content: &str,
+        tags: &[&str],
+        scope: Option<&str>,
+    ) -> MemoryRecord {
+        let mut rec = mk_mem(key, kind, content, tags);
+        rec.scope = scope.map(|s| s.to_string());
+        rec
+    }
+
     #[test]
     fn link_suggest_empty_blacklist_preserves_top_match() {
         // baseline: stubs tied by tag/prefix; no blacklist → highest still wins
@@ -20958,6 +24568,121 @@ mod tests {
             compute_link_suggestions(&src, &cands, &std::collections::HashSet::new(), 5, &skip);
         let keys: Vec<&str> = out.iter().map(|(k, _, _)| k.as_str()).collect();
         assert_eq!(keys, vec!["c3"]);
+    }
+
+    #[test]
+    fn link_orphan_candidate_guard_rejects_volatile_kinds_and_tags() {
+        let source = mk_mem(
+            "source",
+            "decision",
+            "shared shared shared shared",
+            &["topic"],
+        );
+        let skip_tags = vec!["alert".to_string(), "ttl:7d".to_string()];
+        let skip_kinds = vec!["alert".to_string(), "work_memory".to_string()];
+
+        let alert_target = mk_mem(
+            "alert_target",
+            "decision",
+            "shared shared shared shared",
+            &["topic", "alert"],
+        );
+        assert!(!memory_link_orphan_candidate_allowed(
+            &source,
+            &alert_target,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        ));
+
+        let work_memory_target = mk_mem(
+            "scratch_target",
+            "work_memory",
+            "shared shared shared shared",
+            &["topic"],
+        );
+        assert!(!memory_link_orphan_candidate_allowed(
+            &source,
+            &work_memory_target,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        ));
+
+        let durable_target = mk_mem(
+            "durable_target",
+            "decision",
+            "shared shared shared shared",
+            &["topic"],
+        );
+        assert!(memory_link_orphan_candidate_allowed(
+            &source,
+            &durable_target,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        ));
+    }
+
+    #[test]
+    fn link_orphan_candidate_guard_rejects_mismatched_project_scope() {
+        let source = mk_mem_scoped(
+            "source",
+            "decision",
+            "shared shared shared shared",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let mismatch = mk_mem_scoped(
+            "target_b",
+            "decision",
+            "shared shared shared shared",
+            &["topic"],
+            Some("project:/repo/b"),
+        );
+        let global = mk_mem_scoped(
+            "target_global",
+            "decision",
+            "shared shared shared shared",
+            &["topic"],
+            Some("global"),
+        );
+        let skip_tags: Vec<String> = Vec::new();
+        let skip_kinds: Vec<String> = Vec::new();
+
+        assert!(!memory_link_orphan_candidate_allowed(
+            &source,
+            &mismatch,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        ));
+        assert!(memory_link_orphan_candidate_allowed(
+            &source,
+            &mismatch,
+            &skip_tags,
+            &skip_kinds,
+            false,
+        ));
+        assert!(memory_link_orphan_candidate_allowed(
+            &source,
+            &global,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        ));
+    }
+
+    #[test]
+    fn undirected_memory_pair_key_is_order_independent() {
+        assert_eq!(
+            undirected_memory_pair_key("b", "a"),
+            undirected_memory_pair_key("a", "b")
+        );
+        assert_eq!(
+            undirected_memory_pair_key("a", "b"),
+            ("a".to_string(), "b".to_string())
+        );
     }
 
     #[test]
@@ -21684,6 +25409,7 @@ mod tests {
         assert!(p.includes(Tier::Standard, "forum_set_thread_status"));
         assert!(p.includes(Tier::Standard, "agent_presence_announce"));
         assert!(p.includes(Tier::Standard, "agent_presence_list"));
+        assert!(p.includes(Tier::Standard, "xiao_shu_action_request"));
         assert!(!p.includes(Tier::Standard, "avatar_state_get"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
@@ -21693,10 +25419,12 @@ mod tests {
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 10 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
-        //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1).
+        // 23 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
+        //      + DIRECT(13: xiao_shu_action_request + 11 mobile bridge tools
+        //      + memory_graph_topology).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        assert_eq!(extras.len(), 10);
+        assert_eq!(extras.len(), 23);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -21707,6 +25435,14 @@ mod tests {
         assert!(extras.contains(&"forum_set_thread_status"));
         assert!(extras.contains(&"agent_presence_announce"));
         assert!(extras.contains(&"agent_presence_list"));
+        assert!(extras.contains(&"xiao_shu_action_request"));
+        assert!(extras.contains(&"mobile_list_devices"));
+        assert!(extras.contains(&"mobile_screenshot"));
+        assert!(extras.contains(&"mobile_health"));
+        assert!(extras.contains(&"mobile_ui_snapshot"));
+        assert!(extras.contains(&"mobile_click"));
+        assert!(extras.contains(&"mobile_apple_status"));
+        assert!(extras.contains(&"memory_graph_topology"));
     }
 
     #[test]
@@ -21736,7 +25472,10 @@ mod tests {
         // forum tools by name).
         let ess = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let lean = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
-        assert!(ess.includes(Tier::Standard, "forum_digest"), "codex-essential");
+        assert!(
+            ess.includes(Tier::Standard, "forum_digest"),
+            "codex-essential"
+        );
         assert!(lean.includes(Tier::Standard, "forum_digest"), "codex-lean");
     }
 
@@ -21766,9 +25505,19 @@ mod tests {
         // collab subset = FORUM_READ + FORUM_POST + PRESENCE_LIST (NOT manage).
         let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
         for t in [
-            "memory_search", "memory_save", "memory_neighbors", "session_bootstrap",
-            "agent_spawn", "plan_save", "project_detect", "pet_state_ritual",
-            "forum_post", "forum_read", "forum_list_threads", "agent_presence_list",
+            "memory_search",
+            "memory_save",
+            "memory_neighbors",
+            "work_memory",
+            "session_bootstrap",
+            "agent_spawn",
+            "plan_save",
+            "project_detect",
+            "pet_state_ritual",
+            "forum_post",
+            "forum_read",
+            "forum_list_threads",
+            "agent_presence_list",
         ] {
             assert!(p.includes(Tier::Niche, t), "lost curated tool: {t}");
         }
@@ -21821,6 +25570,7 @@ mod tests {
         assert!(p.includes(Tier::Essential, "memory_search"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "session_bootstrap"));
+        assert!(p.includes(Tier::Essential, "work_memory"));
         assert!(p.includes(Tier::Niche, "ide_snapshot"));
         // Minimum collab surface: lean keeps read+post+list-threads + presence_list
         // so a lean Codex can still see + reach the whiteboard.
@@ -21847,6 +25597,7 @@ mod tests {
         assert_eq!(p.profile().label(), "standard");
         assert!(p.includes(Tier::Standard, "memory_compact"));
         assert!(p.includes(Tier::Essential, "pet_state_ritual"));
+        assert!(p.includes(Tier::Essential, "work_memory"));
         assert!(!p.includes(Tier::Essential, "shell_exec"));
         assert!(!p.includes(Tier::Essential, "agent_spawn"));
     }
@@ -23126,7 +26877,12 @@ mod tests {
         }
     }
 
-    fn mk_fthread(id: i64, title: &str, post_count: i64, last_post_at: i64) -> ab_store::ForumThreadRecord {
+    fn mk_fthread(
+        id: i64,
+        title: &str,
+        post_count: i64,
+        last_post_at: i64,
+    ) -> ab_store::ForumThreadRecord {
         ab_store::ForumThreadRecord {
             id,
             board: "general".into(),
@@ -23143,9 +26899,15 @@ mod tests {
 
     #[test]
     fn forum_digest_title_strips_markdown_and_truncates() {
-        assert_eq!(forum_digest_title("## Decision A — ship it", 60), "Decision A — ship it");
+        assert_eq!(
+            forum_digest_title("## Decision A — ship it", 60),
+            "Decision A — ship it"
+        );
         assert_eq!(forum_digest_title("plain line\nsecond", 60), "plain line");
-        assert_eq!(forum_digest_title("   \n\n## After blanks", 60), "After blanks");
+        assert_eq!(
+            forum_digest_title("   \n\n## After blanks", 60),
+            "After blanks"
+        );
         let long = "#".repeat(1) + " " + &"x".repeat(100);
         assert!(forum_digest_title(&long, 10).ends_with('…'));
     }
@@ -23164,7 +26926,10 @@ mod tests {
         assert!(joined.contains("[6] v22 RFC substrate"), "header: {joined}");
         assert!(joined.contains("active:"), "active line: {joined}");
         assert!(joined.contains("decisions:"), "decisions line: {joined}");
-        assert!(joined.contains("Defer to Day-14"), "decision title: {joined}");
+        assert!(
+            joined.contains("Defer to Day-14"),
+            "decision title: {joined}"
+        );
         assert!(joined.contains("open-q:"), "questions line: {joined}");
         // No my_sigil → no needs-reply line.
         assert!(!joined.contains("needs-reply"));
@@ -23192,7 +26957,10 @@ mod tests {
         ];
         let block = forum_digest_thread_block(&thread, &posts, Some("me#abc"), 1_700_000_200);
         let joined = block.join("\n");
-        assert!(!joined.contains("needs-reply"), "replied after → no flag: {joined}");
+        assert!(
+            !joined.contains("needs-reply"),
+            "replied after → no flag: {joined}"
+        );
     }
 
     // ── L7 P1 — session_reflect ─────────────────────────────────────────
