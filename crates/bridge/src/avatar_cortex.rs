@@ -4488,6 +4488,69 @@ fn xiao_shu_action_downstream_preview_payload(
     compact
 }
 
+fn xiao_shu_action_degraded_preview(
+    error: String,
+    opts: &AvatarCortexVoiceActionPreviewOptions<'_>,
+    project: &str,
+    track: &str,
+    reason: &str,
+) -> Value {
+    let heartbeat_label = crate::avatar_health::heartbeat_label(opts.heartbeat_label, project);
+    json!({
+        "surface": "avatar_cortex_voice_action_preview",
+        "schema": 1,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "dry_run": true,
+        "degraded": true,
+        "degraded_reason": "downstream_preview_unavailable",
+        "error": error,
+        "cli_only_real_emit": true,
+        "http_available": true,
+        "http_emit_route_added": false,
+        "actual_emit_invoked": false,
+        "writes_files": false,
+        "writes_cooldown_state": false,
+        "codex_pet_package_mutation": false,
+        "mutates_global_substrate": false,
+        "emits_audio": false,
+        "would_emit_audio": false,
+        "emits_notification": false,
+        "action_preview": {
+            "confirmation_state": "blocked_by_downstream_preview",
+            "confirmed": false,
+            "confirm_flag": opts.confirm,
+            "force": opts.force,
+            "cooldown_secs": opts.cooldown_secs,
+            "ready_to_emit_now": false,
+            "would_emit_if_operator_runs_command": false,
+            "blocked": true,
+            "blocked_reasons": ["downstream_preview_unavailable"],
+            "selected_token": track,
+            "line": Value::Null,
+            "reason_present": !reason.trim().is_empty(),
+            "reason": reason,
+            "allow_policy_override": false,
+            "tts_voice": opts.tts_voice,
+            "tts_rate": opts.tts_rate,
+            "state_path": Value::Null,
+            "events_path": Value::Null,
+            "command_args": Value::Null,
+            "command_preview": Value::Null,
+        },
+        "gate_dry_run": {
+            "surface": "avatar_cortex_voice_gate",
+            "read_only": true,
+            "dry_run": true,
+            "would_emit": false,
+            "emits_audio": false,
+            "blocked_reasons": ["downstream_preview_unavailable"],
+            "heartbeat_label": heartbeat_label,
+        },
+        "source_voice_confirm": Value::Null,
+    })
+}
+
 fn xiao_shu_action_request_from_preview(
     action_preview_payload: Value,
     opts: &XiaoShuActionRequestOptions<'_>,
@@ -4644,7 +4707,9 @@ pub fn xiao_shu_action_request(opts: &XiaoShuActionRequestOptions<'_>) -> Result
         tts_voice: opts.tts_voice,
         tts_rate: opts.tts_rate,
     };
-    let action_preview = avatar_cortex_voice_action_preview(&preview_opts)?;
+    let action_preview = avatar_cortex_voice_action_preview(&preview_opts).unwrap_or_else(|e| {
+        xiao_shu_action_degraded_preview(e.to_string(), &preview_opts, project, &track, &reason)
+    });
     Ok(xiao_shu_action_request_from_preview(
         action_preview,
         opts,
