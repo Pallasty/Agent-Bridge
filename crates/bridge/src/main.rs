@@ -874,6 +874,75 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// List append-only Xiao Shu renderer review decision records without approving bindings.
+    CortexReviewDecisions {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels and ledger path.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Filter to a renderer token.
+        #[arg(long)]
+        track: Option<String>,
+        /// Filter to a decision value.
+        #[arg(long)]
+        decision: Option<String>,
+        /// Include full nested decision records instead of compact rows.
+        #[arg(long)]
+        details: bool,
+        /// Maximum records to return, newest first.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Append one Xiao Shu renderer review decision record without approving or promoting.
+    CortexReviewDecision {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels and ledger path.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Actor recording the decision.
+        #[arg(long, default_value = "operator")]
+        actor: String,
+        /// Pending renderer review token to record.
+        #[arg(long)]
+        track: String,
+        /// Decision to record. This is audit-only, not approval.
+        #[arg(long, default_value = "keep_pending")]
+        decision: String,
+        /// Optional human note.
+        #[arg(long)]
+        note: Option<String>,
+        /// Optional evidence pointer, such as a screenshot path or panel observation.
+        #[arg(long)]
+        evidence: Option<String>,
+        /// Required to append the record. Without it, this is a dry-run preview.
+        #[arg(long)]
+        confirm: bool,
+        /// Include full nested source review report in JSON output.
+        #[arg(long)]
+        details: bool,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Show Xiao Shu's sparse voice policy without emitting audio.
     CortexVoicePolicy {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2935,6 +3004,60 @@ async fn main() -> Result<()> {
                     heartbeat_label.clone(),
                     project.clone(),
                     output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexReviewDecisions {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                track,
+                decision,
+                details,
+                limit,
+                json: as_json,
+            } => {
+                run_avatar_cortex_review_decisions(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    track.clone(),
+                    decision.clone(),
+                    *details,
+                    *limit,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexReviewDecision {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                actor,
+                track,
+                decision,
+                note,
+                evidence,
+                confirm,
+                details,
+                json: as_json,
+            } => {
+                run_avatar_cortex_review_decision(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    actor.clone(),
+                    track.clone(),
+                    decision.clone(),
+                    note.clone(),
+                    evidence.clone(),
+                    *confirm,
+                    *details,
                     *as_json,
                 )
                 .await
@@ -5436,6 +5559,150 @@ async fn run_avatar_cortex_review_report(
             );
         }
     }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_cortex_review_decisions(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    track: Option<String>,
+    decision: Option<String>,
+    details: bool,
+    limit: usize,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::AvatarCortexRendererReviewDecisionQueueOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        track: track.as_deref(),
+        decision: decision.as_deref(),
+        include_details: details,
+        limit,
+    };
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_review_decisions(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    let ledger = payload.get("ledger").unwrap_or(&Value::Null);
+    println!("avatar cortex review decisions");
+    println!(
+        "project={} exists={} path={}",
+        avatar_health_display(ledger.get("project"), &project),
+        avatar_health_display(ledger.get("exists"), "false"),
+        avatar_health_display(ledger.get("path"), "-")
+    );
+    println!(
+        "filter track={} decision={} details={} limit={} parsed={} matching={} returned={} parse_errors={}",
+        avatar_health_display(ledger.get("track_filter"), "-"),
+        avatar_health_display(ledger.get("decision_filter"), "-"),
+        avatar_health_display(ledger.get("include_details"), "false"),
+        avatar_health_display(ledger.get("limit"), "20"),
+        avatar_health_display(ledger.get("parsed_records"), "0"),
+        avatar_health_display(ledger.get("matching_records"), "0"),
+        avatar_health_display(ledger.get("returned_count"), "0"),
+        avatar_health_display(ledger.get("parse_errors"), "0")
+    );
+    println!(
+        "writes_approval={} can_promote={} mutates_renderer={} pet_package={}",
+        avatar_health_display(payload.get("writes_approval"), "false"),
+        avatar_health_display(
+            payload
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+            "false"
+        ),
+        avatar_health_display(payload.get("mutates_renderer"), "false"),
+        avatar_health_display(payload.get("codex_pet_package_mutation"), "false")
+    );
+    if let Some(records) = payload.get("records").and_then(Value::as_array) {
+        for record in records {
+            println!(
+                "- {} track={} decision={} actor={} approval={}",
+                avatar_health_display(record.get("decision_id"), "-"),
+                avatar_health_display(record.get("track"), "-"),
+                avatar_health_display(record.get("decision"), "-"),
+                avatar_health_display(record.get("actor"), "-"),
+                avatar_health_display(record.get("approval_state"), "not_approved")
+            );
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_cortex_review_decision(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    actor: String,
+    track: String,
+    decision: String,
+    note: Option<String>,
+    evidence: Option<String>,
+    confirm: bool,
+    details: bool,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::AvatarCortexRendererReviewDecisionOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        actor: Some(actor.as_str()),
+        track: Some(track.as_str()),
+        decision: Some(decision.as_str()),
+        note: note.as_deref(),
+        evidence: evidence.as_deref(),
+        confirm,
+        include_details: details,
+    };
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_review_decision(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    let decision_payload = payload.get("decision").unwrap_or(&Value::Null);
+    println!("avatar cortex review decision");
+    println!(
+        "track={} decision={} actor={} confirm={} blocked={} recorded={}",
+        avatar_health_display(decision_payload.get("track"), "-"),
+        avatar_health_display(decision_payload.get("decision"), "-"),
+        avatar_health_display(decision_payload.get("actor"), "-"),
+        avatar_health_display(decision_payload.get("confirm_requested"), "false"),
+        avatar_health_display(decision_payload.get("blocked"), "true"),
+        avatar_health_display(decision_payload.get("recorded"), "false")
+    );
+    println!(
+        "reasons={} writes_record={} writes_approval={} can_promote={} mutates_renderer={}",
+        avatar_health_display_list(decision_payload.get("blocked_reasons"), "none"),
+        avatar_health_display(payload.get("writes_review_record"), "false"),
+        avatar_health_display(payload.get("writes_approval"), "false"),
+        avatar_health_display(
+            payload
+                .get("acceptance")
+                .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+            "false"
+        ),
+        avatar_health_display(payload.get("mutates_renderer"), "false")
+    );
+    println!(
+        "ledger={} next={}",
+        avatar_health_display(decision_payload.get("ledger_path"), "-"),
+        avatar_health_display(payload.get("next_step"), "-")
+    );
     Ok(())
 }
 

@@ -25,6 +25,8 @@
 //!   - `GET /avatar-surface/cortex-review-gate?...` — read-only renderer review gate
 //!   - `GET /avatar-surface/cortex-review-packet?...` — read-only renderer review packets
 //!   - `GET /avatar-surface/cortex-review-report?...` — read-only review readiness report
+//!   - `GET /avatar-surface/cortex-review-decisions?...` — read-only review decision ledger
+//!   - `POST /avatar-surface/cortex-review-decision` — append-only review decision record
 //!   - `GET /avatar-surface/cortex-preview?...` — voice preview without emission
 //!   - `GET /avatar-surface/cortex-voice-policy?...` — read-only sparse voice policy
 //!   - `GET /avatar-surface/cortex-voice-request?...` — read-only two-step voice request
@@ -168,6 +170,14 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route(
             "/avatar-surface/cortex-review-report",
             get(avatar_cortex_review_report),
+        )
+        .route(
+            "/avatar-surface/cortex-review-decisions",
+            get(avatar_cortex_review_decisions),
+        )
+        .route(
+            "/avatar-surface/cortex-review-decision",
+            post(avatar_cortex_review_decision),
         )
         .route("/avatar-surface/cortex-preview", get(avatar_cortex_preview))
         .route(
@@ -588,6 +598,36 @@ struct AvatarCortexStatusQuery {
 }
 
 #[derive(Deserialize, Debug)]
+struct AvatarCortexReviewDecisionsQuery {
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<std::path::PathBuf>,
+    track: Option<String>,
+    decision: Option<String>,
+    #[serde(default)]
+    details: bool,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize, Debug)]
+struct AvatarCortexReviewDecisionRequest {
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<std::path::PathBuf>,
+    actor: Option<String>,
+    track: Option<String>,
+    decision: Option<String>,
+    note: Option<String>,
+    evidence: Option<String>,
+    #[serde(default)]
+    confirm: bool,
+    #[serde(default)]
+    details: bool,
+}
+
+#[derive(Deserialize, Debug)]
 struct AvatarPetSpritesheetQuery {
     pet_id: Option<String>,
 }
@@ -667,6 +707,12 @@ struct XiaoShuActionRequestsQuery {
 }
 
 impl XiaoShuActionRequestsQuery {
+    fn effective_limit(&self) -> usize {
+        self.limit.unwrap_or(20).clamp(1, 500)
+    }
+}
+
+impl AvatarCortexReviewDecisionsQuery {
     fn effective_limit(&self) -> usize {
         self.limit.unwrap_or(20).clamp(1, 500)
     }
@@ -815,6 +861,29 @@ async fn avatar_surface_panel(
         crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(cortex.clone());
     let cortex_review_report =
         crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(cortex.clone());
+    let cortex_review_decisions = crate::avatar_cortex::avatar_cortex_renderer_review_decisions(
+        &crate::avatar_cortex::AvatarCortexRendererReviewDecisionQueueOptions {
+            label: None,
+            heartbeat_label: None,
+            project: q.project.as_deref(),
+            output: None,
+            track: None,
+            decision: None,
+            include_details: false,
+            limit: 5,
+        },
+    )
+    .unwrap_or_else(|e| {
+        json!({
+            "surface": "avatar_cortex_renderer_review_decisions",
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "writes_files": false,
+            "writes_approval": false,
+            "error": e.to_string(),
+        })
+    });
     let cortex_voice_policy =
         crate::avatar_cortex::avatar_cortex_voice_policy_from_status(cortex.clone());
     let cortex_voice_request = crate::avatar_cortex::avatar_cortex_voice_request_from_status(
@@ -917,6 +986,7 @@ async fn avatar_surface_panel(
         &cortex_review_gate,
         &cortex_review_packet,
         &cortex_review_report,
+        &cortex_review_decisions,
         &cortex_voice_policy,
         &cortex_voice_request,
         &cortex_voice_confirm,
@@ -2468,6 +2538,45 @@ async fn avatar_cortex_review_report(
     Ok(Json(payload))
 }
 
+async fn avatar_cortex_review_decisions(
+    Query(q): Query<AvatarCortexReviewDecisionsQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let opts = crate::avatar_cortex::AvatarCortexRendererReviewDecisionQueueOptions {
+        label: q.label.as_deref(),
+        heartbeat_label: q.heartbeat_label.as_deref(),
+        project: q.project.as_deref(),
+        output: q.output.as_deref(),
+        track: q.track.as_deref(),
+        decision: q.decision.as_deref(),
+        include_details: q.details,
+        limit: q.effective_limit(),
+    };
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_review_decisions(&opts)
+        .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
+async fn avatar_cortex_review_decision(
+    Json(q): Json<AvatarCortexReviewDecisionRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let opts = crate::avatar_cortex::AvatarCortexRendererReviewDecisionOptions {
+        label: q.label.as_deref(),
+        heartbeat_label: q.heartbeat_label.as_deref(),
+        project: q.project.as_deref(),
+        output: q.output.as_deref(),
+        actor: q.actor.as_deref(),
+        track: q.track.as_deref(),
+        decision: q.decision.as_deref(),
+        note: q.note.as_deref(),
+        evidence: q.evidence.as_deref(),
+        confirm: q.confirm,
+        include_details: q.details,
+    };
+    let payload = crate::avatar_cortex::avatar_cortex_renderer_review_decision(&opts)
+        .map_err(internal_error)?;
+    Ok(Json(payload))
+}
+
 async fn avatar_cortex_preview(
     Query(q): Query<AvatarCortexStatusQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
@@ -3819,6 +3928,82 @@ fn avatar_surface_review_report_html(
         merge_without_review = merge_without_review,
         packet_href = packet_href,
         href = href,
+    )
+}
+
+fn avatar_surface_review_decisions_html(
+    review_decisions_preview: &Value,
+    q: &AvatarSurfaceQuery,
+) -> String {
+    let ledger = review_decisions_preview
+        .get("ledger")
+        .unwrap_or(&Value::Null);
+    let href_raw = avatar_surface_route_href(
+        "/avatar-surface/cortex-review-decisions",
+        q.project.as_deref(),
+        None,
+    );
+    let exists = avatar_surface_html_json_value(ledger.get("exists"), "false");
+    let matching = avatar_surface_html_json_value(ledger.get("matching_records"), "0");
+    let returned = avatar_surface_html_json_value(ledger.get("returned_count"), "0");
+    let latest = avatar_surface_html_json_value(ledger.get("latest_track_count"), "0");
+    let parsed = avatar_surface_html_json_value(ledger.get("parsed_records"), "0");
+    let path = avatar_surface_html_json_value(ledger.get("path"), "-");
+    let writes_approval =
+        avatar_surface_html_json_value(review_decisions_preview.get("writes_approval"), "false");
+    let can_promote = avatar_surface_html_json_value(
+        review_decisions_preview
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("can_promote_review_tracks")),
+        "false",
+    );
+    let mut rows = String::new();
+    if let Some(records) = review_decisions_preview
+        .get("records")
+        .and_then(Value::as_array)
+    {
+        for record in records.iter().take(3) {
+            rows.push_str(&format!(
+                "<li><strong>{}</strong><span>track={} decision={} actor={}</span><span>approval={}</span></li>",
+                avatar_surface_html_json_value(record.get("decision_id"), "-"),
+                avatar_surface_html_json_value(record.get("track"), "-"),
+                avatar_surface_html_json_value(record.get("decision"), "-"),
+                avatar_surface_html_json_value(record.get("actor"), "-"),
+                avatar_surface_html_json_value(record.get("approval_state"), "not_approved"),
+            ));
+        }
+    }
+    if rows.is_empty() {
+        rows.push_str(
+            "<li><strong>none</strong><span>no review decisions recorded yet</span></li>",
+        );
+    }
+
+    format!(
+        r#"<section class="health status-fresh">
+      <div class="health-title">
+        <span class="pill status-fresh">ledger</span>
+        <strong>Xiao Shu Review Decisions</strong>
+        <span>exists={exists} parsed={parsed} latest={latest}</span>
+      </div>
+      <dl>
+        <div><dt>records</dt><dd>matching={matching} returned={returned}</dd></div>
+        <div><dt>safety</dt><dd>writes_approval={writes_approval} can_promote={can_promote}</dd></div>
+        <div><dt>path</dt><dd>{path}</dd></div>
+        <div><dt>open</dt><dd><a href="{href}">review decisions json</a></dd></div>
+      </dl>
+      <ul class="event-list">{rows}</ul>
+    </section>"#,
+        exists = exists,
+        parsed = parsed,
+        latest = latest,
+        matching = matching,
+        returned = returned,
+        writes_approval = writes_approval,
+        can_promote = can_promote,
+        path = path,
+        href = html_escape(&href_raw),
+        rows = rows,
     )
 }
 
@@ -5466,6 +5651,7 @@ fn avatar_surface_panel_html(
     cortex_review_gate: &Value,
     cortex_review_packet: &Value,
     cortex_review_report: &Value,
+    cortex_review_decisions: &Value,
     cortex_voice_policy: &Value,
     cortex_voice_request: &Value,
     cortex_voice_confirm: &Value,
@@ -5533,6 +5719,7 @@ fn avatar_surface_panel_html(
     let review_gate_html = avatar_surface_review_gate_html(cortex_review_gate, q);
     let review_packet_html = avatar_surface_review_packet_html(cortex_review_packet, q);
     let review_report_html = avatar_surface_review_report_html(cortex_review_report, q);
+    let review_decisions_html = avatar_surface_review_decisions_html(cortex_review_decisions, q);
     let voice_policy_html = avatar_surface_voice_policy_html(cortex_voice_policy, q);
     let voice_request_html = avatar_surface_voice_request_html(cortex_voice_request, q);
     let voice_confirm_html = avatar_surface_voice_confirm_html(cortex_voice_confirm, q);
@@ -5806,6 +5993,7 @@ fn avatar_surface_panel_html(
     {review_gate_html}
     {review_packet_html}
     {review_report_html}
+    {review_decisions_html}
     {voice_policy_html}
     {voice_request_html}
     {voice_confirm_html}
@@ -5839,6 +6027,7 @@ fn avatar_surface_panel_html(
         review_gate_html = review_gate_html,
         review_packet_html = review_packet_html,
         review_report_html = review_report_html,
+        review_decisions_html = review_decisions_html,
         voice_policy_html = voice_policy_html,
         voice_request_html = voice_request_html,
         voice_confirm_html = voice_confirm_html,
@@ -6270,6 +6459,35 @@ mod tests {
             },
         )
         .unwrap();
+        let review_decisions = json!({
+            "surface": "avatar_cortex_renderer_review_decisions",
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "writes_files": false,
+            "writes_approval": false,
+            "mutates_renderer": false,
+            "codex_pet_package_mutation": false,
+            "ledger": {
+                "project": "agent-bridge",
+                "exists": true,
+                "path": "/tmp/decisions.jsonl",
+                "matching_records": 1,
+                "returned_count": 1,
+                "latest_track_count": 1,
+                "parsed_records": 1
+            },
+            "acceptance": {
+                "can_promote_review_tracks": false
+            },
+            "records": [{
+                "decision_id": "xrd-test",
+                "track": "xiao_shu::look_sideways::medium",
+                "decision": "accept_visual_motion_candidate",
+                "actor": "operator",
+                "approval_state": "not_approved"
+            }]
+        });
         let xiao_shu_action_requests = json!({
             "surface": "xiao_shu_action_request_queue",
             "read_only": true,
@@ -6314,6 +6532,7 @@ mod tests {
             &review_gate,
             &review_packet,
             &review_report,
+            &review_decisions,
             &voice_policy,
             &voice_request,
             &voice_confirm,
@@ -6384,6 +6603,11 @@ mod tests {
         assert!(html.contains("items=1 voice_requests=1"));
         assert!(html.contains("can_promote=false merge_without_review=false"));
         assert!(html.contains("review report json"));
+        assert!(html.contains("Xiao Shu Review Decisions"));
+        assert!(html.contains("exists=true parsed=1 latest=1"));
+        assert!(html.contains("xrd-test"));
+        assert!(html.contains("approval=not_approved"));
+        assert!(html.contains("review decisions json"));
         assert!(html.contains("Xiao Shu Voice Policy"));
         assert!(html.contains("tracks=5 manual_cli=1 display_only=4 auto=0"));
         assert!(html.contains("Flo (中文（中国大陆）) rate=190 cooldown=300s"));
@@ -6498,10 +6722,18 @@ mod tests {
         assert!(html.contains("pet=xiao-shu-dev"));
         assert!(html.contains("<dd data-asset>"));
         assert!(html.contains("/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev"));
-        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1"));
-        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1"));
-        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1"));
-        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1"));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1"
+        ));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1"
+        ));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1"
+        ));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1"
+        ));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-soft-bounce-v1\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-idle-breathe-v1\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-sorting-glow-v1\""));
@@ -6577,12 +6809,15 @@ mod tests {
         ));
         assert!(focused.contains("const defaultAssetPetId = \"xiao-shu-dev\";"));
         assert!(focused.contains("let defaultSpriteAvailable = true;"));
-        assert!(focused.contains("function setAssetLabel(spriteRoute, sidecarAsset, fallbackReason)"));
+        assert!(
+            focused.contains("function setAssetLabel(spriteRoute, sidecarAsset, fallbackReason)")
+        );
         assert!(focused.contains("fallback=css silhouette"));
         assert!(focused.contains("reason=${fallbackReason}"));
         assert!(focused.contains("pet_spritesheet_unavailable"));
         assert!(focused.contains("figure.dataset.spriteAsset = \"css_silhouette\";"));
-        assert!(focused.contains("fetch(defaultSpriteRoute, { method: \"HEAD\", cache: \"no-store\" })"));
+        assert!(focused
+            .contains("fetch(defaultSpriteRoute, { method: \"HEAD\", cache: \"no-store\" })"));
         assert!(focused.contains("figure.dataset.spriteAsset"));
         assert!(focused.contains("sprite-sidecar-asset"));
         assert!(focused.contains("figure.dataset.spritePhase"));

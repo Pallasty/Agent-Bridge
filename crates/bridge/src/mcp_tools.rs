@@ -7431,7 +7431,7 @@ impl McpTool for AvatarCortexRendererSnapshotTool {
                  Defaults to a compact browser renderer view for the current \
                  Linux/Cursor environment; mode can switch to renderer, registry, \
                  binding_plan, visual_adapter, review_gate, review_packet, or \
-                 review_report. It never writes renderer assets, mutates the \
+                 review_report, or review_decisions. It never writes renderer assets, mutates the \
                  official Codex pet package, emits audio, or sends notifications."
                 .into(),
             input_schema: json!({
@@ -7449,7 +7449,8 @@ impl McpTool for AvatarCortexRendererSnapshotTool {
                             "renderer_view",
                             "review_gate",
                             "review_packet",
-                            "review_report"
+                            "review_report",
+                            "review_decisions"
                         ],
                         "description": "Which read-only renderer surface to return."
                     },
@@ -7457,6 +7458,13 @@ impl McpTool for AvatarCortexRendererSnapshotTool {
                     "heartbeat_label": { "type": "string", "description": "Optional avatar heartbeat label override." },
                     "project": { "type": "string", "description": "Project slug. Defaults to agent-bridge." },
                     "output": { "type": "string", "description": "Optional cortex snapshot path override." },
+                    "track": { "type": "string", "description": "Optional renderer track filter for review_decisions mode." },
+                    "decision": { "type": "string", "description": "Optional decision filter for review_decisions mode." },
+                    "limit": {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Maximum review decision records to return in review_decisions mode."
+                    },
                     "include_details": {
                         "type": "boolean",
                         "default": false,
@@ -7475,6 +7483,13 @@ impl McpTool for AvatarCortexRendererSnapshotTool {
         let heartbeat_label = avatar_cortex_arg_string(&args, "heartbeat_label");
         let project = avatar_cortex_arg_string(&args, "project");
         let output = avatar_cortex_arg_path(&args, "output");
+        let track = avatar_cortex_arg_string(&args, "track");
+        let decision = avatar_cortex_arg_string(&args, "decision");
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(20)
+            .clamp(1, 500) as usize;
         let include_details = args
             .get("include_details")
             .and_then(Value::as_bool)
@@ -7517,6 +7532,26 @@ impl McpTool for AvatarCortexRendererSnapshotTool {
             }
             "review-report" => {
                 crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(status)
+            }
+            "review-decisions" => {
+                let opts = crate::avatar_cortex::AvatarCortexRendererReviewDecisionQueueOptions {
+                    label: label.as_deref(),
+                    heartbeat_label: heartbeat_label.as_deref(),
+                    project: project.as_deref(),
+                    output: output.as_deref(),
+                    track: track.as_deref(),
+                    decision: decision.as_deref(),
+                    include_details,
+                    limit,
+                };
+                match crate::avatar_cortex::avatar_cortex_renderer_review_decisions(&opts) {
+                    Ok(payload) => payload,
+                    Err(e) => {
+                        return Ok(ToolResult::error(format!(
+                            "avatar_cortex_renderer_snapshot: {e}"
+                        )));
+                    }
+                }
             }
             other => {
                 return Ok(ToolResult::error(format!(

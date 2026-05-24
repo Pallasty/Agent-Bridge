@@ -130,6 +130,33 @@ pub struct XiaoShuActionRequestActionOptions<'a> {
     pub tts_rate: Option<u64>,
 }
 
+#[derive(Clone, Copy)]
+pub struct AvatarCortexRendererReviewDecisionOptions<'a> {
+    pub label: Option<&'a str>,
+    pub heartbeat_label: Option<&'a str>,
+    pub project: Option<&'a str>,
+    pub output: Option<&'a Path>,
+    pub actor: Option<&'a str>,
+    pub track: Option<&'a str>,
+    pub decision: Option<&'a str>,
+    pub note: Option<&'a str>,
+    pub evidence: Option<&'a str>,
+    pub confirm: bool,
+    pub include_details: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct AvatarCortexRendererReviewDecisionQueueOptions<'a> {
+    pub label: Option<&'a str>,
+    pub heartbeat_label: Option<&'a str>,
+    pub project: Option<&'a str>,
+    pub output: Option<&'a Path>,
+    pub track: Option<&'a str>,
+    pub decision: Option<&'a str>,
+    pub include_details: bool,
+    pub limit: usize,
+}
+
 fn home_dir() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -179,6 +206,14 @@ fn avatar_cortex_action_request_dir() -> Result<PathBuf> {
         .join("avatar_cortex_action_requests"))
 }
 
+fn avatar_cortex_review_decision_dir() -> Result<PathBuf> {
+    Ok(home_dir()?
+        .join("Library")
+        .join("Application Support")
+        .join("agent-bridge")
+        .join("avatar_cortex_review_decisions"))
+}
+
 fn avatar_cortex_voice_paths(project: &str, heartbeat_label: &str) -> Result<(PathBuf, PathBuf)> {
     let dir = avatar_cortex_voice_dir()?.join(label_component(project));
     let slug = label_component(heartbeat_label);
@@ -192,6 +227,12 @@ fn xiao_shu_action_request_queue_path(project: &str) -> Result<PathBuf> {
     Ok(avatar_cortex_action_request_dir()?
         .join(label_component(project))
         .join("requests.jsonl"))
+}
+
+fn avatar_cortex_review_decision_ledger_path(project: &str) -> Result<PathBuf> {
+    Ok(avatar_cortex_review_decision_dir()?
+        .join(label_component(project))
+        .join("decisions.jsonl"))
 }
 
 pub fn cortex_runner_label(label: Option<&str>, project: &str) -> String {
@@ -3103,6 +3144,454 @@ pub fn avatar_cortex_renderer_review_report(
     Ok(avatar_cortex_renderer_review_report_from_status(status))
 }
 
+fn avatar_cortex_review_decision_normalize(value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.replace('-', "_"))
+        .unwrap_or_else(|| "keep_pending".to_string())
+}
+
+fn avatar_cortex_review_decision_allowed(decision: &str) -> bool {
+    matches!(
+        decision,
+        "keep_pending"
+            | "request_visual_revision"
+            | "candidate_for_future_approval_design"
+            | "accept_visual_motion_candidate"
+            | "reject_visual_candidate"
+    )
+}
+
+fn avatar_cortex_review_decision_items(report_payload: &Value) -> &[Value] {
+    report_payload
+        .get("review_report")
+        .and_then(|report| report.get("items"))
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn avatar_cortex_review_decision_report_summary(report_payload: &Value) -> Value {
+    let report = report_payload.get("review_report").unwrap_or(&Value::Null);
+    let pending_tracks: Vec<Value> = avatar_cortex_review_decision_items(report_payload)
+        .iter()
+        .filter_map(|item| item.get("token").and_then(Value::as_str))
+        .map(|token| json!(token))
+        .collect();
+
+    json!({
+        "packet_count": report.get("packet_count").cloned().unwrap_or(Value::Null),
+        "ready_packet_count": report.get("ready_packet_count").cloned().unwrap_or(Value::Null),
+        "blocked_packet_count": report.get("blocked_packet_count").cloned().unwrap_or(Value::Null),
+        "report_state": report.get("report_state").cloned().unwrap_or(Value::Null),
+        "ready_for_human_visual_review": report
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("ready_for_human_visual_review"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "ready_for_approval": false,
+        "can_promote_review_tracks": false,
+        "pending_tracks": pending_tracks,
+    })
+}
+
+fn avatar_cortex_review_decision_compact_record(record: Value) -> Value {
+    let mut compact = serde_json::Map::new();
+    for key in [
+        "schema",
+        "decision_id",
+        "created_at",
+        "project",
+        "actor",
+        "track",
+        "decision",
+        "note",
+        "evidence",
+        "approval_state",
+        "source",
+        "ledger_path",
+        "local_record_command",
+    ] {
+        compact.insert(
+            key.to_string(),
+            record.get(key).cloned().unwrap_or(Value::Null),
+        );
+    }
+    for (key, fallback) in [
+        ("append_only", true),
+        ("sidecar_only", true),
+        ("writes_review_record", true),
+        ("writes_approval", false),
+        ("approval_writes_allowed", false),
+        ("can_promote_binding", false),
+        ("mutates_renderer", false),
+        ("codex_pet_package_mutation", false),
+        ("emits_audio", false),
+        ("emits_notification", false),
+    ] {
+        compact.insert(
+            key.to_string(),
+            record.get(key).cloned().unwrap_or_else(|| json!(fallback)),
+        );
+    }
+    compact.insert("compact".to_string(), json!(true));
+    Value::Object(compact)
+}
+
+fn avatar_cortex_review_decision_record_from_report(
+    opts: &AvatarCortexRendererReviewDecisionOptions<'_>,
+    project: &str,
+    ledger_path: &Path,
+    review_report_payload: Value,
+    now: i64,
+) -> Result<Value> {
+    let actor = opts
+        .actor
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("operator");
+    let track = opts.track.map(str::trim).filter(|s| !s.is_empty());
+    let decision = avatar_cortex_review_decision_normalize(opts.decision);
+    let note = opts.note.map(str::trim).filter(|s| !s.is_empty());
+    let evidence = opts.evidence.map(str::trim).filter(|s| !s.is_empty());
+    let items = avatar_cortex_review_decision_items(&review_report_payload);
+    let source_item = track.and_then(|requested| {
+        items
+            .iter()
+            .find(|item| item.get("token").and_then(Value::as_str) == Some(requested))
+            .cloned()
+    });
+
+    let mut blocked_reasons = Vec::new();
+    if track.is_none() {
+        blocked_reasons.push(json!("track_required"));
+    }
+    if !avatar_cortex_review_decision_allowed(&decision) {
+        blocked_reasons.push(json!("unsupported_decision"));
+    }
+    if track.is_some() && source_item.is_none() {
+        blocked_reasons.push(json!("unknown_review_track"));
+    }
+    if !opts.confirm {
+        blocked_reasons.push(json!("confirmation_required"));
+    }
+
+    let blocked = !blocked_reasons.is_empty();
+    let will_record = !blocked;
+    let track_for_record = track.unwrap_or("xiao_shu::unknown");
+    let seed = json!({
+        "created_at": now,
+        "project": project,
+        "actor": actor,
+        "track": track_for_record,
+        "decision": decision,
+        "note": note,
+        "evidence": evidence,
+    });
+    let seed_hash = fnv1a_hex16(&serde_json::to_string(&seed).unwrap_or_default());
+    let decision_id = format!("xrd-{now}-{}", &seed_hash[..8]);
+    let local_record_command = format!(
+        "agent-bridge avatar cortex-review-decision --project {project} --track {track_for_record:?} --decision {decision:?} --actor {actor:?} --confirm"
+    );
+    let record = json!({
+        "schema": 1,
+        "decision_id": decision_id,
+        "created_at": now,
+        "project": project,
+        "target": "xiao-shu-renderer-review",
+        "actor": actor,
+        "track": track_for_record,
+        "decision": decision,
+        "note": note,
+        "evidence": evidence,
+        "source": "avatar_cortex_renderer_review_decision",
+        "ledger_path": ledger_path.to_string_lossy(),
+        "append_only": true,
+        "sidecar_only": true,
+        "llm_safe": true,
+        "writes_review_record": true,
+        "writes_approval": false,
+        "approval_writes_allowed": false,
+        "approval_state": "not_approved",
+        "review_state_effect": "audit_only_no_promotion",
+        "records_human_observation": true,
+        "can_promote_binding": false,
+        "can_promote_review_tracks": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "mutates_global_substrate": false,
+        "asset_writes_allowed": false,
+        "emits_audio": false,
+        "emits_notification": false,
+        "local_record_command": local_record_command,
+        "decision_effect": {
+            "records_review_decision": true,
+            "records_human_observation": true,
+            "approval_state": "not_approved",
+            "ready_for_approval": false,
+            "approval_writes_allowed": false,
+            "can_promote_binding": false,
+            "requires_separate_approval_design": true,
+        },
+        "source_review_item": source_item.clone().unwrap_or(Value::Null),
+    });
+
+    if will_record {
+        append_jsonl(ledger_path, &record)?;
+    }
+
+    Ok(json!({
+        "surface": "avatar_cortex_renderer_review_decision",
+        "schema": 1,
+        "generated_at": now,
+        "read_only": false,
+        "dry_run": !will_record,
+        "llm_safe": true,
+        "sidecar_only": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": will_record,
+        "writes_review_record": will_record,
+        "writes_approval": false,
+        "approval_writes_allowed": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "decision": {
+            "schema": 1,
+            "project": project,
+            "ledger_path": ledger_path.to_string_lossy(),
+            "append_only": true,
+            "actor": actor,
+            "track": track,
+            "decision": decision,
+            "note": note,
+            "evidence": evidence,
+            "confirm_requested": opts.confirm,
+            "blocked": blocked,
+            "blocked_reasons": blocked_reasons,
+            "would_record": will_record,
+            "recorded": will_record,
+            "decision_id": record.get("decision_id").cloned().unwrap_or(Value::Null),
+            "approval_state": "not_approved",
+            "writes_approval": false,
+            "can_promote_review_tracks": false,
+            "local_record_command": record
+                .get("local_record_command")
+                .cloned()
+                .unwrap_or(Value::Null),
+            "allowed_decisions": [
+                "keep_pending",
+                "request_visual_revision",
+                "candidate_for_future_approval_design",
+                "accept_visual_motion_candidate",
+                "reject_visual_candidate",
+            ],
+        },
+        "record": if opts.include_details || will_record {
+            record
+        } else {
+            avatar_cortex_review_decision_compact_record(record)
+        },
+        "review_report": avatar_cortex_review_decision_report_summary(&review_report_payload),
+        "acceptance": {
+            "records_are_approval_state": false,
+            "approval_writes_allowed": false,
+            "ready_for_approval": false,
+            "review_tracks_mutate_bindings": false,
+            "can_promote_review_tracks": false,
+            "asset_writes_allowed": false,
+            "renderer_mutation_allowed": false,
+            "codex_pet_package_mutation_allowed": false,
+            "emits_audio": false,
+        },
+        "source_review_report": if opts.include_details {
+            review_report_payload
+        } else {
+            Value::Null
+        },
+        "next_step": if will_record {
+            "use cortex-review-decisions to inspect the append-only ledger; promotion still requires a separate future approval design"
+        } else {
+            "rerun with a known review track, an allowed decision, and --confirm to append a review decision record"
+        },
+    }))
+}
+
+pub fn avatar_cortex_renderer_review_decision(
+    opts: &AvatarCortexRendererReviewDecisionOptions<'_>,
+) -> Result<Value> {
+    let project = opts.project.unwrap_or("agent-bridge");
+    let ledger_path = avatar_cortex_review_decision_ledger_path(project)?;
+    let status =
+        avatar_cortex_status(opts.label, opts.heartbeat_label, Some(project), opts.output)?;
+    let review_report_payload = avatar_cortex_renderer_review_report_from_status(status);
+    avatar_cortex_review_decision_record_from_report(
+        opts,
+        project,
+        &ledger_path,
+        review_report_payload,
+        now_secs(),
+    )
+}
+
+fn avatar_cortex_renderer_review_decisions_from_path(
+    opts: &AvatarCortexRendererReviewDecisionQueueOptions<'_>,
+    project: &str,
+    ledger_path: &Path,
+    review_report_payload: Option<Value>,
+) -> Result<Value> {
+    let limit = opts.limit.clamp(1, 500);
+    let track_filter = opts.track.map(str::trim).filter(|track| !track.is_empty());
+    let decision_filter = opts
+        .decision
+        .map(str::trim)
+        .filter(|decision| !decision.is_empty())
+        .map(|decision| decision.replace('-', "_"));
+    let include_details = opts.include_details;
+    let ledger_exists = ledger_path.exists();
+    let mut total_lines = 0usize;
+    let mut parsed_records = 0usize;
+    let mut parse_errors = 0usize;
+    let mut decision_counts = BTreeMap::<String, usize>::new();
+    let mut track_counts = BTreeMap::<String, usize>::new();
+    let mut latest_by_track = BTreeMap::<String, (usize, Value)>::new();
+    let mut records = Vec::<Value>::new();
+
+    if ledger_exists {
+        let body = std::fs::read_to_string(ledger_path)
+            .with_context(|| format!("read {}", ledger_path.display()))?;
+        for line in body.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            total_lines += 1;
+            let Ok(record) = serde_json::from_str::<Value>(trimmed) else {
+                parse_errors += 1;
+                continue;
+            };
+            parsed_records += 1;
+            let track = vstr(record.get("track")).unwrap_or("unknown").to_string();
+            let decision = vstr(record.get("decision"))
+                .unwrap_or("unknown")
+                .to_string();
+            *track_counts.entry(track.clone()).or_default() += 1;
+            *decision_counts.entry(decision.clone()).or_default() += 1;
+            latest_by_track.insert(track.clone(), (total_lines, record.clone()));
+
+            if let Some(expected_track) = track_filter {
+                if track != expected_track {
+                    continue;
+                }
+            }
+            if let Some(expected_decision) = decision_filter.as_deref() {
+                if decision != expected_decision {
+                    continue;
+                }
+            }
+            records.push(record);
+        }
+    }
+
+    let matching_records = records.len();
+    records.reverse();
+    records.truncate(limit);
+    if !include_details {
+        records = records
+            .into_iter()
+            .map(avatar_cortex_review_decision_compact_record)
+            .collect();
+    }
+
+    let mut latest_records: Vec<(usize, Value)> = latest_by_track.into_values().collect();
+    latest_records.sort_by_key(|(line, _record)| *line);
+    latest_records.reverse();
+    let latest_by_track: Vec<Value> = latest_records
+        .into_iter()
+        .map(|(_line, record)| {
+            if include_details {
+                record
+            } else {
+                avatar_cortex_review_decision_compact_record(record)
+            }
+        })
+        .collect();
+
+    Ok(json!({
+        "surface": "avatar_cortex_renderer_review_decisions",
+        "schema": 1,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "dry_run": true,
+        "llm_safe": true,
+        "sidecar_only": true,
+        "emits_audio": false,
+        "emits_notification": false,
+        "mutates_global_substrate": false,
+        "writes_files": false,
+        "writes_review_record": false,
+        "writes_approval": false,
+        "approval_writes_allowed": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "ledger": {
+            "schema": 1,
+            "project": project,
+            "path": ledger_path.to_string_lossy(),
+            "exists": ledger_exists,
+            "append_only": true,
+            "track_filter": track_filter,
+            "decision_filter": decision_filter,
+            "include_details": include_details,
+            "limit": limit,
+            "total_lines": total_lines,
+            "parsed_records": parsed_records,
+            "parse_errors": parse_errors,
+            "matching_records": matching_records,
+            "returned_count": records.len(),
+            "latest_track_count": latest_by_track.len(),
+            "track_counts": track_counts,
+            "decision_counts": decision_counts,
+        },
+        "review_report": review_report_payload
+            .as_ref()
+            .map(avatar_cortex_review_decision_report_summary)
+            .unwrap_or(Value::Null),
+        "latest_by_track": latest_by_track,
+        "records": records,
+        "acceptance": {
+            "records_are_approval_state": false,
+            "approval_writes_allowed": false,
+            "ready_for_approval": false,
+            "review_tracks_mutate_bindings": false,
+            "can_promote_review_tracks": false,
+            "asset_writes_allowed": false,
+            "renderer_mutation_allowed": false,
+            "codex_pet_package_mutation_allowed": false,
+            "emits_audio": false,
+        },
+        "next_step": "record additional human review decisions with cortex-review-decision --confirm; this ledger still cannot approve or promote bindings",
+    }))
+}
+
+pub fn avatar_cortex_renderer_review_decisions(
+    opts: &AvatarCortexRendererReviewDecisionQueueOptions<'_>,
+) -> Result<Value> {
+    let project = opts.project.unwrap_or("agent-bridge");
+    let ledger_path = avatar_cortex_review_decision_ledger_path(project)?;
+    let status =
+        avatar_cortex_status(opts.label, opts.heartbeat_label, Some(project), opts.output)?;
+    let review_report_payload = avatar_cortex_renderer_review_report_from_status(status);
+    avatar_cortex_renderer_review_decisions_from_path(
+        opts,
+        project,
+        &ledger_path,
+        Some(review_report_payload),
+    )
+}
+
 fn avatar_cortex_voice_policy_rule_from_track(track: &Value) -> Value {
     let token = vstr(track.get("token")).unwrap_or("xiao_shu::unknown");
     let review = track.get("semantic_variant_review").unwrap_or(&Value::Null);
@@ -5010,10 +5499,7 @@ fn xiao_shu_action_request_compact_record(record: Value) -> Value {
     );
     action_request.insert(
         "request_state".to_string(),
-        request
-            .get("request_state")
-            .cloned()
-            .unwrap_or(Value::Null),
+        request.get("request_state").cloned().unwrap_or(Value::Null),
     );
     action_request.insert(
         "mapped_track".to_string(),
@@ -5108,10 +5594,7 @@ fn xiao_shu_action_request_compact_record(record: Value) -> Value {
             record.get(key).cloned().unwrap_or_else(|| json!(fallback)),
         );
     }
-    compact.insert(
-        "action_request".to_string(),
-        Value::Object(action_request),
-    );
+    compact.insert("action_request".to_string(), Value::Object(action_request));
     compact.insert("compact".to_string(), json!(true));
     Value::Object(compact)
 }
@@ -6843,6 +7326,147 @@ mod tests {
     }
 
     #[test]
+    fn avatar_cortex_renderer_review_decision_records_append_only_without_approval() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let gate = avatar_cortex_renderer_review_gate_from_renderer_view_payload(view);
+        let packet = avatar_cortex_renderer_review_packet_from_review_gate_payload(gate);
+        let report = avatar_cortex_renderer_review_report_from_packet_payload(packet);
+        let root = std::env::temp_dir().join(format!(
+            "agent-bridge-review-decision-{}-{}",
+            std::process::id(),
+            now_secs()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let ledger_path = root.join("decisions.jsonl");
+
+        let preview = avatar_cortex_review_decision_record_from_report(
+            &AvatarCortexRendererReviewDecisionOptions {
+                label: None,
+                heartbeat_label: None,
+                project: Some("agent-bridge"),
+                output: None,
+                actor: Some("operator"),
+                track: Some("xiao_shu::look_sideways::medium"),
+                decision: Some("accept_visual_motion_candidate"),
+                note: Some("motion is calm enough for a sidecar preview"),
+                evidence: Some("watched in browser panel"),
+                confirm: false,
+                include_details: false,
+            },
+            "agent-bridge",
+            &ledger_path,
+            report.clone(),
+            1_779_480_000,
+        )
+        .unwrap();
+
+        assert_eq!(preview["surface"], "avatar_cortex_renderer_review_decision");
+        assert_eq!(preview["dry_run"], true);
+        assert_eq!(preview["writes_files"], false);
+        assert_eq!(preview["writes_review_record"], false);
+        assert_eq!(preview["writes_approval"], false);
+        assert_eq!(preview["mutates_renderer"], false);
+        assert_eq!(preview["codex_pet_package_mutation"], false);
+        assert_eq!(preview["decision"]["blocked"], true);
+        assert!(preview["decision"]["blocked_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason == "confirmation_required"));
+        assert!(!ledger_path.exists());
+
+        let recorded = avatar_cortex_review_decision_record_from_report(
+            &AvatarCortexRendererReviewDecisionOptions {
+                label: None,
+                heartbeat_label: None,
+                project: Some("agent-bridge"),
+                output: None,
+                actor: Some("operator"),
+                track: Some("xiao_shu::look_sideways::medium"),
+                decision: Some("accept_visual_motion_candidate"),
+                note: Some("motion is calm enough for a sidecar preview"),
+                evidence: Some("watched in browser panel"),
+                confirm: true,
+                include_details: true,
+            },
+            "agent-bridge",
+            &ledger_path,
+            report.clone(),
+            1_779_480_100,
+        )
+        .unwrap();
+
+        assert_eq!(recorded["dry_run"], false);
+        assert_eq!(recorded["writes_files"], true);
+        assert_eq!(recorded["writes_review_record"], true);
+        assert_eq!(recorded["writes_approval"], false);
+        assert_eq!(recorded["approval_writes_allowed"], false);
+        assert_eq!(recorded["mutates_renderer"], false);
+        assert_eq!(recorded["codex_pet_package_mutation"], false);
+        assert_eq!(recorded["decision"]["recorded"], true);
+        assert_eq!(recorded["decision"]["approval_state"], "not_approved");
+        assert_eq!(
+            recorded["record"]["decision_effect"]["requires_separate_approval_design"],
+            true
+        );
+        assert_eq!(
+            recorded["record"]["source_review_item"]["token"],
+            "xiao_shu::look_sideways::medium"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&ledger_path)
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+
+        let queue = avatar_cortex_renderer_review_decisions_from_path(
+            &AvatarCortexRendererReviewDecisionQueueOptions {
+                label: None,
+                heartbeat_label: None,
+                project: Some("agent-bridge"),
+                output: None,
+                track: None,
+                decision: None,
+                include_details: false,
+                limit: 10,
+            },
+            "agent-bridge",
+            &ledger_path,
+            Some(report),
+        )
+        .unwrap();
+
+        assert_eq!(queue["surface"], "avatar_cortex_renderer_review_decisions");
+        assert_eq!(queue["read_only"], true);
+        assert_eq!(queue["writes_files"], false);
+        assert_eq!(queue["writes_review_record"], false);
+        assert_eq!(queue["writes_approval"], false);
+        assert_eq!(queue["approval_writes_allowed"], false);
+        assert_eq!(queue["mutates_renderer"], false);
+        assert_eq!(queue["codex_pet_package_mutation"], false);
+        assert_eq!(queue["ledger"]["exists"], true);
+        assert_eq!(queue["ledger"]["parsed_records"], 1);
+        assert_eq!(queue["ledger"]["matching_records"], 1);
+        assert_eq!(queue["ledger"]["latest_track_count"], 1);
+        assert_eq!(
+            queue["ledger"]["decision_counts"]["accept_visual_motion_candidate"],
+            1
+        );
+        assert_eq!(queue["records"][0]["compact"], true);
+        assert_eq!(queue["records"][0]["approval_state"], "not_approved");
+        assert_eq!(queue["records"][0]["can_promote_binding"], false);
+        assert_eq!(queue["acceptance"]["can_promote_review_tracks"], false);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn avatar_cortex_voice_policy_keeps_real_audio_cli_only() {
         let registry = avatar_cortex_renderer_registry_payload(None);
         let plan = avatar_cortex_binding_plan_from_registry(registry);
@@ -7499,7 +8123,10 @@ mod tests {
         assert_eq!(one["queue"]["request_id_filter"], request_id);
         assert_eq!(one["queue"]["include_details"], true);
         assert_eq!(one["records"][0]["request_id"], request_id);
-        assert_eq!(one["records"][0]["source_request"]["surface"], "xiao_shu_action_request");
+        assert_eq!(
+            one["records"][0]["source_request"]["surface"],
+            "xiao_shu_action_request"
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -7535,8 +8162,10 @@ mod tests {
 
     #[test]
     fn xiao_shu_action_queue_uses_latest_append_only_state() {
-        let root =
-            std::env::temp_dir().join(format!("agent-bridge-xiao-shu-action-current-{}", now_secs()));
+        let root = std::env::temp_dir().join(format!(
+            "agent-bridge-xiao-shu-action-current-{}",
+            now_secs()
+        ));
         std::fs::create_dir_all(&root).unwrap();
 
         let request_payload = json!({
