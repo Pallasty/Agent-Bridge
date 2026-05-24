@@ -6550,8 +6550,7 @@ impl McpTool for PetPresenceSyncTool {
             description:
                 "Sync the current Codex pet sidecar state into this agent's presence row. \
                  This is a Standard-profile bridge from pet_state to agent_presence: it \
-                 does not change the pet package, emit audio, or expand the Essential \
-                 tool surface."
+                 does not change the pet package or emit audio."
                     .into(),
             input_schema: json!({
                 "type": "object",
@@ -6652,8 +6651,7 @@ impl McpTool for AvatarAdapterCapabilitiesTool {
             description: "Read-only Phase 7.2 diagnostic for the Agent Avatar Protocol. \
                  Reports which input/output adapter surfaces are available for Codex, \
                  Claude Code, Warp, Gemini CLI, Auggie/local CLI, and daemon peers. \
-                 It does not mutate avatar state, emit audio, send notifications, or \
-                 expand the Codex Essential tool surface."
+                 It does not mutate avatar state, emit audio, or send notifications."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -21182,6 +21180,14 @@ const CODEX_ESSENTIAL_GROUPS: &[&[&str]] = &[
 /// collab capability groups. Keep these explicit so the group drift guardrails
 /// stay about forum/presence/IDE families only.
 const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
+    // Avatar observation and sidecar-to-presence bridge: expose the read path
+    // plus an explicit sync surface so Codex can inspect Xiao Shu without
+    // widening to every Standard tool.
+    "avatar_adapter_capabilities",
+    "avatar_state_get",
+    "avatar_surface_snapshot",
+    "avatar_surface_report",
+    "pet_presence_sync",
     "xiao_shu_action_request",
     // Mobile bridge: compact enough to expose directly during Android
     // install/debug lanes; mutation remains explicit per tool.
@@ -23353,6 +23359,26 @@ mod tests {
     }
 
     #[test]
+    fn codex_essential_exposes_avatar_observation_surface() {
+        for tool in [
+            "avatar_adapter_capabilities",
+            "avatar_state_get",
+            "avatar_surface_snapshot",
+            "avatar_surface_report",
+            "pet_presence_sync",
+        ] {
+            assert!(
+                codex_essential_tool(Tier::Standard, tool),
+                "codex-essential should expose {tool}"
+            );
+            assert!(
+                !codex_lean_tool(tool),
+                "codex-lean keeps avatar observation out of the minimal surface: {tool}"
+            );
+        }
+    }
+
+    #[test]
     fn mobile_parsers_extract_devices_bounds_and_nodes() {
         let devices = parse_adb_devices(
             "List of devices attached\n\
@@ -25409,8 +25435,12 @@ mod tests {
         assert!(p.includes(Tier::Standard, "forum_set_thread_status"));
         assert!(p.includes(Tier::Standard, "agent_presence_announce"));
         assert!(p.includes(Tier::Standard, "agent_presence_list"));
+        assert!(p.includes(Tier::Standard, "avatar_adapter_capabilities"));
+        assert!(p.includes(Tier::Standard, "avatar_state_get"));
+        assert!(p.includes(Tier::Standard, "avatar_surface_snapshot"));
+        assert!(p.includes(Tier::Standard, "avatar_surface_report"));
+        assert!(p.includes(Tier::Standard, "pet_presence_sync"));
         assert!(p.includes(Tier::Standard, "xiao_shu_action_request"));
-        assert!(!p.includes(Tier::Standard, "avatar_state_get"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
     }
@@ -25419,12 +25449,13 @@ mod tests {
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 23 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 28 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(13: xiao_shu_action_request + 11 mobile bridge tools
+        //      + DIRECT(18: 5 avatar observation/sync tools
+        //      + xiao_shu_action_request + 11 mobile bridge tools
         //      + memory_graph_topology).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        assert_eq!(extras.len(), 23);
+        assert_eq!(extras.len(), 28);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -25435,6 +25466,11 @@ mod tests {
         assert!(extras.contains(&"forum_set_thread_status"));
         assert!(extras.contains(&"agent_presence_announce"));
         assert!(extras.contains(&"agent_presence_list"));
+        assert!(extras.contains(&"avatar_adapter_capabilities"));
+        assert!(extras.contains(&"avatar_state_get"));
+        assert!(extras.contains(&"avatar_surface_snapshot"));
+        assert!(extras.contains(&"avatar_surface_report"));
+        assert!(extras.contains(&"pet_presence_sync"));
         assert!(extras.contains(&"xiao_shu_action_request"));
         assert!(extras.contains(&"mobile_list_devices"));
         assert!(extras.contains(&"mobile_screenshot"));
