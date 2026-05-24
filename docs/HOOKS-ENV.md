@@ -1,0 +1,63 @@
+# Agent-Bridge hooks — env-gate reference
+
+集中文档化已部署 hook 及其环境变量门控。背景:ECC 调研的 delta④(b)「hook profile」——
+经核实 agent-bridge **已有丰富的 per-hook env 门控**(只是没集中文档),所以真缺口是
+*discoverability* 而非 profile 层。本文是那个缺口的补丁。
+
+## Hooks(部署到 `~/.local/bin/`,注册在 `~/.claude/settings.json`)
+
+| Hook | CC 事件 | 源 | 职责 |
+|---|---|---|---|
+| `ab-memory-hook` | UserPromptSubmit | `crates/bridge/src/hooks/ab-memory-hook.sh`(setup.rs `include_str!`)| 注入记忆上下文 |
+| `ab-seed-familiarity-hook` | UserPromptSubmit | ⚠️ 已部署,**源不在 setup.rs/repo**(孤儿,pre-existing)| substrate familiarity 探针 |
+| `ab-precompact-hook` | PreCompact | `crates/bridge/src/hooks/ab-precompact-hook.sh` | compact 前策展 |
+| `ab-session-end-hook` | Stop | `crates/bridge/src/hooks/ab-session-end-hook.sh` | session-end finalize |
+| `ab-instinct-observer-hook` | PostToolUse + UserPromptSubmit | `crates/bridge/src/hooks/ab-instinct-observer-hook.py` | delta① **探针**:append-only 观测日志 |
+
+**安装**:`setup.rs::install_claude_code` 编译期嵌入并写 memory/precompact/session-end 三个 +
+merge settings.json 的 `UserPromptSubmit/Stop/PreCompact`。
+**observer 是 probe-stage**:源已进 repo(防孤儿),但**刻意不 wire 进 setup.rs**(探针不该
+推给所有机器/sibling);当前为**手动注册**(PostToolUse + UserPromptSubmit 第 3 hook)。delta①
+若 graduate 再 wire 进 install(见 task #49 / `docs/design/ECC_INSTINCT_MINING_PROBE_2026_05_24.md`)。
+
+## Env 门控
+
+**Toggle(开关)**
+
+| Env | Hook | 默认 | 效果 |
+|---|---|---|---|
+| `AB_INSTINCT_OBSERVER` | observer | `1`(开)| `=0` → no-op,关闭观测 |
+| `AB_SEED_FAMILIARITY_OFF` | seed-familiarity | unset(开)| `=1` → `exit 0`,关闭 |
+| `AB_PET_STATE_DISABLE` | memory, session-end | unset(开)| `=1` → 跳过 pet state |
+| `AB_SESSION_END_CURATE` | session-end | unset(**关**)| `=1` → 跑 end-of-session 策展(+ precompact)|
+
+**Config(配置值)**
+
+| Env | Hook | 默认 | 含义 |
+|---|---|---|---|
+| `AB_MEMORY_COOLDOWN_TURNS` | memory | `8`(P-A1 locked)| 记忆注入间隔轮数;`999999` ≈ 还原 one-shot |
+| `AB_PET_AUTO_TTS` | session-end | unset(关)| TTS spec |
+| `AB_PET_AUTO_TTS_CHANNEL` | session-end | `tts` | TTS 通道 |
+| `AB_PET_AUTO_TTS_COOLDOWN_SECONDS` | session-end | `1800` | TTS 冷却秒 |
+| `AB_STATE_DIR` | 多数 | 默认 cache dir | state 目录覆盖 |
+
+**Internal(内部协调,一般别手设)**
+
+| Env | 说明 |
+|---|---|
+| `AB_MEMORY_CURATOR` | precompact 设 `=1`,memory-hook 见之即 `exit 0`(re-entry guard)|
+| `AB_HOOK_LOG` / `AB_HOOK_PAYLOAD` / `AB_HOOK_START` / `AB_HOOK_EVENT` / `AB_HOOK_OUTPUT_BYTES` | hook 自我日志 plumbing |
+
+## delta④(b) profile 判断
+
+ECC 的 `ECC_HOOK_PROFILE=minimal|standard|strict` 是上述 toggle 的**便利分组**。agent-bridge
+粒度门控已全有 → profile 仅是便利层,且要动多个 live 脚本。**定级:低边际价值,DEFER(task #54)**,
+除非出现真实"一键切档"需求。镜像对象若要做:`setup.rs::SetupToolset::{Essential,Lean}` 的 enum 模式。
+
+## 探针清理(observer)
+
+```sh
+# 关闭：AB_INSTINCT_OBSERVER=0（或从 settings.json 摘掉两处 hook 条目）
+# 清数据：rm -f ~/.cache/agent-bridge/instinct-probe/observations.jsonl
+# 跑密度审计：python3 scripts/instinct_density_audit.py
+```
