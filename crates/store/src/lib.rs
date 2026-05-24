@@ -2238,6 +2238,12 @@ pub trait StateStore: Send + Sync {
     /// timestamp (`COALESCE(read_at, created_at)`) is older than
     /// `now_secs - max_age_secs`. Returns `(cleared, retained)` counts.
     ///
+    /// When `dry_run` is true, no rows are deleted: `cleared` is the count
+    /// that *would* be removed and `retained` the count that *would* remain.
+    /// The match predicate is shared between the count and delete paths so a
+    /// dry-run preview can never diverge from the real GC (the exact drift
+    /// class P-XM-7 guards against).
+    ///
     /// Guarantees (locked per design §4 / §6.5 rule 2):
     /// - any message with `last_touch < cutoff` → DELETED (100%)
     /// - any message with `last_touch >= cutoff` → KEPT (0% false-delete)
@@ -2245,6 +2251,7 @@ pub trait StateStore: Send + Sync {
         &self,
         now_secs: i64,
         max_age_secs: i64,
+        dry_run: bool,
     ) -> Result<(usize, usize)>;
 
     // ─── v18: forum / collaboration whiteboard ─────────────────────────────

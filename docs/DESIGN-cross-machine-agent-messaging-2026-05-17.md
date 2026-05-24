@@ -532,12 +532,16 @@ sqlite3 ~/.local/share/agent-bridge/state.db <<EOF
 INSERT INTO agent_messages …
 EOF
 
-# Trigger GC pass (CLI to be wired in v0.5)
-agent-bridge dream xm-gc --max-age-days 30
+# Preview first (no delete), then run for real:
+agent-bridge dream xm-gc --max-age-days 30 --dry-run   # would-clear / would-retain
+agent-bridge dream xm-gc --max-age-days 30             # executes
+agent-bridge dream xm-gc --max-age-days 30 --json      # machine-readable
 
 # Verify counts
 sqlite3 … "SELECT COUNT(*) FROM agent_messages;"  # expect 51
 ```
+
+**CLI wired (XM v0.5, 2026-05-24)**: `dream xm-gc` now exists (`main.rs::run_dream_xm_gc` → `agent_messages_gc`). `--dry-run` shares the exact `COALESCE(read_at, created_at) < cutoff` predicate with the real pass (no preview/execute drift). Default `--max-age-days 30` is the locked P-XM-7 threshold. The store method's dry-run + real paths are unit-tested (`agent_messages_gc_p_xm_7_fixture`: 102 → dry-run reports 51/51 with all 102 still present → real pass clears 51, retains 51). Cron scheduling (daily 03:42 UTC alongside `dream weekly`) remains a deploy step, not a code gap.
 
 **Pass criteria**: cleared=51 (50 stale unread + 1 stale-read); retained=51 (50 fresh + 1 touched-recently). Zero false-deletes.
 **Fail action**: Soft-delete tombstone first, two-phase GC (rule 3 reframe — NOT relaxing the 0% target).

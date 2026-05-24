@@ -1636,6 +1636,29 @@ enum DreamOp {
         #[arg(long)]
         json: bool,
     },
+    /// **XM v0.5 (cross-machine messaging inbox GC)** — P-XM-7 enforcement.
+    /// Hard-DELETE `agent_messages` rows whose effective last-touch
+    /// timestamp (`COALESCE(read_at, created_at)`) is older than
+    /// `--max-age-days`. CLI mirror / cron entry point for the
+    /// `agent_messages_gc` store method (the wet-validation gap noted in
+    /// `docs/DESIGN-cross-machine-agent-messaging-2026-05-17.md` §10).
+    /// Locked predicate (§4 / §6.5 rule 2): stale-unread 100% cleared,
+    /// touched-within-window 0% false-deleted.
+    XmGc {
+        /// Rows whose effective last-touch (`COALESCE(read_at, created_at)`)
+        /// is older than this many days are cleared. Default 30 = the locked
+        /// P-XM-7 threshold; do NOT lower (§6.5 rule 2 — fail goes to a
+        /// rule-3 reframe, not a threshold drop).
+        #[arg(long, default_value_t = 30)]
+        max_age_days: i64,
+        /// Preview only — report would-clear / would-retain counts without
+        /// deleting. Shares the exact match predicate with the real pass.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// **Replay quality audit** — are the LLM-consolidated summaries that
     /// `dream replay` writes actually being used? Pure read pass: counts
     /// `p5_replay`-tagged active memories, bins access patterns, surfaces
@@ -3387,6 +3410,11 @@ async fn main() -> Result<()> {
                 dry_run,
                 json,
             } => run_dream_purge_tombstones(*older_than_days, *dry_run, *json).await,
+            DreamOp::XmGc {
+                max_age_days,
+                dry_run,
+                json,
+            } => run_dream_xm_gc(*max_age_days, *dry_run, *json).await,
             DreamOp::ReplayAudit {
                 stale_days,
                 waypoint_min,
@@ -9101,6 +9129,56 @@ async fn run_dream_purge_tombstones(
             println!("  · {k}");
         }
         println!("  … (+{} more)", removed.len() - 20);
+    }
+    Ok(())
+}
+
+/// **XM v0.5 — cross-machine messaging inbox GC (P-XM-7).** CLI / cron entry
+/// point for `agent_messages_gc`. Clears rows whose effective last-touch
+/// (`COALESCE(read_at, created_at)`) is older than `--max-age-days`; the
+/// dry-run path shares the same match predicate so the preview can't drift
+/// from the executed pass. Closes the §10 wet-validation invocation gap.
+async fn run_dream_xm_gc(max_age_days: i64, dry_run: bool, as_json: bool) -> Result<()> {
+    use ab_store::{default_db_path, SqliteStore, StateStore};
+    let max_age_days = max_age_days.max(0);
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let max_age_secs = max_age_days.saturating_mul(86_400);
+    let path = default_db_path();
+    let store = SqliteStore::open(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {path:?}: {e}"))?;
+    let (cleared, retained) = store
+        .agent_messages_gc(now_secs, max_age_secs, dry_run)
+        .await
+        .map_err(|e| anyhow::anyhow!("agent_messages_gc: {e}"))?;
+
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "max_age_days": max_age_days,
+                "dry_run": dry_run,
+                "cleared": cleared,
+                "retained": retained,
+            }))?
+        );
+        return Ok(());
+    }
+
+    println!("# XM v0.5 — agent_messages inbox GC (P-XM-7)");
+    println!("DB: {}", path.display());
+    println!("max_age: {max_age_days}d · dry_run: {dry_run}");
+    println!();
+    let verb = if dry_run { "would clear" } else { "cleared" };
+    let kept = if dry_run { "would retain" } else { "retained" };
+    println!("{verb:<14}: {cleared}");
+    println!("{kept:<14}: {retained}");
+    if cleared == 0 {
+        println!();
+        println!("(no agent_messages older than {max_age_days}d — nothing to GC)");
     }
     Ok(())
 }

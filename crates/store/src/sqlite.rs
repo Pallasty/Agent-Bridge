@@ -7323,22 +7323,39 @@ impl StateStore for SqliteStore {
         &self,
         now_secs: i64,
         max_age_secs: i64,
+        dry_run: bool,
     ) -> Result<(usize, usize)> {
         let cutoff = now_secs.saturating_sub(max_age_secs);
+        // Single shared WHERE predicate for the count and delete paths so a
+        // dry-run preview can never diverge from the executed GC.
+        const MATCH_PRED: &str = "COALESCE(read_at, created_at) < ?1";
         let (cleared, retained) = self
             .conn
             .call(move |c| -> RusqliteResult<(usize, usize)> {
-                let cleared = c.execute(
-                    "DELETE FROM agent_messages
-                     WHERE COALESCE(read_at, created_at) < ?1",
-                    params![cutoff],
-                )?;
-                let retained: i64 = c.query_row(
-                    "SELECT COUNT(*) FROM agent_messages",
-                    [],
-                    |r| r.get(0),
-                )?;
-                Ok((cleared, retained as usize))
+                let cleared = if dry_run {
+                    let n: i64 = c.query_row(
+                        &format!("SELECT COUNT(*) FROM agent_messages WHERE {MATCH_PRED}"),
+                        params![cutoff],
+                        |r| r.get(0),
+                    )?;
+                    n as usize
+                } else {
+                    c.execute(
+                        &format!("DELETE FROM agent_messages WHERE {MATCH_PRED}"),
+                        params![cutoff],
+                    )?
+                };
+                let total: i64 =
+                    c.query_row("SELECT COUNT(*) FROM agent_messages", [], |r| r.get(0))?;
+                // After a real delete, COUNT is the survivors. In dry-run the
+                // delete didn't happen, so subtract the would-clear count to
+                // report the post-GC survivor projection.
+                let retained = if dry_run {
+                    (total as usize).saturating_sub(cleared)
+                } else {
+                    total as usize
+                };
+                Ok((cleared, retained))
             })
             .await
             .map_err(|e| Error::Backend(format!("agent_messages_gc: {e}")))?;
@@ -9255,9 +9272,27 @@ mod tests {
             .await
             .expect("seed");
 
-        // GC with max_age = 30 days.
+        // Dry-run first: must report the SAME (would_clear, would_retain)
+        // as the real pass but leave every row in place.
+        let (dry_cleared, dry_retained) = store
+            .agent_messages_gc(now, 30 * DAY, /* dry_run */ true)
+            .await
+            .expect("gc dry-run");
+        assert_eq!(dry_cleared, 51, "dry-run must project the same clear count");
+        assert_eq!(dry_retained, 51, "dry-run must project the same retain count");
+        let still_there = store
+            .agent_inbox_fetch("b", None, false, 200)
+            .await
+            .expect("post dry-run fetch");
+        assert_eq!(
+            still_there.len(),
+            102,
+            "dry-run must NOT delete any row (all 102 remain)"
+        );
+
+        // GC with max_age = 30 days (real pass).
         let (cleared, retained) = store
-            .agent_messages_gc(now, 30 * DAY)
+            .agent_messages_gc(now, 30 * DAY, /* dry_run */ false)
             .await
             .expect("gc");
 
