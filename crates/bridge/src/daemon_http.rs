@@ -4424,6 +4424,7 @@ fn avatar_surface_renderer_view_html(
     let timer = null;
     const defaultSpriteRoute = {sprite_route_json};
     const defaultAssetPetId = {asset_pet_id_json};
+    let defaultSpriteAvailable = true;
     const spriteRows = {{
       "xiao_shu::soft_bounce::low": {{ row: 0, frames: 6, alert: false }},
       "xiao_shu::idle_breathe::low": {{ row: 0, frames: 6, alert: false }},
@@ -4588,12 +4589,19 @@ fn avatar_surface_renderer_view_html(
       }});
     }}
 
-    function setAssetLabel(spriteRoute, sidecarAsset) {{
+    function setAssetLabel(spriteRoute, sidecarAsset, fallbackReason) {{
       if (!assetEl) {{
         return;
       }}
       assetEl.textContent = "";
-      const parts = sidecarAsset
+      const parts = fallbackReason
+        ? [
+            "fallback=css silhouette",
+            `missing=${{defaultSpriteRoute || ""}}`,
+            `reason=${{fallbackReason}}`,
+            "mode=read-only visual fallback"
+          ]
+        : sidecarAsset
         ? [
             `sidecar=${{sidecarAsset.asset_id || "prototype"}}`,
             `route=${{spriteRoute || ""}}`,
@@ -4648,6 +4656,20 @@ fn avatar_surface_renderer_view_html(
       const config = {{ ...(spriteRows[track.token] || {{ row: 0, frames: 6, alert: false }}) }};
       const variant = activeVariant(track);
       const sidecarAsset = variant && variant.sidecar_asset ? variant.sidecar_asset : null;
+      const hasVariantSprite = Boolean(variant && (variant.asset_route || sidecarAsset));
+      if (!hasVariantSprite && !defaultSpriteAvailable) {{
+        spriteFrame.style.backgroundImage = "";
+        setAssetLabel("", null, "pet_spritesheet_unavailable");
+        figure.dataset.spriteVariant = "css_fallback";
+        figure.dataset.spriteAsset = "css_silhouette";
+        figure.dataset.spritePhase = "";
+        figure.classList.toggle("sprite-backed", false);
+        figure.classList.toggle("sprite-choreographed", false);
+        figure.classList.toggle("sprite-sidecar-asset", false);
+        figure.classList.toggle("sprite-alert", false);
+        figure.classList.toggle("sprite-attention-visible", false);
+        return;
+      }}
       const spriteRoute = variant && (variant.asset_route || (sidecarAsset && sidecarAsset.route))
         ? variant.asset_route || sidecarAsset.route
         : defaultSpriteRoute;
@@ -4668,7 +4690,7 @@ fn avatar_surface_renderer_view_html(
       const y = -Number(config.row || 0) * 208;
       spriteFrame.style.backgroundImage = "url(" + JSON.stringify(String(spriteRoute || defaultSpriteRoute)) + ")";
       spriteFrame.style.backgroundPosition = `${{x}}px ${{y}}px`;
-      setAssetLabel(spriteRoute, sidecarAsset);
+      setAssetLabel(spriteRoute, sidecarAsset, "");
       figure.dataset.spriteVariant = variant && variant.variant_id ? variant.variant_id : "default";
       figure.dataset.spriteAsset = sidecarAsset && sidecarAsset.asset_id ? sidecarAsset.asset_id : "official_pet";
       figure.dataset.spritePhase = choreoFrame && choreoFrame.phase ? choreoFrame.phase : "";
@@ -4724,6 +4746,20 @@ fn avatar_surface_renderer_view_html(
     setActiveButton();
     renderVariantButtons();
     applyFrame();
+    fetch(defaultSpriteRoute, {{ method: "HEAD", cache: "no-store" }})
+      .then((response) => {{
+        defaultSpriteAvailable = Boolean(response && response.ok);
+      }})
+      .catch(() => {{
+        defaultSpriteAvailable = false;
+      }})
+      .finally(() => {{
+        if (!defaultSpriteAvailable) {{
+          if (timer) window.clearTimeout(timer);
+          frameIndex = 0;
+          applyFrame();
+        }}
+      }});
   </script>
 </body>
 </html>"#,
@@ -5884,7 +5920,13 @@ mod tests {
             "const defaultSpriteRoute = \"/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev\";"
         ));
         assert!(focused.contains("const defaultAssetPetId = \"xiao-shu-dev\";"));
-        assert!(focused.contains("function setAssetLabel(spriteRoute, sidecarAsset)"));
+        assert!(focused.contains("let defaultSpriteAvailable = true;"));
+        assert!(focused.contains("function setAssetLabel(spriteRoute, sidecarAsset, fallbackReason)"));
+        assert!(focused.contains("fallback=css silhouette"));
+        assert!(focused.contains("reason=${fallbackReason}"));
+        assert!(focused.contains("pet_spritesheet_unavailable"));
+        assert!(focused.contains("figure.dataset.spriteAsset = \"css_silhouette\";"));
+        assert!(focused.contains("fetch(defaultSpriteRoute, { method: \"HEAD\", cache: \"no-store\" })"));
         assert!(focused.contains("figure.dataset.spriteAsset"));
         assert!(focused.contains("sprite-sidecar-asset"));
         assert!(focused.contains("figure.dataset.spritePhase"));

@@ -41,6 +41,14 @@ impl Status {
             Status::Fail => "✗",
         }
     }
+    /// Emoji glyph for Markdown rendering (table-friendly).
+    fn md_glyph(self) -> &'static str {
+        match self {
+            Status::Ok => "✅",
+            Status::Warn => "⚠️",
+            Status::Fail => "❌",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +85,14 @@ impl Check {
             fix: Some(fix.into()),
         }
     }
+}
+
+/// Sanitize a string for a Markdown table cell: escape pipes, collapse whitespace.
+fn md_cell(s: &str) -> String {
+    s.replace('|', "\\|")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // ── pure classification helpers (unit-tested) ──────────────────────────────
@@ -474,7 +490,7 @@ fn check_mcp_servers(dir: &Path) -> Check {
     }
 }
 
-pub async fn run_doctor(json: bool) -> Result<()> {
+pub async fn run_doctor(json: bool, markdown: bool) -> Result<()> {
     let dir = install_dir();
     let checks = vec![
         check_wrapper(&dir),
@@ -507,6 +523,36 @@ pub async fn run_doctor(json: bool) -> Result<()> {
             "checks": rows,
         });
         println!("{}", serde_json::to_string_pretty(&out)?);
+    } else if markdown {
+        println!("## agent-bridge doctor — `{}`", dir.display());
+        println!();
+        println!(
+            "**{} ok · {warns} warn · {fails} fail**",
+            checks.len() - warns - fails
+        );
+        println!();
+        println!("| | check | detail |");
+        println!("|---|---|---|");
+        for c in &checks {
+            println!(
+                "| {} | {} | {} |",
+                c.status.md_glyph(),
+                md_cell(c.name),
+                md_cell(&c.detail)
+            );
+        }
+        let fixes: Vec<&Check> = checks.iter().filter(|c| c.fix.is_some()).collect();
+        if !fixes.is_empty() {
+            println!();
+            println!("**Fixes**");
+            for c in &fixes {
+                println!(
+                    "- **{}** — {}",
+                    md_cell(c.name),
+                    md_cell(c.fix.as_deref().unwrap_or(""))
+                );
+            }
+        }
     } else {
         println!("=== agent-bridge doctor ({}) ===", dir.display());
         for c in &checks {
@@ -536,6 +582,19 @@ pub async fn run_doctor(json: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn md_cell_escapes_pipes_and_collapses_ws() {
+        assert_eq!(md_cell("a | b\nc   d"), "a \\| b c d");
+        assert_eq!(md_cell("  trimmed  "), "trimmed");
+    }
+
+    #[test]
+    fn md_glyph_distinct_per_status() {
+        assert_eq!(Status::Ok.md_glyph(), "✅");
+        assert_eq!(Status::Warn.md_glyph(), "⚠️");
+        assert_eq!(Status::Fail.md_glyph(), "❌");
+    }
 
     #[test]
     fn classify_elf_vs_script() {

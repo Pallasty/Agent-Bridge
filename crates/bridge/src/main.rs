@@ -43,6 +43,9 @@ enum Cmd {
         /// Emit a JSON report instead of the human-readable table.
         #[arg(long)]
         json: bool,
+        /// Emit a Markdown operator snapshot (paste into forum/commit/handoff).
+        #[arg(long)]
+        markdown: bool,
     },
     /// Install agent-bridge for the chosen frontend.
     ///
@@ -3479,8 +3482,8 @@ async fn main() -> Result<()> {
     }
 
     // Deployment self-check — pure file/process inspection, no Hub.
-    if let Cmd::Doctor { json } = &cmd {
-        return doctor::run_doctor(*json).await;
+    if let Cmd::Doctor { json, markdown } = &cmd {
+        return doctor::run_doctor(*json, *markdown).await;
     }
 
     // ε-5: worktree-session subcommand. Doesn't need a Hub — pure git
