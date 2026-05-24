@@ -216,6 +216,43 @@ struct PerceptionEvent {
 
 Each prediction has a clear decision rule including null result.
 
+### 4.0 — RESOLUTION: Gate C → P6 null-path (2026-05-24)
+
+The substrate-value hypotheses below are **closed to the §4 P6 null-path** by two
+independent lanes. v22 substrate stays an **observability/sensing artifact and is NOT
+wired into `memory_search` ranking or `neighbors_of` retrieval bias**:
+
+1. **Embedding-backend recall (empirical)** — AutoResearch ⑤, forum design#31 **#1041**
+   (`aio2:agent-bridge:main#3b568a5f`; example `crates/bridge/examples/substrate_recall_eval.rs`,
+   spec `docs/design/AUTORESEARCH_SUBSTRATE_RECALL_PROBE_2026_05_24.md`). Leave-one-out recall,
+   A=ONNX flat vs B=SeedBackend(+SVD), 3 configs: substrate is **statistically indistinguishable
+   from and uniformly slightly below** raw flat embedding (all Δ within ±0.03; the SUBSTRATE_HELPS
+   bar was +0.10 R@5 / +0.05 MRR). SVD is a 384→latent→384 round-trip that adds loss, not signal.
+   **VERDICT `NO_RECALL_ADVANTAGE`.** Closes the **EmbeddingBackend** surface.
+
+2. **`neighbors_of` connection-topology (mechanistic, this audit)** — the P2/P3 attention-bias
+   surface the recall probe did not touch (it tested the embedding transform, not the §3.5
+   topology query). Code-read of `seed-bridge::SeedBackend::neighbors_of` (`lib.rs:566-637`):
+   output keys are ranked by `connection_matrix()` (softmax connection weights) summed over the
+   winner neurons; the only perception-driven parts are the *instantaneous* winner assignment and
+   the lossy one-slot-per-neuron `last_perceived` map (overwritten every step, `lib.rs:562-564`).
+   The ranking signal **is** `connection_matrix` — which AiOT AutoResearch ① **#1016** + ④
+   **#1031/#1038** proved is a **seed-determined universal attractor (early symmetry-breaking),
+   NOT accumulated perception history** (`INPUT_DETERMINED_NO_ACCUMULATED_IDENTITY`). A seed-static
+   topology routing between a volatile winner map has no mechanism to encode stable coactivation,
+   so **P2** (neighbors_of vs α `cofires` ≥ 0.4) and **P3** (14d learned attention bias) inherit
+   T31's falsification — the 14d variant would reproduce the seed-attractor readout, not a
+   coactivation signal. Closes P2/P3 **mechanistically — no 14d uptime needed**.
+
+**Convergence**: ⑤ (recall) joins AiOT ① (carrier readout #1016), ② (M-ablation #1017), ④
+(daemon-scale #1031), ⑥ (collapse #1023) — five angles, **no measured retrieval or behavioral
+value** for substrate-as-cognition. Honest niche (per #1022) = **shared dynamical sensing /
+observability**, not per-memory recall. **Gate C verdict = P6.** P4/P5 (compute/determinism
+envelopes) remain valid and unaffected — they are mechanism properties, not value claims.
+
+Sediment: `research_t31_substrate_first_falsified_vs_v22_frame_audit_2026_05_24`,
+`lesson_verify_code_semantics_not_field_names`.
+
 ### P1 — Substrate produces internal modular structure within 30 days
 
 After 30 days of normal use (244 records/day × 30 = 7 320 events), substrate `connection_logits` matrix exhibits **bimodal cross-correlation** between neuron pairs:
@@ -358,6 +395,8 @@ All 6 satisfied.
 - → green-light 7-day dogfood
 
 ### Gate C — End of dogfood / P1-P6 measurement
+> **→ RESOLVED 2026-05-24 = P6 null-path.** ⑤ recall probe `NO_RECALL_ADVANTAGE` (#1041) + `neighbors_of` connection-topology mechanistically inherits T31's seed-attractor falsification (#1016/#1031). Substrate stays observability-only; NOT wired into retrieval. See §4.0. P4/P5 envelopes unaffected.
+
 - P1 + P2 + P3 all pass → **wire into retrieval bias** (becomes new minor version, like v22.1)
 - P1 + P2 pass, P3 fails → **null result per §4 P6**, keep substrate as observability, redirect to pattern completion v0 on L3
 - P1 or P2 fails → **substrate is wrong shape for this perception domain**; pause, re-design encoder/projection
