@@ -10480,7 +10480,8 @@ impl McpTool for MemoryImportTool {
                    - `skip` (default): keep local row\n\
                    - `overwrite`: always replace with the imported row\n\
                    - `newer_wins`: replace only if imported.updated_at is greater\n\
-                 Returns {inserted, updated, skipped, malformed, edges_upserted, edges_malformed, edges_skipped_dangling}. \
+                   - `version_vector_merge`: conflict-aware (Track MS) — the dominant version vector wins; a concurrent pair (neither dominates) is preserved as a non-destructive conflict copy (`<key>#conflict-…`, status='conflict') instead of dropping the loser; falls back to newer_wins when either side has no version vector yet\n\
+                 Returns {inserted, updated, skipped, malformed, conflict_copies, edges_upserted, edges_malformed, edges_skipped_dangling}. \
                  `edges_skipped_dangling` counts edges that referenced a key not present locally — these are dropped rather than upserted to keep the graph free of dangling refs."
                 .into(),
             input_schema: json!({
@@ -10490,7 +10491,7 @@ impl McpTool for MemoryImportTool {
                     "edges_path":      { "type": "string", "description": "Optional companion JSONL produced by memory_export(edges_out_path=...)." },
                     "conflict_policy": {
                         "type": "string",
-                        "enum": ["skip","overwrite","newer_wins"],
+                        "enum": ["skip","overwrite","newer_wins","version_vector_merge"],
                         "default": "skip"
                     }
                 },
@@ -10514,6 +10515,7 @@ impl McpTool for MemoryImportTool {
         {
             "overwrite" => ImportConflictPolicy::Overwrite,
             "newer_wins" => ImportConflictPolicy::NewerWins,
+            "version_vector_merge" => ImportConflictPolicy::VersionVectorMerge,
             _ => ImportConflictPolicy::Skip,
         };
         let edges_path = args
