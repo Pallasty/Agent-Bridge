@@ -1139,6 +1139,37 @@ impl SqliteStore {
                 c.execute_batch(SCHEMA_V30_INDEXES)?;
                 let _ = c.execute("UPDATE schema_meta SET value='30' WHERE key='version'", []);
             }
+
+            // ── v31: memories.version_vector TEXT (Track MS-1b — conflict-aware
+            //    sync; see docs/design/MEMORY_SYNC_VERSION_VECTOR_BORROW_2026_05_24.md).
+            //    Additive + idempotent: defaults to '' (empty vector = "no version
+            //    info yet"); the write path (MS-1b-ii) populates it on first local
+            //    write. Expand-contract: land the column everywhere before any code
+            //    reads/writes it. ─
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "30".to_string());
+            if cur.as_str() == "30" {
+                let col_exists: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('memories') \
+                         WHERE name='version_vector'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                if col_exists == 0 {
+                    c.execute(
+                        "ALTER TABLE memories ADD COLUMN version_vector TEXT NOT NULL DEFAULT ''",
+                        [],
+                    )?;
+                }
+                let _ = c.execute("UPDATE schema_meta SET value='31' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
