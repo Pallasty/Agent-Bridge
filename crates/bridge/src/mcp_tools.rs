@@ -6922,6 +6922,257 @@ impl McpTool for AvatarStateGetTool {
     }
 }
 
+pub struct AvatarCortexRendererSnapshotTool;
+impl AvatarCortexRendererSnapshotTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+
+fn avatar_cortex_arg_string(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+}
+
+fn avatar_cortex_arg_path(args: &Value, key: &str) -> Option<PathBuf> {
+    avatar_cortex_arg_string(args, key).map(PathBuf::from)
+}
+
+fn avatar_cortex_renderer_strip_sources(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut compact = Map::new();
+            for (key, child) in map {
+                if key.starts_with("source_") {
+                    continue;
+                }
+                compact.insert(key.clone(), avatar_cortex_renderer_strip_sources(child));
+            }
+            Value::Object(compact)
+        }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(avatar_cortex_renderer_strip_sources)
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
+
+fn avatar_cortex_renderer_compact_variant(variant: &Value) -> Value {
+    json!({
+        "variant_id": variant.get("variant_id").cloned().unwrap_or(Value::Null),
+        "label": variant.get("label").cloned().unwrap_or(Value::Null),
+        "default": variant.get("default").cloned().unwrap_or(Value::Null),
+        "asset_route": variant.get("asset_route").cloned().unwrap_or(Value::Null),
+        "duration_ms": variant
+            .get("frame_choreography")
+            .and_then(|v| v.get("duration_ms"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "review_question": variant.get("review_question").cloned().unwrap_or(Value::Null),
+    })
+}
+
+fn avatar_cortex_renderer_compact_track(track: &Value) -> Value {
+    let variants: Vec<Value> = track
+        .get("semantic_variants")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(avatar_cortex_renderer_compact_variant)
+                .collect()
+        })
+        .unwrap_or_default();
+    json!({
+        "track_id": track.get("track_id").cloned().unwrap_or(Value::Null),
+        "token": track.get("token").cloned().unwrap_or(Value::Null),
+        "track_kind": track.get("track_kind").cloned().unwrap_or(Value::Null),
+        "review_only": track.get("review_only").cloned().unwrap_or(Value::Null),
+        "risk_level": track.get("risk_level").cloned().unwrap_or(Value::Null),
+        "visual_intent": track.get("visual_intent").cloned().unwrap_or(Value::Null),
+        "duration_ms": track.get("duration_ms").cloned().unwrap_or(Value::Null),
+        "frame_count": track.get("frame_count").cloned().unwrap_or(Value::Null),
+        "semantic_variant_count": track.get("semantic_variant_count").cloned().unwrap_or(Value::Null),
+        "preferred_variant": track
+            .get("semantic_variant_review")
+            .and_then(|v| v.get("preferred_variant"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "semantic_variants": variants,
+    })
+}
+
+fn avatar_cortex_renderer_snapshot_compact(payload: &Value) -> Value {
+    if payload.get("surface").and_then(Value::as_str) != Some("avatar_cortex_sidecar_renderer_view")
+    {
+        return avatar_cortex_renderer_strip_sources(payload);
+    }
+
+    let view = payload.get("renderer_view").unwrap_or(&Value::Null);
+    let tracks: Vec<Value> = view
+        .get("tracks")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(avatar_cortex_renderer_compact_track)
+                .collect()
+        })
+        .unwrap_or_default();
+    json!({
+        "surface": payload.get("surface").cloned().unwrap_or(Value::Null),
+        "schema": payload.get("schema").cloned().unwrap_or(Value::Null),
+        "read_only": payload.get("read_only").cloned().unwrap_or(Value::Null),
+        "dry_run": payload.get("dry_run").cloned().unwrap_or(Value::Null),
+        "sidecar_only": payload.get("sidecar_only").cloned().unwrap_or(Value::Null),
+        "renders_pixels": payload.get("renders_pixels").cloned().unwrap_or(Value::Null),
+        "browser_renders_pixels": payload.get("browser_renders_pixels").cloned().unwrap_or(Value::Null),
+        "writes_files": payload.get("writes_files").cloned().unwrap_or(Value::Null),
+        "mutates_renderer": payload.get("mutates_renderer").cloned().unwrap_or(Value::Null),
+        "codex_pet_package_mutation": payload.get("codex_pet_package_mutation").cloned().unwrap_or(Value::Null),
+        "renderer_view": {
+            "schema": view.get("schema").cloned().unwrap_or(Value::Null),
+            "kind": view.get("kind").cloned().unwrap_or(Value::Null),
+            "contract": view.get("contract").cloned().unwrap_or(Value::Null),
+            "html_route": view.get("html_route").cloned().unwrap_or(Value::Null),
+            "asset_source": view.get("asset_source").cloned().unwrap_or(Value::Null),
+            "track_count": view.get("track_count").cloned().unwrap_or(Value::Null),
+            "selected_track_count": view.get("selected_track_count").cloned().unwrap_or(Value::Null),
+            "review_track_count": view.get("review_track_count").cloned().unwrap_or(Value::Null),
+            "first_track": view
+                .get("first_track")
+                .map(avatar_cortex_renderer_compact_track)
+                .unwrap_or(Value::Null),
+            "tracks": tracks,
+            "acceptance": view.get("acceptance").cloned().unwrap_or(Value::Null),
+            "next_step": view.get("next_step").cloned().unwrap_or(Value::Null),
+        },
+    })
+}
+
+#[async_trait]
+impl McpTool for AvatarCortexRendererSnapshotTool {
+    fn name(&self) -> &'static str {
+        "avatar_cortex_renderer_snapshot"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Xiao Shu portable sidecar renderer snapshot. \
+                 Defaults to a compact browser renderer view for the current \
+                 Linux/Cursor environment; mode can switch to renderer, registry, \
+                 binding_plan, visual_adapter, review_gate, review_packet, or \
+                 review_report. It never writes renderer assets, mutates the \
+                 official Codex pet package, emits audio, or sends notifications."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "default": "renderer_view",
+                        "enum": [
+                            "renderer",
+                            "registry",
+                            "binding_plan",
+                            "binding_fixture",
+                            "visual_adapter",
+                            "renderer_view",
+                            "review_gate",
+                            "review_packet",
+                            "review_report"
+                        ],
+                        "description": "Which read-only renderer surface to return."
+                    },
+                    "label": { "type": "string", "description": "Optional cortex runner launch label override." },
+                    "heartbeat_label": { "type": "string", "description": "Optional avatar heartbeat label override." },
+                    "project": { "type": "string", "description": "Project slug. Defaults to agent-bridge." },
+                    "output": { "type": "string", "description": "Optional cortex snapshot path override." },
+                    "include_details": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Return full recursive provenance and all renderer frames instead of compact Codex-safe output."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let mode = avatar_cortex_arg_string(&args, "mode")
+            .map(|s| normalize_tool_policy_value(&s))
+            .unwrap_or_else(|| "renderer-view".to_string());
+        let label = avatar_cortex_arg_string(&args, "label");
+        let heartbeat_label = avatar_cortex_arg_string(&args, "heartbeat_label");
+        let project = avatar_cortex_arg_string(&args, "project");
+        let output = avatar_cortex_arg_path(&args, "output");
+        let include_details = args
+            .get("include_details")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let status = match crate::avatar_cortex::avatar_cortex_status(
+            label.as_deref(),
+            heartbeat_label.as_deref(),
+            project.as_deref(),
+            output.as_deref(),
+        ) {
+            Ok(status) => status,
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "avatar_cortex_renderer_snapshot: {e}"
+                )));
+            }
+        };
+
+        let payload = match mode.as_str() {
+            "renderer" | "preview" => {
+                crate::avatar_cortex::avatar_cortex_renderer_preview_from_status(status)
+            }
+            "registry" => crate::avatar_cortex::avatar_cortex_renderer_registry_from_status(status),
+            "binding-plan" => crate::avatar_cortex::avatar_cortex_binding_plan_from_status(status),
+            "binding-fixture" => {
+                crate::avatar_cortex::avatar_cortex_binding_fixture_from_status(status)
+            }
+            "visual-adapter" => {
+                crate::avatar_cortex::avatar_cortex_visual_adapter_from_status(status)
+            }
+            "renderer-view" | "view" => {
+                crate::avatar_cortex::avatar_cortex_renderer_view_from_status(status)
+            }
+            "review-gate" => {
+                crate::avatar_cortex::avatar_cortex_renderer_review_gate_from_status(status)
+            }
+            "review-packet" => {
+                crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(status)
+            }
+            "review-report" => {
+                crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(status)
+            }
+            other => {
+                return Ok(ToolResult::error(format!(
+                    "avatar_cortex_renderer_snapshot: unsupported mode '{other}'"
+                )));
+            }
+        };
+
+        if include_details {
+            Ok(ToolResult::json_text(&payload))
+        } else {
+            Ok(ToolResult::json_text(
+                &avatar_cortex_renderer_snapshot_compact(&payload),
+            ))
+        }
+    }
+}
+
 // ===========================================================================
 //                       agent + worktree tools
 // ===========================================================================
@@ -21207,6 +21458,7 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     "avatar_state_get",
     "avatar_surface_snapshot",
     "avatar_surface_report",
+    "avatar_cortex_renderer_snapshot",
     "pet_presence_sync",
     "xiao_shu_action_request",
     // Mobile bridge: compact enough to expose directly during Android
@@ -22068,6 +22320,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         policy,
         Tier::Standard,
         Arc::new(AvatarSurfaceReportTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AvatarCortexRendererSnapshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -23397,6 +23655,7 @@ mod tests {
             "avatar_state_get",
             "avatar_surface_snapshot",
             "avatar_surface_report",
+            "avatar_cortex_renderer_snapshot",
             "pet_presence_sync",
         ] {
             assert!(
@@ -24402,6 +24661,32 @@ mod tests {
         assert!(report.contains("next: ship terminal report"));
         assert_eq!(payload["avatars"][0]["agent_id"], "codex-xiao-shu-dev");
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn avatar_cortex_renderer_snapshot_returns_compact_sidecar_view() {
+        let tool = AvatarCortexRendererSnapshotTool::new(crate::Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({"project": "agent-bridge", "mode": "renderer_view"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["surface"], "avatar_cortex_sidecar_renderer_view");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["writes_files"], false);
+        assert_eq!(payload["mutates_renderer"], false);
+        assert_eq!(payload["codex_pet_package_mutation"], false);
+        assert_eq!(payload["renderer_view"]["track_count"], 5);
+        assert_eq!(payload["renderer_view"]["selected_track_count"], 2);
+        assert_eq!(payload["renderer_view"]["review_track_count"], 3);
+        assert!(
+            payload.get("source_visual_adapter").is_none(),
+            "compact mode should strip recursive provenance"
+        );
     }
 
     #[test]
@@ -25509,6 +25794,7 @@ mod tests {
         assert!(p.includes(Tier::Standard, "avatar_state_get"));
         assert!(p.includes(Tier::Standard, "avatar_surface_snapshot"));
         assert!(p.includes(Tier::Standard, "avatar_surface_report"));
+        assert!(p.includes(Tier::Standard, "avatar_cortex_renderer_snapshot"));
         assert!(p.includes(Tier::Standard, "pet_presence_sync"));
         assert!(p.includes(Tier::Standard, "xiao_shu_action_request"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
@@ -25519,13 +25805,13 @@ mod tests {
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 28 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 29 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(18: 5 avatar observation/sync tools
+        //      + DIRECT(19: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 11 mobile bridge tools
         //      + memory_graph_topology).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        assert_eq!(extras.len(), 28);
+        assert_eq!(extras.len(), 29);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -25540,6 +25826,7 @@ mod tests {
         assert!(extras.contains(&"avatar_state_get"));
         assert!(extras.contains(&"avatar_surface_snapshot"));
         assert!(extras.contains(&"avatar_surface_report"));
+        assert!(extras.contains(&"avatar_cortex_renderer_snapshot"));
         assert!(extras.contains(&"pet_presence_sync"));
         assert!(extras.contains(&"xiao_shu_action_request"));
         assert!(extras.contains(&"mobile_list_devices"));

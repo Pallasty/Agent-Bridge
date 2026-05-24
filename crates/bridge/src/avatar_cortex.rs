@@ -3695,6 +3695,34 @@ pub fn avatar_cortex_snapshot_payload(path: &Path) -> Value {
     }
 }
 
+fn avatar_cortex_launchd_payload(label: &str) -> Value {
+    match crate::avatar_health::probe_launchd(label) {
+        Ok(launchd) => json!({
+            "loaded": launchd.loaded,
+            "domain": launchd.domain,
+            "target": launchd.target,
+            "state": launchd.state,
+            "runs": launchd.runs,
+            "last_exit_code": launchd.last_exit_code,
+            "run_interval_secs": launchd.run_interval_secs,
+            "error": launchd.error,
+        }),
+        Err(err) => json!({
+            "loaded": false,
+            "domain": Value::Null,
+            "target": label,
+            "state": Value::Null,
+            "runs": Value::Null,
+            "last_exit_code": Value::Null,
+            "run_interval_secs": Value::Null,
+            "error": err.to_string(),
+            "degraded": true,
+            "degraded_reason": "launchd_probe_unavailable",
+            "platform": std::env::consts::OS,
+        }),
+    }
+}
+
 pub fn avatar_cortex_status(
     label: Option<&str>,
     heartbeat_label: Option<&str>,
@@ -3708,26 +3736,17 @@ pub fn avatar_cortex_status(
         Some(path) => path.to_path_buf(),
         None => default_avatar_cortex_path(project, &heartbeat_label)?,
     };
-    let launchd = crate::avatar_health::probe_launchd(&label)?;
     let snapshot = avatar_cortex_snapshot_payload(&snapshot_path);
     let events = avatar_cortex_events_summary(&heartbeat_label, project);
     let trend = avatar_cortex_trend(&snapshot, &events);
+    let launchd = avatar_cortex_launchd_payload(&label);
     Ok(json!({
         "surface": "avatar_cortex_status",
         "schema": 1,
         "project": project,
         "label": label,
         "heartbeat_label": heartbeat_label,
-        "launchd": {
-            "loaded": launchd.loaded,
-            "domain": launchd.domain,
-            "target": launchd.target,
-            "state": launchd.state,
-            "runs": launchd.runs,
-            "last_exit_code": launchd.last_exit_code,
-            "run_interval_secs": launchd.run_interval_secs,
-            "error": launchd.error,
-        },
+        "launchd": launchd,
         "snapshot": snapshot,
         "events": events,
         "trend": trend,
@@ -6292,6 +6311,42 @@ mod tests {
             false
         );
         assert_eq!(alert_peek["semantic_variant_review"]["emits_audio"], false);
+    }
+
+    #[test]
+    fn avatar_cortex_renderer_view_accepts_degraded_launchd_status() {
+        let status = json!({
+            "surface": "avatar_cortex_status",
+            "project": "agent-bridge",
+            "label": "com.agentbridge.avatar-cortex.agent-bridge",
+            "heartbeat_label": "com.agentbridge.avatar-heartbeat.agent-bridge",
+            "launchd": {
+                "loaded": false,
+                "degraded": true,
+                "degraded_reason": "launchd_probe_unavailable",
+                "error": "launchctl unavailable"
+            },
+            "snapshot": {"exists": false, "total_rows": 0},
+            "events": {"records_count": 0, "unhealthy_count": 0, "recent": []},
+            "trend": {
+                "step_records_delta": null,
+                "snapshot_event_lag_secs": null,
+                "learning_state": {"state": "stale", "reason": "no_snapshot"}
+            }
+        });
+        let view = avatar_cortex_renderer_view_from_status(status);
+
+        assert_eq!(view["surface"], "avatar_cortex_sidecar_renderer_view");
+        assert_eq!(view["read_only"], true);
+        assert_eq!(view["writes_files"], false);
+        assert_eq!(view["mutates_renderer"], false);
+        assert_eq!(view["codex_pet_package_mutation"], false);
+        assert_eq!(view["renderer_view"]["track_count"], 5);
+        assert_eq!(
+            view["source_visual_adapter"]["source_fixture"]["source_plan"]["registry"]
+                ["source_status"]["launchd"]["degraded"],
+            true
+        );
     }
 
     #[test]
