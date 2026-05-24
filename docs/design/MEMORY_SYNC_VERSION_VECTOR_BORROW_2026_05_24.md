@@ -26,11 +26,17 @@ peer pull → git pull --rebase --autostash → import jsonl → SQLite
 | Branch divergence not detected at the git layer; only file conflicts handled | `lesson_sync_fallback_branch_divergence_gap_2026_05_19`; `sync.rs:689-752` | **`reset --hard origin/<branch>`** ("SQLite-as-truth", `sync.rs:743-749`) + 3-fail alert (`b305ff3`/`6e10240`) |
 | Conflict resolution is **all-or-nothing at the branch level** — a `reset --hard` discards the loser node's *git* state wholesale; correctness rests entirely on "every prior sync already pushed SQLite" | `sync.rs:724-731` | re-export from SQLite after reset |
 | No per-record provenance / concurrency tracking — two nodes editing **the same memory key** independently cannot be distinguished from a clean update | `memories` table has `status` but **no version vector** (`crates/store/src/sqlite.rs:247-250`) | none |
+| **The precise record-level data-loss point**: import conflict resolution is **last-write-wins by wall-clock `updated_at`** — the older of two *concurrent* same-key edits is silently dropped | `ImportConflictPolicy::NewerWins` in `plan_import_actions` (`sqlite.rs:1742-1747`: `if r.updated_at > existing { Update } else { Skip }`) | none — this *is* the loss |
 | Full-jsonl transport every cycle (no diff) | timer ships whole export | none |
 
 **Core reframe**: move conflict resolution **down from the git-branch layer to the SQLite-record layer**. Once each memory row carries a version vector, jsonl import becomes a **conflict-aware per-key merge**, branch divergence becomes a non-event (git is a dumb pipe), and `reset --hard` (a data-loss-shaped tool) is retired.
 
 Syncthing has solved exactly this problem class (decentralized, multi-writer, conflict-aware, data-loss-averse) and its mechanisms are small and portable.
+
+> **Implementation-audit refinements (2026-05-24, during MS-1 build)**:
+> - **The real loss is `NewerWins`, not just `reset --hard`.** The git-layer `reset --hard` is the coarse outer symptom; the precise record-level loss is the LWW tiebreak in `plan_import_actions` (`sqlite.rs:1742`). MS-3 is therefore concretely scoped: **add a `VersionVectorMerge` import policy** that, on an existing key, compares vectors — dominated side takes the winner, **`Concurrent` → conflict-copy (MS-2)** — replacing the wall-clock LWW that drops the loser.
+> - **Carry the vector without churning `MemoryRecord`.** jsonl rows are `serde_json::from_str::<MemoryRecord>` and the struct has **~100 literal construction sites**, so adding a field there is high-churn. Instead introduce a sync-boundary `SyncEnvelope { #[serde(flatten)] record: MemoryRecord, #[serde(default)] version_vector: String }` used **only** by `memory_export`/`memory_import`; the vector lives in the SQLite column + this wrapper. Zero construction-site churn.
+> - **Node id source**: `crates/bridge/src/sync.rs:823 hostname_short()` (e.g. `aio2`/`mac`) → `node_id_from_name`. Plumb a `node_id` into `SqliteStore` at open so `memory_save` can bump the local counter.
 
 ---
 
