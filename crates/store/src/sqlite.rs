@@ -8620,6 +8620,14 @@ impl StateStore for SqliteStore {
             "SELECT COUNT(*) FROM memories \
              WHERE status='active' AND kind NOT IN ({placeholders})"
         );
+        // Conservation counterpart for S2 (thread 27 #813): retired working
+        // memories on the same kind universe. A benign active→retired
+        // transition shows active↓ matched by retired↑; genuine loss shows
+        // active↓ with no retired↑.
+        let retired_query = format!(
+            "SELECT COUNT(*) FROM memories \
+             WHERE status != 'active' AND kind NOT IN ({placeholders})"
+        );
         let counts = self
             .conn
             .call(move |c| -> RusqliteResult<S234Counts> {
@@ -8627,6 +8635,11 @@ impl StateStore for SqliteStore {
                     CATALOG_KINDS_C3.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
                 let memories_active: i64 = c.query_row(
                     &active_query,
+                    rusqlite::params_from_iter(kind_params.iter()),
+                    |r| r.get(0),
+                )?;
+                let memories_retired: i64 = c.query_row(
+                    &retired_query,
                     rusqlite::params_from_iter(kind_params.iter()),
                     |r| r.get(0),
                 )?;
@@ -8638,6 +8651,7 @@ impl StateStore for SqliteStore {
                     memories_active: memories_active.max(0) as u64,
                     forum_threads: forum_threads.max(0) as u64,
                     memory_edges: memory_edges.max(0) as u64,
+                    memories_retired: memories_retired.max(0) as u64,
                 })
             })
             .await

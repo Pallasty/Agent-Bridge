@@ -323,6 +323,13 @@ pub struct S234DropEvent {
     /// Fraction of `before` lost (0.0..=1.0). For S3 the threshold is
     /// "any drop" but we still report the percentage for the alert body.
     pub drop_pct: f64,
+    /// Rows lost that are NOT explained by a same-window rise in retired
+    /// tiers. For S2 this is `active_drop - retired_rise` and is what the
+    /// firing decision tests against (conservation check, thread 27 #813);
+    /// for S3/S4 there is no lifecycle counterpart so it equals
+    /// `before - after`. When `unexplained_drop < before - after` part of
+    /// the drop was benign archival and the alert body says so.
+    pub unexplained_drop: u64,
 }
 
 /// Per-process anchor snapshot for S2-S4. `None` until the first tick
@@ -338,16 +345,28 @@ fn s234_last_snapshot() -> &'static Mutex<Option<(SystemTime, S234Counts)>> {
 /// the anchor management lives in [`s234_check_against_snapshot`].
 pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234DropEvent> {
     let mut out = Vec::new();
-    // S2 — memories_active drop > 5%
+    // S2 — memories_active drop > 5%, conservation-aware (thread 27 #813).
+    // The raw active drop is reported for context, but the firing decision
+    // tests the *unexplained* fraction: active rows that left without a
+    // matching rise in retired tiers. A benign active→archived lifecycle
+    // transition (active↓N, retired↑N) nets to unexplained=0 and stays
+    // silent; genuine disappearance (active↓N, retired↑0 — the inode-swap /
+    // accidental-DELETE class) keeps the full alarm.
     if prev.memories_active > 0 && current.memories_active < prev.memories_active {
         let drop = prev.memories_active - current.memories_active;
+        let retired_rise = current
+            .memories_retired
+            .saturating_sub(prev.memories_retired);
+        let unexplained = drop.saturating_sub(retired_rise);
         let pct = drop as f64 / prev.memories_active as f64;
-        if pct > S2_DROP_THRESHOLD {
+        let unexplained_pct = unexplained as f64 / prev.memories_active as f64;
+        if unexplained_pct > S2_DROP_THRESHOLD {
             out.push(S234DropEvent {
                 signal: S234Signal::S2Memories,
                 before: prev.memories_active,
                 after: current.memories_active,
                 drop_pct: pct,
+                unexplained_drop: unexplained,
             });
         }
     }
@@ -364,6 +383,7 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
             before: prev.forum_threads,
             after: current.forum_threads,
             drop_pct: pct,
+            unexplained_drop: drop,
         });
     }
     // S4 — memory_edges drop > 5%
@@ -376,6 +396,7 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
                 before: prev.memory_edges,
                 after: current.memory_edges,
                 drop_pct: pct,
+                unexplained_drop: drop,
             });
         }
     }
@@ -445,10 +466,24 @@ pub fn s234_check_against_snapshot(
 /// receives this as the body; the title is built separately by the
 /// caller to keep the heading short.
 pub fn format_s234_alert_body(ev: &S234DropEvent, ts_unix: i64) -> String {
+    let raw_drop = ev.before.saturating_sub(ev.after);
+    // When part of the active drop was a benign active→retired transition,
+    // surface the split so the reader doesn't re-triage it as data loss.
+    let lifecycle_line = if ev.unexplained_drop < raw_drop {
+        let explained = raw_drop - ev.unexplained_drop;
+        format!(
+            "\n[lifecycle] {explained} of {raw_drop} drop explained by \
+             retired-tier rise (benign archival); {} unexplained (= the \
+             figure that tripped the threshold)",
+            ev.unexplained_drop,
+        )
+    } else {
+        String::new()
+    };
     format!(
         "[ALERT] {} at ts_unix={}\n\
          [evidence] {} → {} ({:.1}% drop in <={}s window)\n\
-         [fd_state] state.db = live (non-DB-anomaly tier)\n\
+         [fd_state] state.db = live (non-DB-anomaly tier){}\n\
          [suggested action] inspect dream-tier output / GC logs / \
          recent retire ops; see docs/DESIGN-COLLAB-PROTOCOL-v0.md §3.4.4 \
          for false-positive mitigations",
@@ -458,6 +493,7 @@ pub fn format_s234_alert_body(ev: &S234DropEvent, ts_unix: i64) -> String {
         ev.after,
         ev.drop_pct * 100.0,
         S234_WINDOW_SECS,
+        lifecycle_line,
     )
 }
 
@@ -650,10 +686,17 @@ mod tests {
     static S234_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn mk_counts(memories: u64, threads: u64, edges: u64) -> S234Counts {
+        // retired=0 both sides keeps the conservation netting a no-op, so
+        // the pre-#813 S2 tests still exercise the raw-drop path unchanged.
+        mk_counts_retired(memories, threads, edges, 0)
+    }
+
+    fn mk_counts_retired(memories: u64, threads: u64, edges: u64, retired: u64) -> S234Counts {
         S234Counts {
             memories_active: memories,
             forum_threads: threads,
             memory_edges: edges,
+            memories_retired: retired,
         }
     }
 
@@ -760,6 +803,7 @@ mod tests {
             before: 500,
             after: 400,
             drop_pct: 0.20,
+            unexplained_drop: 100,
         };
         let body = format_s234_alert_body(&ev, 1_700_000_000);
         assert!(body.contains("s4-memory-edges-drop"), "signal in body");
@@ -768,5 +812,65 @@ mod tests {
         assert!(body.contains("20"), "percent in body");
         assert!(body.contains("ts_unix=1700000000"), "ts in body");
         assert!(body.contains("non-DB-anomaly"), "tier annotation present");
+        // Fully-unexplained drop (S4 has no lifecycle counterpart) → no
+        // benign-archival line.
+        assert!(!body.contains("[lifecycle]"), "no lifecycle line when fully unexplained");
+    }
+
+    // ─── S2 conservation check (thread 27 #813) ────────────────────────
+
+    #[test]
+    fn compute_s234_drops_s2_archival_conserved_no_event() {
+        // The #813 case: active 305→282 (drop 23) but 26 rows moved into
+        // retired tiers (archived) — active loss fully explained by
+        // lifecycle transition → unexplained=0 → silent despite 7.5% raw.
+        let prev = mk_counts_retired(305, 27, 200, 800);
+        let cur = mk_counts_retired(282, 27, 200, 826);
+        assert!(
+            compute_s234_drops(prev, cur).is_empty(),
+            "benign active→retired transition must not fire S2"
+        );
+    }
+
+    #[test]
+    fn compute_s234_drops_s2_unexplained_loss_fires() {
+        // Same 23-row active drop but retired stays flat → rows truly
+        // vanished (inode-swap / accidental-DELETE shape) → fire.
+        let prev = mk_counts_retired(305, 27, 200, 800);
+        let cur = mk_counts_retired(282, 27, 200, 800);
+        let events = compute_s234_drops(prev, cur);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signal, S234Signal::S2Memories);
+        assert_eq!(events[0].before, 305);
+        assert_eq!(events[0].after, 282);
+        assert_eq!(events[0].unexplained_drop, 23);
+    }
+
+    #[test]
+    fn compute_s234_drops_s2_partial_explanation_fires_on_residual() {
+        // 30 active lost, 20 explained by retired↑20, 10 unexplained.
+        // 10/100 = 10% > 5% → fires; body should split benign vs alarming.
+        let prev = mk_counts_retired(100, 5, 200, 50);
+        let cur = mk_counts_retired(70, 5, 200, 70);
+        let events = compute_s234_drops(prev, cur);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signal, S234Signal::S2Memories);
+        assert_eq!(events[0].unexplained_drop, 10);
+        assert!((events[0].drop_pct - 0.30).abs() < 1e-9, "drop_pct is raw");
+        let body = format_s234_alert_body(&events[0], 1_700_000_000);
+        assert!(body.contains("[lifecycle]"), "partial explanation surfaces lifecycle line");
+        assert!(body.contains("20 of 30"), "shows explained/raw split");
+    }
+
+    #[test]
+    fn compute_s234_drops_s2_partial_explanation_stays_silent_when_residual_small() {
+        // 30 active lost, 28 explained, 2 unexplained → 2/100 = 2% ≤ 5%
+        // → no event (residual below threshold).
+        let prev = mk_counts_retired(100, 5, 200, 50);
+        let cur = mk_counts_retired(70, 5, 200, 78);
+        assert!(
+            compute_s234_drops(prev, cur).is_empty(),
+            "small unexplained residual must stay below threshold"
+        );
     }
 }

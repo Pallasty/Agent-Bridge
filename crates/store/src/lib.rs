@@ -1408,6 +1408,14 @@ pub struct S234Counts {
     pub forum_threads: u64,
     /// Total `memory_edges` rows.
     pub memory_edges: u64,
+    /// Count of *retired* working memories: `status != 'active'`
+    /// (archived / superseded / tombstoned) AND `kind NOT IN
+    /// CATALOG_KINDS_C3` — same universe as `memories_active` but on the
+    /// retired side. Lets S2 distinguish a benign active→retired
+    /// lifecycle transition (active↓ matched by an equal retired↑, total
+    /// conserved) from genuine row disappearance (active↓ with no
+    /// retired↑ — the inode-swap / accidental-DELETE failure class).
+    pub memories_retired: u64,
 }
 
 /// Filters for `memory_export` (v0.6). All None = export everything.
