@@ -177,7 +177,7 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
     // `HEAD` is rejected by both gitlab and github with "destination is not
     // a full refname", and silent for ~1.5 days of "no changes" sync logs.
     let refspec = format!("{branch}:refs/heads/{branch}");
-    run_git(&repo, &["push", "origin", &refspec]).context("git push")?;
+    push_origin_primary_aware(&repo, &branch, &refspec, verbose).context("git push")?;
     if verbose {
         eprintln!("[sync] pushed: {msg}");
     }
@@ -606,6 +606,86 @@ fn git_rev_list_count(repo: &Path, range: &str) -> Result<u64> {
         .with_context(|| format!("parse rev-list count: {}", out.trim()))
 }
 
+/// Outcome of a `git push origin` round where `origin` is a multi-push
+/// remote (GitLab primary fetch URL + GitHub mirror push URL).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PushVerdict {
+    /// Every push leg succeeded.
+    AllOk,
+    /// The combined push exited non-zero, but the *primary* (GitLab, the
+    /// `origin` fetch URL) already has HEAD — only a mirror leg failed.
+    /// Sync truth source is in sync; do NOT count this as a sync failure.
+    MirrorOnlyFailure,
+    /// The combined push failed AND the primary is still behind HEAD (or
+    /// couldn't be verified) — a genuine sync failure.
+    RealFailure,
+}
+
+/// Pure classification: a multi-push exits non-zero if *any* leg fails,
+/// but GitLab (the `origin` fetch URL) is the truth source. A dead GitHub
+/// mirror leg must not inflate the consecutive-fail alert counter (see
+/// lesson_sync_alert_inflated_by_dead_github_mirror_leg_20260524). After a
+/// push error we re-check how far the primary is behind HEAD: 0 ⇒ the
+/// primary got our commit (mirror-only failure), >0 ⇒ real failure.
+fn classify_push(push_ok: bool, primary_behind_after_fail: u64) -> PushVerdict {
+    if push_ok {
+        PushVerdict::AllOk
+    } else if primary_behind_after_fail == 0 {
+        PushVerdict::MirrorOnlyFailure
+    } else {
+        PushVerdict::RealFailure
+    }
+}
+
+/// Push to `origin` (multi-push: GitLab primary + GitHub mirror) treating
+/// the primary as the source of truth. A mirror-only failure logs a
+/// warning and returns `Ok` so the consecutive-fail alert isn't inflated
+/// by a dead mirror leg; a primary failure (or unverifiable primary)
+/// returns `Err` so a genuine outage still trips the alert.
+fn push_origin_primary_aware(
+    repo: &Path,
+    branch: &str,
+    refspec: &str,
+    verbose: bool,
+) -> Result<()> {
+    let push_ok = run_git(repo, &["push", "origin", refspec]).is_ok();
+    if push_ok {
+        return Ok(());
+    }
+    // Push reported failure. Re-fetch the primary (origin fetch URL =
+    // GitLab) and measure whether it already carries HEAD. `git fetch
+    // origin` updates `origin/<branch>` via the default refspec; if that
+    // fetch itself fails the primary is unverifiable and we fall through
+    // to RealFailure (conservative — a true outage must still alert).
+    let primary_behind = match run_git(repo, &["fetch", "origin"]) {
+        Ok(()) => git_rev_list_count(repo, &format!("origin/{branch}..HEAD")).unwrap_or(u64::MAX),
+        Err(_) => u64::MAX,
+    };
+    match classify_push(false, primary_behind) {
+        PushVerdict::MirrorOnlyFailure => {
+            eprintln!(
+                "[sync] push: primary (origin/GitLab) is in sync; a mirror leg \
+                 (GitHub) failed — not counting as a sync failure. Reconcile the \
+                 mirror separately (see lesson_sync_alert_inflated_by_dead_github_mirror_leg)."
+            );
+            Ok(())
+        }
+        PushVerdict::RealFailure => bail!(
+            "git push origin {refspec} failed and primary still {} behind HEAD",
+            if primary_behind == u64::MAX {
+                "unverifiable /".to_string()
+            } else {
+                primary_behind.to_string()
+            }
+        ),
+        // push_ok was false above, so AllOk is unreachable here.
+        PushVerdict::AllOk => {
+            let _ = verbose;
+            Ok(())
+        }
+    }
+}
+
 /// Best-effort `git pull --rebase --autostash`. Last-resort fallback (when
 /// rebase fails) checks out the remote `memory.jsonl` so subsequent
 /// import/export reconciles via the local SQLite store.
@@ -814,5 +894,28 @@ mod tests {
         assert_eq!(Provider::Gitlab.user_jq(), ".username");
         assert_eq!(Provider::Github.forge(), "GitHub");
         assert_eq!(Provider::Gitlab.forge(), "GitLab");
+    }
+
+    #[test]
+    fn classify_push_all_legs_ok() {
+        // push_ok=true short-circuits; behind value is irrelevant.
+        assert_eq!(classify_push(true, 0), PushVerdict::AllOk);
+        assert_eq!(classify_push(true, 99), PushVerdict::AllOk);
+    }
+
+    #[test]
+    fn classify_push_mirror_only_failure_when_primary_in_sync() {
+        // Combined push failed but primary (GitLab) already has HEAD
+        // (0 behind) — the dead-GitHub-mirror false-alarm case.
+        assert_eq!(classify_push(false, 0), PushVerdict::MirrorOnlyFailure);
+    }
+
+    #[test]
+    fn classify_push_real_failure_when_primary_behind() {
+        // Primary still behind → genuine sync failure, must still alert.
+        assert_eq!(classify_push(false, 1), PushVerdict::RealFailure);
+        // Unverifiable primary (fetch failed → u64::MAX sentinel) is also
+        // treated conservatively as a real failure.
+        assert_eq!(classify_push(false, u64::MAX), PushVerdict::RealFailure);
     }
 }
