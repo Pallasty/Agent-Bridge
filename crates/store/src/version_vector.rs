@@ -53,6 +53,21 @@ pub fn node_id_from_name(name: &str) -> NodeId {
     hash
 }
 
+/// The default [`NodeId`] a freshly opened store stamps writes with, read from
+/// the `AB_SYNC_NODE` environment variable (e.g. exported as the machine name).
+///
+/// Returns `0` ("unset") when the env var is missing or empty, in which case
+/// the write path skips version-vector stamping — appropriate for transient /
+/// single-node / test stores. The daemon and sync paths additionally call
+/// `SqliteStore::set_node_id` with the resolved hostname so stamping works even
+/// without the env var set.
+pub fn node_id_from_env() -> NodeId {
+    match std::env::var("AB_SYNC_NODE") {
+        Ok(name) if !name.trim().is_empty() => node_id_from_name(name.trim()),
+        _ => 0,
+    }
+}
+
 /// A single per-node counter within a [`VersionVector`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Counter {

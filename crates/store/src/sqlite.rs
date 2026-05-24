@@ -2,6 +2,7 @@
 
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio_rusqlite::{params, rusqlite, Connection};
 
@@ -578,6 +579,27 @@ pub fn default_db_path() -> PathBuf {
 #[derive(Clone)]
 pub struct SqliteStore {
     conn: Connection,
+    /// Sync node identity used to stamp version vectors on write (Track MS).
+    /// `0` = unset → the write path skips version-vector stamping (transient /
+    /// single-node / test stores). Defaults from `AB_SYNC_NODE`
+    /// ([`crate::version_vector::node_id_from_env`]); the daemon and sync paths
+    /// additionally call [`SqliteStore::set_node_id`] with the resolved
+    /// hostname so stamping works without the env var.
+    node_id: crate::version_vector::NodeId,
+}
+
+impl SqliteStore {
+    /// Set the sync node identity used to stamp version vectors on write.
+    /// Call once after [`SqliteStore::open`] (e.g. from the daemon/sync with
+    /// `node_id_from_name(hostname)`). `0` disables stamping.
+    pub fn set_node_id(&mut self, id: crate::version_vector::NodeId) {
+        self.node_id = id;
+    }
+
+    /// The sync node identity this store stamps writes with (`0` = unset).
+    pub fn node_id(&self) -> crate::version_vector::NodeId {
+        self.node_id
+    }
 }
 
 impl SqliteStore {
@@ -1176,7 +1198,10 @@ impl SqliteStore {
         .map_err(|e| Error::Backend(format!("sqlite migrate: {e}")))?;
 
         info!(path = %path.display(), "SqliteStore ready");
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            node_id: crate::version_vector::node_id_from_env(),
+        })
     }
 
     /// Write [`MemoryEdgeExport`] JSONL for edges whose endpoints are both in `keys`.
@@ -1716,12 +1741,32 @@ fn parse_str_array(s: &str) -> Vec<String> {
 }
 
 /// Clamp `s` to at most `max` bytes, preserving UTF-8 boundaries.
+/// Sync-boundary serialization wrapper (Track MS): a [`MemoryRecord`] plus its
+/// version vector, used **only** by `memory_export` / `memory_import`.
+///
+/// `#[serde(flatten)]` keeps the jsonl line a single object carrying all
+/// `MemoryRecord` fields **plus** `version_vector`, so the field rides along
+/// without touching `MemoryRecord`'s ~100 construction sites. Old importers
+/// that parse a line as a bare `MemoryRecord` simply ignore the extra field
+/// (serde default-ignores unknown fields) — backward compatible.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SyncEnvelope {
+    #[serde(flatten)]
+    record: MemoryRecord,
+    #[serde(default)]
+    version_vector: String,
+}
+
 /// Action selected for one row during a [`SqliteStore::memory_import`] preflight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ImportAction {
     Insert,
     Update,
     Skip,
+    /// Track MS-3 — incoming row is *concurrent* with the existing one (neither
+    /// version vector dominates). Preserve both: leave the canonical row and
+    /// write the incoming version as a non-destructive conflict copy.
+    ConflictCopy,
 }
 
 /// Decide what `memory_import` will do per row, *without* touching SQLite or the
@@ -1729,21 +1774,45 @@ enum ImportAction {
 /// and so we can guarantee `embed_batch` is only called for rows we actually persist.
 fn plan_import_actions(
     parsed: &[MemoryRecord],
-    existing_uat: &std::collections::HashMap<String, i64>,
+    incoming_vv: &[crate::version_vector::VersionVector],
+    existing: &std::collections::HashMap<String, (i64, crate::version_vector::VersionVector)>,
     policy: ImportConflictPolicy,
 ) -> Vec<ImportAction> {
+    use crate::version_vector::Ordering as VvOrd;
     parsed
         .iter()
-        .map(|r| match existing_uat.get(&r.key) {
+        .enumerate()
+        .map(|(i, r)| match existing.get(&r.key) {
             None => ImportAction::Insert,
-            Some(&existing) => match policy {
+            Some((existing_uat, existing_vv)) => match policy {
                 ImportConflictPolicy::Skip => ImportAction::Skip,
                 ImportConflictPolicy::Overwrite => ImportAction::Update,
                 ImportConflictPolicy::NewerWins => {
-                    if r.updated_at > existing {
+                    if r.updated_at > *existing_uat {
                         ImportAction::Update
                     } else {
                         ImportAction::Skip
+                    }
+                }
+                ImportConflictPolicy::VersionVectorMerge => {
+                    let inc = &incoming_vv[i];
+                    // Expand-contract safety: until BOTH sides carry a real
+                    // vector (rollout / legacy unstamped rows), fall back to
+                    // NewerWins so sync keeps converging exactly as before.
+                    if inc.is_empty() || existing_vv.is_empty() {
+                        if r.updated_at > *existing_uat {
+                            ImportAction::Update
+                        } else {
+                            ImportAction::Skip
+                        }
+                    } else {
+                        match inc.compare(existing_vv) {
+                            VvOrd::Greater => ImportAction::Update,
+                            VvOrd::Equal | VvOrd::Lesser => ImportAction::Skip,
+                            VvOrd::ConcurrentLesser | VvOrd::ConcurrentGreater => {
+                                ImportAction::ConflictCopy
+                            }
+                        }
                     }
                 }
             },
@@ -2418,16 +2487,18 @@ impl StateStore for SqliteStore {
         // and users may update tags/importance without touching content.
         const EXPECTED_EMBED_BYTES: usize = crate::vector::VECTOR_DIM * 4;
         let key_for_preflight = key.clone();
-        let existing: Option<(String, Vec<u8>)> = self
+        let existing: Option<(String, Vec<u8>, String)> = self
             .conn
-            .call(move |c| -> RusqliteResult<Option<(String, Vec<u8>)>> {
-                let mut stmt =
-                    c.prepare("SELECT content, embedding FROM memories WHERE key = ?1")?;
+            .call(move |c| -> RusqliteResult<Option<(String, Vec<u8>, String)>> {
+                let mut stmt = c.prepare(
+                    "SELECT content, embedding, version_vector FROM memories WHERE key = ?1",
+                )?;
                 let mut rows = stmt.query(params![key_for_preflight])?;
                 if let Some(row) = rows.next()? {
                     let existing_content: String = row.get(0)?;
                     let existing_emb: Option<Vec<u8>> = row.get(1)?;
-                    Ok(Some((existing_content, existing_emb.unwrap_or_default())))
+                    let existing_vv: String = row.get::<_, Option<String>>(2)?.unwrap_or_default();
+                    Ok(Some((existing_content, existing_emb.unwrap_or_default(), existing_vv)))
                 } else {
                     Ok(None)
                 }
@@ -2435,10 +2506,28 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("memory_save preflight: {e}")))?;
 
+        // Track MS-1b-ii — bump this node's version-vector counter for the
+        // write. When `node_id == 0` (unset / single-node / test store) we
+        // leave the stored vector untouched (empty for a fresh row), so the
+        // column stays inert until a node identity is configured.
+        let existing_vv_str: String = existing
+            .as_ref()
+            .map(|(_, _, vv)| vv.clone())
+            .unwrap_or_default();
+        let new_vv_str: String = if self.node_id != 0 {
+            existing_vv_str
+                .parse::<crate::version_vector::VersionVector>()
+                .unwrap_or_default()
+                .update(self.node_id)
+                .to_string()
+        } else {
+            existing_vv_str
+        };
+
         // P9: fresh computes stamp current backend name; reused
         // embeddings keep their prior tag (None signals "leave").
         let (embedding_bytes, fresh_backend_name): (Vec<u8>, Option<String>) = match existing {
-            Some((existing_content, existing_emb))
+            Some((existing_content, existing_emb, _))
                 if existing_content == content && existing_emb.len() == EXPECTED_EMBED_BYTES =>
             {
                 (existing_emb, None)
@@ -2481,8 +2570,8 @@ impl StateStore for SqliteStore {
                        (key, kind, content, tags, related_keys, scope,
                         created_at, updated_at, last_accessed_at, access_count,
                         importance, status, trigger_pattern, embedding, dedupe_key,
-                        embedding_backend)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13)
+                        embedding_backend, version_vector)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                      ON CONFLICT(key) DO UPDATE SET
                         kind          = excluded.kind,
                         content       = excluded.content,
@@ -2499,7 +2588,8 @@ impl StateStore for SqliteStore {
                         trigger_pattern = excluded.trigger_pattern,
                         embedding     = excluded.embedding,
                         dedupe_key    = excluded.dedupe_key,
-                        embedding_backend = COALESCE(excluded.embedding_backend, memories.embedding_backend)",
+                        embedding_backend = COALESCE(excluded.embedding_backend, memories.embedding_backend),
+                        version_vector = excluded.version_vector",
                     params![
                         key,
                         kind_clone,
@@ -2514,6 +2604,7 @@ impl StateStore for SqliteStore {
                         embedding_bytes,
                         dedupe_key_storage,
                         fresh_backend_name,
+                        new_vv_str,
                     ],
                 )?;
 
@@ -4550,13 +4641,14 @@ impl StateStore for SqliteStore {
         let tags = filter.tags_any.clone();
         let since = filter.since_ts;
 
-        let rows: Vec<MemoryRecord> = self
+        let rows: Vec<SyncEnvelope> = self
             .conn
-            .call(move |c| -> RusqliteResult<Vec<MemoryRecord>> {
+            .call(move |c| -> RusqliteResult<Vec<SyncEnvelope>> {
                 let mut stmt = c.prepare(
                     "SELECT key, kind, content, tags, related_keys, scope,
                             created_at, updated_at, last_accessed_at, access_count,
-                            importance, status, trigger_pattern, superseded_by
+                            importance, status, trigger_pattern, superseded_by,
+                            version_vector
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
                        AND (?2 IS NULL OR updated_at >= ?2)
@@ -4566,7 +4658,7 @@ impl StateStore for SqliteStore {
                     .query_map(params![kind, since], |row| {
                         let tags_s: String = row.get(3)?;
                         let related_s: String = row.get(4)?;
-                        Ok(MemoryRecord {
+                        let record = MemoryRecord {
                             key: row.get(0)?,
                             kind: row.get(1)?,
                             content: row.get(2)?,
@@ -4583,6 +4675,12 @@ impl StateStore for SqliteStore {
                                 .unwrap_or_else(|_| "active".to_string()),
                             trigger_pattern: row.get::<_, Option<String>>(12)?,
                             superseded_by: row.get::<_, Option<String>>(13)?,
+                        };
+                        let version_vector: String =
+                            row.get::<_, Option<String>>(14)?.unwrap_or_default();
+                        Ok(SyncEnvelope {
+                            record,
+                            version_vector,
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -4592,10 +4690,10 @@ impl StateStore for SqliteStore {
             .map_err(|e| Error::Backend(format!("memory_export query: {e}")))?;
 
         // Tag intersection done in Rust (JSON column).
-        let filtered: Vec<MemoryRecord> = rows
+        let filtered: Vec<SyncEnvelope> = rows
             .into_iter()
             .filter(|r| match &tags {
-                Some(want) if !want.is_empty() => want.iter().any(|t| r.tags.contains(t)),
+                Some(want) if !want.is_empty() => want.iter().any(|t| r.record.tags.contains(t)),
                 _ => true,
             })
             .collect();
@@ -4616,7 +4714,7 @@ impl StateStore for SqliteStore {
 
         let edges_written = if let Some(ref ep) = filter.edges_out_path {
             let keys: std::collections::HashSet<String> =
-                filtered.iter().map(|r| r.key.clone()).collect();
+                filtered.iter().map(|r| r.record.key.clone()).collect();
             self.export_edges_for_key_set(&keys, ep.as_path(), filter.loose_edges)
                 .await?
         } else {
@@ -4644,15 +4742,26 @@ impl StateStore for SqliteStore {
         // for atomicity (a malformed line shouldn't half-import).
         let mut malformed_mem = 0u64;
         let mut parsed: Vec<MemoryRecord> = Vec::new();
+        // Track MS — parallel per-row version-vector strings (empty when the
+        // line predates MS-1b or came from a node that doesn't stamp yet).
+        let mut vv_strings: Vec<String> = Vec::new();
         for line in text.lines() {
             if line.trim().is_empty() {
                 continue;
             }
-            match serde_json::from_str::<MemoryRecord>(line) {
-                Ok(r) => parsed.push(r),
+            match serde_json::from_str::<SyncEnvelope>(line) {
+                Ok(env) => {
+                    parsed.push(env.record);
+                    vv_strings.push(env.version_vector);
+                }
                 Err(_) => malformed_mem += 1,
             }
         }
+        // Incoming version vectors (empty string → empty vector).
+        let incoming_vv: Vec<crate::version_vector::VersionVector> = vv_strings
+            .iter()
+            .map(|s| s.parse().unwrap_or_default())
+            .collect();
 
         let clamped_contents: Vec<String> = parsed
             .iter()
@@ -4665,13 +4774,15 @@ impl StateStore for SqliteStore {
         // policy — without this gate, every Stop hook spawned a fresh
         // process that batch-embedded 100s of rows and then threw the
         // results away, cold-starting fastembed each time.
-        let existing_uat: std::collections::HashMap<String, i64> = if parsed.is_empty() {
+        type ExistingMeta =
+            std::collections::HashMap<String, (i64, crate::version_vector::VersionVector)>;
+        let existing_meta: ExistingMeta = if parsed.is_empty() {
             std::collections::HashMap::new()
         } else {
             let keys: Vec<String> = parsed.iter().map(|r| r.key.clone()).collect();
             self.conn
-                .call(move |c| -> RusqliteResult<std::collections::HashMap<String, i64>> {
-                    let mut map = std::collections::HashMap::with_capacity(keys.len());
+                .call(move |c| -> RusqliteResult<ExistingMeta> {
+                    let mut map = ExistingMeta::with_capacity(keys.len());
                     // Chunk to stay under SQLite's default max parameter limit (999).
                     for chunk in keys.chunks(500) {
                         let placeholders = std::iter::repeat("?")
@@ -4679,14 +4790,20 @@ impl StateStore for SqliteStore {
                             .collect::<Vec<_>>()
                             .join(",");
                         let sql = format!(
-                            "SELECT key, updated_at FROM memories WHERE key IN ({placeholders})"
+                            "SELECT key, updated_at, version_vector FROM memories \
+                             WHERE key IN ({placeholders})"
                         );
                         let mut stmt = c.prepare(&sql)?;
                         let mut rows = stmt.query(rusqlite::params_from_iter(chunk.iter()))?;
                         while let Some(row) = rows.next()? {
                             let k: String = row.get(0)?;
                             let u: i64 = row.get(1)?;
-                            map.insert(k, u);
+                            let vv: crate::version_vector::VersionVector = row
+                                .get::<_, Option<String>>(2)?
+                                .unwrap_or_default()
+                                .parse()
+                                .unwrap_or_default();
+                            map.insert(k, (u, vv));
                         }
                     }
                     Ok(map)
@@ -4695,7 +4812,7 @@ impl StateStore for SqliteStore {
                 .map_err(|e| Error::Backend(format!("memory_import preflight: {e}")))?
         };
 
-        let actions = plan_import_actions(&parsed, &existing_uat, policy);
+        let actions = plan_import_actions(&parsed, &incoming_vv, &existing_meta, policy);
 
         // Embed only rows we're actually going to persist. When everything
         // is Skip (the common sync-no-op case), we never touch the embedding
@@ -4730,6 +4847,7 @@ impl StateStore for SqliteStore {
         let clamped_for_tx = clamped_contents;
         let actions_for_tx = actions;
         let embeddings_for_tx = embeddings;
+        let vv_for_tx = vv_strings;
         let mut report = self
             .conn
             .call(move |c| -> RusqliteResult<ImportReport> {
@@ -4765,8 +4883,9 @@ impl StateStore for SqliteStore {
                                 "INSERT INTO memories
                                    (key, kind, content, tags, related_keys, scope,
                                     created_at, updated_at, last_accessed_at, access_count,
-                                    importance, status, trigger_pattern, embedding)
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                                    importance, status, trigger_pattern, embedding,
+                                    version_vector)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                                 params![
                                     r.key,
                                     r.kind,
@@ -4782,6 +4901,7 @@ impl StateStore for SqliteStore {
                                     stat,
                                     trig,
                                     embedding_bytes,
+                                    vv_for_tx[idx],
                                 ],
                             )?;
                             report.inserted += 1;
@@ -4795,7 +4915,8 @@ impl StateStore for SqliteStore {
                                     kind = ?2, content = ?3, tags = ?4, related_keys = ?5,
                                     scope = ?6, updated_at = ?7, last_accessed_at = ?8,
                                     access_count = ?9, importance = ?10, status = ?11,
-                                    trigger_pattern = ?12, embedding = ?13
+                                    trigger_pattern = ?12, embedding = ?13,
+                                    version_vector = ?14
                                  WHERE key = ?1",
                                 params![
                                     r.key,
@@ -4811,12 +4932,61 @@ impl StateStore for SqliteStore {
                                     stat,
                                     trig,
                                     embedding_bytes,
+                                    vv_for_tx[idx],
                                 ],
                             )?;
                             report.updated += 1;
                         }
                         ImportAction::Skip => {
                             report.skipped += 1;
+                        }
+                        ImportAction::ConflictCopy => {
+                            // Concurrent edit (neither version vector dominates):
+                            // preserve BOTH. Leave the canonical row untouched and
+                            // write the incoming version as a non-destructive
+                            // conflict copy with status='conflict'. The key is
+                            // derived from (key, content, incoming vector) so
+                            // re-importing the same jsonl is idempotent
+                            // (ON CONFLICT DO NOTHING). Resolution back into the
+                            // canonical row is a dream-replay / human concern.
+                            let embedding_bytes =
+                                embeddings_for_tx[idx].as_deref().unwrap_or(&[]);
+                            let suffix = crate::version_vector::node_id_from_name(
+                                &format!("{}|{}", content, vv_for_tx[idx]),
+                            );
+                            let conflict_key = format!("{}#conflict-{:016x}", r.key, suffix);
+                            let affected = tx.execute(
+                                "INSERT INTO memories
+                                   (key, kind, content, tags, related_keys, scope,
+                                    created_at, updated_at, last_accessed_at, access_count,
+                                    importance, status, trigger_pattern, embedding,
+                                    version_vector)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                                         'conflict', ?12, ?13, ?14)
+                                 ON CONFLICT(key) DO NOTHING",
+                                params![
+                                    conflict_key,
+                                    r.kind,
+                                    content,
+                                    tags_s,
+                                    related_s,
+                                    r.scope,
+                                    r.created_at,
+                                    r.updated_at,
+                                    r.last_accessed_at,
+                                    r.access_count as i64,
+                                    imp,
+                                    trig,
+                                    embedding_bytes,
+                                    vv_for_tx[idx],
+                                ],
+                            )?;
+                            if affected > 0 {
+                                report.conflict_copies += 1;
+                            } else {
+                                // This exact conflict copy already exists.
+                                report.skipped += 1;
+                            }
                         }
                     }
                 }
@@ -8877,40 +9047,60 @@ mod tests {
         assert_eq!(out, "\"lens:\"\"foo\"\"\"");
     }
 
+    // Track MS — test helpers for the version-vector-aware planner.
+    type ExistingMetaT =
+        std::collections::HashMap<String, (i64, crate::version_vector::VersionVector)>;
+    /// `n` empty incoming vectors (the legacy / unstamped case).
+    fn empty_vvs(n: usize) -> Vec<crate::version_vector::VersionVector> {
+        vec![crate::version_vector::VersionVector::default(); n]
+    }
+    /// A single-counter vector `{node: value}` via the public API.
+    fn vstamp(node: &str, value: u64) -> crate::version_vector::VersionVector {
+        crate::version_vector::VersionVector::default()
+            .update_with_now(crate::version_vector::node_id_from_name(node), value)
+    }
+
     #[test]
     fn plan_import_actions_skip_existing_under_skip_policy() {
         // Regression: sync.sh re-imports the same JSONL every Stop hook.
         // Under Skip policy and pre-existing keys, every action must be Skip
         // so the caller never invokes the embedding backend.
         let parsed = vec![mk_record("k1", 100), mk_record("k2", 200)];
-        let mut existing = std::collections::HashMap::new();
-        existing.insert("k1".to_string(), 100);
-        existing.insert("k2".to_string(), 200);
-        let actions = plan_import_actions(&parsed, &existing, ImportConflictPolicy::Skip);
+        let mut existing: ExistingMetaT = std::collections::HashMap::new();
+        existing.insert("k1".to_string(), (100, Default::default()));
+        existing.insert("k2".to_string(), (200, Default::default()));
+        let actions =
+            plan_import_actions(&parsed, &empty_vvs(parsed.len()), &existing, ImportConflictPolicy::Skip);
         assert_eq!(actions, vec![ImportAction::Skip, ImportAction::Skip]);
     }
 
     #[test]
     fn plan_import_actions_inserts_unknown_keys() {
         let parsed = vec![mk_record("new", 500), mk_record("known", 200)];
-        let mut existing = std::collections::HashMap::new();
-        existing.insert("known".to_string(), 200);
-        let actions = plan_import_actions(&parsed, &existing, ImportConflictPolicy::Skip);
+        let mut existing: ExistingMetaT = std::collections::HashMap::new();
+        existing.insert("known".to_string(), (200, Default::default()));
+        let actions =
+            plan_import_actions(&parsed, &empty_vvs(parsed.len()), &existing, ImportConflictPolicy::Skip);
         assert_eq!(actions, vec![ImportAction::Insert, ImportAction::Skip]);
     }
 
     #[test]
     fn plan_import_actions_newer_wins_compares_updated_at() {
         let parsed = vec![
-            mk_record("stale", 100),  // local 200 → keep local
-            mk_record("fresh", 300),  // local 200 → take import
-            mk_record("equal", 200),  // local 200 → keep local (strictly greater)
+            mk_record("stale", 100), // local 200 → keep local
+            mk_record("fresh", 300), // local 200 → take import
+            mk_record("equal", 200), // local 200 → keep local (strictly greater)
         ];
-        let mut existing = std::collections::HashMap::new();
-        existing.insert("stale".to_string(), 200);
-        existing.insert("fresh".to_string(), 200);
-        existing.insert("equal".to_string(), 200);
-        let actions = plan_import_actions(&parsed, &existing, ImportConflictPolicy::NewerWins);
+        let mut existing: ExistingMetaT = std::collections::HashMap::new();
+        existing.insert("stale".to_string(), (200, Default::default()));
+        existing.insert("fresh".to_string(), (200, Default::default()));
+        existing.insert("equal".to_string(), (200, Default::default()));
+        let actions = plan_import_actions(
+            &parsed,
+            &empty_vvs(parsed.len()),
+            &existing,
+            ImportConflictPolicy::NewerWins,
+        );
         assert_eq!(
             actions,
             vec![ImportAction::Skip, ImportAction::Update, ImportAction::Skip]
@@ -8920,10 +9110,93 @@ mod tests {
     #[test]
     fn plan_import_actions_overwrite_always_updates_existing() {
         let parsed = vec![mk_record("k1", 100)];
-        let mut existing = std::collections::HashMap::new();
-        existing.insert("k1".to_string(), 999);
-        let actions = plan_import_actions(&parsed, &existing, ImportConflictPolicy::Overwrite);
+        let mut existing: ExistingMetaT = std::collections::HashMap::new();
+        existing.insert("k1".to_string(), (999, Default::default()));
+        let actions = plan_import_actions(
+            &parsed,
+            &empty_vvs(parsed.len()),
+            &existing,
+            ImportConflictPolicy::Overwrite,
+        );
         assert_eq!(actions, vec![ImportAction::Update]);
+    }
+
+    // ── Track MS-3 — VersionVectorMerge policy (Phase-1 falsifier) ──────────
+
+    #[test]
+    fn vv_merge_falls_back_to_newerwins_when_unstamped() {
+        // Rollout safety: while either side has no vector, behave exactly like
+        // NewerWins so sync keeps converging on legacy rows.
+        let parsed = vec![mk_record("stale", 100), mk_record("fresh", 300)];
+        let mut existing: ExistingMetaT = std::collections::HashMap::new();
+        existing.insert("stale".to_string(), (200, Default::default()));
+        existing.insert("fresh".to_string(), (200, Default::default()));
+        let actions = plan_import_actions(
+            &parsed,
+            &empty_vvs(parsed.len()),
+            &existing,
+            ImportConflictPolicy::VersionVectorMerge,
+        );
+        assert_eq!(actions, vec![ImportAction::Skip, ImportAction::Update]);
+    }
+
+    #[test]
+    fn vv_merge_dominant_incoming_updates() {
+        // Incoming = existing + a further mac bump → strictly Greater → Update.
+        let existing_vv = vstamp("aio2", 5);
+        let incoming_vv = existing_vv
+            .clone()
+            .update_with_now(crate::version_vector::node_id_from_name("mac"), 6);
+        let parsed = vec![mk_record("k", 100)];
+        let mut existing: ExistingMetaT = std::collections::HashMap::new();
+        existing.insert("k".to_string(), (100, existing_vv));
+        let actions = plan_import_actions(
+            &parsed,
+            &[incoming_vv],
+            &existing,
+            ImportConflictPolicy::VersionVectorMerge,
+        );
+        assert_eq!(actions, vec![ImportAction::Update]);
+    }
+
+    #[test]
+    fn vv_merge_dominated_incoming_skips() {
+        // Incoming is strictly behind existing → Skip (we already hold ≥).
+        let incoming_vv = vstamp("aio2", 5);
+        let existing_vv = incoming_vv
+            .clone()
+            .update_with_now(crate::version_vector::node_id_from_name("mac"), 6);
+        let parsed = vec![mk_record("k", 999)]; // newer wall-clock, but vv dominated
+        let mut existing: ExistingMetaT = std::collections::HashMap::new();
+        existing.insert("k".to_string(), (100, existing_vv));
+        let actions = plan_import_actions(
+            &parsed,
+            &[incoming_vv],
+            &existing,
+            ImportConflictPolicy::VersionVectorMerge,
+        );
+        // Note: NewerWins would have *Updated* here (999 > 100) and dropped the
+        // dominant local edit. VersionVectorMerge correctly keeps it.
+        assert_eq!(actions, vec![ImportAction::Skip]);
+    }
+
+    #[test]
+    fn vv_merge_concurrent_emits_conflict_copy() {
+        // The core falsifier: two nodes edited the SAME key offline (disjoint
+        // counters) → concurrent → ConflictCopy (preserve both), NOT a silent
+        // LWW drop.
+        let incoming_vv = vstamp("mac", 5);
+        let existing_vv = vstamp("aio2", 5);
+        let parsed = vec![mk_record("k", 100)];
+        let mut existing: ExistingMetaT = std::collections::HashMap::new();
+        existing.insert("k".to_string(), (100, existing_vv));
+        let actions = plan_import_actions(
+            &parsed,
+            &[incoming_vv],
+            &existing,
+            ImportConflictPolicy::VersionVectorMerge,
+        );
+        assert_eq!(actions, vec![ImportAction::ConflictCopy]);
     }
 
     #[tokio::test]

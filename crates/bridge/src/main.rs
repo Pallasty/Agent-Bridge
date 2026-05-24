@@ -3522,7 +3522,12 @@ async fn main() -> Result<()> {
                     .with(tracing_subscriber::fmt::layer())
                     .init();
                 let path = default_db_path();
-                let store: Arc<dyn StateStore> = Arc::new(SqliteStore::open(&path).await?);
+                let mut store_impl = SqliteStore::open(&path).await?;
+                // Track MS — stamp this node's identity so live memory writes
+                // carry a version vector (conflict-aware cross-machine sync).
+                store_impl
+                    .set_node_id(ab_store::node_id_from_name(&crate::sync::hostname_short()));
+                let store: Arc<dyn StateStore> = Arc::new(store_impl);
                 let listen = format!("{host}:{port}");
                 let markdown_root: Option<PathBuf> = match memory_dir.as_deref() {
                     Some("none") => None,

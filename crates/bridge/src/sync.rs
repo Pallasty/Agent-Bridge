@@ -6,7 +6,10 @@
 //!
 //! Steady-state algorithm (idempotent):
 //!   1. `git pull --rebase --autostash`
-//!   2. `memory_import(NewerWins)` from `<repo>/memory.jsonl`
+//!   2. `memory_import(VersionVectorMerge)` from `<repo>/memory.jsonl`
+//!      (Track MS-3 — conflict-aware; concurrent same-key edits become
+//!      non-destructive conflict copies instead of a silent last-write-wins
+//!      drop; falls back to NewerWins for rows without a version vector yet)
 //!   3. `memory_export` overwriting `<repo>/memory.jsonl`
 //!   4. `git add` then commit + push if anything changed
 //!
@@ -16,7 +19,8 @@
 //! runs an initial sync.
 
 use ab_store::{
-    default_db_path, ImportConflictPolicy, MemoryExportFilter, MemoryRecord, SqliteStore, StateStore,
+    default_db_path, node_id_from_name, ImportConflictPolicy, MemoryExportFilter, MemoryRecord,
+    SqliteStore, StateStore,
 };
 use anyhow::{anyhow, bail, Context, Result};
 use std::path::{Path, PathBuf};
@@ -106,7 +110,7 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
 
     if memory_file.exists() {
         let report = store
-            .memory_import(&memory_file, ImportConflictPolicy::NewerWins, None)
+            .memory_import(&memory_file, ImportConflictPolicy::VersionVectorMerge, None)
             .await
             .context("memory_import")?;
         if verbose {
@@ -500,9 +504,13 @@ async fn open_store() -> Result<SqliteStore> {
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(default_db_path);
-    SqliteStore::open(&db_path)
+    let mut store = SqliteStore::open(&db_path)
         .await
-        .with_context(|| format!("open {}", db_path.display()))
+        .with_context(|| format!("open {}", db_path.display()))?;
+    // Track MS — stamp this machine's identity so version-vector writes and the
+    // VersionVectorMerge import policy attribute edits to the right node.
+    store.set_node_id(node_id_from_name(&hostname_short()));
+    Ok(store)
 }
 
 fn ensure_command_on_path(cmd: &str, hint: &str) -> Result<()> {
@@ -820,7 +828,7 @@ fn git_index_changed(repo: &Path, path: &str) -> Result<bool> {
     }
 }
 
-fn hostname_short() -> String {
+pub(crate) fn hostname_short() -> String {
     Command::new("hostname")
         .arg("-s")
         .output()

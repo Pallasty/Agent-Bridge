@@ -17,7 +17,9 @@ pub use embedding::{
 };
 pub use vector::{cosine_similarity, decode_embedding, embed_text, encode_embedding, VECTOR_DIM};
 pub mod version_vector;
-pub use version_vector::{node_id_from_name, Counter, NodeId, Ordering, VersionVector};
+pub use version_vector::{
+    node_id_from_env, node_id_from_name, Counter, NodeId, Ordering, VersionVector,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredSession {
@@ -1460,6 +1462,13 @@ pub enum ImportConflictPolicy {
     Overwrite,
     /// Overwrite only when the imported `updated_at` is strictly greater.
     NewerWins,
+    /// Track MS-3 — conflict-aware merge by per-record version vector. When an
+    /// existing row is present and both sides carry a vector: the dominating
+    /// version wins (`Update`/`Skip`); a *concurrent* pair (neither dominates)
+    /// is preserved non-destructively as a conflict copy instead of silently
+    /// dropping the loser. Falls back to `NewerWins` when either side has no
+    /// vector yet (rollout / legacy rows).
+    VersionVectorMerge,
 }
 
 /// Per-row outcome of an import.
@@ -1479,6 +1488,11 @@ pub struct ImportReport {
     /// callers can decide whether to re-export the missing endpoints.
     #[serde(default)]
     pub edges_skipped_dangling: u64,
+    /// Track MS-3 — rows preserved as non-destructive conflict copies because
+    /// the incoming version was *concurrent* with the existing one (neither
+    /// version vector dominated). Both versions survive; zero rows are lost.
+    #[serde(default)]
+    pub conflict_copies: u64,
 }
 
 #[async_trait]
