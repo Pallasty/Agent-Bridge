@@ -9254,6 +9254,156 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
+    // ── Track MS-3 — end-to-end two-node (aio2/mac) simulation ──────────────
+    //
+    // Exercises the FULL path the planner-unit tests can't: memory_save
+    // stamping → memory_export (SyncEnvelope) → memory_import
+    // (VersionVectorMerge + conflict-copy row). Single-machine stand-in for the
+    // real two-node wet-test.
+
+    fn export_all() -> MemoryExportFilter {
+        MemoryExportFilter {
+            kind: None,
+            tags_any: None,
+            since_ts: None,
+            edges_out_path: None,
+            loose_edges: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn vv_merge_e2e_concurrent_same_key_preserves_both() {
+        let base = std::env::temp_dir().join(format!(
+            "ab-vvmerge-e2e-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let mut a = SqliteStore::open(&base.join("a/state.db"))
+            .await
+            .expect("open A");
+        let mut b = SqliteStore::open(&base.join("b/state.db"))
+            .await
+            .expect("open B");
+        a.set_node_id(crate::version_vector::node_id_from_name("aio2"));
+        b.set_node_id(crate::version_vector::node_id_from_name("mac"));
+
+        // 1. A creates the shared row; sync the base into B.
+        let mut rec = mk_record("shared", 1_700_000_000);
+        rec.content = "v0".into();
+        a.memory_save(&rec).await.expect("A save v0");
+        let exp0 = base.join("a0.jsonl");
+        a.memory_export(&export_all(), &exp0).await.expect("A export0");
+        let r = b
+            .memory_import(&exp0, ImportConflictPolicy::VersionVectorMerge, None)
+            .await
+            .expect("B import base");
+        assert_eq!(r.inserted, 1, "B receives the shared base row");
+
+        // 2. Concurrent offline edits: A bumps aio2, B bumps mac.
+        rec.content = "vA".into();
+        a.memory_save(&rec).await.expect("A edit");
+        let mut recb = mk_record("shared", 1_700_000_000);
+        recb.content = "vB".into();
+        b.memory_save(&recb).await.expect("B edit");
+
+        // 3. Sync A -> B: the two vectors are concurrent -> conflict copy.
+        let exp_a = base.join("a1.jsonl");
+        a.memory_export(&export_all(), &exp_a).await.expect("A export1");
+        let rep = b
+            .memory_import(&exp_a, ImportConflictPolicy::VersionVectorMerge, None)
+            .await
+            .expect("B merge");
+        assert_eq!(rep.conflict_copies, 1, "concurrent edit => one conflict copy");
+        assert_eq!(rep.updated, 0, "B's canonical row must NOT be LWW-overwritten");
+
+        // 4. Both versions survive on B: canonical = vB, conflict copy = vA.
+        let (canonical, conflict_count, conflict_content) = b
+            .conn
+            .call(|c| -> RusqliteResult<(String, i64, String)> {
+                let canonical: String = c.query_row(
+                    "SELECT content FROM memories WHERE key='shared'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let conflict_count: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM memories WHERE key LIKE 'shared#conflict-%'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let conflict_content: String = c.query_row(
+                    "SELECT content FROM memories WHERE key LIKE 'shared#conflict-%' LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok((canonical, conflict_count, conflict_content))
+            })
+            .await
+            .expect("verify B");
+        assert_eq!(canonical, "vB", "B keeps its own edit as canonical");
+        assert_eq!(conflict_count, 1);
+        assert_eq!(
+            conflict_content, "vA",
+            "A's concurrent edit preserved as a conflict copy — zero loss"
+        );
+
+        // 5. Idempotent: re-importing the same export adds no new conflict copy.
+        let rep2 = b
+            .memory_import(&exp_a, ImportConflictPolicy::VersionVectorMerge, None)
+            .await
+            .expect("B re-merge");
+        assert_eq!(rep2.conflict_copies, 0, "re-import is idempotent");
+
+        let _ = tokio::fs::remove_dir_all(&base).await;
+    }
+
+    #[tokio::test]
+    async fn vv_merge_e2e_disjoint_keys_both_survive() {
+        // Two nodes each create a DIFFERENT key offline; sync merges cleanly
+        // with zero conflict copies and zero loss.
+        let base = std::env::temp_dir().join(format!(
+            "ab-vvmerge-disjoint-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let mut a = SqliteStore::open(&base.join("a/state.db"))
+            .await
+            .expect("open A");
+        let mut b = SqliteStore::open(&base.join("b/state.db"))
+            .await
+            .expect("open B");
+        a.set_node_id(crate::version_vector::node_id_from_name("aio2"));
+        b.set_node_id(crate::version_vector::node_id_from_name("mac"));
+
+        let mut ka = mk_record("ka", 1_700_000_000);
+        ka.content = "from-aio2".into();
+        a.memory_save(&ka).await.expect("A save ka");
+        let mut kb = mk_record("kb", 1_700_000_000);
+        kb.content = "from-mac".into();
+        b.memory_save(&kb).await.expect("B save kb");
+
+        let exp_a = base.join("a.jsonl");
+        a.memory_export(&export_all(), &exp_a).await.expect("A export");
+        let rep = b
+            .memory_import(&exp_a, ImportConflictPolicy::VersionVectorMerge, None)
+            .await
+            .expect("B merge");
+        assert_eq!(rep.inserted, 1, "B gains A's key");
+        assert_eq!(rep.conflict_copies, 0, "different keys never conflict");
+
+        let total: i64 = b
+            .conn
+            .call(|c| c.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0)))
+            .await
+            .expect("count B");
+        assert_eq!(total, 2, "B holds both keys — zero loss");
+
+        let _ = tokio::fs::remove_dir_all(&base).await;
+    }
+
     #[tokio::test]
     async fn memory_save_reuses_embedding_when_content_unchanged() {
         // Preflight gate for memory_save: when an upsert hits an existing key
