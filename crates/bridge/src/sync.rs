@@ -115,8 +115,23 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
             .context("memory_import")?;
         if verbose {
             eprintln!(
-                "[sync] memory import: inserted={} updated={} skipped={} malformed={}",
-                report.inserted, report.updated, report.skipped, report.malformed
+                "[sync] memory import: inserted={} updated={} skipped={} malformed={} conflict_copies={}",
+                report.inserted,
+                report.updated,
+                report.skipped,
+                report.malformed,
+                report.conflict_copies
+            );
+        }
+        // Surface conflicts prominently even without -v (Track MS-3): a
+        // concurrent same-key edit was preserved as a non-destructive conflict
+        // copy rather than silently dropped by last-write-wins.
+        if report.conflict_copies > 0 {
+            eprintln!(
+                "[sync] ⚠ {} conflict cop{} created — concurrent same-key edit(s) preserved \
+                 (`<key>#conflict-…`, status='conflict'); resolve via dream-replay or manually.",
+                report.conflict_copies,
+                if report.conflict_copies == 1 { "y" } else { "ies" }
             );
         }
     }
