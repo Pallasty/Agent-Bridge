@@ -2578,6 +2578,56 @@ fn avatar_surface_renderer_token_label(token: &str) -> String {
     }
 }
 
+fn avatar_surface_renderer_default_variant(track: &Value) -> Option<&Value> {
+    let variants = track.get("semantic_variants").and_then(Value::as_array)?;
+    variants
+        .iter()
+        .find(|variant| {
+            variant
+                .get("default")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .or_else(|| variants.first())
+}
+
+fn avatar_surface_renderer_variant_choreography(variant: &Value) -> Option<&Value> {
+    variant
+        .get("frame_choreography")
+        .filter(|choreography| choreography.is_object())
+}
+
+fn avatar_surface_renderer_i64(value: Option<&Value>) -> Option<i64> {
+    match value {
+        Some(Value::Number(n)) => n.as_i64().or_else(|| n.as_u64().map(|v| v as i64)),
+        Some(Value::String(s)) => s.parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
+fn avatar_surface_renderer_track_display_metrics(track: &Value) -> (String, String) {
+    if let Some(choreography) = avatar_surface_renderer_default_variant(track)
+        .and_then(avatar_surface_renderer_variant_choreography)
+    {
+        if let Some(frames) = choreography
+            .get("frames")
+            .and_then(Value::as_array)
+            .map(|frames| frames.len())
+            .filter(|frames| *frames > 0)
+        {
+            let duration = avatar_surface_renderer_i64(choreography.get("duration_ms"))
+                .or_else(|| avatar_surface_renderer_i64(track.get("duration_ms")))
+                .unwrap_or(0);
+            return (frames.to_string(), duration.to_string());
+        }
+    }
+
+    (
+        avatar_surface_html_json_value(track.get("frame_count"), "0"),
+        avatar_surface_html_json_value(track.get("duration_ms"), "0"),
+    )
+}
+
 fn avatar_surface_html_value(entry: &Value, key: &str, fallback: &str) -> String {
     avatar_surface_html_json_value(entry.get(key), fallback)
 }
@@ -4180,8 +4230,7 @@ fn avatar_surface_renderer_view_html(
             let token = html_escape(token_raw);
             let token_label = html_escape(&avatar_surface_renderer_token_label(token_raw));
             let track_kind = avatar_surface_html_json_value(track.get("track_kind"), "selected");
-            let frames = avatar_surface_html_json_value(track.get("frame_count"), "0");
-            let duration = avatar_surface_html_json_value(track.get("duration_ms"), "0");
+            let (frames, duration) = avatar_surface_renderer_track_display_metrics(track);
             track_buttons.push_str(&format!(
                 r#"<button type="button" class="track-button{active}{review}" data-track-index="{index}" data-track-token="{token}">
           <span title="{token}">{token_label}</span>
@@ -4721,7 +4770,7 @@ fn avatar_surface_renderer_view_html(
       {track_buttons}
     </nav>
     <section class="variant-panel" data-variant-panel hidden>
-      <h2>Alert Peek Semantic Variants</h2>
+      <h2 data-variant-title>Renderer Variants</h2>
       <div class="variant-options" data-variant-options></div>
     </section>
   </main>
@@ -4738,6 +4787,7 @@ fn avatar_surface_renderer_view_html(
     const assetEl = document.querySelector("[data-asset]");
     const voiceEl = document.querySelector("[data-voice-linkage]");
     const variantPanel = document.querySelector("[data-variant-panel]");
+    const variantTitle = document.querySelector("[data-variant-title]");
     const variantOptions = document.querySelector("[data-variant-options]");
     const buttons = Array.from(document.querySelectorAll("[data-track-index]"));
     let trackIndex = {active_track_index};
@@ -4862,6 +4912,11 @@ fn avatar_surface_renderer_view_html(
       const track = activeTrack();
       const variants = trackVariants(track);
       variantOptions.textContent = "";
+      if (variantTitle) {{
+        variantTitle.textContent = track.semantic_variant_review
+          ? "Alert Peek Semantic Variants"
+          : "Sidecar Track Variants";
+      }}
       if (!variants.length) {{
         variantId = "";
         variantPanel.hidden = true;
@@ -6166,6 +6221,8 @@ mod tests {
         assert!(html.contains("data-stage=\"xiao-shu-renderer-view\""));
         assert!(html.contains("xiao_shu::soft_bounce::low"));
         assert!(html.contains("xiao_shu::sorting_glow::medium"));
+        assert!(html.contains("selected / 8 frames / 1800ms"));
+        assert!(html.contains("selected / 6 frames / 1800ms"));
         assert!(html.contains("review_only / 8 frames / 1440ms"));
         assert!(html.contains("motion-soft-bounce"));
         assert!(html.contains("motion-sorting-glow"));
@@ -6178,6 +6235,8 @@ mod tests {
         assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1"));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-soft-bounce-v1\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-idle-breathe-v1\""));
+        assert!(html.contains("<h2 data-variant-title>Renderer Variants</h2>"));
+        assert!(html.contains("Sidecar Track Variants"));
         assert!(html.contains("Alert Peek Semantic Variants"));
         assert!(html.contains("data-variant-panel hidden"));
         assert!(html.contains("\"variant_id\":\"current_alert_row\""));
