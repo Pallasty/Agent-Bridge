@@ -1144,6 +1144,8 @@ fn avatar_sidecar_spritesheet_svg(asset: &str) -> Option<String> {
     }
     if asset == "xiao-shu-motion-canonical-soft-bounce-v1"
         || asset == "xiao-shu-motion-canonical-idle-breathe-v1"
+        || asset == "xiao-shu-motion-canonical-sorting-glow-v1"
+        || asset == "xiao-shu-motion-canonical-look-sideways-v1"
     {
         return avatar_sidecar_baseline_motion_svg(asset);
     }
@@ -1368,6 +1370,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
         right_arm: i32,
         ribbon: i32,
         cheek: &'static str,
+        aura: &'static str,
     }
 
     let (title, frames): (&str, Vec<Frame>) = match asset {
@@ -1386,6 +1389,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -7,
                     ribbon: -8,
                     cheek: "0.26",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 1,
@@ -1399,6 +1403,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -10,
                     ribbon: -12,
                     cheek: "0.28",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 2,
@@ -1412,6 +1417,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -14,
                     ribbon: -18,
                     cheek: "0.32",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 3,
@@ -1425,6 +1431,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -20,
                     ribbon: 8,
                     cheek: "0.36",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 4,
@@ -1438,6 +1445,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -18,
                     ribbon: 14,
                     cheek: "0.34",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 5,
@@ -1451,6 +1459,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -12,
                     ribbon: 4,
                     cheek: "0.32",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 6,
@@ -1464,6 +1473,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -8,
                     ribbon: -6,
                     cheek: "0.28",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 7,
@@ -1477,6 +1487,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -6,
                     ribbon: -8,
                     cheek: "0.24",
+                    aura: "0.00",
                 },
             ],
         ),
@@ -1495,6 +1506,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -4,
                     ribbon: -4,
                     cheek: "0.20",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 1,
@@ -1508,6 +1520,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -5,
                     ribbon: -6,
                     cheek: "0.22",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 2,
@@ -1521,6 +1534,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -6,
                     ribbon: 0,
                     cheek: "0.24",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 3,
@@ -1534,6 +1548,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -7,
                     ribbon: 4,
                     cheek: "0.26",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 4,
@@ -1547,6 +1562,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -5,
                     ribbon: 0,
                     cheek: "0.24",
+                    aura: "0.00",
                 },
                 Frame {
                     col: 5,
@@ -1560,6 +1576,227 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     right_arm: -4,
                     ribbon: -4,
                     cheek: "0.22",
+                    aura: "0.00",
+                },
+            ],
+        ),
+        "xiao-shu-motion-canonical-sorting-glow-v1" => (
+            "Xiao Shu motion-canonical sorting glow sidecar v1 sprite atlas",
+            vec![
+                Frame {
+                    col: 0,
+                    rise: 5,
+                    tilt: 0,
+                    scale: "0.99",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 4,
+                    right_arm: -4,
+                    ribbon: -4,
+                    cheek: "0.22",
+                    aura: "0.08",
+                },
+                Frame {
+                    col: 1,
+                    rise: 3,
+                    tilt: -2,
+                    scale: "1.00",
+                    eye_shift: -2,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 9,
+                    right_arm: -8,
+                    ribbon: -10,
+                    cheek: "0.24",
+                    aura: "0.18",
+                },
+                Frame {
+                    col: 2,
+                    rise: 0,
+                    tilt: -4,
+                    scale: "1.02",
+                    eye_shift: -4,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 14,
+                    right_arm: -12,
+                    ribbon: -18,
+                    cheek: "0.26",
+                    aura: "0.32",
+                },
+                Frame {
+                    col: 3,
+                    rise: -2,
+                    tilt: 3,
+                    scale: "1.03",
+                    eye_shift: 3,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: -10,
+                    right_arm: 16,
+                    ribbon: 10,
+                    cheek: "0.28",
+                    aura: "0.45",
+                },
+                Frame {
+                    col: 4,
+                    rise: -4,
+                    tilt: 1,
+                    scale: "1.04",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "wide",
+                    left_arm: 12,
+                    right_arm: -12,
+                    ribbon: 16,
+                    cheek: "0.34",
+                    aura: "0.62",
+                },
+                Frame {
+                    col: 5,
+                    rise: 0,
+                    tilt: -1,
+                    scale: "1.02",
+                    eye_shift: 2,
+                    blink: true,
+                    mouth: "soft",
+                    left_arm: 8,
+                    right_arm: -8,
+                    ribbon: 4,
+                    cheek: "0.30",
+                    aura: "0.40",
+                },
+                Frame {
+                    col: 6,
+                    rise: 3,
+                    tilt: 2,
+                    scale: "1.00",
+                    eye_shift: -1,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 5,
+                    right_arm: -5,
+                    ribbon: -3,
+                    cheek: "0.24",
+                    aura: "0.22",
+                },
+                Frame {
+                    col: 7,
+                    rise: 5,
+                    tilt: 0,
+                    scale: "0.99",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 4,
+                    right_arm: -4,
+                    ribbon: -4,
+                    cheek: "0.22",
+                    aura: "0.10",
+                },
+            ],
+        ),
+        "xiao-shu-motion-canonical-look-sideways-v1" => (
+            "Xiao Shu motion-canonical look sideways sidecar v1 sprite atlas",
+            vec![
+                Frame {
+                    col: 0,
+                    rise: 6,
+                    tilt: 0,
+                    scale: "0.99",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 4,
+                    right_arm: -4,
+                    ribbon: -4,
+                    cheek: "0.20",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 1,
+                    rise: 5,
+                    tilt: -2,
+                    scale: "1.00",
+                    eye_shift: -3,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 5,
+                    right_arm: -8,
+                    ribbon: -10,
+                    cheek: "0.22",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 2,
+                    rise: 4,
+                    tilt: -5,
+                    scale: "1.01",
+                    eye_shift: -6,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 6,
+                    right_arm: -14,
+                    ribbon: -18,
+                    cheek: "0.24",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 3,
+                    rise: 3,
+                    tilt: -7,
+                    scale: "1.02",
+                    eye_shift: -8,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 9,
+                    right_arm: -17,
+                    ribbon: -24,
+                    cheek: "0.26",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 4,
+                    rise: 4,
+                    tilt: -5,
+                    scale: "1.01",
+                    eye_shift: -7,
+                    blink: true,
+                    mouth: "soft",
+                    left_arm: 7,
+                    right_arm: -14,
+                    ribbon: -20,
+                    cheek: "0.24",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 5,
+                    rise: 5,
+                    tilt: -2,
+                    scale: "1.00",
+                    eye_shift: -4,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 5,
+                    right_arm: -8,
+                    ribbon: -10,
+                    cheek: "0.22",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 6,
+                    rise: 6,
+                    tilt: 0,
+                    scale: "0.99",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 4,
+                    right_arm: -4,
+                    ribbon: -4,
+                    cheek: "0.20",
+                    aura: "0.00",
                 },
             ],
         ),
@@ -1580,6 +1817,11 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
       <stop offset="0" stop-color="#f0dfb8"/>
       <stop offset="1" stop-color="#cba35e"/>
     </linearGradient>
+    <radialGradient id="xsb-process-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#56c6cc" stop-opacity="0.70"/>
+      <stop offset="0.52" stop-color="#56c6cc" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#56c6cc" stop-opacity="0"/>
+    </radialGradient>
     <filter id="xsb-shadow" x="-24%" y="-24%" width="148%" height="148%">
       <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#2d2018" flood-opacity="0.18"/>
     </filter>
@@ -1627,6 +1869,12 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
     <ellipse cx="96" cy="190" rx="54" ry="12" fill="#2d2018" opacity="0.14"/>
     <g filter="url(#xsb-shadow)" transform="translate(96 118) scale({scale}) translate(-96 -118) translate(0 {rise})">
       <g transform="translate(96 96) rotate({tilt}) translate(-96 -96)">
+        <g class="xsb-process-glow" opacity="{aura}">
+          <circle cx="96" cy="129" r="60" fill="url(#xsb-process-glow)"/>
+          <path d="M58 132 C76 117 115 117 134 132" fill="none" stroke="#56c6cc" stroke-width="5" stroke-linecap="round" stroke-dasharray="9 8"/>
+          <circle cx="62" cy="128" r="4" fill="#56c6cc"/>
+          <circle cx="132" cy="128" r="4" fill="#56c6cc"/>
+        </g>
         <ellipse cx="96" cy="154" rx="51" ry="44" fill="url(#xsb-robe)" stroke="#3a291c" stroke-width="5"/>
         <path d="M58 133 C76 121 116 121 134 133" fill="none" stroke="#b94735" stroke-width="6" stroke-linecap="round"/>
         <path d="M72 132 L96 187 L120 132" fill="#ead9ad" stroke="#8f4a32" stroke-width="4" stroke-linejoin="round"/>
@@ -1661,6 +1909,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
             ribbon = frame.ribbon,
             eyes = eyes,
             cheek = frame.cheek,
+            aura = frame.aura,
             mouth = mouth
         )
         .ok()?;
@@ -6233,8 +6482,12 @@ mod tests {
         assert!(html.contains("/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev"));
         assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1"));
         assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1"));
+        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1"));
+        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1"));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-soft-bounce-v1\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-idle-breathe-v1\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-sorting-glow-v1\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-look-sideways-v1\""));
         assert!(html.contains("<h2 data-variant-title>Renderer Variants</h2>"));
         assert!(html.contains("Sidecar Track Variants"));
         assert!(html.contains("Alert Peek Semantic Variants"));
@@ -6331,6 +6584,10 @@ mod tests {
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-soft-bounce-v1").unwrap();
         let idle_breathe_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-idle-breathe-v1").unwrap();
+        let sorting_glow_svg =
+            avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-sorting-glow-v1").unwrap();
+        let look_sideways_svg =
+            avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-look-sideways-v1").unwrap();
 
         assert!(
             svg.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872""#)
@@ -6359,6 +6616,16 @@ mod tests {
         assert!(idle_breathe_svg.contains(r#"id="frame-5""#));
         assert!(idle_breathe_svg.contains("xsb-robe"));
         assert!(!idle_breathe_svg.contains(r#"id="frame-7""#));
+        assert!(sorting_glow_svg
+            .contains("Xiao Shu motion-canonical sorting glow sidecar v1 sprite atlas"));
+        assert!(sorting_glow_svg.contains(r#"id="frame-7""#));
+        assert!(sorting_glow_svg.contains("xsb-process-glow"));
+        assert!(sorting_glow_svg.contains(r#"opacity="0.62""#));
+        assert!(look_sideways_svg
+            .contains("Xiao Shu motion-canonical look sideways sidecar v1 sprite atlas"));
+        assert!(look_sideways_svg.contains(r#"id="frame-6""#));
+        assert!(look_sideways_svg.contains("rotate(-24 134 42)"));
+        assert!(!look_sideways_svg.contains(r#"id="frame-7""#));
         assert!(avatar_sidecar_spritesheet_svg("unknown").is_none());
     }
 }

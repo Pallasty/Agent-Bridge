@@ -1943,6 +1943,85 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
             },
             "review_question": "does idle remain present without becoming needy beside a coding session",
         })],
+        "xiao_shu::sorting_glow::medium" => vec![json!({
+            "variant_id": "sidecar_sorting_glow_v1",
+            "label": "sidecar sorting glow v1",
+            "sprite_row": 0,
+            "sprite_frames": 8,
+            "alert_mark": false,
+            "default": true,
+            "intent": "motion-canonical review-only processing loop with visible signal sorting glow, independent of the installed Codex pet package",
+            "sidecar_asset": {
+                "asset_id": "xiao-shu-motion-canonical-sorting-glow-v1",
+                "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1",
+                "format": "image/svg+xml",
+                "atlas": "1536x1872",
+                "cell": "192x208",
+                "read_only": true,
+                "official_pet_package_mutation": false,
+                "art_pass": "motion_canonical_review_v1"
+            },
+            "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1",
+            "frame_choreography": {
+                "schema": 1,
+                "choreography_id": "sorting_glow_sidecar_v1_frame_choreo",
+                "mode": "sidecar_sprite_atlas_columns",
+                "uses_css_motion": false,
+                "loop": "gather_sort_glow_return",
+                "duration_ms": 1440,
+                "frames": [
+                    {"row": 0, "col": 0, "hold_ms": 150, "phase": "idle_entry", "mark": false},
+                    {"row": 0, "col": 1, "hold_ms": 160, "phase": "gather_left", "mark": false},
+                    {"row": 0, "col": 2, "hold_ms": 170, "phase": "sort_left", "mark": false},
+                    {"row": 0, "col": 3, "hold_ms": 190, "phase": "sort_right", "mark": false},
+                    {"row": 0, "col": 4, "hold_ms": 260, "phase": "glow_peak", "mark": false},
+                    {"row": 0, "col": 5, "hold_ms": 190, "phase": "coalesce", "mark": false},
+                    {"row": 0, "col": 6, "hold_ms": 160, "phase": "settle", "mark": false},
+                    {"row": 0, "col": 7, "hold_ms": 160, "phase": "idle_return", "mark": false}
+                ],
+                "review_note": "keeps sorting_glow visually distinct from alert_peek by using process glow instead of attention marks",
+            },
+            "review_question": "does sorting_glow read as quiet processing rather than a warning or alert",
+        })],
+        "xiao_shu::look_sideways::medium" => vec![json!({
+            "variant_id": "sidecar_look_sideways_v1",
+            "label": "sidecar look sideways v1",
+            "sprite_row": 0,
+            "sprite_frames": 7,
+            "alert_mark": false,
+            "default": true,
+            "intent": "motion-canonical review-only sideways glance for gentle inspection states without relying on the installed Codex pet package",
+            "sidecar_asset": {
+                "asset_id": "xiao-shu-motion-canonical-look-sideways-v1",
+                "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1",
+                "format": "image/svg+xml",
+                "atlas": "1536x1872",
+                "cell": "192x208",
+                "read_only": true,
+                "official_pet_package_mutation": false,
+                "art_pass": "motion_canonical_review_v1"
+            },
+            "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1",
+            "frame_choreography": {
+                "schema": 1,
+                "choreography_id": "look_sideways_sidecar_v1_frame_choreo",
+                "mode": "sidecar_sprite_atlas_columns",
+                "uses_css_motion": false,
+                "loop": "glance_hold_return",
+                "duration_ms": 1320,
+                "frames": [
+                    {"row": 0, "col": 0, "hold_ms": 160, "phase": "idle_entry", "mark": false},
+                    {"row": 0, "col": 1, "hold_ms": 170, "phase": "notice_side", "mark": false},
+                    {"row": 0, "col": 2, "hold_ms": 190, "phase": "glance_left", "mark": false},
+                    {"row": 0, "col": 3, "hold_ms": 260, "phase": "inspect_hold", "mark": false},
+                    {"row": 0, "col": 4, "hold_ms": 190, "phase": "blink_hold", "mark": false},
+                    {"row": 0, "col": 5, "hold_ms": 170, "phase": "returning", "mark": false},
+                    {"row": 0, "col": 6, "hold_ms": 180, "phase": "idle_return", "mark": false}
+                ],
+                "review_note": "uses eye and ribbon offsets instead of warning color so the glance remains curious, not urgent",
+            },
+            "review_question": "does look_sideways feel like calm inspection rather than distraction",
+        })],
         "xiao_shu::alert_peek::medium" => vec![
             json!({
                 "variant_id": "current_alert_row",
@@ -6277,6 +6356,16 @@ mod tests {
         assert_eq!(sorting_glow["binding_stage"], "needs_review");
         assert_eq!(sorting_glow["review_only"], true);
         assert_eq!(sorting_glow["duration_ms"], 1440);
+        assert_eq!(sorting_glow["semantic_variant_count"], 1);
+        assert_eq!(
+            sorting_glow["semantic_variants"][0]["variant_id"],
+            "sidecar_sorting_glow_v1"
+        );
+        assert_eq!(
+            sorting_glow["semantic_variants"][0]["sidecar_asset"]["asset_id"],
+            "xiao-shu-motion-canonical-sorting-glow-v1"
+        );
+        assert_eq!(sorting_glow["semantic_variant_review"], Value::Null);
         assert!(sorting_glow["frames"]
             .as_array()
             .unwrap()
@@ -6296,6 +6385,20 @@ mod tests {
         assert!(tracks
             .iter()
             .any(|track| track["token"] == "xiao_shu::look_sideways::medium"));
+        let look_sideways = tracks
+            .iter()
+            .find(|track| track["token"] == "xiao_shu::look_sideways::medium")
+            .unwrap();
+        assert_eq!(look_sideways["semantic_variant_count"], 1);
+        assert_eq!(
+            look_sideways["semantic_variants"][0]["variant_id"],
+            "sidecar_look_sideways_v1"
+        );
+        assert_eq!(
+            look_sideways["semantic_variants"][0]["sidecar_asset"]["asset_id"],
+            "xiao-shu-motion-canonical-look-sideways-v1"
+        );
+        assert_eq!(look_sideways["semantic_variant_review"], Value::Null);
         let alert_peek = tracks
             .iter()
             .find(|track| track["token"] == "xiao_shu::alert_peek::medium")
