@@ -1865,6 +1865,84 @@ fn avatar_cortex_renderer_view_frame(frame: &Value, index: usize, duration_ms: i
 
 fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
     match token {
+        "xiao_shu::soft_bounce::low" => vec![json!({
+            "variant_id": "sidecar_soft_bounce_v1",
+            "label": "sidecar soft bounce v1",
+            "sprite_row": 0,
+            "sprite_frames": 8,
+            "alert_mark": false,
+            "default": true,
+            "intent": "motion-canonical baseline bounce using Xiao Shu sidecar identity cues without requiring an installed Codex pet package",
+            "sidecar_asset": {
+                "asset_id": "xiao-shu-motion-canonical-soft-bounce-v1",
+                "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1",
+                "format": "image/svg+xml",
+                "atlas": "1536x1872",
+                "cell": "192x208",
+                "read_only": true,
+                "official_pet_package_mutation": false,
+                "art_pass": "motion_canonical_baseline_v1"
+            },
+            "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1",
+            "frame_choreography": {
+                "schema": 1,
+                "choreography_id": "soft_bounce_sidecar_v1_frame_choreo",
+                "mode": "sidecar_sprite_atlas_columns",
+                "uses_css_motion": false,
+                "loop": "soft_bounce_return",
+                "duration_ms": 1800,
+                "frames": [
+                    {"row": 0, "col": 0, "hold_ms": 180, "phase": "idle_entry", "mark": false},
+                    {"row": 0, "col": 1, "hold_ms": 160, "phase": "compress", "mark": false},
+                    {"row": 0, "col": 2, "hold_ms": 150, "phase": "lift_start", "mark": false},
+                    {"row": 0, "col": 3, "hold_ms": 190, "phase": "apex", "mark": false},
+                    {"row": 0, "col": 4, "hold_ms": 220, "phase": "float", "mark": false},
+                    {"row": 0, "col": 5, "hold_ms": 170, "phase": "descend", "mark": false},
+                    {"row": 0, "col": 6, "hold_ms": 170, "phase": "settle", "mark": false},
+                    {"row": 0, "col": 7, "hold_ms": 560, "phase": "idle_return", "mark": false}
+                ],
+                "review_note": "keeps the cheerful confirmation readable without relying on the missing installed pet spritesheet",
+            },
+            "review_question": "does the sidecar baseline bounce still feel calm after several loops",
+        })],
+        "xiao_shu::idle_breathe::low" => vec![json!({
+            "variant_id": "sidecar_idle_breathe_v1",
+            "label": "sidecar idle breathe v1",
+            "sprite_row": 0,
+            "sprite_frames": 6,
+            "alert_mark": false,
+            "default": true,
+            "intent": "motion-canonical idle loop for quiet desktop presence without requiring an installed Codex pet package",
+            "sidecar_asset": {
+                "asset_id": "xiao-shu-motion-canonical-idle-breathe-v1",
+                "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1",
+                "format": "image/svg+xml",
+                "atlas": "1536x1872",
+                "cell": "192x208",
+                "read_only": true,
+                "official_pet_package_mutation": false,
+                "art_pass": "motion_canonical_baseline_v1"
+            },
+            "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1",
+            "frame_choreography": {
+                "schema": 1,
+                "choreography_id": "idle_breathe_sidecar_v1_frame_choreo",
+                "mode": "sidecar_sprite_atlas_columns",
+                "uses_css_motion": false,
+                "loop": "quiet_breathe",
+                "duration_ms": 1800,
+                "frames": [
+                    {"row": 0, "col": 0, "hold_ms": 260, "phase": "idle_floor", "mark": false},
+                    {"row": 0, "col": 1, "hold_ms": 260, "phase": "inhale_start", "mark": false},
+                    {"row": 0, "col": 2, "hold_ms": 300, "phase": "inhale_hold", "mark": false},
+                    {"row": 0, "col": 3, "hold_ms": 300, "phase": "soft_hold", "mark": false},
+                    {"row": 0, "col": 4, "hold_ms": 260, "phase": "exhale", "mark": false},
+                    {"row": 0, "col": 5, "hold_ms": 420, "phase": "idle_return", "mark": false}
+                ],
+                "review_note": "slows the source 300ms idle fixture into a humane desktop breathing loop for visual QA",
+            },
+            "review_question": "does idle remain present without becoming needy beside a coding session",
+        })],
         "xiao_shu::alert_peek::medium" => vec![
             json!({
                 "variant_id": "current_alert_row",
@@ -2147,7 +2225,7 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
         "semantic_variant_count": semantic_variants.len(),
         "has_semantic_variants": has_semantic_variants,
         "semantic_variants": semantic_variants,
-        "semantic_variant_review": if has_semantic_variants {
+        "semantic_variant_review": if token == "xiao_shu::alert_peek::medium" && has_semantic_variants {
             json!({
                 "schema": 1,
                 "surface": "alert_peek_semantic_variant_review",
@@ -6155,6 +6233,16 @@ mod tests {
         );
         assert_eq!(first["renderer"]["asset_pet_id"], "xiao-shu-dev");
         assert_eq!(first["renderer"]["official_pet_package_mutation"], false);
+        assert_eq!(first["semantic_variant_count"], 1);
+        assert_eq!(
+            first["semantic_variants"][0]["variant_id"],
+            "sidecar_soft_bounce_v1"
+        );
+        assert_eq!(
+            first["semantic_variants"][0]["sidecar_asset"]["asset_id"],
+            "xiao-shu-motion-canonical-soft-bounce-v1"
+        );
+        assert_eq!(first["semantic_variant_review"], Value::Null);
         assert!(first["frames"][2]["css_classes"]
             .as_str()
             .unwrap()
@@ -6167,6 +6255,20 @@ mod tests {
             true
         );
         let tracks = view["renderer_view"]["tracks"].as_array().unwrap();
+        let idle_breathe = tracks
+            .iter()
+            .find(|track| track["token"] == "xiao_shu::idle_breathe::low")
+            .unwrap();
+        assert_eq!(idle_breathe["semantic_variant_count"], 1);
+        assert_eq!(
+            idle_breathe["semantic_variants"][0]["variant_id"],
+            "sidecar_idle_breathe_v1"
+        );
+        assert_eq!(
+            idle_breathe["semantic_variants"][0]["sidecar_asset"]["asset_id"],
+            "xiao-shu-motion-canonical-idle-breathe-v1"
+        );
+        assert_eq!(idle_breathe["semantic_variant_review"], Value::Null);
         let sorting_glow = tracks
             .iter()
             .find(|track| track["token"] == "xiao_shu::sorting_glow::medium")

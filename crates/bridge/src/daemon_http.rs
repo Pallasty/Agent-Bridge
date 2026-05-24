@@ -1142,6 +1142,11 @@ fn avatar_sidecar_spritesheet_svg(asset: &str) -> Option<String> {
     if asset == "xiao-shu-motion-canonical-peek-v4" {
         return avatar_sidecar_motion_canonical_peek_v4_svg();
     }
+    if asset == "xiao-shu-motion-canonical-soft-bounce-v1"
+        || asset == "xiao-shu-motion-canonical-idle-breathe-v1"
+    {
+        return avatar_sidecar_baseline_motion_svg(asset);
+    }
     if asset != "xiao-shu-alert-peek-v2" {
         return None;
     }
@@ -1337,6 +1342,323 @@ fn avatar_sidecar_spritesheet_svg(asset: &str) -> Option<String> {
             tilt = frame.tilt,
             left_arm = frame.left_arm,
             right_arm = frame.right_arm,
+            eyes = eyes,
+            cheek = frame.cheek,
+            mouth = mouth
+        )
+        .ok()?;
+    }
+
+    svg.push_str("</svg>\n");
+    Some(svg)
+}
+
+fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
+    use std::fmt::Write as _;
+
+    struct Frame {
+        col: i32,
+        rise: i32,
+        tilt: i32,
+        scale: &'static str,
+        eye_shift: i32,
+        blink: bool,
+        mouth: &'static str,
+        left_arm: i32,
+        right_arm: i32,
+        ribbon: i32,
+        cheek: &'static str,
+    }
+
+    let (title, frames): (&str, Vec<Frame>) = match asset {
+        "xiao-shu-motion-canonical-soft-bounce-v1" => (
+            "Xiao Shu motion-canonical soft bounce sidecar v1 sprite atlas",
+            vec![
+                Frame {
+                    col: 0,
+                    rise: 8,
+                    tilt: -1,
+                    scale: "0.96",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "smile",
+                    left_arm: 7,
+                    right_arm: -7,
+                    ribbon: -8,
+                    cheek: "0.26",
+                },
+                Frame {
+                    col: 1,
+                    rise: 6,
+                    tilt: -2,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "smile",
+                    left_arm: 10,
+                    right_arm: -10,
+                    ribbon: -12,
+                    cheek: "0.28",
+                },
+                Frame {
+                    col: 2,
+                    rise: -8,
+                    tilt: -3,
+                    scale: "1.02",
+                    eye_shift: 1,
+                    blink: false,
+                    mouth: "smile",
+                    left_arm: 15,
+                    right_arm: -14,
+                    ribbon: -18,
+                    cheek: "0.32",
+                },
+                Frame {
+                    col: 3,
+                    rise: -24,
+                    tilt: 2,
+                    scale: "1.05",
+                    eye_shift: 1,
+                    blink: false,
+                    mouth: "wide",
+                    left_arm: 21,
+                    right_arm: -20,
+                    ribbon: 8,
+                    cheek: "0.36",
+                },
+                Frame {
+                    col: 4,
+                    rise: -18,
+                    tilt: 3,
+                    scale: "1.04",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "wide",
+                    left_arm: 18,
+                    right_arm: -18,
+                    ribbon: 14,
+                    cheek: "0.34",
+                },
+                Frame {
+                    col: 5,
+                    rise: -4,
+                    tilt: 1,
+                    scale: "1.00",
+                    eye_shift: 0,
+                    blink: true,
+                    mouth: "smile",
+                    left_arm: 12,
+                    right_arm: -12,
+                    ribbon: 4,
+                    cheek: "0.32",
+                },
+                Frame {
+                    col: 6,
+                    rise: 5,
+                    tilt: -2,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "smile",
+                    left_arm: 8,
+                    right_arm: -8,
+                    ribbon: -6,
+                    cheek: "0.28",
+                },
+                Frame {
+                    col: 7,
+                    rise: 8,
+                    tilt: -1,
+                    scale: "0.96",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 6,
+                    right_arm: -6,
+                    ribbon: -8,
+                    cheek: "0.24",
+                },
+            ],
+        ),
+        "xiao-shu-motion-canonical-idle-breathe-v1" => (
+            "Xiao Shu motion-canonical idle breathe sidecar v1 sprite atlas",
+            vec![
+                Frame {
+                    col: 0,
+                    rise: 8,
+                    tilt: 0,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 4,
+                    right_arm: -4,
+                    ribbon: -4,
+                    cheek: "0.20",
+                },
+                Frame {
+                    col: 1,
+                    rise: 5,
+                    tilt: -1,
+                    scale: "0.99",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 5,
+                    right_arm: -5,
+                    ribbon: -6,
+                    cheek: "0.22",
+                },
+                Frame {
+                    col: 2,
+                    rise: 2,
+                    tilt: 0,
+                    scale: "1.00",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 6,
+                    right_arm: -6,
+                    ribbon: 0,
+                    cheek: "0.24",
+                },
+                Frame {
+                    col: 3,
+                    rise: 0,
+                    tilt: 1,
+                    scale: "1.01",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 7,
+                    right_arm: -7,
+                    ribbon: 4,
+                    cheek: "0.26",
+                },
+                Frame {
+                    col: 4,
+                    rise: 3,
+                    tilt: 0,
+                    scale: "1.00",
+                    eye_shift: 0,
+                    blink: true,
+                    mouth: "soft",
+                    left_arm: 5,
+                    right_arm: -5,
+                    ribbon: 0,
+                    cheek: "0.24",
+                },
+                Frame {
+                    col: 5,
+                    rise: 6,
+                    tilt: -1,
+                    scale: "0.99",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 4,
+                    right_arm: -4,
+                    ribbon: -4,
+                    cheek: "0.22",
+                },
+            ],
+        ),
+        _ => return None,
+    };
+
+    let mut svg = String::new();
+    svg.push_str(&format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872" viewBox="0 0 1536 1872">
+  <title>{title}</title>
+  <defs>
+    <linearGradient id="xsb-head" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f1d89f"/>
+      <stop offset="0.62" stop-color="#e4bd76"/>
+      <stop offset="1" stop-color="#b9803e"/>
+    </linearGradient>
+    <linearGradient id="xsb-robe" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f0dfb8"/>
+      <stop offset="1" stop-color="#cba35e"/>
+    </linearGradient>
+    <filter id="xsb-shadow" x="-24%" y="-24%" width="148%" height="148%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#2d2018" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+"##,
+        title = title
+    ));
+
+    for frame in frames {
+        let x = frame.col * 192;
+        let left_eye_x = 73 + frame.eye_shift;
+        let right_eye_x = 119 + frame.eye_shift;
+        let eyes = if frame.blink {
+            format!(
+                r##"<path d="M{left_eye_x} 92 h15" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>
+      <path d="M{right_eye_x} 92 h15" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>"##
+            )
+        } else {
+            format!(
+                r##"<ellipse cx="{left_eye_x}" cy="92" rx="7" ry="12" fill="#35251a"/>
+      <ellipse cx="{right_eye_x}" cy="92" rx="7" ry="12" fill="#35251a"/>
+      <circle cx="{left_eye_x}" cy="87" r="2" fill="#f8efd6"/>
+      <circle cx="{right_eye_x}" cy="87" r="2" fill="#f8efd6"/>"##
+            )
+        };
+        let mouth = match frame.mouth {
+            "wide" => {
+                r##"<path d="M78 107 Q96 123 114 107" fill="none" stroke="#35251a" stroke-width="5" stroke-linecap="round"/>"##
+            }
+            "soft" => {
+                r##"<path d="M85 109 Q96 117 107 109" fill="none" stroke="#35251a" stroke-width="4.5" stroke-linecap="round"/>"##
+            }
+            "smile" => {
+                r##"<path d="M81 108 Q96 120 111 108" fill="none" stroke="#35251a" stroke-width="4.5" stroke-linecap="round"/>"##
+            }
+            _ => {
+                r##"<path d="M88 110 Q96 114 104 110" fill="none" stroke="#35251a" stroke-width="4" stroke-linecap="round"/>"##
+            }
+        };
+
+        writeln!(
+            svg,
+            r##"  <g id="frame-{col}" transform="translate({x} 0)">
+    <rect width="192" height="208" fill="none"/>
+    <ellipse cx="96" cy="190" rx="54" ry="12" fill="#2d2018" opacity="0.14"/>
+    <g filter="url(#xsb-shadow)" transform="translate(96 118) scale({scale}) translate(-96 -118) translate(0 {rise})">
+      <g transform="translate(96 96) rotate({tilt}) translate(-96 -96)">
+        <ellipse cx="96" cy="154" rx="51" ry="44" fill="url(#xsb-robe)" stroke="#3a291c" stroke-width="5"/>
+        <path d="M58 133 C76 121 116 121 134 133" fill="none" stroke="#b94735" stroke-width="6" stroke-linecap="round"/>
+        <path d="M72 132 L96 187 L120 132" fill="#ead9ad" stroke="#8f4a32" stroke-width="4" stroke-linejoin="round"/>
+        <path d="M83 137 L108 163 L93 188" fill="none" stroke="#b94735" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <g transform="translate(53 148) rotate({left_arm})">
+          <ellipse cx="0" cy="0" rx="14" ry="27" fill="#d4ad64" stroke="#3a291c" stroke-width="5"/>
+          <ellipse cx="0" cy="-18" rx="8" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+        </g>
+        <g transform="translate(139 148) rotate({right_arm})">
+          <ellipse cx="0" cy="0" rx="14" ry="27" fill="#d4ad64" stroke="#3a291c" stroke-width="5"/>
+          <ellipse cx="0" cy="-18" rx="8" ry="5" fill="#f0d59f" stroke="#3a291c" stroke-width="3"/>
+        </g>
+        <path d="M48 70 C48 43 67 27 96 27 C125 27 144 43 144 70 L144 90 C144 124 123 144 96 144 C69 144 48 124 48 90 Z" fill="url(#xsb-head)" stroke="#3a291c" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M73 31 C63 19 73 8 82 17 C90 26 79 38 65 33" fill="none" stroke="#9b6b32" stroke-width="5" stroke-linecap="round"/>
+        <path d="M114 37 C130 21 154 29 152 52 C138 47 126 53 114 37 Z" fill="#b94735" stroke="#3a291c" stroke-width="4" stroke-linejoin="round" transform="rotate({ribbon} 134 42)"/>
+        <circle cx="140" cy="61" r="6" fill="#56c6cc" stroke="#3a291c" stroke-width="3"/>
+        {eyes}
+        <ellipse cx="60" cy="112" rx="12" ry="7" fill="#c95f4a" opacity="{cheek}"/>
+        <ellipse cx="132" cy="112" rx="12" ry="7" fill="#c95f4a" opacity="{cheek}"/>
+        {mouth}
+      </g>
+    </g>
+  </g>
+"##,
+            col = frame.col,
+            x = x,
+            scale = frame.scale,
+            rise = frame.rise,
+            tilt = frame.tilt,
+            left_arm = frame.left_arm,
+            right_arm = frame.right_arm,
+            ribbon = frame.ribbon,
             eyes = eyes,
             cheek = frame.cheek,
             mouth = mouth
@@ -5852,6 +6174,10 @@ mod tests {
         assert!(html.contains("pet=xiao-shu-dev"));
         assert!(html.contains("<dd data-asset>"));
         assert!(html.contains("/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev"));
+        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1"));
+        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1"));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-soft-bounce-v1\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-idle-breathe-v1\""));
         assert!(html.contains("Alert Peek Semantic Variants"));
         assert!(html.contains("data-variant-panel hidden"));
         assert!(html.contains("\"variant_id\":\"current_alert_row\""));
@@ -5942,6 +6268,10 @@ mod tests {
         let motion_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-peek-v4").unwrap();
         let canonical_svg = avatar_sidecar_spritesheet_svg("xiao-shu-canonical-peek-v3").unwrap();
+        let soft_bounce_svg =
+            avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-soft-bounce-v1").unwrap();
+        let idle_breathe_svg =
+            avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-idle-breathe-v1").unwrap();
 
         assert!(
             svg.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872""#)
@@ -5960,6 +6290,16 @@ mod tests {
         assert!(canonical_svg.contains(r#"id="frame-7""#));
         assert!(canonical_svg.contains("xs3-robe"));
         assert!(!canonical_svg.contains("xiao-shu-canonical-peek-v3"));
+        assert!(soft_bounce_svg
+            .contains("Xiao Shu motion-canonical soft bounce sidecar v1 sprite atlas"));
+        assert!(soft_bounce_svg.contains(r#"id="frame-7""#));
+        assert!(soft_bounce_svg.contains("xsb-robe"));
+        assert!(soft_bounce_svg.contains("rotate(21)"));
+        assert!(idle_breathe_svg
+            .contains("Xiao Shu motion-canonical idle breathe sidecar v1 sprite atlas"));
+        assert!(idle_breathe_svg.contains(r#"id="frame-5""#));
+        assert!(idle_breathe_svg.contains("xsb-robe"));
+        assert!(!idle_breathe_svg.contains(r#"id="frame-7""#));
         assert!(avatar_sidecar_spritesheet_svg("unknown").is_none());
     }
 }
