@@ -5,7 +5,7 @@
 //! a dedicated snapshot file for inspection.
 
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -1990,85 +1990,168 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
             },
             "review_question": "does idle remain present without becoming needy beside a coding session",
         })],
-        "xiao_shu::sorting_glow::medium" => vec![json!({
-            "variant_id": "sidecar_sorting_glow_v1",
-            "label": "sidecar sorting glow v1",
-            "sprite_row": 0,
-            "sprite_frames": 8,
-            "alert_mark": false,
-            "default": true,
-            "intent": "motion-canonical review-only processing loop with visible signal sorting glow, independent of the installed Codex pet package",
-            "sidecar_asset": {
-                "asset_id": "xiao-shu-motion-canonical-sorting-glow-v1",
-                "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1",
-                "format": "image/svg+xml",
-                "atlas": "1536x1872",
-                "cell": "192x208",
-                "read_only": true,
-                "official_pet_package_mutation": false,
-                "art_pass": "motion_canonical_review_v1"
-            },
-            "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1",
-            "frame_choreography": {
-                "schema": 1,
-                "choreography_id": "sorting_glow_sidecar_v1_frame_choreo",
-                "mode": "sidecar_sprite_atlas_columns",
-                "uses_css_motion": false,
-                "loop": "gather_sort_glow_return",
-                "duration_ms": 1440,
-                "frames": [
-                    {"row": 0, "col": 0, "hold_ms": 150, "phase": "idle_entry", "mark": false},
-                    {"row": 0, "col": 1, "hold_ms": 160, "phase": "gather_left", "mark": false},
-                    {"row": 0, "col": 2, "hold_ms": 170, "phase": "sort_left", "mark": false},
-                    {"row": 0, "col": 3, "hold_ms": 190, "phase": "sort_right", "mark": false},
-                    {"row": 0, "col": 4, "hold_ms": 260, "phase": "glow_peak", "mark": false},
-                    {"row": 0, "col": 5, "hold_ms": 190, "phase": "coalesce", "mark": false},
-                    {"row": 0, "col": 6, "hold_ms": 160, "phase": "settle", "mark": false},
-                    {"row": 0, "col": 7, "hold_ms": 160, "phase": "idle_return", "mark": false}
-                ],
-                "review_note": "keeps sorting_glow visually distinct from alert_peek by using process glow instead of attention marks",
-            },
-            "review_question": "does sorting_glow read as quiet processing rather than a warning or alert",
-        })],
-        "xiao_shu::look_sideways::medium" => vec![json!({
-            "variant_id": "sidecar_look_sideways_v1",
-            "label": "sidecar look sideways v1",
-            "sprite_row": 0,
-            "sprite_frames": 7,
-            "alert_mark": false,
-            "default": true,
-            "intent": "motion-canonical review-only sideways glance for gentle inspection states without relying on the installed Codex pet package",
-            "sidecar_asset": {
-                "asset_id": "xiao-shu-motion-canonical-look-sideways-v1",
-                "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1",
-                "format": "image/svg+xml",
-                "atlas": "1536x1872",
-                "cell": "192x208",
-                "read_only": true,
-                "official_pet_package_mutation": false,
-                "art_pass": "motion_canonical_review_v1"
-            },
-            "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1",
-            "frame_choreography": {
-                "schema": 1,
-                "choreography_id": "look_sideways_sidecar_v1_frame_choreo",
-                "mode": "sidecar_sprite_atlas_columns",
-                "uses_css_motion": false,
-                "loop": "glance_hold_return",
-                "duration_ms": 1320,
-                "frames": [
-                    {"row": 0, "col": 0, "hold_ms": 160, "phase": "idle_entry", "mark": false},
-                    {"row": 0, "col": 1, "hold_ms": 170, "phase": "notice_side", "mark": false},
-                    {"row": 0, "col": 2, "hold_ms": 190, "phase": "glance_left", "mark": false},
-                    {"row": 0, "col": 3, "hold_ms": 260, "phase": "inspect_hold", "mark": false},
-                    {"row": 0, "col": 4, "hold_ms": 190, "phase": "blink_hold", "mark": false},
-                    {"row": 0, "col": 5, "hold_ms": 170, "phase": "returning", "mark": false},
-                    {"row": 0, "col": 6, "hold_ms": 180, "phase": "idle_return", "mark": false}
-                ],
-                "review_note": "uses eye and ribbon offsets instead of warning color so the glance remains curious, not urgent",
-            },
-            "review_question": "does look_sideways feel like calm inspection rather than distraction",
-        })],
+        "xiao_shu::sorting_glow::medium" => vec![
+            json!({
+                "variant_id": "sidecar_sorting_glow_v2",
+                "label": "sidecar sorting glow v2",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": true,
+                "intent": "stronger motion-canonical review-only processing loop with a clearer gather-sort-glow arc, independent of the installed Codex pet package",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-motion-canonical-sorting-glow-v2",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v2",
+                    "format": "image/svg+xml",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "motion_canonical_review_v2"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v2",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "sorting_glow_sidecar_v2_frame_choreo",
+                    "mode": "sidecar_sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "gather_cross_sort_glow_return",
+                    "duration_ms": 1440,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 140, "phase": "idle_entry", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 150, "phase": "gather_left", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 165, "phase": "sort_left_peak", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 180, "phase": "sort_right_peak", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 280, "phase": "glow_peak", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 185, "phase": "coalesce", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 165, "phase": "settle", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 175, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "increases silhouette, eye, ribbon, and glow deltas so sorting_glow remains legible when the panel is small",
+                },
+                "review_question": "does sorting_glow now read as quiet processing rather than a warning or alert",
+            }),
+            json!({
+                "variant_id": "sidecar_sorting_glow_v1",
+                "label": "sidecar sorting glow v1",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": false,
+                "intent": "motion-canonical review-only processing loop with visible signal sorting glow, independent of the installed Codex pet package",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-motion-canonical-sorting-glow-v1",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1",
+                    "format": "image/svg+xml",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "motion_canonical_review_v1"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "sorting_glow_sidecar_v1_frame_choreo",
+                    "mode": "sidecar_sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "gather_sort_glow_return",
+                    "duration_ms": 1440,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 150, "phase": "idle_entry", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 160, "phase": "gather_left", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 170, "phase": "sort_left", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 190, "phase": "sort_right", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 260, "phase": "glow_peak", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 190, "phase": "coalesce", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 160, "phase": "settle", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 160, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "keeps sorting_glow visually distinct from alert_peek by using process glow instead of attention marks",
+                },
+                "review_question": "does sorting_glow read as quiet processing rather than a warning or alert",
+            }),
+        ],
+        "xiao_shu::look_sideways::medium" => vec![
+            json!({
+                "variant_id": "sidecar_look_sideways_v2",
+                "label": "sidecar look sideways v2",
+                "sprite_row": 0,
+                "sprite_frames": 7,
+                "alert_mark": false,
+                "default": true,
+                "intent": "stronger motion-canonical review-only sideways glance with clearer eye, tilt, and ribbon offsets, independent of the installed Codex pet package",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-motion-canonical-look-sideways-v2",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v2",
+                    "format": "image/svg+xml",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "motion_canonical_review_v2"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v2",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "look_sideways_sidecar_v2_frame_choreo",
+                    "mode": "sidecar_sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "notice_side_glance_hold_return",
+                    "duration_ms": 1320,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 150, "phase": "idle_entry", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 165, "phase": "notice_side", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 190, "phase": "glance_left", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 285, "phase": "inspect_hold", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 190, "phase": "blink_hold", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 165, "phase": "returning", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 175, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "increases sideways eye travel and head tilt so look_sideways reads as inspection instead of idle wobble",
+                },
+                "review_question": "does look_sideways now feel like calm inspection rather than distraction",
+            }),
+            json!({
+                "variant_id": "sidecar_look_sideways_v1",
+                "label": "sidecar look sideways v1",
+                "sprite_row": 0,
+                "sprite_frames": 7,
+                "alert_mark": false,
+                "default": false,
+                "intent": "motion-canonical review-only sideways glance for gentle inspection states without relying on the installed Codex pet package",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-motion-canonical-look-sideways-v1",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1",
+                    "format": "image/svg+xml",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "motion_canonical_review_v1"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "look_sideways_sidecar_v1_frame_choreo",
+                    "mode": "sidecar_sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "glance_hold_return",
+                    "duration_ms": 1320,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 160, "phase": "idle_entry", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 170, "phase": "notice_side", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 190, "phase": "glance_left", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 260, "phase": "inspect_hold", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 190, "phase": "blink_hold", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 170, "phase": "returning", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 180, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "uses eye and ribbon offsets instead of warning color so the glance remains curious, not urgent",
+                },
+                "review_question": "does look_sideways feel like calm inspection rather than distraction",
+            }),
+        ],
         "xiao_shu::alert_peek::medium" => vec![
             json!({
                 "variant_id": "current_alert_row",
@@ -2337,6 +2420,18 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
     let final_frame = frames.last().cloned().unwrap_or(Value::Null);
     let semantic_variants = avatar_cortex_renderer_view_track_variants(token);
     let has_semantic_variants = !semantic_variants.is_empty();
+    let preferred_variant = semantic_variants
+        .iter()
+        .find(|variant| {
+            variant
+                .get("default")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .or_else(|| semantic_variants.first())
+        .and_then(|variant| vstr(variant.get("variant_id")))
+        .map(|variant| json!(variant))
+        .unwrap_or(Value::Null);
 
     json!({
         "track_id": format!("xiao_shu_sidecar_renderer_track_{}", index + 1),
@@ -2348,6 +2443,7 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
         "review_only": preview.get("review_only").cloned().unwrap_or(json!(false)),
         "risk_level": preview.get("risk_level").cloned().unwrap_or(Value::Null),
         "visual_intent": preview.get("visual_intent").cloned().unwrap_or(Value::Null),
+        "preferred_variant": preferred_variant,
         "semantic_variant_count": semantic_variants.len(),
         "has_semantic_variants": has_semantic_variants,
         "semantic_variants": semantic_variants,
@@ -6641,11 +6737,13 @@ mod tests {
             entry["token"] == "xiao_shu::unknown::fallback"
                 && entry["reason"] == "fallback policy is not a named renderer binding"
         }));
-        assert!(plan["binding_plan"]["validation_checklist"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item == "needs_review and fallback_only tokens remain deferred"));
+        assert!(
+            plan["binding_plan"]["validation_checklist"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item == "needs_review and fallback_only tokens remain deferred")
+        );
     }
 
     #[test]
@@ -6695,11 +6793,13 @@ mod tests {
             fixture["fixture"]["first_fixture"]["golden_assertions"]["duration_ms"],
             1800
         );
-        assert!(!fixture["fixture"]["golden_payloads"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|entry| entry["token"] == "xiao_shu::sorting_glow::medium"));
+        assert!(
+            !fixture["fixture"]["golden_payloads"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["token"] == "xiao_shu::sorting_glow::medium")
+        );
     }
 
     #[test]
@@ -6813,10 +6913,12 @@ mod tests {
             "xiao-shu-motion-canonical-soft-bounce-v1"
         );
         assert_eq!(first["semantic_variant_review"], Value::Null);
-        assert!(first["frames"][2]["css_classes"]
-            .as_str()
-            .unwrap()
-            .contains("motion-soft-bounce"));
+        assert!(
+            first["frames"][2]["css_classes"]
+                .as_str()
+                .unwrap()
+                .contains("motion-soft-bounce")
+        );
         assert_eq!(
             first["final_frame"]["css_classes"]
                 .as_str()
@@ -6847,46 +6949,79 @@ mod tests {
         assert_eq!(sorting_glow["binding_stage"], "needs_review");
         assert_eq!(sorting_glow["review_only"], true);
         assert_eq!(sorting_glow["duration_ms"], 1440);
-        assert_eq!(sorting_glow["semantic_variant_count"], 1);
+        assert_eq!(sorting_glow["preferred_variant"], "sidecar_sorting_glow_v2");
+        assert_eq!(sorting_glow["semantic_variant_count"], 2);
         assert_eq!(
             sorting_glow["semantic_variants"][0]["variant_id"],
-            "sidecar_sorting_glow_v1"
+            "sidecar_sorting_glow_v2"
         );
+        assert_eq!(sorting_glow["semantic_variants"][0]["default"], true);
         assert_eq!(
             sorting_glow["semantic_variants"][0]["sidecar_asset"]["asset_id"],
+            "xiao-shu-motion-canonical-sorting-glow-v2"
+        );
+        assert_eq!(
+            sorting_glow["semantic_variants"][1]["variant_id"],
+            "sidecar_sorting_glow_v1"
+        );
+        assert_eq!(sorting_glow["semantic_variants"][1]["default"], false);
+        assert_eq!(
+            sorting_glow["semantic_variants"][1]["sidecar_asset"]["asset_id"],
             "xiao-shu-motion-canonical-sorting-glow-v1"
         );
         assert_eq!(sorting_glow["semantic_variant_review"], Value::Null);
-        assert!(sorting_glow["frames"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|frame| frame["css_classes"]
+        assert!(
+            sorting_glow["frames"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|frame| frame["css_classes"]
+                    .as_str()
+                    .unwrap()
+                    .contains("motion-sorting-glow"))
+        );
+        assert!(
+            sorting_glow["final_frame"]["css_classes"]
                 .as_str()
                 .unwrap()
-                .contains("motion-sorting-glow")));
-        assert!(sorting_glow["final_frame"]["css_classes"]
-            .as_str()
-            .unwrap()
-            .contains("pose-neutral-idle"));
-        assert!(sorting_glow["final_frame"]["css_classes"]
-            .as_str()
-            .unwrap()
-            .contains("motion-idle-breathe"));
-        assert!(tracks
-            .iter()
-            .any(|track| track["token"] == "xiao_shu::look_sideways::medium"));
+                .contains("pose-neutral-idle")
+        );
+        assert!(
+            sorting_glow["final_frame"]["css_classes"]
+                .as_str()
+                .unwrap()
+                .contains("motion-idle-breathe")
+        );
+        assert!(
+            tracks
+                .iter()
+                .any(|track| track["token"] == "xiao_shu::look_sideways::medium")
+        );
         let look_sideways = tracks
             .iter()
             .find(|track| track["token"] == "xiao_shu::look_sideways::medium")
             .unwrap();
-        assert_eq!(look_sideways["semantic_variant_count"], 1);
+        assert_eq!(
+            look_sideways["preferred_variant"],
+            "sidecar_look_sideways_v2"
+        );
+        assert_eq!(look_sideways["semantic_variant_count"], 2);
         assert_eq!(
             look_sideways["semantic_variants"][0]["variant_id"],
-            "sidecar_look_sideways_v1"
+            "sidecar_look_sideways_v2"
         );
+        assert_eq!(look_sideways["semantic_variants"][0]["default"], true);
         assert_eq!(
             look_sideways["semantic_variants"][0]["sidecar_asset"]["asset_id"],
+            "xiao-shu-motion-canonical-look-sideways-v2"
+        );
+        assert_eq!(
+            look_sideways["semantic_variants"][1]["variant_id"],
+            "sidecar_look_sideways_v1"
+        );
+        assert_eq!(look_sideways["semantic_variants"][1]["default"], false);
+        assert_eq!(
+            look_sideways["semantic_variants"][1]["sidecar_asset"]["asset_id"],
             "xiao-shu-motion-canonical-look-sideways-v1"
         );
         assert_eq!(look_sideways["semantic_variant_review"], Value::Null);
@@ -6983,8 +7118,7 @@ mod tests {
             "小舒发现一点需要你看一下。"
         );
         assert_eq!(
-            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["gate"]
-                ["real_emit_surface"],
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["gate"]["real_emit_surface"],
             "agent-bridge avatar cortex-voice-emit"
         );
         assert!(
@@ -6994,8 +7128,7 @@ mod tests {
                 .contains("preview_text=%E5%B0%8F%E8%88%92")
         );
         assert_eq!(
-            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["gate"]
-                ["http_emit_route"],
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["gate"]["http_emit_route"],
             Value::Null
         );
         assert_eq!(
@@ -7039,8 +7172,8 @@ mod tests {
         assert_eq!(view["codex_pet_package_mutation"], false);
         assert_eq!(view["renderer_view"]["track_count"], 5);
         assert_eq!(
-            view["source_visual_adapter"]["source_fixture"]["source_plan"]["registry"]
-                ["source_status"]["launchd"]["degraded"],
+            view["source_visual_adapter"]["source_fixture"]["source_plan"]["registry"]["source_status"]
+                ["launchd"]["degraded"],
             true
         );
     }
@@ -7110,11 +7243,13 @@ mod tests {
         assert_eq!(sorting_glow["automatic_gate"], "ready_for_manual_review");
         assert_eq!(sorting_glow["can_promote_binding"], false);
         assert_eq!(sorting_glow["auto_checks"]["returns_to_idle"], true);
-        assert!(sorting_glow["review_questions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|question| question == "does the glow imply urgency"));
+        assert!(
+            sorting_glow["review_questions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|question| question == "does the glow imply urgency")
+        );
     }
 
     #[test]
@@ -7169,17 +7304,21 @@ mod tests {
             alert["review_packet"]["voice_linkage"]["emits_audio_now"],
             false
         );
-        assert!(alert["review_packet"]["revision_response"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|step| step == "mute the attention mark brightness"));
-        assert!(alert["review_packet"]["required_human_checks"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|check| check
-                == "should this ever pair with sparse voice output, or stay visual-only"));
+        assert!(
+            alert["review_packet"]["revision_response"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|step| step == "mute the attention mark brightness")
+        );
+        assert!(
+            alert["review_packet"]["required_human_checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|check| check
+                    == "should this ever pair with sparse voice output, or stay visual-only")
+        );
     }
 
     #[test]
@@ -7231,9 +7370,31 @@ mod tests {
             .find(|item| item["token"] == "xiao_shu::look_sideways::medium")
             .unwrap();
         assert_eq!(look_sideways["readiness"], "ready_for_human_visual_review");
+        assert_eq!(
+            look_sideways["preferred_variant"],
+            "sidecar_look_sideways_v2"
+        );
         assert_eq!(look_sideways["ready_for_approval"], false);
         assert_eq!(look_sideways["can_promote_binding"], false);
         assert_eq!(look_sideways["evidence_counts"]["source_blockers"], 0);
+        assert!(
+            look_sideways["review_record_command"]
+                .as_str()
+                .unwrap()
+                .contains("--variant \"sidecar_look_sideways_v2\"")
+        );
+
+        let sorting_glow = items
+            .iter()
+            .find(|item| item["token"] == "xiao_shu::sorting_glow::medium")
+            .unwrap();
+        assert_eq!(sorting_glow["preferred_variant"], "sidecar_sorting_glow_v2");
+        assert!(
+            sorting_glow["review_record_command"]
+                .as_str()
+                .unwrap()
+                .contains("--variant \"sidecar_sorting_glow_v2\"")
+        );
 
         let alert = items
             .iter()
@@ -7350,10 +7511,12 @@ mod tests {
         assert_eq!(alert["can_promote_binding"], false);
         assert_eq!(alert["human_decision_present"], true);
         assert_eq!(alert["latest_review_record"]["review_id"], "xsrrev-test");
-        assert!(alert["review_record_command"]
-            .as_str()
-            .unwrap()
-            .contains("cortex-review-record"));
+        assert!(
+            alert["review_record_command"]
+                .as_str()
+                .unwrap()
+                .contains("cortex-review-record")
+        );
     }
 
     #[test]
@@ -7447,16 +7610,20 @@ mod tests {
             request["safety"]["codex_pet_package_mutation_allowed"],
             false
         );
-        assert!(request["command_args"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|arg| arg == "--allow-policy-override"));
-        assert!(request["command_args"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|arg| arg == "小舒发现一点需要你看一下。"));
+        assert!(
+            request["command_args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|arg| arg == "--allow-policy-override")
+        );
+        assert!(
+            request["command_args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|arg| arg == "小舒发现一点需要你看一下。")
+        );
 
         let blocked = avatar_cortex_voice_request_from_policy_payload(
             payload["source_voice_policy"].clone(),
@@ -7514,24 +7681,30 @@ mod tests {
             confirm["safety"]["codex_pet_package_mutation_allowed"],
             false
         );
-        assert!(confirm["command_args"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|arg| arg == "--allow-policy-override"));
+        assert!(
+            confirm["command_args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|arg| arg == "--allow-policy-override")
+        );
         assert_eq!(
             confirm["action_surface"],
             "agent-bridge avatar cortex-voice-action"
         );
-        assert!(confirm["action_command_args"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|arg| arg == "cortex-voice-action"));
-        assert!(confirm["action_command_preview"]
-            .as_str()
-            .unwrap()
-            .contains("--confirm --emit"));
+        assert!(
+            confirm["action_command_args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|arg| arg == "cortex-voice-action")
+        );
+        assert!(
+            confirm["action_command_preview"]
+                .as_str()
+                .unwrap()
+                .contains("--confirm --emit")
+        );
 
         let waiting = avatar_cortex_voice_confirm_from_request_payload(
             payload["source_voice_request"].clone(),
@@ -7605,15 +7778,19 @@ mod tests {
         );
         assert_eq!(action["action"]["confirmed"], true);
         assert_eq!(action["action"]["blocked"], true);
-        assert!(action["action"]["blocked_reasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason == "emit_flag_missing"));
-        assert!(action["action"]["command_preview"]
-            .as_str()
-            .unwrap()
-            .contains("cortex-voice-action"));
+        assert!(
+            action["action"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "emit_flag_missing")
+        );
+        assert!(
+            action["action"]["command_preview"]
+                .as_str()
+                .unwrap()
+                .contains("cortex-voice-action")
+        );
         assert_eq!(action["source_voice_emit"], Value::Null);
 
         let waiting = avatar_cortex_voice_confirm_from_request_payload(
@@ -7628,12 +7805,16 @@ mod tests {
         let blocked =
             avatar_cortex_voice_action_from_confirm_payload(waiting, &blocked_opts).unwrap();
         let reasons = blocked["action"]["blocked_reasons"].as_array().unwrap();
-        assert!(reasons
-            .iter()
-            .any(|reason| reason == "confirm_flag_missing"));
-        assert!(reasons
-            .iter()
-            .any(|reason| reason == "confirmation_not_ready"));
+        assert!(
+            reasons
+                .iter()
+                .any(|reason| reason == "confirm_flag_missing")
+        );
+        assert!(
+            reasons
+                .iter()
+                .any(|reason| reason == "confirmation_not_ready")
+        );
         assert_eq!(blocked["actual_emit_invoked"], false);
         assert_eq!(blocked["emits_audio"], false);
     }
@@ -7684,16 +7865,20 @@ mod tests {
         assert_eq!(preview["would_emit_audio"], false);
         assert_eq!(preview["action_preview"]["ready_to_emit_now"], false);
         assert_eq!(preview["action_preview"]["blocked"], true);
-        assert!(preview["action_preview"]["blocked_reasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason == "cooldown_active"));
+        assert!(
+            preview["action_preview"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "cooldown_active")
+        );
         assert_eq!(preview["gate_dry_run"]["cooldown"]["active"], true);
-        assert!(preview["action_preview"]["command_preview"]
-            .as_str()
-            .unwrap()
-            .contains("cortex-voice-action"));
+        assert!(
+            preview["action_preview"]["command_preview"]
+                .as_str()
+                .unwrap()
+                .contains("cortex-voice-action")
+        );
 
         let forced_opts = AvatarCortexVoiceActionPreviewOptions {
             force: true,
@@ -7812,19 +7997,25 @@ mod tests {
             true
         );
         assert_eq!(request["action_request"]["ready_for_local_cli_emit"], false);
-        assert!(request["action_request"]["blocked_reasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason == "human_confirmation_required"));
-        assert!(request["action_request"]["confirm_request_command"]
-            .as_str()
-            .unwrap()
-            .contains("--confirm"));
-        assert!(request["action_request"]["emit_command"]
-            .as_str()
-            .unwrap()
-            .contains("cortex-voice-action"));
+        assert!(
+            request["action_request"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "human_confirmation_required")
+        );
+        assert!(
+            request["action_request"]["confirm_request_command"]
+                .as_str()
+                .unwrap()
+                .contains("--confirm")
+        );
+        assert!(
+            request["action_request"]["emit_command"]
+                .as_str()
+                .unwrap()
+                .contains("cortex-voice-action")
+        );
 
         let unsupported = xiao_shu_action_request_from_preview(
             request["downstream_action_preview"].clone(),
@@ -7891,10 +8082,12 @@ mod tests {
         );
 
         assert_eq!(record["schema"], 1);
-        assert!(record["request_id"]
-            .as_str()
-            .unwrap()
-            .starts_with("xsr-1779470000-"));
+        assert!(
+            record["request_id"]
+                .as_str()
+                .unwrap()
+                .starts_with("xsr-1779470000-")
+        );
         assert_eq!(record["state"], "pending_human_confirmation");
         assert_eq!(record["llm_safe"], true);
         assert_eq!(record["sidecar_only"], true);
@@ -7908,14 +8101,18 @@ mod tests {
         assert_eq!(record["writes_cooldown_state"], false);
         assert_eq!(record["codex_pet_package_mutation"], false);
         assert_eq!(record["queue_path"], queue_path.to_string_lossy().as_ref());
-        assert!(record["local_confirm_command"]
-            .as_str()
-            .unwrap()
-            .contains("xiao-shu-action-request-action"));
-        assert!(record["local_emit_command"]
-            .as_str()
-            .unwrap()
-            .contains("--confirm --emit"));
+        assert!(
+            record["local_confirm_command"]
+                .as_str()
+                .unwrap()
+                .contains("xiao-shu-action-request-action")
+        );
+        assert!(
+            record["local_emit_command"]
+                .as_str()
+                .unwrap()
+                .contains("--confirm --emit")
+        );
         assert_eq!(record["action_request"]["actor"], "codex");
         assert_eq!(
             record["source_request"]["action_request"]["request_state"],
@@ -8184,10 +8381,12 @@ mod tests {
         assert_eq!(gate["emits_audio"], false);
         assert_eq!(gate["emits_notification"], false);
         assert_eq!(gate["required"]["explicit_enabled"], false);
-        assert!(gate["gate"]["blocked_reasons"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("gate_disabled")));
+        assert!(
+            gate["gate"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("gate_disabled"))
+        );
     }
 
     #[test]
@@ -8201,10 +8400,12 @@ mod tests {
         );
         assert_eq!(gate["would_emit"], false);
         assert_eq!(gate["required"]["operator_reason_present"], false);
-        assert!(gate["gate"]["blocked_reasons"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("missing_reason")));
+        assert!(
+            gate["gate"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("missing_reason"))
+        );
     }
 
     #[test]
@@ -8218,10 +8419,12 @@ mod tests {
         );
         assert_eq!(gate["would_emit"], false);
         assert_eq!(gate["required"]["voice_policy_allowed"], false);
-        assert!(gate["gate"]["blocked_reasons"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("policy_voice_disabled")));
+        assert!(
+            gate["gate"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("policy_voice_disabled"))
+        );
     }
 
     #[test]
@@ -8237,10 +8440,12 @@ mod tests {
         assert_eq!(gate["dry_run"], true);
         assert_eq!(gate["emits_audio"], false);
         assert_eq!(gate["emits_notification"], false);
-        assert!(gate["gate"]["blocked_reasons"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            gate["gate"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -8289,10 +8494,12 @@ mod tests {
         assert_eq!(gate["gate"]["allow_policy_override"], true);
         assert_eq!(gate["required"]["voice_policy_allowed"], false);
         assert_eq!(gate["required"]["policy_override_allowed"], true);
-        assert!(gate["gate"]["blocked_reasons"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            gate["gate"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -8310,10 +8517,12 @@ mod tests {
         );
         assert_eq!(gate["would_emit"], false);
         assert_eq!(gate["cooldown"]["active"], true);
-        assert!(gate["gate"]["blocked_reasons"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("cooldown_active")));
+        assert!(
+            gate["gate"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("cooldown_active"))
+        );
 
         let forced = avatar_cortex_voice_gate_payload(
             sample_voice_preview(true),

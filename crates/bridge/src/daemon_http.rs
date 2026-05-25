@@ -58,14 +58,14 @@ use ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend};
 use ab_store::{AgentPresenceRecord, StateStore};
 use anyhow::{Context, Result};
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{Html, IntoResponse},
     routing::{get, post},
-    Json, Router,
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -1178,7 +1178,9 @@ fn avatar_sidecar_spritesheet_svg(asset: &str) -> Option<String> {
     if asset == "xiao-shu-motion-canonical-soft-bounce-v1"
         || asset == "xiao-shu-motion-canonical-idle-breathe-v1"
         || asset == "xiao-shu-motion-canonical-sorting-glow-v1"
+        || asset == "xiao-shu-motion-canonical-sorting-glow-v2"
         || asset == "xiao-shu-motion-canonical-look-sideways-v1"
+        || asset == "xiao-shu-motion-canonical-look-sideways-v2"
     {
         return avatar_sidecar_baseline_motion_svg(asset);
     }
@@ -1730,6 +1732,123 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                 },
             ],
         ),
+        "xiao-shu-motion-canonical-sorting-glow-v2" => (
+            "Xiao Shu motion-canonical sorting glow sidecar v2 sprite atlas",
+            vec![
+                Frame {
+                    col: 0,
+                    rise: 7,
+                    tilt: 0,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 2,
+                    right_arm: -2,
+                    ribbon: -4,
+                    cheek: "0.22",
+                    aura: "0.12",
+                },
+                Frame {
+                    col: 1,
+                    rise: 4,
+                    tilt: -5,
+                    scale: "1.00",
+                    eye_shift: -5,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 18,
+                    right_arm: -12,
+                    ribbon: -18,
+                    cheek: "0.25",
+                    aura: "0.28",
+                },
+                Frame {
+                    col: 2,
+                    rise: 1,
+                    tilt: -9,
+                    scale: "1.03",
+                    eye_shift: -10,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 28,
+                    right_arm: -20,
+                    ribbon: -32,
+                    cheek: "0.28",
+                    aura: "0.46",
+                },
+                Frame {
+                    col: 3,
+                    rise: -3,
+                    tilt: 7,
+                    scale: "1.04",
+                    eye_shift: 8,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: -20,
+                    right_arm: 30,
+                    ribbon: 26,
+                    cheek: "0.30",
+                    aura: "0.62",
+                },
+                Frame {
+                    col: 4,
+                    rise: -5,
+                    tilt: 2,
+                    scale: "1.06",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "wide",
+                    left_arm: 30,
+                    right_arm: -26,
+                    ribbon: 36,
+                    cheek: "0.36",
+                    aura: "0.82",
+                },
+                Frame {
+                    col: 5,
+                    rise: -1,
+                    tilt: -4,
+                    scale: "1.03",
+                    eye_shift: 6,
+                    blink: true,
+                    mouth: "soft",
+                    left_arm: 18,
+                    right_arm: -16,
+                    ribbon: 14,
+                    cheek: "0.32",
+                    aura: "0.58",
+                },
+                Frame {
+                    col: 6,
+                    rise: 3,
+                    tilt: 3,
+                    scale: "1.00",
+                    eye_shift: -2,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 8,
+                    right_arm: -8,
+                    ribbon: -8,
+                    cheek: "0.25",
+                    aura: "0.30",
+                },
+                Frame {
+                    col: 7,
+                    rise: 7,
+                    tilt: 0,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 2,
+                    right_arm: -2,
+                    ribbon: -4,
+                    cheek: "0.22",
+                    aura: "0.14",
+                },
+            ],
+        ),
         "xiao-shu-motion-canonical-look-sideways-v1" => (
             "Xiao Shu motion-canonical look sideways sidecar v1 sprite atlas",
             vec![
@@ -1822,6 +1941,109 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                     rise: 6,
                     tilt: 0,
                     scale: "0.99",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 4,
+                    right_arm: -4,
+                    ribbon: -4,
+                    cheek: "0.20",
+                    aura: "0.00",
+                },
+            ],
+        ),
+        "xiao-shu-motion-canonical-look-sideways-v2" => (
+            "Xiao Shu motion-canonical look sideways sidecar v2 sprite atlas",
+            vec![
+                Frame {
+                    col: 0,
+                    rise: 6,
+                    tilt: 0,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 4,
+                    right_arm: -4,
+                    ribbon: -4,
+                    cheek: "0.20",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 1,
+                    rise: 5,
+                    tilt: -5,
+                    scale: "1.00",
+                    eye_shift: -7,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 3,
+                    right_arm: -12,
+                    ribbon: -20,
+                    cheek: "0.22",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 2,
+                    rise: 4,
+                    tilt: -10,
+                    scale: "1.02",
+                    eye_shift: -14,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 2,
+                    right_arm: -24,
+                    ribbon: -38,
+                    cheek: "0.24",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 3,
+                    rise: 3,
+                    tilt: -13,
+                    scale: "1.03",
+                    eye_shift: -18,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 0,
+                    right_arm: -30,
+                    ribbon: -44,
+                    cheek: "0.27",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 4,
+                    rise: 4,
+                    tilt: -11,
+                    scale: "1.02",
+                    eye_shift: -16,
+                    blink: true,
+                    mouth: "soft",
+                    left_arm: 1,
+                    right_arm: -26,
+                    ribbon: -40,
+                    cheek: "0.24",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 5,
+                    rise: 5,
+                    tilt: -5,
+                    scale: "1.00",
+                    eye_shift: -8,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 3,
+                    right_arm: -14,
+                    ribbon: -22,
+                    cheek: "0.22",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 6,
+                    rise: 6,
+                    tilt: 0,
+                    scale: "0.98",
                     eye_shift: 0,
                     blink: false,
                     mouth: "small",
@@ -3807,9 +4029,7 @@ fn avatar_surface_review_report_html(
             .and_then(|acceptance| acceptance.get("records_persisted")),
         "false",
     );
-    let items = report
-        .get("items")
-        .and_then(Value::as_array);
+    let items = report.get("items").and_then(Value::as_array);
     let latest_record = items
         .and_then(|items| {
             items.iter().find_map(|item| {
@@ -4337,7 +4557,10 @@ fn avatar_surface_xiao_shu_action_requests_html(
     let state_counts = html_escape(&state_counts);
     let mut rows = String::new();
     for record in records {
-        let request_id_raw = record.get("request_id").and_then(Value::as_str).unwrap_or("-");
+        let request_id_raw = record
+            .get("request_id")
+            .and_then(Value::as_str)
+            .unwrap_or("-");
         let project_raw = record
             .get("project")
             .and_then(Value::as_str)
@@ -6442,11 +6665,17 @@ mod tests {
         );
         assert!(html.contains("xiao_shu::soft_bounce::low frames=4"));
         assert!(html.contains("motion=idle_breathe expression=bright_smile"));
-        assert!(html
-            .contains("pixels=false writes_files=false mutates_renderer=false pet_package=false"));
+        assert!(
+            html.contains(
+                "pixels=false writes_files=false mutates_renderer=false pet_package=false"
+            )
+        );
         assert!(html.contains("Xiao Shu Renderer View"));
-        assert!(html
-            .contains("tracks=5 selected=2 review=3 route=/avatar-surface/cortex-renderer-view"));
+        assert!(
+            html.contains(
+                "tracks=5 selected=2 review=3 route=/avatar-surface/cortex-renderer-view"
+            )
+        );
         assert!(html.contains("xiao_shu::soft_bounce::low frames=4"));
         assert!(html.contains("browser=true"));
         assert!(html.contains("renderer view"));
@@ -6485,8 +6714,11 @@ mod tests {
         assert!(html.contains("http_emit_route_added=false auto_emit=0"));
         assert!(html.contains("voice policy json"));
         assert!(html.contains("Xiao Shu Voice Request"));
-        assert!(html
-            .contains("state=ready_for_operator_confirmation token=xiao_shu::alert_peek::medium"));
+        assert!(
+            html.contains(
+                "state=ready_for_operator_confirmation token=xiao_shu::alert_peek::medium"
+            )
+        );
         assert!(html.contains("manual_cli=true second_step=true reason_present=false"));
         assert!(html.contains("auto_emit=false http_emit_route=null"));
         assert!(html.contains("voice request json"));
@@ -6592,20 +6824,38 @@ mod tests {
         assert!(html.contains("pet=xiao-shu-dev"));
         assert!(html.contains("<dd data-asset>"));
         assert!(html.contains("/avatar-surface/pet-spritesheet?pet_id=xiao-shu-dev"));
-        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1"));
-        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1"));
-        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1"));
-        assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1"));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1"
+        ));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1"
+        ));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1"
+        ));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v2"
+        ));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1"
+        ));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v2"
+        ));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-soft-bounce-v1\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-idle-breathe-v1\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-sorting-glow-v1\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-sorting-glow-v2\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-look-sideways-v1\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-look-sideways-v2\""));
         assert!(html.contains("<h2 data-variant-title>Renderer Variants</h2>"));
         assert!(html.contains("Sidecar Track Variants"));
         assert!(html.contains("Alert Peek Semantic Variants"));
         assert!(html.contains("data-variant-panel hidden"));
         assert!(html.contains("\"variant_id\":\"current_alert_row\""));
         assert!(html.contains("\"variant_id\":\"waiting_peek_row\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_sorting_glow_v2\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_look_sideways_v2\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v2\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v4\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v3\""));
@@ -6621,6 +6871,8 @@ mod tests {
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-peek-v4\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-canonical-peek-v3\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_frame_choreo_v1\""));
+        assert!(html.contains("\"choreography_id\":\"sorting_glow_sidecar_v2_frame_choreo\""));
+        assert!(html.contains("\"choreography_id\":\"look_sideways_sidecar_v2_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v2_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v4_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v3_frame_choreo\""));
@@ -6671,12 +6923,17 @@ mod tests {
         ));
         assert!(focused.contains("const defaultAssetPetId = \"xiao-shu-dev\";"));
         assert!(focused.contains("let defaultSpriteAvailable = true;"));
-        assert!(focused.contains("function setAssetLabel(spriteRoute, sidecarAsset, fallbackReason)"));
+        assert!(
+            focused.contains("function setAssetLabel(spriteRoute, sidecarAsset, fallbackReason)")
+        );
         assert!(focused.contains("fallback=css silhouette"));
         assert!(focused.contains("reason=${fallbackReason}"));
         assert!(focused.contains("pet_spritesheet_unavailable"));
         assert!(focused.contains("figure.dataset.spriteAsset = \"css_silhouette\";"));
-        assert!(focused.contains("fetch(defaultSpriteRoute, { method: \"HEAD\", cache: \"no-store\" })"));
+        assert!(
+            focused
+                .contains("fetch(defaultSpriteRoute, { method: \"HEAD\", cache: \"no-store\" })")
+        );
         assert!(focused.contains("figure.dataset.spriteAsset"));
         assert!(focused.contains("sprite-sidecar-asset"));
         assert!(focused.contains("figure.dataset.spritePhase"));
@@ -6698,8 +6955,12 @@ mod tests {
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-idle-breathe-v1").unwrap();
         let sorting_glow_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-sorting-glow-v1").unwrap();
+        let sorting_glow_v2_svg =
+            avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-sorting-glow-v2").unwrap();
         let look_sideways_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-look-sideways-v1").unwrap();
+        let look_sideways_v2_svg =
+            avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-look-sideways-v2").unwrap();
 
         assert!(
             svg.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872""#)
@@ -6709,7 +6970,9 @@ mod tests {
         assert!(svg.contains(r#"id="frame-7""#));
         assert!(svg.contains("rotate(72)"));
         assert!(svg.contains(r##"fill="#d45f4c""##));
-        assert!(motion_svg.contains("Xiao Shu motion-canonical alert peek sidecar v4 sprite atlas"));
+        assert!(
+            motion_svg.contains("Xiao Shu motion-canonical alert peek sidecar v4 sprite atlas")
+        );
         assert!(motion_svg.contains(r#"id="frame-7""#));
         assert!(motion_svg.contains("xs4-robe"));
         assert!(motion_svg.contains("rotate(72)"));
@@ -6718,26 +6981,48 @@ mod tests {
         assert!(canonical_svg.contains(r#"id="frame-7""#));
         assert!(canonical_svg.contains("xs3-robe"));
         assert!(!canonical_svg.contains("xiao-shu-canonical-peek-v3"));
-        assert!(soft_bounce_svg
-            .contains("Xiao Shu motion-canonical soft bounce sidecar v1 sprite atlas"));
+        assert!(
+            soft_bounce_svg
+                .contains("Xiao Shu motion-canonical soft bounce sidecar v1 sprite atlas")
+        );
         assert!(soft_bounce_svg.contains(r#"id="frame-7""#));
         assert!(soft_bounce_svg.contains("xsb-robe"));
         assert!(soft_bounce_svg.contains("rotate(21)"));
-        assert!(idle_breathe_svg
-            .contains("Xiao Shu motion-canonical idle breathe sidecar v1 sprite atlas"));
+        assert!(
+            idle_breathe_svg
+                .contains("Xiao Shu motion-canonical idle breathe sidecar v1 sprite atlas")
+        );
         assert!(idle_breathe_svg.contains(r#"id="frame-5""#));
         assert!(idle_breathe_svg.contains("xsb-robe"));
         assert!(!idle_breathe_svg.contains(r#"id="frame-7""#));
-        assert!(sorting_glow_svg
-            .contains("Xiao Shu motion-canonical sorting glow sidecar v1 sprite atlas"));
+        assert!(
+            sorting_glow_svg
+                .contains("Xiao Shu motion-canonical sorting glow sidecar v1 sprite atlas")
+        );
         assert!(sorting_glow_svg.contains(r#"id="frame-7""#));
         assert!(sorting_glow_svg.contains("xsb-process-glow"));
         assert!(sorting_glow_svg.contains(r#"opacity="0.62""#));
-        assert!(look_sideways_svg
-            .contains("Xiao Shu motion-canonical look sideways sidecar v1 sprite atlas"));
+        assert!(
+            sorting_glow_v2_svg
+                .contains("Xiao Shu motion-canonical sorting glow sidecar v2 sprite atlas")
+        );
+        assert!(sorting_glow_v2_svg.contains(r#"id="frame-7""#));
+        assert!(sorting_glow_v2_svg.contains(r#"opacity="0.82""#));
+        assert!(sorting_glow_v2_svg.contains("rotate(36 134 42)"));
+        assert!(
+            look_sideways_svg
+                .contains("Xiao Shu motion-canonical look sideways sidecar v1 sprite atlas")
+        );
         assert!(look_sideways_svg.contains(r#"id="frame-6""#));
         assert!(look_sideways_svg.contains("rotate(-24 134 42)"));
         assert!(!look_sideways_svg.contains(r#"id="frame-7""#));
+        assert!(
+            look_sideways_v2_svg
+                .contains("Xiao Shu motion-canonical look sideways sidecar v2 sprite atlas")
+        );
+        assert!(look_sideways_v2_svg.contains(r#"id="frame-6""#));
+        assert!(look_sideways_v2_svg.contains("rotate(-44 134 42)"));
+        assert!(!look_sideways_v2_svg.contains(r#"id="frame-7""#));
         assert!(avatar_sidecar_spritesheet_svg("unknown").is_none());
     }
 }
