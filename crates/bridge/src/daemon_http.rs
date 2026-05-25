@@ -2835,6 +2835,11 @@ fn avatar_sidecar_spritesheet_png(asset: &str) -> Option<&'static [u8]> {
             "../assets/xiao-shu-prototypes/xiao-shu-ai-alert-peek-v1-atlas.png"
         ));
     }
+    if asset == "xiao-shu-ai-alert-peek-v2" {
+        return Some(include_bytes!(
+            "../assets/xiao-shu-prototypes/xiao-shu-ai-alert-peek-v2-atlas.png"
+        ));
+    }
     None
 }
 
@@ -7048,6 +7053,7 @@ mod tests {
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v2\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v4\""));
         assert!(html.contains("\"variant_id\":\"sidecar_ai_peek_v1\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_ai_peek_v2\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v3\""));
         assert!(html.contains("\"variant_id\":\"focused_review_row\""));
         assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-alert-peek-v2"));
@@ -7058,11 +7064,15 @@ mod tests {
             html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-ai-alert-peek-v1")
         );
         assert!(
+            html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-ai-alert-peek-v2")
+        );
+        assert!(
             html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-canonical-peek-v3")
         );
         assert!(html.contains("\"asset_id\":\"xiao-shu-alert-peek-v2\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-peek-v4\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-ai-alert-peek-v1\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-ai-alert-peek-v2\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-canonical-peek-v3\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_frame_choreo_v1\""));
         assert!(html.contains("\"choreography_id\":\"sorting_glow_sidecar_v3_frame_choreo\""));
@@ -7071,6 +7081,7 @@ mod tests {
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v2_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v4_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_ai_frame_v1_choreo\""));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_ai_frame_v2_grounded_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v3_frame_choreo\""));
         assert!(html.contains("\"surface\":\"alert_peek_voice_linkage_preview\""));
         assert!(html.contains("\"utterance\":\"小舒发现一点需要你看一下。\""));
@@ -7145,6 +7156,7 @@ mod tests {
         let motion_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-peek-v4").unwrap();
         let ai_peek_png = avatar_sidecar_spritesheet_png("xiao-shu-ai-alert-peek-v1").unwrap();
+        let ai_peek_v2_png = avatar_sidecar_spritesheet_png("xiao-shu-ai-alert-peek-v2").unwrap();
         let canonical_svg = avatar_sidecar_spritesheet_svg("xiao-shu-canonical-peek-v3").unwrap();
         let soft_bounce_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-soft-bounce-v1").unwrap();
@@ -7178,6 +7190,8 @@ mod tests {
         assert!(motion_svg.contains(r##"fill="#56c6cc""##));
         assert!(ai_peek_png.starts_with(b"\x89PNG\r\n\x1a\n"));
         assert!(ai_peek_png.len() > 4096);
+        assert!(ai_peek_v2_png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(ai_peek_v2_png.len() > 4096);
         assert!(canonical_svg.contains("Xiao Shu canonical alert peek sidecar v3 sprite atlas"));
         assert!(canonical_svg.contains(r#"id="frame-7""#));
         assert!(canonical_svg.contains("xs3-robe"));

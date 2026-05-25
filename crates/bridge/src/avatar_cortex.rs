@@ -2385,6 +2385,48 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "voice_policy": "silent_now_review_sparse_voice_later",
             }),
             json!({
+                "variant_id": "sidecar_ai_peek_v2",
+                "label": "AI frame peek v2 grounded",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": false,
+                "intent": "AI-generated Xiao Shu identity pass with grounded entry and exit frames so the peek reads from the lower edge instead of floating",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-ai-alert-peek-v2",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-ai-alert-peek-v2",
+                    "format": "image/png",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "ai_frame_grounded_identity_v2"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-ai-alert-peek-v2",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "alert_peek_ai_frame_v2_grounded_choreo",
+                    "mode": "sidecar_bitmap_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "grounded_peek_raise_hold_return",
+                    "duration_ms": 1600,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 120, "phase": "edge_peek_low", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 140, "phase": "edge_peek_rise", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 170, "phase": "notice_fuller", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 180, "phase": "sleeve_raise", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 250, "phase": "gentle_alert_hold", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 210, "phase": "concerned_blink", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 170, "phase": "edge_return_low", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 260, "phase": "edge_hidden_return", "mark": false},
+                        {"row": 0, "col": 0, "hold_ms": 100, "phase": "loop_reset", "mark": false}
+                    ],
+                    "review_note": "keeps the generated frame-animation feel while baseline-aligning low entry and exit frames to remove the floating look",
+                },
+                "review_question": "does the grounded AI frame pass fix the floating first and last frames while staying close enough to Xiao Shu",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+            json!({
                 "variant_id": "sidecar_peek_v3",
                 "label": "sidecar peek v3",
                 "sprite_row": 0,
@@ -7119,7 +7161,7 @@ mod tests {
             .iter()
             .find(|track| track["token"] == "xiao_shu::alert_peek::medium")
             .unwrap();
-        assert_eq!(alert_peek["semantic_variant_count"], 7);
+        assert_eq!(alert_peek["semantic_variant_count"], 8);
         assert_eq!(alert_peek["has_semantic_variants"], true);
         assert_eq!(
             alert_peek["semantic_variants"][0]["variant_id"],
@@ -7188,17 +7230,29 @@ mod tests {
         );
         assert_eq!(
             alert_peek["semantic_variants"][5]["variant_id"],
-            "sidecar_peek_v3"
+            "sidecar_ai_peek_v2"
         );
         assert_eq!(
             alert_peek["semantic_variants"][5]["sidecar_asset"]["asset_id"],
-            "xiao-shu-canonical-peek-v3"
+            "xiao-shu-ai-alert-peek-v2"
         );
         assert_eq!(
             alert_peek["semantic_variants"][5]["frame_choreography"]["choreography_id"],
+            "alert_peek_ai_frame_v2_grounded_choreo"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][6]["variant_id"],
+            "sidecar_peek_v3"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][6]["sidecar_asset"]["asset_id"],
+            "xiao-shu-canonical-peek-v3"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][6]["frame_choreography"]["choreography_id"],
             "alert_peek_sidecar_v3_frame_choreo"
         );
-        assert_eq!(alert_peek["semantic_variants"][6]["sprite_row"], 8);
+        assert_eq!(alert_peek["semantic_variants"][7]["sprite_row"], 8);
         assert_eq!(
             alert_peek["semantic_variant_review"]["default_variant"],
             "sidecar_peek_v4"
