@@ -6195,9 +6195,7 @@ impl McpTool for ForumDigestTool {
             .map_err(|e| ab_core::Error::Backend(format!("forum_digest_threads: {e}")))?;
 
         if threads.is_empty() {
-            let board_note = board
-                .map(|b| format!(" on board={b}"))
-                .unwrap_or_default();
+            let board_note = board.map(|b| format!(" on board={b}")).unwrap_or_default();
             return Ok(ToolResult::text(format!(
                 "(no {status} threads{board_note})"
             )));
@@ -7530,9 +7528,18 @@ impl McpTool for AvatarCortexRendererSnapshotTool {
             "review-packet" => {
                 crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(status)
             }
-            "review-report" => {
-                crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(status)
-            }
+            "review-report" => match crate::avatar_cortex::
+                avatar_cortex_renderer_review_report_from_status_for_project(
+                    status,
+                    project.as_deref().unwrap_or("agent-bridge"),
+                ) {
+                Ok(payload) => payload,
+                Err(e) => {
+                    return Ok(ToolResult::error(format!(
+                        "avatar_cortex_renderer_snapshot: {e}"
+                    )));
+                }
+            },
             "review-decisions" => {
                 let opts = crate::avatar_cortex::AvatarCortexRendererReviewDecisionQueueOptions {
                     label: label.as_deref(),
@@ -14608,12 +14615,9 @@ impl McpTool for CapabilitiesTool {
 
         let sec = &self.hub.security;
         let mobile = mobile_capabilities_json(policy).await;
-        let exposed_tool_count = build_registry_with_policy(
-            Hub::builder().build(),
-            policy,
-        )
-        .list()
-        .len();
+        let exposed_tool_count = build_registry_with_policy(Hub::builder().build(), policy)
+            .list()
+            .len();
         Ok(ToolResult::json_text(&json!({
             "mcp": {
                 "client": std::env::var("AGENT_BRIDGE_CLIENT").ok(),

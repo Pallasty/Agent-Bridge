@@ -62,7 +62,7 @@ use anyhow::{Context, Result};
 use axum::{
     extract::{Path, Query, State},
     http::{header, StatusCode},
-    response::{Html, IntoResponse},
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -860,7 +860,40 @@ async fn avatar_surface_panel(
     let cortex_review_packet =
         crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(cortex.clone());
     let cortex_review_report =
-        crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(cortex.clone());
+        crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status_for_project(
+            cortex.clone(),
+            q.project.as_deref().unwrap_or("agent-bridge"),
+        )
+        .unwrap_or_else(|e| {
+            json!({
+                "surface": "avatar_cortex_renderer_review_report",
+                "read_only": true,
+                "writes_files": false,
+                "persists_review_record": false,
+                "review_report": {
+                    "report_state": "error",
+                    "packet_count": 0,
+                    "ready_packet_count": 0,
+                    "blocked_packet_count": 0,
+                    "human_feedback_count": 0,
+                    "voice_linkage_requested_count": 0,
+                    "human_decision_count": 0,
+                    "approved_count": 0,
+                    "review_record_count": 0,
+                    "html_route": "/avatar-surface/cortex-review-report",
+                    "packet_route": "/avatar-surface/cortex-review-packet",
+                    "summary": e.to_string(),
+                    "acceptance": {
+                        "ready_for_human_visual_review": false,
+                        "ready_for_approval": false,
+                        "can_promote_review_tracks": false,
+                        "merge_without_human_review_allowed": false,
+                        "records_persisted": false,
+                    },
+                    "items": []
+                }
+            })
+        });
     let cortex_review_decisions = crate::avatar_cortex::avatar_cortex_renderer_review_decisions(
         &crate::avatar_cortex::AvatarCortexRendererReviewDecisionQueueOptions {
             label: None,
@@ -1215,7 +1248,10 @@ fn avatar_sidecar_spritesheet_svg(asset: &str) -> Option<String> {
     if asset == "xiao-shu-motion-canonical-soft-bounce-v1"
         || asset == "xiao-shu-motion-canonical-idle-breathe-v1"
         || asset == "xiao-shu-motion-canonical-sorting-glow-v1"
+        || asset == "xiao-shu-motion-canonical-sorting-glow-v2"
+        || asset == "xiao-shu-motion-canonical-sorting-glow-v3"
         || asset == "xiao-shu-motion-canonical-look-sideways-v1"
+        || asset == "xiao-shu-motion-canonical-look-sideways-v2"
     {
         return avatar_sidecar_baseline_motion_svg(asset);
     }
@@ -1767,6 +1803,240 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                 },
             ],
         ),
+        "xiao-shu-motion-canonical-sorting-glow-v2" => (
+            "Xiao Shu motion-canonical sorting glow sidecar v2 sprite atlas",
+            vec![
+                Frame {
+                    col: 0,
+                    rise: 7,
+                    tilt: 0,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 2,
+                    right_arm: -2,
+                    ribbon: -4,
+                    cheek: "0.22",
+                    aura: "0.12",
+                },
+                Frame {
+                    col: 1,
+                    rise: 4,
+                    tilt: -5,
+                    scale: "1.00",
+                    eye_shift: -5,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 18,
+                    right_arm: -12,
+                    ribbon: -18,
+                    cheek: "0.25",
+                    aura: "0.28",
+                },
+                Frame {
+                    col: 2,
+                    rise: 1,
+                    tilt: -9,
+                    scale: "1.03",
+                    eye_shift: -10,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 28,
+                    right_arm: -20,
+                    ribbon: -32,
+                    cheek: "0.28",
+                    aura: "0.46",
+                },
+                Frame {
+                    col: 3,
+                    rise: -3,
+                    tilt: 7,
+                    scale: "1.04",
+                    eye_shift: 8,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: -20,
+                    right_arm: 30,
+                    ribbon: 26,
+                    cheek: "0.30",
+                    aura: "0.62",
+                },
+                Frame {
+                    col: 4,
+                    rise: -5,
+                    tilt: 2,
+                    scale: "1.06",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "wide",
+                    left_arm: 30,
+                    right_arm: -26,
+                    ribbon: 36,
+                    cheek: "0.36",
+                    aura: "0.82",
+                },
+                Frame {
+                    col: 5,
+                    rise: -1,
+                    tilt: -4,
+                    scale: "1.03",
+                    eye_shift: 6,
+                    blink: true,
+                    mouth: "soft",
+                    left_arm: 18,
+                    right_arm: -16,
+                    ribbon: 14,
+                    cheek: "0.32",
+                    aura: "0.58",
+                },
+                Frame {
+                    col: 6,
+                    rise: 3,
+                    tilt: 3,
+                    scale: "1.00",
+                    eye_shift: -2,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 8,
+                    right_arm: -8,
+                    ribbon: -8,
+                    cheek: "0.25",
+                    aura: "0.30",
+                },
+                Frame {
+                    col: 7,
+                    rise: 7,
+                    tilt: 0,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 2,
+                    right_arm: -2,
+                    ribbon: -4,
+                    cheek: "0.22",
+                    aura: "0.14",
+                },
+            ],
+        ),
+        "xiao-shu-motion-canonical-sorting-glow-v3" => (
+            "Xiao Shu motion-canonical sorting glow sidecar v3 sprite atlas",
+            vec![
+                Frame {
+                    col: 0,
+                    rise: 7,
+                    tilt: 0,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 2,
+                    right_arm: -2,
+                    ribbon: -4,
+                    cheek: "0.22",
+                    aura: "0.10",
+                },
+                Frame {
+                    col: 1,
+                    rise: 5,
+                    tilt: -4,
+                    scale: "1.00",
+                    eye_shift: -5,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 14,
+                    right_arm: -8,
+                    ribbon: -18,
+                    cheek: "0.25",
+                    aura: "0.36",
+                },
+                Frame {
+                    col: 2,
+                    rise: 1,
+                    tilt: -8,
+                    scale: "1.03",
+                    eye_shift: -10,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 30,
+                    right_arm: -16,
+                    ribbon: -34,
+                    cheek: "0.28",
+                    aura: "0.58",
+                },
+                Frame {
+                    col: 3,
+                    rise: -2,
+                    tilt: 8,
+                    scale: "1.04",
+                    eye_shift: 9,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: -18,
+                    right_arm: 32,
+                    ribbon: 28,
+                    cheek: "0.30",
+                    aura: "0.70",
+                },
+                Frame {
+                    col: 4,
+                    rise: -6,
+                    tilt: 1,
+                    scale: "1.06",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "wide",
+                    left_arm: 32,
+                    right_arm: -28,
+                    ribbon: 38,
+                    cheek: "0.36",
+                    aura: "0.94",
+                },
+                Frame {
+                    col: 5,
+                    rise: -1,
+                    tilt: -5,
+                    scale: "1.04",
+                    eye_shift: 6,
+                    blink: true,
+                    mouth: "soft",
+                    left_arm: 18,
+                    right_arm: -18,
+                    ribbon: 16,
+                    cheek: "0.32",
+                    aura: "0.64",
+                },
+                Frame {
+                    col: 6,
+                    rise: 3,
+                    tilt: 3,
+                    scale: "1.00",
+                    eye_shift: -2,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 8,
+                    right_arm: -8,
+                    ribbon: -8,
+                    cheek: "0.25",
+                    aura: "0.34",
+                },
+                Frame {
+                    col: 7,
+                    rise: 7,
+                    tilt: 0,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 2,
+                    right_arm: -2,
+                    ribbon: -4,
+                    cheek: "0.22",
+                    aura: "0.12",
+                },
+            ],
+        ),
         "xiao-shu-motion-canonical-look-sideways-v1" => (
             "Xiao Shu motion-canonical look sideways sidecar v1 sprite atlas",
             vec![
@@ -1870,6 +2140,109 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                 },
             ],
         ),
+        "xiao-shu-motion-canonical-look-sideways-v2" => (
+            "Xiao Shu motion-canonical look sideways sidecar v2 sprite atlas",
+            vec![
+                Frame {
+                    col: 0,
+                    rise: 6,
+                    tilt: 0,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 4,
+                    right_arm: -4,
+                    ribbon: -4,
+                    cheek: "0.20",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 1,
+                    rise: 5,
+                    tilt: -5,
+                    scale: "1.00",
+                    eye_shift: -7,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 3,
+                    right_arm: -12,
+                    ribbon: -20,
+                    cheek: "0.22",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 2,
+                    rise: 4,
+                    tilt: -10,
+                    scale: "1.02",
+                    eye_shift: -14,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 2,
+                    right_arm: -24,
+                    ribbon: -38,
+                    cheek: "0.24",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 3,
+                    rise: 3,
+                    tilt: -13,
+                    scale: "1.03",
+                    eye_shift: -18,
+                    blink: false,
+                    mouth: "soft",
+                    left_arm: 0,
+                    right_arm: -30,
+                    ribbon: -44,
+                    cheek: "0.27",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 4,
+                    rise: 4,
+                    tilt: -11,
+                    scale: "1.02",
+                    eye_shift: -16,
+                    blink: true,
+                    mouth: "soft",
+                    left_arm: 1,
+                    right_arm: -26,
+                    ribbon: -40,
+                    cheek: "0.24",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 5,
+                    rise: 5,
+                    tilt: -5,
+                    scale: "1.00",
+                    eye_shift: -8,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 3,
+                    right_arm: -14,
+                    ribbon: -22,
+                    cheek: "0.22",
+                    aura: "0.00",
+                },
+                Frame {
+                    col: 6,
+                    rise: 6,
+                    tilt: 0,
+                    scale: "0.98",
+                    eye_shift: 0,
+                    blink: false,
+                    mouth: "small",
+                    left_arm: 4,
+                    right_arm: -4,
+                    ribbon: -4,
+                    cheek: "0.20",
+                    aura: "0.00",
+                },
+            ],
+        ),
         _ => return None,
     };
 
@@ -1931,6 +2304,50 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
                 r##"<path d="M88 110 Q96 114 104 110" fill="none" stroke="#35251a" stroke-width="4" stroke-linecap="round"/>"##
             }
         };
+        let sorting_signal_overlay = if asset == "xiao-shu-motion-canonical-sorting-glow-v3" {
+            let signal_opacity = match frame.col {
+                0 => "0.18",
+                1 => "0.46",
+                2 => "0.72",
+                3 => "0.78",
+                4 => "0.96",
+                5 => "0.74",
+                6 => "0.42",
+                _ => "0.18",
+            };
+            let signal_rotation = match frame.col {
+                1 => "-10",
+                2 => "-22",
+                3 => "18",
+                4 => "0",
+                5 => "13",
+                6 => "-7",
+                _ => "0",
+            };
+            let signal_y = match frame.col {
+                2 => 126,
+                3 => 130,
+                4 => 120,
+                5 => 126,
+                _ => 132,
+            };
+            format!(
+                r##"<g class="xsb-sorting-signals" opacity="{signal_opacity}" transform="rotate({signal_rotation} 96 122)">
+          <path d="M58 {line_y} C74 {curve_y} 118 {curve_y} 134 {line_y}" fill="none" stroke="#2f9da4" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="7 7"/>
+          <rect x="58" y="{signal_y}" width="17" height="12" rx="4" fill="#f6d68f" stroke="#2f9da4" stroke-width="3" transform="rotate(-11 66 {signal_y})"/>
+          <rect x="87" y="{middle_y}" width="18" height="13" rx="4" fill="#eaf5e8" stroke="#2f9da4" stroke-width="3"/>
+          <rect x="118" y="{signal_y}" width="17" height="12" rx="4" fill="#f6d68f" stroke="#2f9da4" stroke-width="3" transform="rotate(11 126 {signal_y})"/>
+          <circle cx="72" cy="{dot_y}" r="4" fill="#56c6cc" stroke="#3a291c" stroke-width="2"/>
+          <circle cx="120" cy="{dot_y}" r="4" fill="#56c6cc" stroke="#3a291c" stroke-width="2"/>
+        </g>"##,
+                line_y = signal_y + 8,
+                curve_y = signal_y - 7,
+                middle_y = signal_y - 8,
+                dot_y = signal_y + 24
+            )
+        } else {
+            String::new()
+        };
 
         writeln!(
             svg,
@@ -1965,6 +2382,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
         <ellipse cx="60" cy="112" rx="12" ry="7" fill="#c95f4a" opacity="{cheek}"/>
         <ellipse cx="132" cy="112" rx="12" ry="7" fill="#c95f4a" opacity="{cheek}"/>
         {mouth}
+        {sorting_signal_overlay}
       </g>
     </g>
   </g>
@@ -1976,6 +2394,7 @@ fn avatar_sidecar_baseline_motion_svg(asset: &str) -> Option<String> {
             tilt = frame.tilt,
             left_arm = frame.left_arm,
             right_arm = frame.right_arm,
+            sorting_signal_overlay = sorting_signal_overlay,
             ribbon = frame.ribbon,
             eyes = eyes,
             cheek = frame.cheek,
@@ -2480,10 +2899,34 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
     Some(svg)
 }
 
+fn avatar_sidecar_spritesheet_png(asset: &str) -> Option<&'static [u8]> {
+    if asset == "xiao-shu-ai-alert-peek-v1" {
+        return Some(include_bytes!(
+            "../assets/xiao-shu-prototypes/xiao-shu-ai-alert-peek-v1-atlas.png"
+        ));
+    }
+    if asset == "xiao-shu-ai-alert-peek-v2" {
+        return Some(include_bytes!(
+            "../assets/xiao-shu-prototypes/xiao-shu-ai-alert-peek-v2-atlas.png"
+        ));
+    }
+    None
+}
+
 async fn avatar_sidecar_spritesheet(
     Query(q): Query<AvatarSidecarSpritesheetQuery>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let asset = q.asset.as_deref().unwrap_or("xiao-shu-alert-peek-v2");
+    if let Some(png) = avatar_sidecar_spritesheet_png(asset) {
+        return Ok((
+            [
+                (header::CONTENT_TYPE, "image/png"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            png.to_vec(),
+        )
+            .into_response());
+    }
     let svg = avatar_sidecar_spritesheet_svg(asset).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
@@ -2496,7 +2939,8 @@ async fn avatar_sidecar_spritesheet(
             (header::CACHE_CONTROL, "no-store"),
         ],
         svg,
-    ))
+    )
+        .into_response())
 }
 
 async fn avatar_cortex_review_gate(
@@ -3875,6 +4319,53 @@ fn avatar_surface_review_report_html(
     let voice_requests =
         avatar_surface_html_json_value(report.get("voice_linkage_requested_count"), "0");
     let human_decisions = avatar_surface_html_json_value(report.get("human_decision_count"), "0");
+    let approved_count = avatar_surface_html_json_value(report.get("approved_count"), "0");
+    let review_records = avatar_surface_html_json_value(report.get("review_record_count"), "0");
+    let records_persisted = avatar_surface_html_json_value(
+        report
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("records_persisted")),
+        "false",
+    );
+    let items = report.get("items").and_then(Value::as_array);
+    let latest_record = items
+        .and_then(|items| {
+            items.iter().find_map(|item| {
+                let record = item.get("latest_review_record")?;
+                if !record.is_object() {
+                    return None;
+                }
+                let token = item.get("token").and_then(Value::as_str).unwrap_or("-");
+                let variant = record.get("variant").and_then(Value::as_str).unwrap_or("-");
+                let outcome = record.get("outcome").and_then(Value::as_str).unwrap_or("-");
+                Some(format!("{token} variant={variant} outcome={outcome}"))
+            })
+        })
+        .unwrap_or_else(|| "-".to_string());
+    let latest_record = html_escape(&latest_record);
+    let record_command = items
+        .and_then(|items| {
+            items.iter().find_map(|item| {
+                if item
+                    .get("human_decision_present")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    None
+                } else {
+                    item.get("review_record_command").and_then(Value::as_str)
+                }
+            })
+        })
+        .or_else(|| {
+            items.and_then(|items| {
+                items
+                    .iter()
+                    .find_map(|item| item.get("review_record_command").and_then(Value::as_str))
+            })
+        })
+        .unwrap_or("-");
+    let record_command = html_escape(record_command);
     let ready_for_human = avatar_surface_html_json_value(
         report
             .get("acceptance")
@@ -3909,8 +4400,11 @@ fn avatar_surface_review_report_html(
       </div>
       <dl>
         <div><dt>readiness</dt><dd>human={ready_for_human} approval={ready_for_approval} decisions={human_decisions}</dd></div>
+        <div><dt>records</dt><dd>approved={approved_count} records={review_records} persisted={records_persisted}</dd></div>
+        <div><dt>latest</dt><dd>{latest_record}</dd></div>
         <div><dt>feedback</dt><dd>items={feedback} voice_requests={voice_requests}</dd></div>
         <div><dt>safety</dt><dd>can_promote={can_promote} merge_without_review={merge_without_review}</dd></div>
+        <div><dt>next record</dt><dd><code>{record_command}</code></dd></div>
         <div><dt>packet</dt><dd><a href="{packet_href}">review packet json</a></dd></div>
         <div><dt>open</dt><dd><a href="{href}">review report json</a></dd></div>
       </dl>
@@ -3924,8 +4418,13 @@ fn avatar_surface_review_report_html(
         ready_for_human = ready_for_human,
         ready_for_approval = ready_for_approval,
         human_decisions = human_decisions,
+        approved_count = approved_count,
+        review_records = review_records,
+        records_persisted = records_persisted,
+        latest_record = latest_record,
         can_promote = can_promote,
         merge_without_review = merge_without_review,
+        record_command = record_command,
         packet_href = packet_href,
         href = href,
     )
@@ -4432,7 +4931,10 @@ fn avatar_surface_xiao_shu_action_requests_html(
     let state_counts = html_escape(&state_counts);
     let mut rows = String::new();
     for record in records {
-        let request_id_raw = record.get("request_id").and_then(Value::as_str).unwrap_or("-");
+        let request_id_raw = record
+            .get("request_id")
+            .and_then(Value::as_str)
+            .unwrap_or("-");
         let project_raw = record
             .get("project")
             .and_then(Value::as_str)
@@ -6600,8 +7102,12 @@ mod tests {
         assert!(html.contains("Xiao Shu Review Report"));
         assert!(html.contains("state=ready_for_human_visual_review packets=3 ready=3 blocked=0"));
         assert!(html.contains("human=true approval=false decisions=0"));
+        assert!(html.contains("approved=0 records=0 persisted=false"));
+        assert!(html.contains("<dt>latest</dt><dd>-</dd>"));
         assert!(html.contains("items=1 voice_requests=1"));
         assert!(html.contains("can_promote=false merge_without_review=false"));
+        assert!(html.contains("next record"));
+        assert!(html.contains("cortex-review-record"));
         assert!(html.contains("review report json"));
         assert!(html.contains("Xiao Shu Review Decisions"));
         assert!(html.contains("exists=true parsed=1 latest=1"));
@@ -6714,7 +7220,7 @@ mod tests {
         assert!(html.contains("xiao_shu::sorting_glow::medium"));
         assert!(html.contains("selected / 8 frames / 1800ms"));
         assert!(html.contains("selected / 6 frames / 1800ms"));
-        assert!(html.contains("review_only / 8 frames / 1440ms"));
+        assert!(html.contains("review_only / 8 frames / 1520ms"));
         assert!(html.contains("motion-soft-bounce"));
         assert!(html.contains("motion-sorting-glow"));
         assert!(html.contains("xiao-shu sprite-backed"));
@@ -6732,20 +7238,37 @@ mod tests {
             "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1"
         ));
         assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v2"
+        ));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v3"
+        ));
+        assert!(html.contains(
             "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v1"
+        ));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-look-sideways-v2"
         ));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-soft-bounce-v1\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-idle-breathe-v1\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-sorting-glow-v1\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-sorting-glow-v2\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-sorting-glow-v3\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-look-sideways-v1\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-look-sideways-v2\""));
         assert!(html.contains("<h2 data-variant-title>Renderer Variants</h2>"));
         assert!(html.contains("Sidecar Track Variants"));
         assert!(html.contains("Alert Peek Semantic Variants"));
         assert!(html.contains("data-variant-panel hidden"));
         assert!(html.contains("\"variant_id\":\"current_alert_row\""));
         assert!(html.contains("\"variant_id\":\"waiting_peek_row\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_sorting_glow_v3\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_sorting_glow_v2\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_look_sideways_v2\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v2\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v4\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_ai_peek_v1\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_ai_peek_v2\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v3\""));
         assert!(html.contains("\"variant_id\":\"focused_review_row\""));
         assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-alert-peek-v2"));
@@ -6753,14 +7276,27 @@ mod tests {
             "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-peek-v4"
         ));
         assert!(
+            html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-ai-alert-peek-v1")
+        );
+        assert!(
+            html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-ai-alert-peek-v2")
+        );
+        assert!(
             html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-canonical-peek-v3")
         );
         assert!(html.contains("\"asset_id\":\"xiao-shu-alert-peek-v2\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-peek-v4\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-ai-alert-peek-v1\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-ai-alert-peek-v2\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-canonical-peek-v3\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_frame_choreo_v1\""));
+        assert!(html.contains("\"choreography_id\":\"sorting_glow_sidecar_v3_frame_choreo\""));
+        assert!(html.contains("\"choreography_id\":\"sorting_glow_sidecar_v2_frame_choreo\""));
+        assert!(html.contains("\"choreography_id\":\"look_sideways_sidecar_v2_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v2_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v4_frame_choreo\""));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_ai_frame_v1_choreo\""));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_ai_frame_v2_grounded_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v3_frame_choreo\""));
         assert!(html.contains("\"surface\":\"alert_peek_voice_linkage_preview\""));
         assert!(html.contains("\"utterance\":\"小舒发现一点需要你看一下。\""));
@@ -6832,6 +7368,8 @@ mod tests {
         let svg = avatar_sidecar_spritesheet_svg("xiao-shu-alert-peek-v2").unwrap();
         let motion_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-peek-v4").unwrap();
+        let ai_peek_png = avatar_sidecar_spritesheet_png("xiao-shu-ai-alert-peek-v1").unwrap();
+        let ai_peek_v2_png = avatar_sidecar_spritesheet_png("xiao-shu-ai-alert-peek-v2").unwrap();
         let canonical_svg = avatar_sidecar_spritesheet_svg("xiao-shu-canonical-peek-v3").unwrap();
         let soft_bounce_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-soft-bounce-v1").unwrap();
@@ -6839,8 +7377,14 @@ mod tests {
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-idle-breathe-v1").unwrap();
         let sorting_glow_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-sorting-glow-v1").unwrap();
+        let sorting_glow_v2_svg =
+            avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-sorting-glow-v2").unwrap();
+        let sorting_glow_v3_svg =
+            avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-sorting-glow-v3").unwrap();
         let look_sideways_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-look-sideways-v1").unwrap();
+        let look_sideways_v2_svg =
+            avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-look-sideways-v2").unwrap();
 
         assert!(
             svg.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872""#)
@@ -6855,6 +7399,10 @@ mod tests {
         assert!(motion_svg.contains("xs4-robe"));
         assert!(motion_svg.contains("rotate(72)"));
         assert!(motion_svg.contains(r##"fill="#56c6cc""##));
+        assert!(ai_peek_png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(ai_peek_png.len() > 4096);
+        assert!(ai_peek_v2_png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(ai_peek_v2_png.len() > 4096);
         assert!(canonical_svg.contains("Xiao Shu canonical alert peek sidecar v3 sprite atlas"));
         assert!(canonical_svg.contains(r#"id="frame-7""#));
         assert!(canonical_svg.contains("xs3-robe"));
@@ -6874,11 +7422,27 @@ mod tests {
         assert!(sorting_glow_svg.contains(r#"id="frame-7""#));
         assert!(sorting_glow_svg.contains("xsb-process-glow"));
         assert!(sorting_glow_svg.contains(r#"opacity="0.62""#));
+        assert!(sorting_glow_v2_svg
+            .contains("Xiao Shu motion-canonical sorting glow sidecar v2 sprite atlas"));
+        assert!(sorting_glow_v2_svg.contains(r#"id="frame-7""#));
+        assert!(sorting_glow_v2_svg.contains(r#"opacity="0.82""#));
+        assert!(sorting_glow_v2_svg.contains("rotate(36 134 42)"));
+        assert!(sorting_glow_v3_svg
+            .contains("Xiao Shu motion-canonical sorting glow sidecar v3 sprite atlas"));
+        assert!(sorting_glow_v3_svg.contains(r#"id="frame-7""#));
+        assert!(sorting_glow_v3_svg.contains(r#"opacity="0.94""#));
+        assert!(sorting_glow_v3_svg.contains("xsb-sorting-signals"));
+        assert!(sorting_glow_v3_svg.contains("rotate(38 134 42)"));
         assert!(look_sideways_svg
             .contains("Xiao Shu motion-canonical look sideways sidecar v1 sprite atlas"));
         assert!(look_sideways_svg.contains(r#"id="frame-6""#));
         assert!(look_sideways_svg.contains("rotate(-24 134 42)"));
         assert!(!look_sideways_svg.contains(r#"id="frame-7""#));
+        assert!(look_sideways_v2_svg
+            .contains("Xiao Shu motion-canonical look sideways sidecar v2 sprite atlas"));
+        assert!(look_sideways_v2_svg.contains(r#"id="frame-6""#));
+        assert!(look_sideways_v2_svg.contains("rotate(-44 134 42)"));
+        assert!(!look_sideways_v2_svg.contains(r#"id="frame-7""#));
         assert!(avatar_sidecar_spritesheet_svg("unknown").is_none());
     }
 }
