@@ -3069,6 +3069,353 @@ impl McpTool for MobileAppleStatusTool {
     }
 }
 
+fn mobile_schema_ios_udid() -> Value {
+    json!({
+        "type": "string",
+        "description": "iOS device UDID. When omitted, the first `idevice_id -l` device is used."
+    })
+}
+
+async fn ios_visible_udids(timeout_ms: u64) -> std::result::Result<Vec<String>, String> {
+    let out = run_local_mobile_command("idevice_id", &["-l"], timeout_ms).await?;
+    if !out.ok() {
+        return Err(out.stderr.trim().to_string());
+    }
+    Ok(out
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+async fn ios_selected_udid(args: &Value, timeout_ms: u64) -> std::result::Result<String, String> {
+    if let Some(udid) = args
+        .get("udid")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Ok(udid.to_string());
+    }
+    ios_visible_udids(timeout_ms)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "no iOS device visible via idevice_id".to_string())
+}
+
+async fn ios_info_key(udid: &str, key: &str, timeout_ms: u64) -> Option<String> {
+    run_local_mobile_command("ideviceinfo", &["-u", udid, "-k", key], timeout_ms)
+        .await
+        .ok()
+        .filter(|out| out.ok())
+        .map(|out| out.stdout.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+async fn ios_device_info_json(udid: &str, timeout_ms: u64) -> Value {
+    let keys = [
+        ("device_name", "DeviceName"),
+        ("product_type", "ProductType"),
+        ("product_version", "ProductVersion"),
+        ("build_version", "BuildVersion"),
+        ("serial_number", "SerialNumber"),
+        ("cpu_architecture", "CPUArchitecture"),
+        ("trusted_host_attached", "TrustedHostAttached"),
+    ];
+    let mut obj = Map::new();
+    obj.insert("udid".into(), json!(udid));
+    for (field, key) in keys {
+        if let Some(value) = ios_info_key(udid, key, timeout_ms).await {
+            obj.insert(field.into(), json!(value));
+        }
+    }
+    Value::Object(obj)
+}
+
+fn parse_ios_installer_csv(stdout: &str, limit: usize) -> Vec<Value> {
+    let mut records = Vec::new();
+    let mut record = Vec::new();
+    let mut field = String::new();
+    let mut in_quotes = false;
+    let mut chars = stdout.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if in_quotes && chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                record.push(field.trim().to_string());
+                field.clear();
+            }
+            '\n' | '\r' if !in_quotes => {
+                if ch == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                record.push(field.trim().to_string());
+                field.clear();
+                if !record.iter().all(|s| s.is_empty()) {
+                    records.push(std::mem::take(&mut record));
+                } else {
+                    record.clear();
+                }
+            }
+            _ => field.push(ch),
+        }
+    }
+    if !field.is_empty() || !record.is_empty() {
+        record.push(field.trim().to_string());
+        if !record.iter().all(|s| s.is_empty()) {
+            records.push(record);
+        }
+    }
+
+    records
+        .into_iter()
+        .skip(1)
+        .filter(|row| row.len() >= 3 && !row[0].is_empty())
+        .take(limit)
+        .map(|row| {
+            json!({
+                "bundle_identifier": row[0],
+                "version": if row[1].is_empty() { Value::Null } else { json!(row[1]) },
+                "display_name": row[2],
+            })
+        })
+        .collect()
+}
+
+mobile_tool_struct!(MobileIosListDevicesTool);
+#[async_trait]
+impl McpTool for MobileIosListDevicesTool {
+    fn name(&self) -> &'static str {
+        "mobile_ios_list_devices"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "List iPhone/iPad/iPod devices visible through libimobiledevice. \
+                 Returns UDIDs and optional lockdownd device info such as model, iOS version, \
+                 serial, and trust state."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "include_info": { "type": "boolean", "default": true },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let include_info = args
+            .get("include_info")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let udids = match ios_visible_udids(timeout_ms).await {
+            Ok(udids) => udids,
+            Err(e) => {
+                return Ok(ToolResult::json_text(&json!({
+                    "status": "error",
+                    "error": e,
+                    "hint": "Install libimobiledevice and trust this computer on the device.",
+                })));
+            }
+        };
+        let mut devices = Vec::new();
+        for udid in &udids {
+            if include_info {
+                devices.push(ios_device_info_json(udid, timeout_ms).await);
+            } else {
+                devices.push(json!({ "udid": udid }));
+            }
+        }
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "count": devices.len(),
+            "devices": devices,
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileIosAppsTool);
+#[async_trait]
+impl McpTool for MobileIosAppsTool {
+    fn name(&self) -> &'static str {
+        "mobile_ios_apps"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "List installed iOS apps through ideviceinstaller. Returns a compact \
+                 parsed app list with bundle identifiers, display names, and versions."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "udid": mobile_schema_ios_udid(),
+                    "scope": { "type": "string", "enum": ["user", "system", "all"], "default": "user" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let udid = match ios_selected_udid(&args, timeout_ms).await {
+            Ok(udid) => udid,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .filter(|s| matches!(*s, "user" | "system" | "all"))
+            .unwrap_or("user");
+        let scope_arg = format!("--{scope}");
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100)
+            .clamp(1, 500) as usize;
+        let out = match run_local_mobile_command(
+            "ideviceinstaller",
+            &["-u", &udid, "list", &scope_arg],
+            timeout_ms,
+        )
+        .await
+        {
+            Ok(out) => out,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        if !out.ok() {
+            return Ok(ToolResult::json_text(&json!({
+                "status": "error",
+                "udid": udid,
+                "scope": scope,
+                "ideviceinstaller": out.as_json(),
+            })));
+        }
+        let apps = parse_ios_installer_csv(&out.stdout, limit);
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "udid": udid,
+            "scope": scope,
+            "count": apps.len(),
+            "limit": limit,
+            "apps": apps,
+            "truncated": out.truncated,
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileIosSyslogTailTool);
+#[async_trait]
+impl McpTool for MobileIosSyslogTailTool {
+    fn name(&self) -> &'static str {
+        "mobile_ios_syslog_tail"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Capture a short iOS syslog sample through idevicesyslog. Use this for \
+                 crash/runtime diagnostics before falling back to screenshots."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "udid": mobile_schema_ios_udid(),
+                    "duration_ms": { "type": "integer", "minimum": 1000, "maximum": 15000, "default": 3000 },
+                    "lines": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 },
+                    "filter": { "type": "string", "description": "Optional substring filter applied after capture." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let udid = match ios_selected_udid(&args, timeout_ms).await {
+            Ok(udid) => udid,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let duration_ms = args
+            .get("duration_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(3_000)
+            .clamp(1_000, 15_000);
+        let duration_secs = ((duration_ms + 999) / 1000).to_string();
+        let line_limit = args
+            .get("lines")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100)
+            .clamp(1, 500) as usize;
+        let filter = args
+            .get("filter")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .filter(|s| !s.is_empty());
+        let command_timeout = timeout_ms.max(duration_ms + 2_000);
+        let out = match run_local_mobile_command(
+            "perl",
+            &[
+                "-e",
+                "alarm shift; exec @ARGV",
+                &duration_secs,
+                "idevicesyslog",
+                "-u",
+                &udid,
+            ],
+            command_timeout,
+        )
+        .await
+        {
+            Ok(out) => out,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let mut matched = 0usize;
+        let mut kept = Vec::new();
+        for line in out.stdout.lines() {
+            if filter.as_ref().is_some_and(|needle| !line.contains(needle)) {
+                continue;
+            }
+            matched += 1;
+            if kept.len() < line_limit {
+                kept.push(line.to_string());
+            }
+        }
+        Ok(ToolResult::json_text(&json!({
+            "status": if matched > 0 || out.ok() { "ok" } else { "error" },
+            "udid": udid,
+            "duration_ms": duration_ms,
+            "line_count": matched,
+            "returned_lines": kept.len(),
+            "filter": filter,
+            "lines": kept,
+            "idevicesyslog": {
+                "exit_code": out.exit_code,
+                "stderr": out.stderr,
+                "duration_ms": out.duration_ms,
+                "truncated": out.truncated,
+            },
+        })))
+    }
+}
+
 // ===========================================================================
 //                        terminal_read_blocks tool
 // ===========================================================================
@@ -5786,8 +6133,9 @@ impl McpTool for ForumDigestTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Compact rule-based digest of forum threads across ALL boards \
-                 (default status=open). One short block per thread: header \
+            description: "Compact rule-based digest of forum threads (default status=open). \
+                 Omit `board` for all boards, or set `board=announcements` (etc.) to \
+                 focus on one board. One short block per thread: header \
                  (id/title/post_count/days_idle/board), active authors, decision \
                  + finding titles, open questions, and — when `my_sigil` is set — \
                  posts mentioning you with no later reply from you (needs-reply). \
@@ -5798,6 +6146,7 @@ impl McpTool for ForumDigestTool {
                 "type": "object",
                 "properties": {
                     "status":          { "type": "string", "enum": ["open", "resolved", "archived"], "default": "open" },
+                    "board":           { "type": "string", "description": "Optional board filter (e.g. announcements, design). Omit for all boards." },
                     "thread_limit":    { "type": "integer", "default": 30, "description": "Max threads to digest (1–200)." },
                     "posts_per_thread":{ "type": "integer", "default": 60, "description": "Recent posts scanned per thread for extraction (1–200)." },
                     "my_sigil":        { "type": "string", "description": "Your author sigil (e.g. '#3b568a5f' or full id) — enables needs-reply detection." },
@@ -5816,6 +6165,10 @@ impl McpTool for ForumDigestTool {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .unwrap_or("open");
+        let board = args
+            .get("board")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
         let thread_limit = args
             .get("thread_limit")
             .and_then(|v| v.as_u64())
@@ -5837,12 +6190,17 @@ impl McpTool for ForumDigestTool {
             .clamp(200, 20_000) as usize;
 
         let threads = store
-            .forum_digest_threads(Some(status), thread_limit)
+            .forum_digest_threads(Some(status), board, thread_limit)
             .await
             .map_err(|e| ab_core::Error::Backend(format!("forum_digest_threads: {e}")))?;
 
         if threads.is_empty() {
-            return Ok(ToolResult::text(format!("(no {status} threads)")));
+            let board_note = board
+                .map(|b| format!(" on board={b}"))
+                .unwrap_or_default();
+            return Ok(ToolResult::text(format!(
+                "(no {status} threads{board_note})"
+            )));
         }
 
         let now_secs = std::time::SystemTime::now()
@@ -5850,10 +6208,14 @@ impl McpTool for ForumDigestTool {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
 
-        let mut lines: Vec<String> = vec![
-            format!("=== Forum Digest ({} {status} threads) ===", threads.len()),
-            String::new(),
-        ];
+        let header = match board {
+            Some(b) => format!(
+                "=== Forum Digest ({} {status} threads · board={b}) ===",
+                threads.len()
+            ),
+            None => format!("=== Forum Digest ({} {status} threads) ===", threads.len()),
+        };
+        let mut lines: Vec<String> = vec![header, String::new()];
         let mut budget_hit = false;
         let mut rendered = 0usize;
         for thread in &threads {
@@ -12203,6 +12565,8 @@ impl McpTool for XiaoShuActionRequestTool {
                  controls the pet, emits audio, writes request records, mutates \
                  cooldown state, or changes the official Codex pet package. \
                  It can also read the pending-action queue when list_queue=true. \
+                 Default preview responses include a compact queue_summary (pending \
+                 count and newest pending ids) without flooding nested renderer payloads. \
                  Real audio still requires a separate local CLI confirmation."
                 .into(),
             input_schema: json!({
@@ -14030,6 +14394,70 @@ fn dispatch_profile_suggestions(
 }
 
 // ===========================================================================
+//                         memory_sync_status
+// ===========================================================================
+
+pub struct MemorySyncStatusTool;
+impl MemorySyncStatusTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for MemorySyncStatusTool {
+    fn name(&self) -> &'static str {
+        "memory_sync_status"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Report cross-device memory-sync repo state: path, git \
+                 remote, last commit, dirty flag, AB_SYNC_NODE / node id. No \
+                 network calls — use before memory_import/export or after sync."
+                .into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(&crate::sync::status_json()))
+    }
+}
+
+async fn mobile_capabilities_json(policy: ToolPolicy) -> Value {
+    let exposed: Vec<String> = build_registry_with_policy(Hub::builder().build(), policy)
+        .list()
+        .into_iter()
+        .map(|s| s.name)
+        .filter(|n| n.starts_with("mobile_"))
+        .collect();
+    let adb_on_path = which_binary("adb");
+    let devices = if adb_on_path {
+        match mobile_online_devices(3_000).await {
+            Ok(list) => json!({
+                "ok": true,
+                "online_count": list.len(),
+                "serials": list.iter().map(|d| &d.serial).collect::<Vec<_>>(),
+            }),
+            Err(e) => json!({ "ok": false, "error": e }),
+        }
+    } else {
+        json!({ "ok": false, "error": "adb not on PATH" })
+    };
+    json!({
+        "backend": "adb",
+        "adb_on_path": adb_on_path,
+        "exposed_tools": exposed,
+        "default_serial": devices
+            .get("serials")
+            .and_then(|v| v.as_array())
+            .and_then(|a| a.first())
+            .and_then(|v| v.as_str()),
+        "devices": devices,
+        "security_note": "mobile_install_apk and other write tools respect AB_ALLOW_* policy via capabilities.security"
+    })
+}
+
+// ===========================================================================
 //                              capabilities
 // ===========================================================================
 
@@ -14144,6 +14572,13 @@ impl McpTool for CapabilitiesTool {
         let policy = ToolPolicy::from_env();
 
         let sec = &self.hub.security;
+        let mobile = mobile_capabilities_json(policy).await;
+        let exposed_tool_count = build_registry_with_policy(
+            Hub::builder().build(),
+            policy,
+        )
+        .list()
+        .len();
         Ok(ToolResult::json_text(&json!({
             "mcp": {
                 "client": std::env::var("AGENT_BRIDGE_CLIENT").ok(),
@@ -14155,8 +14590,10 @@ impl McpTool for CapabilitiesTool {
                 "tool_profile_env": std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok(),
                 "codex_host": std::env::var("AGENT_BRIDGE_CODEX_HOST").ok(),
                 "model": std::env::var("AGENT_BRIDGE_MODEL").ok(),
-                "model_reasoning_effort": std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT").ok()
+                "model_reasoning_effort": std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT").ok(),
+                "exposed_tool_count": exposed_tool_count
             },
+            "mobile": mobile,
             "terminal": {
                 "backend": terminal_id,
                 "available": terminal_available,
@@ -14226,9 +14663,9 @@ impl McpTool for McpConfigAuditTool {
             name: self.name().into(),
             description: "Audit local CLI MCP configuration for agent-bridge. \
                  Checks Codex (~/.codex/config.toml), Gemini CLI \
-                 (~/.gemini/settings.json), Claude Code (`claude mcp get`), \
-                 and runs a direct stdio smoke test against the configured \
-                 agent-bridge command when possible."
+                 (~/.gemini/settings.json), Cursor (~/.cursor/mcp.json), \
+                 Claude Code (`claude mcp get`), and runs a direct stdio \
+                 smoke test against the configured agent-bridge command when possible."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -14273,9 +14710,10 @@ impl McpTool for McpConfigAuditTool {
 
         let codex = audit_codex_config(include_cli_checks, timeout).await;
         let gemini = audit_gemini_config(include_cli_checks, timeout).await;
+        let cursor = audit_cursor_config().await;
         let claude = audit_claude_config(include_cli_checks, timeout).await;
 
-        let configured = [&codex, &gemini, &claude]
+        let configured = [&codex, &gemini, &cursor, &claude]
             .iter()
             .filter(|v| {
                 v.get("configured")
@@ -14283,7 +14721,7 @@ impl McpTool for McpConfigAuditTool {
                     .unwrap_or(false)
             })
             .count();
-        let connected = [&codex, &gemini, &claude]
+        let connected = [&codex, &gemini, &cursor, &claude]
             .iter()
             .filter(|v| {
                 v.get("connected")
@@ -14294,7 +14732,7 @@ impl McpTool for McpConfigAuditTool {
 
         let smoke = if include_smoke_test {
             let mut candidates = Vec::new();
-            for v in [&codex, &gemini, &claude] {
+            for v in [&codex, &gemini, &cursor, &claude] {
                 if let Some(cmd) = v.get("command").and_then(|x| x.as_str()) {
                     let args = v
                         .get("args")
@@ -14330,11 +14768,12 @@ impl McpTool for McpConfigAuditTool {
             "clients": {
                 "codex": codex,
                 "gemini_cli": gemini,
+                "cursor": cursor,
                 "claude_code": claude
             },
             "stdio_smoke": smoke,
             "tool_profile_divergence": collab_group_divergence(),
-            "recommendations": mcp_audit_recommendations(&codex, &gemini, &claude)
+            "recommendations": mcp_audit_recommendations(&codex, &gemini, &cursor, &claude)
         })))
     }
 }
@@ -14416,6 +14855,65 @@ async fn audit_gemini_config(include_cli_checks: bool, timeout: Duration) -> Val
         "connected": connected,
         "cli_check": cli
     })
+}
+
+async fn audit_cursor_config() -> Value {
+    let path = dirs_home().join(".cursor/mcp.json");
+    let raw = std::fs::read_to_string(&path).ok();
+    let (command, args) = raw
+        .as_deref()
+        .and_then(parse_gemini_agent_bridge_json)
+        .unwrap_or((None, Vec::new()));
+    let env = raw
+        .as_deref()
+        .and_then(parse_mcp_server_env_json)
+        .unwrap_or_default();
+    let toolset = env.get("AGENT_BRIDGE_TOOLSET").cloned();
+    let client = env.get("AGENT_BRIDGE_CLIENT").cloned();
+    let _profile = env.get("AGENT_BRIDGE_TOOL_PROFILE").cloned();
+    let configured = command.is_some();
+    let exists = command
+        .as_deref()
+        .map(|p| std::path::Path::new(p).exists())
+        .unwrap_or(false);
+    let toolset_ok = toolset.as_deref() == Some("claude-standard");
+    let client_ok = client.as_deref() == Some("cursor");
+    // Cursor has no `mcp get` CLI — treat configured+existing binary as connected.
+    let connected = configured && exists && toolset_ok && client_ok;
+    let expected_tools =
+        exposed_tool_count_for(Some("claude-standard"), Some("cursor"), Some("standard"));
+    json!({
+        "configured": configured,
+        "config_path": path.display().to_string(),
+        "config_exists": path.exists(),
+        "command": command,
+        "args": args,
+        "env": env,
+        "command_exists": exists,
+        "toolset_ok": toolset_ok,
+        "client_ok": client_ok,
+        "expected_tool_count": expected_tools,
+        "connected": connected,
+        "reload_hint": if connected {
+            Value::Null
+        } else if configured {
+            json!("run agent-bridge setup --frontend cursor, then Developer: Reload Window in Cursor")
+        } else {
+            json!("run agent-bridge setup --frontend cursor")
+        }
+    })
+}
+
+fn parse_mcp_server_env_json(raw: &str) -> Option<std::collections::HashMap<String, String>> {
+    let v: Value = serde_json::from_str(raw).ok()?;
+    let env = v.get("mcpServers")?.get("agent-bridge")?.get("env")?;
+    let mut out = std::collections::HashMap::new();
+    for (k, v) in env.as_object()? {
+        if let Some(s) = v.as_str() {
+            out.insert(k.clone(), s.to_string());
+        }
+    }
+    Some(out)
 }
 
 async fn audit_claude_config(include_cli_checks: bool, timeout: Duration) -> Value {
@@ -14681,11 +15179,17 @@ fn truncate_for_audit(s: &str) -> String {
     format!("{}…", &s[..end])
 }
 
-fn mcp_audit_recommendations(codex: &Value, gemini: &Value, claude: &Value) -> Vec<String> {
+fn mcp_audit_recommendations(
+    codex: &Value,
+    gemini: &Value,
+    cursor: &Value,
+    claude: &Value,
+) -> Vec<String> {
     let mut recs = Vec::new();
     for (name, v) in [
         ("Codex", codex),
         ("Gemini CLI", gemini),
+        ("Cursor", cursor),
         ("Claude Code", claude),
     ] {
         if !v
@@ -14694,7 +15198,13 @@ fn mcp_audit_recommendations(codex: &Value, gemini: &Value, claude: &Value) -> V
             .unwrap_or(false)
         {
             recs.push(format!(
-                "{name}: not configured; run `agent-bridge setup --frontend local-cli`."
+                "{name}: not configured; run `agent-bridge setup --frontend {}`.",
+                match name {
+                    "Cursor" => "cursor",
+                    "Codex" => "codex",
+                    "Gemini CLI" => "gemini-cli",
+                    _ => "local-cli",
+                }
             ));
         } else if !v
             .get("command_exists")
@@ -21476,6 +21986,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     "mobile_click",
     "mobile_input_text",
     "mobile_apple_status",
+    "mobile_ios_list_devices",
+    "mobile_ios_apps",
+    "mobile_ios_syslog_tail",
     // Search-ranking diagnostics: read-only graph topology preflight for
     // PageRank-like centrality experiments.
     "memory_graph_topology",
@@ -21762,7 +22275,24 @@ fn tag_value_in(tags: &[String], prefix: &str) -> Option<String> {
 }
 
 pub fn build_registry(hub: Hub) -> ToolRegistry {
-    let policy = ToolPolicy::from_env();
+    build_registry_with_policy(hub, ToolPolicy::from_env())
+}
+
+/// Count tools exposed for a given toolset/client/profile without spawning MCP.
+pub fn exposed_tool_count_for(
+    toolset: Option<&str>,
+    client: Option<&str>,
+    profile: Option<&str>,
+) -> usize {
+    build_registry_with_policy(
+        Hub::builder().build(),
+        ToolPolicy::from_values(toolset, client, None, profile),
+    )
+    .list()
+    .len()
+}
+
+pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry {
     let mut reg = ToolRegistry::new();
 
     // ── ESSENTIAL ──────────────────────────────────────────────────────
@@ -22085,6 +22615,24 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         Tier::Standard,
         Arc::new(MobileAppleStatusTool::new(hub.clone())),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileIosListDevicesTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileIosAppsTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MobileIosSyslogTailTool::new(hub.clone())),
+    );
 
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
     reg_if(
@@ -22273,6 +22821,12 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         policy,
         Tier::Standard,
         Arc::new(ForumDigestTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemorySyncStatusTool::new()),
     );
     // Presence (v19): identity convention + agent registry (A2A AgentCard-aligned).
     reg_if(
@@ -23747,6 +24301,31 @@ mod tests {
         }))
         .expect("selector");
         assert!(selector.matches(&nodes[0]));
+    }
+
+    #[test]
+    fn ios_app_csv_parser_extracts_compact_fields() {
+        let csv = "CFBundleIdentifier, CFBundleShortVersionString, CFBundleDisplayName\n\
+com.example.demo, \"1.2.3\", \"Demo, Test\"\n\
+com.example.multiline, , \"Line one\nLine two\"\n";
+        let apps = parse_ios_installer_csv(csv, 10);
+        assert_eq!(apps.len(), 2);
+        assert_eq!(
+            apps[0].get("bundle_identifier").and_then(Value::as_str),
+            Some("com.example.demo")
+        );
+        assert_eq!(
+            apps[0].get("version").and_then(Value::as_str),
+            Some("1.2.3")
+        );
+        assert_eq!(
+            apps[0].get("display_name").and_then(Value::as_str),
+            Some("Demo, Test")
+        );
+        assert_eq!(
+            apps[1].get("display_name").and_then(Value::as_str),
+            Some("Line one\nLine two")
+        );
     }
 
     #[test]
@@ -25799,6 +26378,9 @@ mod tests {
         assert!(p.includes(Tier::Standard, "avatar_cortex_renderer_snapshot"));
         assert!(p.includes(Tier::Standard, "pet_presence_sync"));
         assert!(p.includes(Tier::Standard, "xiao_shu_action_request"));
+        assert!(p.includes(Tier::Standard, "mobile_ios_list_devices"));
+        assert!(p.includes(Tier::Standard, "mobile_ios_apps"));
+        assert!(p.includes(Tier::Standard, "mobile_ios_syslog_tail"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
     }
@@ -25807,13 +26389,13 @@ mod tests {
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 29 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 32 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(19: 6 avatar observation/sync/renderer tools
-        //      + xiao_shu_action_request + 11 mobile bridge tools
+        //      + DIRECT(22: 6 avatar observation/sync/renderer tools
+        //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        assert_eq!(extras.len(), 29);
+        assert_eq!(extras.len(), 32);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -25837,6 +26419,9 @@ mod tests {
         assert!(extras.contains(&"mobile_ui_snapshot"));
         assert!(extras.contains(&"mobile_click"));
         assert!(extras.contains(&"mobile_apple_status"));
+        assert!(extras.contains(&"mobile_ios_list_devices"));
+        assert!(extras.contains(&"mobile_ios_apps"));
+        assert!(extras.contains(&"mobile_ios_syslog_tail"));
         assert!(extras.contains(&"memory_graph_topology"));
     }
 

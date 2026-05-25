@@ -19,6 +19,8 @@ use std::os::unix::fs::MetadataExt;
 use anyhow::Result;
 use serde_json::json;
 
+use ab_bridge::mcp_tools::exposed_tool_count_for;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     Ok,
@@ -245,8 +247,15 @@ fn check_svd_artifact() -> Check {
     }
 }
 
+fn parse_env_assignment(text: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    text.split_whitespace()
+        .find_map(|token| token.strip_prefix(&prefix).map(ToOwned::to_owned))
+}
+
 /// Read AGENT_BRIDGE / AB_SUBSTRATE env of a pid from /proc (Linux). Best-effort.
-fn proc_env(pid: i64, key: &str) -> Option<String> {
+#[cfg(not(target_os = "macos"))]
+fn proc_env_from_proc(pid: i64, key: &str) -> Option<String> {
     let data = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
     for entry in data.split(|&b| b == 0) {
         if let Ok(s) = std::str::from_utf8(entry) {
@@ -256,6 +265,27 @@ fn proc_env(pid: i64, key: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn proc_env_from_ps(pid: i64, key: &str) -> Option<String> {
+    let out = std::process::Command::new("ps")
+        .args(["eww", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_env_assignment(&String::from_utf8_lossy(&out.stdout), key)
+}
+
+#[cfg(target_os = "macos")]
+fn proc_env(pid: i64, key: &str) -> Option<String> {
+    proc_env_from_ps(pid, key)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn proc_env(pid: i64, key: &str) -> Option<String> {
+    proc_env_from_proc(pid, key).or_else(|| proc_env_from_ps(pid, key))
 }
 
 fn pgrep(pattern: &str) -> Vec<i64> {
@@ -490,6 +520,27 @@ fn check_mcp_servers(dir: &Path) -> Check {
     }
 }
 
+fn check_mcp_tool_surface() -> Check {
+    let cursor_count = exposed_tool_count_for(
+        Some("claude-standard"),
+        Some("cursor"),
+        Some("standard"),
+    );
+    let process_count = exposed_tool_count_for(
+        std::env::var("AGENT_BRIDGE_TOOLSET").ok().as_deref(),
+        std::env::var("AGENT_BRIDGE_CLIENT").ok().as_deref(),
+        std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok().as_deref(),
+    );
+    let toolset = std::env::var("AGENT_BRIDGE_TOOLSET").unwrap_or_else(|_| "(unset)".into());
+    let client = std::env::var("AGENT_BRIDGE_CLIENT").unwrap_or_else(|_| "(unset)".into());
+    Check::ok(
+        "mcp_tool_surface",
+        format!(
+            "claude-standard+cursor={cursor_count} tools; current process ({client}/{toolset})={process_count} tools"
+        ),
+    )
+}
+
 pub async fn run_doctor(json: bool, markdown: bool) -> Result<()> {
     let dir = install_dir();
     let checks = vec![
@@ -498,6 +549,7 @@ pub async fn run_doctor(json: bool, markdown: bool) -> Result<()> {
         check_svd_artifact(),
         check_daemon_runtime(),
         check_mcp_servers(&dir),
+        check_mcp_tool_surface(),
     ];
 
     let fails = checks.iter().filter(|c| c.status == Status::Fail).count();
@@ -621,6 +673,22 @@ mod tests {
         assert!(wrapper_execs_real(no_svd));
         let elf_text = "not a wrapper";
         assert!(!wrapper_execs_real(elf_text));
+    }
+
+    #[test]
+    fn parse_env_assignment_from_ps_eww_output() {
+        let ps_out = "\
+  PID TT  STAT      TIME COMMAND\n\
+12345 ??  S      0:00.01 /Users/me/.local/bin/agent-bridge.real daemon AB_SUBSTRATE_PROJECTION=svd AB_SYNC_NODE=maxiaodeMac-Pro OTHER=value\n";
+        assert_eq!(
+            parse_env_assignment(ps_out, "AB_SUBSTRATE_PROJECTION"),
+            Some("svd".into())
+        );
+        assert_eq!(
+            parse_env_assignment(ps_out, "AB_SYNC_NODE"),
+            Some("maxiaodeMac-Pro".into())
+        );
+        assert_eq!(parse_env_assignment(ps_out, "MISSING"), None);
     }
 
     #[test]

@@ -4823,6 +4823,14 @@ fn xiao_shu_action_request_from_preview(
         "http_emit_route_allowed": false,
     });
 
+    let queue_summary = xiao_shu_action_request_queue_summary(Some(project))
+        .unwrap_or_else(|e| {
+            json!({
+                "read_only": true,
+                "error": e.to_string(),
+            })
+        });
+
     json!({
         "surface": "xiao_shu_action_request",
         "schema": 1,
@@ -4847,6 +4855,7 @@ fn xiao_shu_action_request_from_preview(
         "action_request": action_request,
         "policy": policy,
         "downstream_action_preview": downstream_action_preview,
+        "queue_summary": queue_summary,
     })
 }
 
@@ -5281,6 +5290,81 @@ pub fn xiao_shu_action_request_queue(opts: &XiaoShuActionRequestQueueOptions<'_>
     let project = opts.project.unwrap_or("agent-bridge");
     let queue_path = xiao_shu_action_request_queue_path(project)?;
     xiao_shu_action_request_queue_from_path(opts, project, &queue_path)
+}
+
+/// Compact read-only queue headline for MCP/panel surfaces (no nested renderer payloads).
+pub fn xiao_shu_action_request_queue_summary(project: Option<&str>) -> Result<Value> {
+    let project_slug = project.unwrap_or("agent-bridge");
+    let queue_path = xiao_shu_action_request_queue_path(project_slug)?;
+
+    let all_states = xiao_shu_action_request_queue_from_path(
+        &XiaoShuActionRequestQueueOptions {
+            project: Some(project_slug),
+            request_id: None,
+            state: None,
+            include_all_states: true,
+            include_details: false,
+            limit: 1,
+        },
+        project_slug,
+        &queue_path,
+    )?;
+    let queue_meta = all_states.get("queue").cloned().unwrap_or(Value::Null);
+    let state_counts = queue_meta
+        .get("state_counts")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let pending_count = state_counts
+        .get("pending_human_confirmation")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+
+    let pending_head = xiao_shu_action_request_queue_from_path(
+        &XiaoShuActionRequestQueueOptions {
+            project: Some(project_slug),
+            request_id: None,
+            state: None,
+            include_all_states: false,
+            include_details: false,
+            limit: 5,
+        },
+        project_slug,
+        &queue_path,
+    )?;
+    let newest_pending = pending_head
+        .get("records")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|record| {
+            json!({
+                "request_id": record.get("request_id").cloned().unwrap_or(Value::Null),
+                "state": record.get("state").cloned().unwrap_or(Value::Null),
+                "actor": record.get("actor").cloned().unwrap_or(Value::Null),
+                "intent": record.get("intent").cloned().unwrap_or(Value::Null),
+                "reason": record.get("reason").cloned().unwrap_or(Value::Null),
+                "mapped_track": record.get("mapped_track").cloned().unwrap_or(Value::Null),
+                "created_at": record.get("created_at").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(json!({
+        "read_only": true,
+        "dry_run": true,
+        "llm_safe": true,
+        "project": project_slug,
+        "queue_exists": queue_meta.get("exists").cloned().unwrap_or(Value::Bool(false)),
+        "pending_count": pending_count,
+        "current_records": queue_meta.get("current_records").cloned().unwrap_or(Value::Null),
+        "state_counts": state_counts,
+        "newest_pending": newest_pending,
+        "panel_path": format!("/avatar-surface/xiao-shu-action-requests?project={project_slug}"),
+        "local_queue_command": format!(
+            "agent-bridge avatar xiao-shu-action-requests --project {project_slug}"
+        ),
+    }))
 }
 
 pub fn xiao_shu_action_request_action(
@@ -7418,6 +7502,35 @@ mod tests {
         assert_eq!(one["records"][0]["source_request"]["surface"], "xiao_shu_action_request");
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn xiao_shu_action_request_includes_read_only_queue_summary() {
+        let payload = xiao_shu_action_request(&XiaoShuActionRequestOptions {
+            label: None,
+            heartbeat_label: None,
+            project: Some("agent-bridge"),
+            output: None,
+            actor: Some("llm"),
+            intent: Some("voice_alert"),
+            message: None,
+            requested_track: None,
+            reason: Some("unit-test"),
+            confirm: false,
+            force: false,
+            cooldown_secs: 300,
+            tts_voice: None,
+            tts_rate: None,
+            include_details: false,
+        })
+        .unwrap();
+        let summary = payload
+            .get("queue_summary")
+            .expect("queue_summary should be attached to preview responses");
+        assert_eq!(summary["read_only"], true);
+        assert!(summary.get("pending_count").is_some());
+        assert!(summary.get("state_counts").is_some());
+        assert!(summary.get("newest_pending").is_some());
     }
 
     #[test]

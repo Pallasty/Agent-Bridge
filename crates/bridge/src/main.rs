@@ -19,7 +19,7 @@ mod doctor;
 mod setup;
 mod shadow_cortex;
 mod skills;
-mod sync;
+use ab_bridge::sync;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "agent-bridge — Unix-native AI agent control plane")]
@@ -64,6 +64,9 @@ enum Cmd {
     ///
     /// `--frontend gemini-cli`: copies the binary and registers the MCP server
     /// in `~/.gemini/settings.json`.
+    ///
+    /// `--frontend cursor`: copies the binary and registers the MCP server
+    /// in `~/.cursor/mcp.json` with `AGENT_BRIDGE_TOOLSET=claude-standard`.
     ///
     /// `--frontend local-cli`: copies the binary and registers the MCP server
     /// with local CLI clients that can consume stdio MCP servers.
@@ -2223,7 +2226,9 @@ pub enum SetupFrontend {
     CodexIde,
     /// Install for Gemini CLI — registers MCP in ~/.gemini/settings.json.
     GeminiCli,
-    /// Install MCP config for local CLI clients (Codex, Gemini CLI, Claude Code).
+    /// Install for Cursor — registers MCP in ~/.cursor/mcp.json.
+    Cursor,
+    /// Install MCP config for local CLI clients (Codex, Gemini CLI, Claude Code, Cursor).
     LocalCli,
     /// Auto-detect from the running shell's environment.
     Auto,
@@ -2281,6 +2286,7 @@ impl SetupFrontend {
             Self::CodexCli => setup::Frontend::CodexCli,
             Self::CodexIde => setup::Frontend::CodexIde,
             Self::GeminiCli => setup::Frontend::GeminiCli,
+            Self::Cursor => setup::Frontend::Cursor,
             Self::LocalCli => setup::Frontend::LocalCli,
             Self::Auto => {
                 if detect_claude_code_wired() {
@@ -3526,7 +3532,7 @@ async fn main() -> Result<()> {
                 // Track MS — stamp this node's identity so live memory writes
                 // carry a version vector (conflict-aware cross-machine sync).
                 store_impl
-                    .set_node_id(ab_store::node_id_from_name(&crate::sync::hostname_short()));
+                    .set_node_id(ab_store::node_id_from_name(&ab_bridge::sync::hostname_short()));
                 let store: Arc<dyn StateStore> = Arc::new(store_impl);
                 let listen = format!("{host}:{port}");
                 let markdown_root: Option<PathBuf> = match memory_dir.as_deref() {

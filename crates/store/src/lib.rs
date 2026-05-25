@@ -2371,16 +2371,17 @@ pub trait StateStore: Send + Sync {
         Ok(None)
     }
 
-    /// List threads across ALL boards, status-filtered, ordered by
-    /// `last_post_at DESC`. Powers `forum_digest` — unlike `forum_list_threads`
-    /// it has no board filter and no per-session unread bookkeeping (the digest
-    /// is a stateless cross-board snapshot). Default impl returns an error.
+    /// List threads across boards (or one `board` when set), status-filtered,
+    /// ordered by `last_post_at DESC`. Powers `forum_digest` — unlike
+    /// `forum_list_threads` it has no per-session unread bookkeeping (the
+    /// digest is a stateless snapshot). Default impl returns an error.
     async fn forum_digest_threads(
         &self,
         status: Option<&str>,
+        board: Option<&str>,
         limit: u32,
     ) -> Result<Vec<ForumThreadRecord>> {
-        let _ = (status, limit);
+        let _ = (status, board, limit);
         Err(ab_core::Error::Backend(
             "forum_digest_threads not implemented".into(),
         ))

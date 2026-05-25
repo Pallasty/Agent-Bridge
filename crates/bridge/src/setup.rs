@@ -60,6 +60,7 @@ pub enum Frontend {
     CodexCli,
     CodexIde,
     GeminiCli,
+    Cursor,
     LocalCli,
 }
 
@@ -89,32 +90,63 @@ pub fn run(frontend: Frontend, codex_toolset: CodexToolset) -> Result<()> {
     let bin_dir = home.join(".local/bin");
     fs::create_dir_all(&bin_dir).context("create ~/.local/bin")?;
 
-    let bin_dst = bin_dir.join("agent-bridge");
+    let mcp_command = bin_dir.join("agent-bridge");
+    let install_dst = binary_install_destination(&mcp_command);
     let bin_src = std::env::current_exe().context("current_exe")?;
 
-    if bin_src != bin_dst {
-        copy_executable_atomically(&bin_src, &bin_dst)?;
-        println!("  ✓  binary      → {}", bin_dst.display());
+    if bin_src != install_dst {
+        copy_executable_atomically(&bin_src, &install_dst)?;
+        println!("  ✓  binary      → {}", install_dst.display());
+        if install_dst != mcp_command {
+            println!("  ·  MCP command → {} (wrapper preserved)", mcp_command.display());
+        }
     } else {
-        println!("  ·  binary      already at {}", bin_dst.display());
+        println!("  ·  binary      already at {}", install_dst.display());
     }
 
     match frontend {
-        Frontend::ClaudeCode => install_claude_code(&home, &bin_dir, &bin_dst),
-        Frontend::Warp => install_warp(&bin_dst),
-        Frontend::Auggie => install_auggie(&bin_dst),
+        Frontend::ClaudeCode => install_claude_code(&home, &bin_dir, &mcp_command),
+        Frontend::Warp => install_warp(&mcp_command),
+        Frontend::Auggie => install_auggie(&mcp_command),
         Frontend::Codex => {
-            install_codex(&home, &bin_dir, &bin_dst, CodexHost::Desktop, codex_toolset)
+            install_codex(&home, &bin_dir, &mcp_command, CodexHost::Desktop, codex_toolset)
         }
         Frontend::CodexCli => {
-            install_codex(&home, &bin_dir, &bin_dst, CodexHost::Cli, codex_toolset)
+            install_codex(&home, &bin_dir, &mcp_command, CodexHost::Cli, codex_toolset)
         }
         Frontend::CodexIde => {
-            install_codex(&home, &bin_dir, &bin_dst, CodexHost::Ide, codex_toolset)
+            install_codex(&home, &bin_dir, &mcp_command, CodexHost::Ide, codex_toolset)
         }
-        Frontend::GeminiCli => install_gemini_cli(&home, &bin_dst),
-        Frontend::LocalCli => install_local_cli(&home, &bin_dst, codex_toolset),
+        Frontend::GeminiCli => install_gemini_cli(&home, &mcp_command),
+        Frontend::Cursor => install_cursor(&home, &mcp_command),
+        Frontend::LocalCli => install_local_cli(&home, &mcp_command, codex_toolset),
     }
+}
+
+/// When `~/.local/bin/agent-bridge` is the env-injection wrapper, install the
+/// real ELF to `agent-bridge.real` so `setup` does not clobber the wrapper.
+fn binary_install_destination(mcp_command: &Path) -> PathBuf {
+    if is_env_wrapper_script(mcp_command) {
+        mcp_command.with_extension("real")
+    } else {
+        mcp_command.to_path_buf()
+    }
+}
+
+fn is_env_wrapper_script(path: &Path) -> bool {
+    let Ok(meta) = fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_file() || meta.len() > 32 * 1024 {
+        return false;
+    }
+    let Ok(head) = fs::read(path).map(|b| b.into_iter().take(512).collect::<Vec<_>>()) else {
+        return false;
+    };
+    let Ok(text) = std::str::from_utf8(&head) else {
+        return false;
+    };
+    text.starts_with("#!") && text.contains("bash") && text.contains("agent-bridge.real")
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -281,6 +313,74 @@ fn install_codex(
     Ok(())
 }
 
+/// Cursor profile: binary plus `~/.cursor/mcp.json` MCP registration.
+fn install_cursor(home: &Path, bin_dst: &Path) -> Result<()> {
+    println!("  ·  hook scripts skipped (Cursor has no equivalent hook events)");
+    println!("  ·  ~/.claude/settings.json skipped (claude-code only)");
+
+    merge_cursor_settings(home, bin_dst)?;
+
+    println!();
+    println!("Setup complete (cursor profile).");
+    println!();
+    println!("Next steps in Cursor:");
+    println!("  1. Open Settings → MCP and confirm `agent-bridge` is enabled.");
+    println!("  2. Run **Developer: Reload Window** so tools/list refreshes.");
+    println!("  3. Expect ~98 tools with `AGENT_BRIDGE_TOOLSET=claude-standard`.");
+    print_manual_lifecycle_guidance("Cursor");
+
+    Ok(())
+}
+
+/// Read `~/.cursor/mcp.json`, replace or append `mcpServers.agent-bridge`.
+fn merge_cursor_settings(home: &Path, bin_dst: &Path) -> Result<()> {
+    let settings_path = home.join(".cursor/mcp.json");
+
+    let mut settings: Value = if settings_path.exists() {
+        let raw = fs::read_to_string(&settings_path)
+            .with_context(|| format!("read {}", settings_path.display()))?;
+        serde_json::from_str(&raw).unwrap_or(json!({}))
+    } else {
+        json!({})
+    };
+
+    let root = settings
+        .as_object_mut()
+        .context("Cursor mcp.json is not an object")?;
+    let mcp_servers = root
+        .entry("mcpServers")
+        .or_insert(json!({}))
+        .as_object_mut()
+        .context("Cursor mcpServers is not an object")?;
+
+    let agent_bridge_env = merged_tool_env(
+        mcp_servers.get("agent-bridge").and_then(|v| v.get("env")),
+        "cursor",
+        "claude-standard",
+        "standard",
+    );
+    mcp_servers.insert(
+        "agent-bridge".to_string(),
+        json!({
+            "command": bin_dst.display().to_string(),
+            "args": ["mcp"],
+            "env": agent_bridge_env
+        }),
+    );
+
+    if let Some(parent) = settings_path.parent() {
+        fs::create_dir_all(parent).context("create ~/.cursor")?;
+    }
+    let out = serde_json::to_string_pretty(&settings).context("re-serialize Cursor mcp.json")?;
+    fs::write(&settings_path, out).with_context(|| format!("write {}", settings_path.display()))?;
+    println!(
+        "  ✓  settings     → {} (MCP server merged)",
+        settings_path.display()
+    );
+
+    Ok(())
+}
+
 /// Gemini CLI profile: binary plus `~/.gemini/settings.json` MCP registration.
 fn install_gemini_cli(home: &Path, bin_dst: &Path) -> Result<()> {
     println!("  ·  hook scripts skipped (Gemini CLI has no equivalent hook events)");
@@ -306,6 +406,7 @@ fn install_local_cli(home: &Path, bin_dst: &Path, codex_toolset: CodexToolset) -
 
     merge_codex_config(home, bin_dst, false, CodexHost::Cli, codex_toolset)?;
     merge_gemini_settings(home, bin_dst)?;
+    merge_cursor_settings(home, bin_dst)?;
     let claude_registered = try_register_claude_mcp(bin_dst);
 
     println!();
@@ -314,6 +415,7 @@ fn install_local_cli(home: &Path, bin_dst: &Path, codex_toolset: CodexToolset) -
     println!("Configured:");
     println!("  ✓ Codex      → ~/.codex/config.toml");
     println!("  ✓ Gemini CLI → ~/.gemini/settings.json");
+    println!("  ✓ Cursor     → ~/.cursor/mcp.json");
     if claude_registered {
         println!("  ✓ Claude Code → MCP server registered");
     } else {
@@ -1151,9 +1253,9 @@ fn script_name_for_event(event: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_toml_bool, merge_codex_config, merge_codex_hooks, merge_gemini_settings,
-        remove_toml_key, replace_toml_table, CodexHost, CodexToolset, HOOK_PRECOMPACT,
-        HOOK_SESSION_END,
+        ensure_toml_bool, merge_codex_config, merge_codex_hooks, merge_cursor_settings,
+        merge_gemini_settings, remove_toml_key, replace_toml_table, CodexHost, CodexToolset,
+        HOOK_PRECOMPACT, HOOK_SESSION_END,
     };
     use serde_json::{json, Value};
     use std::fs;
@@ -1426,6 +1528,37 @@ trust_level = \"trusted\"
         assert_eq!(
             agent_bridge["env"]["AGENT_BRIDGE_TOOL_PROFILE"],
             "essential"
+        );
+        assert_eq!(agent_bridge["env"]["CUSTOM_ENV"], "keep");
+
+        let _ = fs::remove_dir_all(tmp);
+    }
+
+    #[test]
+    fn merges_cursor_mcp_server_while_preserving_settings() {
+        let tmp =
+            std::env::temp_dir().join(format!("agent-bridge-cursor-test-{}", std::process::id()));
+        let cursor_dir = tmp.join(".cursor");
+        fs::create_dir_all(&cursor_dir).unwrap();
+        fs::write(
+            cursor_dir.join("mcp.json"),
+            r#"{"mcpServers":{"other":{"command":"old"},"agent-bridge":{"command":"old","env":{"AGENT_BRIDGE_TOOLSET":"all-dev","CUSTOM_ENV":"keep"}}}}"#,
+        )
+        .unwrap();
+
+        merge_cursor_settings(&tmp, std::path::Path::new("/tmp/agent-bridge")).unwrap();
+        let raw = fs::read_to_string(cursor_dir.join("mcp.json")).unwrap();
+        let v: Value = serde_json::from_str(&raw).unwrap();
+        let agent_bridge = &v["mcpServers"]["agent-bridge"];
+
+        assert!(raw.contains("\"other\""));
+        assert_eq!(agent_bridge["command"], "/tmp/agent-bridge");
+        assert_eq!(agent_bridge["args"], json!(["mcp"]));
+        assert_eq!(agent_bridge["env"]["AGENT_BRIDGE_CLIENT"], "cursor");
+        assert_eq!(agent_bridge["env"]["AGENT_BRIDGE_TOOLSET"], "claude-standard");
+        assert_eq!(
+            agent_bridge["env"]["AGENT_BRIDGE_TOOL_PROFILE"],
+            "standard"
         );
         assert_eq!(agent_bridge["env"]["CUSTOM_ENV"], "keep");
 

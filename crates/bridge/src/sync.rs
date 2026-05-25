@@ -23,6 +23,7 @@ use ab_store::{
     SqliteStore, StateStore,
 };
 use anyhow::{anyhow, bail, Context, Result};
+use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -364,6 +365,41 @@ pub fn run_status() -> Result<()> {
         }
     );
     Ok(())
+}
+
+/// JSON snapshot of cross-device memory-sync repo state (no network I/O).
+pub fn status_json() -> serde_json::Value {
+    let repo = default_memory_repo_path();
+    let initialized = repo.join(".git").exists();
+    if !initialized {
+        return json!({
+            "initialized": false,
+            "repo_path": repo.display().to_string(),
+            "status": "not_initialised",
+            "hint": "run `agent-bridge sync init`"
+        });
+    }
+    let remote = git_capture(&repo, &["remote", "get-url", "origin"])
+        .unwrap_or_else(|_| "(no origin)".into());
+    let last_sync = git_capture(&repo, &["log", "-1", "--format=%h %s (%cr)"])
+        .unwrap_or_else(|_| "(no commits)".into());
+    let dirty = git_capture(&repo, &["status", "--porcelain"])
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    let memory_file = repo.join(MEMORY_FILE);
+    let forum_file = repo.join(FORUM_FILE);
+    json!({
+        "initialized": true,
+        "repo_path": repo.display().to_string(),
+        "remote": remote.trim(),
+        "last_sync": last_sync.trim(),
+        "dirty": dirty,
+        "memory_jsonl_exists": memory_file.exists(),
+        "forum_jsonl_exists": forum_file.exists(),
+        "sync_node": std::env::var("AB_SYNC_NODE").ok().filter(|s| !s.trim().is_empty()),
+        "node_id": ab_store::node_id_from_env().to_string(),
+        "import_conflict_policy": "version_vector_merge"
+    })
 }
 
 // ─── failure tracking + alert emit ──────────────────────────────────────
@@ -843,7 +879,7 @@ fn git_index_changed(repo: &Path, path: &str) -> Result<bool> {
     }
 }
 
-pub(crate) fn hostname_short() -> String {
+pub fn hostname_short() -> String {
     Command::new("hostname")
         .arg("-s")
         .output()

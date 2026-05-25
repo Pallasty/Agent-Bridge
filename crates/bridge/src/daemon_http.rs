@@ -4230,6 +4230,21 @@ fn avatar_surface_xiao_shu_action_requests_html(
     let returned = avatar_surface_html_json_value(queue.get("returned_count"), "0");
     let include_details = avatar_surface_html_json_value(queue.get("include_details"), "false");
     let path = avatar_surface_html_json_value(queue.get("path"), "-");
+    let current_records = avatar_surface_html_json_value(queue.get("current_records"), "0");
+    let state_counts = queue
+        .get("state_counts")
+        .and_then(Value::as_object)
+        .map(|counts| {
+            let mut parts = counts
+                .iter()
+                .map(|(state, count)| format!("{state}={count}"))
+                .collect::<Vec<_>>();
+            parts.sort();
+            parts.join(" ")
+        })
+        .filter(|summary| !summary.is_empty())
+        .unwrap_or_else(|| "none".to_string());
+    let state_counts = html_escape(&state_counts);
     let mut rows = String::new();
     for record in records {
         let request_id_raw = record.get("request_id").and_then(Value::as_str).unwrap_or("-");
@@ -4305,9 +4320,10 @@ fn avatar_surface_xiao_shu_action_requests_html(
       <div class="health-title">
         <span class="pill status-fresh">queue</span>
         <strong>Xiao Shu Action Requests</strong>
-        <span>pending={matching} returned={returned} exists={exists}</span>
+        <span>pending={matching} returned={returned} current={current_records} exists={exists}</span>
       </div>
       <dl>
+        <div><dt>states</dt><dd>{state_counts}</dd></div>
         <div><dt>filter</dt><dd>state={state_filter} details={include_details}</dd></div>
         <div><dt>path</dt><dd>{path}</dd></div>
         <div><dt>open</dt><dd><a href="{href}">pending action request json</a></dd></div>
@@ -4316,7 +4332,9 @@ fn avatar_surface_xiao_shu_action_requests_html(
     </section>"#,
         matching = matching,
         returned = returned,
+        current_records = current_records,
         exists = exists,
+        state_counts = state_counts,
         state_filter = state_filter,
         include_details = include_details,
         path = path,

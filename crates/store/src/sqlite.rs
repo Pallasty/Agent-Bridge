@@ -8093,9 +8093,11 @@ impl StateStore for SqliteStore {
     async fn forum_digest_threads(
         &self,
         status: Option<&str>,
+        board: Option<&str>,
         limit: u32,
     ) -> Result<Vec<ForumThreadRecord>> {
         let status_f = status.map(|s| s.to_string());
+        let board_f = board.map(|s| s.to_string());
         let lim = i64::from(limit.clamp(1, 500));
 
         let rows = self
@@ -8108,9 +8110,10 @@ impl StateStore for SqliteStore {
                                 (SELECT COUNT(*) FROM forum_posts WHERE thread_id = forum_threads.id) AS post_count \
                          FROM forum_threads \
                          WHERE (?1 IS NULL OR status = ?1) \
-                         ORDER BY last_post_at DESC LIMIT ?2",
+                           AND (?2 IS NULL OR board = ?2) \
+                         ORDER BY last_post_at DESC LIMIT ?3",
                     )?;
-                    let mut q = stmt.query(params![status_f, lim])?;
+                    let mut q = stmt.query(params![status_f, board_f, lim])?;
                     let mut out = Vec::new();
                     while let Some(r) = q.next()? {
                         out.push((
