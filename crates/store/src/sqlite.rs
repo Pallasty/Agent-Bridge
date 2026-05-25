@@ -549,6 +549,101 @@ CREATE INDEX IF NOT EXISTS idx_memory_coactivation_b       ON memory_coactivatio
 CREATE INDEX IF NOT EXISTS idx_memory_coactivation_count   ON memory_coactivation(count DESC);
 "#;
 
+// v32 — timestamp integrity guard for sync/export tables.
+//
+// SQLite's dynamic typing allows TEXT to land in INTEGER columns. A handful of
+// ISO-8601 TEXT timestamps can make memory_export/forum_export fail while
+// deserialising rows as i64, which in turn blocks cross-device sync. First
+// normalise parseable legacy values, then reject future direct TEXT writes.
+const SCHEMA_V32: &str = r#"
+UPDATE memories
+   SET created_at = CAST(strftime('%s', created_at) AS INTEGER)
+ WHERE typeof(created_at) = 'text'
+   AND strftime('%s', created_at) IS NOT NULL;
+UPDATE memories
+   SET updated_at = CAST(strftime('%s', updated_at) AS INTEGER)
+ WHERE typeof(updated_at) = 'text'
+   AND strftime('%s', updated_at) IS NOT NULL;
+UPDATE memories
+   SET last_accessed_at = CAST(strftime('%s', last_accessed_at) AS INTEGER)
+ WHERE typeof(last_accessed_at) = 'text'
+   AND strftime('%s', last_accessed_at) IS NOT NULL;
+UPDATE memory_edges
+   SET created_at = CAST(strftime('%s', created_at) AS INTEGER)
+ WHERE typeof(created_at) = 'text'
+   AND strftime('%s', created_at) IS NOT NULL;
+UPDATE forum_threads
+   SET created_at = CAST(strftime('%s', created_at) AS INTEGER)
+ WHERE typeof(created_at) = 'text'
+   AND strftime('%s', created_at) IS NOT NULL;
+UPDATE forum_threads
+   SET last_post_at = CAST(strftime('%s', last_post_at) AS INTEGER)
+ WHERE typeof(last_post_at) = 'text'
+   AND strftime('%s', last_post_at) IS NOT NULL;
+UPDATE forum_posts
+   SET created_at = CAST(strftime('%s', created_at) AS INTEGER)
+ WHERE typeof(created_at) = 'text'
+   AND strftime('%s', created_at) IS NOT NULL;
+
+CREATE TRIGGER IF NOT EXISTS memories_timestamp_guard_insert
+BEFORE INSERT ON memories
+WHEN typeof(NEW.created_at) != 'integer'
+  OR typeof(NEW.updated_at) != 'integer'
+  OR typeof(NEW.last_accessed_at) != 'integer'
+BEGIN
+    SELECT RAISE(ABORT, 'memories timestamps must be integer unix seconds');
+END;
+CREATE TRIGGER IF NOT EXISTS memories_timestamp_guard_update
+BEFORE UPDATE OF created_at, updated_at, last_accessed_at ON memories
+WHEN typeof(NEW.created_at) != 'integer'
+  OR typeof(NEW.updated_at) != 'integer'
+  OR typeof(NEW.last_accessed_at) != 'integer'
+BEGIN
+    SELECT RAISE(ABORT, 'memories timestamps must be integer unix seconds');
+END;
+
+CREATE TRIGGER IF NOT EXISTS memory_edges_timestamp_guard_insert
+BEFORE INSERT ON memory_edges
+WHEN typeof(NEW.created_at) != 'integer'
+BEGIN
+    SELECT RAISE(ABORT, 'memory_edges.created_at must be integer unix seconds');
+END;
+CREATE TRIGGER IF NOT EXISTS memory_edges_timestamp_guard_update
+BEFORE UPDATE OF created_at ON memory_edges
+WHEN typeof(NEW.created_at) != 'integer'
+BEGIN
+    SELECT RAISE(ABORT, 'memory_edges.created_at must be integer unix seconds');
+END;
+
+CREATE TRIGGER IF NOT EXISTS forum_threads_timestamp_guard_insert
+BEFORE INSERT ON forum_threads
+WHEN typeof(NEW.created_at) != 'integer'
+  OR typeof(NEW.last_post_at) != 'integer'
+BEGIN
+    SELECT RAISE(ABORT, 'forum_threads timestamps must be integer unix seconds');
+END;
+CREATE TRIGGER IF NOT EXISTS forum_threads_timestamp_guard_update
+BEFORE UPDATE OF created_at, last_post_at ON forum_threads
+WHEN typeof(NEW.created_at) != 'integer'
+  OR typeof(NEW.last_post_at) != 'integer'
+BEGIN
+    SELECT RAISE(ABORT, 'forum_threads timestamps must be integer unix seconds');
+END;
+
+CREATE TRIGGER IF NOT EXISTS forum_posts_timestamp_guard_insert
+BEFORE INSERT ON forum_posts
+WHEN typeof(NEW.created_at) != 'integer'
+BEGIN
+    SELECT RAISE(ABORT, 'forum_posts.created_at must be integer unix seconds');
+END;
+CREATE TRIGGER IF NOT EXISTS forum_posts_timestamp_guard_update
+BEFORE UPDATE OF created_at ON forum_posts
+WHEN typeof(NEW.created_at) != 'integer'
+BEGIN
+    SELECT RAISE(ABORT, 'forum_posts.created_at must be integer unix seconds');
+END;
+"#;
+
 /// Default database path.
 ///
 /// Linux: `$XDG_DATA_HOME/agent-bridge/state.db` → `~/.local/share/agent-bridge/state.db`.
@@ -1192,6 +1287,22 @@ impl SqliteStore {
                 }
                 let _ = c.execute("UPDATE schema_meta SET value='31' WHERE key='version'", []);
             }
+
+            // ── v32: timestamp guards for sync/export tables. SQLite columns
+            // are dynamically typed, so external writers can insert ISO-8601
+            // TEXT into INTEGER timestamp columns. Coerce parseable legacy rows
+            // before installing guards that reject future TEXT writes.
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "31".to_string());
+            if cur.as_str() == "31" {
+                c.execute_batch(SCHEMA_V32)?;
+                let _ = c.execute("UPDATE schema_meta SET value='32' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -1216,7 +1327,14 @@ impl SqliteStore {
             .conn
             .call(move |c| -> RusqliteResult<Vec<MemoryEdgeExport>> {
                 let mut stmt = c.prepare(
-                    "SELECT from_key, to_key, edge_type, weight, created_at FROM memory_edges",
+                    "SELECT from_key, to_key, edge_type, weight,
+                            CASE
+                                WHEN typeof(created_at) = 'text'
+                                 AND strftime('%s', created_at) IS NOT NULL
+                                THEN CAST(strftime('%s', created_at) AS INTEGER)
+                                ELSE created_at
+                            END AS created_at
+                     FROM memory_edges",
                 )?;
                 let rows = stmt
                     .query_map([], |row| {
@@ -4646,12 +4764,35 @@ impl StateStore for SqliteStore {
             .call(move |c| -> RusqliteResult<Vec<SyncEnvelope>> {
                 let mut stmt = c.prepare(
                     "SELECT key, kind, content, tags, related_keys, scope,
-                            created_at, updated_at, last_accessed_at, access_count,
+                            CASE
+                                WHEN typeof(created_at) = 'text'
+                                 AND strftime('%s', created_at) IS NOT NULL
+                                THEN CAST(strftime('%s', created_at) AS INTEGER)
+                                ELSE created_at
+                            END AS created_at,
+                            CASE
+                                WHEN typeof(updated_at) = 'text'
+                                 AND strftime('%s', updated_at) IS NOT NULL
+                                THEN CAST(strftime('%s', updated_at) AS INTEGER)
+                                ELSE updated_at
+                            END AS updated_at,
+                            CASE
+                                WHEN typeof(last_accessed_at) = 'text'
+                                 AND strftime('%s', last_accessed_at) IS NOT NULL
+                                THEN CAST(strftime('%s', last_accessed_at) AS INTEGER)
+                                ELSE last_accessed_at
+                            END AS last_accessed_at,
+                            access_count,
                             importance, status, trigger_pattern, superseded_by,
                             version_vector
                      FROM memories
                      WHERE (?1 IS NULL OR kind = ?1)
-                       AND (?2 IS NULL OR updated_at >= ?2)
+                       AND (?2 IS NULL OR CASE
+                                WHEN typeof(updated_at) = 'text'
+                                 AND strftime('%s', updated_at) IS NOT NULL
+                                THEN CAST(strftime('%s', updated_at) AS INTEGER)
+                                ELSE updated_at
+                            END >= ?2)
                      ORDER BY created_at ASC",
                 )?;
                 let rows = stmt
@@ -8220,7 +8361,19 @@ impl StateStore for SqliteStore {
             .conn
             .call(move |c| -> RusqliteResult<Vec<ForumThreadExport>> {
                 let mut tstmt = c.prepare(
-                    "SELECT id, board, title, created_by, created_at, last_post_at,
+                    "SELECT id, board, title, created_by,
+                            CASE
+                                WHEN typeof(created_at) = 'text'
+                                 AND strftime('%s', created_at) IS NOT NULL
+                                THEN CAST(strftime('%s', created_at) AS INTEGER)
+                                ELSE created_at
+                            END AS created_at,
+                            CASE
+                                WHEN typeof(last_post_at) = 'text'
+                                 AND strftime('%s', last_post_at) IS NOT NULL
+                                THEN CAST(strftime('%s', last_post_at) AS INTEGER)
+                                ELSE last_post_at
+                            END AS last_post_at,
                             status, tags_json
                      FROM forum_threads
                      ORDER BY created_at ASC, id ASC",
@@ -8250,7 +8403,13 @@ impl StateStore for SqliteStore {
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 let mut pstmt = c.prepare(
-                    "SELECT author, kind, body, refs_json, created_at
+                    "SELECT author, kind, body, refs_json,
+                            CASE
+                                WHEN typeof(created_at) = 'text'
+                                 AND strftime('%s', created_at) IS NOT NULL
+                                THEN CAST(strftime('%s', created_at) AS INTEGER)
+                                ELSE created_at
+                            END AS created_at
                      FROM forum_posts
                      WHERE thread_id = ?1
                      ORDER BY created_at ASC, id ASC",
@@ -9013,6 +9172,26 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         }
+    }
+
+    async fn drop_timestamp_guards(store: &SqliteStore) {
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute_batch(
+                    "DROP TRIGGER IF EXISTS memories_timestamp_guard_insert;
+                     DROP TRIGGER IF EXISTS memories_timestamp_guard_update;
+                     DROP TRIGGER IF EXISTS memory_edges_timestamp_guard_insert;
+                     DROP TRIGGER IF EXISTS memory_edges_timestamp_guard_update;
+                     DROP TRIGGER IF EXISTS forum_threads_timestamp_guard_insert;
+                     DROP TRIGGER IF EXISTS forum_threads_timestamp_guard_update;
+                     DROP TRIGGER IF EXISTS forum_posts_timestamp_guard_insert;
+                     DROP TRIGGER IF EXISTS forum_posts_timestamp_guard_update;",
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("drop timestamp guards");
     }
 
     #[test]
@@ -9993,6 +10172,87 @@ mod tests {
             n.iter()
                 .any(|e| e.to_key == "edge_rt_b" && e.edge_type == "relates"),
             "expected relates edge; got {n:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_export_coerces_iso_text_timestamps() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-memory-export-iso-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        let rec = mk_record("iso_memory_row", 1_700_000_010);
+        store.memory_save(&rec).await.expect("memory_save");
+        drop_timestamp_guards(&store).await;
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories
+                        SET created_at = ?1,
+                            updated_at = ?1,
+                            last_accessed_at = ?1
+                      WHERE key = ?2",
+                    params!["2026-05-24T16:47:09.209Z", "iso_memory_row"],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("poison timestamps");
+
+        let out = temp_dir.join("memory.jsonl");
+        let result = store
+            .memory_export(&MemoryExportFilter::default(), &out)
+            .await
+            .expect("export");
+        assert_eq!(result.memories_written, 1);
+        let raw = tokio::fs::read_to_string(&out).await.expect("read export");
+        let v: serde_json::Value = serde_json::from_str(raw.trim()).expect("json");
+        assert_eq!(v["created_at"], 1_779_641_229_i64);
+        assert_eq!(v["updated_at"], 1_779_641_229_i64);
+        assert_eq!(v["last_accessed_at"], 1_779_641_229_i64);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn timestamp_guards_reject_text_memory_timestamps() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-memory-guard-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        let rec = mk_record("guard_memory_row", 1_700_000_010);
+        store.memory_save(&rec).await.expect("memory_save");
+        let err = store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET created_at = ?1 WHERE key = ?2",
+                    params!["2026-05-24T16:47:09.209Z", "guard_memory_row"],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect_err("text timestamp should be rejected");
+        assert!(
+            err.to_string().contains("integer unix seconds"),
+            "unexpected error: {err}"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -13253,6 +13513,185 @@ mod tests {
 
         let _ = tokio::fs::remove_dir_all(&dir_a).await;
         let _ = tokio::fs::remove_dir_all(&dir_b).await;
+    }
+
+    #[tokio::test]
+    async fn forum_export_coerces_iso_text_timestamps() {
+        let (dir, store) = fresh_store("forum-iso-export").await;
+        let t = store
+            .forum_post(
+                None,
+                Some("incidents"),
+                Some("ISO timestamp incident"),
+                "node-A",
+                "finding",
+                "coerce on export",
+                None,
+                None,
+            )
+            .await
+            .expect("create thread");
+        drop_timestamp_guards(&store).await;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE forum_threads
+                        SET created_at = ?1,
+                            last_post_at = ?1
+                      WHERE id = ?2",
+                    params!["2026-05-24T16:47:09.209Z", t.thread_id],
+                )?;
+                c.execute(
+                    "UPDATE forum_posts SET created_at = ?1 WHERE thread_id = ?2",
+                    params!["2026-05-24T16:47:09.209Z", t.thread_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("poison forum timestamps");
+
+        let out_file = dir.join("forum.jsonl");
+        let exp = store.forum_export(&out_file).await.expect("export");
+        assert_eq!(exp.threads_written, 1);
+        assert_eq!(exp.posts_written, 1);
+        let raw = tokio::fs::read_to_string(&out_file)
+            .await
+            .expect("read forum export");
+        let v: serde_json::Value = serde_json::from_str(raw.trim()).expect("json");
+        assert_eq!(v["created_at"], 1_779_641_229_i64);
+        assert_eq!(v["last_post_at"], 1_779_641_229_i64);
+        assert_eq!(v["posts"][0]["created_at"], 1_779_641_229_i64);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn timestamp_guards_reject_text_forum_timestamps() {
+        let (dir, store) = fresh_store("forum-ts-guard").await;
+        let t = store
+            .forum_post(
+                None,
+                Some("incidents"),
+                Some("Timestamp guard"),
+                "node-A",
+                "finding",
+                "reject text",
+                None,
+                None,
+            )
+            .await
+            .expect("create thread");
+        let err = store
+            .conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE forum_posts SET created_at = ?1 WHERE thread_id = ?2",
+                    params!["2026-05-24T16:47:09.209Z", t.thread_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect_err("text timestamp should be rejected");
+        assert!(
+            err.to_string().contains("integer unix seconds"),
+            "unexpected error: {err}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn v32_migration_coerces_parseable_iso_timestamps() {
+        let (dir, store) = fresh_store("v32-iso-migration").await;
+        let rec = mk_record("v32_iso_memory", 1_700_000_010);
+        store.memory_save(&rec).await.expect("memory_save");
+        let t = store
+            .forum_post(
+                None,
+                Some("incidents"),
+                Some("Legacy ISO timestamps"),
+                "node-A",
+                "finding",
+                "legacy row",
+                None,
+                None,
+            )
+            .await
+            .expect("create thread");
+        drop_timestamp_guards(&store).await;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories
+                        SET created_at = ?1,
+                            updated_at = ?1,
+                            last_accessed_at = ?1
+                      WHERE key = ?2",
+                    params!["2026-05-24T16:47:09.209Z", "v32_iso_memory"],
+                )?;
+                c.execute(
+                    "UPDATE forum_threads
+                        SET created_at = ?1,
+                            last_post_at = ?1
+                      WHERE id = ?2",
+                    params!["2026-05-24T16:47:09.209Z", t.thread_id],
+                )?;
+                c.execute(
+                    "UPDATE forum_posts SET created_at = ?1 WHERE thread_id = ?2",
+                    params!["2026-05-24T16:47:09.209Z", t.thread_id],
+                )?;
+                c.execute("UPDATE schema_meta SET value='31' WHERE key='version'", [])?;
+                Ok(())
+            })
+            .await
+            .expect("seed legacy v31 rows");
+        drop(store);
+
+        let reopened = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("reopen store");
+        let (version, bad_count, mem_created, post_created): (String, i64, i64, i64) = reopened
+            .conn
+            .call(|c| -> RusqliteResult<(String, i64, i64, i64)> {
+                let version = c.query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let bad_count = c.query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM memories
+                          WHERE typeof(created_at) != 'integer'
+                             OR typeof(updated_at) != 'integer'
+                             OR typeof(last_accessed_at) != 'integer') +
+                        (SELECT COUNT(*) FROM forum_threads
+                          WHERE typeof(created_at) != 'integer'
+                             OR typeof(last_post_at) != 'integer') +
+                        (SELECT COUNT(*) FROM forum_posts
+                          WHERE typeof(created_at) != 'integer')",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let mem_created = c.query_row(
+                    "SELECT created_at FROM memories WHERE key='v32_iso_memory'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let post_created =
+                    c.query_row("SELECT created_at FROM forum_posts LIMIT 1", [], |r| r.get(0))?;
+                Ok((version, bad_count, mem_created, post_created))
+            })
+            .await
+            .expect("inspect migrated rows");
+
+        assert_eq!(version, "32");
+        assert_eq!(bad_count, 0);
+        assert_eq!(mem_created, 1_779_641_229_i64);
+        assert_eq!(post_created, 1_779_641_229_i64);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
     #[tokio::test]
@@ -16756,7 +17195,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("29"),
+            Some("32"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
