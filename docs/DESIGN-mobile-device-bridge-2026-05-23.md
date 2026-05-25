@@ -63,6 +63,16 @@ Implemented a small Android-first MCP surface in
 - `mobile_click`: click by coordinates, or resolve one matching UI node and
   click the center of its bounds.
 - `mobile_input_text`: send text through `adb shell input text`.
+- `mobile_apple_status`: read-only Apple mobile readiness probe for Xcode,
+  libimobiledevice, third-party iOS tools, and USB-visible iPhone/iPad/iPod
+  devices.
+- `mobile_ios_list_devices`: list libimobiledevice-visible iOS devices and
+  compact lockdownd info such as product type, iOS version, build, serial, and
+  trust state.
+- `mobile_ios_apps`: list installed iOS apps through `ideviceinstaller` and
+  return compact bundle/version/display-name rows.
+- `mobile_ios_syslog_tail`: capture a short `idevicesyslog` sample with an
+  optional substring filter.
 
 ## Safety Boundaries
 
@@ -200,6 +210,22 @@ debug loops, multi-device disambiguation, selector-based actions, and compact
 decision summaries. They are not justified as a one-for-one replacement for
 simple shell commands unless the tool adds parsing, safety, or projection.
 
+iOS device validation on 2026-05-25 used a physical iPhone 7 Plus
+(`iPhone9,2`) running iOS `15.8.7`. USB/ioreg saw the phone, then
+`libimobiledevice` + `ideviceinstaller` were installed through Homebrew for the
+minimal bridge path. Results:
+
+| Task | Naked command result | Agent-Bridge value |
+| --- | --- | --- |
+| Device status | `idevice_id -l` + several `ideviceinfo -k ...` calls returned UDID, `iPhone9,2`, iOS `15.8.7`, build `19H411`, and `TrustedHostAttached=true`. | `mobile_ios_list_devices` folds this into one compact structured call. |
+| Syslog | 4s of `idevicesyslog` returned 16,731 lines. | `mobile_ios_syslog_tail` makes this bounded and filterable so agents do not flood context. |
+| Apps | `ideviceinstaller list --user` returned compact app CSV; `--xml` was too verbose for context-efficient use. | `mobile_ios_apps` extracts only bundle id, display name, and version. |
+
+This clears the 30%+ usefulness bar for repeated iOS diagnostics: the bridge
+does not make the underlying channel faster, but it removes repeated shell
+composition, trust-state ambiguity, XML/plist parsing, and unbounded syslog
+output.
+
 Acceptance bar for future mobile tools:
 
 - A naked one-line command should remain the preferred path when it is faster
@@ -213,13 +239,12 @@ Acceptance bar for future mobile tools:
 
 Apple mobile note: this Mac currently uses
 `/Library/Developer/CommandLineTools`, and `xcrun` cannot find `simctl`,
-`devicectl`, `xcdevice`, or `xctrace`. USB/ioreg does see one Apple mobile
-device (`iPhone`, UDID `ebd641971f7214cab624b784740ddd288b340f90`,
-`SupportsIPhoneOS=true`), but there is no available development bridge yet:
-full Xcode, libimobiledevice, Apple Configurator `cfgutil`, and idb-style tools
-are all absent. Therefore an iOS bridge should not start with a full click/input
-surface yet; the first useful tool is the implemented read-only
-`mobile_apple_status` probe.
+`devicectl`, `xcdevice`, or `xctrace`. USB/ioreg sees one Apple mobile device
+(`iPhone`, `SupportsIPhoneOS=true`). After installing `libimobiledevice` and
+`ideviceinstaller`, the physical-device read path is available for device info,
+app inventory, and syslog. Full Xcode is still required before simulator,
+`devicectl`, XCUITest, WebDriverAgent, or selector/click-style iOS UI automation
+should be treated as ready.
 
 ## Dogfood Follow-Up
 
@@ -247,6 +272,7 @@ most useful when it bundles state and preserves structured fallbacks:
   artifact bundle.
 - Consider a later `mobile_wait_for_text` helper once selector matching is
   proven stable.
-- If full Xcode or libimobiledevice becomes available, expand Apple support in
-  this order: `mobile_apple_status` -> list/install/launch/log for simulators
-  and devices -> WDA/XCUITest UI snapshot and selector actions.
+- If full Xcode becomes available, expand Apple support in this order:
+  simulator/device install and launch -> WDA/XCUITest UI snapshot -> selector
+  actions. Until then, keep iOS support to `mobile_apple_status`,
+  `mobile_ios_list_devices`, `mobile_ios_apps`, and `mobile_ios_syslog_tail`.
