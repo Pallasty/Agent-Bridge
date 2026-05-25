@@ -874,6 +874,45 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Persist a local CLI-only human visual review record for one renderer candidate.
+    CortexReviewRecord {
+        /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
+        #[arg(long)]
+        label: Option<String>,
+        /// Heartbeat label used to derive the default snapshot path.
+        #[arg(long)]
+        heartbeat_label: Option<String>,
+        /// Project used to derive default labels.
+        #[arg(long)]
+        project: Option<String>,
+        /// Override cortex snapshot path.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Renderer track token, for example xiao_shu::alert_peek::medium.
+        #[arg(long, default_value = "xiao_shu::alert_peek::medium")]
+        track: String,
+        /// Semantic variant id. Defaults to the track's preferred/default variant.
+        #[arg(long)]
+        variant: Option<String>,
+        /// Human review outcome to record.
+        #[arg(long, value_enum, default_value = "approved")]
+        outcome: AvatarReviewOutcome,
+        /// Actor/reviewer writing the local review record.
+        #[arg(long, default_value = "local-operator")]
+        reviewer: String,
+        /// Operator-facing reason. Required to write with --confirm.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Optional review note. May be repeated.
+        #[arg(long = "note")]
+        notes: Vec<String>,
+        /// Persist the record. Without this flag the command is a dry-run preview.
+        #[arg(long)]
+        confirm: bool,
+        /// Emit raw JSON payload.
+        #[arg(long)]
+        json: bool,
+    },
     /// Show Xiao Shu's sparse voice policy without emitting audio.
     CortexVoicePolicy {
         /// launchd label. Defaults to com.agentbridge.avatar-cortex.<project>.
@@ -2092,6 +2131,27 @@ enum ShadowCortexFeedbackOp {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
+enum AvatarReviewOutcome {
+    Approved,
+    #[value(name = "keep_pending", alias = "keep-pending")]
+    KeepPending,
+    #[value(name = "request_revision", alias = "request-revision")]
+    RequestRevision,
+    Rejected,
+}
+
+impl AvatarReviewOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::KeepPending => "keep_pending",
+            Self::RequestRevision => "request_revision",
+            Self::Rejected => "rejected",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
 enum ShadowCortexFeedbackDecision {
     Accepted,
     Ignored,
@@ -2935,6 +2995,36 @@ async fn main() -> Result<()> {
                     heartbeat_label.clone(),
                     project.clone(),
                     output.clone(),
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::CortexReviewRecord {
+                label,
+                heartbeat_label,
+                project,
+                output,
+                track,
+                variant,
+                outcome,
+                reviewer,
+                reason,
+                notes,
+                confirm,
+                json: as_json,
+            } => {
+                run_avatar_cortex_review_record(
+                    label.clone(),
+                    heartbeat_label.clone(),
+                    project.clone(),
+                    output.clone(),
+                    track.clone(),
+                    variant.clone(),
+                    *outcome,
+                    reviewer.clone(),
+                    reason.clone(),
+                    notes.clone(),
+                    *confirm,
                     *as_json,
                 )
                 .await
@@ -5389,14 +5479,16 @@ async fn run_avatar_cortex_review_report(
     let report = payload.get("review_report").unwrap_or(&Value::Null);
     println!("avatar cortex review report");
     println!(
-        "state={} packets={} ready={} blocked={} feedback={} voice_requests={} human_decisions={}",
+        "state={} packets={} ready={} blocked={} feedback={} voice_requests={} human_decisions={} approved={} records={}",
         avatar_health_display(report.get("report_state"), "-"),
         avatar_health_display(report.get("packet_count"), "0"),
         avatar_health_display(report.get("ready_packet_count"), "0"),
         avatar_health_display(report.get("blocked_packet_count"), "0"),
         avatar_health_display(report.get("human_feedback_count"), "0"),
         avatar_health_display(report.get("voice_linkage_requested_count"), "0"),
-        avatar_health_display(report.get("human_decision_count"), "0")
+        avatar_health_display(report.get("human_decision_count"), "0"),
+        avatar_health_display(report.get("approved_count"), "0"),
+        avatar_health_display(report.get("review_record_count"), "0")
     );
     println!(
         "ready_for_human_review={} ready_for_approval={} can_promote={} merge_without_review={}",
@@ -5428,14 +5520,76 @@ async fn run_avatar_cortex_review_report(
     if let Some(items) = report.get("items").and_then(Value::as_array) {
         for item in items.iter().take(5) {
             println!(
-                "- {} readiness={} approval={} promote={}",
+                "- {} readiness={} approval={} decision={} promote={}",
                 avatar_health_display(item.get("token"), "-"),
                 avatar_health_display(item.get("readiness"), "-"),
                 avatar_health_display(item.get("ready_for_approval"), "false"),
+                avatar_health_display(item.get("approval_state"), "-"),
                 avatar_health_display(item.get("can_promote_binding"), "false")
             );
         }
     }
+    Ok(())
+}
+
+async fn run_avatar_cortex_review_record(
+    label: Option<String>,
+    heartbeat_label: Option<String>,
+    project: Option<String>,
+    output: Option<PathBuf>,
+    track: String,
+    variant: Option<String>,
+    outcome: AvatarReviewOutcome,
+    reviewer: String,
+    reason: Option<String>,
+    notes: Vec<String>,
+    confirm: bool,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = avatar_current_cwd()?;
+    let project = avatar_project_slug(project, &cwd);
+    let opts = ab_bridge::avatar_cortex::AvatarCortexReviewRecordOptions {
+        label: label.as_deref(),
+        heartbeat_label: heartbeat_label.as_deref(),
+        project: Some(&project),
+        output: output.as_deref(),
+        requested_track: Some(track.as_str()),
+        requested_variant: variant.as_deref(),
+        outcome: Some(outcome.as_str()),
+        reviewer: Some(reviewer.as_str()),
+        reason: reason.as_deref(),
+        notes: notes.as_slice(),
+        confirm,
+    };
+    let payload = ab_bridge::avatar_cortex::avatar_cortex_renderer_review_record(&opts)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    println!("avatar cortex review record");
+    println!(
+        "track={} variant={} outcome={} confirmed={} blocked={} wrote_record={} approval_write={}",
+        avatar_health_display(payload.get("track"), "-"),
+        avatar_health_display(payload.get("variant"), "-"),
+        avatar_health_display(payload.get("outcome"), "-"),
+        avatar_health_display(payload.get("confirmed"), "false"),
+        avatar_health_display(payload.get("blocked"), "true"),
+        avatar_health_display(payload.get("persists_review_record"), "false"),
+        avatar_health_display(payload.get("writes_approval"), "false")
+    );
+    if let Some(reasons) = payload.get("blocked_reasons").and_then(Value::as_array) {
+        if !reasons.is_empty() {
+            println!("blocked_reasons={}", serde_json::to_string(reasons)?);
+        }
+    }
+    println!(
+        "record_path={}",
+        avatar_health_display(payload.get("record_path"), "-")
+    );
+    println!(
+        "next={}",
+        avatar_health_display(payload.get("next_step"), "-")
+    );
     Ok(())
 }
 

@@ -814,7 +814,40 @@ async fn avatar_surface_panel(
     let cortex_review_packet =
         crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(cortex.clone());
     let cortex_review_report =
-        crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(cortex.clone());
+        crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status_for_project(
+            cortex.clone(),
+            q.project.as_deref().unwrap_or("agent-bridge"),
+        )
+        .unwrap_or_else(|e| {
+            json!({
+                "surface": "avatar_cortex_renderer_review_report",
+                "read_only": true,
+                "writes_files": false,
+                "persists_review_record": false,
+                "review_report": {
+                    "report_state": "error",
+                    "packet_count": 0,
+                    "ready_packet_count": 0,
+                    "blocked_packet_count": 0,
+                    "human_feedback_count": 0,
+                    "voice_linkage_requested_count": 0,
+                    "human_decision_count": 0,
+                    "approved_count": 0,
+                    "review_record_count": 0,
+                    "html_route": "/avatar-surface/cortex-review-report",
+                    "packet_route": "/avatar-surface/cortex-review-packet",
+                    "summary": e.to_string(),
+                    "acceptance": {
+                        "ready_for_human_visual_review": false,
+                        "ready_for_approval": false,
+                        "can_promote_review_tracks": false,
+                        "merge_without_human_review_allowed": false,
+                        "records_persisted": false,
+                    },
+                    "items": []
+                }
+            })
+        });
     let cortex_voice_policy =
         crate::avatar_cortex::avatar_cortex_voice_policy_from_status(cortex.clone());
     let cortex_voice_request = crate::avatar_cortex::avatar_cortex_voice_request_from_status(
@@ -3766,6 +3799,55 @@ fn avatar_surface_review_report_html(
     let voice_requests =
         avatar_surface_html_json_value(report.get("voice_linkage_requested_count"), "0");
     let human_decisions = avatar_surface_html_json_value(report.get("human_decision_count"), "0");
+    let approved_count = avatar_surface_html_json_value(report.get("approved_count"), "0");
+    let review_records = avatar_surface_html_json_value(report.get("review_record_count"), "0");
+    let records_persisted = avatar_surface_html_json_value(
+        report
+            .get("acceptance")
+            .and_then(|acceptance| acceptance.get("records_persisted")),
+        "false",
+    );
+    let items = report
+        .get("items")
+        .and_then(Value::as_array);
+    let latest_record = items
+        .and_then(|items| {
+            items.iter().find_map(|item| {
+                let record = item.get("latest_review_record")?;
+                if !record.is_object() {
+                    return None;
+                }
+                let token = item.get("token").and_then(Value::as_str).unwrap_or("-");
+                let variant = record.get("variant").and_then(Value::as_str).unwrap_or("-");
+                let outcome = record.get("outcome").and_then(Value::as_str).unwrap_or("-");
+                Some(format!("{token} variant={variant} outcome={outcome}"))
+            })
+        })
+        .unwrap_or_else(|| "-".to_string());
+    let latest_record = html_escape(&latest_record);
+    let record_command = items
+        .and_then(|items| {
+            items.iter().find_map(|item| {
+                if item
+                    .get("human_decision_present")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    None
+                } else {
+                    item.get("review_record_command").and_then(Value::as_str)
+                }
+            })
+        })
+        .or_else(|| {
+            items.and_then(|items| {
+                items
+                    .iter()
+                    .find_map(|item| item.get("review_record_command").and_then(Value::as_str))
+            })
+        })
+        .unwrap_or("-");
+    let record_command = html_escape(record_command);
     let ready_for_human = avatar_surface_html_json_value(
         report
             .get("acceptance")
@@ -3800,8 +3882,11 @@ fn avatar_surface_review_report_html(
       </div>
       <dl>
         <div><dt>readiness</dt><dd>human={ready_for_human} approval={ready_for_approval} decisions={human_decisions}</dd></div>
+        <div><dt>records</dt><dd>approved={approved_count} records={review_records} persisted={records_persisted}</dd></div>
+        <div><dt>latest</dt><dd>{latest_record}</dd></div>
         <div><dt>feedback</dt><dd>items={feedback} voice_requests={voice_requests}</dd></div>
         <div><dt>safety</dt><dd>can_promote={can_promote} merge_without_review={merge_without_review}</dd></div>
+        <div><dt>next record</dt><dd><code>{record_command}</code></dd></div>
         <div><dt>packet</dt><dd><a href="{packet_href}">review packet json</a></dd></div>
         <div><dt>open</dt><dd><a href="{href}">review report json</a></dd></div>
       </dl>
@@ -3815,8 +3900,13 @@ fn avatar_surface_review_report_html(
         ready_for_human = ready_for_human,
         ready_for_approval = ready_for_approval,
         human_decisions = human_decisions,
+        approved_count = approved_count,
+        review_records = review_records,
+        records_persisted = records_persisted,
+        latest_record = latest_record,
         can_promote = can_promote,
         merge_without_review = merge_without_review,
+        record_command = record_command,
         packet_href = packet_href,
         href = href,
     )
@@ -6381,8 +6471,12 @@ mod tests {
         assert!(html.contains("Xiao Shu Review Report"));
         assert!(html.contains("state=ready_for_human_visual_review packets=3 ready=3 blocked=0"));
         assert!(html.contains("human=true approval=false decisions=0"));
+        assert!(html.contains("approved=0 records=0 persisted=false"));
+        assert!(html.contains("<dt>latest</dt><dd>-</dd>"));
         assert!(html.contains("items=1 voice_requests=1"));
         assert!(html.contains("can_promote=false merge_without_review=false"));
+        assert!(html.contains("next record"));
+        assert!(html.contains("cortex-review-record"));
         assert!(html.contains("review report json"));
         assert!(html.contains("Xiao Shu Voice Policy"));
         assert!(html.contains("tracks=5 manual_cli=1 display_only=4 auto=0"));

@@ -130,6 +130,21 @@ pub struct XiaoShuActionRequestActionOptions<'a> {
     pub tts_rate: Option<u64>,
 }
 
+#[derive(Clone, Copy)]
+pub struct AvatarCortexReviewRecordOptions<'a> {
+    pub label: Option<&'a str>,
+    pub heartbeat_label: Option<&'a str>,
+    pub project: Option<&'a str>,
+    pub output: Option<&'a Path>,
+    pub requested_track: Option<&'a str>,
+    pub requested_variant: Option<&'a str>,
+    pub outcome: Option<&'a str>,
+    pub reviewer: Option<&'a str>,
+    pub reason: Option<&'a str>,
+    pub notes: &'a [String],
+    pub confirm: bool,
+}
+
 fn home_dir() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -179,6 +194,14 @@ fn avatar_cortex_action_request_dir() -> Result<PathBuf> {
         .join("avatar_cortex_action_requests"))
 }
 
+fn avatar_cortex_review_record_dir() -> Result<PathBuf> {
+    Ok(home_dir()?
+        .join("Library")
+        .join("Application Support")
+        .join("agent-bridge")
+        .join("avatar_cortex_reviews"))
+}
+
 fn avatar_cortex_voice_paths(project: &str, heartbeat_label: &str) -> Result<(PathBuf, PathBuf)> {
     let dir = avatar_cortex_voice_dir()?.join(label_component(project));
     let slug = label_component(heartbeat_label);
@@ -192,6 +215,12 @@ fn xiao_shu_action_request_queue_path(project: &str) -> Result<PathBuf> {
     Ok(avatar_cortex_action_request_dir()?
         .join(label_component(project))
         .join("requests.jsonl"))
+}
+
+fn avatar_cortex_review_record_path(project: &str) -> Result<PathBuf> {
+    Ok(avatar_cortex_review_record_dir()?
+        .join(label_component(project))
+        .join("review_records.jsonl"))
 }
 
 pub fn cortex_runner_label(label: Option<&str>, project: &str) -> String {
@@ -264,6 +293,24 @@ fn append_jsonl(path: &Path, value: &Value) -> Result<()> {
         .with_context(|| format!("open {}", path.display()))?;
     writeln!(file, "{}", serde_json::to_string(value)?)
         .with_context(|| format!("append {}", path.display()))
+}
+
+fn read_jsonl_records(path: &Path) -> Result<Vec<Value>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let body = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let mut records = Vec::new();
+    for (idx, line) in body.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let value: Value = serde_json::from_str(line)
+            .with_context(|| format!("parse {} line {}", path.display(), idx + 1))?;
+        records.push(value);
+    }
+    Ok(records)
 }
 
 fn feed_record(backend: &ab_seed_bridge::SeedBackend, record: &Value) -> Option<(String, String)> {
@@ -2564,6 +2611,11 @@ fn avatar_cortex_renderer_review_gate_item(track: &Value, index: usize) -> Value
         "risk_level": risk_level,
         "duration_ms": duration_ms,
         "frame_count": frame_count,
+        "preferred_variant": track.get("preferred_variant").cloned().unwrap_or(Value::Null),
+        "semantic_variant_count": track
+            .get("semantic_variant_count")
+            .cloned()
+            .unwrap_or(Value::Null),
         "automatic_gate": automatic_gate,
         "manual_decision": manual_decision,
         "can_promote_binding": false,
@@ -2723,6 +2775,14 @@ fn avatar_cortex_renderer_review_packet_item(item: &Value) -> Value {
         "token": token,
         "track_kind": item.get("track_kind").cloned().unwrap_or(Value::Null),
         "risk_level": risk_level,
+        "preferred_variant": item
+            .get("preferred_variant")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "semantic_variant_count": item
+            .get("semantic_variant_count")
+            .cloned()
+            .unwrap_or(Value::Null),
         "automatic_gate": automatic_gate,
         "manual_decision": item.get("manual_decision").cloned().unwrap_or(Value::Null),
         "approval_state": "not_approved",
@@ -2873,8 +2933,54 @@ fn avatar_cortex_json_array_len(value: &Value) -> usize {
     value.as_array().map(Vec::len).unwrap_or(0)
 }
 
-fn avatar_cortex_renderer_review_report_item(packet: &Value) -> Value {
+fn avatar_cortex_review_record_outcome_state(outcome: &str) -> &'static str {
+    match outcome {
+        "approved" => "approved",
+        "request_revision" => "revision_requested",
+        "rejected" => "rejected",
+        "keep_pending" => "kept_pending",
+        _ => "recorded",
+    }
+}
+
+fn avatar_cortex_latest_review_record<'a>(
+    records: &'a [Value],
+    token: &str,
+    variant: Option<&str>,
+) -> Option<&'a Value> {
+    records.iter().rev().find(|record| {
+        vstr(record.get("track")) == Some(token)
+            && match (variant, vstr(record.get("variant"))) {
+                (Some(expected), Some(actual)) => expected == actual,
+                (Some(_), None) => false,
+                (None, _) => true,
+            }
+    })
+}
+
+fn avatar_cortex_review_record_command(
+    project: &str,
+    token: &str,
+    variant: Option<&str>,
+) -> String {
+    let mut command = format!(
+        "agent-bridge avatar cortex-review-record --project {project:?} --track {token:?} --outcome approved --reviewer \"local-operator\" --reason \"human-visual-review\" --confirm"
+    );
+    if let Some(variant) = variant.filter(|v| !v.trim().is_empty()) {
+        command.push_str(&format!(" --variant {variant:?}"));
+    }
+    command
+}
+
+fn avatar_cortex_renderer_review_report_item(
+    packet: &Value,
+    project: &str,
+    review_records: &[Value],
+) -> Value {
     let token = vstr(packet.get("token")).unwrap_or("xiao_shu::unknown");
+    let preferred_variant = vstr(packet.get("preferred_variant"));
+    let latest_review_record =
+        avatar_cortex_latest_review_record(review_records, token, preferred_variant);
     let review_packet = packet.get("review_packet").unwrap_or(&Value::Null);
     let source_checks = packet.get("source_checks").unwrap_or(&Value::Null);
     let blockers = source_checks.get("blockers").unwrap_or(&Value::Null);
@@ -2921,9 +3027,27 @@ fn avatar_cortex_renderer_review_report_item(packet: &Value) -> Value {
         && has_questions
         && has_acceptance
         && has_operator_checks;
+    let latest_review_record_value = latest_review_record.cloned().unwrap_or(Value::Null);
+    let latest_outcome = latest_review_record
+        .and_then(|record| vstr(record.get("outcome")))
+        .unwrap_or("not_approved");
+    let human_decision_present = latest_review_record.is_some();
+    let approved = latest_outcome == "approved";
+    let approval_state = if human_decision_present {
+        avatar_cortex_review_record_outcome_state(latest_outcome)
+    } else {
+        packet
+            .get("approval_state")
+            .and_then(Value::as_str)
+            .unwrap_or("not_approved")
+    };
 
     json!({
         "token": token,
+        "preferred_variant": packet
+            .get("preferred_variant")
+            .cloned()
+            .unwrap_or(Value::Null),
         "readiness": if ready_for_human_review {
             "ready_for_human_visual_review"
         } else {
@@ -2933,13 +3057,17 @@ fn avatar_cortex_renderer_review_report_item(packet: &Value) -> Value {
             .get("default_decision")
             .cloned()
             .unwrap_or(json!("keep_pending")),
-        "approval_state": packet
-            .get("approval_state")
-            .cloned()
-            .unwrap_or(json!("not_approved")),
+        "approval_state": approval_state,
         "can_promote_binding": false,
         "ready_for_human_review": ready_for_human_review,
-        "ready_for_approval": false,
+        "ready_for_approval": ready_for_human_review && approved,
+        "human_decision_present": human_decision_present,
+        "latest_review_record": latest_review_record_value,
+        "review_record_command": avatar_cortex_review_record_command(
+            project,
+            token,
+            preferred_variant,
+        ),
         "focused_renderer": packet
             .get("renderer_view")
             .cloned()
@@ -2963,6 +3091,7 @@ fn avatar_cortex_renderer_review_report_item(packet: &Value) -> Value {
                 review_packet.get("revision_response").unwrap_or(&Value::Null),
             ),
             "source_blockers": avatar_cortex_json_array_len(blockers),
+            "review_records": if human_decision_present { 1 } else { 0 },
         },
         "missing": {
             "preview_route": !has_preview_route,
@@ -2971,11 +3100,28 @@ fn avatar_cortex_renderer_review_report_item(packet: &Value) -> Value {
             "operator_checks": !has_operator_checks,
             "source_blockers": has_blockers,
         },
-        "next_step": "open focused renderer preview and record a human observation outside this read-only report",
+        "next_step": if approved {
+            "review record is approved; binding promotion still requires a separate explicit design"
+        } else {
+            "open focused renderer preview and record a local CLI review decision"
+        },
     })
 }
 
+#[cfg(test)]
 fn avatar_cortex_renderer_review_report_from_packet_payload(review_packet_payload: Value) -> Value {
+    avatar_cortex_renderer_review_report_from_packet_payload_with_records(
+        review_packet_payload,
+        "agent-bridge",
+        &[],
+    )
+}
+
+fn avatar_cortex_renderer_review_report_from_packet_payload_with_records(
+    review_packet_payload: Value,
+    project: &str,
+    review_records: &[Value],
+) -> Value {
     let packet = review_packet_payload
         .get("review_packet")
         .unwrap_or(&Value::Null);
@@ -2986,7 +3132,7 @@ fn avatar_cortex_renderer_review_report_from_packet_payload(review_packet_payloa
         .unwrap_or_default();
     let items: Vec<Value> = packets
         .iter()
-        .map(avatar_cortex_renderer_review_report_item)
+        .map(|packet| avatar_cortex_renderer_review_report_item(packet, project, review_records))
         .collect();
     let packet_count = items.len();
     let ready_count = items
@@ -3013,8 +3159,21 @@ fn avatar_cortex_renderer_review_report_from_packet_payload(review_packet_payloa
                 .unwrap_or(false)
         })
         .count();
+    let human_decision_count = items
+        .iter()
+        .filter(|item| {
+            item.get("human_decision_present")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .count();
+    let approved_count = items
+        .iter()
+        .filter(|item| item.get("approval_state").and_then(Value::as_str) == Some("approved"))
+        .count();
     let blocked_count = packet_count.saturating_sub(ready_count);
     let ready_for_human_review = packet_count > 0 && blocked_count == 0;
+    let ready_for_approval = approved_count > 0;
     let packet_route = packet
         .get("html_route")
         .cloned()
@@ -3036,9 +3195,10 @@ fn avatar_cortex_renderer_review_report_from_packet_payload(review_packet_payloa
     ]);
     let acceptance = json!({
         "ready_for_human_visual_review": ready_for_human_review,
-        "ready_for_approval": false,
+        "ready_for_approval": ready_for_approval,
         "approval_writes_allowed": false,
-        "records_persisted": false,
+        "cli_review_record_available": true,
+        "records_persisted": !review_records.is_empty(),
         "review_tracks_mutate_bindings": false,
         "can_promote_review_tracks": false,
         "asset_writes_allowed": false,
@@ -3057,13 +3217,23 @@ fn avatar_cortex_renderer_review_report_from_packet_payload(review_packet_payloa
         "blocked_packet_count": blocked_count,
         "human_feedback_count": human_feedback_count,
         "voice_linkage_requested_count": voice_linkage_requested_count,
-        "human_decision_count": 0,
+        "human_decision_count": human_decision_count,
+        "approved_count": approved_count,
+        "review_record_count": review_records.len(),
         "report_state": report_state,
         "items": items,
         "checklist": checklist,
         "acceptance": acceptance,
-        "decision": "implementation is ready for human visual review, but no pending track is approved or promotable",
-        "next_step": "perform the human visual pass for sorting_glow, look_sideways, and alert_peek before designing any approval record",
+        "decision": if approved_count > 0 {
+            "human review records exist; renderer bindings still require a separate explicit promotion design"
+        } else {
+            "implementation is ready for human visual review, but no pending track is approved or promotable"
+        },
+        "next_step": if approved_count > 0 {
+            "inspect approved records and design a separate binding promotion gate before any renderer binding changes"
+        } else {
+            "perform the human visual pass for sorting_glow, look_sideways, and alert_peek, then record a local CLI review decision"
+        },
     });
 
     json!({
@@ -3088,9 +3258,26 @@ fn avatar_cortex_renderer_review_report_from_packet_payload(review_packet_payloa
     })
 }
 
+#[cfg(test)]
 pub(crate) fn avatar_cortex_renderer_review_report_from_status(status: Value) -> Value {
     let review_packet = avatar_cortex_renderer_review_packet_from_status(status);
     avatar_cortex_renderer_review_report_from_packet_payload(review_packet)
+}
+
+pub(crate) fn avatar_cortex_renderer_review_report_from_status_for_project(
+    status: Value,
+    project: &str,
+) -> Result<Value> {
+    let review_packet = avatar_cortex_renderer_review_packet_from_status(status);
+    let path = avatar_cortex_review_record_path(project)?;
+    let records = read_jsonl_records(&path)?;
+    Ok(
+        avatar_cortex_renderer_review_report_from_packet_payload_with_records(
+            review_packet,
+            project,
+            &records,
+        ),
+    )
 }
 
 pub fn avatar_cortex_renderer_review_report(
@@ -3099,8 +3286,234 @@ pub fn avatar_cortex_renderer_review_report(
     project: Option<&str>,
     output: Option<&Path>,
 ) -> Result<Value> {
-    let status = avatar_cortex_status(label, heartbeat_label, project, output)?;
-    Ok(avatar_cortex_renderer_review_report_from_status(status))
+    let project = project.unwrap_or("agent-bridge");
+    let status = avatar_cortex_status(label, heartbeat_label, Some(project), output)?;
+    avatar_cortex_renderer_review_report_from_status_for_project(status, project)
+}
+
+fn avatar_cortex_review_outcome_allowed(outcome: &str) -> bool {
+    matches!(
+        outcome,
+        "approved" | "keep_pending" | "request_revision" | "rejected"
+    )
+}
+
+fn avatar_cortex_track_default_variant(track: &Value) -> Option<String> {
+    vstr(track.get("preferred_variant"))
+        .or_else(|| {
+            track
+                .get("semantic_variants")
+                .and_then(Value::as_array)
+                .and_then(|variants| {
+                    variants
+                        .iter()
+                        .find(|variant| {
+                            variant
+                                .get("default")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false)
+                        })
+                        .or_else(|| variants.first())
+                })
+                .and_then(|variant| vstr(variant.get("variant_id")))
+        })
+        .map(ToString::to_string)
+}
+
+fn avatar_cortex_track_has_variant(track: &Value, variant: &str) -> bool {
+    track
+        .get("semantic_variants")
+        .and_then(Value::as_array)
+        .map(|variants| {
+            variants
+                .iter()
+                .any(|candidate| vstr(candidate.get("variant_id")) == Some(variant))
+        })
+        .unwrap_or(false)
+}
+
+fn avatar_cortex_review_record_from_renderer_view_payload(
+    renderer_view_payload: Value,
+    opts: &AvatarCortexReviewRecordOptions<'_>,
+    record_path: &Path,
+) -> Result<Value> {
+    let project = opts.project.unwrap_or("agent-bridge");
+    let token = opts
+        .requested_track
+        .map(str::trim)
+        .filter(|track| !track.is_empty())
+        .unwrap_or("xiao_shu::alert_peek::medium");
+    let outcome = opts
+        .outcome
+        .map(str::trim)
+        .filter(|outcome| !outcome.is_empty())
+        .unwrap_or("approved");
+    let reviewer = opts
+        .reviewer
+        .map(str::trim)
+        .filter(|reviewer| !reviewer.is_empty())
+        .unwrap_or("local-operator");
+    let reason = opts
+        .reason
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty());
+    let view = renderer_view_payload
+        .get("renderer_view")
+        .unwrap_or(&Value::Null);
+    let track = view
+        .get("tracks")
+        .and_then(Value::as_array)
+        .and_then(|tracks| {
+            tracks
+                .iter()
+                .find(|track| vstr(track.get("token")) == Some(token))
+        });
+    let variant = track
+        .and_then(|track| {
+            opts.requested_variant
+                .map(str::trim)
+                .filter(|variant| !variant.is_empty())
+                .map(ToString::to_string)
+                .or_else(|| avatar_cortex_track_default_variant(track))
+        })
+        .unwrap_or_else(|| "default".to_string());
+    let mut blocked_reasons = Vec::new();
+    if track.is_none() {
+        blocked_reasons.push(json!("track_not_found"));
+    }
+    if !avatar_cortex_review_outcome_allowed(outcome) {
+        blocked_reasons.push(json!("unsupported_outcome"));
+    }
+    if let Some(track) = track {
+        if !avatar_cortex_track_has_variant(track, &variant) {
+            blocked_reasons.push(json!("variant_not_found"));
+        }
+        if track
+            .get("track_kind")
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            != "review_only"
+        {
+            blocked_reasons.push(json!("track_not_review_only"));
+        }
+    }
+    if reason.is_none() {
+        blocked_reasons.push(json!("reason_missing"));
+    }
+    if !opts.confirm {
+        blocked_reasons.push(json!("confirm_flag_missing"));
+    }
+
+    let blocked = !blocked_reasons.is_empty();
+    let now = now_secs();
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(now as u128);
+    let notes: Vec<String> = opts
+        .notes
+        .iter()
+        .map(|note| note.trim())
+        .filter(|note| !note.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    let review_hash = fnv1a_hex16(&format!(
+        "{project}|{token}|{variant}|{outcome}|{reviewer}|{now}|{nonce}|{:?}",
+        notes
+    ));
+    let review_id = format!("xsrrev-{now}-{}", &review_hash[..8]);
+    let record = if blocked {
+        Value::Null
+    } else {
+        json!({
+            "schema": 1,
+            "review_id": review_id,
+            "created_at": now,
+            "updated_at": now,
+            "project": project,
+            "target": "xiao-shu",
+            "source": "avatar_cortex_review_record",
+            "actor": "local-cli",
+            "reviewer": reviewer,
+            "track": token,
+            "variant": variant,
+            "outcome": outcome,
+            "approval_state": avatar_cortex_review_record_outcome_state(outcome),
+            "reason": reason,
+            "notes": notes,
+            "cli_only": true,
+            "sidecar_only": true,
+            "llm_safe": true,
+            "direct_pet_control_allowed": false,
+            "direct_llm_emit_allowed": false,
+            "emits_audio": false,
+            "emits_notification": false,
+            "writes_approval": outcome == "approved",
+            "writes_files": true,
+            "writes_cooldown_state": false,
+            "mutates_renderer": false,
+            "codex_pet_package_mutation": false,
+            "mutates_global_substrate": false,
+            "can_promote_binding": false,
+            "review_tracks_mutate_bindings": false,
+            "record_path": record_path.to_string_lossy(),
+        })
+    };
+    if !blocked {
+        append_jsonl(record_path, &record)?;
+    }
+
+    Ok(json!({
+        "surface": "avatar_cortex_review_record",
+        "schema": 1,
+        "generated_at": now,
+        "cli_only": true,
+        "http_available": false,
+        "read_only": blocked,
+        "dry_run": blocked,
+        "llm_safe": true,
+        "sidecar_only": true,
+        "direct_pet_control_allowed": false,
+        "direct_llm_emit_allowed": false,
+        "emits_audio": false,
+        "emits_notification": false,
+        "writes_files": !blocked,
+        "writes_approval": !blocked && outcome == "approved",
+        "persists_review_record": !blocked,
+        "writes_cooldown_state": false,
+        "mutates_renderer": false,
+        "codex_pet_package_mutation": false,
+        "mutates_global_substrate": false,
+        "can_promote_binding": false,
+        "review_tracks_mutate_bindings": false,
+        "project": project,
+        "track": token,
+        "variant": variant,
+        "outcome": outcome,
+        "reviewer": reviewer,
+        "confirmed": opts.confirm,
+        "blocked": blocked,
+        "blocked_reasons": blocked_reasons,
+        "record_path": record_path.to_string_lossy(),
+        "record": record,
+        "source_renderer_view": renderer_view_payload,
+        "next_step": if blocked {
+            "review the focused renderer view and rerun this local CLI command with --confirm plus a reason to persist the review record"
+        } else {
+            "review record persisted; inspect cortex-review-report before any separate binding promotion design"
+        },
+    }))
+}
+
+pub fn avatar_cortex_renderer_review_record(
+    opts: &AvatarCortexReviewRecordOptions<'_>,
+) -> Result<Value> {
+    let project = opts.project.unwrap_or("agent-bridge");
+    let status =
+        avatar_cortex_status(opts.label, opts.heartbeat_label, Some(project), opts.output)?;
+    let renderer_view = avatar_cortex_renderer_view_from_status(status);
+    let record_path = avatar_cortex_review_record_path(project)?;
+    avatar_cortex_review_record_from_renderer_view_payload(renderer_view, opts, &record_path)
 }
 
 fn avatar_cortex_voice_policy_rule_from_track(track: &Value) -> Value {
@@ -5010,10 +5423,7 @@ fn xiao_shu_action_request_compact_record(record: Value) -> Value {
     );
     action_request.insert(
         "request_state".to_string(),
-        request
-            .get("request_state")
-            .cloned()
-            .unwrap_or(Value::Null),
+        request.get("request_state").cloned().unwrap_or(Value::Null),
     );
     action_request.insert(
         "mapped_track".to_string(),
@@ -5108,10 +5518,7 @@ fn xiao_shu_action_request_compact_record(record: Value) -> Value {
             record.get(key).cloned().unwrap_or_else(|| json!(fallback)),
         );
     }
-    compact.insert(
-        "action_request".to_string(),
-        Value::Object(action_request),
-    );
+    compact.insert("action_request".to_string(), Value::Object(action_request));
     compact.insert("compact".to_string(), json!(true));
     Value::Object(compact)
 }
@@ -6843,6 +7250,113 @@ mod tests {
     }
 
     #[test]
+    fn avatar_cortex_review_record_writes_cli_only_approval() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let root =
+            std::env::temp_dir().join(format!("agent-bridge-xiao-review-record-{}", now_secs()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("review_records.jsonl");
+        let notes = vec!["v4 keeps the raised hand and restores Xiao Shu identity".to_string()];
+        let opts = AvatarCortexReviewRecordOptions {
+            label: None,
+            heartbeat_label: None,
+            project: Some("agent-bridge"),
+            output: None,
+            requested_track: Some("xiao_shu::alert_peek::medium"),
+            requested_variant: Some("sidecar_peek_v4"),
+            outcome: Some("approved"),
+            reviewer: Some("unit-test"),
+            reason: Some("visual review accepted v4"),
+            notes: &notes,
+            confirm: true,
+        };
+        let payload =
+            avatar_cortex_review_record_from_renderer_view_payload(view, &opts, &path).unwrap();
+
+        assert_eq!(payload["surface"], "avatar_cortex_review_record");
+        assert_eq!(payload["cli_only"], true);
+        assert_eq!(payload["http_available"], false);
+        assert_eq!(payload["persists_review_record"], true);
+        assert_eq!(payload["writes_approval"], true);
+        assert_eq!(payload["writes_files"], true);
+        assert_eq!(payload["emits_audio"], false);
+        assert_eq!(payload["mutates_renderer"], false);
+        assert_eq!(payload["codex_pet_package_mutation"], false);
+        assert_eq!(payload["can_promote_binding"], false);
+        assert_eq!(payload["record"]["outcome"], "approved");
+        assert_eq!(payload["record"]["variant"], "sidecar_peek_v4");
+
+        let records = read_jsonl_records(&path).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["track"], "xiao_shu::alert_peek::medium");
+        assert_eq!(records[0]["approval_state"], "approved");
+    }
+
+    #[test]
+    fn avatar_cortex_review_report_reflects_persisted_review_records() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let gate = avatar_cortex_renderer_review_gate_from_renderer_view_payload(view);
+        let packet = avatar_cortex_renderer_review_packet_from_review_gate_payload(gate);
+        let records = vec![json!({
+            "schema": 1,
+            "review_id": "xsrrev-test",
+            "created_at": 1,
+            "updated_at": 1,
+            "project": "agent-bridge",
+            "track": "xiao_shu::alert_peek::medium",
+            "variant": "sidecar_peek_v4",
+            "outcome": "approved",
+            "approval_state": "approved",
+            "reviewer": "unit-test",
+            "reason": "visual review accepted v4",
+            "notes": ["looks correct"],
+            "cli_only": true,
+            "can_promote_binding": false,
+            "codex_pet_package_mutation": false,
+        })];
+        let report = avatar_cortex_renderer_review_report_from_packet_payload_with_records(
+            packet,
+            "agent-bridge",
+            &records,
+        );
+        let review_report = &report["review_report"];
+
+        assert_eq!(review_report["human_decision_count"], 1);
+        assert_eq!(review_report["approved_count"], 1);
+        assert_eq!(review_report["review_record_count"], 1);
+        assert_eq!(review_report["acceptance"]["records_persisted"], true);
+        assert_eq!(review_report["acceptance"]["ready_for_approval"], true);
+        assert_eq!(
+            review_report["acceptance"]["can_promote_review_tracks"],
+            false
+        );
+
+        let alert = review_report["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["token"] == "xiao_shu::alert_peek::medium")
+            .unwrap();
+        assert_eq!(alert["approval_state"], "approved");
+        assert_eq!(alert["ready_for_approval"], true);
+        assert_eq!(alert["can_promote_binding"], false);
+        assert_eq!(alert["human_decision_present"], true);
+        assert_eq!(alert["latest_review_record"]["review_id"], "xsrrev-test");
+        assert!(alert["review_record_command"]
+            .as_str()
+            .unwrap()
+            .contains("cortex-review-record"));
+    }
+
+    #[test]
     fn avatar_cortex_voice_policy_keeps_real_audio_cli_only() {
         let registry = avatar_cortex_renderer_registry_payload(None);
         let plan = avatar_cortex_binding_plan_from_registry(registry);
@@ -7499,7 +8013,10 @@ mod tests {
         assert_eq!(one["queue"]["request_id_filter"], request_id);
         assert_eq!(one["queue"]["include_details"], true);
         assert_eq!(one["records"][0]["request_id"], request_id);
-        assert_eq!(one["records"][0]["source_request"]["surface"], "xiao_shu_action_request");
+        assert_eq!(
+            one["records"][0]["source_request"]["surface"],
+            "xiao_shu_action_request"
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -7535,8 +8052,10 @@ mod tests {
 
     #[test]
     fn xiao_shu_action_queue_uses_latest_append_only_state() {
-        let root =
-            std::env::temp_dir().join(format!("agent-bridge-xiao-shu-action-current-{}", now_secs()));
+        let root = std::env::temp_dir().join(format!(
+            "agent-bridge-xiao-shu-action-current-{}",
+            now_secs()
+        ));
         std::fs::create_dir_all(&root).unwrap();
 
         let request_payload = json!({

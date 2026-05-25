@@ -542,15 +542,23 @@ route, but `writes_approval`, `persists_review_record`,
 until a separate approval surface is designed.
 `avatar cortex-review-report` and `/avatar-surface/cortex-review-report`
 summarize whether those packets are ready for human visual review. The report
-can mark implementation evidence ready for a human pass, but it must keep
-`human_decision_count=0`, `ready_for_approval=false`,
-`approval_writes_allowed=false`, `records_persisted=false`, and
-`merge_without_human_review_allowed=false`. Packets and reports may include
-`latest_human_feedback`, `revision_response`, and `voice_linkage` so a visual
-review can request lower brightness, thicker shape, aesthetic revision, or
-future sparse voice linkage. Those fields are evidence and design intent only:
-they do not approve a track, persist a review decision, bind a renderer, mutate
-the official pet package, or emit audio.
+can mark implementation evidence ready for a human pass, but without a separate
+local review record it must keep `human_decision_count=0`,
+`ready_for_approval=false`, `approval_writes_allowed=false`,
+`records_persisted=false`, and `merge_without_human_review_allowed=false`.
+Packets and reports may include `latest_human_feedback`, `revision_response`,
+and `voice_linkage` so a visual review can request lower brightness, thicker
+shape, aesthetic revision, or future sparse voice linkage. Those fields are
+evidence and design intent only: they do not approve a track, bind a renderer,
+mutate the official pet package, or emit audio.
+`avatar cortex-review-record` is the only approved write path for local visual
+decisions in this slice. It is CLI-only, requires `--confirm` plus an operator
+reason, appends a sidecar JSONL record, and exposes the result back through the
+review report and read-only panel/MCP projections. It may set
+`human_decision_count>0`, `records_persisted=true`, and
+`ready_for_approval=true` for an approved track, but it must still keep
+`can_promote_review_tracks=false`, `can_promote_binding=false`, no HTTP write
+route, no MCP direct-control route, no package mutation, and no audio emission.
 `avatar cortex-preview` and `/avatar-surface/cortex-preview` expose that preview
 as a dedicated read-only surface with `emits_audio=false`,
 `emits_notification=false`, and `requires_explicit_emit_gate=true`.
@@ -643,7 +651,8 @@ external watchdogs and non-MCP clients.
 | `agent-bridge avatar cortex-renderer-view` | Preview frames and review-only deferred medium tracks become a browser sidecar renderer view without asset writes or package mutation |
 | `agent-bridge avatar cortex-review-gate` | Renderer tracks are scored for manual visual review without approval writes or binding promotion |
 | `agent-bridge avatar cortex-review-packet` | Pending review-only renderer tracks become human inspection packets without approval persistence or binding promotion |
-| `agent-bridge avatar cortex-review-report` | Pending-track packets are summarized for human visual-review readiness without recording decisions, approval state, or merge readiness |
+| `agent-bridge avatar cortex-review-report` | Pending-track packets are summarized for human visual-review readiness; persisted CLI review records may be reflected without enabling binding promotion |
+| `agent-bridge avatar cortex-review-record` | Local CLI-only visual decisions append sidecar review records with `--confirm` and an operator reason; no HTTP/MCP write route is exposed |
 | `agent-bridge avatar cortex-preview` | Voice preview text is visible without emitting audio or notifications |
 | `agent-bridge avatar cortex-voice-gate` | Explicit voice-gate dry-run reports whether a future emit would pass, without emitting audio |
 | `agent-bridge avatar cortex-voice-emit` | CLI-only manual voice adapter can speak one gated line and record cooldown state |
@@ -670,7 +679,7 @@ external watchdogs and non-MCP clients.
 | daemon HTTP `/avatar-surface/sidecar-spritesheet` | Prototype Xiao Shu spritesheets can be served as read-only sidecar review assets without official package mutation or binding promotion |
 | daemon HTTP `/avatar-surface/cortex-review-gate` | Same read-only renderer review gate is available to browser and non-MCP clients without approval writes; panel links can open pending tracks for focused inspection only |
 | daemon HTTP `/avatar-surface/cortex-review-packet` | Same pending-track human inspection packets are available without approval persistence, record writes, or binding promotion |
-| daemon HTTP `/avatar-surface/cortex-review-report` | Same packet-readiness report is available without human decision writes, approval persistence, or merge readiness |
+| daemon HTTP `/avatar-surface/cortex-review-report` | Same packet-readiness report is available and can reflect persisted CLI review records without accepting HTTP writes or merge readiness |
 | daemon HTTP `/avatar-surface/cortex-preview` | Same voice preview is available to browser and non-MCP clients without emission |
 | daemon HTTP `/avatar-surface/cortex-voice-gate` | Same explicit voice-gate dry-run is available to browser and non-MCP clients without emission |
 | Non-Codex synthetic avatar state | Object validates without `compat.codex` |

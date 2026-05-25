@@ -7515,9 +7515,18 @@ impl McpTool for AvatarCortexRendererSnapshotTool {
             "review-packet" => {
                 crate::avatar_cortex::avatar_cortex_renderer_review_packet_from_status(status)
             }
-            "review-report" => {
-                crate::avatar_cortex::avatar_cortex_renderer_review_report_from_status(status)
-            }
+            "review-report" => match crate::avatar_cortex::
+                avatar_cortex_renderer_review_report_from_status_for_project(
+                    status,
+                    project.as_deref().unwrap_or("agent-bridge"),
+                ) {
+                Ok(payload) => payload,
+                Err(e) => {
+                    return Ok(ToolResult::error(format!(
+                        "avatar_cortex_renderer_snapshot: {e}"
+                    )));
+                }
+            },
             other => {
                 return Ok(ToolResult::error(format!(
                     "avatar_cortex_renderer_snapshot: unsupported mode '{other}'"
