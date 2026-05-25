@@ -1992,12 +1992,52 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
         })],
         "xiao_shu::sorting_glow::medium" => vec![
             json!({
+                "variant_id": "sidecar_sorting_glow_v3",
+                "label": "sidecar sorting glow v3",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": true,
+                "intent": "review-only processing loop with visible signal-sorting particles and a quiet teal glow, independent of the installed Codex pet package",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-motion-canonical-sorting-glow-v3",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v3",
+                    "format": "image/svg+xml",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "motion_canonical_review_v3"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v3",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "sorting_glow_sidecar_v3_frame_choreo",
+                    "mode": "sidecar_sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "collect_signal_tiles_sort_glow_return",
+                    "duration_ms": 1520,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 150, "phase": "idle_entry", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 155, "phase": "notice_signals", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 170, "phase": "collect_left", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 180, "phase": "collect_right", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 300, "phase": "sort_glow_peak", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 205, "phase": "coalesce_tiles", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 180, "phase": "settle_sorted", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 180, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "adds explicit teal signal tiles so the motion reads as quiet processing instead of generic body wobble",
+                },
+                "review_question": "do the visible signal tiles read as quiet sorting rather than a warning or alert",
+            }),
+            json!({
                 "variant_id": "sidecar_sorting_glow_v2",
                 "label": "sidecar sorting glow v2",
                 "sprite_row": 0,
                 "sprite_frames": 8,
                 "alert_mark": false,
-                "default": true,
+                "default": false,
                 "intent": "stronger motion-canonical review-only processing loop with a clearer gather-sort-glow arc, independent of the installed Codex pet package",
                 "sidecar_asset": {
                     "asset_id": "xiao-shu-motion-canonical-sorting-glow-v2",
@@ -6949,24 +6989,33 @@ mod tests {
         assert_eq!(sorting_glow["binding_stage"], "needs_review");
         assert_eq!(sorting_glow["review_only"], true);
         assert_eq!(sorting_glow["duration_ms"], 1440);
-        assert_eq!(sorting_glow["preferred_variant"], "sidecar_sorting_glow_v2");
-        assert_eq!(sorting_glow["semantic_variant_count"], 2);
+        assert_eq!(sorting_glow["preferred_variant"], "sidecar_sorting_glow_v3");
+        assert_eq!(sorting_glow["semantic_variant_count"], 3);
         assert_eq!(
             sorting_glow["semantic_variants"][0]["variant_id"],
-            "sidecar_sorting_glow_v2"
+            "sidecar_sorting_glow_v3"
         );
         assert_eq!(sorting_glow["semantic_variants"][0]["default"], true);
         assert_eq!(
             sorting_glow["semantic_variants"][0]["sidecar_asset"]["asset_id"],
-            "xiao-shu-motion-canonical-sorting-glow-v2"
+            "xiao-shu-motion-canonical-sorting-glow-v3"
         );
         assert_eq!(
             sorting_glow["semantic_variants"][1]["variant_id"],
-            "sidecar_sorting_glow_v1"
+            "sidecar_sorting_glow_v2"
         );
         assert_eq!(sorting_glow["semantic_variants"][1]["default"], false);
         assert_eq!(
             sorting_glow["semantic_variants"][1]["sidecar_asset"]["asset_id"],
+            "xiao-shu-motion-canonical-sorting-glow-v2"
+        );
+        assert_eq!(
+            sorting_glow["semantic_variants"][2]["variant_id"],
+            "sidecar_sorting_glow_v1"
+        );
+        assert_eq!(sorting_glow["semantic_variants"][2]["default"], false);
+        assert_eq!(
+            sorting_glow["semantic_variants"][2]["sidecar_asset"]["asset_id"],
             "xiao-shu-motion-canonical-sorting-glow-v1"
         );
         assert_eq!(sorting_glow["semantic_variant_review"], Value::Null);
@@ -7388,12 +7437,12 @@ mod tests {
             .iter()
             .find(|item| item["token"] == "xiao_shu::sorting_glow::medium")
             .unwrap();
-        assert_eq!(sorting_glow["preferred_variant"], "sidecar_sorting_glow_v2");
+        assert_eq!(sorting_glow["preferred_variant"], "sidecar_sorting_glow_v3");
         assert!(
             sorting_glow["review_record_command"]
                 .as_str()
                 .unwrap()
-                .contains("--variant \"sidecar_sorting_glow_v2\"")
+                .contains("--variant \"sidecar_sorting_glow_v3\"")
         );
 
         let alert = items
