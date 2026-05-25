@@ -2343,6 +2343,48 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "voice_policy": "silent_now_review_sparse_voice_later",
             }),
             json!({
+                "variant_id": "sidecar_ai_peek_v1",
+                "label": "AI frame peek v1",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": false,
+                "intent": "AI-generated bitmap frame sequence used as a read-only reference for more natural alert_peek motion",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-ai-alert-peek-v1",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-ai-alert-peek-v1",
+                    "format": "image/png",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "ai_frame_reference_v1"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-ai-alert-peek-v1",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "alert_peek_ai_frame_v1_choreo",
+                    "mode": "sidecar_bitmap_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "ai_generated_peek_raise_hold_return",
+                    "duration_ms": 1580,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 120, "phase": "hidden_low", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 130, "phase": "peek_low", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 160, "phase": "rise_notice", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 180, "phase": "hand_raise", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 260, "phase": "soft_alert_hold", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 210, "phase": "concerned_hold", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 160, "phase": "return_low", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 260, "phase": "hidden_return", "mark": false},
+                        {"row": 0, "col": 0, "hold_ms": 100, "phase": "loop_reset", "mark": false}
+                    ],
+                    "review_note": "uses generated raster frames to test traditional spritesheet motion before any official package binding",
+                },
+                "review_question": "does the AI-generated frame sequence feel more alive than the procedural sidecar SVG variants",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+            json!({
                 "variant_id": "sidecar_peek_v3",
                 "label": "sidecar peek v3",
                 "sprite_row": 0,
@@ -5372,13 +5414,12 @@ fn xiao_shu_action_request_from_preview(
         "http_emit_route_allowed": false,
     });
 
-    let queue_summary = xiao_shu_action_request_queue_summary(Some(project))
-        .unwrap_or_else(|e| {
-            json!({
-                "read_only": true,
-                "error": e.to_string(),
-            })
-        });
+    let queue_summary = xiao_shu_action_request_queue_summary(Some(project)).unwrap_or_else(|e| {
+        json!({
+            "read_only": true,
+            "error": e.to_string(),
+        })
+    });
 
     json!({
         "surface": "xiao_shu_action_request",
@@ -7078,7 +7119,7 @@ mod tests {
             .iter()
             .find(|track| track["token"] == "xiao_shu::alert_peek::medium")
             .unwrap();
-        assert_eq!(alert_peek["semantic_variant_count"], 6);
+        assert_eq!(alert_peek["semantic_variant_count"], 7);
         assert_eq!(alert_peek["has_semantic_variants"], true);
         assert_eq!(
             alert_peek["semantic_variants"][0]["variant_id"],
@@ -7135,17 +7176,29 @@ mod tests {
         );
         assert_eq!(
             alert_peek["semantic_variants"][4]["variant_id"],
-            "sidecar_peek_v3"
+            "sidecar_ai_peek_v1"
         );
         assert_eq!(
             alert_peek["semantic_variants"][4]["sidecar_asset"]["asset_id"],
-            "xiao-shu-canonical-peek-v3"
+            "xiao-shu-ai-alert-peek-v1"
         );
         assert_eq!(
             alert_peek["semantic_variants"][4]["frame_choreography"]["choreography_id"],
+            "alert_peek_ai_frame_v1_choreo"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][5]["variant_id"],
+            "sidecar_peek_v3"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][5]["sidecar_asset"]["asset_id"],
+            "xiao-shu-canonical-peek-v3"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][5]["frame_choreography"]["choreography_id"],
             "alert_peek_sidecar_v3_frame_choreo"
         );
-        assert_eq!(alert_peek["semantic_variants"][5]["sprite_row"], 8);
+        assert_eq!(alert_peek["semantic_variants"][6]["sprite_row"], 8);
         assert_eq!(
             alert_peek["semantic_variant_review"]["default_variant"],
             "sidecar_peek_v4"

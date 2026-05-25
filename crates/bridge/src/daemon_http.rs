@@ -61,7 +61,7 @@ use axum::{
     Json, Router,
     extract::{Path, Query, State},
     http::{StatusCode, header},
-    response::{Html, IntoResponse},
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
 use serde::Deserialize;
@@ -2829,10 +2829,29 @@ fn avatar_sidecar_canonical_peek_v3_svg() -> Option<String> {
     Some(svg)
 }
 
+fn avatar_sidecar_spritesheet_png(asset: &str) -> Option<&'static [u8]> {
+    if asset == "xiao-shu-ai-alert-peek-v1" {
+        return Some(include_bytes!(
+            "../assets/xiao-shu-prototypes/xiao-shu-ai-alert-peek-v1-atlas.png"
+        ));
+    }
+    None
+}
+
 async fn avatar_sidecar_spritesheet(
     Query(q): Query<AvatarSidecarSpritesheetQuery>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let asset = q.asset.as_deref().unwrap_or("xiao-shu-alert-peek-v2");
+    if let Some(png) = avatar_sidecar_spritesheet_png(asset) {
+        return Ok((
+            [
+                (header::CONTENT_TYPE, "image/png"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            png.to_vec(),
+        )
+            .into_response());
+    }
     let svg = avatar_sidecar_spritesheet_svg(asset).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
@@ -2845,7 +2864,8 @@ async fn avatar_sidecar_spritesheet(
             (header::CACHE_CONTROL, "no-store"),
         ],
         svg,
-    ))
+    )
+        .into_response())
 }
 
 async fn avatar_cortex_review_gate(
@@ -7027,6 +7047,7 @@ mod tests {
         assert!(html.contains("\"variant_id\":\"sidecar_look_sideways_v2\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v2\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v4\""));
+        assert!(html.contains("\"variant_id\":\"sidecar_ai_peek_v1\""));
         assert!(html.contains("\"variant_id\":\"sidecar_peek_v3\""));
         assert!(html.contains("\"variant_id\":\"focused_review_row\""));
         assert!(html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-alert-peek-v2"));
@@ -7034,10 +7055,14 @@ mod tests {
             "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-peek-v4"
         ));
         assert!(
+            html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-ai-alert-peek-v1")
+        );
+        assert!(
             html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-canonical-peek-v3")
         );
         assert!(html.contains("\"asset_id\":\"xiao-shu-alert-peek-v2\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-peek-v4\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-ai-alert-peek-v1\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-canonical-peek-v3\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_frame_choreo_v1\""));
         assert!(html.contains("\"choreography_id\":\"sorting_glow_sidecar_v3_frame_choreo\""));
@@ -7045,6 +7070,7 @@ mod tests {
         assert!(html.contains("\"choreography_id\":\"look_sideways_sidecar_v2_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v2_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v4_frame_choreo\""));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_ai_frame_v1_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v3_frame_choreo\""));
         assert!(html.contains("\"surface\":\"alert_peek_voice_linkage_preview\""));
         assert!(html.contains("\"utterance\":\"小舒发现一点需要你看一下。\""));
@@ -7118,6 +7144,7 @@ mod tests {
         let svg = avatar_sidecar_spritesheet_svg("xiao-shu-alert-peek-v2").unwrap();
         let motion_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-peek-v4").unwrap();
+        let ai_peek_png = avatar_sidecar_spritesheet_png("xiao-shu-ai-alert-peek-v1").unwrap();
         let canonical_svg = avatar_sidecar_spritesheet_svg("xiao-shu-canonical-peek-v3").unwrap();
         let soft_bounce_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-soft-bounce-v1").unwrap();
@@ -7149,6 +7176,8 @@ mod tests {
         assert!(motion_svg.contains("xs4-robe"));
         assert!(motion_svg.contains("rotate(72)"));
         assert!(motion_svg.contains(r##"fill="#56c6cc""##));
+        assert!(ai_peek_png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(ai_peek_png.len() > 4096);
         assert!(canonical_svg.contains("Xiao Shu canonical alert peek sidecar v3 sprite atlas"));
         assert!(canonical_svg.contains(r#"id="frame-7""#));
         assert!(canonical_svg.contains("xs3-robe"));
