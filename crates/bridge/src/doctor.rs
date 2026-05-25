@@ -97,6 +97,15 @@ fn md_cell(s: &str) -> String {
         .join(" ")
 }
 
+fn truthy_env(key: &str) -> bool {
+    std::env::var(key).is_ok_and(|v| {
+        matches!(
+            v.as_str(),
+            "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+        )
+    })
+}
+
 // ── pure classification helpers (unit-tested) ──────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -232,11 +241,48 @@ fn check_real_binary(dir: &Path) -> Check {
     }
 }
 
-/// Check 4: SVD projection artifact resolvable.
+/// Check 4: SVD projection artifact resolvable when the opt-in substrate needs it.
 fn check_svd_artifact() -> Check {
     let path = std::env::var("AB_SUBSTRATE_SVD_PATH")
         .unwrap_or_else(|_| "/Data/CascadeProjects/AiOT/build/svd_projection_v1.bin".into());
-    if Path::new(&path).is_file() {
+    let projection = std::env::var("AB_SUBSTRATE_PROJECTION").unwrap_or_default();
+    check_svd_artifact_status(
+        &path,
+        truthy_env("AB_SUBSTRATE"),
+        projection.as_str(),
+        Path::new(&path).is_file(),
+    )
+}
+
+fn check_svd_artifact_status(
+    path: &str,
+    substrate_enabled: bool,
+    projection: &str,
+    present: bool,
+) -> Check {
+    let projection = projection.trim();
+    if !substrate_enabled {
+        return Check::ok(
+            "svd_artifact",
+            format!(
+                "substrate disabled (AB_SUBSTRATE unset/false); SVD artifact not required until opt-in; configured path: {path}"
+            ),
+        );
+    }
+
+    if projection != "svd" {
+        let projection = if projection.is_empty() {
+            "<unset>"
+        } else {
+            projection
+        };
+        return Check::ok(
+            "svd_artifact",
+            format!("AB_SUBSTRATE enabled with projection={projection}; SVD artifact not required"),
+        );
+    }
+
+    if present {
         Check::ok("svd_artifact", format!("SVD projection present: {path}"))
     } else {
         Check::warn(
@@ -521,11 +567,8 @@ fn check_mcp_servers(dir: &Path) -> Check {
 }
 
 fn check_mcp_tool_surface() -> Check {
-    let cursor_count = exposed_tool_count_for(
-        Some("claude-standard"),
-        Some("cursor"),
-        Some("standard"),
-    );
+    let cursor_count =
+        exposed_tool_count_for(Some("claude-standard"), Some("cursor"), Some("standard"));
     let process_count = exposed_tool_count_for(
         std::env::var("AGENT_BRIDGE_TOOLSET").ok().as_deref(),
         std::env::var("AGENT_BRIDGE_CLIENT").ok().as_deref(),
@@ -673,6 +716,36 @@ mod tests {
         assert!(wrapper_execs_real(no_svd));
         let elf_text = "not a wrapper";
         assert!(!wrapper_execs_real(elf_text));
+    }
+
+    #[test]
+    fn svd_artifact_check_is_ok_when_substrate_disabled() {
+        let check =
+            check_svd_artifact_status("/missing/svd_projection_v1.bin", false, "svd", false);
+        assert_eq!(check.status, Status::Ok);
+        assert!(check.detail.contains("SVD artifact not required"));
+    }
+
+    #[test]
+    fn svd_artifact_check_is_ok_when_projection_is_not_svd() {
+        let check =
+            check_svd_artifact_status("/missing/svd_projection_v1.bin", true, "bucket_pool", false);
+        assert_eq!(check.status, Status::Ok);
+        assert!(check.detail.contains("projection=bucket_pool"));
+    }
+
+    #[test]
+    fn svd_artifact_check_warns_when_active_svd_is_missing() {
+        let check = check_svd_artifact_status("/missing/svd_projection_v1.bin", true, "svd", false);
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("SVD projection file absent"));
+    }
+
+    #[test]
+    fn svd_artifact_check_ok_when_active_svd_is_present() {
+        let check = check_svd_artifact_status("/tmp/svd_projection_v1.bin", true, "svd", true);
+        assert_eq!(check.status, Status::Ok);
+        assert!(check.detail.contains("SVD projection present"));
     }
 
     #[test]
