@@ -840,6 +840,7 @@ pub async fn run_install(key: &str, assume_yes: bool, dry_run: bool) -> Result<(
     let lint_tag = tag_value(&rec.tags, "lint:").unwrap_or_else(|| "lint:?".to_string());
     let risks = tag_values(&rec.tags, "risk:");
     let approval_risks = install_approval_risks(&risks);
+    let clone_plan = install_clone_plan(&src, &rec.tags);
     let dest_name = derive_flat_name(key, &rel);
     let dest_root = claude_skills_dir()?;
     let dest = dest_root.join(&dest_name);
@@ -850,7 +851,13 @@ pub async fn run_install(key: &str, assume_yes: bool, dry_run: bool) -> Result<(
         key,
         dest.display(),
     );
-    eprintln!("[install]   source: {}", src_to_clone_url(&src));
+    eprintln!("[install]   source: {}", clone_plan.url);
+    if let Some(branch) = &clone_plan.checkout_ref {
+        eprintln!("[install]   branch: {}", branch);
+    }
+    if let Some(commit) = &clone_plan.expected_commit {
+        eprintln!("[install]   commit: {}", commit);
+    }
     eprintln!("[install]   path:   {}", rel);
     eprintln!("[install]   lint:   {}", lint_tag);
     eprintln!(
@@ -901,8 +908,15 @@ pub async fn run_install(key: &str, assume_yes: bool, dry_run: bool) -> Result<(
     }
 
     // Clone, copy, clean up.
-    let url = src_to_clone_url(&src);
-    let clone_dir = clone_shallow(&url, &src.replace('/', "_"), None)?;
+    let clone_dir = clone_shallow(
+        &clone_plan.url,
+        &src.replace('/', "_"),
+        clone_plan.checkout_ref.as_deref(),
+    )?;
+    if let Err(err) = verify_cloned_commit(&clone_dir, clone_plan.expected_commit.as_deref()) {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        return Err(err);
+    }
     let source_path = clone_dir.join(&rel);
     if !source_path.exists() {
         let _ = std::fs::remove_dir_all(&clone_dir);
@@ -942,6 +956,41 @@ pub async fn run_install(key: &str, assume_yes: bool, dry_run: bool) -> Result<(
     let _ = std::fs::remove_dir_all(&clone_dir);
     eprintln!("[install] done");
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InstallClonePlan {
+    url: String,
+    checkout_ref: Option<String>,
+    expected_commit: Option<String>,
+}
+
+fn install_clone_plan(src: &str, tags: &[String]) -> InstallClonePlan {
+    InstallClonePlan {
+        url: tag_value(tags, "git_origin:").unwrap_or_else(|| src_to_clone_url(src)),
+        checkout_ref: tag_value(tags, "git_branch:"),
+        expected_commit: tag_value(tags, "git_commit:"),
+    }
+}
+
+fn verify_cloned_commit(repo: &Path, expected_commit: Option<&str>) -> Result<()> {
+    let Some(expected) = expected_commit else {
+        return Ok(());
+    };
+    let actual = git_output(repo, &["rev-parse", "HEAD"])
+        .ok_or_else(|| anyhow!("failed to read cloned repo HEAD for commit verification"))?;
+    if !commit_matches_expected(&actual, expected) {
+        bail!(
+            "cloned repo HEAD {} does not match indexed git_commit {}; re-run `skills index` before installing",
+            actual,
+            expected
+        );
+    }
+    Ok(())
+}
+
+fn commit_matches_expected(actual: &str, expected: &str) -> bool {
+    actual == expected || actual.starts_with(expected)
 }
 
 fn lint_requires_approval(lint_tag: &str) -> bool {
@@ -2020,6 +2069,46 @@ mod tests {
             .map(str::to_string)
             .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn install_clone_plan_prefers_recorded_git_provenance() {
+        let tags = vec![
+            "src:OpenBMB/MiniCPM".to_string(),
+            "git_origin:https://github.com/OpenBMB/MiniCPM.git".to_string(),
+            "git_branch:minicpm5".to_string(),
+            "git_commit:44e6ae86fe8d7fbde2903beaeabccc3a45a8c19b".to_string(),
+        ];
+        assert_eq!(
+            install_clone_plan("OpenBMB/MiniCPM", &tags),
+            InstallClonePlan {
+                url: "https://github.com/OpenBMB/MiniCPM.git".to_string(),
+                checkout_ref: Some("minicpm5".to_string()),
+                expected_commit: Some("44e6ae86fe8d7fbde2903beaeabccc3a45a8c19b".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn install_clone_plan_falls_back_to_source_id() {
+        let plan = install_clone_plan("gitlab.com/example/repo", &[]);
+        assert_eq!(
+            plan,
+            InstallClonePlan {
+                url: "https://gitlab.com/example/repo".to_string(),
+                checkout_ref: None,
+                expected_commit: None,
+            }
+        );
+    }
+
+    #[test]
+    fn commit_match_accepts_exact_or_expected_prefix_only() {
+        let full = "44e6ae86fe8d7fbde2903beaeabccc3a45a8c19b";
+        assert!(commit_matches_expected(full, full));
+        assert!(commit_matches_expected(full, "44e6ae8"));
+        assert!(!commit_matches_expected("44e6ae8", full));
+        assert!(!commit_matches_expected(full, "deadbeef"));
     }
 
     #[test]

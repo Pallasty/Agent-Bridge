@@ -147,9 +147,14 @@ The audit command supports composable filters:
 - `--limit <n>` (`0` means all matched records)
 
 `skills install <key> --dry-run` is the install preview gate. It prints the
-resolved source, original path, destination name, lint tag, operational risk
-tags, and any approval gates without cloning, copying, or writing files. A real
-install requires `--yes` when any of these are true:
+resolved source, indexed branch/commit when present, original path, destination
+name, lint tag, operational risk tags, and any approval gates without cloning,
+copying, or writing files. A real install uses recorded `git_origin` and
+`git_branch` for cloning, then verifies the cloned HEAD against recorded
+`git_commit`. If upstream has drifted, install aborts and the operator should
+re-run `skills index` before approving a new source snapshot.
+
+A real install requires `--yes` when any of these are true:
 
 - lint is `warn:*` or `danger:*`;
 - destination already exists;
