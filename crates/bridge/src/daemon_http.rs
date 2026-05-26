@@ -4550,8 +4550,9 @@ fn avatar_surface_voice_policy_html(
         })
     {
         first_manual = format!(
-            "{} line={}",
+            "{} cue={} line={}",
             avatar_surface_html_json_value(rule.get("token"), "-"),
+            avatar_surface_html_json_value(rule.get("cue_id"), "-"),
             avatar_surface_html_json_value(rule.get("utterance"), "-")
         );
     }
@@ -4611,6 +4612,19 @@ fn avatar_surface_voice_request_html(
     let manual = avatar_surface_html_json_value(request.get("manual_cli_emit_allowed"), "false");
     let auto = avatar_surface_html_json_value(request.get("auto_emit_allowed"), "false");
     let line = avatar_surface_html_json_value(request.get("line"), "-");
+    let script = avatar_surface_html_json_value(
+        request
+            .get("voice_script")
+            .and_then(|script| script.get("script_id")),
+        "-",
+    );
+    let cue = avatar_surface_html_json_value(request.get("cue_id"), "-");
+    let message_policy = avatar_surface_html_json_value(
+        request
+            .get("caller_message_policy")
+            .and_then(|policy| policy.get("message_can_replace_utterance")),
+        "false",
+    );
     let voice = avatar_surface_html_json_value(request.get("suggested_voice"), "-");
     let rate = avatar_surface_html_json_value(request.get("suggested_rate"), "-");
     let reason = avatar_surface_html_json_value(request.get("operator_reason_present"), "false");
@@ -4626,6 +4640,7 @@ fn avatar_surface_voice_request_html(
       </div>
       <dl>
         <div><dt>line</dt><dd>{line}</dd></div>
+        <div><dt>script</dt><dd>{script} cue={cue} llm_replace_line={message_policy}</dd></div>
         <div><dt>voice</dt><dd>{voice} rate={rate}</dd></div>
         <div><dt>confirm</dt><dd>manual_cli={manual} second_step={second_step} reason_present={reason}</dd></div>
         <div><dt>safety</dt><dd>auto_emit={auto} http_emit_route={http_emit}</dd></div>
@@ -4636,6 +4651,9 @@ fn avatar_surface_voice_request_html(
         state = state,
         token = token,
         line = line,
+        script = script,
+        cue = cue,
+        message_policy = message_policy,
         voice = voice,
         rate = rate,
         manual = manual,
@@ -4849,6 +4867,16 @@ fn avatar_surface_xiao_shu_action_request_html(
     );
     let track = avatar_surface_html_json_value(request.get("mapped_track"), "-");
     let line = avatar_surface_html_json_value(request.get("line"), "-");
+    let cue = avatar_surface_html_json_value(request.get("cue_id"), "-");
+    let message_handling = request.get("message_handling").unwrap_or(&Value::Null);
+    let message_context = avatar_surface_html_json_value(
+        message_handling.get("message_is_context_note_only"),
+        "false",
+    );
+    let message_replace = avatar_surface_html_json_value(
+        message_handling.get("message_can_replace_utterance"),
+        "false",
+    );
     let preview_command = avatar_surface_html_json_value(request.get("preview_command"), "-");
     let confirm_command =
         avatar_surface_html_json_value(request.get("confirm_request_command"), "-");
@@ -4863,7 +4891,8 @@ fn avatar_surface_xiao_shu_action_request_html(
       </div>
       <dl>
         <div><dt>target</dt><dd>track={track} supported={supported}</dd></div>
-        <div><dt>line</dt><dd>{line}</dd></div>
+        <div><dt>line</dt><dd>{line} cue={cue}</dd></div>
+        <div><dt>message</dt><dd>context_only={message_context} can_replace_line={message_replace}</dd></div>
         <div><dt>policy</dt><dd>direct_control={direct_control} emits_audio={emit_audio} human_required={human_required} confirmed={confirmed}</dd></div>
         <div><dt>readiness</dt><dd>ready={ready} blocked={blocked} reasons={reasons}</dd></div>
         <div><dt>preview</dt><dd>{preview_command}</dd></div>
@@ -4878,6 +4907,9 @@ fn avatar_surface_xiao_shu_action_request_html(
         track = track,
         supported = supported,
         line = line,
+        cue = cue,
+        message_context = message_context,
+        message_replace = message_replace,
         direct_control = direct_control,
         emit_audio = emit_audio,
         human_required = human_required,
@@ -7117,12 +7149,20 @@ mod tests {
         assert!(html.contains("Xiao Shu Voice Policy"));
         assert!(html.contains("tracks=5 manual_cli=1 display_only=4 auto=0"));
         assert!(html.contains("Flo (中文（中国大陆）) rate=190 cooldown=300s"));
-        assert!(html.contains("xiao_shu::alert_peek::medium line=小舒发现一点需要你看一下。"));
+        assert!(html.contains(
+            "xiao_shu::alert_peek::medium cue=soft_attention_needed line=小舒发现一点需要你看一下。"
+        ));
         assert!(html.contains("http_emit_route_added=false auto_emit=0"));
         assert!(html.contains("voice policy json"));
         assert!(html.contains("Xiao Shu Voice Request"));
-        assert!(html
-            .contains("state=ready_for_operator_confirmation token=xiao_shu::alert_peek::medium"));
+        assert!(
+            html.contains(
+                "state=ready_for_operator_confirmation token=xiao_shu::alert_peek::medium"
+            )
+        );
+        assert!(html.contains(
+            "xiao_shu_alert_peek_sparse_voice_v1 cue=soft_attention_needed llm_replace_line=false"
+        ));
         assert!(html.contains("manual_cli=true second_step=true reason_present=false"));
         assert!(html.contains("auto_emit=false http_emit_route=null"));
         assert!(html.contains("voice request json"));
@@ -7140,6 +7180,8 @@ mod tests {
         assert!(html.contains("voice action preview json"));
         assert!(html.contains("Xiao Shu Action Request"));
         assert!(html.contains("state=requires_human_confirmation actor=panel intent=voice_alert"));
+        assert!(html.contains("cue=soft_attention_needed"));
+        assert!(html.contains("context_only=true can_replace_line=false"));
         assert!(html.contains(
             "direct_control=false emits_audio=false human_required=true confirmed=false"
         ));
