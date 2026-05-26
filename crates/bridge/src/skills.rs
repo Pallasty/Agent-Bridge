@@ -135,6 +135,14 @@ struct LintFinding {
 /// Indexer entry-point: handle either a URL or a local path.
 pub async fn run_index(source: &str, verbose: bool) -> Result<usize> {
     let (owned_clone, repo_dir, src_id) = resolve_source(source)?;
+    let result = index_resolved_repo(&repo_dir, &src_id, verbose).await;
+    if owned_clone {
+        let _ = std::fs::remove_dir_all(&repo_dir);
+    }
+    result
+}
+
+async fn index_resolved_repo(repo_dir: &Path, src_id: &str, verbose: bool) -> Result<usize> {
     if verbose {
         eprintln!(
             "[skills] indexing {} (path: {})",
@@ -148,9 +156,6 @@ pub async fn run_index(source: &str, verbose: bool) -> Result<usize> {
             "[skills] {}: no SKILL.md or .claude/skills/*.md files found",
             src_id
         );
-        if owned_clone {
-            let _ = std::fs::remove_dir_all(&repo_dir);
-        }
         return Ok(0);
     }
     let store = open_store().await?;
@@ -176,9 +181,6 @@ pub async fn run_index(source: &str, verbose: bool) -> Result<usize> {
         }
     }
     eprintln!("[skills] {}: indexed {} skills", src_id, saved);
-    if owned_clone {
-        let _ = std::fs::remove_dir_all(&repo_dir);
-    }
     Ok(saved)
 }
 
@@ -211,10 +213,11 @@ pub async fn run_seed(verbose: bool) -> Result<()> {
 
 /// Re-index every previously-indexed GitHub source.
 ///
-/// Walks all `kind=skill` records, collects distinct `src:` tag values that
-/// look like `<owner>/<repo>`, and re-runs [`run_index`] for each as
-/// `https://github.com/<owner>/<repo>`. Local-path sources (basenames with
-/// no `/`) are reported and skipped — they need a manual `skills index`.
+/// Walks all `kind=skill` records, collects distinct remote `src:` tag values,
+/// and re-runs indexing for each. When indexed records carry git provenance,
+/// refresh preserves `git_origin` and `git_branch` instead of reconstructing a
+/// default-branch URL from `src:` alone. Local-path sources are reported and
+/// skipped — they need a manual `skills index`.
 ///
 /// When `prune` is set, after re-indexing each GitHub source we delete
 /// records with that `src:` tag whose `updated_at` is still older than the
@@ -231,16 +234,23 @@ pub async fn run_refresh(verbose: bool, prune: bool) -> Result<()> {
         eprintln!("[skills] none indexed yet — try `agent-bridge skills seed`");
         return Ok(());
     }
-    let mut github_srcs: Vec<String> = Vec::new();
-    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut remote_plans: BTreeMap<String, RemoteIndexPlan> = BTreeMap::new();
     let mut local_srcs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for r in &rows {
         let Some(src) = tag_value(&r.tags, "src:") else {
             continue;
         };
         if is_remote_src(&src) {
-            if seen.insert(src.clone()) {
-                github_srcs.push(src);
+            let plan = remote_index_plan(&src, &r.tags);
+            if let Some(existing) = remote_plans.get(&src) {
+                if existing != &plan && verbose {
+                    eprintln!(
+                        "[skills]   source {} has mixed git provenance; keeping first plan {:?}, ignoring {:?}",
+                        src, existing, plan
+                    );
+                }
+            } else {
+                remote_plans.insert(src.clone(), plan);
             }
         } else {
             local_srcs.insert(src);
@@ -251,8 +261,8 @@ pub async fn run_refresh(verbose: bool, prune: bool) -> Result<()> {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     eprintln!(
-        "[skills] refresh: {} github source(s), {} local source(s) skipped, {} record(s) total{}",
-        github_srcs.len(),
+        "[skills] refresh: {} remote source(s), {} local source(s) skipped, {} record(s) total{}",
+        remote_plans.len(),
         local_srcs.len(),
         rows.len(),
         if prune { " (prune ON)" } else { "" }
@@ -266,9 +276,8 @@ pub async fn run_refresh(verbose: bool, prune: bool) -> Result<()> {
     let mut total = 0usize;
     let mut failed: Vec<String> = Vec::new();
     let mut pruned_total = 0usize;
-    for src in &github_srcs {
-        let url = src_to_clone_url(src);
-        match run_index(&url, verbose).await {
+    for (src, plan) in &remote_plans {
+        match run_index_remote_plan(plan, verbose).await {
             Ok(n) => {
                 total += n;
                 if prune {
@@ -303,6 +312,32 @@ pub async fn run_refresh(verbose: bool, prune: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RemoteIndexPlan {
+    src: String,
+    url: String,
+    checkout_ref: Option<String>,
+}
+
+fn remote_index_plan(src: &str, tags: &[String]) -> RemoteIndexPlan {
+    RemoteIndexPlan {
+        src: src.to_string(),
+        url: tag_value(tags, "git_origin:").unwrap_or_else(|| src_to_clone_url(src)),
+        checkout_ref: tag_value(tags, "git_branch:"),
+    }
+}
+
+async fn run_index_remote_plan(plan: &RemoteIndexPlan, verbose: bool) -> Result<usize> {
+    let clone_dir = clone_shallow(
+        &plan.url,
+        &plan.src.replace('/', "_"),
+        plan.checkout_ref.as_deref(),
+    )?;
+    let result = index_resolved_repo(&clone_dir, &plan.src, verbose).await;
+    let _ = std::fs::remove_dir_all(&clone_dir);
+    result
 }
 
 /// After a successful re-index of `src`, delete records with that `src:`
@@ -2109,6 +2144,36 @@ mod tests {
         assert!(commit_matches_expected(full, "44e6ae8"));
         assert!(!commit_matches_expected("44e6ae8", full));
         assert!(!commit_matches_expected(full, "deadbeef"));
+    }
+
+    #[test]
+    fn refresh_remote_plan_preserves_recorded_git_provenance() {
+        let tags = vec![
+            "src:OpenBMB/MiniCPM".to_string(),
+            "git_origin:https://github.com/OpenBMB/MiniCPM.git".to_string(),
+            "git_branch:minicpm5".to_string(),
+            "git_commit:44e6ae86fe8d7fbde2903beaeabccc3a45a8c19b".to_string(),
+        ];
+        assert_eq!(
+            remote_index_plan("OpenBMB/MiniCPM", &tags),
+            RemoteIndexPlan {
+                src: "OpenBMB/MiniCPM".to_string(),
+                url: "https://github.com/OpenBMB/MiniCPM.git".to_string(),
+                checkout_ref: Some("minicpm5".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn refresh_remote_plan_falls_back_to_source_id() {
+        assert_eq!(
+            remote_index_plan("OpenBMB/MiniCPM", &[]),
+            RemoteIndexPlan {
+                src: "OpenBMB/MiniCPM".to_string(),
+                url: "https://github.com/OpenBMB/MiniCPM".to_string(),
+                checkout_ref: None,
+            }
+        );
     }
 
     #[test]

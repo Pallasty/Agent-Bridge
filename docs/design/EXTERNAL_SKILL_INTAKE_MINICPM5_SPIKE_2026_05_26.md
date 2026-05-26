@@ -124,6 +124,11 @@ The supported target is a repository branch/ref URL. Subdirectory tree URLs
 whose branch name and path cannot be disambiguated from the URL alone remain
 out of scope for v0.
 
+`skills refresh` must preserve the same provenance boundary. Refresh now builds
+its remote source plan from existing `git_origin` and `git_branch` tags instead
+of reconstructing a default-branch URL from `src:` alone. This keeps a branch
+source such as `OpenBMB/MiniCPM/tree/minicpm5` on `minicpm5` during refresh.
+
 `skills show --json` is the automation-facing review surface. It keeps the
 existing human `skills show <key>` output unchanged, while exposing a
 structured payload with:

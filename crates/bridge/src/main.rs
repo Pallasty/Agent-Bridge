@@ -2284,10 +2284,12 @@ enum SkillsOp {
     },
     /// Re-index every previously-indexed source to refresh upstream changes.
     ///
-    /// Walks all `kind=skill` records, collects distinct GitHub `<owner>/<repo>`
-    /// values from `src:` tags, and re-runs `index` for each. Local-path
-    /// sources (no `/` in `src`) are skipped — re-run `index <path>` manually.
-    /// Suitable for cron / Stop hook.
+    /// Walks all `kind=skill` records, collects distinct remote `src:` values,
+    /// and re-runs indexing for each. Existing `git_origin` / `git_branch`
+    /// provenance is preserved, so branch-sourced records refresh the same
+    /// branch instead of drifting back to a default branch. Local-path sources
+    /// are skipped — re-run `index <path>` manually. Suitable for cron / Stop
+    /// hook.
     ///
     /// `--prune`: after re-indexing each GitHub source, delete records that
     /// have that `src:` tag but were not refreshed in this run (i.e. removed
