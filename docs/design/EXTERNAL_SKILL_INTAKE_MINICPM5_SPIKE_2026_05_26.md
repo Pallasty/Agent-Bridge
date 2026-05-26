@@ -124,6 +124,17 @@ The supported target is a repository branch/ref URL. Subdirectory tree URLs
 whose branch name and path cannot be disambiguated from the URL alone remain
 out of scope for v0.
 
+`skills show --json` is the automation-facing review surface. It keeps the
+existing human `skills show <key>` output unchanged, while exposing a
+structured payload with:
+
+- raw record fields: `key`, `kind`, `content`, `tags`, timestamps, scope,
+  status, importance.
+- parsed convenience fields: `source`, `path`, `lint`, `vendor`, `license`,
+  `compatibility`, `tools`.
+- grouped provenance: `git.commit`, `git.branch`, `git.origin`, `git.src`.
+- operational risk values without the `risk:` prefix.
+
 Re-indexed MiniCPM5 examples:
 
 - `minicpm5-deploy-mlx`: `lint:clean`, `git_branch:minicpm5`,
@@ -233,8 +244,9 @@ Phase 2: index hardening if needed
 - Add `skills audit` or `skills show --json` only if manual review is clumsy.
 
 Status: provenance tags, operational-risk tags, and branch-aware tree URL
-source resolution are implemented. `skills show --json` remains a possible
-future UX improvement, but is not required for the first MiniCPM5 intake.
+source resolution are implemented. `skills show --json` is also implemented as
+the first automation-facing review surface; broader `skills audit` remains a
+possible future batch UX.
 
 Phase 3: optional MLX worker spike
 

@@ -2326,7 +2326,12 @@ enum SkillsOp {
         limit: usize,
     },
     /// Print one skill's body and metadata (use a key from `list` / `search`).
-    Show { key: String },
+    Show {
+        key: String,
+        /// Emit machine-readable JSON for automation.
+        #[arg(long)]
+        json: bool,
+    },
     /// Install an indexed skill into `~/.claude/skills/<name>/`.
     ///
     /// Re-clones the source repo and copies the original SKILL.md (plus
@@ -2575,7 +2580,7 @@ async fn main() -> Result<()> {
             SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::List { limit } => skills::run_list(*limit).await,
-            SkillsOp::Show { key } => skills::run_show(key).await,
+            SkillsOp::Show { key, json } => skills::run_show(key, *json).await,
             SkillsOp::Install { key, yes } => skills::run_install(key, *yes).await,
         };
     }

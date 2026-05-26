@@ -713,18 +713,70 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
 }
 
 /// Print one skill's body + metadata.
-pub async fn run_show(key: &str) -> Result<()> {
+pub async fn run_show(key: &str, json: bool) -> Result<()> {
     let store = open_store().await?;
     let rec = store
         .memory_get(key)
         .await
         .context("memory_get failed")?
         .ok_or_else(|| anyhow!("no skill with key {:?}", key))?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&skill_show_json_payload(&rec))?);
+        return Ok(());
+    }
     println!("# {}", rec.key);
     println!("tags: {}", rec.tags.join(", "));
     println!("---");
     println!("{}", rec.content);
     Ok(())
+}
+
+fn skill_show_json_payload(rec: &MemoryRecord) -> serde_json::Value {
+    let git = serde_json::json!({
+        "commit": tag_value(&rec.tags, "git_commit:"),
+        "branch": tag_value(&rec.tags, "git_branch:"),
+        "origin": tag_value(&rec.tags, "git_origin:"),
+        "src": tag_value(&rec.tags, "git_src:"),
+    });
+    let tools = tag_value(&rec.tags, "tools:")
+        .map(|v| {
+            v.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    serde_json::json!({
+        "key": &rec.key,
+        "kind": &rec.kind,
+        "content": &rec.content,
+        "tags": &rec.tags,
+        "related_keys": &rec.related_keys,
+        "scope": &rec.scope,
+        "created_at": rec.created_at,
+        "updated_at": rec.updated_at,
+        "last_accessed_at": rec.last_accessed_at,
+        "access_count": rec.access_count,
+        "importance": rec.importance,
+        "status": &rec.status,
+        "source": tag_value(&rec.tags, "src:"),
+        "path": tag_value(&rec.tags, "path:"),
+        "lint": tag_value(&rec.tags, "lint:"),
+        "vendor": tag_value(&rec.tags, "vendor:"),
+        "license": tag_value(&rec.tags, "license:"),
+        "compatibility": tag_value(&rec.tags, "compatibility:"),
+        "tools": tools,
+        "git": git,
+        "risks": tag_values(&rec.tags, "risk:"),
+    })
+}
+
+fn tag_values(tags: &[String], prefix: &str) -> Vec<String> {
+    tags.iter()
+        .filter_map(|t| t.strip_prefix(prefix).map(str::to_string))
+        .collect()
 }
 
 // ── source resolution ─────────────────────────────────────────────────────
@@ -1627,6 +1679,45 @@ mod tests {
         );
         assert_eq!(tag_value(&tags, "path:"), Some("pdf/SKILL.md".to_string()));
         assert_eq!(tag_value(&tags, "missing:"), None);
+    }
+
+    #[test]
+    fn skill_show_json_payload_extracts_metadata() {
+        let mut rec = mk_skill("OpenBMB/MiniCPM", 42);
+        rec.key = "skill:OpenBMB/MiniCPM/minicpm5-deploy-mlx".to_string();
+        rec.content = "Deploy MiniCPM5 with MLX".to_string();
+        rec.tags.extend([
+            "path:skills/minicpm5-deploy-mlx/SKILL.md".to_string(),
+            "lint:warn:1".to_string(),
+            "vendor:community".to_string(),
+            "git_commit:abc123".to_string(),
+            "git_branch:minicpm5".to_string(),
+            "git_origin:https://github.com/OpenBMB/MiniCPM.git".to_string(),
+            "git_src:OpenBMB/MiniCPM".to_string(),
+            "risk:apple_mlx".to_string(),
+            "risk:model_download".to_string(),
+            "license:Apache-2.0".to_string(),
+            "compatibility:macos".to_string(),
+            "tools:Bash,Read".to_string(),
+        ]);
+
+        let payload = skill_show_json_payload(&rec);
+        assert_eq!(payload["source"], "OpenBMB/MiniCPM");
+        assert_eq!(
+            payload["path"],
+            "skills/minicpm5-deploy-mlx/SKILL.md"
+        );
+        assert_eq!(payload["lint"], "warn:1");
+        assert_eq!(payload["vendor"], "community");
+        assert_eq!(payload["license"], "Apache-2.0");
+        assert_eq!(payload["compatibility"], "macos");
+        assert_eq!(payload["tools"], serde_json::json!(["Bash", "Read"]));
+        assert_eq!(payload["git"]["commit"], "abc123");
+        assert_eq!(payload["git"]["branch"], "minicpm5");
+        assert_eq!(
+            payload["risks"],
+            serde_json::json!(["apple_mlx", "model_download"])
+        );
     }
 
     #[test]
