@@ -308,6 +308,37 @@ fn vbool(value: Option<&Value>) -> Option<bool> {
     value.and_then(Value::as_bool)
 }
 
+pub(crate) fn shell_quote_cli_arg(value: &str) -> String {
+    if !value.is_empty()
+        && value.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || matches!(ch, '-' | '_' | '.' | '/' | ':' | '@' | '+' | '=')
+        })
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+pub(crate) fn xiao_shu_action_request_action_command(
+    project: &str,
+    request_id: &str,
+    reason: &str,
+    action_flag: Option<&str>,
+) -> String {
+    let mut command = format!(
+        "agent-bridge avatar xiao-shu-action-request-action --project {} --request-id {} --reason {} --confirm",
+        shell_quote_cli_arg(project),
+        shell_quote_cli_arg(request_id),
+        shell_quote_cli_arg(reason)
+    );
+    if let Some(flag) = action_flag {
+        command.push(' ');
+        command.push_str(flag);
+    }
+    command
+}
+
 fn read_json(path: &Path) -> Value {
     std::fs::read_to_string(path)
         .ok()
@@ -5952,6 +5983,67 @@ fn xiao_shu_action_intent_supported(intent: &str) -> bool {
     )
 }
 
+fn push_unique_reason(reasons: &mut Vec<String>, reason: impl Into<String>) {
+    let reason = reason.into();
+    if !reasons.iter().any(|existing| existing == &reason) {
+        reasons.push(reason);
+    }
+}
+
+fn xiao_shu_action_pending_request_block_reasons(
+    request: &Value,
+    fallback_record: Option<&Value>,
+    require_request_state: bool,
+) -> Vec<String> {
+    let mut reasons = Vec::new();
+    let intent = vstr(request.get("intent"))
+        .or_else(|| fallback_record.and_then(|record| vstr(record.get("intent"))))
+        .unwrap_or("voice_alert");
+    if !xiao_shu_action_intent_supported(intent) {
+        push_unique_reason(&mut reasons, "unsupported_intent");
+    }
+    if matches!(vbool(request.get("supported_intent")), Some(false)) {
+        push_unique_reason(&mut reasons, "unsupported_intent");
+    }
+    if matches!(vbool(request.get("direct_llm_emit_allowed")), Some(true)) {
+        push_unique_reason(&mut reasons, "direct_llm_emit_allowed");
+    }
+
+    match vstr(request.get("request_state")) {
+        Some("requires_human_confirmation") => {}
+        Some(state) => push_unique_reason(
+            &mut reasons,
+            format!("request_state_not_enqueueable:{state}"),
+        ),
+        None if require_request_state => push_unique_reason(&mut reasons, "missing_request_state"),
+        None => {}
+    }
+
+    if let Some(blocked) = request.get("blocked_reasons").and_then(Value::as_array) {
+        for reason in blocked.iter().filter_map(Value::as_str) {
+            if !matches!(
+                reason,
+                "human_confirmation_required" | "confirm_flag_missing"
+            ) {
+                push_unique_reason(&mut reasons, format!("downstream_blocked:{reason}"));
+            }
+        }
+    }
+    reasons
+}
+
+fn xiao_shu_action_request_enqueue_block_reasons(request_payload: &Value) -> Vec<String> {
+    let request = request_payload
+        .get("action_request")
+        .unwrap_or(&Value::Null);
+    xiao_shu_action_pending_request_block_reasons(request, None, true)
+}
+
+fn xiao_shu_action_queue_record_action_block_reasons(record: &Value) -> Vec<String> {
+    let request = record.get("action_request").unwrap_or(&Value::Null);
+    xiao_shu_action_pending_request_block_reasons(request, Some(record), false)
+}
+
 fn strip_recursive_provenance(value: &Value) -> Value {
     match value {
         Value::Object(map) => {
@@ -6086,26 +6178,32 @@ fn xiao_shu_action_request_from_preview(
     } else {
         "confirmed_but_blocked"
     };
+    let project_arg = shell_quote_cli_arg(project);
+    let track_arg = shell_quote_cli_arg(track);
+    let actor_arg = shell_quote_cli_arg(actor);
+    let intent_arg = shell_quote_cli_arg(intent);
+    let reason_arg = shell_quote_cli_arg(reason);
     let preview_command = format!(
-        "agent-bridge avatar cortex-voice-action-preview --project {project} --track {track:?} --reason {reason:?} --confirm"
+        "agent-bridge avatar cortex-voice-action-preview --project {project_arg} --track {track_arg} --reason {reason_arg} --confirm"
     );
     let message_arg = message
-        .map(|message| format!(" --message {message:?}"))
+        .map(|message| format!(" --message {}", shell_quote_cli_arg(message)))
         .unwrap_or_default();
     let request_command = format!(
-        "agent-bridge avatar xiao-shu-action-request --project {project} --actor {actor:?} --intent {intent:?}{message_arg} --reason {reason:?}"
+        "agent-bridge avatar xiao-shu-action-request --project {project_arg} --actor {actor_arg} --intent {intent_arg}{message_arg} --reason {reason_arg}"
     );
     let enqueue_command = format!(
-        "agent-bridge avatar xiao-shu-action-request --project {project} --actor {actor:?} --intent {intent:?}{message_arg} --reason {reason:?} --enqueue"
+        "agent-bridge avatar xiao-shu-action-request --project {project_arg} --actor {actor_arg} --intent {intent_arg}{message_arg} --reason {reason_arg} --enqueue"
     );
     let confirm_request_command = format!(
-        "agent-bridge avatar xiao-shu-action-request --project {project} --actor {actor:?} --intent {intent:?}{message_arg} --reason {reason:?} --confirm"
+        "agent-bridge avatar xiao-shu-action-request --project {project_arg} --actor {actor_arg} --intent {intent_arg}{message_arg} --reason {reason_arg} --confirm"
     );
     let emit_command = action
         .get("command_preview")
         .cloned()
         .unwrap_or(Value::Null);
-    let queue_command = format!("agent-bridge avatar xiao-shu-action-requests --project {project}");
+    let queue_command =
+        format!("agent-bridge avatar xiao-shu-action-requests --project {project_arg}");
     let queue_panel_path = format!("/avatar-surface/xiao-shu-action-requests?project={project}");
     let caller_message_policy = action
         .get("caller_message_policy")
@@ -6324,12 +6422,10 @@ fn xiao_shu_action_enqueue_record_from_request(
     });
     let seed_hash = fnv1a_hex16(&serde_json::to_string(&seed).unwrap_or_default());
     let request_id = format!("xsr-{now}-{}", &seed_hash[..8]);
-    let action_preview_command = format!(
-        "agent-bridge avatar xiao-shu-action-request-action --project {project} --request-id {request_id:?} --reason {reason:?} --confirm"
-    );
-    let local_emit_command = format!(
-        "agent-bridge avatar xiao-shu-action-request-action --project {project} --request-id {request_id:?} --reason {reason:?} --confirm --emit"
-    );
+    let action_preview_command =
+        xiao_shu_action_request_action_command(project, &request_id, reason, None);
+    let local_emit_command =
+        xiao_shu_action_request_action_command(project, &request_id, reason, Some("--emit"));
 
     json!({
         "schema": 1,
@@ -6533,7 +6629,47 @@ fn xiao_shu_action_request_compact_record(record: Value) -> Value {
 pub fn xiao_shu_action_request_enqueue(opts: &XiaoShuActionRequestOptions<'_>) -> Result<Value> {
     let project = opts.project.unwrap_or("agent-bridge");
     let queue_path = xiao_shu_action_request_queue_path(project)?;
-    let request_payload = xiao_shu_action_request(opts)?;
+    let request_opts = XiaoShuActionRequestOptions {
+        confirm: false,
+        ..*opts
+    };
+    let request_payload = xiao_shu_action_request(&request_opts)?;
+    let block_reasons = xiao_shu_action_request_enqueue_block_reasons(&request_payload);
+    if !block_reasons.is_empty() {
+        return Ok(json!({
+            "surface": "xiao_shu_action_request_enqueue",
+            "schema": 1,
+            "generated_at": now_secs(),
+            "read_only": true,
+            "dry_run": true,
+            "llm_safe": true,
+            "sidecar_only": true,
+            "direct_pet_control_allowed": false,
+            "direct_llm_emit_allowed": false,
+            "requires_human_confirmation": true,
+            "real_emit_requires_local_cli": true,
+            "enqueue_blocked": true,
+            "blocked": true,
+            "blocked_reasons": block_reasons,
+            "actual_emit_invoked": false,
+            "emits_audio": false,
+            "emits_notification": false,
+            "http_emit_route_added": false,
+            "writes_files": false,
+            "writes_request_record": false,
+            "writes_cooldown_state": false,
+            "codex_pet_package_mutation": false,
+            "mutates_global_substrate": false,
+            "queue": {
+                "project": project,
+                "path": queue_path.to_string_lossy(),
+                "append_only": true,
+            },
+            "action_request": request_payload.get("action_request").cloned().unwrap_or(Value::Null),
+            "source_request": request_payload,
+            "next_step": "do not enqueue this request; inspect blocked_reasons and create a supported Xiao Shu request first",
+        }));
+    }
     let now = now_secs();
     let record =
         xiao_shu_action_enqueue_record_from_request(request_payload, project, &queue_path, now);
@@ -6776,7 +6912,8 @@ pub fn xiao_shu_action_request_queue_summary(project: Option<&str>) -> Result<Va
         "newest_pending": newest_pending,
         "panel_path": format!("/avatar-surface/xiao-shu-action-requests?project={project_slug}"),
         "local_queue_command": format!(
-            "agent-bridge avatar xiao-shu-action-requests --project {project_slug}"
+            "agent-bridge avatar xiao-shu-action-requests --project {}",
+            shell_quote_cli_arg(project_slug)
         ),
     }))
 }
@@ -6820,6 +6957,8 @@ pub fn xiao_shu_action_request_action(
         .unwrap_or("xiao-shu-action-request-action")
         .to_string();
     let pending = current_state == "pending_human_confirmation";
+    let action_block_reasons = xiao_shu_action_queue_record_action_block_reasons(&record);
+    let actionable_pending = pending && action_block_reasons.is_empty();
     let action_payload = if opts.dismiss {
         let mut blocked_reasons = Vec::new();
         if !pending {
@@ -6877,7 +7016,7 @@ pub fn xiao_shu_action_request_action(
             },
             "source_queue_record": record,
         })
-    } else if pending {
+    } else if actionable_pending {
         let action_opts = AvatarCortexVoiceActionOptions {
             label: opts.label,
             heartbeat_label: opts.heartbeat_label,
@@ -6894,6 +7033,13 @@ pub fn xiao_shu_action_request_action(
         };
         avatar_cortex_voice_action(&action_opts)?
     } else {
+        let mut blocked_reasons = Vec::new();
+        if !pending {
+            blocked_reasons.push(json!("request_state_not_pending"));
+        }
+        for reason in &action_block_reasons {
+            blocked_reasons.push(json!(reason));
+        }
         json!({
             "surface": "avatar_cortex_voice_action",
             "schema": 1,
@@ -6919,7 +7065,7 @@ pub fn xiao_shu_action_request_action(
                 "confirm_flag": opts.confirm,
                 "emit_flag": opts.emit,
                 "blocked": true,
-                "blocked_reasons": ["request_state_not_pending"],
+                "blocked_reasons": blocked_reasons,
                 "selected_token": track,
                 "line": request.get("line").cloned().unwrap_or(Value::Null),
                 "reason_present": !reason.trim().is_empty(),
@@ -8990,6 +9136,26 @@ mod tests {
     }
 
     #[test]
+    fn shell_quote_cli_arg_quotes_unsafe_values() {
+        assert_eq!(shell_quote_cli_arg("agent-bridge"), "agent-bridge");
+        assert_eq!(
+            shell_quote_cli_arg("agent bridge; rm -rf /"),
+            "'agent bridge; rm -rf /'"
+        );
+        assert_eq!(shell_quote_cli_arg("a'b"), "'a'\\''b'");
+
+        let command = xiao_shu_action_request_action_command(
+            "agent bridge; rm -rf /",
+            "xsr-test",
+            "operator's reason",
+            Some("--emit"),
+        );
+        assert!(command.contains("--project 'agent bridge; rm -rf /'"));
+        assert!(command.contains("--reason 'operator'\\''s reason'"));
+        assert!(command.ends_with("--confirm --emit"));
+    }
+
+    #[test]
     fn xiao_shu_action_request_keeps_llm_behind_confirmation() {
         let registry = avatar_cortex_renderer_registry_payload(None);
         let plan = avatar_cortex_binding_plan_from_registry(registry);
@@ -9164,6 +9330,79 @@ mod tests {
         let compact_len = serde_json::to_string(&request).unwrap().len();
         let detailed_len = serde_json::to_string(&detailed).unwrap().len();
         assert!(compact_len < detailed_len / 2);
+    }
+
+    #[test]
+    fn xiao_shu_action_enqueue_blocks_unsupported_or_downstream_blocked_requests() {
+        let unsupported_payload = json!({
+            "surface": "xiao_shu_action_request",
+            "read_only": true,
+            "dry_run": true,
+            "llm_safe": true,
+            "action_request": {
+                "actor": "codex",
+                "intent": "dance_now",
+                "mapped_track": "xiao_shu::alert_peek::medium",
+                "request_state": "blocked_unsupported_intent",
+                "supported_intent": false,
+                "direct_llm_emit_allowed": false,
+                "blocked_reasons": ["unsupported_intent"]
+            }
+        });
+        let unsupported_reasons =
+            xiao_shu_action_request_enqueue_block_reasons(&unsupported_payload);
+        assert!(unsupported_reasons
+            .iter()
+            .any(|reason| reason == "unsupported_intent"));
+        assert!(unsupported_reasons
+            .iter()
+            .any(|reason| reason == "request_state_not_enqueueable:blocked_unsupported_intent"));
+
+        let downstream_blocked = json!({
+            "surface": "xiao_shu_action_request",
+            "read_only": true,
+            "dry_run": true,
+            "llm_safe": true,
+            "action_request": {
+                "actor": "codex",
+                "intent": "voice_alert",
+                "mapped_track": "xiao_shu::alert_peek::medium",
+                "request_state": "requires_human_confirmation",
+                "supported_intent": true,
+                "direct_llm_emit_allowed": false,
+                "blocked_reasons": [
+                    "human_confirmation_required",
+                    "downstream_preview_unavailable"
+                ]
+            }
+        });
+        let downstream_reasons =
+            xiao_shu_action_request_enqueue_block_reasons(&downstream_blocked);
+        assert_eq!(
+            downstream_reasons,
+            vec!["downstream_blocked:downstream_preview_unavailable"]
+        );
+
+        let bad_pending_record = json!({
+            "state": "pending_human_confirmation",
+            "actor": "codex",
+            "intent": "dance_now",
+            "mapped_track": "xiao_shu::alert_peek::medium",
+            "action_request": {
+                "intent": "dance_now",
+                "request_state": "blocked_unsupported_intent",
+                "supported_intent": false,
+                "direct_llm_emit_allowed": false,
+                "blocked_reasons": ["unsupported_intent"]
+            }
+        });
+        let action_reasons = xiao_shu_action_queue_record_action_block_reasons(&bad_pending_record);
+        assert!(action_reasons
+            .iter()
+            .any(|reason| reason == "unsupported_intent"));
+        assert!(action_reasons
+            .iter()
+            .any(|reason| reason == "request_state_not_enqueueable:blocked_unsupported_intent"));
     }
 
     #[test]

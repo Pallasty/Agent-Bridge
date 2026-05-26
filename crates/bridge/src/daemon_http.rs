@@ -5016,32 +5016,23 @@ fn avatar_surface_xiao_shu_action_requests_html(
             .get("reason")
             .and_then(Value::as_str)
             .unwrap_or("operator-confirmed-request");
-        let local_confirm_raw = record
-            .get("local_confirm_command")
-            .and_then(Value::as_str)
-            .map(ToString::to_string)
-            .or_else(|| {
-                record
-                    .get("action_preview_command")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string)
-            })
-            .unwrap_or_else(|| {
-                format!(
-                    "agent-bridge avatar xiao-shu-action-request-action --project {project_raw} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm"
-                )
-            });
-        let local_command_raw = record
-            .get("local_emit_command")
-            .and_then(Value::as_str)
-            .map(ToString::to_string)
-            .unwrap_or_else(|| {
-                format!(
-                    "agent-bridge avatar xiao-shu-action-request-action --project {project_raw} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm --emit"
-                )
-            });
-        let local_dismiss_raw = format!(
-            "agent-bridge avatar xiao-shu-action-request-action --project {project_raw} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm --dismiss"
+        let local_confirm_raw = crate::avatar_cortex::xiao_shu_action_request_action_command(
+            project_raw,
+            request_id_raw,
+            reason_raw,
+            None,
+        );
+        let local_command_raw = crate::avatar_cortex::xiao_shu_action_request_action_command(
+            project_raw,
+            request_id_raw,
+            reason_raw,
+            Some("--emit"),
+        );
+        let local_dismiss_raw = crate::avatar_cortex::xiao_shu_action_request_action_command(
+            project_raw,
+            request_id_raw,
+            reason_raw,
+            Some("--dismiss"),
         );
         let detail_href_raw = format!(
             "/avatar-surface/xiao-shu-action-requests?project={project}&request_id={request_id}&details=true",
@@ -5183,26 +5174,23 @@ fn avatar_surface_xiao_shu_action_console_html(
             .get("project")
             .and_then(Value::as_str)
             .unwrap_or(project_raw);
-        let confirm_raw = record
-            .get("local_confirm_command")
-            .and_then(Value::as_str)
-            .map(ToString::to_string)
-            .unwrap_or_else(|| {
-                format!(
-                    "agent-bridge avatar xiao-shu-action-request-action --project {project_for_command} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm"
-                )
-            });
-        let emit_raw = record
-            .get("local_emit_command")
-            .and_then(Value::as_str)
-            .map(ToString::to_string)
-            .unwrap_or_else(|| {
-                format!(
-                    "agent-bridge avatar xiao-shu-action-request-action --project {project_for_command} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm --emit"
-                )
-            });
-        let dismiss_raw = format!(
-            "agent-bridge avatar xiao-shu-action-request-action --project {project_for_command} --request-id {request_id_raw:?} --reason {reason_raw:?} --confirm --dismiss"
+        let confirm_raw = crate::avatar_cortex::xiao_shu_action_request_action_command(
+            project_for_command,
+            request_id_raw,
+            reason_raw,
+            None,
+        );
+        let emit_raw = crate::avatar_cortex::xiao_shu_action_request_action_command(
+            project_for_command,
+            request_id_raw,
+            reason_raw,
+            Some("--emit"),
+        );
+        let dismiss_raw = crate::avatar_cortex::xiao_shu_action_request_action_command(
+            project_for_command,
+            request_id_raw,
+            reason_raw,
+            Some("--dismiss"),
         );
         let json_href = html_escape(&format!(
             "/avatar-surface/xiao-shu-action-requests?project={project}&request_id={request_id}&details=true",
@@ -7602,7 +7590,7 @@ mod tests {
         assert!(html.contains("read-only console; server actions disabled"));
         assert!(html.contains("/avatar-surface/xiao-shu-action-console?project=agent-bridge&amp;all_states=true&amp;limit=10"));
         assert!(html.contains("/avatar-surface/xiao-shu-action-console?project=agent-bridge&amp;state=emitted&amp;limit=10"));
-        assert!(html.contains("data-copy=\"agent-bridge avatar xiao-shu-action-request-action --project agent-bridge --request-id &quot;xsr-test&quot; --reason &quot;unit-test&quot; --confirm\""));
+        assert!(html.contains("data-copy=\"agent-bridge avatar xiao-shu-action-request-action --project agent-bridge --request-id xsr-test --reason unit-test --confirm\""));
         assert!(html.contains("navigator.clipboard.writeText"));
         assert!(html.contains("dry run"));
         assert!(html.contains("--confirm"));
@@ -7610,6 +7598,52 @@ mod tests {
         assert!(html.contains("--confirm --dismiss"));
         assert!(html.contains("/avatar-surface/xiao-shu-action-requests?project=agent-bridge&amp;request_id=xsr-test&amp;details=true"));
         assert!(!html.contains("http_emit_route"));
+    }
+
+    #[test]
+    fn xiao_shu_action_console_copy_commands_quote_unsafe_cli_args() {
+        let q = XiaoShuActionRequestsQuery {
+            project: Some("agent bridge; rm -rf /".into()),
+            request_id: Some("xsr-test".into()),
+            state: None,
+            all_states: true,
+            details: true,
+            limit: Some(1),
+        };
+        let queue = json!({
+            "surface": "xiao_shu_action_request_queue",
+            "read_only": true,
+            "dry_run": true,
+            "emits_audio": false,
+            "queue": {
+                "project": "agent bridge; rm -rf /",
+                "exists": true,
+                "path": "/tmp/requests.jsonl",
+                "state_filter": null,
+                "matching_records": 1,
+                "returned_count": 1,
+                "current_records": 1
+            },
+            "records": [{
+                "request_id": "xsr-test",
+                "state": "pending_human_confirmation",
+                "actor": "codex",
+                "intent": "voice_alert",
+                "mapped_track": "xiao_shu::alert_peek::medium",
+                "reason": "operator's reason",
+                "action_request": {
+                    "message": "please look",
+                    "line": "小舒发现一点需要你看一下。",
+                    "cue_id": "soft_attention_needed"
+                }
+            }]
+        });
+        let html = avatar_surface_xiao_shu_action_console_html(&queue, &q);
+
+        assert!(html.contains("--project &#39;agent bridge; rm -rf /&#39;"));
+        assert!(html.contains("--reason &#39;operator&#39;\\&#39;&#39;s reason&#39;"));
+        assert!(!html.contains("--project agent bridge; rm -rf / --request-id"));
+        assert!(html.contains("navigator.clipboard.writeText"));
     }
 
     #[test]

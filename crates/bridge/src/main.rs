@@ -6211,6 +6211,21 @@ async fn run_xiao_shu_action_request(
         return Ok(());
     }
     if enqueue {
+        if payload
+            .get("enqueue_blocked")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            println!("xiao shu action request enqueue blocked");
+            println!(
+                "reasons={} emits_audio={} direct_control={} writes_request_record={}",
+                avatar_health_display(payload.get("blocked_reasons"), "-"),
+                avatar_health_display(payload.get("emits_audio"), "false"),
+                avatar_health_display(payload.get("direct_pet_control_allowed"), "false"),
+                avatar_health_display(payload.get("writes_request_record"), "false")
+            );
+            return Ok(());
+        }
         let record = payload.get("record").unwrap_or(&Value::Null);
         let queue = payload.get("queue").unwrap_or(&Value::Null);
         let request = record.get("action_request").unwrap_or(&Value::Null);
