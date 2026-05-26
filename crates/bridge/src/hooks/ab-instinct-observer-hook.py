@@ -34,6 +34,36 @@ def _brief(obj, n=240):
     return s[:n]
 
 
+def _clean_error(resp):
+    """Return (is_error, source) without treating stderr as failure.
+
+    Many successful tools write progress or warnings to stderr (`git`, `cargo`,
+    `maturin`, test runners). Using stderr as an error signal polluted the
+    Phase-0b density audit, so only explicit error/status fields count here.
+    """
+    if not isinstance(resp, dict):
+        return False, None
+    for key in ("is_error", "error", "interrupted"):
+        if resp.get(key):
+            return True, key
+    for key in ("exit_code", "exitCode", "returncode", "return_code"):
+        value = resp.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value != 0:
+            return True, key
+        if isinstance(value, str):
+            try:
+                if int(value.strip()) != 0:
+                    return True, key
+            except ValueError:
+                pass
+    status = resp.get("status")
+    if isinstance(status, str) and status.lower() in {"error", "failed", "failure"}:
+        return True, "status"
+    return False, None
+
+
 def main():
     if os.environ.get("AB_INSTINCT_OBSERVER", "1") == "0":
         return
@@ -50,16 +80,13 @@ def main():
     }
     if ev == "PostToolUse":
         resp = data.get("tool_response", data.get("tool_result"))
-        # best-effort error flag — analysis pass refines; we only need a hint
-        err = False
-        if isinstance(resp, dict):
-            if resp.get("is_error") or resp.get("error") or resp.get("interrupted"):
-                err = True
-            stderr = resp.get("stderr")
-            if isinstance(stderr, str) and stderr.strip():
-                err = True
+        err, err_source = _clean_error(resp)
         rec["tool"] = data.get("tool_name", "?")
         rec["err"] = err
+        rec["err_source"] = err_source
+        if isinstance(resp, dict):
+            stderr = resp.get("stderr")
+            rec["stderr_nonempty"] = isinstance(stderr, str) and bool(stderr.strip())
         rec["in"] = _brief(data.get("tool_input", ""))
         rec["out"] = _brief(resp, 200)
     elif ev == "UserPromptSubmit":

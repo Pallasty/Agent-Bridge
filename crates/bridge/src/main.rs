@@ -54,7 +54,7 @@ enum Cmd {
     /// scripts, and merges hook entries into `~/.claude/settings.json`.
     ///
     /// `--frontend codex`: installs the Codex desktop profile with MCP config
-    /// plus Codex lifecycle hooks.
+    /// plus Codex lifecycle hooks and the instinct observer hook.
     ///
     /// Add `--codex-toolset lean` to write the narrower experimental Codex
     /// tool surface without changing the default stable profile.
@@ -2438,7 +2438,8 @@ impl SetupFrontend {
 
 /// True when `~/.claude/settings.json` already references at least one
 /// of agent-bridge's hook scripts (`ab-memory-hook`,
-/// `ab-precompact-hook`, `ab-session-end-hook`). This is the strongest
+/// `ab-precompact-hook`, `ab-session-end-hook`, or
+/// `ab-instinct-observer-hook`). This is the strongest
 /// possible "Claude Code is the primary frontend" signal — beats every
 /// other detector because it means the user previously committed to
 /// this profile.
@@ -2461,6 +2462,7 @@ fn settings_references_ab_hook(body: &str) -> bool {
     body.contains("ab-memory-hook")
         || body.contains("ab-precompact-hook")
         || body.contains("ab-session-end-hook")
+        || body.contains("ab-instinct-observer-hook")
 }
 
 /// Heuristic: Codex keeps its config under `$CODEX_HOME/config.toml`

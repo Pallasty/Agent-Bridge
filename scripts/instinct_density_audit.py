@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""delta① Phase-0b density audit — analyze the observer sidecar log.
+"""delta① observer audit snapshot — analyze the observer sidecar log.
 
 Reads ~/.cache/agent-bridge/instinct-probe/observations.jsonl (written by
-ab-instinct-observer-hook) and estimates the per-session density of MINEABLE
+ab-instinct-observer-hook) and estimates the per-session density of clean
 behavioral signals, to decide whether an auto-miner is worth building.
 Spec/falsifier: docs/design/ECC_INSTINCT_MINING_PROBE_2026_05_24.md (Phase 0b).
 
@@ -11,8 +11,10 @@ an LLM pass for precision, this just answers "is there ENOUGH to bother?"):
 
   - correction  : a UserPromptSubmit whose text carries negation / redirection
                   cues right after assistant action ("不对/应该/instead/revert"…)
-  - error-resln : a PostToolUse with err=true that is later followed (same
-                  session) by a SUCCESS of the same tool — i.e. a fix landed
+  - error-resln : a PostToolUse with a CLEAN error signal that is later followed
+                  (same session) by a SUCCESS of the same tool — i.e. a fix
+                  landed. stderr-only records are reported as sensor noise, not
+                  counted as errors.
 
 Gate (frozen): mean mineable signals/session >= ~1 over >=5 sessions -> proceed
 to Phase 1 miner. Below that -> NO_SIGNAL (don't build it).
@@ -24,6 +26,7 @@ import json
 import os
 import sys
 from collections import defaultdict
+from datetime import datetime, timezone
 
 DEFAULT_LOG = os.path.expanduser("~/.cache/agent-bridge/instinct-probe/observations.jsonl")
 
@@ -41,6 +44,10 @@ CORRECTION_CUES = [
 def classify_prompt(text):
     low = text.lower()
     return any(cue in text or cue in low for cue in CORRECTION_CUES)
+
+
+def is_clean_error(record):
+    return bool(record.get("err") and record.get("err_source"))
 
 
 def load(path):
@@ -61,8 +68,12 @@ def load(path):
 
 def analyze(rows):
     by_sid = defaultdict(lambda: {
-        "prompts": 0, "corrections": 0, "tools": 0, "errors": 0,
-        "error_resolutions": 0, "_err_pending": defaultdict(int),
+        "prompts": 0, "corrections": 0, "tools": 0,
+        "clean_errors": 0, "clean_error_resolutions": 0,
+        "stderr_success": 0, "legacy_untrusted_errors": 0,
+        "legacy_error_resolutions": 0,
+        "_clean_err_pending": defaultdict(int),
+        "_legacy_err_pending": defaultdict(int),
     })
     # chronological per session for error->fix detection
     rows = sorted(rows, key=lambda r: r.get("ts", 0))
@@ -77,39 +88,88 @@ def analyze(rows):
         elif ev == "PostToolUse":
             s["tools"] += 1
             tool = r.get("tool", "?")
-            if r.get("err"):
-                s["errors"] += 1
-                s["_err_pending"][tool] += 1
-            else:
+            clean_err = is_clean_error(r)
+            legacy_err = bool(r.get("err"))
+            stderr_success = bool(r.get("stderr_nonempty")) and not clean_err
+            legacy_untrusted = legacy_err and not r.get("err_source")
+            if stderr_success:
+                s["stderr_success"] += 1
+            if legacy_untrusted:
+                s["legacy_untrusted_errors"] += 1
+
+            if clean_err:
+                s["clean_errors"] += 1
+                s["_clean_err_pending"][tool] += 1
+            elif s["_clean_err_pending"].get(tool, 0) > 0:
                 # a success of a tool that previously errored = resolution
-                if s["_err_pending"].get(tool, 0) > 0:
-                    s["error_resolutions"] += 1
-                    s["_err_pending"][tool] -= 1
+                s["clean_error_resolutions"] += 1
+                s["_clean_err_pending"][tool] -= 1
+
+            # Preserve the old upper-bound line so we can see how much of the
+            # previous density came from untrusted stderr-derived errors.
+            if legacy_err:
+                s["_legacy_err_pending"][tool] += 1
+            elif s["_legacy_err_pending"].get(tool, 0) > 0:
+                s["legacy_error_resolutions"] += 1
+                s["_legacy_err_pending"][tool] -= 1
     # finalize
     sessions = {}
     for sid, s in by_sid.items():
-        s.pop("_err_pending", None)
-        s["mineable"] = s["corrections"] + s["error_resolutions"]
+        s.pop("_clean_err_pending", None)
+        s.pop("_legacy_err_pending", None)
+        s["clean_mineable"] = s["corrections"] + s["clean_error_resolutions"]
+        s["legacy_upper_bound_mineable"] = s["corrections"] + s["legacy_error_resolutions"]
         sessions[sid] = s
     return sessions
 
 
+def verdict_for(mean, n):
+    if n < 5:
+        return "INSUFFICIENT_SESSIONS"
+    if mean >= 1.0:
+        return "DENSITY_OK_PROCEED_PHASE1"
+    return "NO_SIGNAL"
+
+
 def verdict(sessions):
     n = len(sessions)
-    total_mineable = sum(s["mineable"] for s in sessions.values())
-    mean = (total_mineable / n) if n else 0.0
-    if n < 5:
-        v = "INSUFFICIENT_SESSIONS"
-    elif mean >= 1.0:
-        v = "DENSITY_OK_PROCEED_PHASE1"
-    else:
-        v = "NO_SIGNAL"
+    total_clean = sum(s["clean_mineable"] for s in sessions.values())
+    total_legacy = sum(s["legacy_upper_bound_mineable"] for s in sessions.values())
+    mean_clean = (total_clean / n) if n else 0.0
+    mean_legacy = (total_legacy / n) if n else 0.0
     return {
         "sessions": n,
-        "total_mineable": total_mineable,
-        "mean_mineable_per_session": round(mean, 3),
+        "total_clean_mineable": total_clean,
+        "mean_clean_mineable_per_session": round(mean_clean, 3),
+        "total_legacy_upper_bound_mineable": total_legacy,
+        "mean_legacy_upper_bound_per_session": round(mean_legacy, 3),
+        "legacy_untrusted_errors": sum(s["legacy_untrusted_errors"] for s in sessions.values()),
+        "stderr_success_records": sum(s["stderr_success"] for s in sessions.values()),
         "gate": "mean>=1.0 over >=5 sessions",
-        "verdict": v,
+        "verdict": verdict_for(mean_clean, n),
+        "legacy_upper_bound_verdict": verdict_for(mean_legacy, n),
+    }
+
+
+def event_summary(rows):
+    events = defaultdict(int)
+    tools = defaultdict(int)
+    latest_ts = None
+    for row in rows:
+        ev = row.get("ev", "?")
+        events[ev] += 1
+        if ev == "PostToolUse":
+            tools[row.get("tool", "?")] += 1
+        ts = row.get("ts")
+        if isinstance(ts, (int, float)):
+            latest_ts = ts if latest_ts is None else max(latest_ts, ts)
+    latest_iso = None
+    if latest_ts is not None:
+        latest_iso = datetime.fromtimestamp(latest_ts, timezone.utc).isoformat()
+    return {
+        "events": dict(sorted(events.items())),
+        "top_tools": dict(sorted(tools.items(), key=lambda kv: (-kv[1], kv[0]))[:10]),
+        "latest_event_at": latest_iso,
     }
 
 
@@ -124,19 +184,29 @@ def main():
     summary = verdict(sessions)
     summary["log"] = args.log
     summary["total_records"] = len(rows)
+    summary["generated_at"] = datetime.now(timezone.utc).isoformat()
+    summary.update(event_summary(rows))
 
     if args.json:
         print(json.dumps({"summary": summary, "per_session": sessions}, ensure_ascii=False, indent=2))
         return
 
-    print(f"=== instinct density audit ({args.log}) ===")
+    print(f"=== instinct observer audit snapshot ({args.log}) ===")
     print(f"records: {len(rows)} | sessions: {summary['sessions']}")
-    print(f"{'session':<40} {'prompt':>6} {'corr':>5} {'tool':>5} {'err':>4} {'fix':>4} {'mine':>5}")
-    for sid, s in sorted(sessions.items(), key=lambda kv: -kv[1]["mineable"]):
+    print(f"events: {summary['events']} | latest: {summary['latest_event_at']}")
+    print(f"{'session':<40} {'prompt':>6} {'corr':>5} {'tool':>5} {'cerr':>5} {'cfix':>5} "
+          f"{'clean':>6} {'legacy':>6} {'noise':>5}")
+    for sid, s in sorted(sessions.items(), key=lambda kv: -kv[1]["clean_mineable"]):
         print(f"{sid:<40} {s['prompts']:>6} {s['corrections']:>5} {s['tools']:>5} "
-              f"{s['errors']:>4} {s['error_resolutions']:>4} {s['mineable']:>5}")
-    print(f"--- mean mineable/session: {summary['mean_mineable_per_session']} "
+              f"{s['clean_errors']:>5} {s['clean_error_resolutions']:>5} "
+              f"{s['clean_mineable']:>6} {s['legacy_upper_bound_mineable']:>6} "
+              f"{s['legacy_untrusted_errors'] + s['stderr_success']:>5}")
+    print(f"--- clean mean/session: {summary['mean_clean_mineable_per_session']} "
           f"| verdict: {summary['verdict']} ({summary['gate']}) ---")
+    print(f"--- legacy upper-bound mean/session: {summary['mean_legacy_upper_bound_per_session']} "
+          f"| verdict: {summary['legacy_upper_bound_verdict']} | "
+          f"untrusted legacy errors: {summary['legacy_untrusted_errors']} | "
+          f"stderr-success records: {summary['stderr_success_records']} ---")
 
 
 if __name__ == "__main__":

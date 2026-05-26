@@ -8,9 +8,9 @@
 //! - `Frontend::Codex`: copies the binary and merges an
 //!   `[mcp_servers.agent-bridge]` entry into `~/.codex/config.toml`.
 //!   It also enables Codex hooks and merges the Agent-Bridge lifecycle
-//!   hooks into `~/.codex/hooks.json`. The default toolset is
-//!   `codex-essential`; `--codex-toolset lean` writes the narrower
-//!   experimental `codex-lean` surface.
+//!   hooks plus the instinct observer into `~/.codex/hooks.json`. The
+//!   default toolset is `codex-essential`; `--codex-toolset lean` writes
+//!   the narrower experimental `codex-lean` surface.
 //! - `Frontend::CodexCli` / `Frontend::CodexIde`: install the same Codex
 //!   MCP entry with a host marker, but skip lifecycle hooks because those
 //!   surfaces may not expose Codex desktop hook events.
@@ -42,6 +42,7 @@ use std::path::{Path, PathBuf};
 const HOOK_MEMORY: &str = include_str!("hooks/ab-memory-hook.sh");
 const HOOK_PRECOMPACT: &str = include_str!("hooks/ab-precompact-hook.sh");
 const HOOK_SESSION_END: &str = include_str!("hooks/ab-session-end-hook.sh");
+const HOOK_INSTINCT_OBSERVER: &str = include_str!("hooks/ab-instinct-observer-hook.py");
 const MANAGED_TOOL_ENV_KEYS: &[&str] = &[
     "AGENT_BRIDGE_CLIENT",
     "AGENT_BRIDGE_TOOLSET",
@@ -98,7 +99,10 @@ pub fn run(frontend: Frontend, codex_toolset: CodexToolset) -> Result<()> {
         copy_executable_atomically(&bin_src, &install_dst)?;
         println!("  ✓  binary      → {}", install_dst.display());
         if install_dst != mcp_command {
-            println!("  ·  MCP command → {} (wrapper preserved)", mcp_command.display());
+            println!(
+                "  ·  MCP command → {} (wrapper preserved)",
+                mcp_command.display()
+            );
         }
     } else {
         println!("  ·  binary      already at {}", install_dst.display());
@@ -108,9 +112,13 @@ pub fn run(frontend: Frontend, codex_toolset: CodexToolset) -> Result<()> {
         Frontend::ClaudeCode => install_claude_code(&home, &bin_dir, &mcp_command),
         Frontend::Warp => install_warp(&mcp_command),
         Frontend::Auggie => install_auggie(&mcp_command),
-        Frontend::Codex => {
-            install_codex(&home, &bin_dir, &mcp_command, CodexHost::Desktop, codex_toolset)
-        }
+        Frontend::Codex => install_codex(
+            &home,
+            &bin_dir,
+            &mcp_command,
+            CodexHost::Desktop,
+            codex_toolset,
+        ),
         Frontend::CodexCli => {
             install_codex(&home, &bin_dir, &mcp_command, CodexHost::Cli, codex_toolset)
         }
@@ -140,10 +148,7 @@ fn is_env_wrapper_script(path: &Path) -> bool {
     if !meta.is_file() || meta.len() > 32 * 1024 {
         return false;
     }
-    let Ok(head) = fs::read(path).map(|b| b.into_iter().take(512).collect::<Vec<_>>()) else {
-        return false;
-    };
-    let Ok(text) = std::str::from_utf8(&head) else {
+    let Ok(text) = fs::read_to_string(path) else {
         return false;
     };
     text.starts_with("#!") && text.contains("bash") && text.contains("agent-bridge.real")
@@ -270,8 +275,8 @@ fn install_warp(bin_dst: &Path) -> Result<()> {
 ///
 /// Codex reads MCP server definitions from the `[mcp_servers]` table in
 /// `config.toml`. Recent Codex builds expose a hooks.json lifecycle file,
-/// so this profile installs the same hook scripts as Claude Code and wires
-/// them into Codex without touching `~/.claude/settings.json`.
+/// so this profile installs the Agent-Bridge hook scripts and wires them
+/// into Codex without touching `~/.claude/settings.json`.
 fn install_codex(
     home: &Path,
     bin_dir: &Path,
@@ -283,6 +288,10 @@ fn install_codex(
         write_script(&bin_dir.join("ab-memory-hook"), HOOK_MEMORY)?;
         write_script(&bin_dir.join("ab-precompact-hook"), HOOK_PRECOMPACT)?;
         write_script(&bin_dir.join("ab-session-end-hook"), HOOK_SESSION_END)?;
+        write_script(
+            &bin_dir.join("ab-instinct-observer-hook"),
+            HOOK_INSTINCT_OBSERVER,
+        )?;
     } else {
         println!("  ·  hook scripts skipped ({} host)", host.profile_label());
     }
@@ -774,10 +783,11 @@ fn merge_codex_hooks(home: &Path, bin_dir: &Path) -> Result<()> {
 
     let bin = bin_dir.to_string_lossy();
     let session_end_command = format!("AB_SESSION_END_CURATE=1 \"{}/ab-session-end-hook\"", bin);
-    let new_hooks: &[(&str, Option<&str>, Value)] = &[
+    let new_hooks: &[(&str, Option<&str>, &'static str, Value)] = &[
         (
             "UserPromptSubmit",
             None,
+            "ab-memory-hook",
             json!({
                 "hooks": [{
                     "type": "command",
@@ -787,8 +797,33 @@ fn merge_codex_hooks(home: &Path, bin_dir: &Path) -> Result<()> {
             }),
         ),
         (
+            "UserPromptSubmit",
+            None,
+            "ab-instinct-observer-hook",
+            json!({
+                "hooks": [{
+                    "type": "command",
+                    "command": format!("{}/ab-instinct-observer-hook", bin),
+                    "timeout": 5
+                }]
+            }),
+        ),
+        (
+            "PostToolUse",
+            None,
+            "ab-instinct-observer-hook",
+            json!({
+                "hooks": [{
+                    "type": "command",
+                    "command": format!("{}/ab-instinct-observer-hook", bin),
+                    "timeout": 5
+                }]
+            }),
+        ),
+        (
             "PreCompact",
             Some("manual"),
+            "ab-precompact-hook",
             json!({
                 "matcher": "manual",
                 "hooks": [{
@@ -802,6 +837,7 @@ fn merge_codex_hooks(home: &Path, bin_dir: &Path) -> Result<()> {
         (
             "PreCompact",
             Some("auto"),
+            "ab-precompact-hook",
             json!({
                 "matcher": "auto",
                 "hooks": [{
@@ -815,6 +851,7 @@ fn merge_codex_hooks(home: &Path, bin_dir: &Path) -> Result<()> {
         (
             "Stop",
             None,
+            "ab-session-end-hook",
             json!({
                 "hooks": [{
                     "type": "command",
@@ -826,6 +863,7 @@ fn merge_codex_hooks(home: &Path, bin_dir: &Path) -> Result<()> {
         (
             "SessionEnd",
             None,
+            "ab-session-end-hook",
             json!({
                 "hooks": [{
                     "type": "command",
@@ -837,13 +875,12 @@ fn merge_codex_hooks(home: &Path, bin_dir: &Path) -> Result<()> {
         ),
     ];
 
-    for (event, matcher, entry) in new_hooks {
+    for (event, matcher, script_name, entry) in new_hooks {
         let arr = hooks_obj
             .entry(*event)
             .or_insert(json!([]))
             .as_array_mut()
             .context("Codex hook event entry is not an array")?;
-        let script_name = script_name_for_event(event);
         let already = arr.iter().any(|item| {
             let item_matcher = item.get("matcher").and_then(|m| m.as_str());
             if item_matcher != *matcher {
@@ -1480,15 +1517,84 @@ trust_level = \"trusted\"
         .unwrap();
 
         merge_codex_hooks(&tmp, &bin_dir).unwrap();
+        merge_codex_hooks(&tmp, &bin_dir).unwrap();
 
         let raw = fs::read_to_string(codex_dir.join("hooks.json")).unwrap();
         assert!(raw.contains("cmux codex-hook stop"));
         assert!(raw.contains("ab-memory-hook"));
         assert!(raw.contains("ab-precompact-hook"));
+        assert!(raw.contains("ab-instinct-observer-hook"));
+        assert!(raw.contains("\"PostToolUse\""));
         assert!(raw.contains("AB_SESSION_END_CURATE=1"));
         assert!(raw.contains("\"SessionEnd\""));
 
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let hooks = parsed["hooks"].as_object().unwrap();
+        let user_prompt = hooks["UserPromptSubmit"].as_array().unwrap();
+        let post_tool = hooks["PostToolUse"].as_array().unwrap();
+        assert_eq!(
+            count_hook_commands(user_prompt, "ab-memory-hook"),
+            1,
+            "memory hook should not be duplicated"
+        );
+        assert_eq!(
+            count_hook_commands(user_prompt, "ab-instinct-observer-hook"),
+            1,
+            "observer prompt hook should not be duplicated"
+        );
+        assert_eq!(
+            count_hook_commands(post_tool, "ab-instinct-observer-hook"),
+            1,
+            "observer post-tool hook should not be duplicated"
+        );
+
         fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn wrapper_detection_scans_past_long_header_comments() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agent-bridge-wrapper-detect-test-{}",
+            std::process::id()
+        ));
+        let bin_dir = tmp.join(".local/bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let wrapper = bin_dir.join("agent-bridge");
+        let long_header = "#".repeat(700);
+        fs::write(
+            &wrapper,
+            format!(
+                "#!/usr/bin/env bash\n{long_header}\nexec \"$HOME/.local/bin/agent-bridge.real\" \"$@\"\n"
+            ),
+        )
+        .unwrap();
+
+        assert!(super::is_env_wrapper_script(&wrapper));
+        assert_eq!(
+            super::binary_install_destination(&wrapper),
+            bin_dir.join("agent-bridge.real")
+        );
+
+        fs::remove_dir_all(tmp).unwrap();
+    }
+
+    fn count_hook_commands(entries: &[Value], script_name: &str) -> usize {
+        entries
+            .iter()
+            .flat_map(|entry| {
+                entry
+                    .get("hooks")
+                    .and_then(|hooks| hooks.as_array())
+                    .into_iter()
+                    .flatten()
+            })
+            .filter(|hook| {
+                hook.get("command")
+                    .and_then(|command| command.as_str())
+                    .map(|command| command.contains(script_name))
+                    .unwrap_or(false)
+            })
+            .count()
     }
 
     #[test]
@@ -1555,11 +1661,11 @@ trust_level = \"trusted\"
         assert_eq!(agent_bridge["command"], "/tmp/agent-bridge");
         assert_eq!(agent_bridge["args"], json!(["mcp"]));
         assert_eq!(agent_bridge["env"]["AGENT_BRIDGE_CLIENT"], "cursor");
-        assert_eq!(agent_bridge["env"]["AGENT_BRIDGE_TOOLSET"], "claude-standard");
         assert_eq!(
-            agent_bridge["env"]["AGENT_BRIDGE_TOOL_PROFILE"],
-            "standard"
+            agent_bridge["env"]["AGENT_BRIDGE_TOOLSET"],
+            "claude-standard"
         );
+        assert_eq!(agent_bridge["env"]["AGENT_BRIDGE_TOOL_PROFILE"], "standard");
         assert_eq!(agent_bridge["env"]["CUSTOM_ENV"], "keep");
 
         let _ = fs::remove_dir_all(tmp);

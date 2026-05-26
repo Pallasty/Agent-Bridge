@@ -2,7 +2,7 @@
 
 **Source**: ECC (`affaan-m/ECC`) `continuous-learning-v2` 调研，2026-05-24（见 memory `research_ecc_operator_system_deepdive_2026_05_24`）。
 **Lane**: agent-bridge learning loop.
-**Status**: DESIGN — frozen falsifier, not yet built.
+**Status**: ⛔ CLOSED 2026-05-25 — `NO_SIGNAL` 结构性 null-path。error-resolution 自动挖掘在 Claude Code 上结构性不可行(**PostToolUse 对 tool-error 不 fire**,见末节 §2);corrections 可观测但稀疏。不建 miner;observer observability-only。镜像 ⑤ P6。
 **Discipline**: 验—设计—行动。本 memo 是「设计」相，落地前 Phase 0 先验证再决定建不建（对照 AutoResearch ⑤ 的 frame-audit）。
 
 ## Question
@@ -50,6 +50,19 @@ agent-bridge 能否从会话/工具流里**自动**挖出这类行为信号、�
 - 噪音高再加 **LLM-assist**（复用 `LlmClient` + modelscope fallback，对标 ECC 的 Haiku miner）。
 - 复用 daemon bg-task 模式（对照 P-α decay tick），低频跑。
 
+#### Phase 1 参考架构 — rustnet 被动观测管线（2026-05-25 外部调研，见 `reference_rustnet`）
+`domcyrus/rustnet`（Rust TUI 网络监控)的管线是一个**成熟的被动观测流水线**,与本 miner 结构同构,Phase 1 触发时照此形状建:
+
+| rustnet 阶段 | delta① miner 对应 | 状态 |
+|---|---|---|
+| Capture 线程 → crossbeam channel → 关闭写 JSONL sidecar | observer hook 写 `observations.jsonl` | **已有** |
+| N worker 做 parse + DPI 分类（cheap header→选择性深检） | correction / error-resolution 分类器（**先 rule 启发式上界 → 候选才上 LLM 精判**）| 待建 |
+| `DashMap<Key,Conn>` 分片并发存 | per-session 候选聚合 | 待建 |
+| Snapshot Provider 周期读出**不可变快照**(`RwLock<Vec>`)→ 渲染 | 密度审计 / 候选人审快照 | 部分(audit 脚本) |
+| Cleanup 线程 + **per-class TTL + 三档 staleness 着色**(白<75%/黄75-90%/红>90% TTL) | 候选 instinct 的生命周期/衰减(可借「按 kind 差异 TTL + 临过期着色」作候选过期 UX) | 待建 |
+
+借鉴要点:**(a)** staged-cost(rustnet `--no-dpi` 省 20-40% = 我们 cheap-prefilter→LLM-precision,确认 spec 对);**(b)** 写侧并发存 / 读侧周期不可变快照分离(writers 不阻塞 readers);**(c)** per-class TTL + 临过期三档着色作候选生命周期显示约定。**纯架构借鉴,Phase 1 未触发前零代码**;repo https://github.com/domcyrus/rustnet。
+
 ### Phase 2 — 复用验证（**冻结 falsifier**，user 指定的核心门）
 auto-mined 候选跑 N session 后，对比 auto-mined vs 既有 manual 基线的复用率。
 
@@ -88,6 +101,69 @@ auto-mined 候选跑 N session 后，对比 auto-mined vs 既有 manual 基线�
 - 旧的「≥30% 后续 session 浮现」指标作废（file-memory 恒被浮现，不可证伪）。
 
 **下一步 gate**：Phase 0b（生产侧密度审计）仍需做，但因涉及给 hook 链加 PostToolUse 观测 + 跨 ~5 真实 session 打点，**需 user 在环确认**后再动 hook。
+
+## Phase 0b 结果（2026-05-25，gate ✅ PASSED → `DENSITY_OK_PROCEED_PHASE1`）
+
+observer(`ab-instinct-observer-hook`)累计 5 distinct session、585 records,`scripts/instinct_density_audit.py`:
+
+| | 值 |
+|---|---|
+| sessions | **5**（达 ≥5 阈值）|
+| mean mineable/session | **4.0**（4× 的 1.0 gate）|
+| verdict | **`DENSITY_OK_PROCEED_PHASE1`** |
+| 趋势 | 4-session 1.75 → 4-session 2.5 → 5-session 4.0(单调上升)|
+
+**诚实解读(防 over-claim)**：
+1. **mean 4.0 是启发式分类器的*上界***(脚本自述 FP-tolerant upper-bound proxy)。Phase 0b 只证「**有足够候选信号值得建 miner**」,**不证**信号都高质量。真质量门 = Phase 2(人审采纳率 ≥50%)。
+2. **信号压倒性是 error-resolutions 不是 corrections**:5 session corrections 共 **3**(1+0+0+1+0),error→fix 修复 **18**(8+5+5)。→ **Phase 1 优先建 error-resolution miner**(高密度 + 更确定:工具报错→同工具后续成功);corrections 次要(稀疏 + 负向-cue 分类器更噪)。
+
+**Phase 1 解锁(0a∧0b 双绿),但是真 build,需 user 在环 + 验—设计—行动**。范围:(i) error-resolution 检测器(从 observations.jsonl 提 err→fix-success 对)→ 候选 file-memory `feedback_`/`error_pattern`;(ii) **入审阅队列,不 auto-apply**(硬约束);(iii) observer 从 probe-stage graduate:Codex desktop setup 已 wire `UserPromptSubmit` + `PostToolUse`,Claude Code 仍保持手动注册;(iv) 守 MEMORY.md always-loaded 预算(Phase 0a reframe)。
+
+### ⚠️ Phase 1 验证步发现 — DENSITY_OK 是传感器 artifact(2026-05-25,verify-before-build)
+
+开建前对真实 `observations.jsonl` 验证 error-resolution 对的实际形态 → **gate 是假阳性灌水**:
+- observer 的 err 判定 = `tool_response.stderr 非空 → err=true`(`ab-instinct-observer-hook.py:58-60`)。**任何往 stderr 写东西的成功命令都被误判**:`git clone/push`(进度/remote 信息)、`cargo test`(`... ok`)、`flake8 rc=0`、maturin warning、`2>&1` 重定向。
+- 实测:**44 个 err 记录,强失败标记命中 0/44,空-stdout(真失败候选)0/44,全部含真实 stdout = 成功命令**。真 error-resolution 密度 ≈ **0**。mean 4.0 / 7.67 pairs 全是 stderr-noise。
+- corrections 信号本就稀疏(5 session 共 3,负向-cue 启发式)。
+
+**裁决(不挪门柱,是发现仪器坏了)**:Phase 0b 按冻结 gate 的字面(启发式上界 ≥1.0)技术上 PASS,但验证揭示**上界由 FP 主导,真信号 ≈0**。同 M6/M7/⑤ 的「指标=测量 artifact」类。**不建 miner**(建=挖噪音=落 NO_SIGNAL null-path)。
+
+**修正后的下一步(Phase 1 step 0 = 修传感器再重测,gated 在建 miner 之前)**:
+1. **修 err 判定**:去掉 stderr-非空 启发式;只保留 `is_error`/`interrupted` 等干净信号。但**先 verify** Claude Code PostToolUse payload 对*真失败 Bash*(非零退出)到底给什么(is_error?exit_code?)——别凭假设重新埋点(守 `lesson_verify_code_semantics_not_field_names`)。
+2. 修后 re-accumulate ~5 session,重测真密度。
+3. **若真密度仍 ~0 → NO_SIGNAL null-path,收口**(这些 dev session 本就 success-heavy,模型少撞硬失败再修复;observer 留 observability,镜像 ⑤ P6)。若 >1 → 真 DENSITY_OK,再建 error-resolution miner。
+
+### ⛔ §2 verify-before-instrument 决定性发现 — PostToolUse 对 tool-error 不 fire(2026-05-25)→ error-resolution 结构性 null-path
+
+修传感器前先 verify「CC 对真失败给什么字段」,诱发真失败实测,结果**比 artifact 更根本**:
+
+| 诱发命令 | exit | harness `<error>`? | observer 记录? |
+|---|---|---|---|
+| `ls /nonexistent` | 2 | 是 | **否** |
+| `false` | 1 | 是 | **否** |
+| `python sys.exit(3)` | 3 | 是 | **否** |
+| `grep` no-match | 1 | 否(当成功) | 是(err=False) |
+| 所有 exit-0 | 0 | 否 | 是 |
+
+**根因(结构性,非可调)**:**Claude Code 的 PostToolUse hook 在工具结果被标 `<error>`(is_error)时根本不 fire**。observer 结构上**看不到真失败**;之前 44 个 err=true 全是 exit-0 成功命令被 stderr-非空 启发式误判。**修 err 启发式 moot**——失败事件到不了 hook。design memo 开篇假设「PostToolUse 100% 确定性捕获每次工具调用(含 errors)」**对 Claude Code 为假**。
+
+**裁决 = `NO_SIGNAL` 结构性 null-path(收口,镜像 ⑤ P6/T31:假设的能力 CC 不提供)**:
+- error-resolution 自动挖掘在 CC 上结构性不可行;**不建 miner**。传感器只做 hygiene 修正:不再把 stderr-only 当失败,避免 observability 本身继续制造假信号。
+- corrections 经 UserPromptSubmit 仍可观测但稀疏(5 session 共 3)+ 分类器噪 → 单独不足以撑 miner。
+- observer err 信号无意义 → 留 observability-only 或退役;**不 graduate 进 setup.rs**。
+- **唯一可复活路径**(若将来,且证明 corrections 够):不走 PostToolUse,改 Stop/PreCompact hook 扒 session transcript(transcript 含 `<error>`)——更重的另一套设计,不在当前范围。
+- **Codex 侧**已 wire PostToolUse,但其对 tool-error 是否 fire **未验证**;若 Codex 捕获错误,error-resolution 或 Codex-only 可行(待验,不投)。
+
+通用基建教训沉淀 `lesson_cc_posttooluse_no_fire_on_tool_error`。**delta① 至此收口** — 见 Status 行。
+
+### RNET-1/RNET-2 hygiene 落地(2026-05-25)
+
+借 `domcyrus/rustnet` 的 Snapshot Provider / staged-cost 思路,把 observer 从“密度上界脚本”收敛为**只读审计快照**:
+
+- `ab-instinct-observer-hook.py` 新增 clean error 语义:`err=true` 只来自 `is_error` / `error` / `interrupted` / 非零 `exit_code` / failed `status`;stderr-only 仅记录 `stderr_nonempty=true`,不计失败。
+- `scripts/instinct_density_audit.py` 同时输出 clean verdict 与 legacy upper-bound verdict,把旧 `stderr=>err` 记录归为 `legacy_untrusted_errors`。
+- 复跑历史 659 records / 5 sessions:clean mean/session **0.8** → `NO_SIGNAL`;legacy upper-bound mean/session **6.2** → `DENSITY_OK`,由 **44** 条 untrusted legacy errors 支撑。该对照固定为“传感器 artifact”证据。
+- 新增 Python 单测覆盖 stderr-success 不算 error、非零 exit code 算 clean error、审计脚本分离 clean/legacy。
 
 ## 与 v22/⑤ 的关系
 

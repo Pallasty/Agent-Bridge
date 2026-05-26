@@ -16,9 +16,11 @@
 
 **安装**:`setup.rs::install_claude_code` 编译期嵌入并写 memory/precompact/session-end 三个 +
 merge settings.json 的 `UserPromptSubmit/Stop/PreCompact`。
-**observer 是 probe-stage**:源已进 repo(防孤儿),但**刻意不 wire 进 setup.rs**(探针不该
-推给所有机器/sibling);当前为**手动注册**(PostToolUse + UserPromptSubmit 第 3 hook)。delta①
-若 graduate 再 wire 进 install(见 task #49 / `docs/design/ECC_INSTINCT_MINING_PROBE_2026_05_24.md`)。
+**observer 状态**:源已进 repo(防孤儿)。Claude Code 仍是手动注册
+(PostToolUse + UserPromptSubmit 第 3 hook);Codex desktop 已随 `setup --frontend codex`
+写入 `~/.codex/hooks.json` 的 `UserPromptSubmit` + `PostToolUse`。delta① 已收口为
+`NO_SIGNAL` null-path:observer 保留 observability-only,不建 miner。`err=true` 只来自
+显式 error/status/exit_code/interrupted 信号,**stderr-only 不算失败**。
 
 ## Env 门控
 
@@ -59,5 +61,6 @@ ECC 的 `ECC_HOOK_PROFILE=minimal|standard|strict` 是上述 toggle 的**便利�
 ```sh
 # 关闭：AB_INSTINCT_OBSERVER=0（或从 settings.json 摘掉两处 hook 条目）
 # 清数据：rm -f ~/.cache/agent-bridge/instinct-probe/observations.jsonl
-# 跑密度审计：python3 scripts/instinct_density_audit.py
+# 跑只读审计快照：python3 scripts/instinct_density_audit.py
+# JSON 输出：python3 scripts/instinct_density_audit.py --json
 ```
