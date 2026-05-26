@@ -1170,12 +1170,14 @@ fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
                 "should this ever pair with sparse voice output"
             ],
             "latest_human_feedback": {
-                "source": "desktop_visual_review_2026_05_22_sidecar_peek_v4",
-                "outcome": "accept_visual_motion_candidate",
+                "source": "desktop_visual_review_2026_05_26_sidecar_ai_peek_v2",
+                "outcome": "accept_grounded_ai_motion_candidate",
                 "notes": [
                     "sidecar_peek_v2_is_clear_raised_hand_motion_baseline",
                     "sidecar_peek_v4_restores_xiao_shu_identity_cues",
                     "motion_canonical_v4_reads_correctly",
+                    "sidecar_ai_peek_v2_fixes_floating_entry_and_exit_frames",
+                    "grounded_ai_frame_sequence_reads_correct",
                     "voice_linkage_desired",
                     "no_official_pet_package_mutation"
                 ]
@@ -1187,14 +1189,15 @@ fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
                 "add slight outline and body weight only in alert state",
                 "reduce alert-state body brightness without changing other tracks",
                 "keep voice linkage as future sparse voice design, not immediate emit",
-                "add sidecar_peek_v4 as the accepted motion-canonical visual candidate using the sidecar_peek_v2 raised-hand skeleton"
+                "add sidecar_peek_v4 as the accepted motion-canonical visual candidate using the sidecar_peek_v2 raised-hand skeleton",
+                "promote sidecar_ai_peek_v2 as the grounded visual baseline after human review accepted the generated frame sequence"
             ],
             "voice_linkage": {
                 "requested": true,
                 "policy": "future_sparse_voice_after_visual_re_review",
                 "emits_audio_now": false
             },
-            "recommended_next_step": "use sidecar_peek_v4 as the alert_peek visual baseline before any sparse voice or binding approval design"
+            "recommended_next_step": "use sidecar_ai_peek_v2 as the alert_peek visual baseline before any sparse voice or binding approval design"
         }),
         _ => json!({
             "schema": 1,
@@ -2346,7 +2349,7 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "sprite_row": 0,
                 "sprite_frames": 8,
                 "alert_mark": true,
-                "default": true,
+                "default": false,
                 "intent": "motion-canonical redraw that keeps the readable v2 raised-hand geometry while adding Xiao Shu paper-charm identity cues",
                 "sidecar_asset": {
                     "asset_id": "xiao-shu-motion-canonical-peek-v4",
@@ -2431,7 +2434,7 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "sprite_row": 0,
                 "sprite_frames": 8,
                 "alert_mark": false,
-                "default": false,
+                "default": true,
                 "intent": "AI-generated Xiao Shu identity pass with grounded entry and exit frames so the peek reads from the lower edge instead of floating",
                 "sidecar_asset": {
                     "asset_id": "xiao-shu-ai-alert-peek-v2",
@@ -2617,14 +2620,14 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
                 "schema": 1,
                 "surface": "alert_peek_semantic_variant_review",
                 "read_only": true,
-                "default_variant": "sidecar_peek_v4",
-                "preferred_variant": "sidecar_peek_v4",
-                "human_review_status": "visual_motion_candidate_accepted",
+                "default_variant": "sidecar_ai_peek_v2",
+                "preferred_variant": "sidecar_ai_peek_v2",
+                "human_review_status": "grounded_ai_motion_candidate_accepted",
                 "voice_linkage_preview": {
                     "schema": 1,
                     "surface": "alert_peek_voice_linkage_preview",
                     "read_only": true,
-                    "selected_variant": "sidecar_peek_v4",
+                    "selected_variant": "sidecar_ai_peek_v2",
                     "intent": "pair the accepted visual attention cue with a sparse spoken prompt after an explicit gate",
                     "utterance": "小舒发现一点需要你看一下。",
                     "alternatives": [
@@ -2654,7 +2657,7 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
                 "persists_record": false,
                 "can_promote_binding": false,
                 "emits_audio": false,
-                "next_step": "keep sidecar_peek_v4 as the alert_peek visual baseline before choosing any binding or sparse voice cue",
+                "next_step": "use sidecar_ai_peek_v2 as the alert_peek visual baseline before choosing any binding or sparse voice cue",
             })
         } else {
             Value::Null
@@ -4242,7 +4245,7 @@ fn avatar_cortex_voice_policy_rule_from_track(track: &Value) -> Value {
         .and_then(|gate| gate.get("dry_run_route"))
         .cloned()
         .unwrap_or(Value::Null);
-    let real_emit_allowed = has_voice_linkage && default_variant == "sidecar_peek_v4";
+    let real_emit_allowed = has_voice_linkage && default_variant == "sidecar_ai_peek_v2";
     let mode = match token {
         "xiao_shu::idle_breathe::low" => "silent_presence",
         "xiao_shu::soft_bounce::low" => "visual_only_completion",
@@ -7684,7 +7687,7 @@ mod tests {
             alert_peek["semantic_variants"][3]["variant_id"],
             "sidecar_peek_v4"
         );
-        assert_eq!(alert_peek["semantic_variants"][3]["default"], true);
+        assert_eq!(alert_peek["semantic_variants"][3]["default"], false);
         assert_eq!(
             alert_peek["semantic_variants"][3]["sidecar_asset"]["asset_id"],
             "xiao-shu-motion-canonical-peek-v4"
@@ -7709,6 +7712,7 @@ mod tests {
             alert_peek["semantic_variants"][5]["variant_id"],
             "sidecar_ai_peek_v2"
         );
+        assert_eq!(alert_peek["semantic_variants"][5]["default"], true);
         assert_eq!(
             alert_peek["semantic_variants"][5]["sidecar_asset"]["asset_id"],
             "xiao-shu-ai-alert-peek-v2"
@@ -7732,11 +7736,11 @@ mod tests {
         assert_eq!(alert_peek["semantic_variants"][7]["sprite_row"], 8);
         assert_eq!(
             alert_peek["semantic_variant_review"]["default_variant"],
-            "sidecar_peek_v4"
+            "sidecar_ai_peek_v2"
         );
         assert_eq!(
             alert_peek["semantic_variant_review"]["human_review_status"],
-            "visual_motion_candidate_accepted"
+            "grounded_ai_motion_candidate_accepted"
         );
         assert_eq!(
             alert_peek["semantic_variant_review"]["voice_linkage_preview"]["surface"],
@@ -7744,7 +7748,7 @@ mod tests {
         );
         assert_eq!(
             alert_peek["semantic_variant_review"]["voice_linkage_preview"]["selected_variant"],
-            "sidecar_peek_v4"
+            "sidecar_ai_peek_v2"
         );
         assert_eq!(
             alert_peek["semantic_variant_review"]["voice_linkage_preview"]["utterance"],
@@ -8046,17 +8050,17 @@ mod tests {
             std::env::temp_dir().join(format!("agent-bridge-xiao-review-record-{}", now_secs()));
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("review_records.jsonl");
-        let notes = vec!["v4 keeps the raised hand and restores Xiao Shu identity".to_string()];
+        let notes = vec!["v2 fixes the floating entry/exit frames".to_string()];
         let opts = AvatarCortexReviewRecordOptions {
             label: None,
             heartbeat_label: None,
             project: Some("agent-bridge"),
             output: None,
             requested_track: Some("xiao_shu::alert_peek::medium"),
-            requested_variant: Some("sidecar_peek_v4"),
+            requested_variant: Some("sidecar_ai_peek_v2"),
             outcome: Some("approved"),
             reviewer: Some("unit-test"),
-            reason: Some("visual review accepted v4"),
+            reason: Some("visual review accepted grounded v2"),
             notes: &notes,
             confirm: true,
         };
@@ -8074,7 +8078,7 @@ mod tests {
         assert_eq!(payload["codex_pet_package_mutation"], false);
         assert_eq!(payload["can_promote_binding"], false);
         assert_eq!(payload["record"]["outcome"], "approved");
-        assert_eq!(payload["record"]["variant"], "sidecar_peek_v4");
+        assert_eq!(payload["record"]["variant"], "sidecar_ai_peek_v2");
 
         let records = read_jsonl_records(&path).unwrap();
         assert_eq!(records.len(), 1);
@@ -8098,11 +8102,11 @@ mod tests {
             "updated_at": 1,
             "project": "agent-bridge",
             "track": "xiao_shu::alert_peek::medium",
-            "variant": "sidecar_peek_v4",
+            "variant": "sidecar_ai_peek_v2",
             "outcome": "approved",
             "approval_state": "approved",
             "reviewer": "unit-test",
-            "reason": "visual review accepted v4",
+            "reason": "visual review accepted grounded v2",
             "notes": ["looks correct"],
             "cli_only": true,
             "can_promote_binding": false,
@@ -8321,7 +8325,7 @@ mod tests {
         assert_eq!(alert["mode"], "manual_cli_emit_after_attention");
         assert_eq!(alert["manual_cli_emit_allowed"], true);
         assert_eq!(alert["utterance"], "小舒发现一点需要你看一下。");
-        assert_eq!(alert["visual_variant"], "sidecar_peek_v4");
+        assert_eq!(alert["visual_variant"], "sidecar_ai_peek_v2");
         assert_eq!(alert["suggested_voice"], "Flo (中文（中国大陆）)");
         assert_eq!(alert["suggested_rate"], 190);
         assert_eq!(alert["http_emit_route"], Value::Null);
@@ -8361,7 +8365,7 @@ mod tests {
         assert_eq!(request["request_state"], "ready_for_operator_confirmation");
         assert_eq!(request["selected_token"], "xiao_shu::alert_peek::medium");
         assert_eq!(request["line"], "小舒发现一点需要你看一下。");
-        assert_eq!(request["visual_variant"], "sidecar_peek_v4");
+        assert_eq!(request["visual_variant"], "sidecar_ai_peek_v2");
         assert_eq!(request["manual_cli_emit_allowed"], true);
         assert_eq!(request["auto_emit_allowed"], false);
         assert_eq!(request["requires_second_step"], true);
