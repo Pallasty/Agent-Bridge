@@ -12,6 +12,7 @@
 //!   (does not index — surfaces a ranked list for the user to approve).
 //! - `skills search <query>` — semantic search over indexed skills.
 //! - `skills list` — list indexed skills (most-recent first).
+//! - `skills sources` — summarize indexed sources, provenance, lint, and risk.
 //! - `skills show <key>` — print one skill's body and metadata.
 //!
 //! ### Discovery patterns
@@ -618,6 +619,71 @@ pub async fn run_list(limit: usize) -> Result<()> {
     Ok(())
 }
 
+/// Summarize indexed skill sources without touching upstream repos.
+pub async fn run_sources(json: bool, limit: usize) -> Result<()> {
+    let store = open_store().await?;
+    let rows = store
+        .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
+        .await
+        .context("list_memories failed")?;
+    let sources = skill_source_inventory(&rows);
+    let returned = if limit == 0 {
+        sources.len()
+    } else {
+        sources.len().min(limit)
+    };
+
+    if json {
+        let payload = serde_json::json!({
+            "total_skills": rows.len(),
+            "total_sources": sources.len(),
+            "returned": returned,
+            "limit": if limit == 0 { serde_json::Value::Null } else { serde_json::json!(limit) },
+            "sources": sources
+                .iter()
+                .take(returned)
+                .map(SkillSourceSummary::to_json)
+                .collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    if sources.is_empty() {
+        eprintln!("[skills] none indexed yet — try `agent-bridge skills seed`");
+        return Ok(());
+    }
+    println!(
+        "[skills] sources: {} source(s), {} skill(s)",
+        sources.len(),
+        rows.len()
+    );
+    for s in sources.iter().take(returned) {
+        println!(
+            "- {}  skills={} refreshable={} latest_updated_at={}",
+            s.source, s.count, s.refreshable, s.latest_updated_at
+        );
+        println!(
+            "  git: origin={} branch={} commit={}",
+            display_set(&s.git_origins),
+            display_set(&s.git_branches),
+            display_set(&s.git_commits)
+        );
+        println!("  lint: {}", display_counts(&s.lint));
+        println!("  vendor: {}", display_counts(&s.vendor));
+        if !s.risks.is_empty() {
+            println!("  risks: {}", display_counts(&s.risks));
+        }
+    }
+    if returned < sources.len() {
+        println!(
+            "... {} more hidden; re-run with `--limit 0` for all sources",
+            sources.len() - returned
+        );
+    }
+    Ok(())
+}
+
 /// Batch-audit indexed skills by provenance, lint, and operational risk.
 pub async fn run_audit(
     json: bool,
@@ -838,6 +904,78 @@ fn skill_audit_item_json(rec: &MemoryRecord) -> serde_json::Value {
     item
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct SkillSourceSummary {
+    source: String,
+    count: usize,
+    refreshable: bool,
+    latest_updated_at: i64,
+    git_origins: BTreeSet<String>,
+    git_branches: BTreeSet<String>,
+    git_commits: BTreeSet<String>,
+    lint: BTreeMap<String, usize>,
+    vendor: BTreeMap<String, usize>,
+    risks: BTreeMap<String, usize>,
+}
+
+impl SkillSourceSummary {
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "source": self.source,
+            "count": self.count,
+            "refreshable": self.refreshable,
+            "latest_updated_at": self.latest_updated_at,
+            "git": {
+                "origins": set_to_json(&self.git_origins),
+                "branches": set_to_json(&self.git_branches),
+                "commits": set_to_json(&self.git_commits),
+            },
+            "lint": self.lint,
+            "vendor": self.vendor,
+            "risks": self.risks,
+        })
+    }
+}
+
+fn skill_source_inventory(rows: &[MemoryRecord]) -> Vec<SkillSourceSummary> {
+    let mut by_source: BTreeMap<String, SkillSourceSummary> = BTreeMap::new();
+    for r in rows {
+        let Some(source) = tag_value(&r.tags, "src:") else {
+            continue;
+        };
+        let entry = by_source
+            .entry(source.clone())
+            .or_insert_with(|| SkillSourceSummary {
+                source: source.clone(),
+                refreshable: is_remote_src(&source),
+                ..SkillSourceSummary::default()
+            });
+        entry.count += 1;
+        entry.latest_updated_at = entry.latest_updated_at.max(r.updated_at);
+        if let Some(origin) = tag_value(&r.tags, "git_origin:") {
+            entry.git_origins.insert(origin);
+        }
+        if let Some(branch) = tag_value(&r.tags, "git_branch:") {
+            entry.git_branches.insert(branch);
+        }
+        if let Some(commit) = tag_value(&r.tags, "git_commit:") {
+            entry.git_commits.insert(commit);
+        }
+        bump(
+            &mut entry.lint,
+            tag_value(&r.tags, "lint:").unwrap_or_else(|| "?".to_string()),
+        );
+        bump(
+            &mut entry.vendor,
+            tag_value(&r.tags, "vendor:").unwrap_or_else(|| "?".to_string()),
+        );
+        for risk in tag_values(&r.tags, "risk:") {
+            bump(&mut entry.risks, risk);
+        }
+    }
+    by_source.into_values().collect()
+}
+
 fn bump(map: &mut BTreeMap<String, usize>, key: String) {
     *map.entry(key).or_insert(0) += 1;
 }
@@ -849,6 +987,35 @@ fn print_count_map(label: &str, map: &BTreeMap<String, usize>) {
     println!("{label}:");
     for (k, v) in map {
         println!("  {k}: {v}");
+    }
+}
+
+fn set_to_json(values: &BTreeSet<String>) -> serde_json::Value {
+    serde_json::Value::Array(
+        values
+            .iter()
+            .map(|v| serde_json::Value::String(v.clone()))
+            .collect(),
+    )
+}
+
+fn display_set(values: &BTreeSet<String>) -> String {
+    if values.is_empty() {
+        "-".to_string()
+    } else {
+        values.iter().cloned().collect::<Vec<_>>().join(",")
+    }
+}
+
+fn display_counts(counts: &BTreeMap<String, usize>) -> String {
+    if counts.is_empty() {
+        "none".to_string()
+    } else {
+        counts
+            .iter()
+            .map(|(k, v)| format!("{k}:{v}"))
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 
@@ -2257,6 +2424,59 @@ mod tests {
         assert_eq!(summary.lint.get("warn:1"), Some(&1));
         assert_eq!(summary.risks.get("server_start"), Some(&2));
         assert_eq!(summary.risks.get("pip_install"), Some(&1));
+    }
+
+    #[test]
+    fn skill_source_inventory_groups_provenance_lint_and_risk() {
+        let mut a = mk_skill("OpenBMB/MiniCPM", 10);
+        a.tags.extend([
+            "lint:clean".to_string(),
+            "vendor:community".to_string(),
+            "git_origin:https://github.com/OpenBMB/MiniCPM.git".to_string(),
+            "git_branch:minicpm5".to_string(),
+            "git_commit:abc123".to_string(),
+            "risk:model_download".to_string(),
+            "risk:apple_mlx".to_string(),
+        ]);
+        let mut b = mk_skill("OpenBMB/MiniCPM", 20);
+        b.tags.extend([
+            "lint:warn:1".to_string(),
+            "vendor:community".to_string(),
+            "git_origin:https://github.com/OpenBMB/MiniCPM.git".to_string(),
+            "git_branch:minicpm5".to_string(),
+            "git_commit:def456".to_string(),
+            "risk:model_download".to_string(),
+            "risk:server_start".to_string(),
+        ]);
+        let mut local = mk_skill("local-skills", 5);
+        local
+            .tags
+            .extend(["lint:clean".to_string(), "vendor:community".to_string()]);
+
+        let inventory = skill_source_inventory(&[a, b, local]);
+        assert_eq!(inventory.len(), 2);
+
+        let local_summary = inventory
+            .iter()
+            .find(|s| s.source == "local-skills")
+            .unwrap();
+        assert_eq!(local_summary.count, 1);
+        assert!(!local_summary.refreshable);
+
+        let remote = inventory
+            .iter()
+            .find(|s| s.source == "OpenBMB/MiniCPM")
+            .unwrap();
+        assert_eq!(remote.count, 2);
+        assert!(remote.refreshable);
+        assert_eq!(remote.latest_updated_at, 20);
+        assert_eq!(remote.git_branches.len(), 1);
+        assert!(remote.git_branches.contains("minicpm5"));
+        assert_eq!(remote.git_commits.len(), 2);
+        assert_eq!(remote.lint.get("clean"), Some(&1));
+        assert_eq!(remote.lint.get("warn:1"), Some(&1));
+        assert_eq!(remote.risks.get("model_download"), Some(&2));
+        assert_eq!(remote.risks.get("server_start"), Some(&1));
     }
 
     #[test]

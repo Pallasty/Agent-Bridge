@@ -151,6 +151,14 @@ The audit command supports composable filters:
 - `--vendor <vendor-class>`
 - `--limit <n>` (`0` means all matched records)
 
+`skills sources` is the source-inventory surface. It is read-only and does not
+contact upstream repos. It groups indexed `kind=skill` records by `src:`,
+showing skill count, refreshability, latest indexed timestamp, git origin,
+branch/commit provenance, lint distribution, vendor distribution, and
+operational risk counts. `skills sources --json` is the automation-facing form
+for deciding which external repos need refresh or review before running
+`skills refresh`, `skills audit`, or any install dry run.
+
 `skills install <key> --dry-run` is the install preview gate. It prints the
 resolved source, indexed branch/commit when present, original path, destination
 name, lint tag, operational risk tags, and any approval gates without cloning,
@@ -282,6 +290,8 @@ Status: provenance tags, operational-risk tags, and branch-aware tree URL
 source resolution are implemented. `skills show --json` is also implemented as
 the single-record automation-facing review surface. `skills audit --json` is
 implemented as the batch review surface for source/lint/vendor/risk filtering.
+`skills sources` is implemented as the read-only inventory surface for indexed
+external Skill sources.
 
 Phase 3: optional MLX worker spike
 

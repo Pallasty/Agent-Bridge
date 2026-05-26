@@ -2327,6 +2327,15 @@ enum SkillsOp {
         #[arg(long, default_value_t = 50)]
         limit: usize,
     },
+    /// Summarize indexed skill sources by repo, branch, lint, and risk.
+    Sources {
+        /// Emit machine-readable JSON for automation.
+        #[arg(long)]
+        json: bool,
+        /// Maximum sources to print. 0 = all.
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
     /// Batch-audit indexed skills by provenance, lint, and operational risk.
     Audit {
         /// Emit machine-readable JSON for automation.
@@ -2606,6 +2615,7 @@ async fn main() -> Result<()> {
             SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::List { limit } => skills::run_list(*limit).await,
+            SkillsOp::Sources { json, limit } => skills::run_sources(*json, *limit).await,
             SkillsOp::Audit {
                 json,
                 src,
