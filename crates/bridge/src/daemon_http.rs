@@ -5150,6 +5150,22 @@ fn avatar_surface_xiao_shu_action_console_html(
         "/avatar-surface/panel?project={project}&include_stale=true&limit=10",
         project = url_query_component(project_raw)
     ));
+    let pending_href = html_escape(&format!(
+        "/avatar-surface/xiao-shu-action-console?project={project}",
+        project = url_query_component(project_raw)
+    ));
+    let all_href = html_escape(&format!(
+        "/avatar-surface/xiao-shu-action-console?project={project}&all_states=true&limit=10",
+        project = url_query_component(project_raw)
+    ));
+    let emitted_href = html_escape(&format!(
+        "/avatar-surface/xiao-shu-action-console?project={project}&state=emitted&limit=10",
+        project = url_query_component(project_raw)
+    ));
+    let dismissed_href = html_escape(&format!(
+        "/avatar-surface/xiao-shu-action-console?project={project}&state=dismissed&limit=10",
+        project = url_query_component(project_raw)
+    ));
 
     let mut cards = String::new();
     for record in records {
@@ -5237,6 +5253,9 @@ fn avatar_surface_xiao_shu_action_console_html(
                 }),
             "false",
         );
+        let confirm = avatar_surface_xiao_shu_action_console_command_html("dry run", &confirm_raw);
+        let emit = avatar_surface_xiao_shu_action_console_command_html("emit", &emit_raw);
+        let dismiss = avatar_surface_xiao_shu_action_console_command_html("dismiss", &dismiss_raw);
         cards.push_str(&format!(
             r#"<section class="card">
         <div class="card-title"><span class="pill">request</span><strong>{request_id}</strong><span>state={state}</span></div>
@@ -5247,9 +5266,9 @@ fn avatar_surface_xiao_shu_action_console_html(
           <div><dt>message</dt><dd>{message} context_only={context_only} can_replace_line={can_replace}</dd></div>
         </dl>
         <div class="commands">
-          <div><dt>dry run</dt><dd><code>{confirm}</code></dd></div>
-          <div><dt>emit</dt><dd><code>{emit}</code></dd></div>
-          <div><dt>dismiss</dt><dd><code>{dismiss}</code></dd></div>
+          {confirm}
+          {emit}
+          {dismiss}
         </div>
         <div class="links"><a href="{json_href}">json</a><a href="{queue_href}">queue</a><a href="{panel_href}">panel</a></div>
       </section>"#,
@@ -5263,9 +5282,9 @@ fn avatar_surface_xiao_shu_action_console_html(
             message = message,
             context_only = context_only,
             can_replace = can_replace,
-            confirm = html_escape(&confirm_raw),
-            emit = html_escape(&emit_raw),
-            dismiss = html_escape(&dismiss_raw),
+            confirm = confirm,
+            emit = emit,
+            dismiss = dismiss,
             json_href = json_href,
             queue_href = queue_href,
             panel_href = panel_href,
@@ -5294,7 +5313,12 @@ fn avatar_surface_xiao_shu_action_console_html(
     .card {{ margin-top:18px; padding:14px; background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--accent); }}
     .card-title {{ display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; }}
     .pill {{ display:inline-block; padding:2px 7px; border:1px solid var(--accent); color:var(--accent); border-radius:999px; font-size:12px; font-weight:700; }}
+    .filters {{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }}
+    .filters a,.copy-command {{ border:1px solid var(--line); background:var(--surface); color:var(--accent); border-radius:6px; padding:5px 8px; font:inherit; font-weight:700; text-decoration:none; cursor:pointer; }}
+    .policy {{ margin-top:10px; color:var(--muted); }}
     dl,.commands {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:12px 0 0; }}
+    .commands {{ grid-template-columns:1fr; }}
+    .command-head {{ display:flex; align-items:center; justify-content:space-between; gap:8px; }}
     dt {{ color:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; }}
     dd {{ margin:3px 0 0; overflow-wrap:anywhere; }}
     code {{ display:block; padding:10px; background:var(--code); border:1px solid var(--line); white-space:pre-wrap; overflow-wrap:anywhere; }}
@@ -5310,11 +5334,33 @@ fn avatar_surface_xiao_shu_action_console_html(
         <h1>Xiao Shu Action Console</h1>
         <div class="meta">project={project} returned={returned} matching={matching} current={current} state={state_filter}</div>
         <div class="meta">queue={path}</div>
+        <nav class="filters" aria-label="queue filters"><a href="{pending_href}">pending</a><a href="{all_href}">all</a><a href="{emitted_href}">emitted</a><a href="{dismissed_href}">dismissed</a></nav>
+        <div class="policy">read-only console; server actions disabled; real output stays behind local CLI confirmation</div>
       </div>
       <div class="meta"><a href="{panel_href}">panel</a> <a href="{queue_href}">queue json</a></div>
     </header>
     {cards}
   </main>
+  <script>
+    (() => {{
+      const copyText = async (button) => {{
+        const text = button.getAttribute("data-copy") || "";
+        if (!text) return;
+        try {{
+          await navigator.clipboard.writeText(text);
+          const previous = button.textContent;
+          button.textContent = "copied";
+          window.setTimeout(() => {{ button.textContent = previous; }}, 1200);
+        }} catch (_err) {{
+          button.textContent = "select";
+        }}
+      }};
+      document.addEventListener("click", (event) => {{
+        const button = event.target.closest("[data-copy]");
+        if (button) copyText(button);
+      }});
+    }})();
+  </script>
 </body>
 </html>"#,
         project = html_escape(project_raw),
@@ -5325,7 +5371,20 @@ fn avatar_surface_xiao_shu_action_console_html(
         path = path,
         panel_href = panel_href,
         queue_href = queue_href,
+        pending_href = pending_href,
+        all_href = all_href,
+        emitted_href = emitted_href,
+        dismissed_href = dismissed_href,
         cards = cards,
+    )
+}
+
+fn avatar_surface_xiao_shu_action_console_command_html(label: &str, command: &str) -> String {
+    let command = html_escape(command);
+    format!(
+        r#"<div class="command-row"><div class="command-head"><dt>{label}</dt><button class="copy-command" type="button" data-copy="{command}">copy</button></div><dd><code>{command}</code></dd></div>"#,
+        label = html_escape(label),
+        command = command
     )
 }
 
@@ -7540,6 +7599,11 @@ mod tests {
         assert!(html.contains("cue</dt><dd>soft_attention_needed"));
         assert!(html.contains("小舒发现一点需要你看一下。"));
         assert!(html.contains("context_only=true can_replace_line=false"));
+        assert!(html.contains("read-only console; server actions disabled"));
+        assert!(html.contains("/avatar-surface/xiao-shu-action-console?project=agent-bridge&amp;all_states=true&amp;limit=10"));
+        assert!(html.contains("/avatar-surface/xiao-shu-action-console?project=agent-bridge&amp;state=emitted&amp;limit=10"));
+        assert!(html.contains("data-copy=\"agent-bridge avatar xiao-shu-action-request-action --project agent-bridge --request-id &quot;xsr-test&quot; --reason &quot;unit-test&quot; --confirm\""));
+        assert!(html.contains("navigator.clipboard.writeText"));
         assert!(html.contains("dry run"));
         assert!(html.contains("--confirm"));
         assert!(html.contains("--confirm --emit"));
