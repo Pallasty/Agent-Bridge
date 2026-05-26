@@ -22,6 +22,7 @@ pub mod github_api;
 pub mod gitlab_api;
 pub mod hub;
 pub mod ide;
+pub mod instinct;
 pub mod llm_client;
 pub mod locks;
 pub mod mcp_tools;

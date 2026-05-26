@@ -19,6 +19,7 @@ use std::os::unix::fs::MetadataExt;
 use anyhow::Result;
 use serde_json::json;
 
+use ab_bridge::instinct;
 use ab_bridge::mcp_tools::exposed_tool_count_for;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -584,6 +585,40 @@ fn check_mcp_tool_surface() -> Check {
     )
 }
 
+fn check_instinct_observer() -> Check {
+    let status = instinct::observer_status();
+    let detail = format!(
+        "enabled={}, installed={}, executable={}, records={}, sessions={}, verdict={}, recommendation={}, log={}",
+        status.enabled,
+        status.installed,
+        status.executable,
+        status.total_records,
+        status.sessions,
+        status.verdict,
+        status.recommendation,
+        status.log_path
+    );
+
+    if status.installed && !status.executable {
+        return Check::warn(
+            "instinct_observer",
+            detail,
+            format!("chmod +x {}", status.installed_path),
+        );
+    }
+    if status.log_bytes >= status.max_bytes {
+        return Check::warn(
+            "instinct_observer",
+            detail,
+            format!(
+                "rotate or remove the observer log after preserving any needed evidence: {}",
+                status.log_path
+            ),
+        );
+    }
+    Check::ok("instinct_observer", detail)
+}
+
 pub async fn run_doctor(json: bool, markdown: bool) -> Result<()> {
     let dir = install_dir();
     let checks = vec![
@@ -593,6 +628,7 @@ pub async fn run_doctor(json: bool, markdown: bool) -> Result<()> {
         check_daemon_runtime(),
         check_mcp_servers(&dir),
         check_mcp_tool_surface(),
+        check_instinct_observer(),
     ];
 
     let fails = checks.iter().filter(|c| c.status == Status::Fail).count();

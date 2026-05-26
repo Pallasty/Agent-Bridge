@@ -64,3 +64,8 @@ ECC 的 `ECC_HOOK_PROFILE=minimal|standard|strict` 是上述 toggle 的**便利�
 # 跑只读审计快照：python3 scripts/instinct_density_audit.py
 # JSON 输出：python3 scripts/instinct_density_audit.py --json
 ```
+
+`agent-bridge doctor` and the MCP `capabilities` tool also expose the observer
+as read-only operational state. Missing or empty logs are not warnings: the
+probe is optional, and `NO_SIGNAL` / `INSUFFICIENT_SESSIONS` should block miner
+work rather than block normal Agent-Bridge startup.

@@ -14665,7 +14665,8 @@ impl McpTool for CapabilitiesTool {
             },
             "hooks": {
                 "configured": configured_hooks,
-                "frontend": frontend
+                "frontend": frontend,
+                "instinct_observer": crate::instinct::observer_status_json()
             },
             "security": {
                 "shell_exec": sec.allow_shell_exec,
