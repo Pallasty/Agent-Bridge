@@ -30,8 +30,8 @@
 //! the warning to the user is the point. Manual review still recommended.
 
 use ab_store::{MemoryListSort, MemoryRecord, SqliteStore, StateStore};
-use anyhow::{anyhow, bail, Context, Result};
-use std::collections::BTreeMap;
+use anyhow::{Context, Result, anyhow, bail};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
@@ -60,6 +60,8 @@ struct SkillFile {
     rel_path: PathBuf,
     /// Raw file body.
     body: String,
+    /// Source/provenance tags derived from the checkout as a whole.
+    source_tags: Vec<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -91,10 +93,10 @@ const KNOWN_VENDORS: &[&str] = &[
     "openai",
     "microsoft",
     "github",
-    "block",          // Goose
+    "block", // Goose
     "OpenHands",
     "letta-ai",
-    "sst",            // OpenCode
+    "sst", // OpenCode
     "RooCodeInc",
     "mistralai",
     "bytedance",
@@ -134,7 +136,11 @@ struct LintFinding {
 pub async fn run_index(source: &str, verbose: bool) -> Result<usize> {
     let (owned_clone, repo_dir, src_id) = resolve_source(source)?;
     if verbose {
-        eprintln!("[skills] indexing {} (path: {})", src_id, repo_dir.display());
+        eprintln!(
+            "[skills] indexing {} (path: {})",
+            src_id,
+            repo_dir.display()
+        );
     }
     let files = walk_skill_files(&repo_dir, &src_id)?;
     if files.is_empty() {
@@ -166,11 +172,7 @@ pub async fn run_index(source: &str, verbose: bool) -> Result<usize> {
                     .with_context(|| format!("memory_save failed for {}", rec.key))?;
                 saved += 1;
             }
-            Err(e) => eprintln!(
-                "[skills]   skipped {}: {}",
-                sf.rel_path.display(),
-                e
-            ),
+            Err(e) => eprintln!("[skills]   skipped {}: {}", sf.rel_path.display(), e),
         }
     }
     eprintln!("[skills] {}: indexed {} skills", src_id, saved);
@@ -492,8 +494,7 @@ fn fetch_topic(topic: &str) -> Result<Vec<DiscoverHit>> {
 }
 
 fn parse_search_response(body: &[u8]) -> Result<Vec<DiscoverHit>> {
-    let v: serde_json::Value =
-        serde_json::from_slice(body).context("parse GitHub search JSON")?;
+    let v: serde_json::Value = serde_json::from_slice(body).context("parse GitHub search JSON")?;
     let items = v
         .get("items")
         .and_then(|x| x.as_array())
@@ -593,8 +594,8 @@ pub async fn run_install(key: &str, assume_yes: bool) -> Result<()> {
         .await
         .context("memory_get failed")?
         .ok_or_else(|| anyhow!("no skill with key {:?}", key))?;
-    let src = tag_value(&rec.tags, "src:")
-        .ok_or_else(|| anyhow!("record {} has no src: tag", key))?;
+    let src =
+        tag_value(&rec.tags, "src:").ok_or_else(|| anyhow!("record {} has no src: tag", key))?;
     let rel = tag_value(&rec.tags, "path:").ok_or_else(|| {
         anyhow!(
             "record {} has no path: tag (re-run `skills index` / `skills seed` to backfill)",
@@ -606,27 +607,16 @@ pub async fn run_install(key: &str, assume_yes: bool) -> Result<()> {
     let dest_root = claude_skills_dir()?;
     let dest = dest_root.join(&dest_name);
 
-    eprintln!(
-        "[install] {} → {}",
-        key,
-        dest.display(),
-    );
+    eprintln!("[install] {} → {}", key, dest.display(),);
     eprintln!("[install]   source: {} : {}", src_to_clone_url(&src), rel);
     eprintln!("[install]   lint:   {}", lint_tag);
-    if (lint_tag.starts_with("lint:warn:") || lint_tag.starts_with("lint:danger:"))
-        && !assume_yes
-    {
-        eprintln!(
-            "[install]   skill flagged by lint — review SKILL.md before approving."
-        );
+    if (lint_tag.starts_with("lint:warn:") || lint_tag.starts_with("lint:danger:")) && !assume_yes {
+        eprintln!("[install]   skill flagged by lint — review SKILL.md before approving.");
         eprintln!("[install]   re-run with `--yes` to install anyway.");
         bail!("aborted: lint flags require explicit --yes");
     }
     if dest.exists() && !assume_yes {
-        eprintln!(
-            "[install]   destination already exists: {}",
-            dest.display()
-        );
+        eprintln!("[install]   destination already exists: {}", dest.display());
         eprintln!("[install]   re-run with `--yes` to overwrite.");
         bail!("aborted: destination exists");
     }
@@ -642,9 +632,8 @@ pub async fn run_install(key: &str, assume_yes: bool) -> Result<()> {
             rel
         );
     }
-    std::fs::create_dir_all(&dest_root).with_context(|| {
-        format!("create dest root {}", dest_root.display())
-    })?;
+    std::fs::create_dir_all(&dest_root)
+        .with_context(|| format!("create dest root {}", dest_root.display()))?;
     if dest.exists() {
         std::fs::remove_dir_all(&dest)
             .or_else(|_| std::fs::remove_file(&dest))
@@ -663,15 +652,13 @@ pub async fn run_install(key: &str, assume_yes: bool) -> Result<()> {
         copy_dir_recursive(parent, &dest)?;
     } else {
         // Single-file skill — drop just the .md.
-        std::fs::create_dir_all(&dest).with_context(|| {
-            format!("create dest dir {}", dest.display())
-        })?;
+        std::fs::create_dir_all(&dest)
+            .with_context(|| format!("create dest dir {}", dest.display()))?;
         let leaf = source_path
             .file_name()
             .ok_or_else(|| anyhow!("source has no filename"))?;
-        std::fs::copy(&source_path, dest.join(leaf)).with_context(|| {
-            format!("copy {} → {}", source_path.display(), dest.display())
-        })?;
+        std::fs::copy(&source_path, dest.join(leaf))
+            .with_context(|| format!("copy {} → {}", source_path.display(), dest.display()))?;
     }
     let _ = std::fs::remove_dir_all(&clone_dir);
     eprintln!("[install] done");
@@ -690,7 +677,10 @@ fn derive_flat_name(key: &str, rel_path: &str) -> String {
     let path = std::path::PathBuf::from(rel_path);
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
         if name.eq_ignore_ascii_case("SKILL.md") {
-            if let Some(parent) = path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())
+            if let Some(parent) = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
             {
                 return parent.to_string();
             }
@@ -707,11 +697,8 @@ fn claude_skills_dir() -> Result<PathBuf> {
 }
 
 fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
-    std::fs::create_dir_all(dest)
-        .with_context(|| format!("create dir {}", dest.display()))?;
-    for entry in std::fs::read_dir(src)
-        .with_context(|| format!("read dir {}", src.display()))?
-    {
+    std::fs::create_dir_all(dest).with_context(|| format!("create dir {}", dest.display()))?;
+    for entry in std::fs::read_dir(src).with_context(|| format!("read dir {}", src.display()))? {
         let entry = entry?;
         let from = entry.path();
         let to = dest.join(entry.file_name());
@@ -841,6 +828,7 @@ fn clone_shallow(url: &str, src_id: &str) -> Result<PathBuf> {
 
 fn walk_skill_files(repo: &Path, src_id: &str) -> Result<Vec<SkillFile>> {
     let mut out = Vec::new();
+    let source_tags = source_metadata_tags(repo);
     let walker = walkdir::WalkDir::new(repo)
         .max_depth(8)
         .follow_links(false)
@@ -878,8 +866,8 @@ fn walk_skill_files(repo: &Path, src_id: &str) -> Result<Vec<SkillFile>> {
         if !canonical && !claude_skills_top && !skills_top {
             continue;
         }
-        let body = std::fs::read_to_string(path)
-            .with_context(|| format!("read {}", path.display()))?;
+        let body =
+            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let skill_name = if canonical {
             // Use the FULL parent path (relative to repo root) so nested
             // SKILL.md files at e.g. `claude-api/REFERENCE/SKILL.md` get
@@ -901,9 +889,51 @@ fn walk_skill_files(repo: &Path, src_id: &str) -> Result<Vec<SkillFile>> {
             name: skill_name,
             rel_path: rel,
             body,
+            source_tags: source_tags.clone(),
         });
     }
     Ok(out)
+}
+
+fn source_metadata_tags(repo: &Path) -> Vec<String> {
+    let mut tags = Vec::new();
+    let Some(commit) = git_output(repo, &["rev-parse", "HEAD"]) else {
+        return tags;
+    };
+    tags.push(format!("git_commit:{}", commit));
+
+    if let Some(branch) = git_output(repo, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+        if branch != "HEAD" {
+            tags.push(format!("git_branch:{}", tag_safe_value(&branch)));
+        }
+    }
+    if let Some(origin) = git_output(repo, &["config", "--get", "remote.origin.url"]) {
+        tags.push(format!("git_origin:{}", tag_safe_value(&origin)));
+        if let Ok(src) = parse_src_id(&origin) {
+            tags.push(format!("git_src:{}", src));
+        }
+    }
+    tags
+}
+
+fn git_output(repo: &Path, args: &[&str]) -> Option<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+fn tag_safe_value(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_whitespace() { '_' } else { c })
+        .collect()
 }
 
 /// Strip a leading boilerplate prefix (`.agents/skills/` per agentskills.io
@@ -1062,6 +1092,83 @@ fn lint_summary_tag(findings: &[LintFinding]) -> String {
     }
 }
 
+fn operational_risk_tags(name: &str, description: &str, body: &str) -> Vec<String> {
+    let name_lower = name.to_ascii_lowercase();
+    let desc_lower = description.to_ascii_lowercase();
+    let text = format!("{}\n{}", description, body);
+    let lower = text.to_ascii_lowercase();
+    let mut tags = BTreeSet::new();
+
+    if lower.contains("pip install")
+        || lower.contains("uv pip install")
+        || lower.contains("conda install")
+        || lower.contains("brew install")
+        || lower.contains("npm install")
+        || lower.contains("cargo install")
+    {
+        tags.insert("risk:pip_install");
+    }
+    if lower.contains("huggingface-cli download")
+        || lower.contains("modelscope download")
+        || lower.contains("ollama pull")
+        || lower.contains("git clone")
+        || lower.contains("curl ")
+        || lower.contains("wget ")
+    {
+        tags.insert("risk:network_fetch");
+    }
+    if lower.contains("huggingface-cli download")
+        || lower.contains("modelscope download")
+        || lower.contains("ollama pull")
+        || lower.contains("from ./")
+        || lower.contains("--model ")
+        || lower.contains("--model-path")
+    {
+        tags.insert("risk:model_download");
+    }
+    if lower.contains("vllm serve")
+        || lower.contains("launch_server")
+        || lower.contains("mlx_lm.server")
+        || lower.contains("llama-server")
+        || lower.contains("ollama serve")
+        || lower.contains("server start")
+    {
+        tags.insert("risk:server_start");
+    }
+    if lower.contains("trainer.train")
+        || lower.contains("finetune")
+        || lower.contains("fine-tuning")
+        || lower.contains("lora")
+    {
+        tags.insert("risk:finetune_write");
+    }
+    if lower.contains("trainer.train")
+        || lower.contains("checkpoint")
+        || lower.contains("output_dir")
+        || lower.contains("--output")
+        || lower.contains("--save")
+        || lower.contains("--mlx-path")
+        || lower.contains("write to")
+    {
+        tags.insert("risk:checkpoint_write");
+    }
+    if name_lower.contains("mlx")
+        || desc_lower.contains("mlx framework")
+        || (desc_lower.contains("apple silicon") && desc_lower.contains("mlx"))
+    {
+        tags.insert("risk:apple_mlx");
+    }
+    if desc_lower.contains("nvidia gpu")
+        || lower.contains("cuda_visible_devices")
+        || lower.contains("gpu-memory-utilization")
+        || lower.contains("vram")
+    {
+        tags.insert("risk:gpu_required");
+    }
+
+    tags.into_iter().map(str::to_string).collect()
+}
+
 // ── record building ───────────────────────────────────────────────────────
 
 fn build_record(sf: &SkillFile) -> Result<MemoryRecord> {
@@ -1099,6 +1206,8 @@ fn build_record(sf: &SkillFile) -> Result<MemoryRecord> {
         // KNOWN_VENDORS const above for what counts as vendor-curated.
         format!("vendor:{}", classify_vendor(&sf.src)),
     ];
+    tags.extend(sf.source_tags.iter().cloned());
+    tags.extend(operational_risk_tags(&sf.name, &description, body));
     // Preserve agentskills.io spec optional fields as tags. They're not
     // used for embedding signal (which is description + body), but they
     // matter for compliance, redistribution, and environment-aware
@@ -1144,7 +1253,10 @@ fn build_record(sf: &SkillFile) -> Result<MemoryRecord> {
 // ── small helpers ─────────────────────────────────────────────────────────
 
 fn first_line(s: &str) -> &str {
-    s.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim()
+    s.lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim()
 }
 
 fn unix_now() -> i64 {
@@ -1371,10 +1483,7 @@ mod tests {
             "pdf"
         );
         assert_eq!(
-            derive_flat_name(
-                "skill:alirezarezvani/claude-skills/x",
-                "skills/x/SKILL.md"
-            ),
+            derive_flat_name("skill:alirezarezvani/claude-skills/x", "skills/x/SKILL.md"),
             "x"
         );
         assert_eq!(
@@ -1382,10 +1491,7 @@ mod tests {
             "single"
         );
         // Fallback when path doesn't fit the patterns.
-        assert_eq!(
-            derive_flat_name("skill:foo/bar/baz", "weird/path"),
-            "baz"
-        );
+        assert_eq!(derive_flat_name("skill:foo/bar/baz", "weird/path"), "baz");
     }
 
     #[test]
@@ -1396,7 +1502,10 @@ mod tests {
             "path:pdf/SKILL.md".to_string(),
             "lint:clean".to_string(),
         ];
-        assert_eq!(tag_value(&tags, "src:"), Some("anthropics/skills".to_string()));
+        assert_eq!(
+            tag_value(&tags, "src:"),
+            Some("anthropics/skills".to_string())
+        );
         assert_eq!(tag_value(&tags, "path:"), Some("pdf/SKILL.md".to_string()));
         assert_eq!(tag_value(&tags, "missing:"), None);
     }
@@ -1434,7 +1543,10 @@ mod tests {
     fn lint_flags_dangerous_rm() {
         let body = "rm -rf / # don't actually do this";
         let f = lint_body(body);
-        assert!(f.iter().any(|x| x.rule == "dangerous-rm" && x.sev == LintSev::Danger));
+        assert!(
+            f.iter()
+                .any(|x| x.rule == "dangerous-rm" && x.sev == LintSev::Danger)
+        );
     }
 
     #[test]
@@ -1488,10 +1600,7 @@ mod tests {
 
     #[test]
     fn classify_vendor_unknown_is_community() {
-        assert_eq!(
-            classify_vendor("alirezarezvani/claude-skills"),
-            "community"
-        );
+        assert_eq!(classify_vendor("alirezarezvani/claude-skills"), "community");
         assert_eq!(classify_vendor("Jeffallan/claude-skills"), "community");
         assert_eq!(classify_vendor("random-user/random-repo"), "community");
         // Single-segment src (local dir test) — falls back to community.
@@ -1511,11 +1620,17 @@ mod tests {
                 ---\n\
                 # Body\n"
                 .to_string(),
+            source_tags: vec![
+                "git_src:warpdotdev/oz-skills".to_string(),
+                "git_commit:abc123".to_string(),
+            ],
         };
         let rec = build_record(&sf).expect("record");
         let has = |needle: &str| rec.tags.iter().any(|t| t == needle);
         assert!(has("skill"));
         assert!(has("src:warpdotdev/oz-skills"));
+        assert!(has("git_src:warpdotdev/oz-skills"));
+        assert!(has("git_commit:abc123"));
         assert!(has("vendor:vendor-curated"), "tags={:?}", rec.tags);
         assert!(
             has("license:Complete terms in LICENSE.txt"),
@@ -1532,6 +1647,7 @@ mod tests {
             name: "marketing".to_string(),
             rel_path: PathBuf::from("skills/marketing/SKILL.md"),
             body: "---\nname: marketing\ndescription: d\n---\nbody".to_string(),
+            source_tags: Vec::new(),
         };
         let rec = build_record(&sf).expect("record");
         assert!(
@@ -1541,4 +1657,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn build_record_tags_operational_risk() {
+        let sf = SkillFile {
+            src: "OpenBMB/MiniCPM".to_string(),
+            name: "minicpm5-deploy-mlx".to_string(),
+            rel_path: PathBuf::from("skills/minicpm5-deploy-mlx/SKILL.md"),
+            body: "---\n\
+                name: minicpm5-deploy-mlx\n\
+                description: Run MiniCPM5 on Apple Silicon with MLX.\n\
+                ---\n\
+                pip install \"mlx-lm>=0.31\"\n\
+                mlx_lm.server --model openbmb/MiniCPM5-1B-MLX --port 8000\n"
+                .to_string(),
+            source_tags: Vec::new(),
+        };
+        let rec = build_record(&sf).expect("record");
+        let has = |needle: &str| rec.tags.iter().any(|t| t == needle);
+        assert!(has("risk:pip_install"), "tags={:?}", rec.tags);
+        assert!(has("risk:server_start"), "tags={:?}", rec.tags);
+        assert!(has("risk:model_download"), "tags={:?}", rec.tags);
+        assert!(has("risk:apple_mlx"), "tags={:?}", rec.tags);
+    }
 }
