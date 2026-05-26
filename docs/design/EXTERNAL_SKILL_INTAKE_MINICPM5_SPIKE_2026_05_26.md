@@ -111,6 +111,19 @@ It also adds operational risk tags in addition to the existing shell lint:
 - `risk:apple_mlx`
 - `risk:gpu_required`
 
+Follow-up hardening also teaches `skills index` to resolve branch tree URLs:
+
+- `https://github.com/OpenBMB/MiniCPM/tree/minicpm5`
+  clones `https://github.com/OpenBMB/MiniCPM.git` with
+  `--branch minicpm5 --single-branch`.
+- `https://gitlab.com/<owner>/<repo>/-/tree/<ref>` follows the same pattern
+  for GitLab.
+- Plain GitHub/GitLab URLs and SSH clone URLs continue to work.
+
+The supported target is a repository branch/ref URL. Subdirectory tree URLs
+whose branch name and path cannot be disambiguated from the URL alone remain
+out of scope for v0.
+
 Re-indexed MiniCPM5 examples:
 
 - `minicpm5-deploy-mlx`: `lint:clean`, `git_branch:minicpm5`,
@@ -219,9 +232,9 @@ Phase 2: index hardening if needed
 - Add operational risk tags beyond shell-lint warnings.
 - Add `skills audit` or `skills show --json` only if manual review is clumsy.
 
-Status: provenance and operational-risk tags implemented. `skills show --json`
-remains a possible future UX improvement, but is not required for the first
-MiniCPM5 intake.
+Status: provenance tags, operational-risk tags, and branch-aware tree URL
+source resolution are implemented. `skills show --json` remains a possible
+future UX improvement, but is not required for the first MiniCPM5 intake.
 
 Phase 3: optional MLX worker spike
 
@@ -247,6 +260,6 @@ Stop or narrow the work if:
 
 ## Immediate Next Step
 
-Run a local branch checkout scan/index of OpenBMB/MiniCPM `minicpm5`, inspect
-the resulting skill records, and post the Agent-Bridge scoped plan to forum
-thread #40.
+Run `agent-bridge skills index https://github.com/OpenBMB/MiniCPM/tree/minicpm5`
+directly, verify the resulting skill records match the local-checkout intake,
+and keep MiniCPM5 skill execution/install gated behind explicit human approval.

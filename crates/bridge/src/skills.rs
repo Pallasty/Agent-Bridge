@@ -30,7 +30,7 @@
 //! the warning to the user is the point. Manual review still recommended.
 
 use ab_store::{MemoryListSort, MemoryRecord, SqliteStore, StateStore};
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -623,7 +623,7 @@ pub async fn run_install(key: &str, assume_yes: bool) -> Result<()> {
 
     // Clone, copy, clean up.
     let url = src_to_clone_url(&src);
-    let clone_dir = clone_shallow(&url, &src.replace('/', "_"))?;
+    let clone_dir = clone_shallow(&url, &src.replace('/', "_"), None)?;
     let source_path = clone_dir.join(&rel);
     if !source_path.exists() {
         let _ = std::fs::remove_dir_all(&clone_dir);
@@ -734,9 +734,9 @@ pub async fn run_show(key: &str) -> Result<()> {
 fn resolve_source(source: &str) -> Result<(bool, PathBuf, String)> {
     if source.starts_with("http://") || source.starts_with("https://") || source.starts_with("git@")
     {
-        let src_id = parse_src_id(source)?;
-        let dir = clone_shallow(source, &src_id)?;
-        Ok((true, dir, src_id))
+        let spec = parse_remote_source(source)?;
+        let dir = clone_shallow(&spec.clone_url, &spec.src_id, spec.checkout_ref.as_deref())?;
+        Ok((true, dir, spec.src_id))
     } else {
         let p = PathBuf::from(source);
         if !p.exists() {
@@ -749,6 +749,48 @@ fn resolve_source(source: &str) -> Result<(bool, PathBuf, String)> {
             .unwrap_or_else(|| "unknown".to_string());
         Ok((false, canon, src_id))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RemoteSourceSpec {
+    clone_url: String,
+    src_id: String,
+    checkout_ref: Option<String>,
+}
+
+fn parse_remote_source(source: &str) -> Result<RemoteSourceSpec> {
+    if source.starts_with("git@") {
+        let src_id = parse_src_id(source)?;
+        return Ok(RemoteSourceSpec {
+            clone_url: source.to_string(),
+            src_id,
+            checkout_ref: None,
+        });
+    }
+
+    let stripped = source.trim_end_matches('/').trim_end_matches(".git");
+
+    if let Some((_, after)) = stripped.rsplit_once("gitlab.com") {
+        let (owner, repo, rest) = parse_owner_repo_rest(after, source)?;
+        let checkout_ref = parse_tree_ref(&rest, true);
+        return Ok(RemoteSourceSpec {
+            clone_url: format!("https://gitlab.com/{}/{}.git", owner, repo),
+            src_id: format!("gitlab.com/{}/{}", owner, repo),
+            checkout_ref,
+        });
+    }
+
+    if let Some((_, after)) = stripped.rsplit_once("github.com") {
+        let (owner, repo, rest) = parse_owner_repo_rest(after, source)?;
+        let checkout_ref = parse_tree_ref(&rest, false);
+        return Ok(RemoteSourceSpec {
+            clone_url: format!("https://github.com/{}/{}.git", owner, repo),
+            src_id: format!("{}/{}", owner, repo),
+            checkout_ref,
+        });
+    }
+
+    bail!("not a github/gitlab URL: {}", source)
 }
 
 /// Parse a clone URL into the canonical `src_id` we store in `src:` tags.
@@ -788,6 +830,39 @@ fn parse_owner_repo<'a>(after_host: &'a str, original: &str) -> Result<(&'a str,
     Ok((owner, repo))
 }
 
+fn parse_owner_repo_rest<'a>(
+    after_host: &'a str,
+    original: &str,
+) -> Result<(&'a str, &'a str, Vec<&'a str>)> {
+    let cleaned = after_host.trim_start_matches([':', '/']);
+    let mut parts = cleaned.split('/');
+    let owner = parts.next().unwrap_or("");
+    let repo = parts.next().unwrap_or("").trim_end_matches(".git");
+    if owner.is_empty() || repo.is_empty() {
+        bail!("could not parse owner/repo from {}", original);
+    }
+    Ok((owner, repo, parts.collect()))
+}
+
+fn parse_tree_ref(rest: &[&str], gitlab: bool) -> Option<String> {
+    let ref_parts = if gitlab {
+        if rest.len() >= 3 && rest[0] == "-" && rest[1] == "tree" {
+            &rest[2..]
+        } else {
+            &[]
+        }
+    } else if rest.len() >= 2 && rest[0] == "tree" {
+        &rest[1..]
+    } else {
+        &[]
+    };
+    if ref_parts.is_empty() {
+        None
+    } else {
+        Some(ref_parts.join("/"))
+    }
+}
+
 /// Reverse of [`parse_src_id`]: given a stored `src_id`, build the
 /// HTTPS clone URL. Defaults to GitHub when no host prefix is present.
 fn src_to_clone_url(src: &str) -> String {
@@ -798,22 +873,29 @@ fn src_to_clone_url(src: &str) -> String {
     }
 }
 
-fn clone_shallow(url: &str, src_id: &str) -> Result<PathBuf> {
+fn clone_shallow(url: &str, src_id: &str, checkout_ref: Option<&str>) -> Result<PathBuf> {
     let nonce = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let safe_id = src_id.replace('/', "_");
     let dir = std::env::temp_dir().join(format!("ab-skills-{}-{}", safe_id, nonce));
+    let mut args = vec![
+        "clone".to_string(),
+        "--depth=1".to_string(),
+        "--quiet".to_string(),
+        "--filter=blob:none".to_string(),
+    ];
+    if let Some(r) = checkout_ref {
+        args.push("--branch".to_string());
+        args.push(r.to_string());
+        args.push("--single-branch".to_string());
+    }
+    args.push(url.to_string());
+    args.push(dir.to_string_lossy().to_string());
+
     let status = Command::new("git")
-        .args([
-            "clone",
-            "--depth=1",
-            "--quiet",
-            "--filter=blob:none",
-            url,
-            &dir.to_string_lossy(),
-        ])
+        .args(&args)
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .status()
@@ -1337,6 +1419,43 @@ mod tests {
     }
 
     #[test]
+    fn parse_remote_source_github_tree_url() {
+        let spec = parse_remote_source("https://github.com/OpenBMB/MiniCPM/tree/minicpm5").unwrap();
+        assert_eq!(spec.src_id, "OpenBMB/MiniCPM");
+        assert_eq!(spec.clone_url, "https://github.com/OpenBMB/MiniCPM.git");
+        assert_eq!(spec.checkout_ref.as_deref(), Some("minicpm5"));
+    }
+
+    #[test]
+    fn parse_remote_source_github_plain_url() {
+        let spec = parse_remote_source("https://github.com/anthropics/skills").unwrap();
+        assert_eq!(spec.src_id, "anthropics/skills");
+        assert_eq!(spec.clone_url, "https://github.com/anthropics/skills.git");
+        assert_eq!(spec.checkout_ref, None);
+    }
+
+    #[test]
+    fn parse_remote_source_gitlab_tree_url() {
+        let spec =
+            parse_remote_source("https://gitlab.com/pallasting/agent-bridge/-/tree/feature/foo")
+                .unwrap();
+        assert_eq!(spec.src_id, "gitlab.com/pallasting/agent-bridge");
+        assert_eq!(
+            spec.clone_url,
+            "https://gitlab.com/pallasting/agent-bridge.git"
+        );
+        assert_eq!(spec.checkout_ref.as_deref(), Some("feature/foo"));
+    }
+
+    #[test]
+    fn parse_remote_source_ssh_preserves_clone_url() {
+        let spec = parse_remote_source("git@github.com:foo/bar.git").unwrap();
+        assert_eq!(spec.src_id, "foo/bar");
+        assert_eq!(spec.clone_url, "git@github.com:foo/bar.git");
+        assert_eq!(spec.checkout_ref, None);
+    }
+
+    #[test]
     fn parse_src_id_rejects_unknown_host() {
         assert!(parse_src_id("https://codeberg.org/foo/bar").is_err());
         assert!(parse_src_id("not a url").is_err());
@@ -1543,10 +1662,9 @@ mod tests {
     fn lint_flags_dangerous_rm() {
         let body = "rm -rf / # don't actually do this";
         let f = lint_body(body);
-        assert!(
-            f.iter()
-                .any(|x| x.rule == "dangerous-rm" && x.sev == LintSev::Danger)
-        );
+        assert!(f
+            .iter()
+            .any(|x| x.rule == "dangerous-rm" && x.sev == LintSev::Danger));
     }
 
     #[test]
