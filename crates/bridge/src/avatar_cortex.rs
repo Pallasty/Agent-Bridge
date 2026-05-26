@@ -6095,6 +6095,9 @@ fn xiao_shu_action_request_from_preview(
     let request_command = format!(
         "agent-bridge avatar xiao-shu-action-request --project {project} --actor {actor:?} --intent {intent:?}{message_arg} --reason {reason:?}"
     );
+    let enqueue_command = format!(
+        "agent-bridge avatar xiao-shu-action-request --project {project} --actor {actor:?} --intent {intent:?}{message_arg} --reason {reason:?} --enqueue"
+    );
     let confirm_request_command = format!(
         "agent-bridge avatar xiao-shu-action-request --project {project} --actor {actor:?} --intent {intent:?}{message_arg} --reason {reason:?} --confirm"
     );
@@ -6102,6 +6105,8 @@ fn xiao_shu_action_request_from_preview(
         .get("command_preview")
         .cloned()
         .unwrap_or(Value::Null);
+    let queue_command = format!("agent-bridge avatar xiao-shu-action-requests --project {project}");
+    let queue_panel_path = format!("/avatar-surface/xiao-shu-action-requests?project={project}");
     let caller_message_policy = action
         .get("caller_message_policy")
         .cloned()
@@ -6126,6 +6131,41 @@ fn xiao_shu_action_request_from_preview(
     }
     let downstream_action_preview =
         xiao_shu_action_downstream_preview_payload(&action_preview_payload, opts.include_details);
+    let line_value = action.get("line").cloned().unwrap_or(Value::Null);
+    let cue_id = action.get("cue_id").cloned().unwrap_or(Value::Null);
+    let voice_script = action.get("voice_script").cloned().unwrap_or(Value::Null);
+    let line_selection = action.get("line_selection").cloned().unwrap_or(Value::Null);
+    let message_handling = json!({
+        "message_present": message.is_some(),
+        "message_is_context_note_only": message.is_some(),
+        "message_can_replace_utterance": llm_can_replace_utterance,
+        "selected_line_from_curated_bank": line_value.clone(),
+        "requires_human_expansion_for_new_lines": true,
+    });
+    let operator_console_safety = json!({
+        "http_emit_route_allowed": false,
+        "direct_llm_emit_allowed": false,
+        "local_cli_emit_only": true,
+        "message_context_only": message.is_some(),
+    });
+    let operator_console = json!({
+        "mode": "copy_local_cli_command",
+        "workflow": [
+            "preview_request",
+            "enqueue_request_record",
+            "operator_reviews_queue",
+            "operator_runs_confirm_or_emit_command"
+        ],
+        "preview_command": preview_command.clone(),
+        "request_command": request_command.clone(),
+        "enqueue_command": enqueue_command.clone(),
+        "queue_command": queue_command.clone(),
+        "queue_panel_path": queue_panel_path.clone(),
+        "confirm_request_command": confirm_request_command.clone(),
+        "emit_command": emit_command.clone(),
+        "dismiss_command_shape": "agent-bridge avatar xiao-shu-action-request-action --project <project> --request-id <id> --confirm --dismiss",
+        "safety": operator_console_safety,
+    });
     let action_request = json!({
         "target": "xiao-shu",
         "actor": actor,
@@ -6135,18 +6175,12 @@ fn xiao_shu_action_request_from_preview(
         "supported_intent": supported_intent,
         "mapped_surface": "avatar_cortex_voice_action_preview",
         "mapped_track": track,
-        "line": action.get("line").cloned().unwrap_or(Value::Null),
-        "cue_id": action.get("cue_id").cloned().unwrap_or(Value::Null),
-        "voice_script": action.get("voice_script").cloned().unwrap_or(Value::Null),
+        "line": line_value,
+        "cue_id": cue_id,
+        "voice_script": voice_script,
         "caller_message_policy": caller_message_policy,
-        "line_selection": action.get("line_selection").cloned().unwrap_or(Value::Null),
-        "message_handling": {
-            "message_present": message.is_some(),
-            "message_is_context_note_only": message.is_some(),
-            "message_can_replace_utterance": llm_can_replace_utterance,
-            "selected_line_from_curated_bank": action.get("line").cloned().unwrap_or(Value::Null),
-            "requires_human_expansion_for_new_lines": true,
-        },
+        "line_selection": line_selection,
+        "message_handling": message_handling,
         "reason": reason,
         "requires_human_confirmation": true,
         "human_confirmation_present": opts.confirm,
@@ -6156,9 +6190,13 @@ fn xiao_shu_action_request_from_preview(
         "blocked": !supported_intent || !opts.confirm || !downstream_ready,
         "blocked_reasons": blocked_reasons,
         "request_command": request_command,
+        "enqueue_command": enqueue_command,
         "confirm_request_command": confirm_request_command,
+        "queue_command": queue_command,
+        "queue_panel_path": queue_panel_path,
         "preview_command": preview_command,
         "emit_command": emit_command,
+        "operator_console": operator_console,
         "next_step": "show this request to the operator; only a local CLI confirmation may run the emitted command",
     });
     let policy = json!({
@@ -6265,6 +6303,16 @@ fn xiao_shu_action_enqueue_record_from_request(
     let reason = vstr(request.get("reason")).unwrap_or("xiao-shu-action-request");
     let mapped_track = vstr(request.get("mapped_track")).unwrap_or("xiao_shu::alert_peek::medium");
     let message = request.get("message").cloned().unwrap_or(Value::Null);
+    let line = request.get("line").cloned().unwrap_or(Value::Null);
+    let cue_id = request.get("cue_id").cloned().unwrap_or(Value::Null);
+    let message_handling = request
+        .get("message_handling")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let operator_console = request
+        .get("operator_console")
+        .cloned()
+        .unwrap_or(Value::Null);
     let seed = json!({
         "created_at": now,
         "project": project,
@@ -6272,7 +6320,7 @@ fn xiao_shu_action_enqueue_record_from_request(
         "intent": intent,
         "reason": reason,
         "mapped_track": mapped_track,
-        "message": message,
+        "message": message.clone(),
     });
     let seed_hash = fnv1a_hex16(&serde_json::to_string(&seed).unwrap_or_default());
     let request_id = format!("xsr-{now}-{}", &seed_hash[..8]);
@@ -6312,9 +6360,13 @@ fn xiao_shu_action_enqueue_record_from_request(
         "writes_cooldown_state": false,
         "codex_pet_package_mutation": false,
         "mutates_global_substrate": false,
-        "action_preview_command": action_preview_command,
+        "action_preview_command": action_preview_command.clone(),
         "local_confirm_command": action_preview_command,
         "local_emit_command": local_emit_command,
+        "line": line,
+        "cue_id": cue_id,
+        "message_handling": message_handling,
+        "operator_console": operator_console,
         "action_request": request.clone(),
         "source_request": request_payload,
     })
@@ -6368,7 +6420,27 @@ fn xiao_shu_action_request_compact_record(record: Value) -> Value {
     );
     action_request.insert(
         "line".to_string(),
-        request.get("line").cloned().unwrap_or(Value::Null),
+        request
+            .get("line")
+            .cloned()
+            .or_else(|| record.get("line").cloned())
+            .unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "cue_id".to_string(),
+        request
+            .get("cue_id")
+            .cloned()
+            .or_else(|| record.get("cue_id").cloned())
+            .unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "message_handling".to_string(),
+        request
+            .get("message_handling")
+            .cloned()
+            .or_else(|| record.get("message_handling").cloned())
+            .unwrap_or(Value::Null),
     );
     action_request.insert(
         "reason".to_string(),
@@ -6419,6 +6491,8 @@ fn xiao_shu_action_request_compact_record(record: Value) -> Value {
         "emitted",
         "local_confirm_command",
         "local_emit_command",
+        "line",
+        "cue_id",
     ] {
         compact.insert(
             key.to_string(),
@@ -9021,19 +9095,39 @@ mod tests {
             true
         );
         assert_eq!(request["action_request"]["ready_for_local_cli_emit"], false);
-        assert!(request["action_request"]["blocked_reasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason == "human_confirmation_required"));
-        assert!(request["action_request"]["confirm_request_command"]
-            .as_str()
-            .unwrap()
-            .contains("--confirm"));
-        assert!(request["action_request"]["emit_command"]
-            .as_str()
-            .unwrap()
-            .contains("cortex-voice-action"));
+        assert!(
+            request["action_request"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "human_confirmation_required")
+        );
+        assert!(
+            request["action_request"]["confirm_request_command"]
+                .as_str()
+                .unwrap()
+                .contains("--confirm")
+        );
+        assert!(
+            request["action_request"]["enqueue_command"]
+                .as_str()
+                .unwrap()
+                .contains("--enqueue")
+        );
+        assert_eq!(
+            request["action_request"]["operator_console"]["mode"],
+            "copy_local_cli_command"
+        );
+        assert_eq!(
+            request["action_request"]["operator_console"]["safety"]["local_cli_emit_only"],
+            true
+        );
+        assert!(
+            request["action_request"]["emit_command"]
+                .as_str()
+                .unwrap()
+                .contains("cortex-voice-action")
+        );
 
         let unsupported = xiao_shu_action_request_from_preview(
             request["downstream_action_preview"].clone(),
@@ -9085,10 +9179,15 @@ mod tests {
                 "message": "please look",
                 "reason": "unit-test",
                 "mapped_track": "xiao_shu::alert_peek::medium",
+                "line": "小舒发现一点需要你看一下。",
+                "cue_id": "soft_attention_needed",
                 "request_state": "requires_human_confirmation",
                 "requires_human_confirmation": true,
                 "human_confirmation_present": false,
-                "direct_llm_emit_allowed": false
+                "direct_llm_emit_allowed": false,
+                "operator_console": {
+                    "mode": "copy_local_cli_command"
+                }
             }
         });
         let queue_path = Path::new("/tmp/xiao-shu-requests.jsonl");
@@ -9126,6 +9225,12 @@ mod tests {
             .unwrap()
             .contains("--confirm --emit"));
         assert_eq!(record["action_request"]["actor"], "codex");
+        assert_eq!(record["line"], "小舒发现一点需要你看一下。");
+        assert_eq!(record["cue_id"], "soft_attention_needed");
+        assert_eq!(
+            record["operator_console"]["mode"],
+            "copy_local_cli_command"
+        );
         assert_eq!(
             record["source_request"]["action_request"]["request_state"],
             "requires_human_confirmation"

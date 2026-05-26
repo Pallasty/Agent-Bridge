@@ -1164,6 +1164,9 @@ enum AvatarOp {
         /// Preview as if a human/operator confirmation is present.
         #[arg(long)]
         confirm: bool,
+        /// Append this request to the local pending queue without emitting audio.
+        #[arg(long)]
+        enqueue: bool,
         /// Preview readiness as if cooldown state were ignored.
         #[arg(long)]
         force: bool,
@@ -3285,6 +3288,7 @@ async fn main() -> Result<()> {
                 track,
                 reason,
                 confirm,
+                enqueue,
                 force,
                 cooldown_secs,
                 tts_voice,
@@ -3303,6 +3307,7 @@ async fn main() -> Result<()> {
                     track.clone(),
                     reason.clone(),
                     *confirm,
+                    *enqueue,
                     *force,
                     *cooldown_secs,
                     tts_voice.clone(),
@@ -6169,6 +6174,7 @@ async fn run_xiao_shu_action_request(
     track: Option<String>,
     reason: Option<String>,
     confirm: bool,
+    enqueue: bool,
     force: bool,
     cooldown_secs: i64,
     tts_voice: Option<String>,
@@ -6188,16 +6194,46 @@ async fn run_xiao_shu_action_request(
         message: message.as_deref(),
         requested_track: track.as_deref(),
         reason: reason.as_deref(),
-        confirm,
+        confirm: if enqueue { false } else { confirm },
         force,
         cooldown_secs,
         tts_voice: tts_voice.as_deref(),
         tts_rate,
         include_details: details,
     };
-    let payload = ab_bridge::avatar_cortex::xiao_shu_action_request(&opts)?;
+    let payload = if enqueue {
+        ab_bridge::avatar_cortex::xiao_shu_action_request_enqueue(&opts)?
+    } else {
+        ab_bridge::avatar_cortex::xiao_shu_action_request(&opts)?
+    };
     if as_json {
         println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    if enqueue {
+        let record = payload.get("record").unwrap_or(&Value::Null);
+        let queue = payload.get("queue").unwrap_or(&Value::Null);
+        let request = record.get("action_request").unwrap_or(&Value::Null);
+        println!("xiao shu action request enqueued");
+        println!(
+            "request_id={} state={} queue={} emits_audio={} direct_control={}",
+            avatar_health_display(record.get("request_id"), "-"),
+            avatar_health_display(record.get("state"), "-"),
+            avatar_health_display(queue.get("path"), "-"),
+            avatar_health_display(payload.get("emits_audio"), "false"),
+            avatar_health_display(payload.get("direct_pet_control_allowed"), "false")
+        );
+        println!(
+            "track={} cue={} line={}",
+            avatar_health_display(record.get("mapped_track"), "-"),
+            avatar_health_display(record.get("cue_id"), "-"),
+            avatar_health_display(record.get("line").or_else(|| request.get("line")), "-")
+        );
+        println!(
+            "confirm={} emit={}",
+            avatar_health_display(record.get("local_confirm_command"), "-"),
+            avatar_health_display(record.get("local_emit_command"), "-")
+        );
         return Ok(());
     }
     let request = payload.get("action_request").unwrap_or(&Value::Null);

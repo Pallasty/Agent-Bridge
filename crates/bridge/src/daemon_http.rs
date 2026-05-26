@@ -4878,8 +4878,18 @@ fn avatar_surface_xiao_shu_action_request_html(
         "false",
     );
     let preview_command = avatar_surface_html_json_value(request.get("preview_command"), "-");
+    let enqueue_command = avatar_surface_html_json_value(request.get("enqueue_command"), "-");
     let confirm_command =
         avatar_surface_html_json_value(request.get("confirm_request_command"), "-");
+    let queue_command = avatar_surface_html_json_value(request.get("queue_command"), "-");
+    let queue_panel_raw = request
+        .get("queue_panel_path")
+        .and_then(Value::as_str)
+        .unwrap_or("/avatar-surface/xiao-shu-action-requests");
+    let queue_summary = action_request_preview
+        .get("queue_summary")
+        .unwrap_or(&Value::Null);
+    let pending_count = avatar_surface_html_json_value(queue_summary.get("pending_count"), "0");
     let emit_command = avatar_surface_html_json_value(request.get("emit_command"), "-");
 
     format!(
@@ -4896,8 +4906,10 @@ fn avatar_surface_xiao_shu_action_request_html(
         <div><dt>policy</dt><dd>direct_control={direct_control} emits_audio={emit_audio} human_required={human_required} confirmed={confirmed}</dd></div>
         <div><dt>readiness</dt><dd>ready={ready} blocked={blocked} reasons={reasons}</dd></div>
         <div><dt>preview</dt><dd>{preview_command}</dd></div>
+        <div><dt>enqueue</dt><dd>{enqueue_command}</dd></div>
         <div><dt>confirm</dt><dd>{confirm_command}</dd></div>
         <div><dt>emit</dt><dd>{emit_command}</dd></div>
+        <div><dt>queue</dt><dd>pending={pending_count} command={queue_command} <a href="{queue_panel}">open queue</a></dd></div>
         <div><dt>open</dt><dd><a href="{href}">xiao shu action request json</a></dd></div>
       </dl>
     </section>"#,
@@ -4918,8 +4930,12 @@ fn avatar_surface_xiao_shu_action_request_html(
         blocked = blocked,
         reasons = reasons,
         preview_command = preview_command,
+        enqueue_command = enqueue_command,
         confirm_command = confirm_command,
         emit_command = emit_command,
+        pending_count = pending_count,
+        queue_command = queue_command,
+        queue_panel = html_escape(queue_panel_raw),
         href = html_escape(&href_raw),
     )
 }
@@ -5016,7 +5032,15 @@ fn avatar_surface_xiao_shu_action_requests_html(
         let line = avatar_surface_html_json_value(
             record
                 .get("action_request")
-                .and_then(|request| request.get("line")),
+                .and_then(|request| request.get("line"))
+                .or_else(|| record.get("line")),
+            "-",
+        );
+        let cue = avatar_surface_html_json_value(
+            record
+                .get("action_request")
+                .and_then(|request| request.get("cue_id"))
+                .or_else(|| record.get("cue_id")),
             "-",
         );
         let reason = avatar_surface_html_json_value(record.get("reason"), "-");
@@ -5025,7 +5049,7 @@ fn avatar_surface_xiao_shu_action_requests_html(
         let local_dismiss = html_escape(&local_dismiss_raw);
         let detail_href = html_escape(&detail_href_raw);
         rows.push_str(&format!(
-            r#"<li><strong>{request_id}</strong><span>state={state} actor={actor} intent={intent}</span><span>track={track}</span><span>line={line}</span><span>reason={reason}</span><span><a href="{detail_href}">detail json</a></span><span>dry_run={local_confirm}</span><span>emit={local_command}</span><span>dismiss={local_dismiss}</span></li>"#
+            r#"<li><strong>{request_id}</strong><span>state={state} actor={actor} intent={intent}</span><span>track={track}</span><span>cue={cue} line={line}</span><span>reason={reason}</span><span><a href="{detail_href}">detail json</a></span><span>dry_run={local_confirm}</span><span>emit={local_command}</span><span>dismiss={local_dismiss}</span></li>"#
         ));
     }
     if rows.is_empty() {
@@ -7046,7 +7070,8 @@ mod tests {
                 "local_confirm_command": "agent-bridge avatar xiao-shu-action-request-action --project agent-bridge --request-id \"xsr-test\" --reason \"unit-test\" --confirm",
                 "local_emit_command": "agent-bridge avatar xiao-shu-action-request-action --project agent-bridge --request-id \"xsr-test\" --reason \"unit-test\" --confirm --emit",
                 "action_request": {
-                    "line": "please look"
+                    "line": "please look",
+                    "cue_id": "soft_attention_needed"
                 }
             }]
         });
@@ -7187,11 +7212,16 @@ mod tests {
         ));
         assert!(html.contains("ready=false blocked=true reasons="));
         assert!(html.contains("human_confirmation_required"));
+        assert!(html.contains("agent-bridge avatar xiao-shu-action-request"));
+        assert!(html.contains("--enqueue"));
+        assert!(html.contains("command=agent-bridge avatar xiao-shu-action-requests"));
+        assert!(html.contains("open queue"));
         assert!(html.contains("xiao shu action request json"));
         assert!(html.contains("Xiao Shu Action Requests"));
         assert!(html.contains("state=pending_human_confirmation details=false"));
         assert!(html.contains("/avatar-surface/xiao-shu-action-requests?project=agent-bridge&amp;request_id=xsr-test&amp;details=true"));
         assert!(html.contains("detail json"));
+        assert!(html.contains("cue=soft_attention_needed line=please look"));
         assert!(html.contains("dry_run=agent-bridge avatar xiao-shu-action-request-action"));
         assert!(html.contains("emit=agent-bridge avatar xiao-shu-action-request-action"));
         assert!(html.contains("stage=candidate risk=low"));
