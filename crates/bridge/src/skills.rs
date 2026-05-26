@@ -225,7 +225,10 @@ pub async fn run_seed(verbose: bool) -> Result<()> {
 /// refresh's start time — those are skills that disappeared upstream. A
 /// failed re-index for a source skips pruning of that source (don't
 /// destroy data when we don't have a fresh authoritative state).
-pub async fn run_refresh(verbose: bool, prune: bool, dry_run: bool) -> Result<()> {
+pub async fn run_refresh(verbose: bool, prune: bool, dry_run: bool, json: bool) -> Result<()> {
+    if json && !dry_run {
+        bail!("`skills refresh --json` is currently only supported with `--dry-run`");
+    }
     let store = open_store().await?;
     let rows = store
         .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
@@ -257,22 +260,41 @@ pub async fn run_refresh(verbose: bool, prune: bool, dry_run: bool) -> Result<()
             local_srcs.insert(src);
         }
     }
-    eprintln!(
-        "[skills] refresh: {} remote source(s), {} local source(s) skipped, {} record(s) total{}",
+    if dry_run {
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&refresh_dry_run_payload(
+                    &remote_plans,
+                    &local_srcs,
+                    rows.len(),
+                    prune
+                ))?
+            );
+        } else {
+            print_refresh_header(
+                remote_plans.len(),
+                local_srcs.len(),
+                rows.len(),
+                prune,
+                dry_run,
+            );
+            if !local_srcs.is_empty() {
+                print_refresh_local_sources(&local_srcs);
+            }
+            print_refresh_dry_run(&remote_plans, prune);
+        }
+        return Ok(());
+    }
+    print_refresh_header(
         remote_plans.len(),
         local_srcs.len(),
         rows.len(),
-        refresh_mode_suffix(prune, dry_run)
+        prune,
+        dry_run,
     );
-    if !local_srcs.is_empty() && (verbose || dry_run) {
-        eprintln!("[skills]   local sources (re-run `skills index <path>` manually):");
-        for s in &local_srcs {
-            eprintln!("[skills]     - {}", s);
-        }
-    }
-    if dry_run {
-        print_refresh_dry_run(&remote_plans, prune);
-        return Ok(());
+    if !local_srcs.is_empty() && verbose {
+        print_refresh_local_sources(&local_srcs);
     }
     let started_at = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -319,6 +341,29 @@ pub async fn run_refresh(verbose: bool, prune: bool, dry_run: bool) -> Result<()
     Ok(())
 }
 
+fn print_refresh_header(
+    remote_count: usize,
+    local_count: usize,
+    record_count: usize,
+    prune: bool,
+    dry_run: bool,
+) {
+    eprintln!(
+        "[skills] refresh: {} remote source(s), {} local source(s) skipped, {} record(s) total{}",
+        remote_count,
+        local_count,
+        record_count,
+        refresh_mode_suffix(prune, dry_run)
+    );
+}
+
+fn print_refresh_local_sources(local_srcs: &BTreeSet<String>) {
+    eprintln!("[skills]   local sources (re-run `skills index <path>` manually):");
+    for s in local_srcs {
+        eprintln!("[skills]     - {}", s);
+    }
+}
+
 fn refresh_mode_suffix(prune: bool, dry_run: bool) -> &'static str {
     match (prune, dry_run) {
         (true, true) => " (prune ON, dry-run)",
@@ -326,6 +371,43 @@ fn refresh_mode_suffix(prune: bool, dry_run: bool) -> &'static str {
         (false, true) => " (dry-run)",
         (false, false) => "",
     }
+}
+
+fn refresh_dry_run_payload(
+    remote_plans: &BTreeMap<String, RemoteIndexPlan>,
+    local_srcs: &BTreeSet<String>,
+    record_count: usize,
+    prune: bool,
+) -> serde_json::Value {
+    serde_json::json!({
+        "dry_run": true,
+        "mutates": false,
+        "total_records": record_count,
+        "remote_source_count": remote_plans.len(),
+        "local_source_count": local_srcs.len(),
+        "prune_requested": prune,
+        "actions": {
+            "clone_repos": false,
+            "write_memories": false,
+            "prune_stale_records": false,
+        },
+        "remote_sources": remote_plans
+            .iter()
+            .map(|(src, plan)| {
+                serde_json::json!({
+                    "source": src,
+                    "url": &plan.url,
+                    "checkout_ref": &plan.checkout_ref,
+                })
+            })
+            .collect::<Vec<_>>(),
+        "local_sources_skipped": local_srcs.iter().cloned().collect::<Vec<_>>(),
+        "prune_note": if prune {
+            Some("stale deletes are only evaluated after a real successful source refresh")
+        } else {
+            None
+        },
+    })
 }
 
 fn print_refresh_dry_run(remote_plans: &BTreeMap<String, RemoteIndexPlan>, prune: bool) {
@@ -2383,6 +2465,41 @@ mod tests {
         assert_eq!(refresh_mode_suffix(true, false), " (prune ON)");
         assert_eq!(refresh_mode_suffix(false, true), " (dry-run)");
         assert_eq!(refresh_mode_suffix(true, true), " (prune ON, dry-run)");
+    }
+
+    #[test]
+    fn refresh_dry_run_payload_is_machine_readable_and_non_mutating() {
+        let mut plans = BTreeMap::new();
+        plans.insert(
+            "OpenBMB/MiniCPM".to_string(),
+            RemoteIndexPlan {
+                src: "OpenBMB/MiniCPM".to_string(),
+                url: "https://github.com/OpenBMB/MiniCPM.git".to_string(),
+                checkout_ref: Some("minicpm5".to_string()),
+            },
+        );
+        let local_srcs = BTreeSet::from(["local-skills".to_string()]);
+
+        let payload = refresh_dry_run_payload(&plans, &local_srcs, 16, true);
+        assert_eq!(payload["dry_run"], true);
+        assert_eq!(payload["mutates"], false);
+        assert_eq!(payload["total_records"], 16);
+        assert_eq!(payload["remote_source_count"], 1);
+        assert_eq!(payload["local_source_count"], 1);
+        assert_eq!(payload["actions"]["clone_repos"], false);
+        assert_eq!(payload["actions"]["write_memories"], false);
+        assert_eq!(payload["actions"]["prune_stale_records"], false);
+        assert_eq!(payload["remote_sources"][0]["source"], "OpenBMB/MiniCPM");
+        assert_eq!(
+            payload["remote_sources"][0]["url"],
+            "https://github.com/OpenBMB/MiniCPM.git"
+        );
+        assert_eq!(payload["remote_sources"][0]["checkout_ref"], "minicpm5");
+        assert_eq!(payload["local_sources_skipped"][0], "local-skills");
+        assert!(payload["prune_note"]
+            .as_str()
+            .unwrap()
+            .contains("successful"));
     }
 
     #[test]

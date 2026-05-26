@@ -129,9 +129,11 @@ its remote source plan from existing `git_origin` and `git_branch` tags instead
 of reconstructing a default-branch URL from `src:` alone. This keeps a branch
 source such as `OpenBMB/MiniCPM/tree/minicpm5` on `minicpm5` during refresh.
 `skills refresh --dry-run` prints the refresh plan without cloning repos,
-writing memory records, or pruning stale records. With `--prune --dry-run`, it
-also makes the prune boundary explicit: stale deletes are only evaluated after a
-real successful source refresh.
+writing memory records, or pruning stale records. `skills refresh --dry-run
+--json` exposes the same plan as machine-readable JSON for agent automation,
+including remote source URLs, preserved refs, skipped local sources, mutation
+flags, and the prune boundary. With `--prune --dry-run`, stale deletes are only
+evaluated after a real successful source refresh.
 
 `skills show --json` is the automation-facing review surface. It keeps the
 existing human `skills show <key>` output unchanged, while exposing a

@@ -2303,6 +2303,9 @@ enum SkillsOp {
         /// Print the refresh plan without cloning repos, writing memories, or pruning.
         #[arg(long)]
         dry_run: bool,
+        /// Emit machine-readable JSON for `--dry-run`.
+        #[arg(long)]
+        json: bool,
     },
     /// Discover candidate skill repos via GitHub topic search.
     ///
@@ -2618,7 +2621,8 @@ async fn main() -> Result<()> {
                 verbose,
                 prune,
                 dry_run,
-            } => skills::run_refresh(*verbose, *prune, *dry_run).await,
+                json,
+            } => skills::run_refresh(*verbose, *prune, *dry_run, *json).await,
             SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::List { limit } => skills::run_list(*limit).await,
