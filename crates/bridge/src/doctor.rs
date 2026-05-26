@@ -588,10 +588,13 @@ fn check_mcp_tool_surface() -> Check {
 fn check_instinct_observer() -> Check {
     let status = instinct::observer_status();
     let detail = format!(
-        "enabled={}, installed={}, executable={}, records={}, sessions={}, verdict={}, recommendation={}, log={}",
+        "enabled={}, installed={}, executable={}, permissions_ok={}, dir_mode={:?}, log_mode={:?}, records={}, sessions={}, verdict={}, recommendation={}, log={}",
         status.enabled,
         status.installed,
         status.executable,
+        status.permissions_ok,
+        status.log_dir_mode_octal,
+        status.log_mode_octal,
         status.total_records,
         status.sessions,
         status.verdict,
@@ -604,6 +607,16 @@ fn check_instinct_observer() -> Check {
             "instinct_observer",
             detail,
             format!("chmod +x {}", status.installed_path),
+        );
+    }
+    if !status.permissions_ok {
+        return Check::warn(
+            "instinct_observer",
+            detail,
+            format!(
+                "chmod 700 {} && chmod 600 {}",
+                status.log_dir_path, status.log_path
+            ),
         );
     }
     if status.log_bytes >= status.max_bytes {

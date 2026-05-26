@@ -81,7 +81,11 @@ pub struct InstinctObserverStatus {
     pub installed: bool,
     pub executable: bool,
     pub log_path: String,
+    pub log_dir_path: String,
     pub log_present: bool,
+    pub log_dir_mode_octal: Option<String>,
+    pub log_mode_octal: Option<String>,
+    pub permissions_ok: bool,
     pub log_bytes: u64,
     pub max_bytes: u64,
     pub total_records: u64,
@@ -155,8 +159,15 @@ pub fn observer_status_for_paths(
 ) -> InstinctObserverStatus {
     let installed = installed_path.exists();
     let executable = installed && is_executable(&installed_path);
+    let log_dir_path = log_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(""));
+    let log_dir_mode = private_dir_mode_octal(&log_dir_path);
     let log_meta = std::fs::metadata(&log_path).ok();
     let log_present = log_meta.as_ref().is_some_and(|m| m.is_file());
+    let log_mode = private_file_mode_octal(&log_path);
+    let permissions_ok = observer_permissions_ok(&log_dir_path, &log_path, log_present);
     let log_bytes = log_meta.as_ref().map(|m| m.len()).unwrap_or(0);
     let records = load_records(&log_path);
     let analyzed = analyze_records(&records);
@@ -169,7 +180,11 @@ pub fn observer_status_for_paths(
         installed,
         executable,
         log_path: log_path.display().to_string(),
+        log_dir_path: log_dir_path.display().to_string(),
         log_present,
+        log_dir_mode_octal: log_dir_mode,
+        log_mode_octal: log_mode,
+        permissions_ok,
         log_bytes,
         max_bytes: OBSERVER_MAX_BYTES,
         total_records: records.len() as u64,
@@ -435,6 +450,59 @@ fn latest_age_secs(ts: f64) -> Option<u64> {
 }
 
 #[cfg(unix)]
+fn mode_octal(path: &Path) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .ok()
+        .map(|m| format!("{:03o}", m.permissions().mode() & 0o777))
+}
+
+#[cfg(not(unix))]
+fn mode_octal(_path: &Path) -> Option<String> {
+    None
+}
+
+fn private_dir_mode_octal(path: &Path) -> Option<String> {
+    mode_octal(path)
+}
+
+fn private_file_mode_octal(path: &Path) -> Option<String> {
+    mode_octal(path)
+}
+
+#[cfg(unix)]
+fn observer_permissions_ok(log_dir: &Path, log_path: &Path, log_present: bool) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir_ok = std::fs::metadata(log_dir)
+        .ok()
+        .map(|m| {
+            let mode = m.permissions().mode() & 0o777;
+            // Directory should be owner-only; execute is needed to traverse.
+            mode & 0o077 == 0 && mode & 0o700 == 0o700
+        })
+        .unwrap_or(true);
+    let file_ok = if log_present {
+        std::fs::metadata(log_path)
+            .ok()
+            .map(|m| {
+                let mode = m.permissions().mode() & 0o777;
+                // JSONL may contain prompt/tool summaries; no group/other or exec bits.
+                mode & 0o177 == 0 && mode & 0o600 == 0o600
+            })
+            .unwrap_or(true)
+    } else {
+        true
+    };
+    dir_ok && file_ok
+}
+
+#[cfg(not(unix))]
+fn observer_permissions_ok(_log_dir: &Path, _log_path: &Path, _log_present: bool) -> bool {
+    true
+}
+
+#[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(path)
@@ -482,6 +550,37 @@ mod tests {
         assert_eq!(status.legacy_untrusted_errors, 1);
         assert_eq!(status.verdict, "INSUFFICIENT_SESSIONS");
         assert_eq!(status.recommendation, "wait_for_sessions");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn observer_status_reports_private_sidecar_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let hook = tmp.path().join("ab-instinct-observer-hook");
+        let dir = tmp.path().join("instinct-probe");
+        let log = dir.join("observations.jsonl");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(&hook, "#!/bin/sh\n").unwrap();
+        write_jsonl(
+            &log,
+            &[json!({"ts": 1.0, "sid": "s", "ev": "UserPromptSubmit", "prompt": "hello"})],
+        );
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let status = observer_status_for_paths(hook.clone(), log.clone(), true);
+        assert!(status.permissions_ok);
+        assert_eq!(status.log_dir_mode_octal.as_deref(), Some("700"));
+        assert_eq!(status.log_mode_octal.as_deref(), Some("600"));
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o775)).unwrap();
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o664)).unwrap();
+        let status = observer_status_for_paths(hook, log, true);
+        assert!(!status.permissions_ok);
+        assert_eq!(status.log_dir_mode_octal.as_deref(), Some("775"));
+        assert_eq!(status.log_mode_octal.as_deref(), Some("664"));
     }
 
     #[test]

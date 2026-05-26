@@ -8,6 +8,7 @@ per session, to decide whether an auto-miner is worth building
 
 Contract:
   - ZERO DB writes. Appends one JSONL line to a wipeable sidecar log.
+  - Sidecar directory/file are private by default (0700 dir, 0600 JSONL).
   - NEVER blocks or fails the session: any error → silent exit 0, no output.
   - Registered on PostToolUse (tool outcomes / errors) + UserPromptSubmit
     (prompt text, for correction detection).
@@ -23,6 +24,8 @@ import time
 LOG_DIR = os.path.expanduser("~/.cache/agent-bridge/instinct-probe")
 LOG = os.path.join(LOG_DIR, "observations.jsonl")
 MAX_BYTES = 8 * 1024 * 1024  # self-cap; stop appending past 8 MiB (probe, not prod)
+DIR_MODE = 0o700
+FILE_MODE = 0o600
 
 
 def _brief(obj, n=240):
@@ -64,6 +67,32 @@ def _clean_error(resp):
     return False, None
 
 
+def _ensure_private_sidecar():
+    os.makedirs(LOG_DIR, mode=DIR_MODE, exist_ok=True)
+    try:
+        os.chmod(LOG_DIR, DIR_MODE)
+    except OSError:
+        pass
+
+
+def _append_private_jsonl(record):
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+    fd = os.open(LOG, flags, FILE_MODE)
+    try:
+        try:
+            os.chmod(LOG, FILE_MODE)
+        except OSError:
+            pass
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise
+
+
 def main():
     if os.environ.get("AB_INSTINCT_OBSERVER", "1") == "0":
         return
@@ -94,14 +123,13 @@ def main():
     else:
         rec["raw"] = _brief(data, 200)
 
-    os.makedirs(LOG_DIR, exist_ok=True)
+    _ensure_private_sidecar()
     try:
         if os.path.getsize(LOG) >= MAX_BYTES:
             return
     except OSError:
         pass
-    with open(LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    _append_private_jsonl(rec)
 
 
 if __name__ == "__main__":

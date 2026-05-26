@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+import stat
 import subprocess
 import sys
 import tempfile
@@ -53,6 +54,34 @@ class InstinctObserverHookTests(unittest.TestCase):
             self.assertFalse(rec["err"])
             self.assertIsNone(rec["err_source"])
             self.assertTrue(rec["stderr_nonempty"])
+            if os.name == "posix":
+                log = home / ".cache/agent-bridge/instinct-probe/observations.jsonl"
+                log_dir = log.parent
+                self.assertEqual(stat.S_IMODE(log_dir.stat().st_mode), 0o700)
+                self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
+
+    @unittest.skipIf(os.name != "posix", "POSIX permissions only")
+    def test_existing_sidecar_permissions_are_tightened(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = pathlib.Path(tmp)
+            log_dir = home / ".cache/agent-bridge/instinct-probe"
+            log_dir.mkdir(parents=True)
+            log = log_dir / "observations.jsonl"
+            log.write_text("", encoding="utf-8")
+            log_dir.chmod(0o775)
+            log.chmod(0o664)
+
+            run_hook(
+                home,
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "session_id": "s1",
+                    "cwd": str(ROOT),
+                    "prompt": "hello",
+                },
+            )
+            self.assertEqual(stat.S_IMODE(log_dir.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
 
     def test_explicit_nonzero_exit_code_is_error(self):
         with tempfile.TemporaryDirectory() as tmp:

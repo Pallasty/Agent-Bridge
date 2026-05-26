@@ -69,3 +69,9 @@ ECC 的 `ECC_HOOK_PROFILE=minimal|standard|strict` 是上述 toggle 的**便利�
 as read-only operational state. Missing or empty logs are not warnings: the
 probe is optional, and `NO_SIGNAL` / `INSUFFICIENT_SESSIONS` should block miner
 work rather than block normal Agent-Bridge startup.
+
+Security posture: the observer sidecar is local-only and private by default.
+The hook creates `~/.cache/agent-bridge/instinct-probe` as `0700` and
+`observations.jsonl` as `0600`, and `doctor` warns if an older file keeps wider
+permissions. The sidecar may contain prompt/tool summaries, so do not make it
+group/world-readable.

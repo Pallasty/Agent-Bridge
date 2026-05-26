@@ -165,6 +165,16 @@ observer(`ab-instinct-observer-hook`)累计 5 distinct session、585 records,`sc
 - 复跑历史 659 records / 5 sessions:clean mean/session **0.8** → `NO_SIGNAL`;legacy upper-bound mean/session **6.2** → `DENSITY_OK`,由 **44** 条 untrusted legacy errors 支撑。该对照固定为“传感器 artifact”证据。
 - 新增 Python 单测覆盖 stderr-success 不算 error、非零 exit code 算 clean error、审计脚本分离 clean/legacy。
 
+### RNET-6 sidecar 权限硬化(2026-05-26)
+
+借 rustnet “先预创建输出,再收紧边界”的安全姿势,observer sidecar 做最小硬化:
+
+- hook 创建/修正 `~/.cache/agent-bridge/instinct-probe` 为 `0700`。
+- hook 创建/修正 `observations.jsonl` 为 `0600`。
+- `agent-bridge doctor` / `capabilities.hooks.instinct_observer` 暴露 `permissions_ok`,
+  `log_dir_mode_octal`, `log_mode_octal`;旧的 `775/664` 会被 doctor warn。
+- 仍不引入网络/exec 沙箱,避免扩大改动面;本轮只解决本地日志隐私边界。
+
 ## 与 v22/⑤ 的关系
 
 正交于 substrate-recall（⑤ 已证伪 NO_RECALL_ADVANTAGE，是 *embedding 检索*；本条是 *behavioral 挖掘*）。这是 synaptic vision §α「突触痕迹」里**行为侧**最虚一块的具体、低摩擦、可证伪落地路径——且复用既有 feedback/error_pattern/L5 基建，工程量集中在「自动检测」一处。
