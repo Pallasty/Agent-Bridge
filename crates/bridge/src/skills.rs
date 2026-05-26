@@ -820,8 +820,9 @@ fn print_count_map(label: &str, map: &BTreeMap<String, usize>) {
 /// Install an indexed skill into `~/.claude/skills/<name>/` by re-cloning
 /// the source repo and copying the original SKILL.md (plus siblings, for
 /// canonical-layout skills that ship scripts/data). With `assume_yes`,
-/// skips the lint-warning confirmation prompt.
-pub async fn run_install(key: &str, assume_yes: bool) -> Result<()> {
+/// skips lint/risk/destination confirmation prompts. With `dry_run`, only
+/// prints the plan and performs no clone/copy/write.
+pub async fn run_install(key: &str, assume_yes: bool, dry_run: bool) -> Result<()> {
     let store = open_store().await?;
     let rec = store
         .memory_get(key)
@@ -837,17 +838,61 @@ pub async fn run_install(key: &str, assume_yes: bool) -> Result<()> {
         )
     })?;
     let lint_tag = tag_value(&rec.tags, "lint:").unwrap_or_else(|| "lint:?".to_string());
+    let risks = tag_values(&rec.tags, "risk:");
+    let approval_risks = install_approval_risks(&risks);
     let dest_name = derive_flat_name(key, &rel);
     let dest_root = claude_skills_dir()?;
     let dest = dest_root.join(&dest_name);
 
-    eprintln!("[install] {} → {}", key, dest.display(),);
-    eprintln!("[install]   source: {} : {}", src_to_clone_url(&src), rel);
+    eprintln!(
+        "[install{}] {} → {}",
+        if dry_run { " dry-run" } else { "" },
+        key,
+        dest.display(),
+    );
+    eprintln!("[install]   source: {}", src_to_clone_url(&src));
+    eprintln!("[install]   path:   {}", rel);
     eprintln!("[install]   lint:   {}", lint_tag);
-    if (lint_tag.starts_with("lint:warn:") || lint_tag.starts_with("lint:danger:")) && !assume_yes {
+    eprintln!(
+        "[install]   risks:  {}",
+        if risks.is_empty() {
+            "none".to_string()
+        } else {
+            risks.join(",")
+        }
+    );
+    eprintln!(
+        "[install]   dest:   {}",
+        if dest.exists() { "exists" } else { "new" }
+    );
+    if dry_run {
+        if lint_requires_approval(&lint_tag) {
+            eprintln!("[install]   gate: lint requires --yes for real install");
+        }
+        if !approval_risks.is_empty() {
+            eprintln!(
+                "[install]   gate: operational risks require --yes for real install: {}",
+                approval_risks.join(",")
+            );
+        }
+        if dest.exists() {
+            eprintln!("[install]   gate: existing destination requires --yes for overwrite");
+        }
+        eprintln!("[install] dry-run complete; no clone/copy/write performed.");
+        return Ok(());
+    }
+    if lint_requires_approval(&lint_tag) && !assume_yes {
         eprintln!("[install]   skill flagged by lint — review SKILL.md before approving.");
         eprintln!("[install]   re-run with `--yes` to install anyway.");
         bail!("aborted: lint flags require explicit --yes");
+    }
+    if !approval_risks.is_empty() && !assume_yes {
+        eprintln!(
+            "[install]   operational risk tags require review: {}",
+            approval_risks.join(",")
+        );
+        eprintln!("[install]   re-run with `--yes` to install anyway.");
+        bail!("aborted: operational risk tags require explicit --yes");
     }
     if dest.exists() && !assume_yes {
         eprintln!("[install]   destination already exists: {}", dest.display());
@@ -897,6 +942,27 @@ pub async fn run_install(key: &str, assume_yes: bool) -> Result<()> {
     let _ = std::fs::remove_dir_all(&clone_dir);
     eprintln!("[install] done");
     Ok(())
+}
+
+fn lint_requires_approval(lint_tag: &str) -> bool {
+    let lint_tag = lint_tag.strip_prefix("lint:").unwrap_or(lint_tag);
+    lint_tag.starts_with("warn:") || lint_tag.starts_with("danger:")
+}
+
+fn install_approval_risks(risks: &[String]) -> Vec<String> {
+    const NEEDS_YES: &[&str] = &[
+        "checkpoint_write",
+        "finetune_write",
+        "model_download",
+        "network_fetch",
+        "pip_install",
+        "server_start",
+    ];
+    risks
+        .iter()
+        .filter(|r| NEEDS_YES.contains(&r.as_str()))
+        .cloned()
+        .collect()
 }
 
 fn tag_value(tags: &[String], prefix: &str) -> Option<String> {
@@ -1916,6 +1982,44 @@ mod tests {
         );
         assert_eq!(tag_value(&tags, "path:"), Some("pdf/SKILL.md".to_string()));
         assert_eq!(tag_value(&tags, "missing:"), None);
+    }
+
+    #[test]
+    fn install_lint_gate_accepts_stripped_or_full_lint_tags() {
+        assert!(!lint_requires_approval("clean"));
+        assert!(!lint_requires_approval("lint:clean"));
+        assert!(lint_requires_approval("warn:1"));
+        assert!(lint_requires_approval("lint:warn:1"));
+        assert!(lint_requires_approval("danger:2"));
+        assert!(lint_requires_approval("lint:danger:2"));
+    }
+
+    #[test]
+    fn install_approval_risks_only_flags_writey_or_network_actions() {
+        let risks = vec![
+            "apple_mlx".to_string(),
+            "checkpoint_write".to_string(),
+            "finetune_write".to_string(),
+            "gpu_required".to_string(),
+            "model_download".to_string(),
+            "network_fetch".to_string(),
+            "pip_install".to_string(),
+            "server_start".to_string(),
+        ];
+        assert_eq!(
+            install_approval_risks(&risks),
+            vec![
+                "checkpoint_write",
+                "finetune_write",
+                "model_download",
+                "network_fetch",
+                "pip_install",
+                "server_start",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+        );
     }
 
     #[test]

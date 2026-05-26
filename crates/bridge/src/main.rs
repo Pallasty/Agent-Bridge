@@ -2364,6 +2364,9 @@ enum SkillsOp {
         /// Skip lint-warning and overwrite confirmation prompts.
         #[arg(long, short = 'y')]
         yes: bool,
+        /// Preview source, destination, lint, and risk gates without writing files.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -2620,7 +2623,9 @@ async fn main() -> Result<()> {
                 .await
             }
             SkillsOp::Show { key, json } => skills::run_show(key, *json).await,
-            SkillsOp::Install { key, yes } => skills::run_install(key, *yes).await,
+            SkillsOp::Install { key, yes, dry_run } => {
+                skills::run_install(key, *yes, *dry_run).await
+            }
         };
     }
 

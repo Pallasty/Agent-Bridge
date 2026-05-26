@@ -146,6 +146,20 @@ The audit command supports composable filters:
 - `--vendor <vendor-class>`
 - `--limit <n>` (`0` means all matched records)
 
+`skills install <key> --dry-run` is the install preview gate. It prints the
+resolved source, original path, destination name, lint tag, operational risk
+tags, and any approval gates without cloning, copying, or writing files. A real
+install requires `--yes` when any of these are true:
+
+- lint is `warn:*` or `danger:*`;
+- destination already exists;
+- operational risks include `pip_install`, `network_fetch`, `model_download`,
+  `server_start`, `checkpoint_write`, or `finetune_write`.
+
+Hardware/context tags such as `apple_mlx` and `gpu_required` remain review
+signals, but do not by themselves force `--yes`; they are not write/network
+actions.
+
 Re-indexed MiniCPM5 examples:
 
 - `minicpm5-deploy-mlx`: `lint:clean`, `git_branch:minicpm5`,
@@ -283,6 +297,7 @@ Stop or narrow the work if:
 
 ## Immediate Next Step
 
-Use `agent-bridge skills audit --json` as the gate before any external Skill
-install decision. Keep MiniCPM5 skill execution/install gated behind explicit
-human approval.
+Use `agent-bridge skills audit --json` first, then
+`agent-bridge skills install <key> --dry-run`, before any external Skill install
+decision. Keep MiniCPM5 skill execution/install gated behind explicit human
+approval.
