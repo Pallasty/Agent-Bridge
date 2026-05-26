@@ -308,6 +308,37 @@ fn vbool(value: Option<&Value>) -> Option<bool> {
     value.and_then(Value::as_bool)
 }
 
+pub(crate) fn shell_quote_cli_arg(value: &str) -> String {
+    if !value.is_empty()
+        && value.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || matches!(ch, '-' | '_' | '.' | '/' | ':' | '@' | '+' | '=')
+        })
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+pub(crate) fn xiao_shu_action_request_action_command(
+    project: &str,
+    request_id: &str,
+    reason: &str,
+    action_flag: Option<&str>,
+) -> String {
+    let mut command = format!(
+        "agent-bridge avatar xiao-shu-action-request-action --project {} --request-id {} --reason {} --confirm",
+        shell_quote_cli_arg(project),
+        shell_quote_cli_arg(request_id),
+        shell_quote_cli_arg(reason)
+    );
+    if let Some(flag) = action_flag {
+        command.push(' ');
+        command.push_str(flag);
+    }
+    command
+}
+
 fn read_json(path: &Path) -> Value {
     std::fs::read_to_string(path)
         .ok()
@@ -1170,12 +1201,14 @@ fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
                 "should this ever pair with sparse voice output"
             ],
             "latest_human_feedback": {
-                "source": "desktop_visual_review_2026_05_22_sidecar_peek_v4",
-                "outcome": "accept_visual_motion_candidate",
+                "source": "desktop_visual_review_2026_05_26_sidecar_ai_peek_v2",
+                "outcome": "accept_grounded_ai_motion_candidate",
                 "notes": [
                     "sidecar_peek_v2_is_clear_raised_hand_motion_baseline",
                     "sidecar_peek_v4_restores_xiao_shu_identity_cues",
                     "motion_canonical_v4_reads_correctly",
+                    "sidecar_ai_peek_v2_fixes_floating_entry_and_exit_frames",
+                    "grounded_ai_frame_sequence_reads_correct",
                     "voice_linkage_desired",
                     "no_official_pet_package_mutation"
                 ]
@@ -1187,14 +1220,15 @@ fn avatar_cortex_renderer_mapping(renderer_token: &str) -> Value {
                 "add slight outline and body weight only in alert state",
                 "reduce alert-state body brightness without changing other tracks",
                 "keep voice linkage as future sparse voice design, not immediate emit",
-                "add sidecar_peek_v4 as the accepted motion-canonical visual candidate using the sidecar_peek_v2 raised-hand skeleton"
+                "add sidecar_peek_v4 as the accepted motion-canonical visual candidate using the sidecar_peek_v2 raised-hand skeleton",
+                "promote sidecar_ai_peek_v2 as the grounded visual baseline after human review accepted the generated frame sequence"
             ],
             "voice_linkage": {
                 "requested": true,
                 "policy": "future_sparse_voice_after_visual_re_review",
                 "emits_audio_now": false
             },
-            "recommended_next_step": "use sidecar_peek_v4 as the alert_peek visual baseline before any sparse voice or binding approval design"
+            "recommended_next_step": "use sidecar_ai_peek_v2 as the alert_peek visual baseline before any sparse voice or binding approval design"
         }),
         _ => json!({
             "schema": 1,
@@ -2346,7 +2380,7 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "sprite_row": 0,
                 "sprite_frames": 8,
                 "alert_mark": true,
-                "default": true,
+                "default": false,
                 "intent": "motion-canonical redraw that keeps the readable v2 raised-hand geometry while adding Xiao Shu paper-charm identity cues",
                 "sidecar_asset": {
                     "asset_id": "xiao-shu-motion-canonical-peek-v4",
@@ -2431,7 +2465,7 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "sprite_row": 0,
                 "sprite_frames": 8,
                 "alert_mark": false,
-                "default": false,
+                "default": true,
                 "intent": "AI-generated Xiao Shu identity pass with grounded entry and exit frames so the peek reads from the lower edge instead of floating",
                 "sidecar_asset": {
                     "asset_id": "xiao-shu-ai-alert-peek-v2",
@@ -2545,6 +2579,68 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
     }
 }
 
+fn avatar_cortex_alert_peek_voice_script() -> Value {
+    json!({
+        "schema": 1,
+        "script_id": "xiao_shu_alert_peek_sparse_voice_v1",
+        "line_mode": "curated_variants_only",
+        "primary_cue_id": "soft_attention_needed",
+        "primary_line": "小舒发现一点需要你看一下。",
+        "cue_bank": [
+            {
+                "cue_id": "soft_attention_needed",
+                "tone": "gentle_attention",
+                "line": "小舒发现一点需要你看一下。",
+                "use_when": "accepted alert_peek visual cue needs one soft operator prompt"
+            },
+            {
+                "cue_id": "signal_needs_attention",
+                "tone": "quiet_notice",
+                "line": "小舒看到一个需要注意的信号。",
+                "use_when": "the underlying signal is concrete but not urgent"
+            },
+            {
+                "cue_id": "quick_look",
+                "tone": "short_prompt",
+                "line": "这里可能需要你看一眼。",
+                "use_when": "the operator is active and a shorter line is less disruptive"
+            }
+        ],
+        "llm_message_policy": {
+            "message_allowed": true,
+            "message_role": "context_note_only",
+            "message_can_replace_utterance": false,
+            "message_can_add_new_line": false,
+            "operator_reason_still_required": true,
+            "why": "LLM callers may explain why they are requesting attention, but the spoken line stays in the curated cue bank until a human expands it."
+        },
+        "trigger_policy": {
+            "manual_cli_only": true,
+            "auto_emit_allowed": false,
+            "http_emit_route_allowed": false,
+            "min_risk_level": "medium",
+            "speak_on": [
+                "operator_confirms_attention_request",
+                "policy_allows_manual_cli_emit",
+                "cooldown_clear"
+            ],
+            "never_on": [
+                "healthy_unchanged_loop",
+                "visual_review_only",
+                "llm_request_without_human_confirmation",
+                "missing_operator_reason"
+            ],
+            "cooldown_secs": 300
+        },
+        "delivery": {
+            "suggested_voice": "Flo",
+            "suggested_rate": 190,
+            "max_line_chars": 18,
+            "style": "light_childlike_but_not_alarmist"
+        }
+    })
+}
+
 fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
     let token = vstr(preview.get("token")).unwrap_or("xiao_shu::unknown");
     let source_frames = preview
@@ -2617,20 +2713,21 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
                 "schema": 1,
                 "surface": "alert_peek_semantic_variant_review",
                 "read_only": true,
-                "default_variant": "sidecar_peek_v4",
-                "preferred_variant": "sidecar_peek_v4",
-                "human_review_status": "visual_motion_candidate_accepted",
+                "default_variant": "sidecar_ai_peek_v2",
+                "preferred_variant": "sidecar_ai_peek_v2",
+                "human_review_status": "grounded_ai_motion_candidate_accepted",
                 "voice_linkage_preview": {
                     "schema": 1,
                     "surface": "alert_peek_voice_linkage_preview",
                     "read_only": true,
-                    "selected_variant": "sidecar_peek_v4",
+                    "selected_variant": "sidecar_ai_peek_v2",
                     "intent": "pair the accepted visual attention cue with a sparse spoken prompt after an explicit gate",
                     "utterance": "小舒发现一点需要你看一下。",
                     "alternatives": [
                         "小舒看到一个需要注意的信号。",
                         "这里可能需要你看一眼。"
                     ],
+                    "voice_script": avatar_cortex_alert_peek_voice_script(),
                     "voice": {
                         "allowed_now": false,
                         "reason": "visual_linkage_preview_only",
@@ -2654,7 +2751,7 @@ fn avatar_cortex_renderer_view_track(preview: &Value, index: usize) -> Value {
                 "persists_record": false,
                 "can_promote_binding": false,
                 "emits_audio": false,
-                "next_step": "keep sidecar_peek_v4 as the alert_peek visual baseline before choosing any binding or sparse voice cue",
+                "next_step": "use sidecar_ai_peek_v2 as the alert_peek visual baseline before choosing any binding or sparse voice cue",
             })
         } else {
             Value::Null
@@ -4237,12 +4334,28 @@ fn avatar_cortex_voice_policy_rule_from_track(track: &Value) -> Value {
         .unwrap_or("-");
     let visual_intent = vstr(track.get("visual_intent")).unwrap_or("-");
     let utterance = vstr(voice_linkage.get("utterance"));
+    let voice_script = voice_linkage
+        .get("voice_script")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let cue_id = voice_script
+        .get("primary_cue_id")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let caller_message_policy = voice_script
+        .get("llm_message_policy")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let trigger_policy = voice_script
+        .get("trigger_policy")
+        .cloned()
+        .unwrap_or(Value::Null);
     let dry_run_route = voice_linkage
         .get("gate")
         .and_then(|gate| gate.get("dry_run_route"))
         .cloned()
         .unwrap_or(Value::Null);
-    let real_emit_allowed = has_voice_linkage && default_variant == "sidecar_peek_v4";
+    let real_emit_allowed = has_voice_linkage && default_variant == "sidecar_ai_peek_v2";
     let mode = match token {
         "xiao_shu::idle_breathe::low" => "silent_presence",
         "xiao_shu::soft_bounce::low" => "visual_only_completion",
@@ -4289,6 +4402,10 @@ fn avatar_cortex_voice_policy_rule_from_track(track: &Value) -> Value {
         } else {
             "none"
         },
+        "cue_id": cue_id,
+        "voice_script": voice_script,
+        "caller_message_policy": caller_message_policy,
+        "trigger_policy": trigger_policy,
         "dry_run_route": dry_run_route,
         "suggested_voice": if real_emit_allowed { json!("Flo (中文（中国大陆）)") } else { Value::Null },
         "suggested_rate": if real_emit_allowed { json!(190) } else { Value::Null },
@@ -4536,64 +4653,99 @@ fn avatar_cortex_voice_request_from_policy_payload(
         .get("dry_run_route")
         .cloned()
         .unwrap_or(Value::Null);
+    let voice_script = selected_rule
+        .get("voice_script")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let caller_message_policy = selected_rule
+        .get("caller_message_policy")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let cue_id = selected_rule.get("cue_id").cloned().unwrap_or(Value::Null);
+    let policy_route = policy
+        .get("html_route")
+        .cloned()
+        .unwrap_or_else(|| json!("/avatar-surface/cortex-voice-policy"));
+    let line_value = if line.is_empty() {
+        Value::Null
+    } else {
+        json!(line)
+    };
+    let line_selection = json!({
+        "mode": "curated_cue_bank",
+        "llm_can_replace_utterance": false,
+        "operator_can_choose_alternative": true,
+        "requires_human_expansion_for_new_lines": true
+    });
+    let visual_variant = selected_rule
+        .get("visual_variant")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let mode_value = selected_rule.get("mode").cloned().unwrap_or(Value::Null);
+    let display_allowed = selected_rule
+        .get("display_allowed")
+        .cloned()
+        .unwrap_or_else(|| json!(false));
+    let requires_policy_override = selected_rule
+        .get("requires_policy_override")
+        .cloned()
+        .unwrap_or_else(|| json!(manual_cli_allowed));
+    let real_emit_surface = selected_rule
+        .get("real_emit_surface")
+        .cloned()
+        .unwrap_or_else(|| json!("agent-bridge avatar cortex-voice-emit"));
+    let approval = json!({
+        "writes_approval": false,
+        "persists_request_record": false,
+        "records_persisted": false,
+        "approval_writes_allowed": false
+    });
+    let safety = json!({
+        "read_only": true,
+        "dry_run": true,
+        "emits_audio": false,
+        "auto_emit_allowed": false,
+        "http_emit_route_added": false,
+        "cli_only_real_emit": true,
+        "codex_pet_package_mutation_allowed": false
+    });
 
     let request = json!({
         "schema": 1,
         "input": "avatar_cortex_voice_policy.voice_policy.rules",
         "html_route": "/avatar-surface/cortex-voice-request",
-        "policy_route": policy
-            .get("html_route")
-            .cloned()
-            .unwrap_or_else(|| json!("/avatar-surface/cortex-voice-policy")),
+        "policy_route": policy_route,
         "request_state": request_state,
         "project": project,
         "requested_track": requested_track,
         "selected_token": token,
-        "line": if line.is_empty() { Value::Null } else { json!(line) },
-        "visual_variant": selected_rule.get("visual_variant").cloned().unwrap_or(Value::Null),
-        "mode": selected_rule.get("mode").cloned().unwrap_or(Value::Null),
+        "line": line_value,
+        "cue_id": cue_id,
+        "voice_script": voice_script,
+        "caller_message_policy": caller_message_policy,
+        "line_selection": line_selection,
+        "visual_variant": visual_variant,
+        "mode": mode_value,
         "manual_cli_emit_allowed": manual_cli_allowed,
         "auto_emit_allowed": auto_emit_allowed,
-        "display_allowed": selected_rule
-            .get("display_allowed")
-            .cloned()
-            .unwrap_or_else(|| json!(false)),
+        "display_allowed": display_allowed,
         "requires_second_step": true,
         "requires_operator_confirmation": true,
         "requires_operator_reason": true,
         "operator_reason_present": operator_reason.is_some(),
         "operator_reason": operator_reason,
         "suggested_reason": suggested_reason,
-        "requires_policy_override": selected_rule
-            .get("requires_policy_override")
-            .cloned()
-            .unwrap_or_else(|| json!(manual_cli_allowed)),
+        "requires_policy_override": requires_policy_override,
         "cooldown_secs": cooldown_secs,
         "suggested_voice": voice,
         "suggested_rate": rate,
         "dry_run_route": dry_run_route,
-        "real_emit_surface": selected_rule
-            .get("real_emit_surface")
-            .cloned()
-            .unwrap_or_else(|| json!("agent-bridge avatar cortex-voice-emit")),
+        "real_emit_surface": real_emit_surface,
         "http_emit_route": Value::Null,
         "command_args": command_args,
         "command_preview": command_preview,
-        "approval": {
-            "writes_approval": false,
-            "persists_request_record": false,
-            "records_persisted": false,
-            "approval_writes_allowed": false,
-        },
-        "safety": {
-            "read_only": true,
-            "dry_run": true,
-            "emits_audio": false,
-            "auto_emit_allowed": false,
-            "http_emit_route_added": false,
-            "cli_only_real_emit": true,
-            "codex_pet_package_mutation_allowed": false,
-        },
+        "approval": approval,
+        "safety": safety,
         "next_step": "operator can copy the CLI args into a future explicit emit step, or a future slash command can present the same request",
     });
 
@@ -4719,75 +4871,130 @@ fn avatar_cortex_voice_confirm_from_request_payload(
     } else {
         Value::Null
     };
+    let request_route = request
+        .get("html_route")
+        .cloned()
+        .unwrap_or_else(|| json!("/avatar-surface/cortex-voice-request"));
+    let selected_token_value = request
+        .get("selected_token")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let line_value = request.get("line").cloned().unwrap_or(Value::Null);
+    let cue_id = request.get("cue_id").cloned().unwrap_or(Value::Null);
+    let voice_script = request.get("voice_script").cloned().unwrap_or(Value::Null);
+    let caller_message_policy = request
+        .get("caller_message_policy")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let line_selection = request
+        .get("line_selection")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let visual_variant = request
+        .get("visual_variant")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let auto_emit_allowed = request
+        .get("auto_emit_allowed")
+        .cloned()
+        .unwrap_or_else(|| json!(false));
+    let operator_reason_value = request
+        .get("operator_reason")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let suggested_reason = request
+        .get("suggested_reason")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let suggested_voice_value = request
+        .get("suggested_voice")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let suggested_rate_value = request
+        .get("suggested_rate")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let command_args = if would_execute_cli {
+        request.get("command_args").cloned().unwrap_or(Value::Null)
+    } else {
+        Value::Null
+    };
+    let command_preview = if would_execute_cli {
+        request
+            .get("command_preview")
+            .cloned()
+            .unwrap_or(Value::Null)
+    } else {
+        Value::Null
+    };
+    let action_command_args_ready = if would_execute_cli {
+        action_command_args.clone()
+    } else {
+        Value::Null
+    };
+    let action_command_preview_ready = if would_execute_cli {
+        action_command_preview.clone()
+    } else {
+        Value::Null
+    };
+    let pending_command_args = request.get("command_args").cloned().unwrap_or(Value::Null);
+    let pending_command_preview = request
+        .get("command_preview")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let approval = json!({
+        "writes_approval": false,
+        "persists_confirmation_record": false,
+        "records_persisted": false,
+        "approval_writes_allowed": false
+    });
+    let safety = json!({
+        "read_only": true,
+        "dry_run": true,
+        "emits_audio": false,
+        "would_emit_audio": false,
+        "auto_emit_allowed": false,
+        "http_emit_route_added": false,
+        "cli_only_real_emit": true,
+        "codex_pet_package_mutation_allowed": false
+    });
 
     let voice_confirm = json!({
         "schema": 1,
         "input": "avatar_cortex_voice_request.voice_request",
         "html_route": "/avatar-surface/cortex-voice-confirm",
-        "request_route": request
-            .get("html_route")
-            .cloned()
-            .unwrap_or_else(|| json!("/avatar-surface/cortex-voice-request")),
+        "request_route": request_route,
         "confirmation_state": confirmation_state,
         "confirm_requested": confirm,
         "would_execute_cli": would_execute_cli,
         "would_emit_audio": false,
         "actual_execution_available_here": false,
-        "selected_token": request.get("selected_token").cloned().unwrap_or(Value::Null),
-        "line": request.get("line").cloned().unwrap_or(Value::Null),
-        "visual_variant": request.get("visual_variant").cloned().unwrap_or(Value::Null),
+        "selected_token": selected_token_value,
+        "line": line_value,
+        "cue_id": cue_id,
+        "voice_script": voice_script,
+        "caller_message_policy": caller_message_policy,
+        "line_selection": line_selection,
+        "visual_variant": visual_variant,
         "manual_cli_emit_allowed": manual_cli_allowed,
-        "auto_emit_allowed": request
-            .get("auto_emit_allowed")
-            .cloned()
-            .unwrap_or_else(|| json!(false)),
+        "auto_emit_allowed": auto_emit_allowed,
         "operator_reason_present": operator_reason_present,
-        "operator_reason": request.get("operator_reason").cloned().unwrap_or(Value::Null),
-        "suggested_reason": request.get("suggested_reason").cloned().unwrap_or(Value::Null),
-        "suggested_voice": request.get("suggested_voice").cloned().unwrap_or(Value::Null),
-        "suggested_rate": request.get("suggested_rate").cloned().unwrap_or(Value::Null),
+        "operator_reason": operator_reason_value,
+        "suggested_reason": suggested_reason,
+        "suggested_voice": suggested_voice_value,
+        "suggested_rate": suggested_rate_value,
         "http_emit_route": Value::Null,
-        "command_args": if would_execute_cli {
-            request.get("command_args").cloned().unwrap_or(Value::Null)
-        } else {
-            Value::Null
-        },
-        "command_preview": if would_execute_cli {
-            request.get("command_preview").cloned().unwrap_or(Value::Null)
-        } else {
-            Value::Null
-        },
+        "command_args": command_args,
+        "command_preview": command_preview,
         "action_surface": "agent-bridge avatar cortex-voice-action",
-        "action_command_args": if would_execute_cli {
-            action_command_args.clone()
-        } else {
-            Value::Null
-        },
-        "action_command_preview": if would_execute_cli {
-            action_command_preview.clone()
-        } else {
-            Value::Null
-        },
-        "pending_command_args": request.get("command_args").cloned().unwrap_or(Value::Null),
-        "pending_command_preview": request.get("command_preview").cloned().unwrap_or(Value::Null),
+        "action_command_args": action_command_args_ready,
+        "action_command_preview": action_command_preview_ready,
+        "pending_command_args": pending_command_args,
+        "pending_command_preview": pending_command_preview,
         "pending_action_command_args": action_command_args,
         "pending_action_command_preview": action_command_preview,
-        "approval": {
-            "writes_approval": false,
-            "persists_confirmation_record": false,
-            "records_persisted": false,
-            "approval_writes_allowed": false,
-        },
-        "safety": {
-            "read_only": true,
-            "dry_run": true,
-            "emits_audio": false,
-            "would_emit_audio": false,
-            "auto_emit_allowed": false,
-            "http_emit_route_added": false,
-            "cli_only_real_emit": true,
-            "codex_pet_package_mutation_allowed": false,
-        },
+        "approval": approval,
+        "safety": safety,
         "next_step": "future slash command or panel action can display this dry-run confirmation before invoking the CLI-only emit gate",
     });
 
@@ -5386,6 +5593,16 @@ fn avatar_cortex_voice_action_from_confirm_payload(
     let confirmed = confirmation_state == "would_execute_cli_emit_if_operator_runs_command";
     let operator_reason = opts.reason.map(str::trim).filter(|s| !s.is_empty());
     let line = vstr(confirm.get("line")).unwrap_or("").to_string();
+    let cue_id = confirm.get("cue_id").cloned().unwrap_or(Value::Null);
+    let voice_script = confirm.get("voice_script").cloned().unwrap_or(Value::Null);
+    let caller_message_policy = confirm
+        .get("caller_message_policy")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let line_selection = confirm
+        .get("line_selection")
+        .cloned()
+        .unwrap_or(Value::Null);
     let selected_token = vstr(confirm.get("selected_token")).unwrap_or("xiao_shu::unknown");
     let project = opts.project.unwrap_or_else(|| {
         vstr(confirm.get("project"))
@@ -5494,6 +5711,10 @@ fn avatar_cortex_voice_action_from_confirm_payload(
             "blocked_reasons": blocked_reasons,
             "selected_token": selected_token,
             "line": line,
+            "cue_id": cue_id,
+            "voice_script": voice_script,
+            "caller_message_policy": caller_message_policy,
+            "line_selection": line_selection,
             "reason_present": operator_reason.is_some(),
             "allow_policy_override": actual_emit_invoked,
             "cooldown_secs": opts.cooldown_secs,
@@ -5536,6 +5757,16 @@ fn avatar_cortex_voice_action_preview_from_confirm_payload(
     let confirmed = confirmation_state == "would_execute_cli_emit_if_operator_runs_command";
     let operator_reason = opts.reason.map(str::trim).filter(|s| !s.is_empty());
     let line = vstr(confirm.get("line")).unwrap_or("");
+    let cue_id = confirm.get("cue_id").cloned().unwrap_or(Value::Null);
+    let voice_script = confirm.get("voice_script").cloned().unwrap_or(Value::Null);
+    let caller_message_policy = confirm
+        .get("caller_message_policy")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let line_selection = confirm
+        .get("line_selection")
+        .cloned()
+        .unwrap_or(Value::Null);
     let selected_token = vstr(confirm.get("selected_token")).unwrap_or("xiao_shu::unknown");
     let project = opts.project.unwrap_or_else(|| {
         confirm_payload
@@ -5657,6 +5888,10 @@ fn avatar_cortex_voice_action_preview_from_confirm_payload(
             "blocked_reasons": blocked_reasons,
             "selected_token": selected_token,
             "line": line,
+            "cue_id": cue_id,
+            "voice_script": voice_script,
+            "caller_message_policy": caller_message_policy,
+            "line_selection": line_selection,
             "reason_present": operator_reason.is_some(),
             "allow_policy_override": true,
             "tts_voice": tts_voice,
@@ -5746,6 +5981,67 @@ fn xiao_shu_action_intent_supported(intent: &str) -> bool {
         intent,
         "voice_alert" | "alert_peek" | "attention" | "review_attention" | "xiao_shu_alert_peek"
     )
+}
+
+fn push_unique_reason(reasons: &mut Vec<String>, reason: impl Into<String>) {
+    let reason = reason.into();
+    if !reasons.iter().any(|existing| existing == &reason) {
+        reasons.push(reason);
+    }
+}
+
+fn xiao_shu_action_pending_request_block_reasons(
+    request: &Value,
+    fallback_record: Option<&Value>,
+    require_request_state: bool,
+) -> Vec<String> {
+    let mut reasons = Vec::new();
+    let intent = vstr(request.get("intent"))
+        .or_else(|| fallback_record.and_then(|record| vstr(record.get("intent"))))
+        .unwrap_or("voice_alert");
+    if !xiao_shu_action_intent_supported(intent) {
+        push_unique_reason(&mut reasons, "unsupported_intent");
+    }
+    if matches!(vbool(request.get("supported_intent")), Some(false)) {
+        push_unique_reason(&mut reasons, "unsupported_intent");
+    }
+    if matches!(vbool(request.get("direct_llm_emit_allowed")), Some(true)) {
+        push_unique_reason(&mut reasons, "direct_llm_emit_allowed");
+    }
+
+    match vstr(request.get("request_state")) {
+        Some("requires_human_confirmation") => {}
+        Some(state) => push_unique_reason(
+            &mut reasons,
+            format!("request_state_not_enqueueable:{state}"),
+        ),
+        None if require_request_state => push_unique_reason(&mut reasons, "missing_request_state"),
+        None => {}
+    }
+
+    if let Some(blocked) = request.get("blocked_reasons").and_then(Value::as_array) {
+        for reason in blocked.iter().filter_map(Value::as_str) {
+            if !matches!(
+                reason,
+                "human_confirmation_required" | "confirm_flag_missing"
+            ) {
+                push_unique_reason(&mut reasons, format!("downstream_blocked:{reason}"));
+            }
+        }
+    }
+    reasons
+}
+
+fn xiao_shu_action_request_enqueue_block_reasons(request_payload: &Value) -> Vec<String> {
+    let request = request_payload
+        .get("action_request")
+        .unwrap_or(&Value::Null);
+    xiao_shu_action_pending_request_block_reasons(request, None, true)
+}
+
+fn xiao_shu_action_queue_record_action_block_reasons(record: &Value) -> Vec<String> {
+    let request = record.get("action_request").unwrap_or(&Value::Null);
+    xiao_shu_action_pending_request_block_reasons(request, Some(record), false)
 }
 
 fn strip_recursive_provenance(value: &Value) -> Value {
@@ -5882,22 +6178,41 @@ fn xiao_shu_action_request_from_preview(
     } else {
         "confirmed_but_blocked"
     };
+    let project_arg = shell_quote_cli_arg(project);
+    let track_arg = shell_quote_cli_arg(track);
+    let actor_arg = shell_quote_cli_arg(actor);
+    let intent_arg = shell_quote_cli_arg(intent);
+    let reason_arg = shell_quote_cli_arg(reason);
     let preview_command = format!(
-        "agent-bridge avatar cortex-voice-action-preview --project {project} --track {track:?} --reason {reason:?} --confirm"
+        "agent-bridge avatar cortex-voice-action-preview --project {project_arg} --track {track_arg} --reason {reason_arg} --confirm"
     );
     let message_arg = message
-        .map(|message| format!(" --message {message:?}"))
+        .map(|message| format!(" --message {}", shell_quote_cli_arg(message)))
         .unwrap_or_default();
     let request_command = format!(
-        "agent-bridge avatar xiao-shu-action-request --project {project} --actor {actor:?} --intent {intent:?}{message_arg} --reason {reason:?}"
+        "agent-bridge avatar xiao-shu-action-request --project {project_arg} --actor {actor_arg} --intent {intent_arg}{message_arg} --reason {reason_arg}"
+    );
+    let enqueue_command = format!(
+        "agent-bridge avatar xiao-shu-action-request --project {project_arg} --actor {actor_arg} --intent {intent_arg}{message_arg} --reason {reason_arg} --enqueue"
     );
     let confirm_request_command = format!(
-        "agent-bridge avatar xiao-shu-action-request --project {project} --actor {actor:?} --intent {intent:?}{message_arg} --reason {reason:?} --confirm"
+        "agent-bridge avatar xiao-shu-action-request --project {project_arg} --actor {actor_arg} --intent {intent_arg}{message_arg} --reason {reason_arg} --confirm"
     );
     let emit_command = action
         .get("command_preview")
         .cloned()
         .unwrap_or(Value::Null);
+    let queue_command =
+        format!("agent-bridge avatar xiao-shu-action-requests --project {project_arg}");
+    let queue_panel_path = format!("/avatar-surface/xiao-shu-action-requests?project={project}");
+    let caller_message_policy = action
+        .get("caller_message_policy")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let llm_can_replace_utterance = caller_message_policy
+        .get("message_can_replace_utterance")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let mut blocked_reasons = Vec::<String>::new();
     if !supported_intent {
         blocked_reasons.push("unsupported_intent".to_string());
@@ -5914,6 +6229,41 @@ fn xiao_shu_action_request_from_preview(
     }
     let downstream_action_preview =
         xiao_shu_action_downstream_preview_payload(&action_preview_payload, opts.include_details);
+    let line_value = action.get("line").cloned().unwrap_or(Value::Null);
+    let cue_id = action.get("cue_id").cloned().unwrap_or(Value::Null);
+    let voice_script = action.get("voice_script").cloned().unwrap_or(Value::Null);
+    let line_selection = action.get("line_selection").cloned().unwrap_or(Value::Null);
+    let message_handling = json!({
+        "message_present": message.is_some(),
+        "message_is_context_note_only": message.is_some(),
+        "message_can_replace_utterance": llm_can_replace_utterance,
+        "selected_line_from_curated_bank": line_value.clone(),
+        "requires_human_expansion_for_new_lines": true,
+    });
+    let operator_console_safety = json!({
+        "http_emit_route_allowed": false,
+        "direct_llm_emit_allowed": false,
+        "local_cli_emit_only": true,
+        "message_context_only": message.is_some(),
+    });
+    let operator_console = json!({
+        "mode": "copy_local_cli_command",
+        "workflow": [
+            "preview_request",
+            "enqueue_request_record",
+            "operator_reviews_queue",
+            "operator_runs_confirm_or_emit_command"
+        ],
+        "preview_command": preview_command.clone(),
+        "request_command": request_command.clone(),
+        "enqueue_command": enqueue_command.clone(),
+        "queue_command": queue_command.clone(),
+        "queue_panel_path": queue_panel_path.clone(),
+        "confirm_request_command": confirm_request_command.clone(),
+        "emit_command": emit_command.clone(),
+        "dismiss_command_shape": "agent-bridge avatar xiao-shu-action-request-action --project <project> --request-id <id> --confirm --dismiss",
+        "safety": operator_console_safety,
+    });
     let action_request = json!({
         "target": "xiao-shu",
         "actor": actor,
@@ -5923,7 +6273,12 @@ fn xiao_shu_action_request_from_preview(
         "supported_intent": supported_intent,
         "mapped_surface": "avatar_cortex_voice_action_preview",
         "mapped_track": track,
-        "line": action.get("line").cloned().unwrap_or(Value::Null),
+        "line": line_value,
+        "cue_id": cue_id,
+        "voice_script": voice_script,
+        "caller_message_policy": caller_message_policy,
+        "line_selection": line_selection,
+        "message_handling": message_handling,
         "reason": reason,
         "requires_human_confirmation": true,
         "human_confirmation_present": opts.confirm,
@@ -5933,9 +6288,13 @@ fn xiao_shu_action_request_from_preview(
         "blocked": !supported_intent || !opts.confirm || !downstream_ready,
         "blocked_reasons": blocked_reasons,
         "request_command": request_command,
+        "enqueue_command": enqueue_command,
         "confirm_request_command": confirm_request_command,
+        "queue_command": queue_command,
+        "queue_panel_path": queue_panel_path,
         "preview_command": preview_command,
         "emit_command": emit_command,
+        "operator_console": operator_console,
         "next_step": "show this request to the operator; only a local CLI confirmation may run the emitted command",
     });
     let policy = json!({
@@ -6042,6 +6401,16 @@ fn xiao_shu_action_enqueue_record_from_request(
     let reason = vstr(request.get("reason")).unwrap_or("xiao-shu-action-request");
     let mapped_track = vstr(request.get("mapped_track")).unwrap_or("xiao_shu::alert_peek::medium");
     let message = request.get("message").cloned().unwrap_or(Value::Null);
+    let line = request.get("line").cloned().unwrap_or(Value::Null);
+    let cue_id = request.get("cue_id").cloned().unwrap_or(Value::Null);
+    let message_handling = request
+        .get("message_handling")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let operator_console = request
+        .get("operator_console")
+        .cloned()
+        .unwrap_or(Value::Null);
     let seed = json!({
         "created_at": now,
         "project": project,
@@ -6049,16 +6418,14 @@ fn xiao_shu_action_enqueue_record_from_request(
         "intent": intent,
         "reason": reason,
         "mapped_track": mapped_track,
-        "message": message,
+        "message": message.clone(),
     });
     let seed_hash = fnv1a_hex16(&serde_json::to_string(&seed).unwrap_or_default());
     let request_id = format!("xsr-{now}-{}", &seed_hash[..8]);
-    let action_preview_command = format!(
-        "agent-bridge avatar xiao-shu-action-request-action --project {project} --request-id {request_id:?} --reason {reason:?} --confirm"
-    );
-    let local_emit_command = format!(
-        "agent-bridge avatar xiao-shu-action-request-action --project {project} --request-id {request_id:?} --reason {reason:?} --confirm --emit"
-    );
+    let action_preview_command =
+        xiao_shu_action_request_action_command(project, &request_id, reason, None);
+    let local_emit_command =
+        xiao_shu_action_request_action_command(project, &request_id, reason, Some("--emit"));
 
     json!({
         "schema": 1,
@@ -6089,9 +6456,13 @@ fn xiao_shu_action_enqueue_record_from_request(
         "writes_cooldown_state": false,
         "codex_pet_package_mutation": false,
         "mutates_global_substrate": false,
-        "action_preview_command": action_preview_command,
+        "action_preview_command": action_preview_command.clone(),
         "local_confirm_command": action_preview_command,
         "local_emit_command": local_emit_command,
+        "line": line,
+        "cue_id": cue_id,
+        "message_handling": message_handling,
+        "operator_console": operator_console,
         "action_request": request.clone(),
         "source_request": request_payload,
     })
@@ -6145,7 +6516,27 @@ fn xiao_shu_action_request_compact_record(record: Value) -> Value {
     );
     action_request.insert(
         "line".to_string(),
-        request.get("line").cloned().unwrap_or(Value::Null),
+        request
+            .get("line")
+            .cloned()
+            .or_else(|| record.get("line").cloned())
+            .unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "cue_id".to_string(),
+        request
+            .get("cue_id")
+            .cloned()
+            .or_else(|| record.get("cue_id").cloned())
+            .unwrap_or(Value::Null),
+    );
+    action_request.insert(
+        "message_handling".to_string(),
+        request
+            .get("message_handling")
+            .cloned()
+            .or_else(|| record.get("message_handling").cloned())
+            .unwrap_or(Value::Null),
     );
     action_request.insert(
         "reason".to_string(),
@@ -6196,6 +6587,8 @@ fn xiao_shu_action_request_compact_record(record: Value) -> Value {
         "emitted",
         "local_confirm_command",
         "local_emit_command",
+        "line",
+        "cue_id",
     ] {
         compact.insert(
             key.to_string(),
@@ -6236,7 +6629,47 @@ fn xiao_shu_action_request_compact_record(record: Value) -> Value {
 pub fn xiao_shu_action_request_enqueue(opts: &XiaoShuActionRequestOptions<'_>) -> Result<Value> {
     let project = opts.project.unwrap_or("agent-bridge");
     let queue_path = xiao_shu_action_request_queue_path(project)?;
-    let request_payload = xiao_shu_action_request(opts)?;
+    let request_opts = XiaoShuActionRequestOptions {
+        confirm: false,
+        ..*opts
+    };
+    let request_payload = xiao_shu_action_request(&request_opts)?;
+    let block_reasons = xiao_shu_action_request_enqueue_block_reasons(&request_payload);
+    if !block_reasons.is_empty() {
+        return Ok(json!({
+            "surface": "xiao_shu_action_request_enqueue",
+            "schema": 1,
+            "generated_at": now_secs(),
+            "read_only": true,
+            "dry_run": true,
+            "llm_safe": true,
+            "sidecar_only": true,
+            "direct_pet_control_allowed": false,
+            "direct_llm_emit_allowed": false,
+            "requires_human_confirmation": true,
+            "real_emit_requires_local_cli": true,
+            "enqueue_blocked": true,
+            "blocked": true,
+            "blocked_reasons": block_reasons,
+            "actual_emit_invoked": false,
+            "emits_audio": false,
+            "emits_notification": false,
+            "http_emit_route_added": false,
+            "writes_files": false,
+            "writes_request_record": false,
+            "writes_cooldown_state": false,
+            "codex_pet_package_mutation": false,
+            "mutates_global_substrate": false,
+            "queue": {
+                "project": project,
+                "path": queue_path.to_string_lossy(),
+                "append_only": true,
+            },
+            "action_request": request_payload.get("action_request").cloned().unwrap_or(Value::Null),
+            "source_request": request_payload,
+            "next_step": "do not enqueue this request; inspect blocked_reasons and create a supported Xiao Shu request first",
+        }));
+    }
     let now = now_secs();
     let record =
         xiao_shu_action_enqueue_record_from_request(request_payload, project, &queue_path, now);
@@ -6479,7 +6912,8 @@ pub fn xiao_shu_action_request_queue_summary(project: Option<&str>) -> Result<Va
         "newest_pending": newest_pending,
         "panel_path": format!("/avatar-surface/xiao-shu-action-requests?project={project_slug}"),
         "local_queue_command": format!(
-            "agent-bridge avatar xiao-shu-action-requests --project {project_slug}"
+            "agent-bridge avatar xiao-shu-action-requests --project {}",
+            shell_quote_cli_arg(project_slug)
         ),
     }))
 }
@@ -6523,6 +6957,8 @@ pub fn xiao_shu_action_request_action(
         .unwrap_or("xiao-shu-action-request-action")
         .to_string();
     let pending = current_state == "pending_human_confirmation";
+    let action_block_reasons = xiao_shu_action_queue_record_action_block_reasons(&record);
+    let actionable_pending = pending && action_block_reasons.is_empty();
     let action_payload = if opts.dismiss {
         let mut blocked_reasons = Vec::new();
         if !pending {
@@ -6580,7 +7016,7 @@ pub fn xiao_shu_action_request_action(
             },
             "source_queue_record": record,
         })
-    } else if pending {
+    } else if actionable_pending {
         let action_opts = AvatarCortexVoiceActionOptions {
             label: opts.label,
             heartbeat_label: opts.heartbeat_label,
@@ -6597,6 +7033,13 @@ pub fn xiao_shu_action_request_action(
         };
         avatar_cortex_voice_action(&action_opts)?
     } else {
+        let mut blocked_reasons = Vec::new();
+        if !pending {
+            blocked_reasons.push(json!("request_state_not_pending"));
+        }
+        for reason in &action_block_reasons {
+            blocked_reasons.push(json!(reason));
+        }
         json!({
             "surface": "avatar_cortex_voice_action",
             "schema": 1,
@@ -6622,7 +7065,7 @@ pub fn xiao_shu_action_request_action(
                 "confirm_flag": opts.confirm,
                 "emit_flag": opts.emit,
                 "blocked": true,
-                "blocked_reasons": ["request_state_not_pending"],
+                "blocked_reasons": blocked_reasons,
                 "selected_token": track,
                 "line": request.get("line").cloned().unwrap_or(Value::Null),
                 "reason_present": !reason.trim().is_empty(),
@@ -7684,7 +8127,7 @@ mod tests {
             alert_peek["semantic_variants"][3]["variant_id"],
             "sidecar_peek_v4"
         );
-        assert_eq!(alert_peek["semantic_variants"][3]["default"], true);
+        assert_eq!(alert_peek["semantic_variants"][3]["default"], false);
         assert_eq!(
             alert_peek["semantic_variants"][3]["sidecar_asset"]["asset_id"],
             "xiao-shu-motion-canonical-peek-v4"
@@ -7709,6 +8152,7 @@ mod tests {
             alert_peek["semantic_variants"][5]["variant_id"],
             "sidecar_ai_peek_v2"
         );
+        assert_eq!(alert_peek["semantic_variants"][5]["default"], true);
         assert_eq!(
             alert_peek["semantic_variants"][5]["sidecar_asset"]["asset_id"],
             "xiao-shu-ai-alert-peek-v2"
@@ -7732,11 +8176,11 @@ mod tests {
         assert_eq!(alert_peek["semantic_variants"][7]["sprite_row"], 8);
         assert_eq!(
             alert_peek["semantic_variant_review"]["default_variant"],
-            "sidecar_peek_v4"
+            "sidecar_ai_peek_v2"
         );
         assert_eq!(
             alert_peek["semantic_variant_review"]["human_review_status"],
-            "visual_motion_candidate_accepted"
+            "grounded_ai_motion_candidate_accepted"
         );
         assert_eq!(
             alert_peek["semantic_variant_review"]["voice_linkage_preview"]["surface"],
@@ -7744,15 +8188,28 @@ mod tests {
         );
         assert_eq!(
             alert_peek["semantic_variant_review"]["voice_linkage_preview"]["selected_variant"],
-            "sidecar_peek_v4"
+            "sidecar_ai_peek_v2"
         );
         assert_eq!(
             alert_peek["semantic_variant_review"]["voice_linkage_preview"]["utterance"],
             "小舒发现一点需要你看一下。"
         );
         assert_eq!(
-            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["gate"]
-                ["real_emit_surface"],
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["voice_script"]["script_id"],
+            "xiao_shu_alert_peek_sparse_voice_v1"
+        );
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["voice_script"]["llm_message_policy"]
+                ["message_can_replace_utterance"],
+            false
+        );
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["voice_script"]["trigger_policy"]
+                ["manual_cli_only"],
+            true
+        );
+        assert_eq!(
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["gate"]["real_emit_surface"],
             "agent-bridge avatar cortex-voice-emit"
         );
         assert!(
@@ -8029,10 +8486,10 @@ mod tests {
         assert_eq!(alert["voice_linkage_requested"], true);
         assert_eq!(
             alert["latest_human_feedback"]["outcome"],
-            "accept_visual_motion_candidate"
+            "accept_grounded_ai_motion_candidate"
         );
         assert_eq!(alert["voice_linkage"]["emits_audio_now"], false);
-        assert_eq!(alert["evidence_counts"]["revision_response"], 7);
+        assert_eq!(alert["evidence_counts"]["revision_response"], 8);
     }
 
     #[test]
@@ -8046,17 +8503,17 @@ mod tests {
             std::env::temp_dir().join(format!("agent-bridge-xiao-review-record-{}", now_secs()));
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("review_records.jsonl");
-        let notes = vec!["v4 keeps the raised hand and restores Xiao Shu identity".to_string()];
+        let notes = vec!["v2 fixes the floating entry/exit frames".to_string()];
         let opts = AvatarCortexReviewRecordOptions {
             label: None,
             heartbeat_label: None,
             project: Some("agent-bridge"),
             output: None,
             requested_track: Some("xiao_shu::alert_peek::medium"),
-            requested_variant: Some("sidecar_peek_v4"),
+            requested_variant: Some("sidecar_ai_peek_v2"),
             outcome: Some("approved"),
             reviewer: Some("unit-test"),
-            reason: Some("visual review accepted v4"),
+            reason: Some("visual review accepted grounded v2"),
             notes: &notes,
             confirm: true,
         };
@@ -8074,7 +8531,7 @@ mod tests {
         assert_eq!(payload["codex_pet_package_mutation"], false);
         assert_eq!(payload["can_promote_binding"], false);
         assert_eq!(payload["record"]["outcome"], "approved");
-        assert_eq!(payload["record"]["variant"], "sidecar_peek_v4");
+        assert_eq!(payload["record"]["variant"], "sidecar_ai_peek_v2");
 
         let records = read_jsonl_records(&path).unwrap();
         assert_eq!(records.len(), 1);
@@ -8098,11 +8555,11 @@ mod tests {
             "updated_at": 1,
             "project": "agent-bridge",
             "track": "xiao_shu::alert_peek::medium",
-            "variant": "sidecar_peek_v4",
+            "variant": "sidecar_ai_peek_v2",
             "outcome": "approved",
             "approval_state": "approved",
             "reviewer": "unit-test",
-            "reason": "visual review accepted v4",
+            "reason": "visual review accepted grounded v2",
             "notes": ["looks correct"],
             "cli_only": true,
             "can_promote_binding": false,
@@ -8321,7 +8778,17 @@ mod tests {
         assert_eq!(alert["mode"], "manual_cli_emit_after_attention");
         assert_eq!(alert["manual_cli_emit_allowed"], true);
         assert_eq!(alert["utterance"], "小舒发现一点需要你看一下。");
-        assert_eq!(alert["visual_variant"], "sidecar_peek_v4");
+        assert_eq!(alert["cue_id"], "soft_attention_needed");
+        assert_eq!(
+            alert["voice_script"]["script_id"],
+            "xiao_shu_alert_peek_sparse_voice_v1"
+        );
+        assert_eq!(
+            alert["caller_message_policy"]["message_can_replace_utterance"],
+            false
+        );
+        assert_eq!(alert["trigger_policy"]["auto_emit_allowed"], false);
+        assert_eq!(alert["visual_variant"], "sidecar_ai_peek_v2");
         assert_eq!(alert["suggested_voice"], "Flo (中文（中国大陆）)");
         assert_eq!(alert["suggested_rate"], 190);
         assert_eq!(alert["http_emit_route"], Value::Null);
@@ -8361,7 +8828,20 @@ mod tests {
         assert_eq!(request["request_state"], "ready_for_operator_confirmation");
         assert_eq!(request["selected_token"], "xiao_shu::alert_peek::medium");
         assert_eq!(request["line"], "小舒发现一点需要你看一下。");
-        assert_eq!(request["visual_variant"], "sidecar_peek_v4");
+        assert_eq!(request["cue_id"], "soft_attention_needed");
+        assert_eq!(
+            request["voice_script"]["script_id"],
+            "xiao_shu_alert_peek_sparse_voice_v1"
+        );
+        assert_eq!(
+            request["caller_message_policy"]["message_can_replace_utterance"],
+            false
+        );
+        assert_eq!(
+            request["line_selection"]["llm_can_replace_utterance"],
+            false
+        );
+        assert_eq!(request["visual_variant"], "sidecar_ai_peek_v2");
         assert_eq!(request["manual_cli_emit_allowed"], true);
         assert_eq!(request["auto_emit_allowed"], false);
         assert_eq!(request["requires_second_step"], true);
@@ -8433,6 +8913,15 @@ mod tests {
         assert_eq!(confirm["actual_execution_available_here"], false);
         assert_eq!(confirm["selected_token"], "xiao_shu::alert_peek::medium");
         assert_eq!(confirm["line"], "小舒发现一点需要你看一下。");
+        assert_eq!(confirm["cue_id"], "soft_attention_needed");
+        assert_eq!(
+            confirm["voice_script"]["script_id"],
+            "xiao_shu_alert_peek_sparse_voice_v1"
+        );
+        assert_eq!(
+            confirm["caller_message_policy"]["message_can_replace_utterance"],
+            false
+        );
         assert_eq!(confirm["operator_reason_present"], true);
         assert_eq!(confirm["http_emit_route"], Value::Null);
         assert_eq!(confirm["safety"]["emits_audio"], false);
@@ -8647,6 +9136,26 @@ mod tests {
     }
 
     #[test]
+    fn shell_quote_cli_arg_quotes_unsafe_values() {
+        assert_eq!(shell_quote_cli_arg("agent-bridge"), "agent-bridge");
+        assert_eq!(
+            shell_quote_cli_arg("agent bridge; rm -rf /"),
+            "'agent bridge; rm -rf /'"
+        );
+        assert_eq!(shell_quote_cli_arg("a'b"), "'a'\\''b'");
+
+        let command = xiao_shu_action_request_action_command(
+            "agent bridge; rm -rf /",
+            "xsr-test",
+            "operator's reason",
+            Some("--emit"),
+        );
+        assert!(command.contains("--project 'agent bridge; rm -rf /'"));
+        assert!(command.contains("--reason 'operator'\\''s reason'"));
+        assert!(command.ends_with("--confirm --emit"));
+    }
+
+    #[test]
     fn xiao_shu_action_request_keeps_llm_behind_confirmation() {
         let registry = avatar_cortex_renderer_registry_payload(None);
         let plan = avatar_cortex_binding_plan_from_registry(registry);
@@ -8734,24 +9243,57 @@ mod tests {
         assert_eq!(request["action_request"]["actor"], "llm");
         assert_eq!(request["action_request"]["supported_intent"], true);
         assert_eq!(request["action_request"]["direct_llm_emit_allowed"], false);
+        assert_eq!(request["action_request"]["cue_id"], "soft_attention_needed");
+        assert_eq!(
+            request["action_request"]["voice_script"]["script_id"],
+            "xiao_shu_alert_peek_sparse_voice_v1"
+        );
+        assert_eq!(
+            request["action_request"]["message_handling"]["message_is_context_note_only"],
+            true
+        );
+        assert_eq!(
+            request["action_request"]["message_handling"]["message_can_replace_utterance"],
+            false
+        );
         assert_eq!(
             request["action_request"]["real_emit_requires_local_cli"],
             true
         );
         assert_eq!(request["action_request"]["ready_for_local_cli_emit"], false);
-        assert!(request["action_request"]["blocked_reasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason == "human_confirmation_required"));
-        assert!(request["action_request"]["confirm_request_command"]
-            .as_str()
-            .unwrap()
-            .contains("--confirm"));
-        assert!(request["action_request"]["emit_command"]
-            .as_str()
-            .unwrap()
-            .contains("cortex-voice-action"));
+        assert!(
+            request["action_request"]["blocked_reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "human_confirmation_required")
+        );
+        assert!(
+            request["action_request"]["confirm_request_command"]
+                .as_str()
+                .unwrap()
+                .contains("--confirm")
+        );
+        assert!(
+            request["action_request"]["enqueue_command"]
+                .as_str()
+                .unwrap()
+                .contains("--enqueue")
+        );
+        assert_eq!(
+            request["action_request"]["operator_console"]["mode"],
+            "copy_local_cli_command"
+        );
+        assert_eq!(
+            request["action_request"]["operator_console"]["safety"]["local_cli_emit_only"],
+            true
+        );
+        assert!(
+            request["action_request"]["emit_command"]
+                .as_str()
+                .unwrap()
+                .contains("cortex-voice-action")
+        );
 
         let unsupported = xiao_shu_action_request_from_preview(
             request["downstream_action_preview"].clone(),
@@ -8791,6 +9333,79 @@ mod tests {
     }
 
     #[test]
+    fn xiao_shu_action_enqueue_blocks_unsupported_or_downstream_blocked_requests() {
+        let unsupported_payload = json!({
+            "surface": "xiao_shu_action_request",
+            "read_only": true,
+            "dry_run": true,
+            "llm_safe": true,
+            "action_request": {
+                "actor": "codex",
+                "intent": "dance_now",
+                "mapped_track": "xiao_shu::alert_peek::medium",
+                "request_state": "blocked_unsupported_intent",
+                "supported_intent": false,
+                "direct_llm_emit_allowed": false,
+                "blocked_reasons": ["unsupported_intent"]
+            }
+        });
+        let unsupported_reasons =
+            xiao_shu_action_request_enqueue_block_reasons(&unsupported_payload);
+        assert!(unsupported_reasons
+            .iter()
+            .any(|reason| reason == "unsupported_intent"));
+        assert!(unsupported_reasons
+            .iter()
+            .any(|reason| reason == "request_state_not_enqueueable:blocked_unsupported_intent"));
+
+        let downstream_blocked = json!({
+            "surface": "xiao_shu_action_request",
+            "read_only": true,
+            "dry_run": true,
+            "llm_safe": true,
+            "action_request": {
+                "actor": "codex",
+                "intent": "voice_alert",
+                "mapped_track": "xiao_shu::alert_peek::medium",
+                "request_state": "requires_human_confirmation",
+                "supported_intent": true,
+                "direct_llm_emit_allowed": false,
+                "blocked_reasons": [
+                    "human_confirmation_required",
+                    "downstream_preview_unavailable"
+                ]
+            }
+        });
+        let downstream_reasons =
+            xiao_shu_action_request_enqueue_block_reasons(&downstream_blocked);
+        assert_eq!(
+            downstream_reasons,
+            vec!["downstream_blocked:downstream_preview_unavailable"]
+        );
+
+        let bad_pending_record = json!({
+            "state": "pending_human_confirmation",
+            "actor": "codex",
+            "intent": "dance_now",
+            "mapped_track": "xiao_shu::alert_peek::medium",
+            "action_request": {
+                "intent": "dance_now",
+                "request_state": "blocked_unsupported_intent",
+                "supported_intent": false,
+                "direct_llm_emit_allowed": false,
+                "blocked_reasons": ["unsupported_intent"]
+            }
+        });
+        let action_reasons = xiao_shu_action_queue_record_action_block_reasons(&bad_pending_record);
+        assert!(action_reasons
+            .iter()
+            .any(|reason| reason == "unsupported_intent"));
+        assert!(action_reasons
+            .iter()
+            .any(|reason| reason == "request_state_not_enqueueable:blocked_unsupported_intent"));
+    }
+
+    #[test]
     fn xiao_shu_action_enqueue_record_is_pending_and_non_emitting() {
         let request_payload = json!({
             "surface": "xiao_shu_action_request",
@@ -8803,10 +9418,15 @@ mod tests {
                 "message": "please look",
                 "reason": "unit-test",
                 "mapped_track": "xiao_shu::alert_peek::medium",
+                "line": "小舒发现一点需要你看一下。",
+                "cue_id": "soft_attention_needed",
                 "request_state": "requires_human_confirmation",
                 "requires_human_confirmation": true,
                 "human_confirmation_present": false,
-                "direct_llm_emit_allowed": false
+                "direct_llm_emit_allowed": false,
+                "operator_console": {
+                    "mode": "copy_local_cli_command"
+                }
             }
         });
         let queue_path = Path::new("/tmp/xiao-shu-requests.jsonl");
@@ -8844,6 +9464,12 @@ mod tests {
             .unwrap()
             .contains("--confirm --emit"));
         assert_eq!(record["action_request"]["actor"], "codex");
+        assert_eq!(record["line"], "小舒发现一点需要你看一下。");
+        assert_eq!(record["cue_id"], "soft_attention_needed");
+        assert_eq!(
+            record["operator_console"]["mode"],
+            "copy_local_cli_command"
+        );
         assert_eq!(
             record["source_request"]["action_request"]["request_state"],
             "requires_human_confirmation"
