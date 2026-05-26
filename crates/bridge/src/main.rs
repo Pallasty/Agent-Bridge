@@ -2325,6 +2325,27 @@ enum SkillsOp {
         #[arg(long, default_value_t = 50)]
         limit: usize,
     },
+    /// Batch-audit indexed skills by provenance, lint, and operational risk.
+    Audit {
+        /// Emit machine-readable JSON for automation.
+        #[arg(long)]
+        json: bool,
+        /// Filter to one source id, for example `OpenBMB/MiniCPM`.
+        #[arg(long)]
+        src: Option<String>,
+        /// Require a risk tag, without or with `risk:` prefix. Repeatable.
+        #[arg(long)]
+        risk: Vec<String>,
+        /// Filter by lint class: clean, warn, danger, or an exact tag value.
+        #[arg(long)]
+        lint: Option<String>,
+        /// Filter by vendor class, for example community or vendor-curated.
+        #[arg(long)]
+        vendor: Option<String>,
+        /// Maximum records to print in the `items`/record section. 0 = all.
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
     /// Print one skill's body and metadata (use a key from `list` / `search`).
     Show {
         key: String,
@@ -2580,6 +2601,24 @@ async fn main() -> Result<()> {
             SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::List { limit } => skills::run_list(*limit).await,
+            SkillsOp::Audit {
+                json,
+                src,
+                risk,
+                lint,
+                vendor,
+                limit,
+            } => {
+                skills::run_audit(
+                    *json,
+                    src.as_deref(),
+                    risk,
+                    lint.as_deref(),
+                    vendor.as_deref(),
+                    *limit,
+                )
+                .await
+            }
             SkillsOp::Show { key, json } => skills::run_show(key, *json).await,
             SkillsOp::Install { key, yes } => skills::run_install(key, *yes).await,
         };

@@ -583,6 +583,240 @@ pub async fn run_list(limit: usize) -> Result<()> {
     Ok(())
 }
 
+/// Batch-audit indexed skills by provenance, lint, and operational risk.
+pub async fn run_audit(
+    json: bool,
+    src: Option<&str>,
+    risks: &[String],
+    lint: Option<&str>,
+    vendor: Option<&str>,
+    limit: usize,
+) -> Result<()> {
+    let store = open_store().await?;
+    let rows = store
+        .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
+        .await
+        .context("list_memories failed")?;
+    let filters = SkillAuditFilters::new(src, risks, lint, vendor);
+    let matched: Vec<MemoryRecord> = rows
+        .iter()
+        .filter(|r| filters.matches(r))
+        .cloned()
+        .collect();
+    let summary = skill_audit_summary(&matched);
+    let returned = if limit == 0 {
+        matched.len()
+    } else {
+        matched.len().min(limit)
+    };
+
+    if json {
+        let items = matched
+            .iter()
+            .take(returned)
+            .map(skill_audit_item_json)
+            .collect::<Vec<_>>();
+        let payload = serde_json::json!({
+            "total": rows.len(),
+            "matched": matched.len(),
+            "returned": returned,
+            "limit": if limit == 0 { serde_json::Value::Null } else { serde_json::json!(limit) },
+            "filters": filters.to_json(),
+            "summary": summary.to_json(),
+            "items": items,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!(
+        "[skills] audit: {} matched / {} indexed{}",
+        matched.len(),
+        rows.len(),
+        filters.human_suffix()
+    );
+    print_count_map("sources", &summary.sources);
+    print_count_map("lint", &summary.lint);
+    print_count_map("vendor", &summary.vendor);
+    print_count_map("risks", &summary.risks);
+    if matched.is_empty() {
+        return Ok(());
+    }
+    println!("\nrecords (showing {}):", returned);
+    for r in matched.iter().take(returned) {
+        let src = tag_value(&r.tags, "src:").unwrap_or_else(|| "?".to_string());
+        let lint = tag_value(&r.tags, "lint:").unwrap_or_else(|| "?".to_string());
+        let risks = tag_values(&r.tags, "risk:");
+        println!(
+            "- {}  [src={}, lint={}, risks={}]",
+            r.key,
+            src,
+            lint,
+            if risks.is_empty() {
+                "none".to_string()
+            } else {
+                risks.join(",")
+            }
+        );
+    }
+    if returned < matched.len() {
+        println!(
+            "... {} more hidden; re-run with `--limit 0` for all records",
+            matched.len() - returned
+        );
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct SkillAuditFilters {
+    src: Option<String>,
+    risks: Vec<String>,
+    lint: Option<String>,
+    vendor: Option<String>,
+}
+
+impl SkillAuditFilters {
+    fn new(src: Option<&str>, risks: &[String], lint: Option<&str>, vendor: Option<&str>) -> Self {
+        Self {
+            src: src.map(str::to_string),
+            risks: risks
+                .iter()
+                .map(|r| r.strip_prefix("risk:").unwrap_or(r).to_string())
+                .filter(|r| !r.trim().is_empty())
+                .collect(),
+            lint: lint
+                .map(|l| l.strip_prefix("lint:").unwrap_or(l).to_string())
+                .filter(|l| !l.trim().is_empty()),
+            vendor: vendor
+                .map(|v| v.strip_prefix("vendor:").unwrap_or(v).to_string())
+                .filter(|v| !v.trim().is_empty()),
+        }
+    }
+
+    fn matches(&self, rec: &MemoryRecord) -> bool {
+        if let Some(expected) = &self.src {
+            if tag_value(&rec.tags, "src:").as_deref() != Some(expected.as_str()) {
+                return false;
+            }
+        }
+        if let Some(expected) = &self.vendor {
+            if tag_value(&rec.tags, "vendor:").as_deref() != Some(expected.as_str()) {
+                return false;
+            }
+        }
+        if let Some(expected) = &self.lint {
+            let actual = tag_value(&rec.tags, "lint:").unwrap_or_default();
+            if expected == "warn" || expected == "danger" {
+                if !actual.starts_with(expected) {
+                    return false;
+                }
+            } else if actual != *expected {
+                return false;
+            }
+        }
+        let actual_risks: BTreeSet<String> = tag_values(&rec.tags, "risk:").into_iter().collect();
+        self.risks.iter().all(|r| actual_risks.contains(r))
+    }
+
+    fn human_suffix(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some(src) = &self.src {
+            parts.push(format!("src={src}"));
+        }
+        if !self.risks.is_empty() {
+            parts.push(format!("risk={}", self.risks.join(",")));
+        }
+        if let Some(lint) = &self.lint {
+            parts.push(format!("lint={lint}"));
+        }
+        if let Some(vendor) = &self.vendor {
+            parts.push(format!("vendor={vendor}"));
+        }
+        if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", parts.join(" "))
+        }
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "src": self.src,
+            "risks": self.risks,
+            "lint": self.lint,
+            "vendor": self.vendor,
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+struct SkillAuditSummary {
+    sources: BTreeMap<String, usize>,
+    lint: BTreeMap<String, usize>,
+    vendor: BTreeMap<String, usize>,
+    risks: BTreeMap<String, usize>,
+}
+
+impl SkillAuditSummary {
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "sources": self.sources,
+            "lint": self.lint,
+            "vendor": self.vendor,
+            "risks": self.risks,
+        })
+    }
+}
+
+fn skill_audit_summary(rows: &[MemoryRecord]) -> SkillAuditSummary {
+    let mut summary = SkillAuditSummary::default();
+    for r in rows {
+        bump(
+            &mut summary.sources,
+            tag_value(&r.tags, "src:").unwrap_or_else(|| "?".to_string()),
+        );
+        bump(
+            &mut summary.lint,
+            tag_value(&r.tags, "lint:").unwrap_or_else(|| "?".to_string()),
+        );
+        bump(
+            &mut summary.vendor,
+            tag_value(&r.tags, "vendor:").unwrap_or_else(|| "?".to_string()),
+        );
+        for risk in tag_values(&r.tags, "risk:") {
+            bump(&mut summary.risks, risk);
+        }
+    }
+    summary
+}
+
+fn skill_audit_item_json(rec: &MemoryRecord) -> serde_json::Value {
+    let mut item = skill_show_json_payload(rec);
+    if let Some(obj) = item.as_object_mut() {
+        obj.remove("content");
+        obj.insert(
+            "summary".to_string(),
+            serde_json::json!(first_line(&rec.content)),
+        );
+    }
+    item
+}
+
+fn bump(map: &mut BTreeMap<String, usize>, key: String) {
+    *map.entry(key).or_insert(0) += 1;
+}
+
+fn print_count_map(label: &str, map: &BTreeMap<String, usize>) {
+    if map.is_empty() {
+        return;
+    }
+    println!("{label}:");
+    for (k, v) in map {
+        println!("  {k}: {v}");
+    }
+}
+
 /// Install an indexed skill into `~/.claude/skills/<name>/` by re-cloning
 /// the source repo and copying the original SKILL.md (plus siblings, for
 /// canonical-layout skills that ship scripts/data). With `assume_yes`,
@@ -721,7 +955,10 @@ pub async fn run_show(key: &str, json: bool) -> Result<()> {
         .context("memory_get failed")?
         .ok_or_else(|| anyhow!("no skill with key {:?}", key))?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&skill_show_json_payload(&rec))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&skill_show_json_payload(&rec))?
+        );
         return Ok(());
     }
     println!("# {}", rec.key);
@@ -1703,10 +1940,7 @@ mod tests {
 
         let payload = skill_show_json_payload(&rec);
         assert_eq!(payload["source"], "OpenBMB/MiniCPM");
-        assert_eq!(
-            payload["path"],
-            "skills/minicpm5-deploy-mlx/SKILL.md"
-        );
+        assert_eq!(payload["path"], "skills/minicpm5-deploy-mlx/SKILL.md");
         assert_eq!(payload["lint"], "warn:1");
         assert_eq!(payload["vendor"], "community");
         assert_eq!(payload["license"], "Apache-2.0");
@@ -1718,6 +1952,53 @@ mod tests {
             payload["risks"],
             serde_json::json!(["apple_mlx", "model_download"])
         );
+    }
+
+    #[test]
+    fn skill_audit_filters_match_lint_risk_and_source() {
+        let mut rec = mk_skill("OpenBMB/MiniCPM", 42);
+        rec.tags.extend([
+            "lint:warn:1".to_string(),
+            "vendor:community".to_string(),
+            "risk:server_start".to_string(),
+            "risk:model_download".to_string(),
+        ]);
+
+        let filters = SkillAuditFilters::new(
+            Some("OpenBMB/MiniCPM"),
+            &["risk:server_start".to_string()],
+            Some("warn"),
+            Some("community"),
+        );
+        assert!(filters.matches(&rec));
+
+        let missing_risk =
+            SkillAuditFilters::new(None, &["checkpoint_write".to_string()], None, None);
+        assert!(!missing_risk.matches(&rec));
+    }
+
+    #[test]
+    fn skill_audit_summary_counts_sources_and_risks() {
+        let mut a = mk_skill("OpenBMB/MiniCPM", 1);
+        a.tags.extend([
+            "lint:clean".to_string(),
+            "vendor:community".to_string(),
+            "risk:server_start".to_string(),
+        ]);
+        let mut b = mk_skill("OpenBMB/MiniCPM", 2);
+        b.tags.extend([
+            "lint:warn:1".to_string(),
+            "vendor:community".to_string(),
+            "risk:server_start".to_string(),
+            "risk:pip_install".to_string(),
+        ]);
+
+        let summary = skill_audit_summary(&[a, b]);
+        assert_eq!(summary.sources.get("OpenBMB/MiniCPM"), Some(&2));
+        assert_eq!(summary.lint.get("clean"), Some(&1));
+        assert_eq!(summary.lint.get("warn:1"), Some(&1));
+        assert_eq!(summary.risks.get("server_start"), Some(&2));
+        assert_eq!(summary.risks.get("pip_install"), Some(&1));
     }
 
     #[test]

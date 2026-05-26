@@ -135,6 +135,17 @@ structured payload with:
 - grouped provenance: `git.commit`, `git.branch`, `git.origin`, `git.src`.
 - operational risk values without the `risk:` prefix.
 
+`skills audit --json` is the batch review surface. It intentionally omits full
+skill body content from each item and keeps a compact `summary` line instead;
+agents can call `skills show <key> --json` for the full body after filtering.
+The audit command supports composable filters:
+
+- `--src <source-id>`
+- `--risk <risk>` (repeatable, accepts values with or without `risk:`)
+- `--lint <clean|warn|danger|exact>`
+- `--vendor <vendor-class>`
+- `--limit <n>` (`0` means all matched records)
+
 Re-indexed MiniCPM5 examples:
 
 - `minicpm5-deploy-mlx`: `lint:clean`, `git_branch:minicpm5`,
@@ -245,8 +256,8 @@ Phase 2: index hardening if needed
 
 Status: provenance tags, operational-risk tags, and branch-aware tree URL
 source resolution are implemented. `skills show --json` is also implemented as
-the first automation-facing review surface; broader `skills audit` remains a
-possible future batch UX.
+the single-record automation-facing review surface. `skills audit --json` is
+implemented as the batch review surface for source/lint/vendor/risk filtering.
 
 Phase 3: optional MLX worker spike
 
@@ -272,6 +283,6 @@ Stop or narrow the work if:
 
 ## Immediate Next Step
 
-Run `agent-bridge skills index https://github.com/OpenBMB/MiniCPM/tree/minicpm5`
-directly, verify the resulting skill records match the local-checkout intake,
-and keep MiniCPM5 skill execution/install gated behind explicit human approval.
+Use `agent-bridge skills audit --json` as the gate before any external Skill
+install decision. Keep MiniCPM5 skill execution/install gated behind explicit
+human approval.
