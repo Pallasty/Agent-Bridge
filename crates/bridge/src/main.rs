@@ -2300,6 +2300,9 @@ enum SkillsOp {
         /// Delete records for skills that disappeared upstream.
         #[arg(long)]
         prune: bool,
+        /// Print the refresh plan without cloning repos, writing memories, or pruning.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Discover candidate skill repos via GitHub topic search.
     ///
@@ -2611,7 +2614,11 @@ async fn main() -> Result<()> {
                 skills::run_index(source, *verbose).await.map(|_| ())
             }
             SkillsOp::Seed { verbose } => skills::run_seed(*verbose).await,
-            SkillsOp::Refresh { verbose, prune } => skills::run_refresh(*verbose, *prune).await,
+            SkillsOp::Refresh {
+                verbose,
+                prune,
+                dry_run,
+            } => skills::run_refresh(*verbose, *prune, *dry_run).await,
             SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::List { limit } => skills::run_list(*limit).await,

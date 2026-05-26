@@ -225,7 +225,7 @@ pub async fn run_seed(verbose: bool) -> Result<()> {
 /// refresh's start time — those are skills that disappeared upstream. A
 /// failed re-index for a source skips pruning of that source (don't
 /// destroy data when we don't have a fresh authoritative state).
-pub async fn run_refresh(verbose: bool, prune: bool) -> Result<()> {
+pub async fn run_refresh(verbose: bool, prune: bool, dry_run: bool) -> Result<()> {
     let store = open_store().await?;
     let rows = store
         .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
@@ -236,7 +236,7 @@ pub async fn run_refresh(verbose: bool, prune: bool) -> Result<()> {
         return Ok(());
     }
     let mut remote_plans: BTreeMap<String, RemoteIndexPlan> = BTreeMap::new();
-    let mut local_srcs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut local_srcs: BTreeSet<String> = BTreeSet::new();
     for r in &rows {
         let Some(src) = tag_value(&r.tags, "src:") else {
             continue;
@@ -257,23 +257,27 @@ pub async fn run_refresh(verbose: bool, prune: bool) -> Result<()> {
             local_srcs.insert(src);
         }
     }
-    let started_at = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
     eprintln!(
         "[skills] refresh: {} remote source(s), {} local source(s) skipped, {} record(s) total{}",
         remote_plans.len(),
         local_srcs.len(),
         rows.len(),
-        if prune { " (prune ON)" } else { "" }
+        refresh_mode_suffix(prune, dry_run)
     );
-    if !local_srcs.is_empty() && verbose {
+    if !local_srcs.is_empty() && (verbose || dry_run) {
         eprintln!("[skills]   local sources (re-run `skills index <path>` manually):");
         for s in &local_srcs {
             eprintln!("[skills]     - {}", s);
         }
     }
+    if dry_run {
+        print_refresh_dry_run(&remote_plans, prune);
+        return Ok(());
+    }
+    let started_at = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
     let mut total = 0usize;
     let mut failed: Vec<String> = Vec::new();
     let mut pruned_total = 0usize;
@@ -313,6 +317,36 @@ pub async fn run_refresh(verbose: bool, prune: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn refresh_mode_suffix(prune: bool, dry_run: bool) -> &'static str {
+    match (prune, dry_run) {
+        (true, true) => " (prune ON, dry-run)",
+        (true, false) => " (prune ON)",
+        (false, true) => " (dry-run)",
+        (false, false) => "",
+    }
+}
+
+fn print_refresh_dry_run(remote_plans: &BTreeMap<String, RemoteIndexPlan>, prune: bool) {
+    eprintln!("[skills] dry-run: no repos cloned, no memories written, no stale records pruned");
+    if remote_plans.is_empty() {
+        return;
+    }
+    eprintln!("[skills]   remote sources to refresh:");
+    for (src, plan) in remote_plans {
+        eprintln!(
+            "[skills]     - {}  url={}  ref={}",
+            src,
+            plan.url,
+            plan.checkout_ref.as_deref().unwrap_or("<default>")
+        );
+    }
+    if prune {
+        eprintln!(
+            "[skills]   prune preview: stale deletes are only evaluated after a real successful refresh"
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2341,6 +2375,14 @@ mod tests {
                 checkout_ref: None,
             }
         );
+    }
+
+    #[test]
+    fn refresh_mode_suffix_reports_dry_run_and_prune() {
+        assert_eq!(refresh_mode_suffix(false, false), "");
+        assert_eq!(refresh_mode_suffix(true, false), " (prune ON)");
+        assert_eq!(refresh_mode_suffix(false, true), " (dry-run)");
+        assert_eq!(refresh_mode_suffix(true, true), " (prune ON, dry-run)");
     }
 
     #[test]
