@@ -38,6 +38,7 @@ pub mod router;
 pub mod security;
 pub mod server;
 pub mod session_handoff;
+pub mod skills;
 pub mod socket_path;
 pub mod sync;
 pub mod tailscale_api;

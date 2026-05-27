@@ -2,6 +2,7 @@ use ab_agent::{
     AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, CodexRuntime, GeminiRuntime,
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
+use ab_bridge::skills;
 use ab_bridge::warp_scheme;
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
@@ -18,7 +19,6 @@ use tracing_subscriber::{prelude::*, EnvFilter};
 mod doctor;
 mod setup;
 mod shadow_cortex;
-mod skills;
 use ab_bridge::sync;
 
 #[derive(Parser, Debug)]

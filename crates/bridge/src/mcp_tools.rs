@@ -14366,6 +14366,7 @@ fn dispatch_cold_tool_suggestion(tool_name: &str) -> &'static str {
     } else if tool_name.starts_with("memory_")
         || tool_name.starts_with("session_")
         || tool_name == "skills_recommend"
+        || tool_name == "skills_route"
     {
         "keep_exposed_for_agent_bridge_core_value"
     } else {
@@ -14390,6 +14391,7 @@ fn dispatch_profile_suggestions(
         s.tool_name.starts_with("memory_")
             || s.tool_name.starts_with("session_")
             || s.tool_name == "skills_recommend"
+            || s.tool_name == "skills_route"
     });
     if hot_core {
         suggestions.push(
@@ -22064,6 +22066,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "session_bootstrap"
             | "session_finalize"
             | "skills_recommend"
+            | "skills_route"
             | "agent_spawn"
             | "agent_session_get"
             | "agent_session_wait"
@@ -22091,6 +22094,7 @@ fn gemini_lean_tool(tool_name: &str) -> bool {
             | "memory_get"
             | "memory_list"
             | "skills_recommend"
+            | "skills_route"
             | "project_detect"
             | "changes_digest"
             | "mcp_dispatch_audit"
@@ -22305,6 +22309,86 @@ impl McpTool for SkillsRecommendTool {
             },
         });
         Ok(ToolResult::json_text(&resp))
+    }
+}
+
+pub struct SkillsRouteTool {
+    hub: Hub,
+}
+impl SkillsRouteTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for SkillsRouteTool {
+    fn name(&self) -> &'static str {
+        "skills_route"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Route the current task to a small top-k set of indexed skills. \
+                 Use this before loading full skill bodies: it keeps startup prompts small, \
+                 returns lint/risk/source metadata, and includes follow-up commands for \
+                 fetching a selected skill. Unlike skills_recommend, this is a runtime \
+                 context-loading plan over external procedural memory."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Task description in natural language, for example 'design graph memory retrieval for agent skills'."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 5,
+                        "description": "Maximum number of skill candidates to return."
+                    },
+                    "body_chars": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2000,
+                        "default": 0,
+                        "description": "Include the first N characters of each skill body. Keep 0 for metadata-only routing."
+                    }
+                },
+                "required": ["query"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let q = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if q.is_empty() {
+            return Ok(ToolResult::error("query is required"));
+        }
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5)
+            .clamp(1, 50) as usize;
+        let body_chars = args
+            .get("body_chars")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            .min(2000) as usize;
+
+        match crate::skills::route_payload_for_store(store.as_ref(), &q, limit, body_chars).await {
+            Ok(payload) => Ok(ToolResult::json_text(&payload)),
+            Err(e) => Ok(ToolResult::error(format!("skills_route failed: {e}"))),
+        }
     }
 }
 
@@ -23091,6 +23175,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(SkillsRecommendTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(SkillsRouteTool::new(hub.clone())),
     );
 
     // ── NICHE (opt-in via AGENT_BRIDGE_TOOL_PROFILE=all) ───────────────
@@ -26589,6 +26679,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(p.profile().label(), "essential");
         assert!(p.includes(Tier::Essential, "memory_search"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
+        assert!(p.includes(Tier::Essential, "skills_route"));
         assert!(p.includes(Tier::Essential, "session_bootstrap"));
         assert!(p.includes(Tier::Essential, "work_memory"));
         assert!(p.includes(Tier::Niche, "ide_snapshot"));
@@ -26630,8 +26721,22 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(p.profile().label(), "essential");
         assert!(p.includes(Tier::Essential, "memory_search"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
+        assert!(p.includes(Tier::Essential, "skills_route"));
         assert!(!p.includes(Tier::Essential, "shell_exec"));
         assert!(!p.includes(Tier::Essential, "codebase_impact"));
+    }
+
+    #[test]
+    fn registry_exposes_skills_route_tool() {
+        let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), p)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+
+        assert!(names.iter().any(|n| n == "skills_recommend"));
+        assert!(names.iter().any(|n| n == "skills_route"));
     }
 
     #[test]
@@ -26652,6 +26757,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(dispatch_codex_native_overlap("codebase_search"));
         assert!(!dispatch_codex_native_overlap("memory_search"));
         assert!(!dispatch_codex_native_overlap("skills_recommend"));
+        assert!(!dispatch_codex_native_overlap("skills_route"));
     }
 
     #[test]

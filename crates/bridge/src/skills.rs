@@ -729,8 +729,7 @@ pub async fn run_route(query: &str, limit: usize, body_chars: usize, json: bool)
     }
     let limit = limit.clamp(1, 50);
     let store = open_store().await?;
-    let hits = route_skill_hits(&store, query, limit).await?;
-    let payload = route_payload(query, &hits, body_chars);
+    let payload = route_payload_for_store(&store, query, limit, body_chars).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
@@ -739,8 +738,25 @@ pub async fn run_route(query: &str, limit: usize, body_chars: usize, json: bool)
     Ok(())
 }
 
-async fn route_skill_hits(
-    store: &SqliteStore,
+/// Build the JSON payload used by both `agent-bridge skills route` and MCP.
+pub async fn route_payload_for_store(
+    store: &dyn StateStore,
+    query: &str,
+    limit: usize,
+    body_chars: usize,
+) -> Result<serde_json::Value> {
+    let query = query.trim();
+    if query.is_empty() {
+        bail!("query is required");
+    }
+    let limit = limit.clamp(1, 50);
+    let hits = route_skill_hits(store, query, limit).await?;
+    Ok(route_payload(query, &hits, body_chars))
+}
+
+/// Retrieve the small top-k skill set for runtime context loading.
+pub async fn route_skill_hits(
+    store: &dyn StateStore,
     query: &str,
     limit: usize,
 ) -> Result<Vec<MemorySearchHit>> {
