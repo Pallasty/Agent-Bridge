@@ -14183,6 +14183,104 @@ impl McpTool for McpDispatchAuditTool {
     }
 }
 
+pub struct EventSpineSnapshotTool {
+    hub: Hub,
+}
+impl EventSpineSnapshotTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for EventSpineSnapshotTool {
+    fn name(&self) -> &'static str {
+        "event_spine_snapshot"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Phase 0 event-spine projection over existing Agent-Bridge \
+                 telemetry. Builds a timestamp-ordered SHA-256 hash chain from recent MCP \
+                 tool-call and tool-error rows without creating a new source of truth. Use this \
+                 to verify whether current telemetry can support replay/explainability before \
+                 adding a persisted unified event table."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window in seconds."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 100,
+                        "description": "Maximum derived events to include after timestamp ordering."
+                    },
+                    "include_events": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When false, omit event rows but keep counts and chain head."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100)
+            .clamp(1, 500) as usize;
+        let include_events = args
+            .get("include_events")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let fetch_limit = limit.min(500) as u32;
+
+        let calls = match store.recent_mcp_tool_calls(window_secs, fetch_limit).await {
+            Ok(rows) => rows,
+            Err(e) => return Ok(ToolResult::error(format!("recent_mcp_tool_calls: {e}"))),
+        };
+        let errors = match store.recent_mcp_tool_errors(fetch_limit).await {
+            Ok(rows) => rows,
+            Err(e) => return Ok(ToolResult::error(format!("recent_mcp_tool_errors: {e}"))),
+        };
+        let snapshot = crate::event_spine::mcp_event_spine_snapshot(
+            &calls,
+            &errors,
+            window_secs,
+            limit,
+            dispatch_now_secs(),
+        );
+        let event_count = snapshot.event_count;
+        let mut payload = serde_json::to_value(&snapshot).unwrap_or_else(|_| json!({}));
+        if !include_events {
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("events_omitted".to_string(), json!(event_count));
+                obj.insert("events".to_string(), json!([]));
+            }
+        }
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
 fn dispatch_window_from_args(args: &Value) -> (i64, i64, &'static str) {
     let window_days = args
         .get("window_days")
@@ -22056,6 +22154,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
         tool_name,
         "capabilities"
             | "mcp_dispatch_audit"
+            | "event_spine_snapshot"
             | "memory_search"
             | "memory_save"
             | "memory_get"
@@ -22098,6 +22197,7 @@ fn gemini_lean_tool(tool_name: &str) -> bool {
             | "project_detect"
             | "changes_digest"
             | "mcp_dispatch_audit"
+            | "event_spine_snapshot"
             | "session_bootstrap"
             | "pet_state_get"
     )
@@ -22108,6 +22208,7 @@ fn hook_lifecycle_tool(tool_name: &str) -> bool {
         tool_name,
         "capabilities"
             | "mcp_dispatch_audit"
+            | "event_spine_snapshot"
             | "memory_compact"
             | "session_bootstrap"
             | "session_curate"
@@ -22563,6 +22664,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(McpDispatchAuditTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(EventSpineSnapshotTool::new(hub.clone())),
     );
     // IDE bridge stays Niche by default, but Codex Essential allowlists it so
     // IDE-aware Codex sessions can opt into editor context without widening to
@@ -26615,6 +26722,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // collab subset = FORUM_READ + FORUM_POST + PRESENCE_LIST (NOT manage).
         let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
         for t in [
+            "event_spine_snapshot",
             "memory_search",
             "memory_save",
             "memory_neighbors",
@@ -26678,6 +26786,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(p.label(), "codex-lean");
         assert_eq!(p.profile().label(), "essential");
         assert!(p.includes(Tier::Essential, "memory_search"));
+        assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "skills_route"));
         assert!(p.includes(Tier::Essential, "session_bootstrap"));
@@ -26706,6 +26815,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
         assert_eq!(p.label(), "hook-lifecycle");
         assert_eq!(p.profile().label(), "standard");
+        assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
         assert!(p.includes(Tier::Standard, "memory_compact"));
         assert!(p.includes(Tier::Essential, "pet_state_ritual"));
         assert!(p.includes(Tier::Essential, "work_memory"));
@@ -26720,6 +26830,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(p.label(), "gemini-lean");
         assert_eq!(p.profile().label(), "essential");
         assert!(p.includes(Tier::Essential, "memory_search"));
+        assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "skills_route"));
         assert!(!p.includes(Tier::Essential, "shell_exec"));
@@ -26737,6 +26848,18 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
         assert!(names.iter().any(|n| n == "skills_recommend"));
         assert!(names.iter().any(|n| n == "skills_route"));
+    }
+
+    #[test]
+    fn registry_exposes_event_spine_snapshot_tool() {
+        let p = ToolPolicy::from_values(None, None, None, Some("standard"));
+        let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), p)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+
+        assert!(names.iter().any(|n| n == "event_spine_snapshot"));
     }
 
     #[test]
