@@ -30,7 +30,7 @@
 //! `lint:danger:N`); the indexer **does not refuse to save** — surfacing
 //! the warning to the user is the point. Manual review still recommended.
 
-use ab_store::{MemoryListSort, MemoryRecord, SqliteStore, StateStore};
+use ab_store::{MemoryListSort, MemoryRecord, MemorySearchHit, SqliteStore, StateStore};
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -715,6 +715,232 @@ pub async fn run_search(query: &str, limit: usize) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Route a task to a small set of indexed skills.
+///
+/// This is intentionally not an installer. It is a context-budgeting surface:
+/// keep Codex's active startup skills small, then retrieve only the few
+/// procedures relevant to the current task from Agent-Bridge memory.
+pub async fn run_route(query: &str, limit: usize, body_chars: usize, json: bool) -> Result<()> {
+    let query = query.trim();
+    if query.is_empty() {
+        bail!("query is required");
+    }
+    let limit = limit.clamp(1, 50);
+    let store = open_store().await?;
+    let hits = route_skill_hits(&store, query, limit).await?;
+    let payload = route_payload(query, &hits, body_chars);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        print_route_plan(&payload);
+    }
+    Ok(())
+}
+
+async fn route_skill_hits(
+    store: &SqliteStore,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<MemorySearchHit>> {
+    let overfetch = ((limit as u32).saturating_mul(20)).clamp(100, 500);
+    let semantic_hits = store
+        .memory_search_semantic(query, overfetch, 0.25_f32)
+        .await
+        .unwrap_or_default();
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    for hit in semantic_hits
+        .into_iter()
+        .filter(|h| h.record.tags.iter().any(|t| t == "skill"))
+    {
+        if seen.insert(hit.record.key.clone()) {
+            out.push(hit);
+            if out.len() >= limit {
+                return Ok(out);
+            }
+        }
+    }
+
+    let tag_filter = vec!["skill".to_string()];
+    let mut fts_hits = store
+        .memory_search(query, &tag_filter, limit as u32)
+        .await
+        .unwrap_or_default();
+    if fts_hits.is_empty() {
+        if let Some(relaxed) = relaxed_fts_query(query) {
+            fts_hits = store
+                .memory_search(&relaxed, &tag_filter, limit as u32)
+                .await
+                .unwrap_or_default();
+        }
+    }
+    for hit in fts_hits {
+        if seen.insert(hit.record.key.clone()) {
+            out.push(hit);
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn route_payload(query: &str, hits: &[MemorySearchHit], body_chars: usize) -> serde_json::Value {
+    let skills: Vec<_> = hits
+        .iter()
+        .enumerate()
+        .map(|(idx, h)| route_item_json(idx + 1, h, body_chars))
+        .collect();
+    serde_json::json!({
+        "query": query,
+        "count": skills.len(),
+        "skills": skills,
+        "policy": {
+            "startup_prompt": "keep only curated/router skills active",
+            "runtime": "retrieve top-k indexed skill memories, then load full bodies only when needed",
+            "full_body_command": "agent-bridge skills show <key>",
+            "note": "skill routing is external procedural memory, not model-weight internalization"
+        },
+        "hint": if skills.is_empty() {
+            "no indexed skills match; run `agent-bridge skills index <path-or-url>` or `agent-bridge skills seed`"
+        } else {
+            "use the top clean/high-confidence match first; review warn/danger lint and risk tags before following commands"
+        }
+    })
+}
+
+fn route_item_json(rank: usize, hit: &MemorySearchHit, body_chars: usize) -> serde_json::Value {
+    let rec = &hit.record;
+    let lint = tag_value(&rec.tags, "lint:").unwrap_or_else(|| "?".to_string());
+    let risks = tag_values(&rec.tags, "risk:");
+    let tools = tag_value(&rec.tags, "tools:")
+        .map(|s| split_csv_tag(&s))
+        .unwrap_or_default();
+    let action = if lint.starts_with("danger") {
+        "review_before_use"
+    } else if lint.starts_with("warn") || !risks.is_empty() {
+        "review_risk_then_use"
+    } else {
+        "safe_to_load_if_relevant"
+    };
+    let mut obj = serde_json::json!({
+        "rank": rank,
+        "key": rec.key,
+        "score": hit.score,
+        "confidence": route_confidence(hit.score),
+        "summary": first_line(&rec.content),
+        "source": tag_value(&rec.tags, "src:"),
+        "path": tag_value(&rec.tags, "path:"),
+        "lint": lint,
+        "risks": risks,
+        "tools": tools,
+        "action": action,
+        "show": format!("agent-bridge skills show {}", rec.key),
+        "show_json": format!("agent-bridge skills show {} --json", rec.key),
+    });
+    if body_chars > 0 {
+        obj["body_preview"] = serde_json::json!(truncate_chars(&rec.content, body_chars));
+    }
+    obj
+}
+
+fn print_route_plan(payload: &serde_json::Value) {
+    println!(
+        "[route] query: {}",
+        payload.get("query").and_then(|v| v.as_str()).unwrap_or("")
+    );
+    let skills = payload
+        .get("skills")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if skills.is_empty() {
+        println!(
+            "[route] {}",
+            payload
+                .get("hint")
+                .and_then(|v| v.as_str())
+                .unwrap_or("no matches")
+        );
+        return;
+    }
+    println!(
+        "[route] load at most {} skill(s); fetch full bodies only when the task will use them.",
+        skills.len()
+    );
+    for item in skills {
+        let rank = item.get("rank").and_then(|v| v.as_u64()).unwrap_or(0);
+        let key = item.get("key").and_then(|v| v.as_str()).unwrap_or("");
+        let score = item.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let confidence = item
+            .get("confidence")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let lint = item.get("lint").and_then(|v| v.as_str()).unwrap_or("?");
+        let risks = item
+            .get("risks")
+            .and_then(|v| v.as_array())
+            .map(|v| {
+                v.iter()
+                    .filter_map(|x| x.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "none".to_string());
+        let action = item
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("review");
+        let summary = item.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+        println!(
+            "{rank}. {key}\n   score={score:.3} confidence={confidence} lint={lint} risks={risks} action={action}\n   {summary}"
+        );
+        if let Some(show) = item.get("show").and_then(|v| v.as_str()) {
+            println!("   show: {show}");
+        }
+        if let Some(body) = item.get("body_preview").and_then(|v| v.as_str()) {
+            println!("   preview: {}", body.replace('\n', " "));
+        }
+    }
+}
+
+fn route_confidence(score: f64) -> &'static str {
+    if score >= 0.70 {
+        "high"
+    } else if score >= 0.50 {
+        "medium"
+    } else {
+        "low"
+    }
+}
+
+fn relaxed_fts_query(query: &str) -> Option<String> {
+    const STOPWORDS: &[&str] = &[
+        "and", "or", "the", "for", "with", "without", "into", "from", "that", "this", "when",
+        "then", "than", "all", "not", "use", "using",
+    ];
+    let mut seen = BTreeSet::new();
+    let mut terms = Vec::new();
+    for raw in query.split(|c: char| !c.is_ascii_alphanumeric()) {
+        let token = raw.trim().to_ascii_lowercase();
+        if token.len() < 3 || STOPWORDS.contains(&token.as_str()) {
+            continue;
+        }
+        if seen.insert(token.clone()) {
+            terms.push(token);
+        }
+        if terms.len() >= 12 {
+            break;
+        }
+    }
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(" OR "))
+    }
 }
 
 /// List most recently saved skills.
@@ -1449,6 +1675,26 @@ fn tag_values(tags: &[String], prefix: &str) -> Vec<String> {
         .collect()
 }
 
+fn split_csv_tag(s: &str) -> Vec<String> {
+    s.split(',')
+        .map(str::trim)
+        .filter(|x| !x.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for (idx, ch) in s.chars().enumerate() {
+        if idx >= max_chars {
+            out.push_str("...");
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
 // ── source resolution ─────────────────────────────────────────────────────
 
 /// Returns `(owned_clone, repo_dir, src_id)`. `src_id` is `<owner>/<repo>`
@@ -2106,6 +2352,20 @@ mod tests {
         let (fm, rest) = split_frontmatter(body);
         assert!(fm.name.is_none());
         assert_eq!(rest, body);
+    }
+
+    #[test]
+    fn relaxed_fts_query_removes_stopwords_and_ors_terms() {
+        let q = relaxed_fts_query(
+            "memory systems and agent bridge memory retrieval graph without prompt bloat",
+        )
+        .expect("query");
+        assert!(q.contains("memory"));
+        assert!(q.contains("systems"));
+        assert!(q.contains("retrieval"));
+        assert!(q.contains(" OR "));
+        assert!(!q.contains(" and "));
+        assert!(!q.contains("without"));
     }
 
     #[test]

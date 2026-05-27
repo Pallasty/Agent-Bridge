@@ -2328,6 +2328,26 @@ enum SkillsOp {
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
+    /// Route a task to a few indexed skills without exposing the whole catalog.
+    ///
+    /// Semantic-first retrieval over `kind=skill`, then prints a compact
+    /// context-loading plan with lint/risk/source metadata and `skills show`
+    /// follow-up commands. This is the intended runtime pair for a curated
+    /// Codex active-skill set: keep the prompt small, retrieve only the
+    /// relevant procedures for the current task.
+    Route {
+        /// Task description in natural language.
+        query: String,
+        /// Maximum skills to recommend.
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+        /// Include the first N chars of each skill body. 0 = metadata only.
+        #[arg(long, default_value_t = 0)]
+        body_chars: usize,
+        /// Emit machine-readable JSON for automation.
+        #[arg(long)]
+        json: bool,
+    },
     /// List indexed skills, most-recent first.
     List {
         #[arg(long, default_value_t = 50)]
@@ -2625,6 +2645,12 @@ async fn main() -> Result<()> {
             } => skills::run_refresh(*verbose, *prune, *dry_run, *json).await,
             SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
+            SkillsOp::Route {
+                query,
+                limit,
+                body_chars,
+                json,
+            } => skills::run_route(query, *limit, *body_chars, *json).await,
             SkillsOp::List { limit } => skills::run_list(*limit).await,
             SkillsOp::Sources { json, limit } => skills::run_sources(*json, *limit).await,
             SkillsOp::Audit {
