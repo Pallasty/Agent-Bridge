@@ -37,6 +37,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
 
+const ROUTE_STRONG_SEMANTIC_COSINE: f32 = 0.50;
+
 /// Curated seed corpus (Phase A). All known to publish Claude Code skills
 /// in the canonical `<skill-name>/SKILL.md` layout (or a close variant).
 /// Add/remove entries here; `skills seed` indexes the lot.
@@ -765,20 +767,6 @@ pub async fn route_skill_hits(
         .memory_search_semantic(query, overfetch, 0.25_f32)
         .await
         .unwrap_or_default();
-    let mut out = Vec::new();
-    let mut seen = BTreeSet::new();
-    for hit in semantic_hits
-        .into_iter()
-        .filter(|h| h.record.tags.iter().any(|t| t == "skill"))
-    {
-        if seen.insert(hit.record.key.clone()) {
-            out.push(hit);
-            if out.len() >= limit {
-                return Ok(out);
-            }
-        }
-    }
-
     let tag_filter = vec!["skill".to_string()];
     let mut fts_hits = store
         .memory_search(query, &tag_filter, limit as u32)
@@ -792,7 +780,31 @@ pub async fn route_skill_hits(
                 .unwrap_or_default();
         }
     }
-    for hit in fts_hits {
+    Ok(route_merge_hits(semantic_hits, fts_hits, limit))
+}
+
+fn route_merge_hits(
+    semantic_hits: Vec<MemorySearchHit>,
+    fts_hits: Vec<MemorySearchHit>,
+    limit: usize,
+) -> Vec<MemorySearchHit> {
+    let mut strong_semantic = Vec::new();
+    let mut weak_semantic = Vec::new();
+    for hit in semantic_hits.into_iter().filter(is_skill_hit) {
+        if hit.cosine.unwrap_or(0.0) >= ROUTE_STRONG_SEMANTIC_COSINE {
+            strong_semantic.push(hit);
+        } else {
+            weak_semantic.push(hit);
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    for hit in strong_semantic
+        .into_iter()
+        .chain(fts_hits.into_iter().filter(is_skill_hit))
+        .chain(weak_semantic.into_iter())
+    {
         if seen.insert(hit.record.key.clone()) {
             out.push(hit);
             if out.len() >= limit {
@@ -800,7 +812,11 @@ pub async fn route_skill_hits(
             }
         }
     }
-    Ok(out)
+    out
+}
+
+fn is_skill_hit(hit: &MemorySearchHit) -> bool {
+    hit.record.tags.iter().any(|t| t == "skill")
 }
 
 fn route_payload(query: &str, hits: &[MemorySearchHit], body_chars: usize) -> serde_json::Value {
@@ -845,17 +861,21 @@ fn route_item_json(rank: usize, hit: &MemorySearchHit, body_chars: usize) -> ser
         "rank": rank,
         "key": rec.key,
         "score": hit.score,
-        "confidence": route_confidence(hit.score),
+        "confidence": route_confidence(route_confidence_score(hit)),
         "summary": first_line(&rec.content),
         "source": tag_value(&rec.tags, "src:"),
         "path": tag_value(&rec.tags, "path:"),
         "lint": lint,
         "risks": risks,
         "tools": tools,
+        "retrieval": if hit.cosine.is_some() { "semantic" } else { "fts" },
         "action": action,
         "show": format!("agent-bridge skills show {}", rec.key),
         "show_json": format!("agent-bridge skills show {} --json", rec.key),
     });
+    if let Some(cosine) = hit.cosine {
+        obj["cosine"] = serde_json::json!(cosine);
+    }
     if body_chars > 0 {
         obj["body_preview"] = serde_json::json!(truncate_chars(&rec.content, body_chars));
     }
@@ -921,6 +941,10 @@ fn print_route_plan(payload: &serde_json::Value) {
             println!("   preview: {}", body.replace('\n', " "));
         }
     }
+}
+
+fn route_confidence_score(hit: &MemorySearchHit) -> f64 {
+    hit.cosine.map(f64::from).unwrap_or(hit.score)
 }
 
 fn route_confidence(score: f64) -> &'static str {
@@ -2382,6 +2406,63 @@ mod tests {
         assert!(q.contains(" OR "));
         assert!(!q.contains(" and "));
         assert!(!q.contains("without"));
+    }
+
+    #[test]
+    fn route_merge_hits_puts_weak_semantic_after_fts() {
+        let weak_semantic = test_skill_hit("skill:weak-semantic", 0.46, Some(0.46));
+        let fts = test_skill_hit("skill:fts", 20.0, None);
+
+        let hits = route_merge_hits(vec![weak_semantic], vec![fts], 2);
+
+        assert_eq!(hits[0].record.key, "skill:fts");
+        assert_eq!(hits[1].record.key, "skill:weak-semantic");
+    }
+
+    #[test]
+    fn route_merge_hits_keeps_strong_semantic_first() {
+        let strong_semantic = test_skill_hit("skill:strong-semantic", 0.82, Some(0.82));
+        let fts = test_skill_hit("skill:fts", 20.0, None);
+
+        let hits = route_merge_hits(vec![strong_semantic], vec![fts], 2);
+
+        assert_eq!(hits[0].record.key, "skill:strong-semantic");
+        assert_eq!(hits[1].record.key, "skill:fts");
+    }
+
+    #[test]
+    fn route_item_confidence_uses_semantic_cosine() {
+        let hit = test_skill_hit("skill:semantic", 2.0, Some(0.49));
+
+        let item = route_item_json(1, &hit, 0);
+
+        assert_eq!(item["confidence"], "low");
+        assert_eq!(item["retrieval"], "semantic");
+        let cosine = item["cosine"].as_f64().expect("cosine");
+        assert!((cosine - 0.49).abs() < 1e-6);
+    }
+
+    fn test_skill_hit(key: &str, score: f64, cosine: Option<f32>) -> MemorySearchHit {
+        MemorySearchHit {
+            record: MemoryRecord {
+                key: key.to_string(),
+                kind: "skill".to_string(),
+                content: format!("{key} summary"),
+                tags: vec!["skill".to_string(), "lint:clean".to_string()],
+                related_keys: Vec::new(),
+                scope: Some("global".to_string()),
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: "active".to_string(),
+                trigger_pattern: None,
+                superseded_by: None,
+            },
+            score,
+            cosine,
+        }
     }
 
     #[test]
