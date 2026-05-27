@@ -2348,6 +2348,26 @@ enum SkillsOp {
         #[arg(long)]
         json: bool,
     },
+    /// Record whether a routed skill was used/helpful, and link that feedback into memory.
+    Feedback {
+        /// Skill memory key, usually copied from `skills route` / `skills_route`.
+        skill_key: String,
+        /// Original task/query that caused this skill to be considered.
+        #[arg(long)]
+        query: String,
+        /// Feedback outcome: used, helpful, not-helpful, or ignored.
+        #[arg(long, default_value = "used")]
+        outcome: String,
+        /// Optional short note about why the skill helped or failed.
+        #[arg(long)]
+        note: Option<String>,
+        /// Related memory keys to connect as task context. Repeatable.
+        #[arg(long = "related-key")]
+        related_keys: Vec<String>,
+        /// Emit machine-readable JSON for automation.
+        #[arg(long)]
+        json: bool,
+    },
     /// List indexed skills, most-recent first.
     List {
         #[arg(long, default_value_t = 50)]
@@ -2651,6 +2671,24 @@ async fn main() -> Result<()> {
                 body_chars,
                 json,
             } => skills::run_route(query, *limit, *body_chars, *json).await,
+            SkillsOp::Feedback {
+                skill_key,
+                query,
+                outcome,
+                note,
+                related_keys,
+                json,
+            } => {
+                skills::run_feedback(
+                    skill_key,
+                    query,
+                    outcome,
+                    note.as_deref(),
+                    related_keys,
+                    *json,
+                )
+                .await
+            }
             SkillsOp::List { limit } => skills::run_list(*limit).await,
             SkillsOp::Sources { json, limit } => skills::run_sources(*json, *limit).await,
             SkillsOp::Audit {

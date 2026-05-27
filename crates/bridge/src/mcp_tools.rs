@@ -14281,6 +14281,123 @@ impl McpTool for EventSpineSnapshotTool {
     }
 }
 
+pub struct ToolAtlasSnapshotTool {
+    hub: Hub,
+}
+impl ToolAtlasSnapshotTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for ToolAtlasSnapshotTool {
+    fn name(&self) -> &'static str {
+        "tool_atlas_snapshot"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Tool Atlas v0 over Agent-Bridge MCP telemetry. \
+                 Combines the current exposed tool registry, recent mcp_tool_calls stats, \
+                 and mcp_tool_errors samples into per-tool usage, health, failure-mode, \
+                 and keep/fix/watch recommendations. Use after event_spine_snapshot when \
+                 deciding which tools should stay exposed, be optimized, or be repaired."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window in seconds."
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["codex", "hook", "claude", "gemini", "manual", "other", "legacy"],
+                        "description": "Optional caller-source filter. Omit for all traffic."
+                    },
+                    "client_name": {
+                        "type": "string",
+                        "description": "Optional exact MCP clientInfo.name filter."
+                    },
+                    "profile": {
+                        "type": "string",
+                        "enum": ["essential", "standard", "all", "legacy"],
+                        "description": "Optional AGENT_BRIDGE_TOOL_PROFILE filter."
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Optional AGENT_BRIDGE_MODEL filter."
+                    },
+                    "model_reasoning_effort": {
+                        "type": "string",
+                        "description": "Optional AGENT_BRIDGE_MODEL_REASONING_EFFORT filter."
+                    },
+                    "codex_host": {
+                        "type": "string",
+                        "enum": ["desktop", "cli", "ide", "legacy"],
+                        "description": "Optional AGENT_BRIDGE_CODEX_HOST filter for Codex desktop/CLI/IDE slices."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let filter = dispatch_filter_from_args(&args);
+        let current_tools: Vec<String> = build_registry(self.hub.clone())
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect();
+        let stats_limit = current_tools.len().max(1).min(200) as u32;
+        let stats = match store
+            .mcp_tool_call_stats_filtered(window_secs, stats_limit, filter.clone())
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => return Ok(ToolResult::error(format!("mcp_tool_call_stats_filtered: {e}"))),
+        };
+        let recent_errors = match store
+            .recent_mcp_tool_errors(ab_store::MCP_TOOL_ERROR_RING_CAP)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => return Ok(ToolResult::error(format!("recent_mcp_tool_errors: {e}"))),
+        };
+        let snapshot = crate::tool_atlas::build_tool_atlas_snapshot(
+            crate::tool_atlas::ToolAtlasInput {
+                generated_at: dispatch_now_secs(),
+                window_secs,
+                current_tools,
+                stats,
+                recent_errors,
+            },
+        );
+        let mut payload = serde_json::to_value(&snapshot).unwrap_or_else(|_| json!({}));
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("filter".to_string(), dispatch_filter_json(&filter));
+            obj.insert(
+                "note".to_string(),
+                json!("Read-only derived atlas. It does not write memories, change profiles, or replace the event spine; use it to choose the next tool-surface action."),
+            );
+        }
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
 fn dispatch_window_from_args(args: &Value) -> (i64, i64, &'static str) {
     let window_days = args
         .get("window_days")
@@ -14465,6 +14582,8 @@ fn dispatch_cold_tool_suggestion(tool_name: &str) -> &'static str {
         || tool_name.starts_with("session_")
         || tool_name == "skills_recommend"
         || tool_name == "skills_route"
+        || tool_name == "skills_feedback"
+        || tool_name == "tool_atlas_snapshot"
     {
         "keep_exposed_for_agent_bridge_core_value"
     } else {
@@ -14490,6 +14609,8 @@ fn dispatch_profile_suggestions(
             || s.tool_name.starts_with("session_")
             || s.tool_name == "skills_recommend"
             || s.tool_name == "skills_route"
+            || s.tool_name == "skills_feedback"
+            || s.tool_name == "tool_atlas_snapshot"
     });
     if hot_core {
         suggestions.push(
@@ -22155,6 +22276,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
         "capabilities"
             | "mcp_dispatch_audit"
             | "event_spine_snapshot"
+            | "tool_atlas_snapshot"
             | "memory_search"
             | "memory_save"
             | "memory_get"
@@ -22166,6 +22288,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "session_finalize"
             | "skills_recommend"
             | "skills_route"
+            | "skills_feedback"
             | "agent_spawn"
             | "agent_session_get"
             | "agent_session_wait"
@@ -22194,10 +22317,12 @@ fn gemini_lean_tool(tool_name: &str) -> bool {
             | "memory_list"
             | "skills_recommend"
             | "skills_route"
+            | "skills_feedback"
             | "project_detect"
             | "changes_digest"
             | "mcp_dispatch_audit"
             | "event_spine_snapshot"
+            | "tool_atlas_snapshot"
             | "session_bootstrap"
             | "pet_state_get"
     )
@@ -22209,6 +22334,7 @@ fn hook_lifecycle_tool(tool_name: &str) -> bool {
         "capabilities"
             | "mcp_dispatch_audit"
             | "event_spine_snapshot"
+            | "tool_atlas_snapshot"
             | "memory_compact"
             | "session_bootstrap"
             | "session_curate"
@@ -22493,6 +22619,120 @@ impl McpTool for SkillsRouteTool {
     }
 }
 
+pub struct SkillsFeedbackTool {
+    hub: Hub,
+}
+impl SkillsFeedbackTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for SkillsFeedbackTool {
+    fn name(&self) -> &'static str {
+        "skills_feedback"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Record whether a routed indexed skill was used, helpful, not-helpful, \
+                 or ignored. Writes a compact skill_feedback memory and graph edge to the skill \
+                 memory, so future routing can learn from actual task outcomes without exposing \
+                 full skill bodies in the startup prompt."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "skill_key": {
+                        "type": "string",
+                        "description": "Skill memory key from skills_route, for example 'skill:skills/agent-memory-systems'."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Original task/query that caused this skill to be considered."
+                    },
+                    "outcome": {
+                        "type": "string",
+                        "enum": ["used", "helpful", "not-helpful", "ignored"],
+                        "default": "used",
+                        "description": "Whether the skill was used, clearly helpful, not helpful, or ignored."
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Optional short note about why the skill helped or failed."
+                    },
+                    "related_keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": [],
+                        "description": "Optional memory keys for the task, decision, or lesson context to link as context_for_skill."
+                    }
+                },
+                "required": ["skill_key", "query"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let skill_key = args
+            .get("skill_key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if skill_key.is_empty() {
+            return Ok(ToolResult::error("skill_key is required"));
+        }
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if query.is_empty() {
+            return Ok(ToolResult::error("query is required"));
+        }
+        let outcome = args
+            .get("outcome")
+            .and_then(|v| v.as_str())
+            .unwrap_or("used")
+            .to_string();
+        let note = args
+            .get("note")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let related_keys = args
+            .get("related_keys")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        match crate::skills::record_skill_feedback_for_store(
+            store.as_ref(),
+            &skill_key,
+            &query,
+            &outcome,
+            note.as_deref(),
+            &related_keys,
+        )
+        .await
+        {
+            Ok(payload) => Ok(ToolResult::json_text(&payload)),
+            Err(e) => Ok(ToolResult::error(format!("skills_feedback failed: {e}"))),
+        }
+    }
+}
+
 fn tag_value_in(tags: &[String], prefix: &str) -> Option<String> {
     tags.iter()
         .find(|t| t.starts_with(prefix))
@@ -22670,6 +22910,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(EventSpineSnapshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(ToolAtlasSnapshotTool::new(hub.clone())),
     );
     // IDE bridge stays Niche by default, but Codex Essential allowlists it so
     // IDE-aware Codex sessions can opt into editor context without widening to
@@ -23288,6 +23534,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(SkillsRouteTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(SkillsFeedbackTool::new(hub.clone())),
     );
 
     // ── NICHE (opt-in via AGENT_BRIDGE_TOOL_PROFILE=all) ───────────────
@@ -26723,6 +26975,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
         for t in [
             "event_spine_snapshot",
+            "tool_atlas_snapshot",
             "memory_search",
             "memory_save",
             "memory_neighbors",
@@ -26787,8 +27040,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(p.profile().label(), "essential");
         assert!(p.includes(Tier::Essential, "memory_search"));
         assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
+        assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "skills_route"));
+        assert!(p.includes(Tier::Essential, "skills_feedback"));
         assert!(p.includes(Tier::Essential, "session_bootstrap"));
         assert!(p.includes(Tier::Essential, "work_memory"));
         assert!(p.includes(Tier::Niche, "ide_snapshot"));
@@ -26816,6 +27071,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(p.label(), "hook-lifecycle");
         assert_eq!(p.profile().label(), "standard");
         assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
+        assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
         assert!(p.includes(Tier::Standard, "memory_compact"));
         assert!(p.includes(Tier::Essential, "pet_state_ritual"));
         assert!(p.includes(Tier::Essential, "work_memory"));
@@ -26831,8 +27087,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(p.profile().label(), "essential");
         assert!(p.includes(Tier::Essential, "memory_search"));
         assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
+        assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "skills_route"));
+        assert!(p.includes(Tier::Essential, "skills_feedback"));
         assert!(!p.includes(Tier::Essential, "shell_exec"));
         assert!(!p.includes(Tier::Essential, "codebase_impact"));
     }
@@ -26848,6 +27106,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
         assert!(names.iter().any(|n| n == "skills_recommend"));
         assert!(names.iter().any(|n| n == "skills_route"));
+        assert!(names.iter().any(|n| n == "skills_feedback"));
     }
 
     #[test]
@@ -26860,6 +27119,18 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .collect();
 
         assert!(names.iter().any(|n| n == "event_spine_snapshot"));
+    }
+
+    #[test]
+    fn registry_exposes_tool_atlas_snapshot_tool() {
+        let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), p)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+
+        assert!(names.iter().any(|n| n == "tool_atlas_snapshot"));
     }
 
     #[test]
@@ -26881,6 +27152,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(!dispatch_codex_native_overlap("memory_search"));
         assert!(!dispatch_codex_native_overlap("skills_recommend"));
         assert!(!dispatch_codex_native_overlap("skills_route"));
+        assert!(!dispatch_codex_native_overlap("skills_feedback"));
     }
 
     #[test]

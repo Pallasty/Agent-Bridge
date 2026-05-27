@@ -30,8 +30,11 @@
 //! `lint:danger:N`); the indexer **does not refuse to save** — surfacing
 //! the warning to the user is the point. Manual review still recommended.
 
-use ab_store::{MemoryListSort, MemoryRecord, MemorySearchHit, SqliteStore, StateStore};
+use ab_store::{
+    MemoryEdge, MemoryListSort, MemoryRecord, MemorySearchHit, SqliteStore, StateStore,
+};
 use anyhow::{anyhow, bail, Context, Result};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -752,8 +755,18 @@ pub async fn route_payload_for_store(
         bail!("query is required");
     }
     let limit = limit.clamp(1, 50);
-    let hits = route_skill_hits(store, query, limit).await?;
+    let hits = route_skill_entries(store, query, limit).await?;
     Ok(route_payload(query, &hits, body_chars))
+}
+
+async fn route_skill_entries(
+    store: &dyn StateStore,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<RoutedSkillHit>> {
+    let hits = route_skill_hits(store, query, limit).await?;
+    let feedback = route_feedback_for_hits(store, &hits).await;
+    Ok(route_apply_feedback(hits, &feedback))
 }
 
 /// Retrieve the small top-k skill set for runtime context loading.
@@ -762,25 +775,29 @@ pub async fn route_skill_hits(
     query: &str,
     limit: usize,
 ) -> Result<Vec<MemorySearchHit>> {
-    let overfetch = ((limit as u32).saturating_mul(20)).clamp(100, 500);
+    let overfetch = route_retrieval_limit(limit);
     let semantic_hits = store
         .memory_search_semantic(query, overfetch, 0.25_f32)
         .await
         .unwrap_or_default();
     let tag_filter = vec!["skill".to_string()];
     let mut fts_hits = store
-        .memory_search(query, &tag_filter, limit as u32)
+        .memory_search(query, &tag_filter, overfetch)
         .await
         .unwrap_or_default();
     if fts_hits.is_empty() {
         if let Some(relaxed) = relaxed_fts_query(query) {
             fts_hits = store
-                .memory_search(&relaxed, &tag_filter, limit as u32)
+                .memory_search(&relaxed, &tag_filter, overfetch)
                 .await
                 .unwrap_or_default();
         }
     }
     Ok(route_merge_hits(semantic_hits, fts_hits, limit))
+}
+
+fn route_retrieval_limit(limit: usize) -> u32 {
+    ((limit as u32).saturating_mul(20)).clamp(100, 500)
 }
 
 fn route_merge_hits(
@@ -819,7 +836,319 @@ fn is_skill_hit(hit: &MemorySearchHit) -> bool {
     hit.record.tags.iter().any(|t| t == "skill")
 }
 
-fn route_payload(query: &str, hits: &[MemorySearchHit], body_chars: usize) -> serde_json::Value {
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct SkillRouteFeedback {
+    score: f64,
+    count: usize,
+    positive_count: usize,
+    negative_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct RoutedSkillHit {
+    hit: MemorySearchHit,
+    score: f64,
+    feedback: SkillRouteFeedback,
+}
+
+async fn route_feedback_for_hits(
+    store: &dyn StateStore,
+    hits: &[MemorySearchHit],
+) -> BTreeMap<String, SkillRouteFeedback> {
+    let mut out = BTreeMap::new();
+    for hit in hits {
+        let key = &hit.record.key;
+        let edges = store.memory_neighbors(key).await.unwrap_or_default();
+        let stats = route_feedback_stats_from_edges(key, &edges);
+        if stats.count > 0 {
+            out.insert(key.clone(), stats);
+        }
+    }
+    out
+}
+
+fn route_feedback_stats_from_edges(skill_key: &str, edges: &[MemoryEdge]) -> SkillRouteFeedback {
+    let mut stats = SkillRouteFeedback::default();
+    for edge in edges {
+        if edge.to_key != skill_key || !edge.from_key.starts_with("skill_feedback:") {
+            continue;
+        }
+        match edge.edge_type.as_str() {
+            "applied_skill" => {
+                stats.count += 1;
+                stats.positive_count += 1;
+                stats.score += (edge.weight - 1.0).clamp(0.05, 0.4);
+            }
+            "skill_feedback" => {
+                stats.count += 1;
+                stats.negative_count += 1;
+                stats.score -= (0.5 - edge.weight).clamp(0.05, 0.3);
+            }
+            _ => {}
+        }
+    }
+    stats.score = stats.score.clamp(-0.75, 0.75);
+    stats
+}
+
+fn route_apply_feedback(
+    hits: Vec<MemorySearchHit>,
+    feedback: &BTreeMap<String, SkillRouteFeedback>,
+) -> Vec<RoutedSkillHit> {
+    let mut routed: Vec<(usize, RoutedSkillHit)> = hits
+        .into_iter()
+        .enumerate()
+        .map(|(idx, hit)| {
+            let fb = feedback.get(&hit.record.key).copied().unwrap_or_default();
+            let score = hit.score + fb.score;
+            (
+                idx,
+                RoutedSkillHit {
+                    hit,
+                    score,
+                    feedback: fb,
+                },
+            )
+        })
+        .collect();
+    routed.sort_by(|(idx_a, a), (idx_b, b)| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| idx_a.cmp(idx_b))
+    });
+    routed.into_iter().map(|(_, hit)| hit).collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillFeedbackOutcome {
+    Used,
+    Helpful,
+    NotHelpful,
+    Ignored,
+}
+
+impl SkillFeedbackOutcome {
+    pub fn parse(raw: &str) -> Result<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "used" | "use" => Ok(Self::Used),
+            "helpful" | "success" | "accepted" => Ok(Self::Helpful),
+            "not_helpful" | "not-helpful" | "unhelpful" | "bad" => Ok(Self::NotHelpful),
+            "ignored" | "skip" | "skipped" => Ok(Self::Ignored),
+            other => bail!(
+                "unknown skill feedback outcome {other:?}; expected used|helpful|not-helpful|ignored"
+            ),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Used => "used",
+            Self::Helpful => "helpful",
+            Self::NotHelpful => "not_helpful",
+            Self::Ignored => "ignored",
+        }
+    }
+
+    fn edge_type(self) -> &'static str {
+        match self {
+            Self::Used | Self::Helpful => "applied_skill",
+            Self::NotHelpful | Self::Ignored => "skill_feedback",
+        }
+    }
+
+    fn edge_weight(self) -> f64 {
+        match self {
+            Self::Helpful => 1.4,
+            Self::Used => 1.1,
+            Self::NotHelpful => 0.3,
+            Self::Ignored => 0.2,
+        }
+    }
+
+    fn importance(self) -> f64 {
+        match self {
+            Self::Helpful => 0.65,
+            Self::Used => 0.55,
+            Self::NotHelpful => 0.45,
+            Self::Ignored => 0.30,
+        }
+    }
+}
+
+pub async fn run_feedback(
+    skill_key: &str,
+    query: &str,
+    outcome: &str,
+    note: Option<&str>,
+    related_keys: &[String],
+    json: bool,
+) -> Result<()> {
+    let store = open_store().await?;
+    let payload =
+        record_skill_feedback_for_store(&store, skill_key, query, outcome, note, related_keys)
+            .await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        println!(
+            "[skills] recorded feedback {} -> {} ({})",
+            payload
+                .get("feedback_key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?"),
+            payload
+                .get("skill_key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?"),
+            payload
+                .get("outcome")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+        );
+    }
+    Ok(())
+}
+
+pub async fn record_skill_feedback_for_store(
+    store: &dyn StateStore,
+    skill_key: &str,
+    query: &str,
+    outcome: &str,
+    note: Option<&str>,
+    related_keys: &[String],
+) -> Result<serde_json::Value> {
+    let skill_key = skill_key.trim();
+    if skill_key.is_empty() {
+        bail!("skill_key is required");
+    }
+    let query = query.trim();
+    if query.is_empty() {
+        bail!("query is required");
+    }
+    let outcome = SkillFeedbackOutcome::parse(outcome)?;
+    let skill = store
+        .memory_get(skill_key)
+        .await?
+        .ok_or_else(|| anyhow!("skill memory not found: {skill_key}"))?;
+    if !skill.tags.iter().any(|t| t == "skill") {
+        bail!("memory is not indexed as a skill: {skill_key}");
+    }
+
+    let rec = build_skill_feedback_record(skill_key, query, outcome, note, related_keys);
+    let feedback_key = rec.key.clone();
+    store.memory_save(&rec).await?;
+    store
+        .memory_link(
+            &feedback_key,
+            skill_key,
+            outcome.edge_type(),
+            outcome.edge_weight(),
+        )
+        .await?;
+
+    let mut linked_related = Vec::new();
+    for key in related_keys
+        .iter()
+        .map(|k| k.trim())
+        .filter(|k| !k.is_empty() && *k != skill_key)
+    {
+        if store.memory_get(key).await?.is_some() {
+            store
+                .memory_link(&feedback_key, key, "context_for_skill", 0.8)
+                .await?;
+            linked_related.push(key.to_string());
+        }
+    }
+
+    Ok(serde_json::json!({
+        "status": "ok",
+        "feedback_key": feedback_key,
+        "skill_key": skill_key,
+        "outcome": outcome.as_str(),
+        "edge": {
+            "from_key": feedback_key,
+            "to_key": skill_key,
+            "edge_type": outcome.edge_type(),
+            "weight": outcome.edge_weight(),
+        },
+        "linked_related_keys": linked_related,
+        "hint": "future skills_route calls can use these skill_feedback memories and graph edges as ranking evidence",
+    }))
+}
+
+fn skill_feedback_key(
+    skill_key: &str,
+    query: &str,
+    outcome: SkillFeedbackOutcome,
+    note: Option<&str>,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(skill_key.trim().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(query.trim().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(outcome.as_str().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(note.unwrap_or("").trim().as_bytes());
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(16);
+    for byte in digest.iter().take(8) {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    format!("skill_feedback:{hex}")
+}
+
+fn build_skill_feedback_record(
+    skill_key: &str,
+    query: &str,
+    outcome: SkillFeedbackOutcome,
+    note: Option<&str>,
+    related_keys: &[String],
+) -> MemoryRecord {
+    let skill_key = skill_key.trim();
+    let query = query.trim();
+    let note = note.map(str::trim).filter(|s| !s.is_empty());
+    let key = skill_feedback_key(skill_key, query, outcome, note);
+    let mut related = vec![skill_key.to_string()];
+    for rel in related_keys.iter().map(|k| k.trim()) {
+        if !rel.is_empty() && rel != skill_key && !related.iter().any(|k| k == rel) {
+            related.push(rel.to_string());
+        }
+    }
+    let mut content = format!(
+        "skill feedback\nskill: {skill_key}\nquery: {query}\noutcome: {}\n",
+        outcome.as_str()
+    );
+    if let Some(note) = note {
+        content.push_str(&format!("note: {note}\n"));
+    }
+
+    let now = unix_now();
+    MemoryRecord {
+        key,
+        kind: "skill_feedback".to_string(),
+        content,
+        tags: vec![
+            "skill_feedback".to_string(),
+            format!("skill_feedback:{}", outcome.as_str()),
+            format!("skill_key:{skill_key}"),
+            "src:skills_route".to_string(),
+        ],
+        related_keys: related,
+        scope: Some("global".to_string()),
+        created_at: now,
+        updated_at: now,
+        last_accessed_at: now,
+        access_count: 0,
+        importance: outcome.importance(),
+        status: "active".to_string(),
+        trigger_pattern: None,
+        superseded_by: None,
+    }
+}
+
+fn route_payload(query: &str, hits: &[RoutedSkillHit], body_chars: usize) -> serde_json::Value {
     let skills: Vec<_> = hits
         .iter()
         .enumerate()
@@ -843,7 +1172,8 @@ fn route_payload(query: &str, hits: &[MemorySearchHit], body_chars: usize) -> se
     })
 }
 
-fn route_item_json(rank: usize, hit: &MemorySearchHit, body_chars: usize) -> serde_json::Value {
+fn route_item_json(rank: usize, routed: &RoutedSkillHit, body_chars: usize) -> serde_json::Value {
+    let hit = &routed.hit;
     let rec = &hit.record;
     let lint = tag_value(&rec.tags, "lint:").unwrap_or_else(|| "?".to_string());
     let risks = tag_values(&rec.tags, "risk:");
@@ -860,7 +1190,7 @@ fn route_item_json(rank: usize, hit: &MemorySearchHit, body_chars: usize) -> ser
     let mut obj = serde_json::json!({
         "rank": rank,
         "key": rec.key,
-        "score": hit.score,
+        "score": routed.score,
         "confidence": route_confidence(route_confidence_score(hit)),
         "summary": first_line(&rec.content),
         "source": tag_value(&rec.tags, "src:"),
@@ -873,6 +1203,12 @@ fn route_item_json(rank: usize, hit: &MemorySearchHit, body_chars: usize) -> ser
         "show": format!("agent-bridge skills show {}", rec.key),
         "show_json": format!("agent-bridge skills show {} --json", rec.key),
     });
+    if routed.feedback.count > 0 {
+        obj["feedback_score"] = serde_json::json!(routed.feedback.score);
+        obj["feedback_count"] = serde_json::json!(routed.feedback.count);
+        obj["positive_feedback_count"] = serde_json::json!(routed.feedback.positive_count);
+        obj["negative_feedback_count"] = serde_json::json!(routed.feedback.negative_count);
+    }
     if let Some(cosine) = hit.cosine {
         obj["cosine"] = serde_json::json!(cosine);
     }
@@ -2420,6 +2756,17 @@ mod tests {
     }
 
     #[test]
+    fn route_merge_limit_one_prefers_fts_over_weak_semantic() {
+        let weak_semantic = test_skill_hit("skill:weak-semantic", 0.46, Some(0.46));
+        let fts = test_skill_hit("skill:fts", 20.0, None);
+
+        let hits = route_merge_hits(vec![weak_semantic], vec![fts], 1);
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].record.key, "skill:fts");
+    }
+
+    #[test]
     fn route_merge_hits_keeps_strong_semantic_first() {
         let strong_semantic = test_skill_hit("skill:strong-semantic", 0.82, Some(0.82));
         let fts = test_skill_hit("skill:fts", 20.0, None);
@@ -2431,8 +2778,19 @@ mod tests {
     }
 
     #[test]
+    fn route_retrieval_limit_overfetches_before_final_cutoff() {
+        assert_eq!(route_retrieval_limit(1), 100);
+        assert_eq!(route_retrieval_limit(10), 200);
+        assert_eq!(route_retrieval_limit(50), 500);
+    }
+
+    #[test]
     fn route_item_confidence_uses_semantic_cosine() {
-        let hit = test_skill_hit("skill:semantic", 2.0, Some(0.49));
+        let hit = RoutedSkillHit {
+            hit: test_skill_hit("skill:semantic", 2.0, Some(0.49)),
+            score: 2.0,
+            feedback: SkillRouteFeedback::default(),
+        };
 
         let item = route_item_json(1, &hit, 0);
 
@@ -2440,6 +2798,128 @@ mod tests {
         assert_eq!(item["retrieval"], "semantic");
         let cosine = item["cosine"].as_f64().expect("cosine");
         assert!((cosine - 0.49).abs() < 1e-6);
+    }
+
+    #[test]
+    fn skill_feedback_outcome_parses_aliases() {
+        assert_eq!(
+            SkillFeedbackOutcome::parse("not-helpful").expect("outcome"),
+            SkillFeedbackOutcome::NotHelpful
+        );
+        assert_eq!(
+            SkillFeedbackOutcome::parse("used").expect("outcome"),
+            SkillFeedbackOutcome::Used
+        );
+        assert!(SkillFeedbackOutcome::parse("maybe").is_err());
+    }
+
+    #[test]
+    fn skill_feedback_key_is_stable_and_hashed() {
+        let key_a = skill_feedback_key(
+            "skill:skills/agent-memory-systems",
+            "memory systems and agent bridge",
+            SkillFeedbackOutcome::Helpful,
+            Some("worked well"),
+        );
+        let key_b = skill_feedback_key(
+            "skill:skills/agent-memory-systems",
+            "memory systems and agent bridge",
+            SkillFeedbackOutcome::Helpful,
+            Some("worked well"),
+        );
+
+        assert_eq!(key_a, key_b);
+        assert!(key_a.starts_with("skill_feedback:"));
+        assert!(!key_a.contains("agent-memory-systems"));
+        assert!(key_a.len() <= "skill_feedback:".len() + 16);
+    }
+
+    #[test]
+    fn skill_feedback_record_carries_graph_metadata() {
+        let rec = build_skill_feedback_record(
+            "skill:skills/agent-memory-systems",
+            "memory systems and agent bridge",
+            SkillFeedbackOutcome::Helpful,
+            Some("loaded and used for graph design"),
+            &["decision:skill-memory".to_string()],
+        );
+
+        assert_eq!(rec.kind, "skill_feedback");
+        assert!(rec.tags.contains(&"skill_feedback".to_string()));
+        assert!(rec.tags.contains(&"skill_feedback:helpful".to_string()));
+        assert!(rec
+            .tags
+            .contains(&"skill_key:skill:skills/agent-memory-systems".to_string()));
+        assert_eq!(rec.related_keys[0], "skill:skills/agent-memory-systems");
+        assert!(rec
+            .related_keys
+            .contains(&"decision:skill-memory".to_string()));
+        assert!(rec.content.contains("outcome: helpful"));
+        assert!(rec.content.contains("loaded and used for graph design"));
+    }
+
+    #[test]
+    fn route_feedback_stats_counts_positive_and_negative_edges() {
+        let edges = vec![
+            test_edge(
+                "skill_feedback:helpful",
+                "skill:target",
+                "applied_skill",
+                1.4,
+            ),
+            test_edge("skill_feedback:used", "skill:target", "applied_skill", 1.1),
+            test_edge("skill_feedback:bad", "skill:target", "skill_feedback", 0.3),
+            test_edge("unrelated", "skill:target", "relates", 1.0),
+        ];
+
+        let stats = route_feedback_stats_from_edges("skill:target", &edges);
+
+        assert_eq!(stats.count, 3);
+        assert_eq!(stats.positive_count, 2);
+        assert_eq!(stats.negative_count, 1);
+        assert!(stats.score > 0.0, "positive feedback should win here");
+    }
+
+    #[test]
+    fn route_apply_feedback_promotes_nearby_verified_skill() {
+        let high_raw = test_skill_hit("skill:raw", 10.0, None);
+        let verified = test_skill_hit("skill:verified", 9.8, None);
+        let mut feedback = BTreeMap::new();
+        feedback.insert(
+            "skill:verified".to_string(),
+            SkillRouteFeedback {
+                score: 0.35,
+                count: 2,
+                positive_count: 2,
+                negative_count: 0,
+            },
+        );
+
+        let ranked = route_apply_feedback(vec![high_raw, verified], &feedback);
+
+        assert_eq!(ranked[0].hit.record.key, "skill:verified");
+        assert_eq!(ranked[0].feedback.count, 2);
+        assert!(ranked[0].score > ranked[1].score);
+    }
+
+    #[test]
+    fn route_item_json_exposes_feedback_evidence() {
+        let routed = RoutedSkillHit {
+            hit: test_skill_hit("skill:verified", 9.8, None),
+            score: 10.15,
+            feedback: SkillRouteFeedback {
+                score: 0.35,
+                count: 2,
+                positive_count: 2,
+                negative_count: 0,
+            },
+        };
+
+        let item = route_item_json(1, &routed, 0);
+
+        assert_eq!(item["feedback_score"], 0.35);
+        assert_eq!(item["feedback_count"], 2);
+        assert_eq!(item["positive_feedback_count"], 2);
     }
 
     fn test_skill_hit(key: &str, score: f64, cosine: Option<f32>) -> MemorySearchHit {
@@ -2462,6 +2942,15 @@ mod tests {
             },
             score,
             cosine,
+        }
+    }
+
+    fn test_edge(from_key: &str, to_key: &str, edge_type: &str, weight: f64) -> MemoryEdge {
+        MemoryEdge {
+            from_key: from_key.to_string(),
+            to_key: to_key.to_string(),
+            edge_type: edge_type.to_string(),
+            weight,
         }
     }
 
