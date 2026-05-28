@@ -206,7 +206,7 @@ fn atlas_entry(
     let max_duration_ms = stat.map(|s| s.max_duration_ms).unwrap_or(0);
     let avg_result_size = stat.map(|s| s.avg_result_size).unwrap_or(0.0);
     let usage_class = usage_class(call_count).to_string();
-    let risk_flags = risk_flags(error_count, p95_duration_ms, avg_result_size);
+    let risk_flags = risk_flags(tool_name, error_count, p95_duration_ms, avg_result_size);
     let health = health(
         observed,
         error_count,
@@ -245,18 +245,35 @@ fn usage_class(call_count: u64) -> &'static str {
     }
 }
 
-fn risk_flags(error_count: u64, p95_duration_ms: u32, avg_result_size: f64) -> Vec<String> {
+fn risk_flags(
+    tool_name: &str,
+    error_count: u64,
+    p95_duration_ms: u32,
+    avg_result_size: f64,
+) -> Vec<String> {
     let mut flags = Vec::new();
     if error_count > 0 {
         flags.push("has_errors".to_string());
     }
     if p95_duration_ms >= SLOW_P95_MS {
-        flags.push("slow_p95".to_string());
+        if is_expected_wait_tool(tool_name) {
+            flags.push("expected_wait".to_string());
+        } else {
+            flags.push("slow_p95".to_string());
+        }
     }
     if avg_result_size >= LARGE_AVG_RESULT_SIZE {
         flags.push("large_average_result".to_string());
     }
     flags
+}
+
+fn is_expected_wait_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "agent_session_wait")
+}
+
+fn has_actionable_risk_flags(risk_flags: &[String]) -> bool {
+    risk_flags.iter().any(|flag| flag != "expected_wait")
 }
 
 fn health(
@@ -269,7 +286,7 @@ fn health(
         "failing"
     } else if !observed {
         "unobserved"
-    } else if risk_flags.is_empty() {
+    } else if !has_actionable_risk_flags(risk_flags) {
         "healthy"
     } else {
         "degraded"

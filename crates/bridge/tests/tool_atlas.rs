@@ -141,3 +141,25 @@ fn tool_atlas_projection_can_return_summary_only() {
     assert_eq!(payload["tools_included"], 0);
     assert_eq!(payload["tools_omitted"], 3);
 }
+
+#[test]
+fn tool_atlas_treats_agent_session_wait_latency_as_expected() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["agent_session_wait".to_string()],
+        stats: vec![stat("agent_session_wait", 1, 0, 25_000, 600.0)],
+        recent_errors: Vec::new(),
+    });
+
+    let wait = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "agent_session_wait")
+        .expect("agent_session_wait");
+
+    assert_eq!(wait.health, "healthy");
+    assert_eq!(wait.recommendation, "keep");
+    assert!(wait.risk_flags.contains(&"expected_wait".to_string()));
+    assert!(!wait.risk_flags.contains(&"slow_p95".to_string()));
+}
