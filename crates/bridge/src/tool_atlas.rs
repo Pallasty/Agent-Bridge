@@ -154,7 +154,10 @@ pub fn project_tool_atlas_snapshot(
             serde_json::to_value(&snapshot.tools[..tools_included])
                 .unwrap_or_else(|_| serde_json::json!([])),
         );
-        obj.insert("tools_included".to_string(), serde_json::json!(tools_included));
+        obj.insert(
+            "tools_included".to_string(),
+            serde_json::json!(tools_included),
+        );
         obj.insert(
             "tools_omitted".to_string(),
             serde_json::json!(tools_total.saturating_sub(tools_included)),

@@ -27,6 +27,8 @@ use ab_store::{StateStore, StoredSession};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use std::collections::HashMap;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -40,6 +42,7 @@ pub struct OpenCodeFamilyRuntime {
     binary: String,
     runtime_id: &'static str,
     default_model: Option<String>,
+    auto_approve_flag: &'static str,
     store: Option<Arc<dyn StateStore>>,
     children: Arc<DashMap<String, u32>>,
 }
@@ -53,6 +56,7 @@ impl OpenCodeFamilyRuntime {
                 .unwrap_or_else(|_| "opencode".into()),
             runtime_id: "opencode",
             default_model: env_nonempty("AGENT_BRIDGE_OPENCODE_MODEL"),
+            auto_approve_flag: "--dangerously-skip-permissions",
             store: None,
             children: Arc::new(DashMap::new()),
         }
@@ -61,10 +65,22 @@ impl OpenCodeFamilyRuntime {
     /// Build the `kilo` runtime, picking up
     /// `AGENT_BRIDGE_KILO_BIN` / `AGENT_BRIDGE_KILO_MODEL` if set.
     pub fn kilo() -> Self {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let path_env = std::env::var_os("PATH")
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         Self {
-            binary: std::env::var("AGENT_BRIDGE_KILO_BIN").unwrap_or_else(|_| "kilo".into()),
+            binary: resolve_kilo_binary_from(
+                &home,
+                &path_env,
+                env_nonempty("AGENT_BRIDGE_KILO_BIN"),
+            ),
             runtime_id: "kilo",
             default_model: env_nonempty("AGENT_BRIDGE_KILO_MODEL"),
+            auto_approve_flag: "--auto",
             store: None,
             children: Arc::new(DashMap::new()),
         }
@@ -96,6 +112,84 @@ fn env_nonempty(key: &str) -> Option<String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+fn resolve_kilo_binary_from(home: &Path, path_env: &str, env_override: Option<String>) -> String {
+    if let Some(binary) = env_override {
+        return binary;
+    }
+    if let Some(binary) = find_executable_in_path("kilo", path_env) {
+        return binary.display().to_string();
+    }
+    if let Some(binary) = find_latest_kilo_extension_binary(home) {
+        return binary.display().to_string();
+    }
+    "kilo".to_string()
+}
+
+fn find_executable_in_path(name: &str, path_env: &str) -> Option<PathBuf> {
+    std::env::split_paths(OsStr::new(path_env))
+        .map(|dir| dir.join(name))
+        .find(|path| is_executable_file(path))
+}
+
+fn find_latest_kilo_extension_binary(home: &Path) -> Option<PathBuf> {
+    let roots = [
+        home.join(".cursor").join("extensions"),
+        home.join(".vscode").join("extensions"),
+        home.join(".vscode-insiders").join("extensions"),
+        home.join(".antigravity").join("extensions"),
+        PathBuf::from("/Media/Ubuntu/Documents/.antigravity/extensions"),
+    ];
+    let mut candidates = Vec::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if !name.starts_with("kilocode.kilo-code-") {
+                continue;
+            }
+            let binary = path.join("bin").join("kilo");
+            if is_executable_file(&binary) {
+                candidates.push((kilo_extension_version_key(name), binary));
+            }
+        }
+    }
+    candidates.sort_by(|a, b| a.0.cmp(&b.0));
+    candidates.pop().map(|(_, path)| path)
+}
+
+fn kilo_extension_version_key(name: &str) -> Vec<u32> {
+    name.trim_start_matches("kilocode.kilo-code-")
+        .split('-')
+        .next()
+        .unwrap_or_default()
+        .split('.')
+        .map(|part| part.parse::<u32>().unwrap_or(0))
+        .collect()
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 fn now_secs() -> i64 {
@@ -144,7 +238,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         }
 
         let mut cmd = Command::new(&self.binary);
-        cmd.arg("run").arg("--dangerously-skip-permissions");
+        cmd.arg("run").arg(self.auto_approve_flag);
         if let Some(m) = &model {
             cmd.arg("--model").arg(m);
         }
@@ -310,5 +404,65 @@ fn truncate(s: &str, max: usize) -> String {
             .collect::<String>()
             .replace('\n', " ⏎ ");
         format!("{head}…")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+
+    #[test]
+    fn kilo_discovers_latest_extension_binary_when_kilo_is_not_on_path() {
+        let root = unique_temp_dir("ab-kilo-resolver");
+        let home = root.join("home");
+        let older = home
+            .join(".vscode-insiders")
+            .join("extensions")
+            .join("kilocode.kilo-code-7.2.31-linux-x64")
+            .join("bin")
+            .join("kilo");
+        let newer = home
+            .join(".vscode-insiders")
+            .join("extensions")
+            .join("kilocode.kilo-code-7.3.1-linux-x64")
+            .join("bin")
+            .join("kilo");
+        write_executable(&older);
+        write_executable(&newer);
+
+        let resolved = resolve_kilo_binary_from(&home, "", None);
+
+        assert_eq!(resolved, newer.display().to_string());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn kilo_runtime_uses_kilo_auto_flag() {
+        let runtime = OpenCodeFamilyRuntime::kilo();
+
+        assert_eq!(runtime.auto_approve_flag, "--auto");
+    }
+
+    fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
+    }
+
+    fn write_executable(path: &Path) {
+        fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        fs::write(path, "#!/usr/bin/env sh\nexit 0\n").expect("write");
+        #[cfg(unix)]
+        {
+            let mut perms = fs::metadata(path).expect("metadata").permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(path, perms).expect("chmod");
+        }
     }
 }

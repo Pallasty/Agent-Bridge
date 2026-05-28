@@ -14202,9 +14202,9 @@ impl McpTool for EventSpineSnapshotTool {
             name: self.name().into(),
             description: "Read-only Phase 0 event-spine projection over existing Agent-Bridge \
                  telemetry. Builds a timestamp-ordered SHA-256 hash chain from recent MCP \
-                 tool-call and tool-error rows without creating a new source of truth. Use this \
-                 to verify whether current telemetry can support replay/explainability before \
-                 adding a persisted unified event table."
+                 tool-call, tool-error, and agent-session lifecycle rows without creating a \
+                 new source of truth. Use this to verify whether current telemetry can support \
+                 replay/explainability before adding a persisted unified event table."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -14262,9 +14262,17 @@ impl McpTool for EventSpineSnapshotTool {
             Ok(rows) => rows,
             Err(e) => return Ok(ToolResult::error(format!("recent_mcp_tool_errors: {e}"))),
         };
+        let sessions = match store
+            .list_sessions(&SessionFilter::default(), fetch_limit)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => return Ok(ToolResult::error(format!("list_sessions: {e}"))),
+        };
         let snapshot = crate::event_spine::mcp_event_spine_snapshot(
             &calls,
             &errors,
+            &sessions,
             window_secs,
             limit,
             dispatch_now_secs(),

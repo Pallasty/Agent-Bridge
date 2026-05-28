@@ -3,8 +3,8 @@
 //! The memory layer (Phase 1 P4b evolution filter, P5 cluster summary) calls
 //! a hosted LLM. We support two protocols:
 //!
-//!   * Anthropic Messages API (`POST /v1/messages`) — used by api.anthropic.com,
-//!     bltcy.ai, comfly.chat, wenwen-ai, anyrouter, etc.
+//!   * Anthropic Messages API (`POST /v1/messages`) — used by api.anthropic.com
+//!     and compatible relays.
 //!   * OpenAI Chat Completions API (`POST /chat/completions`) — used by
 //!     api.openai.com, Gemini's openai-compat endpoint, NVIDIA build,
 //!     OpenRouter, Groq, opencode-zen, Together, DeepInfra, etc.
@@ -220,10 +220,7 @@ fn try_build_other(primary: &Provider) -> Option<Provider> {
 }
 
 fn nonempty_env(k: &str) -> bool {
-    std::env::var(k)
-        .ok()
-        .filter(|s| !s.is_empty())
-        .is_some()
+    std::env::var(k).ok().filter(|s| !s.is_empty()).is_some()
 }
 
 #[cfg(test)]
