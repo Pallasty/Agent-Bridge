@@ -27,6 +27,27 @@ creds="${AGENT_BRIDGE_CREDS_FILE:-$default_creds}"
 
 real_bin="${AGENT_BRIDGE_REAL_BIN:-$HOME/.local/bin/agent-bridge.real}"
 
+# MCP/IDE launchers often provide a minimal PATH. Keep user-installed CLIs
+# visible for tools such as agent_spawn without requiring every client config
+# to duplicate shell rc setup.
+user_cli_path=""
+for dir in "$HOME/.local/bin" "$HOME/.npm-global/bin" "$HOME/.cargo/bin"; do
+    [ -d "$dir" ] || continue
+    case ":${PATH:-}:" in
+        *":$dir:"*) ;;
+        *) user_cli_path="${user_cli_path:+$user_cli_path:}$dir" ;;
+    esac
+done
+if [ -n "$user_cli_path" ]; then
+    export PATH="$user_cli_path${PATH:+:$PATH}"
+else
+    export PATH="${PATH:-}"
+fi
+
+if [ -z "${AGENT_BRIDGE_CLAUDE_BIN:-}" ] && [ -x "$HOME/.local/bin/claude" ]; then
+    export AGENT_BRIDGE_CLAUDE_BIN="$HOME/.local/bin/claude"
+fi
+
 if [ -f "$creds" ]; then
     # ----- Tailscale OAuth (Section: # Tailscale API) -----
     tailscale_id=$(awk '
