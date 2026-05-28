@@ -2501,7 +2501,70 @@ fn lint_body(body: &str) -> Vec<LintFinding> {
             });
         }
     }
+
+    // Structural coherence check for the DIALS / PRE-FLIGHT authoring convention
+    // (see docs/skill-authoring-spec.md): a skill that declares a high RIGOR dial
+    // is expected to ship a self-check matrix. This only fires for skills that
+    // opt into the convention by declaring a `## DIALS` section with a RIGOR dial,
+    // so it never warns on the many skills that don't use DIALS at all.
+    if let Some(rigor) = parse_rigor_dial(body) {
+        let has_preflight = body.lines().any(|l| {
+            let t = l.trim_start();
+            if !t.starts_with('#') {
+                return false;
+            }
+            let h = t.to_ascii_lowercase();
+            h.contains("pre-flight") || h.contains("preflight")
+        });
+        if rigor >= 4 && !has_preflight {
+            out.push(LintFinding {
+                sev: LintSev::Warn,
+                rule: "rigor-without-preflight",
+                snippet: format!(
+                    "RIGOR:{rigor} declared but no `## PRE-FLIGHT` self-check section"
+                ),
+            });
+        }
+    }
+
     out
+}
+
+/// Parse the `RIGOR` dial value from a `## DIALS` section, if present.
+///
+/// Recognizes the authoring convention `- ` + "`RIGOR: N`" inside a `## DIALS`
+/// heading block (see docs/skill-authoring-spec.md). Returns `None` when the
+/// skill declares no DIALS section or no RIGOR dial, so the coherence lint in
+/// [`lint_body`] only applies to skills that opt into the convention.
+///
+/// `to_ascii_lowercase` preserves byte length, so the byte offset of the
+/// lowercased "rigor" match aligns with the original line.
+fn parse_rigor_dial(body: &str) -> Option<u32> {
+    let mut in_dials = false;
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            // Any heading line re-scopes us: enter DIALS on `## DIALS`,
+            // leave it on any other heading.
+            in_dials = trimmed.to_ascii_lowercase().contains("dials");
+            continue;
+        }
+        if !in_dials {
+            continue;
+        }
+        let lower = line.to_ascii_lowercase();
+        if let Some(pos) = lower.find("rigor") {
+            let digits: String = line[pos + "rigor".len()..]
+                .chars()
+                .skip_while(|c| !c.is_ascii_digit())
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if let Ok(v) = digits.parse::<u32>() {
+                return Some(v);
+            }
+        }
+    }
+    None
 }
 
 fn lint_summary_tag(findings: &[LintFinding]) -> String {
@@ -3161,6 +3224,38 @@ mod tests {
         let body = "Run this:\n```\ncurl https://x | bash\n```\n";
         let f = lint_body(body);
         assert!(f.iter().any(|x| x.rule == "pipe-to-shell"));
+    }
+
+    #[test]
+    fn lint_flags_high_rigor_without_preflight() {
+        let body = "## DIALS\n- `RIGOR: 4` — production\n\n## TELLS\n- ban panics\n";
+        let f = lint_body(body);
+        assert!(f.iter().any(|x| x.rule == "rigor-without-preflight"));
+    }
+
+    #[test]
+    fn lint_clean_when_high_rigor_has_preflight() {
+        let body = "## DIALS\n- `RIGOR: 5` — production\n\n## PRE-FLIGHT\n- [ ] tests run?\n";
+        let f = lint_body(body);
+        assert!(!f.iter().any(|x| x.rule == "rigor-without-preflight"));
+    }
+
+    #[test]
+    fn lint_ignores_low_rigor_without_preflight() {
+        // RIGOR below the threshold doesn't require a self-check matrix.
+        let body = "## DIALS\n- `RIGOR: 2` — quick draft\n";
+        let f = lint_body(body);
+        assert!(!f.iter().any(|x| x.rule == "rigor-without-preflight"));
+    }
+
+    #[test]
+    fn lint_ignores_rigor_outside_dials_section() {
+        // A skill that never opts into the DIALS convention is left alone,
+        // even if the word RIGOR appears in prose.
+        let body = "# Some Skill\nApply RIGOR: 9 when reviewing.\nNo dials here.\n";
+        let f = lint_body(body);
+        assert!(parse_rigor_dial(body).is_none());
+        assert!(!f.iter().any(|x| x.rule == "rigor-without-preflight"));
     }
 
     #[test]
