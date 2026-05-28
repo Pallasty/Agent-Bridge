@@ -8093,6 +8093,10 @@ impl McpTool for AgentSessionReconcileTool {
                         "default": true,
                         "description": "When true, report candidates without mutating sessions."
                     },
+                    "apply_confirmation": {
+                        "type": "string",
+                        "description": "Required exact value 'finalise_stale_sessions' when dry_run=false, after reviewing dry-run candidates."
+                    },
                     "stale_after_secs": {
                         "type": "integer",
                         "minimum": 60,
@@ -8128,6 +8132,15 @@ impl McpTool for AgentSessionReconcileTool {
             .get("dry_run")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
+        if !dry_run
+            && args.get("apply_confirmation").and_then(|v| v.as_str())
+                != Some("finalise_stale_sessions")
+        {
+            return Ok(ToolResult::error(
+                "dry_run=false requires apply_confirmation=\"finalise_stale_sessions\" \
+                 after reviewing dry-run candidates",
+            ));
+        }
         let stale_after_secs = args
             .get("stale_after_secs")
             .and_then(|v| v.as_i64())
@@ -27767,7 +27780,28 @@ com.example.multiline, , \"Line one\nLine two\"\n";
                 &ToolContext::default(),
             )
             .await
-            .expect("execute");
+            .expect("unconfirmed execute");
+        assert!(applied.is_error);
+        let row = store
+            .load_session(&session_id)
+            .await
+            .expect("load")
+            .expect("session");
+        assert!(row.ended_at.is_none());
+        assert_eq!(row.exit_code, None);
+
+        let applied = tool
+            .execute(
+                json!({
+                    "stale_after_secs": 300,
+                    "dry_run": false,
+                    "apply_confirmation": "finalise_stale_sessions",
+                    "limit": 10
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("confirmed execute");
         let payload = result_text_as_json(&applied);
         assert_eq!(payload["dry_run"], false);
         assert_eq!(payload["candidate_count"], 1);
