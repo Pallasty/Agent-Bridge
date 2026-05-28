@@ -30,6 +30,7 @@ use ab_store::{
     PlanStep,
     SessionFilter,
     StateStore,
+    StoredSession,
 };
 use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
 use async_trait::async_trait;
@@ -8063,6 +8064,213 @@ impl McpTool for AgentSessionListTool {
     }
 }
 
+pub struct AgentSessionReconcileTool {
+    hub: Hub,
+}
+impl AgentSessionReconcileTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentSessionReconcileTool {
+    fn name(&self) -> &'static str {
+        "agent_session_reconcile"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Find stale running local agent sessions whose owning MCP process has \
+                 likely disappeared, and optionally finalise them. Defaults to dry-run. Use \
+                 this after MCP/IDE restarts when agent_session_list shows old running rows \
+                 with no live child PID."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, report candidates without mutating sessions."
+                    },
+                    "stale_after_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 604800,
+                        "default": 300,
+                        "description": "Only reconcile running sessions older than this age."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 100
+                    },
+                    "runtime_id": {
+                        "type": "string",
+                        "description": "Optional runtime filter, e.g. kilo or codex."
+                    },
+                    "cwd_prefix": {
+                        "type": "string",
+                        "description": "Optional cwd prefix filter."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let stale_after_secs = args
+            .get("stale_after_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(300)
+            .clamp(60, 604_800);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100)
+            .min(1000) as u32;
+        let filter = SessionFilter {
+            runtime_id: args
+                .get("runtime_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            cwd_prefix: args
+                .get("cwd_prefix")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            exited_only: Some(false),
+            exit_code: None,
+        };
+        let rows = store.list_sessions(&filter, limit).await?;
+        let now = dispatch_now_secs();
+        let mut candidates = Vec::new();
+        let mut finalised_count = 0usize;
+        let mut skipped_recent = 0usize;
+        let mut skipped_unsupported_runtime = 0usize;
+        let mut skipped_alive = 0usize;
+        let mut errors = Vec::new();
+
+        for session in rows {
+            let age_secs = now.saturating_sub(session.started_at);
+            if age_secs < stale_after_secs {
+                skipped_recent += 1;
+                continue;
+            }
+            if !is_local_process_agent_runtime(&session.runtime_id) {
+                skipped_unsupported_runtime += 1;
+                continue;
+            }
+            let (pid, liveness) = agent_session_liveness(&self.hub, &session);
+            if liveness == "alive" {
+                skipped_alive += 1;
+                continue;
+            }
+            let reason = format!(
+                "agent_session_reconcile: finalised stale running session after {age_secs}s; \
+                 liveness={liveness}"
+            );
+            candidates.push(json!({
+                "id": session.id.as_str(),
+                "runtime_id": session.runtime_id.as_str(),
+                "cwd": session.cwd.as_str(),
+                "started_at": session.started_at,
+                "age_secs": age_secs,
+                "pid": pid,
+                "liveness": liveness,
+                "exit_code_if_applied": -15,
+            }));
+            if !dry_run {
+                let stderr = append_reconcile_reason(session.stderr.as_deref(), &reason);
+                match store
+                    .finalise_session(
+                        &session.id,
+                        now,
+                        Some(-15),
+                        session.stdout.clone(),
+                        Some(stderr),
+                    )
+                    .await
+                {
+                    Ok(()) => finalised_count += 1,
+                    Err(e) => errors.push(json!({
+                        "id": session.id.as_str(),
+                        "error": e.to_string(),
+                    })),
+                }
+            }
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "dry_run": dry_run,
+            "stale_after_secs": stale_after_secs,
+            "scanned_count": skipped_recent
+                + skipped_unsupported_runtime
+                + skipped_alive
+                + candidates.len(),
+            "candidate_count": candidates.len(),
+            "finalised_count": finalised_count,
+            "skipped_recent": skipped_recent,
+            "skipped_unsupported_runtime": skipped_unsupported_runtime,
+            "skipped_alive": skipped_alive,
+            "errors": errors,
+            "candidates": candidates,
+        })))
+    }
+}
+
+fn append_reconcile_reason(existing: Option<&str>, reason: &str) -> String {
+    match existing {
+        Some(prev) if !prev.trim().is_empty() => format!("{prev}\n{reason}"),
+        _ => reason.to_string(),
+    }
+}
+
+fn is_local_process_agent_runtime(runtime_id: &str) -> bool {
+    matches!(
+        runtime_id,
+        "claude-code" | "codex" | "kilo" | "opencode" | "gemini" | "auggie"
+    )
+}
+
+fn agent_session_liveness(hub: &Hub, session: &StoredSession) -> (Option<u32>, &'static str) {
+    let pid = hub
+        .agents
+        .get(&session.runtime_id)
+        .and_then(|agent| agent.pid_for(&session.id))
+        .or_else(|| {
+            hub.agent
+                .as_ref()
+                .filter(|agent| agent.id() == session.runtime_id)
+                .and_then(|agent| agent.pid_for(&session.id))
+        });
+    match pid {
+        Some(pid) if process_pid_exists(pid) => (Some(pid), "alive"),
+        Some(pid) => (Some(pid), "dead"),
+        None => (None, "untracked"),
+    }
+}
+
+fn process_pid_exists(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
 pub struct AgentSessionGetTool {
     hub: Hub,
 }
@@ -14397,7 +14605,11 @@ impl McpTool for ToolAtlasSnapshotTool {
             .await
         {
             Ok(rows) => rows,
-            Err(e) => return Ok(ToolResult::error(format!("mcp_tool_call_stats_filtered: {e}"))),
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "mcp_tool_call_stats_filtered: {e}"
+                )))
+            }
         };
         let recent_errors = match store
             .recent_mcp_tool_errors(ab_store::MCP_TOOL_ERROR_RING_CAP)
@@ -14406,15 +14618,14 @@ impl McpTool for ToolAtlasSnapshotTool {
             Ok(rows) => rows,
             Err(e) => return Ok(ToolResult::error(format!("recent_mcp_tool_errors: {e}"))),
         };
-        let snapshot = crate::tool_atlas::build_tool_atlas_snapshot(
-            crate::tool_atlas::ToolAtlasInput {
+        let snapshot =
+            crate::tool_atlas::build_tool_atlas_snapshot(crate::tool_atlas::ToolAtlasInput {
                 generated_at: dispatch_now_secs(),
                 window_secs,
                 current_tools,
                 stats,
                 recent_errors,
-            },
-        );
+            });
         let mut payload = crate::tool_atlas::project_tool_atlas_snapshot(
             &snapshot,
             crate::tool_atlas::ToolAtlasViewOptions {
@@ -22328,6 +22539,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "agent_session_get"
             | "agent_session_wait"
             | "agent_session_list"
+            | "agent_session_reconcile"
             | "ide_snapshot"
             | "ide_command"
             | "pet_state_get"
@@ -22902,6 +23114,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(AgentSessionListTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(AgentSessionReconcileTool::new(hub.clone())),
     );
     // Shell + lifecycle bootstrap + ops introspection that callers ask first.
     reg_if(
@@ -27182,11 +27400,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .expect("mcp_dispatch_audit schema");
 
         assert!(atlas.input_schema["properties"].get("limit").is_some());
-        assert!(atlas
-            .input_schema["properties"]
+        assert!(atlas.input_schema["properties"]
             .get("include_tools")
             .is_some());
-        assert!(audit.input_schema["properties"].get("include_tools").is_none());
+        assert!(audit.input_schema["properties"]
+            .get("include_tools")
+            .is_none());
     }
 
     #[test]
@@ -27502,6 +27721,71 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             _ => panic!("expected text block"),
         };
         serde_json::from_str(&txt).expect("parse json")
+    }
+
+    #[tokio::test]
+    async fn agent_session_reconcile_finalises_stale_running_local_sessions() {
+        use ab_core::SessionId;
+        use ab_store::StoredSession;
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+        let session_id = SessionId::from_raw("ses-stale-local".to_string());
+        store
+            .save_session(&StoredSession {
+                id: session_id.clone(),
+                runtime_id: "kilo".to_string(),
+                cwd: temp_dir.display().to_string(),
+                started_at: dispatch_now_secs() - 600,
+                ended_at: None,
+                exit_code: None,
+                stdout: None,
+                stderr: None,
+                cloud_run_id: None,
+                cloud_run_state: None,
+                cloud_session_link: None,
+            })
+            .await
+            .expect("seed running session");
+
+        let tool = AgentSessionReconcileTool::new(hub.clone());
+        let dry_run = tool
+            .execute(
+                json!({"stale_after_secs": 300, "dry_run": true, "limit": 10}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("dry-run execute");
+        let dry_payload = result_text_as_json(&dry_run);
+        assert_eq!(dry_payload["dry_run"], true);
+        assert_eq!(dry_payload["candidate_count"], 1);
+        assert_eq!(dry_payload["finalised_count"], 0);
+
+        let applied = tool
+            .execute(
+                json!({"stale_after_secs": 300, "dry_run": false, "limit": 10}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&applied);
+        assert_eq!(payload["dry_run"], false);
+        assert_eq!(payload["candidate_count"], 1);
+        assert_eq!(payload["finalised_count"], 1);
+
+        let row = store
+            .load_session(&session_id)
+            .await
+            .expect("load")
+            .expect("session");
+        assert!(row.ended_at.is_some());
+        assert_eq!(row.exit_code, Some(-15));
+        assert!(row
+            .stderr
+            .as_deref()
+            .unwrap_or_default()
+            .contains("agent_session_reconcile"));
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     // ── Phase 0: scan_memory_paths heuristic + dead-link audit ──

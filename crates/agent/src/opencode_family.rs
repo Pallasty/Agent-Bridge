@@ -4,7 +4,8 @@
 //! non-interactive `run` shape:
 //!
 //! ```text
-//! <bin> run [--model PROVIDER/MODEL] [--dangerously-skip-permissions] "<prompt>"
+//! opencode run [--model PROVIDER/MODEL] --dangerously-skip-permissions "<prompt>"
+//! kilo run [--model PROVIDER/MODEL] --auto "<prompt>"
 //! ```
 //!
 //! We model both as a single struct parameterised by binary + runtime id +
@@ -251,9 +252,32 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             .stderr(Stdio::piped());
         apply_env(&mut cmd, &cfg.env);
 
-        let child = cmd
-            .spawn()
-            .map_err(|e| Error::Backend(format!("spawn {}: {e}", self.runtime_id)))?;
+        let child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                let message = format!("spawn {}: {e}", self.runtime_id);
+                if let Some(store) = &self.store {
+                    if let Err(store_err) = store
+                        .finalise_session(
+                            &session_id,
+                            now_secs(),
+                            Some(127),
+                            None,
+                            Some(message.clone()),
+                        )
+                        .await
+                    {
+                        warn!(
+                            session = %session_id,
+                            runtime = %self.runtime_id,
+                            error = %store_err,
+                            "store: finalise failed spawn session failed"
+                        );
+                    }
+                }
+                return Err(Error::Backend(message));
+            }
+        };
         let pid = child.id().unwrap_or(0);
         if pid != 0 {
             self.children.insert(session_id.as_str().to_string(), pid);
@@ -445,6 +469,58 @@ mod tests {
         let runtime = OpenCodeFamilyRuntime::kilo();
 
         assert_eq!(runtime.auto_approve_flag, "--auto");
+    }
+
+    #[tokio::test]
+    async fn spawn_failure_finalises_persisted_session() {
+        use ab_store::{SessionFilter, SqliteStore, StateStore as _};
+        use std::sync::Arc;
+
+        let root = unique_temp_dir("ab-kilo-spawn-failure");
+        fs::create_dir_all(&root).expect("mkdir root");
+        let store = Arc::new(
+            SqliteStore::open(&root.join("state.db"))
+                .await
+                .expect("open store"),
+        );
+        let runtime = OpenCodeFamilyRuntime::kilo()
+            .with_binary(root.join("missing-kilo").display().to_string())
+            .with_store(store.clone());
+
+        let err = runtime
+            .spawn(SpawnConfig {
+                cwd: root.display().to_string(),
+                env: HashMap::new(),
+                initial_prompt: Some("hello".to_string()),
+                model: None,
+            })
+            .await
+            .expect_err("missing binary should fail");
+
+        assert!(format!("{err}").contains("spawn kilo"));
+        let rows = store
+            .list_sessions(
+                &SessionFilter {
+                    runtime_id: Some("kilo".to_string()),
+                    cwd_prefix: Some(root.display().to_string()),
+                    ..SessionFilter::default()
+                },
+                10,
+            )
+            .await
+            .expect("list sessions");
+        assert_eq!(rows.len(), 1);
+        assert!(
+            rows[0].ended_at.is_some(),
+            "failed spawn must not leave a fake running session"
+        );
+        assert_eq!(rows[0].exit_code, Some(127));
+        assert!(rows[0]
+            .stderr
+            .as_deref()
+            .unwrap_or_default()
+            .contains("spawn kilo"));
+        let _ = fs::remove_dir_all(root);
     }
 
     fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
