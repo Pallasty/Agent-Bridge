@@ -385,6 +385,38 @@ fn process_command(pid: i64) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
+fn process_parent_pid(pid: i64) -> Option<i64> {
+    #[cfg(target_os = "linux")]
+    {
+        let data = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+        for line in data.lines() {
+            if let Some(rest) = line.strip_prefix("PPid:") {
+                return rest.trim().parse::<i64>().ok();
+            }
+        }
+    }
+    let out = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "ppid="])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+fn process_elapsed(pid: i64) -> Option<String> {
+    let out = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "etime="])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
 fn process_text_file_from_proc(pid: i64) -> Option<ProcessTextFile> {
     let path = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
     let inode = std::fs::metadata(&path)
@@ -443,6 +475,17 @@ enum McpProcessKind {
     Unknown,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct McpProcessObservation {
+    pid: i64,
+    kind: McpProcessKind,
+    text_file: Option<ProcessTextFile>,
+    command: Option<String>,
+    ppid: Option<i64>,
+    parent_command: Option<String>,
+    elapsed: Option<String>,
+}
+
 fn classify_mcp_process(
     text_file: Option<&ProcessTextFile>,
     command: Option<&str>,
@@ -473,6 +516,106 @@ fn classify_mcp_process(
     } else {
         McpProcessKind::Unknown
     }
+}
+
+fn observe_mcp_process(pid: i64, current_real_inode: Option<u64>) -> McpProcessObservation {
+    let text_file = process_text_file(pid);
+    let command = process_command(pid);
+    let kind = classify_mcp_process(text_file.as_ref(), command.as_deref(), current_real_inode);
+    let ppid = process_parent_pid(pid);
+    let parent_command = ppid.and_then(process_command);
+    McpProcessObservation {
+        pid,
+        kind,
+        text_file,
+        command,
+        ppid,
+        parent_command,
+        elapsed: process_elapsed(pid),
+    }
+}
+
+fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn mcp_process_debug_row(row: &McpProcessObservation) -> String {
+    let exe = row
+        .text_file
+        .as_ref()
+        .map(|f| f.path.as_str())
+        .unwrap_or("unknown");
+    let parent = row.parent_command.as_deref().unwrap_or("unknown");
+    let elapsed = row.elapsed.as_deref().unwrap_or("unknown");
+    let ppid = row
+        .ppid
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    format!(
+        "pid={} ppid={} parent={} elapsed={} exe={}",
+        row.pid,
+        ppid,
+        one_line(parent),
+        one_line(elapsed),
+        one_line(exe)
+    )
+}
+
+fn mcp_pids_by_kind(rows: &[McpProcessObservation], kind: McpProcessKind) -> Vec<i64> {
+    rows.iter()
+        .filter(|row| row.kind == kind)
+        .map(|row| row.pid)
+        .collect()
+}
+
+fn mcp_detail_for_kind(
+    rows: &[McpProcessObservation],
+    kind: McpProcessKind,
+    label: &str,
+) -> Option<String> {
+    let details: Vec<String> = rows
+        .iter()
+        .filter(|row| row.kind == kind)
+        .map(mcp_process_debug_row)
+        .collect();
+    if details.is_empty() {
+        None
+    } else {
+        Some(format!("{label} detail: {}", details.join("; ")))
+    }
+}
+
+fn format_mcp_process_summary(rows: &[McpProcessObservation]) -> String {
+    let current_real = mcp_pids_by_kind(rows, McpProcessKind::CurrentReal);
+    let stale_real = mcp_pids_by_kind(rows, McpProcessKind::StaleReal);
+    let direct_binary = mcp_pids_by_kind(rows, McpProcessKind::DirectBinary);
+    let unknown = mcp_pids_by_kind(rows, McpProcessKind::Unknown);
+    let mut summary = format!(
+        "{} MCP server(s): {} current .real, {} stale .real, {} direct \
+         agent-bridge binary, {} unknown (current {:?}, stale {:?}, direct {:?}, unknown {:?})",
+        rows.len(),
+        current_real.len(),
+        stale_real.len(),
+        direct_binary.len(),
+        unknown.len(),
+        current_real,
+        stale_real,
+        direct_binary,
+        unknown
+    );
+    let detail_blocks = [
+        mcp_detail_for_kind(rows, McpProcessKind::StaleReal, "stale"),
+        mcp_detail_for_kind(rows, McpProcessKind::DirectBinary, "direct"),
+        mcp_detail_for_kind(rows, McpProcessKind::Unknown, "unknown"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    if !detail_blocks.is_empty() {
+        summary.push_str(" | ");
+        summary.push_str(&detail_blocks.join(" | "));
+    }
+    summary
 }
 
 /// Check 5: running daemon has the SVD env (catches the silent regression at
@@ -515,21 +658,13 @@ fn check_mcp_servers(dir: &Path) -> Check {
     }
 
     let real_inode = file_inode(&dir.join("agent-bridge.real"));
-    let mut current_real = Vec::new();
-    let mut stale_real = Vec::new();
-    let mut direct_binary = Vec::new();
-    let mut unknown = Vec::new();
-
-    for pid in &pids {
-        let text = process_text_file(*pid);
-        let command = process_command(*pid);
-        match classify_mcp_process(text.as_ref(), command.as_deref(), real_inode) {
-            McpProcessKind::CurrentReal => current_real.push(*pid),
-            McpProcessKind::StaleReal => stale_real.push(*pid),
-            McpProcessKind::DirectBinary => direct_binary.push(*pid),
-            McpProcessKind::Unknown => unknown.push(*pid),
-        }
-    }
+    let rows: Vec<McpProcessObservation> = pids
+        .iter()
+        .map(|pid| observe_mcp_process(*pid, real_inode))
+        .collect();
+    let stale_real = mcp_pids_by_kind(&rows, McpProcessKind::StaleReal);
+    let direct_binary = mcp_pids_by_kind(&rows, McpProcessKind::DirectBinary);
+    let unknown = mcp_pids_by_kind(&rows, McpProcessKind::Unknown);
 
     if stale_real.is_empty() && direct_binary.is_empty() && unknown.is_empty() {
         Check::ok(
@@ -548,19 +683,7 @@ fn check_mcp_servers(dir: &Path) -> Check {
         // integrity failure.
         Check::warn(
             "mcp_servers",
-            format!(
-                "{} MCP server(s): {} current .real, {} stale .real, {} direct \
-                 agent-bridge binary, {} unknown (current {:?}, stale {:?}, direct {:?}, unknown {:?})",
-                pids.len(),
-                current_real.len(),
-                stale_real.len(),
-                direct_binary.len(),
-                unknown.len(),
-                current_real,
-                stale_real,
-                direct_binary,
-                unknown
-            ),
+            format_mcp_process_summary(&rows),
             "restart the MCP client(s) so they respawn from the current wrapper \
              and re-read tools/list; this refreshes newly added tool manifests",
         )
@@ -850,6 +973,46 @@ mod tests {
             ),
             McpProcessKind::CurrentReal
         );
+    }
+
+    #[test]
+    fn mcp_process_summary_includes_parent_age_and_exe_for_stale_rows() {
+        let rows = vec![
+            McpProcessObservation {
+                pid: 101,
+                kind: McpProcessKind::CurrentReal,
+                text_file: Some(ProcessTextFile {
+                    path: "/home/me/.local/bin/agent-bridge.real".into(),
+                    inode: Some(42),
+                }),
+                command: Some("/home/me/.local/bin/agent-bridge.real mcp".into()),
+                ppid: Some(90),
+                parent_command: Some("cursor --type=extensionHost".into()),
+                elapsed: Some("00:01:02".into()),
+            },
+            McpProcessObservation {
+                pid: 202,
+                kind: McpProcessKind::StaleReal,
+                text_file: Some(ProcessTextFile {
+                    path: "/home/me/.local/bin/agent-bridge.real (deleted)".into(),
+                    inode: Some(41),
+                }),
+                command: Some("/home/me/.local/bin/agent-bridge.real mcp".into()),
+                ppid: Some(77),
+                parent_command: Some("claude --continue".into()),
+                elapsed: Some("01:17:30".into()),
+            },
+        ];
+
+        let detail = format_mcp_process_summary(&rows);
+
+        assert!(detail.contains("2 MCP server(s): 1 current .real, 1 stale .real"));
+        assert!(detail.contains("stale detail"));
+        assert!(detail.contains("pid=202"));
+        assert!(detail.contains("ppid=77"));
+        assert!(detail.contains("parent=claude --continue"));
+        assert!(detail.contains("elapsed=01:17:30"));
+        assert!(detail.contains("exe=/home/me/.local/bin/agent-bridge.real (deleted)"));
     }
 
     #[test]
