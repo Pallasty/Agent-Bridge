@@ -1,4 +1,6 @@
-use ab_bridge::tool_atlas::{build_tool_atlas_snapshot, ToolAtlasInput};
+use ab_bridge::tool_atlas::{
+    build_tool_atlas_snapshot, project_tool_atlas_snapshot, ToolAtlasInput, ToolAtlasViewOptions,
+};
 use ab_store::{McpToolCallStats, McpToolErrorRecord};
 
 fn stat(name: &str, calls: u64, errors: u64, p95: u32, avg_result_size: f64) -> McpToolCallStats {
@@ -75,4 +77,67 @@ fn tool_atlas_classifies_hot_cold_and_failing_tools() {
     assert_eq!(event_spine.usage_class, "cold");
     assert_eq!(event_spine.health, "unobserved");
     assert_eq!(event_spine.recommendation, "watch");
+}
+
+#[test]
+fn tool_atlas_projection_limits_rows_and_reports_omissions() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec![
+            "memory_search".to_string(),
+            "agent_spawn".to_string(),
+            "event_spine_snapshot".to_string(),
+        ],
+        stats: vec![
+            stat("memory_search", 12, 0, 80, 4_000.0),
+            stat("agent_spawn", 5, 2, 1_500, 900.0),
+        ],
+        recent_errors: vec![McpToolErrorRecord {
+            ts: 1_779_909_990,
+            tool_name: "agent_spawn".to_string(),
+            message: "spawn kilo: No such file or directory".to_string(),
+        }],
+    });
+
+    let payload = project_tool_atlas_snapshot(
+        &snapshot,
+        ToolAtlasViewOptions {
+            include_tools: true,
+            limit: 1,
+        },
+    );
+
+    assert_eq!(payload["tools"].as_array().expect("tools").len(), 1);
+    assert_eq!(payload["tools_included"], 1);
+    assert_eq!(payload["tools_omitted"], 2);
+    assert_eq!(payload["tools"][0]["tool_name"], "agent_spawn");
+}
+
+#[test]
+fn tool_atlas_projection_can_return_summary_only() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec![
+            "memory_search".to_string(),
+            "agent_spawn".to_string(),
+            "event_spine_snapshot".to_string(),
+        ],
+        stats: vec![stat("memory_search", 12, 0, 80, 4_000.0)],
+        recent_errors: Vec::new(),
+    });
+
+    let payload = project_tool_atlas_snapshot(
+        &snapshot,
+        ToolAtlasViewOptions {
+            include_tools: false,
+            limit: 20,
+        },
+    );
+
+    assert_eq!(payload["summary"]["current_tool_count"], 3);
+    assert_eq!(payload["tools"].as_array().expect("tools").len(), 0);
+    assert_eq!(payload["tools_included"], 0);
+    assert_eq!(payload["tools_omitted"], 3);
 }

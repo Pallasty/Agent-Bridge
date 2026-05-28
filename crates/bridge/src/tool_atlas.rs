@@ -26,6 +26,21 @@ pub struct ToolAtlasSnapshot {
     pub tools: Vec<ToolAtlasEntry>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolAtlasViewOptions {
+    pub include_tools: bool,
+    pub limit: usize,
+}
+
+impl Default for ToolAtlasViewOptions {
+    fn default() -> Self {
+        Self {
+            include_tools: true,
+            limit: 20,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolAtlasSummary {
     pub current_tool_count: usize,
@@ -119,6 +134,37 @@ pub fn build_tool_atlas_snapshot(input: ToolAtlasInput) -> ToolAtlasSnapshot {
         summary,
         tools,
     }
+}
+
+pub fn project_tool_atlas_snapshot(
+    snapshot: &ToolAtlasSnapshot,
+    options: ToolAtlasViewOptions,
+) -> serde_json::Value {
+    let limit = options.limit.clamp(1, 500);
+    let tools_total = snapshot.tools.len();
+    let tools_included = if options.include_tools {
+        tools_total.min(limit)
+    } else {
+        0
+    };
+    let mut payload = serde_json::to_value(snapshot).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert(
+            "tools".to_string(),
+            serde_json::to_value(&snapshot.tools[..tools_included])
+                .unwrap_or_else(|_| serde_json::json!([])),
+        );
+        obj.insert("tools_included".to_string(), serde_json::json!(tools_included));
+        obj.insert(
+            "tools_omitted".to_string(),
+            serde_json::json!(tools_total.saturating_sub(tools_included)),
+        );
+        obj.insert(
+            "tool_limit".to_string(),
+            serde_json::json!(if options.include_tools { limit } else { 0 }),
+        );
+    }
+    payload
 }
 
 fn group_recent_errors(

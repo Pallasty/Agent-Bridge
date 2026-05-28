@@ -14340,6 +14340,18 @@ impl McpTool for ToolAtlasSnapshotTool {
                         "type": "string",
                         "enum": ["desktop", "cli", "ide", "legacy"],
                         "description": "Optional AGENT_BRIDGE_CODEX_HOST filter for Codex desktop/CLI/IDE slices."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 20,
+                        "description": "Maximum number of per-tool rows to include. Defaults to 20 to keep MCP output compact; summary counts still cover all tools."
+                    },
+                    "include_tools": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When false, return only summary/filter/note and omit per-tool rows."
                     }
                 }
             }),
@@ -14356,6 +14368,15 @@ impl McpTool for ToolAtlasSnapshotTool {
             .and_then(|v| v.as_i64())
             .unwrap_or(86_400)
             .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 500) as usize;
+        let include_tools = args
+            .get("include_tools")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
         let filter = dispatch_filter_from_args(&args);
         let current_tools: Vec<String> = build_registry(self.hub.clone())
             .list()
@@ -14386,12 +14407,18 @@ impl McpTool for ToolAtlasSnapshotTool {
                 recent_errors,
             },
         );
-        let mut payload = serde_json::to_value(&snapshot).unwrap_or_else(|_| json!({}));
+        let mut payload = crate::tool_atlas::project_tool_atlas_snapshot(
+            &snapshot,
+            crate::tool_atlas::ToolAtlasViewOptions {
+                include_tools,
+                limit,
+            },
+        );
         if let Some(obj) = payload.as_object_mut() {
             obj.insert("filter".to_string(), dispatch_filter_json(&filter));
             obj.insert(
                 "note".to_string(),
-                json!("Read-only derived atlas. It does not write memories, change profiles, or replace the event spine; use it to choose the next tool-surface action."),
+                json!("Read-only derived atlas. Default output is compact: use limit to include more rows, or include_tools=false for summary-only. It does not write memories, change profiles, or replace the event spine."),
             );
         }
         Ok(ToolResult::json_text(&payload))
@@ -27131,6 +27158,27 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .collect();
 
         assert!(names.iter().any(|n| n == "tool_atlas_snapshot"));
+    }
+
+    #[test]
+    fn tool_atlas_schema_has_compact_controls_without_polluting_dispatch_audit() {
+        let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let atlas = schemas
+            .iter()
+            .find(|s| s.name == "tool_atlas_snapshot")
+            .expect("tool_atlas_snapshot schema");
+        let audit = schemas
+            .iter()
+            .find(|s| s.name == "mcp_dispatch_audit")
+            .expect("mcp_dispatch_audit schema");
+
+        assert!(atlas.input_schema["properties"].get("limit").is_some());
+        assert!(atlas
+            .input_schema["properties"]
+            .get("include_tools")
+            .is_some());
+        assert!(audit.input_schema["properties"].get("include_tools").is_none());
     }
 
     #[test]
