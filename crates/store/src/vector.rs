@@ -20,7 +20,10 @@ pub const VECTOR_DIM: usize = 384;
 
 #[cfg(feature = "onnx-embed")]
 pub(crate) mod onnx {
-    use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+    use fastembed::{
+        EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, QuantizationMode,
+        TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel,
+    };
     use std::sync::atomic::{AtomicU8, Ordering};
     use std::sync::{Mutex, OnceLock};
     use tracing::{info, warn};
@@ -85,15 +88,80 @@ pub(crate) mod onnx {
         }
     }
 
+    /// Load the active model from a local directory via fastembed's
+    /// user-defined path, bypassing fastembed's hf-hub download.
+    ///
+    /// Dir: `$AGENT_BRIDGE_ONNX_MODEL_DIR/<model-name>/` (default
+    /// `~/.cache/agent-bridge/onnx-models/<model-name>/`) holding model.onnx +
+    /// tokenizer.json + config.json + special_tokens_map.json +
+    /// tokenizer_config.json. Used because fastembed's bundled hf-hub client
+    /// cannot follow HF's Xet CDN redirect on this environment (every model
+    /// download fails → permanent hash fallback); the files are fetched from
+    /// ModelScope instead and placed here. Returns None if the dir is absent or
+    /// incomplete, so the caller falls back to the normal download path.
+    fn try_load_local() -> Option<TextEmbedding> {
+        let base = std::env::var("AGENT_BRIDGE_ONNX_MODEL_DIR").unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_default();
+            format!("{home}/.cache/agent-bridge/onnx-models")
+        });
+        let dir = std::path::Path::new(&base).join(active_model_name());
+        if !dir.join("model.onnx").exists() {
+            return None;
+        }
+        let rd = |f: &str| std::fs::read(dir.join(f));
+        let build = || -> std::io::Result<UserDefinedEmbeddingModel> {
+            Ok(UserDefinedEmbeddingModel {
+                onnx_file: rd("model.onnx")?,
+                external_initializers: Vec::new(),
+                tokenizer_files: TokenizerFiles {
+                    tokenizer_file: rd("tokenizer.json")?,
+                    config_file: rd("config.json")?,
+                    special_tokens_map_file: rd("special_tokens_map.json")?,
+                    tokenizer_config_file: rd("tokenizer_config.json")?,
+                },
+                pooling: Some(Pooling::Mean), // e5 / MiniLM are mean-pooled
+                quantization: QuantizationMode::None,
+                output_key: None,
+            })
+        };
+        let model = match build() {
+            Ok(m) => m,
+            Err(e) => {
+                warn!("fastembed local model dir {} incomplete: {e}", dir.display());
+                return None;
+            }
+        };
+        let mut opts = InitOptionsUserDefined::new();
+        opts.max_length = 512;
+        match TextEmbedding::try_new_from_user_defined(model, opts) {
+            Ok(e) => {
+                info!(
+                    "fastembed: {} loaded from {} (user-defined, no hf-hub)",
+                    active_model_name(),
+                    dir.display()
+                );
+                Some(e)
+            }
+            Err(e) => {
+                warn!("fastembed user-defined load failed for {}: {e}", dir.display());
+                None
+            }
+        }
+    }
+
     fn kickoff_init() {
         INIT_STARTED.get_or_init(|| {
             INIT_STATE.store(1, Ordering::Release);
             std::thread::Builder::new()
                 .name("fastembed-init".into())
                 .spawn(|| {
-                    let opts = InitOptions::new(select_model().0);
                     let started = std::time::Instant::now();
-                    let result = TextEmbedding::try_new(opts);
+                    // Prefer a local model dir (ModelScope-fetched, no hf-hub);
+                    // fall back to fastembed's own download if absent.
+                    let result = match try_load_local() {
+                        Some(e) => Ok(e),
+                        None => TextEmbedding::try_new(InitOptions::new(select_model().0)),
+                    };
                     let elapsed = started.elapsed();
                     let payload = match result {
                         Ok(e) => {
