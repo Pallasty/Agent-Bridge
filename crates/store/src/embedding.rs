@@ -113,7 +113,14 @@ pub struct OnnxBackend;
 
 impl EmbeddingBackend for OnnxBackend {
     fn name(&self) -> &str {
-        "all-MiniLM-L6-v2"
+        #[cfg(feature = "onnx-embed")]
+        {
+            crate::vector::onnx::active_model_name()
+        }
+        #[cfg(not(feature = "onnx-embed"))]
+        {
+            "all-MiniLM-L6-v2"
+        }
     }
     fn dim(&self) -> usize {
         VECTOR_DIM

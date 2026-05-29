@@ -46,20 +46,60 @@ pub(crate) mod onnx {
     static INIT_STARTED: OnceLock<()> = OnceLock::new();
     static INIT_STATE: AtomicU8 = AtomicU8::new(0);
 
+    /// Opt-in embedding-model selection via `AGENT_BRIDGE_ONNX_MODEL`.
+    /// Default is unchanged (`all-MiniLM-L6-v2`) so existing stores and sibling
+    /// lanes are not forced onto a new backend. `AGENT_BRIDGE_ONNX_MODEL=e5-small`
+    /// switches to the bilingual `multilingual-e5-small` (also 384-dim, so
+    /// `VECTOR_DIM` is unchanged) — the #1447 retrieval-quality win for the
+    /// Chinese-dominant memory corpus. Returns (model, stable-name, needs-e5-prefix).
+    fn select_model() -> (EmbeddingModel, &'static str, bool) {
+        match std::env::var("AGENT_BRIDGE_ONNX_MODEL").ok().as_deref() {
+            Some("e5-small") | Some("multilingual-e5-small") => {
+                (EmbeddingModel::MultilingualE5Small, "multilingual-e5-small", true)
+            }
+            _ => (EmbeddingModel::AllMiniLML6V2, "all-MiniLM-L6-v2", false),
+        }
+    }
+
+    /// Stable name of the active ONNX model (memoised; reflects the env choice).
+    /// Feeds the `embedding_backend` column so e5 vectors are never mixed with
+    /// MiniLM vectors at query time.
+    pub fn active_model_name() -> &'static str {
+        static N: OnceLock<&'static str> = OnceLock::new();
+        N.get_or_init(|| select_model().1)
+    }
+
+    fn e5_prefix() -> bool {
+        static E: OnceLock<bool> = OnceLock::new();
+        *E.get_or_init(|| select_model().2)
+    }
+
+    /// E5 models expect a `query: ` / `passage: ` task prefix; for symmetric
+    /// memory↔memory similarity we use `query: ` uniformly (matches the #1447
+    /// study). MiniLM takes the raw text.
+    fn prep(text: &str) -> String {
+        if e5_prefix() {
+            format!("query: {text}")
+        } else {
+            text.to_string()
+        }
+    }
+
     fn kickoff_init() {
         INIT_STARTED.get_or_init(|| {
             INIT_STATE.store(1, Ordering::Release);
             std::thread::Builder::new()
                 .name("fastembed-init".into())
                 .spawn(|| {
-                    let opts = InitOptions::new(EmbeddingModel::AllMiniLML6V2);
+                    let opts = InitOptions::new(select_model().0);
                     let started = std::time::Instant::now();
                     let result = TextEmbedding::try_new(opts);
                     let elapsed = started.elapsed();
                     let payload = match result {
                         Ok(e) => {
                             info!(
-                                "fastembed: all-MiniLM-L6-v2 ready (384-dim) — init {:.1}s",
+                                "fastembed: {} ready (384-dim) — init {:.1}s",
+                                active_model_name(),
                                 elapsed.as_secs_f32()
                             );
                             Some(Mutex::new(e))
@@ -98,7 +138,8 @@ pub(crate) mod onnx {
     pub fn embed(text: &str) -> Option<Vec<f32>> {
         let mutex = try_cell()?;
         let mut guard = mutex.lock().ok()?;
-        match guard.embed(vec![text], None) {
+        let prepped = prep(text);
+        match guard.embed(vec![prepped.as_str()], None) {
             Ok(mut vecs) if !vecs.is_empty() => Some(vecs.remove(0)),
             Ok(_) => None,
             Err(e) => {
@@ -119,7 +160,8 @@ pub(crate) mod onnx {
         }
         let mutex = try_cell()?;
         let mut guard = mutex.lock().ok()?;
-        let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+        let prepped: Vec<String> = texts.iter().map(|s| prep(s)).collect();
+        let refs: Vec<&str> = prepped.iter().map(|s| s.as_str()).collect();
         match guard.embed(refs, None) {
             Ok(vecs) => Some(vecs),
             Err(e) => {
