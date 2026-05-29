@@ -163,3 +163,35 @@ fn tool_atlas_treats_agent_session_wait_latency_as_expected() {
     assert!(wait.risk_flags.contains(&"expected_wait".to_string()));
     assert!(!wait.risk_flags.contains(&"slow_p95".to_string()));
 }
+
+#[test]
+fn tool_atlas_treats_session_reconcile_confirmation_gate_as_expected() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["agent_session_reconcile".to_string()],
+        stats: vec![stat("agent_session_reconcile", 4, 1, 40, 500.0)],
+        recent_errors: vec![McpToolErrorRecord {
+            ts: 1_779_909_990,
+            tool_name: "agent_session_reconcile".to_string(),
+            message: "dry_run=false requires apply_confirmation=\"finalise_stale_sessions\" after reviewing dry-run candidates".to_string(),
+        }],
+    });
+
+    assert_eq!(snapshot.summary.failing_tool_count, 0);
+
+    let reconcile = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "agent_session_reconcile")
+        .expect("agent_session_reconcile");
+
+    assert_eq!(reconcile.error_count, 1);
+    assert_eq!(reconcile.failure_samples.len(), 1);
+    assert_eq!(reconcile.health, "healthy");
+    assert_eq!(reconcile.recommendation, "keep");
+    assert!(reconcile
+        .risk_flags
+        .contains(&"expected_confirmation".to_string()));
+    assert!(!reconcile.risk_flags.contains(&"has_errors".to_string()));
+}
