@@ -70,10 +70,12 @@ INTERESTING_ATSPI_ROLES = {
 }
 
 
-def _run(cmd: list[str], timeout: float = 8.0) -> tuple[int, str, str]:
+def _run(cmd: list[str], timeout: float = 8.0,
+         env: dict[str, str] | None = None) -> tuple[int, str, str]:
     """Run a command, return (rc, stdout, stderr). Never raises on non-zero."""
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           env=env)
         return p.returncode, p.stdout, p.stderr
     except FileNotFoundError:
         return 127, "", f"not found: {cmd[0]}"
@@ -98,7 +100,7 @@ def _swaymsg(kind: str, env: dict[str, str]) -> Any:
     """swaymsg -t <kind> -r -> parsed JSON, or {'error': ...}."""
     if not shutil.which("swaymsg"):
         return {"error": "swaymsg not installed"}
-    rc, out, err = _run(["swaymsg", "-t", kind, "-r"], timeout=6.0)
+    rc, out, err = _run(["swaymsg", "-t", kind, "-r"], timeout=6.0, env=env)
     if rc != 0:
         return {"error": f"swaymsg -t {kind} rc={rc}: {err.strip()}"}
     try:
@@ -179,7 +181,8 @@ def collect_screenshots(outputs: list[dict[str, Any]], screenshot_dir: Path,
         if not name or not o.get("active"):
             continue
         path = screenshot_dir / f"snap_{name}_{ts}.png"
-        rc, _, err = _run(["grim", "-o", name, str(path)], timeout=15.0)
+        rc, _, err = _run(["grim", "-o", name, str(path)], timeout=15.0,
+                          env=env)
         entry = {"output": name, "path": str(path) if rc == 0 else None}
         if rc == 0:
             entry["bytes"] = path.stat().st_size if path.exists() else None
