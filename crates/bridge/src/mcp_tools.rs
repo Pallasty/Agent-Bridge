@@ -4171,6 +4171,180 @@ impl McpTool for BrowserNavigateTool {
     }
 }
 
+/// Output / expression lane — E1 `present()` static-artifact sink.
+/// Renders a structured result into a self-verified standalone HTML artifact
+/// carrying both a human render and a machine-facing `#ab-payload`
+/// (dual-encoding) + provenance. See `crate::present`.
+pub struct PresentTool {
+    hub: Hub,
+}
+impl PresentTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for PresentTool {
+    fn name(&self) -> &'static str {
+        "present"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Output-expression lane E1: render a structured result into a \
+                 self-verified standalone HTML artifact that carries BOTH a human-facing \
+                 render AND a machine-facing structured payload (dual-encoding) + provenance. \
+                 Linear terminal text is lossy for non-linear results (tables, graphs, diagrams); \
+                 `present` writes an artifact to ~/.cache/agent-bridge/presentations/<id>.html, \
+                 self-verifies it by loading it in the browser, and returns the path + verify \
+                 status. Pass `payload` (the structured JSON the artifact visualizes) so other \
+                 agents read structure instead of OCR-ing pixels. Degrades to \
+                 verify_status=no_browser when no browser is available."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["table", "markdown_table", "html", "svg", "mermaid"],
+                        "description": "Artifact kind. table=structured rows (from payload); markdown_table=a markdown pipe table in artifact; html/svg=raw markup in artifact; mermaid=diagram source in artifact."
+                    },
+                    "artifact": {
+                        "type": "string",
+                        "description": "Source content for html/svg/mermaid/markdown_table. For kind=table, optional (data comes from payload, or a JSON array string here)."
+                    },
+                    "payload": {
+                        "description": "Structured JSON the artifact visualizes. Embedded as #ab-payload (dual-encoding). For kind=table, an array of objects/arrays renders the table. Strongly encouraged."
+                    },
+                    "title": { "type": "string", "description": "Document title." },
+                    "channel": {
+                        "type": "string",
+                        "enum": ["file"],
+                        "default": "file",
+                        "description": "Sink. Only 'file' implemented in v0 (browser_tab/notify/avatar are future rungs)."
+                    },
+                    "provenance": {
+                        "type": "object",
+                        "description": "Where the data came from: {source_tool, source_event_ids, cwd, ...}. generated_by/session_id/ts are auto-added."
+                    },
+                    "verify": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Self-verify by loading the artifact in the browser and checking it rendered non-empty (verify_status: rendered_ok|blank|no_browser|error|skipped)."
+                    }
+                },
+                "required": ["kind"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let kind_str = match required_str_arg(&args, "kind") {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let kind = match crate::present::PresentKind::parse(&kind_str) {
+            Some(k) => k,
+            None => {
+                return Ok(ToolResult::error(format!(
+                    "unknown kind '{kind_str}': use table|markdown_table|html|svg|mermaid"
+                )))
+            }
+        };
+        let artifact = args
+            .get("artifact")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let payload = args.get("payload").cloned();
+        let title = args.get("title").and_then(|v| v.as_str());
+        let channel = args
+            .get("channel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("file")
+            .to_string();
+        let verify = args.get("verify").and_then(|v| v.as_bool()).unwrap_or(true);
+
+        // Provenance: caller-supplied + auto fields (generated_by/session_id/ts).
+        let mut provenance = args.get("provenance").cloned().unwrap_or_else(|| json!({}));
+        if let Some(obj) = provenance.as_object_mut() {
+            obj.entry("generated_by")
+                .or_insert_with(|| json!(crate::present::PRESENT_SCHEMA));
+            if let Some(sid) = &ctx.session_id {
+                obj.entry("session_id")
+                    .or_insert_with(|| json!(sid.to_string()));
+            }
+            obj.insert("ts".into(), json!(crate::present::now_unix()));
+        }
+
+        let html =
+            crate::present::build_html(kind, &artifact, title, payload.as_ref(), Some(&provenance));
+        let dual_encoding = payload.is_some();
+        let id = crate::present::derive_id(&html);
+        let dir = crate::present::presentations_dir();
+        let path = dir.join(format!("{id}.html"));
+        if let Err(e) = crate::present::write_artifact_atomic(&path, &html) {
+            return Ok(ToolResult::error(format!("present: write failed: {e}")));
+        }
+
+        // Self-verify: load the artifact in the browser and check it rendered.
+        let mut verify_status = crate::present::VerifyStatus::Skipped;
+        let mut verify_detail: Option<String> = None;
+        let mut screenshot_path: Option<String> = None;
+        if verify && channel == "file" {
+            if let Err(e) = self.hub.security.check(Cap::Browser) {
+                verify_status = crate::present::VerifyStatus::NoBrowser;
+                verify_detail = Some(format!("capability: {e}"));
+            } else if let Some(b) = self.hub.browser.clone() {
+                let file_url = format!("file://{}", path.display());
+                match b.navigate(&file_url).await {
+                    Ok(page) => {
+                        match b.eval(&page, crate::present::VERIFY_METRICS_JS).await {
+                            Ok(mv) => {
+                                let metrics = crate::present::parse_metrics(&mv);
+                                verify_status = crate::present::classify_render(&metrics);
+                            }
+                            Err(e) => {
+                                verify_status = crate::present::VerifyStatus::Error;
+                                verify_detail = Some(format!("eval: {e}"));
+                            }
+                        }
+                        if let Ok(bytes) = b.screenshot(&page).await {
+                            let png = dir.join(format!("{id}.png"));
+                            if std::fs::write(&png, bytes.as_ref()).is_ok() {
+                                screenshot_path = Some(png.display().to_string());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Some(browser) != launchable Chrome — navigate failure
+                        // (missing binary / launch error) degrades, not fails.
+                        verify_status = crate::present::VerifyStatus::NoBrowser;
+                        verify_detail = Some(format!("navigate: {e}"));
+                    }
+                }
+            } else {
+                verify_status = crate::present::VerifyStatus::NoBrowser;
+                verify_detail = Some("no browser backend configured".to_string());
+            }
+        }
+
+        let result = json!({
+            "schema": crate::present::PRESENT_SCHEMA,
+            "id": id,
+            "kind": kind.as_str(),
+            "channel": channel,
+            "artifact_path": path.display().to_string(),
+            "screenshot_path": screenshot_path,
+            "verify_status": verify_status.as_str(),
+            "verify_detail": verify_detail,
+            "dual_encoding": dual_encoding,
+            "bytes": html.len(),
+            "provenance": provenance,
+        });
+        Ok(ToolResult::json_text(&result))
+    }
+}
+
 pub struct BrowserEvalTool {
     hub: Hub,
 }
@@ -18366,6 +18540,193 @@ struct MemoryOrphanCandidatePreview {
     rows: Vec<MemoryOrphanCandidatePreviewRow>,
 }
 
+#[derive(Debug)]
+struct MemoryOrphanInventoryRow {
+    record: MemoryRecord,
+    created_age_days: i64,
+    updated_age_days: i64,
+    content_preview: String,
+    content_truncated: bool,
+    content_total_chars: usize,
+}
+
+#[derive(Debug, Default)]
+struct MemoryOrphanInventory {
+    examined: u64,
+    orphan_total: u64,
+    eligible_orphans: u64,
+    skipped_blacklisted_orphan: u64,
+    skipped_blacklisted_kind: u64,
+    by_kind: Vec<(String, u64)>,
+    top_tags: Vec<(String, u64)>,
+    rows: Vec<MemoryOrphanInventoryRow>,
+}
+
+fn memory_age_days(now_secs: i64, ts: i64) -> i64 {
+    if ts <= 0 || now_secs <= ts {
+        0
+    } else {
+        (now_secs - ts) / 86_400
+    }
+}
+
+fn memory_orphan_inventory_record_in_scope(
+    rec: &MemoryRecord,
+    min_content_len: usize,
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+) -> bool {
+    if rec.kind.eq_ignore_ascii_case("skill") {
+        return false;
+    }
+    if rec.status != "active" && !rec.status.is_empty() {
+        return false;
+    }
+    if rec.content.len() < min_content_len {
+        return false;
+    }
+    if let Some(scope) = requested_scope {
+        if !memory_search_scope_mode_matches(rec, scope, scope_mode) {
+            return false;
+        }
+    }
+    true
+}
+
+fn memory_orphan_inventory_record_eligible(
+    rec: &MemoryRecord,
+    min_content_len: usize,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+) -> bool {
+    memory_orphan_inventory_record_in_scope(rec, min_content_len, requested_scope, scope_mode)
+        && !memory_has_any_tag(rec, skip_tags)
+        && !memory_kind_is_any(rec, skip_kinds)
+}
+
+fn memory_record_has_induced_edge(
+    key: &str,
+    edges: &[MemoryEdge],
+    visible_keys: &HashSet<String>,
+) -> bool {
+    edges.iter().any(|edge| {
+        let other = if edge.from_key == key {
+            &edge.to_key
+        } else if edge.to_key == key {
+            &edge.from_key
+        } else {
+            return false;
+        };
+        visible_keys.contains(other)
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_memory_orphan_inventory(
+    all: &[MemoryRecord],
+    keys_with_edges: &HashSet<String>,
+    min_content_len: usize,
+    max_rows: usize,
+    preview_chars: usize,
+    sort: &str,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+    now_secs: i64,
+) -> MemoryOrphanInventory {
+    let mut inventory = MemoryOrphanInventory::default();
+    let mut rows = Vec::new();
+    let mut kind_counts: HashMap<String, u64> = HashMap::new();
+    let mut tag_counts: HashMap<String, u64> = HashMap::new();
+
+    for rec in all {
+        if !memory_orphan_inventory_record_in_scope(
+            rec,
+            min_content_len,
+            requested_scope,
+            scope_mode,
+        ) {
+            continue;
+        }
+        inventory.examined += 1;
+        if keys_with_edges.contains(&rec.key) {
+            continue;
+        }
+
+        inventory.orphan_total += 1;
+        if memory_has_any_tag(rec, skip_tags) {
+            inventory.skipped_blacklisted_orphan += 1;
+            continue;
+        }
+        if memory_kind_is_any(rec, skip_kinds) {
+            inventory.skipped_blacklisted_kind += 1;
+            continue;
+        }
+
+        *kind_counts.entry(rec.kind.clone()).or_default() += 1;
+        for tag in &rec.tags {
+            *tag_counts.entry(tag.clone()).or_default() += 1;
+        }
+        let (content_preview, content_truncated, content_total_chars) =
+            truncate_chars(&rec.content, preview_chars);
+        rows.push(MemoryOrphanInventoryRow {
+            record: rec.clone(),
+            created_age_days: memory_age_days(now_secs, rec.created_at),
+            updated_age_days: memory_age_days(now_secs, rec.updated_at),
+            content_preview,
+            content_truncated,
+            content_total_chars,
+        });
+    }
+
+    match sort {
+        "newest" => rows.sort_by(|a, b| {
+            b.record
+                .updated_at
+                .cmp(&a.record.updated_at)
+                .then_with(|| a.record.key.cmp(&b.record.key))
+        }),
+        "kind" => rows.sort_by(|a, b| {
+            a.record
+                .kind
+                .cmp(&b.record.kind)
+                .then_with(|| b.updated_age_days.cmp(&a.updated_age_days))
+                .then_with(|| a.record.key.cmp(&b.record.key))
+        }),
+        "importance" => rows.sort_by(|a, b| {
+            b.record
+                .importance
+                .partial_cmp(&a.record.importance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.updated_age_days.cmp(&a.updated_age_days))
+                .then_with(|| a.record.key.cmp(&b.record.key))
+        }),
+        _ => rows.sort_by(|a, b| {
+            b.updated_age_days
+                .cmp(&a.updated_age_days)
+                .then_with(|| a.record.key.cmp(&b.record.key))
+        }),
+    }
+
+    inventory.eligible_orphans = rows.len() as u64;
+    rows.truncate(max_rows);
+    inventory.rows = rows;
+
+    let mut by_kind: Vec<(String, u64)> = kind_counts.into_iter().collect();
+    by_kind.sort_by(|(ka, ca), (kb, cb)| cb.cmp(ca).then_with(|| ka.cmp(kb)));
+    inventory.by_kind = by_kind;
+
+    let mut top_tags: Vec<(String, u64)> = tag_counts.into_iter().collect();
+    top_tags.sort_by(|(ta, ca), (tb, cb)| cb.cmp(ca).then_with(|| ta.cmp(tb)));
+    top_tags.truncate(10);
+    inventory.top_tags = top_tags;
+
+    inventory
+}
+
 #[allow(clippy::too_many_arguments)]
 fn preview_memory_orphan_candidates(
     all: &[MemoryRecord],
@@ -18689,6 +19050,235 @@ impl McpTool for MemoryOrphanCandidatesTool {
             "skipped_blacklisted_kind": preview.skipped_blacklisted_kind,
             "rows": rows,
             "next_step": "Review candidate quality. If precision is acceptable, run the write-capable memory_link_orphans path separately with dry_run first; do not enable centrality ranking while orphan_fraction remains high.",
+        })))
+    }
+}
+
+// ===========================================================================
+//          memory_orphan_inventory (read-only orphan composition report)
+// ===========================================================================
+
+/// Read-only inventory for remaining orphan memories.
+///
+/// Unlike `memory_orphan_candidates`, this tool is not trying to pick targets.
+/// It answers "what is left?" by kind/tag/age/key so operators can decide
+/// whether to link, archive, or leave records isolated before centrality work.
+pub struct MemoryOrphanInventoryTool {
+    hub: Hub,
+}
+impl MemoryOrphanInventoryTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryOrphanInventoryTool {
+    fn name(&self) -> &'static str {
+        "memory_orphan_inventory"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only orphan inventory for graph hygiene. Lists remaining \
+                edge-free memories by kind/tag/age/key after optional scope and volatile-row \
+                filters. Use after memory_orphan_candidates returns no safe would_link rows, \
+                before lowering thresholds or enabling PageRank-like centrality."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional memory scope, e.g. project:/abs/path or domain:rust."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only",
+                        "description": "When scope is set: local_only keeps matching rows; local_plus_global also includes global/unscoped rows; exploratory scans all rows."
+                    },
+                    "skip_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["auto_curated", "alert", "ttl:7d"],
+                        "description": "Orphan rows with these tags are excluded from eligible inventory counts."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["alert", "work_memory", "session_handoff", "snapshot"],
+                        "description": "Orphan rows with these kinds are excluded from eligible inventory counts."
+                    },
+                    "min_content_len": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 50,
+                        "description": "Skip orphans whose content is shorter than this many bytes."
+                    },
+                    "max_rows": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50,
+                        "description": "Maximum inventory rows to return."
+                    },
+                    "preview_chars": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000,
+                        "default": 180,
+                        "description": "Content preview length per row. 0 disables truncation."
+                    },
+                    "sort": {
+                        "type": "string",
+                        "enum": ["oldest", "newest", "kind", "importance"],
+                        "default": "oldest",
+                        "description": "Ordering for returned orphan rows."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let requested_scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            false,
+        );
+        let skip_tags =
+            memory_string_array_arg(&args, "skip_tags", &["auto_curated", "alert", "ttl:7d"]);
+        let skip_kinds = memory_string_array_arg(
+            &args,
+            "skip_kinds",
+            &["alert", "work_memory", "session_handoff", "snapshot"],
+        );
+        let min_content_len = args
+            .get("min_content_len")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as usize;
+        let max_rows = args
+            .get("max_rows")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .clamp(1, 500) as usize;
+        let preview_chars = args
+            .get("preview_chars")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(180)
+            .min(1000) as usize;
+        let sort = args
+            .get("sort")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| matches!(*s, "oldest" | "newest" | "kind" | "importance"))
+            .unwrap_or("oldest");
+
+        let all = store
+            .list_memories(None, MemoryListSort::Recent, 10_000)
+            .await
+            .unwrap_or_default();
+        let eligible_keys: HashSet<String> = all
+            .iter()
+            .filter(|rec| {
+                memory_orphan_inventory_record_eligible(
+                    rec,
+                    min_content_len,
+                    &skip_tags,
+                    &skip_kinds,
+                    requested_scope,
+                    scope_mode,
+                )
+            })
+            .map(|rec| rec.key.clone())
+            .collect();
+        let mut keys_with_edges: HashSet<String> = HashSet::new();
+        for rec in &all {
+            if !eligible_keys.contains(&rec.key) {
+                continue;
+            }
+            if let Ok(edges) = store.memory_neighbors(&rec.key).await {
+                if memory_record_has_induced_edge(&rec.key, &edges, &eligible_keys) {
+                    keys_with_edges.insert(rec.key.clone());
+                }
+            }
+        }
+
+        let inventory = collect_memory_orphan_inventory(
+            &all,
+            &keys_with_edges,
+            min_content_len,
+            max_rows,
+            preview_chars,
+            sort,
+            &skip_tags,
+            &skip_kinds,
+            requested_scope,
+            scope_mode,
+            unix_now_secs(),
+        );
+
+        let by_kind: Vec<Value> = inventory
+            .by_kind
+            .iter()
+            .map(|(kind, count)| json!({ "kind": kind, "count": count }))
+            .collect();
+        let top_tags: Vec<Value> = inventory
+            .top_tags
+            .iter()
+            .map(|(tag, count)| json!({ "tag": tag, "count": count }))
+            .collect();
+        let rows: Vec<Value> = inventory
+            .rows
+            .iter()
+            .map(|row| {
+                json!({
+                    "key": row.record.key,
+                    "kind": row.record.kind,
+                    "scope": row.record.scope,
+                    "tags": row.record.tags,
+                    "importance": ((row.record.importance * 1000.0).round() / 1000.0),
+                    "created_age_days": row.created_age_days,
+                    "updated_age_days": row.updated_age_days,
+                    "access_count": row.record.access_count,
+                    "related_keys_count": row.record.related_keys.len(),
+                    "content_preview": row.content_preview,
+                    "content_truncated": row.content_truncated,
+                    "content_total_chars": row.content_total_chars,
+                })
+            })
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "read_only": true,
+            "scope": requested_scope,
+            "scope_mode": scope_mode.label(),
+            "skip_tags": skip_tags,
+            "skip_kinds": skip_kinds,
+            "min_content_len": min_content_len,
+            "max_rows": max_rows,
+            "preview_chars": preview_chars,
+            "sort": sort,
+            "examined": inventory.examined,
+            "orphan_total": inventory.orphan_total,
+            "eligible_orphans": inventory.eligible_orphans,
+            "returned_rows": rows.len(),
+            "skipped_blacklisted_orphan": inventory.skipped_blacklisted_orphan,
+            "skipped_blacklisted_kind": inventory.skipped_blacklisted_kind,
+            "by_kind": by_kind,
+            "top_tags": top_tags,
+            "rows": rows,
+            "next_step": "Inspect the remaining orphan categories. Prefer explicit links or archive decisions for coherent clusters; do not lower link thresholds just to reduce orphan_fraction.",
         })))
     }
 }
@@ -23826,6 +24416,7 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Graph-hygiene diagnostics: read-only orphan candidate preview. The
     // write-capable memory_link_orphans tool stays out of codex-essential.
     "memory_orphan_candidates",
+    "memory_orphan_inventory",
     // Linux Computer Use T9a: read-only desktop structure snapshot for Codex
     // IDE lanes. Mutating desktop actions stay out of this allowlist.
     "desktop_snapshot",
@@ -24843,6 +25434,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MemoryOrphanCandidatesTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryOrphanInventoryTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -27883,6 +28480,117 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn memory_orphan_inventory_groups_and_sorts_eligible_orphans() {
+        let mut old = mk_mem_scoped(
+            "old_decision",
+            "decision",
+            "alpha beta gamma delta epsilon zeta",
+            &["memory", "graph"],
+            Some("project:/repo/a"),
+        );
+        old.created_at = 1_000;
+        old.updated_at = 1_000;
+        old.importance = 0.8;
+        let mut new = mk_mem_scoped(
+            "new_todo",
+            "todo",
+            "alpha beta gamma delta epsilon zeta",
+            &["memory"],
+            Some("project:/repo/a"),
+        );
+        new.created_at = 3_000;
+        new.updated_at = 3_000;
+        let linked = mk_mem_scoped(
+            "linked",
+            "decision",
+            "alpha beta gamma delta epsilon zeta",
+            &["memory"],
+            Some("project:/repo/a"),
+        );
+        let scratch = mk_mem_scoped(
+            "scratch",
+            "work_memory",
+            "alpha beta gamma delta epsilon zeta",
+            &["memory"],
+            Some("project:/repo/a"),
+        );
+        let tagged = mk_mem_scoped(
+            "tagged",
+            "decision",
+            "alpha beta gamma delta epsilon zeta",
+            &["auto_curated"],
+            Some("project:/repo/a"),
+        );
+        let cross = mk_mem_scoped(
+            "cross",
+            "decision",
+            "alpha beta gamma delta epsilon zeta",
+            &["memory"],
+            Some("project:/repo/b"),
+        );
+        let all = vec![old, new, linked, scratch, tagged, cross];
+        let mut keys_with_edges = HashSet::new();
+        keys_with_edges.insert("linked".to_string());
+        let skip_tags = vec!["auto_curated".to_string()];
+        let skip_kinds = vec!["work_memory".to_string()];
+
+        let inventory = collect_memory_orphan_inventory(
+            &all,
+            &keys_with_edges,
+            0,
+            10,
+            12,
+            "oldest",
+            &skip_tags,
+            &skip_kinds,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+            1_000 + 3 * 86_400,
+        );
+
+        assert_eq!(inventory.examined, 5);
+        assert_eq!(inventory.orphan_total, 4);
+        assert_eq!(inventory.eligible_orphans, 2);
+        assert_eq!(inventory.skipped_blacklisted_kind, 1);
+        assert_eq!(inventory.skipped_blacklisted_orphan, 1);
+        assert_eq!(
+            inventory.by_kind,
+            vec![("decision".to_string(), 1), ("todo".to_string(), 1)]
+        );
+        assert_eq!(inventory.top_tags[0], ("memory".to_string(), 2));
+        let keys: Vec<&str> = inventory
+            .rows
+            .iter()
+            .map(|row| row.record.key.as_str())
+            .collect();
+        assert_eq!(keys, vec!["old_decision", "new_todo"]);
+        assert!(inventory.rows[0].content_truncated);
+    }
+
+    #[test]
+    fn memory_orphan_inventory_induced_edge_ignores_filtered_targets() {
+        let mut visible = HashSet::new();
+        visible.insert("durable_a".to_string());
+        visible.insert("durable_b".to_string());
+        let edges = vec![
+            mk_edge("durable_a", "work_memory_row", "relates"),
+            mk_edge("durable_a", "other_scope", "relates"),
+        ];
+        assert!(!memory_record_has_induced_edge(
+            "durable_a",
+            &edges,
+            &visible
+        ));
+
+        let edges = vec![mk_edge("durable_a", "durable_b", "relates")];
+        assert!(memory_record_has_induced_edge(
+            "durable_a",
+            &edges,
+            &visible
+        ));
+    }
+
+    #[test]
     fn link_suggest_empty_blacklist_preserves_top_match() {
         // baseline: stubs tied by tag/prefix; no blacklist → highest still wins
         let src = mk_mem(
@@ -29026,14 +29734,14 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 35 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 36 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(23: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(24: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
-        //      + memory_graph_topology + memory_orphan_candidates
+        //      + memory_graph_topology + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        assert_eq!(extras.len(), 35);
+        assert_eq!(extras.len(), 36);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -29062,6 +29770,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"mobile_ios_syslog_tail"));
         assert!(extras.contains(&"memory_graph_topology"));
         assert!(extras.contains(&"memory_orphan_candidates"));
+        assert!(extras.contains(&"memory_orphan_inventory"));
         assert!(extras.contains(&"desktop_snapshot"));
         assert!(extras.contains(&"vision_grounding_ocr"));
     }
