@@ -2002,6 +2002,14 @@ fn source_from_str(s: &str) -> NotifySource {
     }
 }
 
+fn embedding_result_is_hash_fallback(backend_name: &str, content: &str, emb: &[f32]) -> bool {
+    if backend_name == "fnv1a-hash-384" || emb.is_empty() {
+        return false;
+    }
+    let hash = crate::vector::embed_text_hash(content);
+    emb == hash.as_slice()
+}
+
 #[async_trait]
 impl StateStore for SqliteStore {
     async fn save_session(&self, session: &StoredSession) -> Result<()> {
@@ -6159,17 +6167,21 @@ impl StateStore for SqliteStore {
 
         let backend_now = crate::embedding::default_backend();
         let backend_name = backend_now.name().to_string();
-        let pairs: Vec<(String, Vec<u8>)> = to_update
-            .into_iter()
-            .map(|(key, content)| {
-                // P-γ: pass key so substrate-aware backends record
-                // last_perceived = key during reindex (rebuilds the
-                // substrate from existing memory store).
-                let emb = backend_now.perceive(&content, &key);
-                let bytes = crate::vector::encode_embedding(&emb);
-                (key, bytes)
-            })
-            .collect();
+        let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(to_update.len());
+        for (key, content) in to_update {
+            // P-γ: pass key so substrate-aware backends record
+            // last_perceived = key during reindex (rebuilds the
+            // substrate from existing memory store).
+            let emb = backend_now.perceive(&content, &key);
+            if embedding_result_is_hash_fallback(&backend_name, &content, &emb) {
+                return Err(Error::Backend(format!(
+                    "memory_reindex refused to write hash fallback as {backend_name}; \
+                     ONNX model may still be loading or unavailable (first key: {key})"
+                )));
+            }
+            let bytes = crate::vector::encode_embedding(&emb);
+            pairs.push((key, bytes));
+        }
 
         let updated = pairs.len();
         self.conn
@@ -10532,6 +10544,30 @@ mod tests {
         assert_eq!(n_null, 0, "no NULL embeddings remain; reindex must return 0");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn reindex_fallback_guard_flags_hash_vector_for_non_hash_backend() {
+        let content = "中文 memory retrieval smoke";
+        let hash = crate::vector::embed_text_hash(content);
+        assert!(super::embedding_result_is_hash_fallback(
+            "multilingual-e5-small",
+            content,
+            &hash
+        ));
+        assert!(!super::embedding_result_is_hash_fallback(
+            "fnv1a-hash-384",
+            content,
+            &hash
+        ));
+
+        let mut non_hash = hash.clone();
+        non_hash[0] += 0.01;
+        assert!(!super::embedding_result_is_hash_fallback(
+            "multilingual-e5-small",
+            content,
+            &non_hash
+        ));
     }
 
     // Phase 2.x #9: loose_edges = at-least-one-endpoint membership.
