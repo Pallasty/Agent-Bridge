@@ -2002,6 +2002,14 @@ fn source_from_str(s: &str) -> NotifySource {
     }
 }
 
+fn embedding_result_is_hash_fallback(backend_name: &str, content: &str, emb: &[f32]) -> bool {
+    if backend_name == "fnv1a-hash-384" || emb.is_empty() {
+        return false;
+    }
+    let hash = crate::vector::embed_text_hash(content);
+    emb == hash.as_slice()
+}
+
 #[async_trait]
 impl StateStore for SqliteStore {
     async fn save_session(&self, session: &StoredSession) -> Result<()> {
@@ -6118,11 +6126,18 @@ impl StateStore for SqliteStore {
             .conn
             .call(move |c| -> RusqliteResult<Vec<(String, String)>> {
                 let sql = if stale_flag {
+                    // Stale = no embedding, OR no recorded backend (NULL —
+                    // cross-machine/cross-project sync brings in 384d vectors
+                    // with no backend tag, leaving their embedding space
+                    // unknown and uncomparable at query time), OR a backend
+                    // different from the current one. The NULL clause is what
+                    // lets a reindex actually re-embed sync'd rows onto a single
+                    // known space (the #1485 retrieval-quality fix).
                     "SELECT key, content FROM memories
                      WHERE status = 'active'
                        AND (embedding IS NULL
-                            OR (embedding_backend IS NOT NULL
-                                AND embedding_backend != ?2))
+                            OR embedding_backend IS NULL
+                            OR embedding_backend != ?2)
                      LIMIT ?1"
                 } else {
                     "SELECT key, content FROM memories
@@ -6152,17 +6167,21 @@ impl StateStore for SqliteStore {
 
         let backend_now = crate::embedding::default_backend();
         let backend_name = backend_now.name().to_string();
-        let pairs: Vec<(String, Vec<u8>)> = to_update
-            .into_iter()
-            .map(|(key, content)| {
-                // P-γ: pass key so substrate-aware backends record
-                // last_perceived = key during reindex (rebuilds the
-                // substrate from existing memory store).
-                let emb = backend_now.perceive(&content, &key);
-                let bytes = crate::vector::encode_embedding(&emb);
-                (key, bytes)
-            })
-            .collect();
+        let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(to_update.len());
+        for (key, content) in to_update {
+            // P-γ: pass key so substrate-aware backends record
+            // last_perceived = key during reindex (rebuilds the
+            // substrate from existing memory store).
+            let emb = backend_now.perceive(&content, &key);
+            if embedding_result_is_hash_fallback(&backend_name, &content, &emb) {
+                return Err(Error::Backend(format!(
+                    "memory_reindex refused to write hash fallback as {backend_name}; \
+                     ONNX model may still be loading or unavailable (first key: {key})"
+                )));
+            }
+            let bytes = crate::vector::encode_embedding(&emb);
+            pairs.push((key, bytes));
+        }
 
         let updated = pairs.len();
         self.conn
@@ -10399,16 +10418,16 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
-    // P9 follow-up: memory_reindex_embeddings(only_stale=true) must:
+    // P9/#1485 follow-up: memory_reindex_embeddings(only_stale=true) must:
     //   • update rows whose embedding_backend != current backend name
-    //   • leave NULL-backend rows alone (those are pre-v26 simulants;
-    //     they get touched only when their *embedding* is NULL, i.e.
-    //     in the only_stale=false path)
+    //   • update rows whose embedding_backend is NULL even when they already
+    //     have vectors, because sync/import can leave them in an unknown
+    //     embedding space that cannot be safely mixed with the current backend
     //   • return the number of rows it actually rewrote
-    // After the reindex, the stale row's embedding_backend column must
-    // be the current backend's name (deterministic via HashBackend).
+    // After the reindex, rewritten rows' embedding_backend columns must be the
+    // current backend's name (deterministic via HashBackend).
     #[tokio::test]
-    async fn memory_reindex_only_stale_upgrades_mismatched_backend() {
+    async fn memory_reindex_only_stale_upgrades_mismatched_and_null_backend() {
         use crate::embedding::{set_default_backend, HashBackend};
         use crate::MemoryRecord;
         use std::sync::Arc;
@@ -10469,13 +10488,16 @@ mod tests {
             .await
             .expect("seed backend tags");
 
-        // only_stale=true: should pick up just stale_a (NULL backend on
-        // null_b is explicitly excluded by the v26 stale predicate).
+        // only_stale=true: should pick up stale_a (wrong backend) and null_b
+        // (unknown backend despite having an embedding).
         let n_stale = store
             .memory_reindex_embeddings(100, true)
             .await
             .expect("reindex stale");
-        assert_eq!(n_stale, 1, "only stale_a should be reindexed in stale mode");
+        assert_eq!(
+            n_stale, 2,
+            "stale_a and null_b should be reindexed in stale mode"
+        );
 
         // Verify stale_a's backend column is now the current backend name.
         let stale_a_backend: Option<String> = store
@@ -10495,6 +10517,24 @@ mod tests {
             "stale_a backend tag should flip to current default"
         );
 
+        // Verify null_b's backend column is also now the current backend name.
+        let null_b_backend: Option<String> = store
+            .conn
+            .call(|c| -> RusqliteResult<Option<String>> {
+                c.query_row(
+                    "SELECT embedding_backend FROM memories WHERE key = ?1",
+                    params!["null_b"],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+            })
+            .await
+            .expect("query null_b backend");
+        assert_eq!(
+            null_b_backend.as_deref(),
+            Some(expected_backend.as_str()),
+            "null_b backend tag should be filled with current default"
+        );
+
         // only_stale=false: no NULL embeddings (every save populated one),
         // so reindex is a no-op.
         let n_null = store
@@ -10504,6 +10544,30 @@ mod tests {
         assert_eq!(n_null, 0, "no NULL embeddings remain; reindex must return 0");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn reindex_fallback_guard_flags_hash_vector_for_non_hash_backend() {
+        let content = "中文 memory retrieval smoke";
+        let hash = crate::vector::embed_text_hash(content);
+        assert!(super::embedding_result_is_hash_fallback(
+            "multilingual-e5-small",
+            content,
+            &hash
+        ));
+        assert!(!super::embedding_result_is_hash_fallback(
+            "fnv1a-hash-384",
+            content,
+            &hash
+        ));
+
+        let mut non_hash = hash.clone();
+        non_hash[0] += 0.01;
+        assert!(!super::embedding_result_is_hash_fallback(
+            "multilingual-e5-small",
+            content,
+            &non_hash
+        ));
     }
 
     // Phase 2.x #9: loose_edges = at-least-one-endpoint membership.

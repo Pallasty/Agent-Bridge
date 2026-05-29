@@ -639,7 +639,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `worktree_remove` | Tear down a worktree |
 | memory | `memory_save` | Persist a note (lesson / decision / context / …) |
 | | `memory_get` | Fetch one note by key |
-| | `memory_search` | FTS5 full-text search with recency ranking |
+| | `memory_search` | FTS / hybrid / semantic recall with explicit scope modes |
 | | `memory_list` | List memories by kind / sort order |
 | | `memory_delete` | Remove a note |
 | | `memory_compact` | Prune stale memories by age or access count |
@@ -650,6 +650,9 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `memory_consolidate` | Find and merge duplicate/redundant memories by Jaccard similarity |
 | | `memory_stats` | Aggregate statistics: counts by status/kind, edge count, top tags |
 | | `memory_suggest` | Suggest related memory keys via tag/prefix/content overlap |
+| | `memory_graph_topology` | Read-only PageRank-readiness snapshot: orphan rate, hubs, edge coverage; accepts optional `scope`/`scope_mode` plus `skip_kinds`/`skip_tags` for durable scoped checks |
+| | `memory_orphan_candidates` | Scoped, read-only orphan-link candidate preview for graph hygiene |
+| | `memory_orphan_inventory` | Scoped, read-only inventory of remaining orphan memories by kind/tag/age/key |
 | | `memory_graph_export` | Export memory graph as Graphviz DOT or JSON (v0.11) |
 | | `memory_auto_curate` | Automated batch curation from `session_handoff` memories (v0.12) |
 | multi-session | `agent_message` | Append JSON payload to another session's inbox (`agent_messages`, SQLite v10 / W6) |
@@ -693,14 +696,30 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 
 ### Memory search / embeddings (operators & agents)
 
-Memories get a **512-dim feature-hash embedding** (`embed_text` in `ab-store`)
-computed from `content` on every `memory_save` and on every `memory_import`
-row — **no external embedding API**.
+Memories get a **384-dim embedding** from the active local backend (`embed_text`
+in `ab-store`) on every `memory_save` and on every `memory_import` row — **no
+external embedding API**. With the default `onnx-embed` feature, Agent-Bridge
+uses a local ONNX sentence-transformer backend; `AGENT_BRIDGE_ONNX_MODEL=e5-small`
+selects the bilingual `multilingual-e5-small` path. Set
+`AGENT_BRIDGE_EMBED_BACKEND=hash` to force the deterministic `fnv1a-hash-384`
+fallback.
+
+When you pass a `scope`, choose the recall boundary deliberately:
+
+| `scope_mode` | Use when | Recall behavior |
+|--------------|----------|-----------------|
+| `local_only` | Fixing, building, releasing, or reporting status inside one repo | Keeps only rows matching the requested project/domain scope |
+| `local_plus_global` | Current repo work can benefit from general lessons | Keeps matching rows plus global/unscoped rows, with global/unscoped results demoted |
+| `exploratory` | Design, research, analogy, or cross-domain ideation | Keeps cross-scope rows as demoted analogy candidates |
+
+For compatibility, `include_global=true` maps to `local_plus_global` when
+`scope_mode` is omitted. Exploratory cross-scope hits are read-time candidates;
+they are not recorded as coactivation training evidence.
 
 | Audience | What to read |
 |----------|----------------|
-| **Human operators** | Pick `memory_search` **mode**: `fts` (BM25 keywords), `hybrid` (FTS + graph RRF), `semantic` (cosine on hash vectors). Tune `threshold` on semantic (≈0.3 broad, ≈0.7 tight). |
-| **Coding agents** | Same rules via MCP schema; do not assume OpenAI-style embeddings — near-synonym recall is **local hash space**, best for **hundreds** of notes, not million-scale semantic search. |
+| **Human operators** | Pick `memory_search` **scope_mode** first, then **mode**: `fts` (BM25 keywords), `hybrid` (FTS + graph RRF), `semantic` (cosine on local embeddings). Tune `threshold` on semantic (about 0.3 broad, about 0.7 tight). |
+| **Coding agents** | Same rules via MCP schema; use `local_only` for implementation/status/release tasks, `local_plus_global` for local work plus general lessons, and `exploratory` only when cross-project analogies are part of the task. |
 
 See also: `docs/AGENT-BRIDGE-EVOLUTION-CORE.md` §8, `docs/AGENT-BRIDGE-AGENT-UX-ROADMAP.md` (phased follow-ups).
 

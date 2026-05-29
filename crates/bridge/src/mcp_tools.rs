@@ -18,9 +18,11 @@ use ab_store::{
     AgentPresenceRecord,
     CompactPolicy,
     ForumPostRecord,
+    GraphTopology,
     ImportConflictPolicy,
     McpToolCallFilter,
     MemoryCosineHit,
+    MemoryEdge,
     MemoryExportFilter,
     MemoryListSort,
     MemoryQueryRecord,
@@ -4432,6 +4434,205 @@ impl McpTool for BrowserNavigateTool {
             Ok(pid) => Ok(ToolResult::text(format!("page: {pid}"))),
             Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
         }
+    }
+}
+
+/// Output / expression lane — E1 `present()` static-artifact sink.
+/// Renders a structured result into a self-verified standalone HTML artifact
+/// carrying both a human render and a machine-facing `#ab-payload`
+/// (dual-encoding) + provenance. See `crate::present`.
+pub struct PresentTool {
+    hub: Hub,
+}
+impl PresentTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for PresentTool {
+    fn name(&self) -> &'static str {
+        "present"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Output-expression lane E1: render a structured result into a \
+                 self-verified standalone HTML artifact that carries BOTH a human-facing \
+                 render AND a machine-facing structured payload (dual-encoding) + provenance. \
+                 Linear terminal text is lossy for non-linear results (tables, graphs, diagrams); \
+                 `present` writes an artifact to ~/.cache/agent-bridge/presentations/<id>.html, \
+                 self-verifies it by loading it in the browser, and returns the path + verify \
+                 status. Pass `payload` (the structured JSON the artifact visualizes) so other \
+                 agents read structure instead of OCR-ing pixels. Degrades to \
+                 verify_status=no_browser when no browser is available."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["table", "markdown_table", "html", "svg", "mermaid"],
+                        "description": "Artifact kind. table=structured rows (from payload); markdown_table=a markdown pipe table in artifact; html/svg=raw markup in artifact; mermaid=diagram source in artifact. NOTE: html/svg are inlined WITHOUT sanitization and, when verify runs, are loaded in a real browser (their scripts execute) — use html/svg only with trusted/self-authored content, not untrusted input."
+                    },
+                    "artifact": {
+                        "type": "string",
+                        "description": "Source content for html/svg/mermaid/markdown_table. For kind=table, optional (data comes from payload, or a JSON array string here)."
+                    },
+                    "payload": {
+                        "description": "Structured JSON the artifact visualizes. Embedded as #ab-payload (dual-encoding). For kind=table, an array of objects/arrays renders the table. Strongly encouraged."
+                    },
+                    "title": { "type": "string", "description": "Document title." },
+                    "channel": {
+                        "type": "string",
+                        "enum": ["file"],
+                        "default": "file",
+                        "description": "Sink. Only 'file' implemented in v0 (browser_tab/notify/avatar are future rungs)."
+                    },
+                    "provenance": {
+                        "type": "object",
+                        "description": "Where the data came from: {source_tool, source_event_ids, cwd, ...}. generated_by/session_id/ts are auto-added."
+                    },
+                    "verify": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Self-verify by loading the artifact in the browser and checking the #ab-render region rendered visible content (verify_status: rendered_ok|blank|no_browser|error|skipped). Requires the Browser capability + a configured backend; otherwise returns no_browser (see verify_detail). Result also includes artifact_path, screenshot_path (when captured), dual_encoding, and provenance."
+                    }
+                },
+                "required": ["kind"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let kind_str = match required_str_arg(&args, "kind") {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let kind = match crate::present::PresentKind::parse(&kind_str) {
+            Some(k) => k,
+            None => {
+                return Ok(ToolResult::error(format!(
+                    "unknown kind '{kind_str}': use table|markdown_table|html|svg|mermaid"
+                )))
+            }
+        };
+        let artifact = args
+            .get("artifact")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        // Explicit `null` means "no payload" (not an embedded JSON null) so
+        // dual_encoding is not falsely reported true.
+        let payload = args.get("payload").filter(|v| !v.is_null()).cloned();
+        let title = args.get("title").and_then(|v| v.as_str());
+        let channel = args
+            .get("channel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("file")
+            .to_string();
+        // v0 implements only the `file` sink; reject others so the echoed
+        // channel always matches what actually happened.
+        if channel != "file" {
+            return Ok(ToolResult::error(format!(
+                "unsupported channel '{channel}': v0 implements only 'file'"
+            )));
+        }
+        let verify = args.get("verify").and_then(|v| v.as_bool()).unwrap_or(true);
+
+        // Provenance: caller-supplied + auto fields (generated_by/session_id/ts).
+        // A non-object provenance is wrapped as {given: <value>} so the auto
+        // integrity fields are never silently dropped.
+        let mut provenance = match args.get("provenance").cloned() {
+            Some(v) if v.is_object() => v,
+            Some(v) => json!({ "given": v }),
+            None => json!({}),
+        };
+        if let Some(obj) = provenance.as_object_mut() {
+            obj.entry("generated_by")
+                .or_insert_with(|| json!(crate::present::PRESENT_SCHEMA));
+            if let Some(sid) = &ctx.session_id {
+                obj.entry("session_id")
+                    .or_insert_with(|| json!(sid.to_string()));
+            }
+            obj.insert("ts".into(), json!(crate::present::now_unix()));
+        }
+
+        let html =
+            crate::present::build_html(kind, &artifact, title, payload.as_ref(), Some(&provenance));
+        let dual_encoding = payload.is_some();
+        // Content-addressed id: hash the SOURCE (kind+title+artifact+payload),
+        // NOT the rendered HTML — the HTML embeds a per-call provenance ts, so
+        // hashing it would defeat dedupe. Identical content → same id/path.
+        let canonical = format!(
+            "{}\u{0}{}\u{0}{}\u{0}{}",
+            kind.as_str(),
+            title.unwrap_or(""),
+            artifact,
+            payload.as_ref().map(|p| p.to_string()).unwrap_or_default()
+        );
+        let id = crate::present::derive_id(&canonical);
+        let dir = crate::present::presentations_dir();
+        let path = dir.join(format!("{id}.html"));
+        if let Err(e) = crate::present::write_artifact_atomic(&path, &html) {
+            return Ok(ToolResult::error(format!("present: write failed: {e}")));
+        }
+
+        // Self-verify: load the artifact in the browser and check it rendered.
+        let mut verify_status = crate::present::VerifyStatus::Skipped;
+        let mut verify_detail: Option<String> = None;
+        let mut screenshot_path: Option<String> = None;
+        if verify && channel == "file" {
+            if let Err(e) = self.hub.security.check(Cap::Browser) {
+                verify_status = crate::present::VerifyStatus::NoBrowser;
+                verify_detail = Some(format!("capability: {e}"));
+            } else if let Some(b) = self.hub.browser.clone() {
+                let file_url = format!("file://{}", path.display());
+                match b.navigate(&file_url).await {
+                    Ok(page) => {
+                        match b.eval(&page, crate::present::VERIFY_METRICS_JS).await {
+                            Ok(mv) => {
+                                let metrics = crate::present::parse_metrics(&mv);
+                                verify_status = crate::present::classify_render(&metrics);
+                            }
+                            Err(e) => {
+                                verify_status = crate::present::VerifyStatus::Error;
+                                verify_detail = Some(format!("eval: {e}"));
+                            }
+                        }
+                        if let Ok(bytes) = b.screenshot(&page).await {
+                            let png = dir.join(format!("{id}.png"));
+                            if std::fs::write(&png, bytes.as_ref()).is_ok() {
+                                screenshot_path = Some(png.display().to_string());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Some(browser) != launchable Chrome — navigate failure
+                        // (missing binary / launch error) degrades, not fails.
+                        verify_status = crate::present::VerifyStatus::NoBrowser;
+                        verify_detail = Some(format!("navigate: {e}"));
+                    }
+                }
+            } else {
+                verify_status = crate::present::VerifyStatus::NoBrowser;
+                verify_detail = Some("no browser backend configured".to_string());
+            }
+        }
+
+        let result = json!({
+            "schema": crate::present::PRESENT_SCHEMA,
+            "id": id,
+            "kind": kind.as_str(),
+            "channel": channel,
+            "artifact_path": path.display().to_string(),
+            "screenshot_path": screenshot_path,
+            "verify_status": verify_status.as_str(),
+            "verify_detail": verify_detail,
+            "dual_encoding": dual_encoding,
+            "bytes": html.len(),
+            "provenance": provenance,
+        });
+        Ok(ToolResult::json_text(&result))
     }
 }
 
@@ -10090,6 +10291,21 @@ impl McpTool for MemorySearchTool {
                 "properties": {
                     "query":      { "type": "string", "description": "Search query (FTS5 match syntax for fts/hybrid; natural language for semantic)." },
                     "tags_any":   { "type": "array", "items": { "type": "string" }, "default": [] },
+                    "scope":      {
+                        "type": "string",
+                        "description": "Optional scope hint/filter, e.g. project:/abs/path or domain:rust. Pair with scope_mode to choose local-only recall vs cross-project exploration."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only",
+                        "description": "When scope is set: local_only keeps only matching project/domain rows; local_plus_global also allows global/unscoped rows with a small score penalty; exploratory keeps cross-project rows as demoted analogy candidates."
+                    },
+                    "include_global": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Compatibility alias for scope_mode=local_plus_global when scope_mode is omitted."
+                    },
                     "limit":      { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 },
                     "mode":       {
                         "type": "string", "enum": ["fts", "hybrid", "semantic"], "default": "fts",
@@ -10144,6 +10360,17 @@ impl McpTool for MemorySearchTool {
             .unwrap_or(20)
             .min(200) as u32;
         let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("fts");
+        let scope_filter = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let include_global = args
+            .get("include_global")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let scope_mode = memory_search_scope_mode(&args, include_global);
 
         let exclude_kinds: Vec<String> = args
             .get("exclude_kinds")
@@ -10154,10 +10381,10 @@ impl McpTool for MemorySearchTool {
                     .collect()
             })
             .unwrap_or_default();
-        // When exclusions are active, overfetch so the post-filter result can
-        // still hit `limit`. 5× covers up to ~80% saturation; cap at 200 (the
-        // schema's hard upper bound) to avoid pathological queries.
-        let inner_limit = if exclude_kinds.is_empty() {
+        // When output filters are active, overfetch so the post-filter result
+        // can still hit `limit`. 5× covers up to ~80% saturation; cap at 200
+        // (the schema's hard upper bound) to avoid pathological queries.
+        let inner_limit = if exclude_kinds.is_empty() && scope_filter.is_none() {
             limit
         } else {
             (limit.saturating_mul(5)).min(200)
@@ -10223,6 +10450,15 @@ impl McpTool for MemorySearchTool {
             store.memory_search(&q, &tags, inner_limit).await?
         };
 
+        // Scope mode is intentionally applied before Seed/coactivation rerank:
+        // callers asking for local work should not let discarded cross-project
+        // hits affect boosts, while exploratory mode keeps those hits as
+        // demoted analogy candidates instead of letting them dominate top-k.
+        let mut hits = hits;
+        if let Some(scope) = scope_filter.as_deref() {
+            hits = memory_search_apply_scope_mode(hits, scope, scope_mode);
+        }
+
         // Path C actuator: rerank using perception_filter hub_clusters.
         // Fail-soft (no state file / disable env / empty hub_clusters → pass-through).
         let hits = apply_seed_boost(hits);
@@ -10282,6 +10518,11 @@ impl McpTool for MemorySearchTool {
         let coact_keys: Vec<String> = hits
             .iter()
             .filter(|h| h.record.kind != "skill")
+            .filter(|h| {
+                scope_filter.as_deref().map_or(true, |scope| {
+                    memory_search_scope_trace_allowed(&h.record, scope, scope_mode)
+                })
+            })
             .take(10)
             .map(|h| h.record.key.clone())
             .collect();
@@ -16857,16 +17098,79 @@ impl McpTool for MemoryGraphTopologyTool {
                  whether the graph is healthy enough for a bounded centrality prior without \
                  changing memory_search ranking."
                 .into(),
-            input_schema: json!({ "type": "object", "properties": {} }),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional memory scope, e.g. project:/abs/path or domain:rust. When set, reports an induced-subgraph topology for records selected by scope_mode."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "description": "Scope selection for scoped topology. local_only keeps matching project/domain rows; local_plus_global also includes global/unscoped rows; exploratory includes all source rows."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Memory kinds to exclude from the topology denominator, e.g. work_memory/session_handoff/snapshot for durable-readiness checks."
+                    },
+                    "skip_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Memory tags to exclude from the topology denominator, e.g. auto_curated/alert/ttl:7d."
+                    }
+                }
+            }),
         }
     }
-    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let store = match &self.hub.store {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
         };
 
-        let topo = store.graph_topology().await?;
+        let requested_scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            false,
+        );
+        let skip_tags = memory_string_array_arg(&args, "skip_tags", &[]);
+        let skip_kinds = memory_string_array_arg(&args, "skip_kinds", &[]);
+        let use_filtered_path =
+            requested_scope.is_some() || !skip_tags.is_empty() || !skip_kinds.is_empty();
+
+        let topo = if use_filtered_path {
+            let records = store
+                .list_memories(None, MemoryListSort::Newest, 10_000)
+                .await?;
+            let visible_records: Vec<MemoryRecord> = records
+                .into_iter()
+                .filter(|rec| {
+                    memory_graph_topology_record_visible(
+                        rec,
+                        requested_scope,
+                        scope_mode,
+                        &skip_tags,
+                        &skip_kinds,
+                    )
+                })
+                .collect();
+            let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+            for rec in &visible_records {
+                edges_by_key.insert(rec.key.clone(), store.memory_neighbors(&rec.key).await?);
+            }
+            memory_graph_topology_from_records(&visible_records, &edges_by_key)
+        } else {
+            store.graph_topology().await?
+        };
         let active_total = topo.non_skill_active_total.max(1);
         let orphan_fraction = topo.orphan_count as f64 / active_total as f64;
         let p4_evolved_fraction = topo.p4_evolved_coverage as f64 / active_total as f64;
@@ -16905,6 +17209,11 @@ impl McpTool for MemoryGraphTopologyTool {
             "p4_evolved_coverage": topo.p4_evolved_coverage,
             "p4_evolved_fraction": (p4_evolved_fraction * 1000.0).round() / 1000.0,
             "pagerank_readiness": pagerank_readiness,
+            "scope": requested_scope,
+            "scope_mode": requested_scope.map(|_| scope_mode.label()),
+            "skip_tags": skip_tags,
+            "skip_kinds": skip_kinds,
+            "edge_scope": use_filtered_path.then_some("induced_subgraph"),
             "ranking_note": "This tool does not run PageRank and does not alter memory_search. \
                 It is the cheap preflight for deciding whether a bounded centrality prior \
                 is safe to test.",
@@ -18214,6 +18523,265 @@ fn memory_scope_value(rec: &MemoryRecord) -> Option<&str> {
         .filter(|scope| !scope.is_empty())
 }
 
+fn project_scope_paths_overlap(a: &str, b: &str) -> bool {
+    let (Some(a), Some(b)) = (a.strip_prefix("project:"), b.strip_prefix("project:")) else {
+        return false;
+    };
+    let a = a.trim_end_matches('/');
+    let b = b.trim_end_matches('/');
+    a == b
+        || b.strip_prefix(a).is_some_and(|rest| rest.starts_with('/'))
+        || a.strip_prefix(b).is_some_and(|rest| rest.starts_with('/'))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemorySearchScopeMode {
+    LocalOnly,
+    LocalPlusGlobal,
+    Exploratory,
+}
+
+impl MemorySearchScopeMode {
+    fn parse(raw: Option<&str>, include_global: bool) -> Self {
+        match raw {
+            Some("local_plus_global") => Self::LocalPlusGlobal,
+            Some("exploratory") => Self::Exploratory,
+            Some("local_only") => Self::LocalOnly,
+            // Backward compatibility for callers that adopted the first
+            // scope-filter cut before scope_mode existed.
+            None if include_global => Self::LocalPlusGlobal,
+            _ => Self::LocalOnly,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::LocalOnly => "local_only",
+            Self::LocalPlusGlobal => "local_plus_global",
+            Self::Exploratory => "exploratory",
+        }
+    }
+}
+
+fn memory_search_scope_mode(args: &Value, include_global: bool) -> MemorySearchScopeMode {
+    MemorySearchScopeMode::parse(
+        args.get("scope_mode")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        include_global,
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemorySearchScopeRelation {
+    Local,
+    Global,
+    CrossScope,
+}
+
+fn memory_search_scope_relation(
+    rec: &MemoryRecord,
+    requested_scope: &str,
+) -> MemorySearchScopeRelation {
+    let requested_scope = requested_scope.trim();
+    match memory_scope_value(rec) {
+        Some(scope)
+            if !requested_scope.is_empty()
+                && (scope == requested_scope
+                    || project_scope_paths_overlap(scope, requested_scope)) =>
+        {
+            MemorySearchScopeRelation::Local
+        }
+        Some("global") | None => MemorySearchScopeRelation::Global,
+        _ => MemorySearchScopeRelation::CrossScope,
+    }
+}
+
+fn memory_search_scope_mode_matches(
+    rec: &MemoryRecord,
+    requested_scope: &str,
+    mode: MemorySearchScopeMode,
+) -> bool {
+    match (mode, memory_search_scope_relation(rec, requested_scope)) {
+        (MemorySearchScopeMode::LocalOnly, MemorySearchScopeRelation::Local) => true,
+        (MemorySearchScopeMode::LocalPlusGlobal, MemorySearchScopeRelation::Local)
+        | (MemorySearchScopeMode::LocalPlusGlobal, MemorySearchScopeRelation::Global) => true,
+        (MemorySearchScopeMode::Exploratory, _) => true,
+        _ => false,
+    }
+}
+
+fn memory_search_scope_score_multiplier(
+    rec: &MemoryRecord,
+    requested_scope: &str,
+    mode: MemorySearchScopeMode,
+) -> f64 {
+    match (mode, memory_search_scope_relation(rec, requested_scope)) {
+        (_, MemorySearchScopeRelation::Local) => 1.0,
+        (MemorySearchScopeMode::LocalPlusGlobal, MemorySearchScopeRelation::Global)
+        | (MemorySearchScopeMode::Exploratory, MemorySearchScopeRelation::Global) => 0.85,
+        (MemorySearchScopeMode::Exploratory, MemorySearchScopeRelation::CrossScope) => 0.65,
+        _ => 1.0,
+    }
+}
+
+fn memory_search_apply_scope_mode(
+    hits: Vec<MemorySearchHit>,
+    requested_scope: &str,
+    mode: MemorySearchScopeMode,
+) -> Vec<MemorySearchHit> {
+    let mut scoped: Vec<MemorySearchHit> = hits
+        .into_iter()
+        .filter_map(|mut hit| {
+            if !memory_search_scope_mode_matches(&hit.record, requested_scope, mode) {
+                return None;
+            }
+            hit.score *= memory_search_scope_score_multiplier(&hit.record, requested_scope, mode);
+            Some(hit)
+        })
+        .collect();
+    scoped.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    scoped
+}
+
+fn memory_search_scope_trace_allowed(
+    rec: &MemoryRecord,
+    requested_scope: &str,
+    mode: MemorySearchScopeMode,
+) -> bool {
+    match (mode, memory_search_scope_relation(rec, requested_scope)) {
+        (_, MemorySearchScopeRelation::Local) => true,
+        (MemorySearchScopeMode::LocalPlusGlobal, MemorySearchScopeRelation::Global) => true,
+        // Exploratory cross-scope hits are read-time analogies. Do not
+        // crystallize them into coactivation until a later explicit-feedback
+        // path can distinguish useful transfer from noisy coincidence.
+        _ => false,
+    }
+}
+
+fn memory_graph_topology_record_visible(
+    rec: &MemoryRecord,
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+) -> bool {
+    if rec.status != "active" || rec.kind.eq_ignore_ascii_case("skill") {
+        return false;
+    }
+    if memory_has_any_tag(rec, skip_tags) || memory_kind_is_any(rec, skip_kinds) {
+        return false;
+    }
+    match requested_scope {
+        Some(scope) => memory_search_scope_mode_matches(rec, scope, scope_mode),
+        None => true,
+    }
+}
+
+fn memory_graph_topology_from_records(
+    records: &[MemoryRecord],
+    edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
+) -> GraphTopology {
+    let visible_keys: HashSet<String> = records.iter().map(|rec| rec.key.clone()).collect();
+    let mut degrees: HashMap<String, u64> = visible_keys
+        .iter()
+        .map(|key| (key.clone(), 0_u64))
+        .collect();
+    let mut evolved_keys: HashSet<String> = HashSet::new();
+
+    for key in &visible_keys {
+        let Some(edges) = edges_by_key.get(key) else {
+            continue;
+        };
+        for edge in edges {
+            let other = if edge.from_key == *key {
+                &edge.to_key
+            } else if edge.to_key == *key {
+                &edge.from_key
+            } else {
+                continue;
+            };
+            if !visible_keys.contains(other) {
+                continue;
+            }
+            if let Some(degree) = degrees.get_mut(key) {
+                *degree += 1;
+            }
+            if edge.edge_type == "evolved" {
+                evolved_keys.insert(key.clone());
+            }
+        }
+    }
+
+    let canonical = ["0", "1", "2-3", "4-5", "6-10", "11-20", "21+"];
+    let mut bucket_counts: HashMap<String, u64> = canonical
+        .iter()
+        .map(|bucket| ((*bucket).to_string(), 0_u64))
+        .collect();
+    for degree in degrees.values() {
+        let bucket = match *degree {
+            0 => "0",
+            1 => "1",
+            2 | 3 => "2-3",
+            4 | 5 => "4-5",
+            6..=10 => "6-10",
+            11..=20 => "11-20",
+            _ => "21+",
+        };
+        *bucket_counts.entry(bucket.to_string()).or_default() += 1;
+    }
+    let degree_histogram = canonical
+        .iter()
+        .map(|bucket| {
+            (
+                (*bucket).to_string(),
+                bucket_counts.get(*bucket).copied().unwrap_or(0),
+            )
+        })
+        .collect();
+
+    let mut hubs: Vec<(String, u64)> = degrees
+        .into_iter()
+        .filter(|(_, degree)| *degree > 0)
+        .collect();
+    hubs.sort_by(|(key_a, degree_a), (key_b, degree_b)| {
+        degree_b.cmp(degree_a).then_with(|| key_a.cmp(key_b))
+    });
+    hubs.truncate(5);
+
+    GraphTopology {
+        non_skill_active_total: visible_keys.len() as u64,
+        orphan_count: visible_keys
+            .iter()
+            .filter(|key| {
+                edges_by_key
+                    .get(*key)
+                    .map(|edges| {
+                        !edges.iter().any(|edge| {
+                            let other = if edge.from_key == **key {
+                                &edge.to_key
+                            } else if edge.to_key == **key {
+                                &edge.from_key
+                            } else {
+                                return false;
+                            };
+                            visible_keys.contains(other)
+                        })
+                    })
+                    .unwrap_or(true)
+            })
+            .count() as u64,
+        degree_histogram,
+        top_5_hubs: hubs,
+        p4_evolved_coverage: evolved_keys.len() as u64,
+    }
+}
+
 fn memory_scopes_compatible(source: &MemoryRecord, target: &MemoryRecord, required: bool) -> bool {
     if !required {
         return true;
@@ -18242,6 +18810,767 @@ fn undirected_memory_pair_key(a: &str, b: &str) -> (String, String) {
         (a.to_string(), b.to_string())
     } else {
         (b.to_string(), a.to_string())
+    }
+}
+
+#[derive(Debug)]
+struct MemoryOrphanCandidatePreviewRow {
+    orphan: MemoryRecord,
+    suggestions: Vec<(String, f64, String)>,
+}
+
+#[derive(Debug, Default)]
+struct MemoryOrphanCandidatePreview {
+    examined: u64,
+    eligible_orphans: u64,
+    would_link: u64,
+    skipped_low_score: u64,
+    skipped_no_candidates: u64,
+    skipped_blacklisted_orphan: u64,
+    skipped_blacklisted_kind: u64,
+    rows: Vec<MemoryOrphanCandidatePreviewRow>,
+}
+
+#[derive(Debug)]
+struct MemoryOrphanInventoryRow {
+    record: MemoryRecord,
+    created_age_days: i64,
+    updated_age_days: i64,
+    content_preview: String,
+    content_truncated: bool,
+    content_total_chars: usize,
+}
+
+#[derive(Debug, Default)]
+struct MemoryOrphanInventory {
+    examined: u64,
+    orphan_total: u64,
+    eligible_orphans: u64,
+    skipped_blacklisted_orphan: u64,
+    skipped_blacklisted_kind: u64,
+    by_kind: Vec<(String, u64)>,
+    top_tags: Vec<(String, u64)>,
+    rows: Vec<MemoryOrphanInventoryRow>,
+}
+
+fn memory_age_days(now_secs: i64, ts: i64) -> i64 {
+    if ts <= 0 || now_secs <= ts {
+        0
+    } else {
+        (now_secs - ts) / 86_400
+    }
+}
+
+fn memory_orphan_inventory_record_in_scope(
+    rec: &MemoryRecord,
+    min_content_len: usize,
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+) -> bool {
+    if rec.kind.eq_ignore_ascii_case("skill") {
+        return false;
+    }
+    if rec.status != "active" && !rec.status.is_empty() {
+        return false;
+    }
+    if rec.content.len() < min_content_len {
+        return false;
+    }
+    if let Some(scope) = requested_scope {
+        if !memory_search_scope_mode_matches(rec, scope, scope_mode) {
+            return false;
+        }
+    }
+    true
+}
+
+fn memory_orphan_inventory_record_eligible(
+    rec: &MemoryRecord,
+    min_content_len: usize,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+) -> bool {
+    memory_orphan_inventory_record_in_scope(rec, min_content_len, requested_scope, scope_mode)
+        && !memory_has_any_tag(rec, skip_tags)
+        && !memory_kind_is_any(rec, skip_kinds)
+}
+
+fn memory_record_has_induced_edge(
+    key: &str,
+    edges: &[MemoryEdge],
+    visible_keys: &HashSet<String>,
+) -> bool {
+    edges.iter().any(|edge| {
+        let other = if edge.from_key == key {
+            &edge.to_key
+        } else if edge.to_key == key {
+            &edge.from_key
+        } else {
+            return false;
+        };
+        visible_keys.contains(other)
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_memory_orphan_inventory(
+    all: &[MemoryRecord],
+    keys_with_edges: &HashSet<String>,
+    min_content_len: usize,
+    max_rows: usize,
+    preview_chars: usize,
+    sort: &str,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+    now_secs: i64,
+) -> MemoryOrphanInventory {
+    let mut inventory = MemoryOrphanInventory::default();
+    let mut rows = Vec::new();
+    let mut kind_counts: HashMap<String, u64> = HashMap::new();
+    let mut tag_counts: HashMap<String, u64> = HashMap::new();
+
+    for rec in all {
+        if !memory_orphan_inventory_record_in_scope(
+            rec,
+            min_content_len,
+            requested_scope,
+            scope_mode,
+        ) {
+            continue;
+        }
+        inventory.examined += 1;
+        if keys_with_edges.contains(&rec.key) {
+            continue;
+        }
+
+        inventory.orphan_total += 1;
+        if memory_has_any_tag(rec, skip_tags) {
+            inventory.skipped_blacklisted_orphan += 1;
+            continue;
+        }
+        if memory_kind_is_any(rec, skip_kinds) {
+            inventory.skipped_blacklisted_kind += 1;
+            continue;
+        }
+
+        *kind_counts.entry(rec.kind.clone()).or_default() += 1;
+        for tag in &rec.tags {
+            *tag_counts.entry(tag.clone()).or_default() += 1;
+        }
+        let (content_preview, content_truncated, content_total_chars) =
+            truncate_chars(&rec.content, preview_chars);
+        rows.push(MemoryOrphanInventoryRow {
+            record: rec.clone(),
+            created_age_days: memory_age_days(now_secs, rec.created_at),
+            updated_age_days: memory_age_days(now_secs, rec.updated_at),
+            content_preview,
+            content_truncated,
+            content_total_chars,
+        });
+    }
+
+    match sort {
+        "newest" => rows.sort_by(|a, b| {
+            b.record
+                .updated_at
+                .cmp(&a.record.updated_at)
+                .then_with(|| a.record.key.cmp(&b.record.key))
+        }),
+        "kind" => rows.sort_by(|a, b| {
+            a.record
+                .kind
+                .cmp(&b.record.kind)
+                .then_with(|| b.updated_age_days.cmp(&a.updated_age_days))
+                .then_with(|| a.record.key.cmp(&b.record.key))
+        }),
+        "importance" => rows.sort_by(|a, b| {
+            b.record
+                .importance
+                .partial_cmp(&a.record.importance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.updated_age_days.cmp(&a.updated_age_days))
+                .then_with(|| a.record.key.cmp(&b.record.key))
+        }),
+        _ => rows.sort_by(|a, b| {
+            b.updated_age_days
+                .cmp(&a.updated_age_days)
+                .then_with(|| a.record.key.cmp(&b.record.key))
+        }),
+    }
+
+    inventory.eligible_orphans = rows.len() as u64;
+    rows.truncate(max_rows);
+    inventory.rows = rows;
+
+    let mut by_kind: Vec<(String, u64)> = kind_counts.into_iter().collect();
+    by_kind.sort_by(|(ka, ca), (kb, cb)| cb.cmp(ca).then_with(|| ka.cmp(kb)));
+    inventory.by_kind = by_kind;
+
+    let mut top_tags: Vec<(String, u64)> = tag_counts.into_iter().collect();
+    top_tags.sort_by(|(ta, ca), (tb, cb)| cb.cmp(ca).then_with(|| ta.cmp(tb)));
+    top_tags.truncate(10);
+    inventory.top_tags = top_tags;
+
+    inventory
+}
+
+#[allow(clippy::too_many_arguments)]
+fn preview_memory_orphan_candidates(
+    all: &[MemoryRecord],
+    keys_with_edges: &HashSet<String>,
+    threshold: f64,
+    min_content_len: usize,
+    max_orphans: usize,
+    candidate_limit: usize,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    require_scope_compatible: bool,
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+) -> MemoryOrphanCandidatePreview {
+    let mut preview = MemoryOrphanCandidatePreview::default();
+    let mut orphans: Vec<MemoryRecord> = Vec::new();
+
+    for rec in all {
+        if rec.kind == "skill" {
+            continue;
+        }
+        if rec.status != "active" && !rec.status.is_empty() {
+            continue;
+        }
+        if rec.content.len() < min_content_len {
+            continue;
+        }
+        if let Some(scope) = requested_scope {
+            if !memory_search_scope_mode_matches(rec, scope, scope_mode) {
+                continue;
+            }
+        }
+        preview.examined += 1;
+        if keys_with_edges.contains(&rec.key) {
+            continue;
+        }
+        if memory_has_any_tag(rec, skip_tags) {
+            preview.skipped_blacklisted_orphan += 1;
+            continue;
+        }
+        if memory_kind_is_any(rec, skip_kinds) {
+            preview.skipped_blacklisted_kind += 1;
+            continue;
+        }
+        orphans.push(rec.clone());
+        if orphans.len() >= max_orphans {
+            break;
+        }
+    }
+
+    preview.eligible_orphans = orphans.len() as u64;
+    for orphan in &orphans {
+        let already_linked: HashSet<String> = HashSet::new();
+        let candidate_pool: Vec<MemoryRecord> = all
+            .iter()
+            .filter(|candidate| {
+                memory_link_orphan_candidate_allowed(
+                    orphan,
+                    candidate,
+                    skip_tags,
+                    skip_kinds,
+                    require_scope_compatible,
+                )
+            })
+            .cloned()
+            .collect();
+        let suggestions = compute_link_suggestions(
+            orphan,
+            &candidate_pool,
+            &already_linked,
+            candidate_limit,
+            skip_tags,
+        );
+        match suggestions.first() {
+            Some((_, confidence, _)) if *confidence >= threshold => preview.would_link += 1,
+            Some(_) => preview.skipped_low_score += 1,
+            None => preview.skipped_no_candidates += 1,
+        }
+        preview.rows.push(MemoryOrphanCandidatePreviewRow {
+            orphan: orphan.clone(),
+            suggestions,
+        });
+    }
+
+    preview
+}
+
+fn memory_pair_scope_relation(source: &MemoryRecord, target: &MemoryRecord) -> &'static str {
+    match (memory_scope_value(source), memory_scope_value(target)) {
+        (Some(a), Some(b)) if a == b => "same_scope",
+        (Some("global"), _) | (_, Some("global")) | (None, _) | (_, None) => "global_or_unscoped",
+        _ => "cross_scope",
+    }
+}
+
+// ===========================================================================
+//          memory_orphan_candidates (read-only graph hygiene preflight)
+// ===========================================================================
+
+/// Read-only preview companion for `memory_link_orphans`.
+///
+/// This is intentionally safe to expose to compact Codex profiles: it finds
+/// orphan memories and returns candidate links, but it never writes
+/// `memory_edges`. Operators can inspect candidate quality before running the
+/// write-capable hygiene tool or before considering PageRank-like priors.
+pub struct MemoryOrphanCandidatesTool {
+    hub: Hub,
+}
+impl MemoryOrphanCandidatesTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryOrphanCandidatesTool {
+    fn name(&self) -> &'static str {
+        "memory_orphan_candidates"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only graph hygiene preflight. Finds non-skill active memories \
+                with zero graph edges and previews top link candidates using the same scoring \
+                and guardrails as memory_link_orphans. Does not write memory_edges. Use this \
+                before PageRank-like centrality experiments or before running write-capable \
+                orphan-linking hygiene."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 2.0,
+                        "default": 0.85,
+                        "description": "Top candidate score needed to count as would_link."
+                    },
+                    "min_content_len": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 50,
+                        "description": "Skip orphans whose content is shorter than this many bytes."
+                    },
+                    "max_orphans": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50,
+                        "description": "Cap on orphans examined for candidate preview."
+                    },
+                    "candidate_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 3,
+                        "description": "Top candidates returned per orphan."
+                    },
+                    "skip_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["auto_curated", "alert", "ttl:7d"],
+                        "description": "Source orphans and target candidates with these tags are skipped."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["alert", "work_memory", "session_handoff", "snapshot"],
+                        "description": "Source orphans and target candidates with these memory kinds are skipped."
+                    },
+                    "require_scope_compatible": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, concrete non-global scopes must match. Global/unscoped rows remain compatible."
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional source-orphan scope filter, e.g. project:/abs/path or domain:rust."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only",
+                        "description": "When scope is set: local_only scans only matching source orphans; local_plus_global also scans global/unscoped source orphans; exploratory scans all source orphans."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let threshold = args
+            .get("threshold")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.85);
+        let min_content_len = args
+            .get("min_content_len")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as usize;
+        let max_orphans = args
+            .get("max_orphans")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .min(500) as usize;
+        let candidate_limit = args
+            .get("candidate_limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(3)
+            .clamp(1, 10) as usize;
+        let skip_tags =
+            memory_string_array_arg(&args, "skip_tags", &["auto_curated", "alert", "ttl:7d"]);
+        let skip_kinds = memory_string_array_arg(
+            &args,
+            "skip_kinds",
+            &["alert", "work_memory", "session_handoff", "snapshot"],
+        );
+        let require_scope_compatible = args
+            .get("require_scope_compatible")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let requested_scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            false,
+        );
+
+        let all = store
+            .list_memories(None, MemoryListSort::Recent, 1000)
+            .await
+            .unwrap_or_default();
+        let mut keys_with_edges: HashSet<String> = HashSet::new();
+        for rec in &all {
+            if rec.kind == "skill" {
+                continue;
+            }
+            if let Ok(edges) = store.memory_neighbors(&rec.key).await {
+                if !edges.is_empty() {
+                    keys_with_edges.insert(rec.key.clone());
+                }
+            }
+        }
+
+        let preview = preview_memory_orphan_candidates(
+            &all,
+            &keys_with_edges,
+            threshold,
+            min_content_len,
+            max_orphans,
+            candidate_limit,
+            &skip_tags,
+            &skip_kinds,
+            require_scope_compatible,
+            requested_scope,
+            scope_mode,
+        );
+        let by_key: HashMap<&str, &MemoryRecord> =
+            all.iter().map(|m| (m.key.as_str(), m)).collect();
+        let rows: Vec<Value> = preview
+            .rows
+            .iter()
+            .map(|row| {
+                let candidates: Vec<Value> = row
+                    .suggestions
+                    .iter()
+                    .map(|(key, confidence, reason)| {
+                        let target = by_key.get(key.as_str()).copied();
+                        json!({
+                            "key": key,
+                            "confidence": confidence,
+                            "reason": reason,
+                            "kind": target.map(|m| m.kind.as_str()).unwrap_or(""),
+                            "scope": target.and_then(|m| m.scope.as_deref()),
+                            "scope_relation": target
+                                .map(|m| memory_pair_scope_relation(&row.orphan, m))
+                                .unwrap_or("unknown"),
+                        })
+                    })
+                    .collect();
+                let status = match row.suggestions.first() {
+                    Some((_, confidence, _)) if *confidence >= threshold => "would_link",
+                    Some(_) => "low_score",
+                    None => "no_candidates",
+                };
+                json!({
+                    "orphan": row.orphan.key,
+                    "kind": row.orphan.kind,
+                    "scope": row.orphan.scope,
+                    "top_confidence": row.suggestions.first().map(|(_, c, _)| *c),
+                    "status": status,
+                    "candidates": candidates,
+                })
+            })
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "read_only": true,
+            "threshold": threshold,
+            "min_content_len": min_content_len,
+            "max_orphans": max_orphans,
+            "candidate_limit": candidate_limit,
+            "skip_tags": skip_tags,
+            "skip_kinds": skip_kinds,
+            "require_scope_compatible": require_scope_compatible,
+            "scope": requested_scope,
+            "scope_mode": scope_mode.label(),
+            "examined": preview.examined,
+            "eligible_orphans": preview.eligible_orphans,
+            "would_link": preview.would_link,
+            "skipped_low_score": preview.skipped_low_score,
+            "skipped_no_candidates": preview.skipped_no_candidates,
+            "skipped_blacklisted_orphan": preview.skipped_blacklisted_orphan,
+            "skipped_blacklisted_kind": preview.skipped_blacklisted_kind,
+            "rows": rows,
+            "next_step": "Review candidate quality. If precision is acceptable, run the write-capable memory_link_orphans path separately with dry_run first; do not enable centrality ranking while orphan_fraction remains high.",
+        })))
+    }
+}
+
+// ===========================================================================
+//          memory_orphan_inventory (read-only orphan composition report)
+// ===========================================================================
+
+/// Read-only inventory for remaining orphan memories.
+///
+/// Unlike `memory_orphan_candidates`, this tool is not trying to pick targets.
+/// It answers "what is left?" by kind/tag/age/key so operators can decide
+/// whether to link, archive, or leave records isolated before centrality work.
+pub struct MemoryOrphanInventoryTool {
+    hub: Hub,
+}
+impl MemoryOrphanInventoryTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryOrphanInventoryTool {
+    fn name(&self) -> &'static str {
+        "memory_orphan_inventory"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only orphan inventory for graph hygiene. Lists remaining \
+                edge-free memories by kind/tag/age/key after optional scope and volatile-row \
+                filters. Use after memory_orphan_candidates returns no safe would_link rows, \
+                before lowering thresholds or enabling PageRank-like centrality."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional memory scope, e.g. project:/abs/path or domain:rust."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only",
+                        "description": "When scope is set: local_only keeps matching rows; local_plus_global also includes global/unscoped rows; exploratory scans all rows."
+                    },
+                    "skip_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["auto_curated", "alert", "ttl:7d"],
+                        "description": "Orphan rows with these tags are excluded from eligible inventory counts."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["alert", "work_memory", "session_handoff", "snapshot"],
+                        "description": "Orphan rows with these kinds are excluded from eligible inventory counts."
+                    },
+                    "min_content_len": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 50,
+                        "description": "Skip orphans whose content is shorter than this many bytes."
+                    },
+                    "max_rows": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50,
+                        "description": "Maximum inventory rows to return."
+                    },
+                    "preview_chars": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000,
+                        "default": 180,
+                        "description": "Content preview length per row. 0 disables truncation."
+                    },
+                    "sort": {
+                        "type": "string",
+                        "enum": ["oldest", "newest", "kind", "importance"],
+                        "default": "oldest",
+                        "description": "Ordering for returned orphan rows."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let requested_scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            false,
+        );
+        let skip_tags =
+            memory_string_array_arg(&args, "skip_tags", &["auto_curated", "alert", "ttl:7d"]);
+        let skip_kinds = memory_string_array_arg(
+            &args,
+            "skip_kinds",
+            &["alert", "work_memory", "session_handoff", "snapshot"],
+        );
+        let min_content_len = args
+            .get("min_content_len")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as usize;
+        let max_rows = args
+            .get("max_rows")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .clamp(1, 500) as usize;
+        let preview_chars = args
+            .get("preview_chars")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(180)
+            .min(1000) as usize;
+        let sort = args
+            .get("sort")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| matches!(*s, "oldest" | "newest" | "kind" | "importance"))
+            .unwrap_or("oldest");
+
+        let all = store
+            .list_memories(None, MemoryListSort::Recent, 10_000)
+            .await
+            .unwrap_or_default();
+        let eligible_keys: HashSet<String> = all
+            .iter()
+            .filter(|rec| {
+                memory_orphan_inventory_record_eligible(
+                    rec,
+                    min_content_len,
+                    &skip_tags,
+                    &skip_kinds,
+                    requested_scope,
+                    scope_mode,
+                )
+            })
+            .map(|rec| rec.key.clone())
+            .collect();
+        let mut keys_with_edges: HashSet<String> = HashSet::new();
+        for rec in &all {
+            if !eligible_keys.contains(&rec.key) {
+                continue;
+            }
+            if let Ok(edges) = store.memory_neighbors(&rec.key).await {
+                if memory_record_has_induced_edge(&rec.key, &edges, &eligible_keys) {
+                    keys_with_edges.insert(rec.key.clone());
+                }
+            }
+        }
+
+        let inventory = collect_memory_orphan_inventory(
+            &all,
+            &keys_with_edges,
+            min_content_len,
+            max_rows,
+            preview_chars,
+            sort,
+            &skip_tags,
+            &skip_kinds,
+            requested_scope,
+            scope_mode,
+            unix_now_secs(),
+        );
+
+        let by_kind: Vec<Value> = inventory
+            .by_kind
+            .iter()
+            .map(|(kind, count)| json!({ "kind": kind, "count": count }))
+            .collect();
+        let top_tags: Vec<Value> = inventory
+            .top_tags
+            .iter()
+            .map(|(tag, count)| json!({ "tag": tag, "count": count }))
+            .collect();
+        let rows: Vec<Value> = inventory
+            .rows
+            .iter()
+            .map(|row| {
+                json!({
+                    "key": row.record.key,
+                    "kind": row.record.kind,
+                    "scope": row.record.scope,
+                    "tags": row.record.tags,
+                    "importance": ((row.record.importance * 1000.0).round() / 1000.0),
+                    "created_age_days": row.created_age_days,
+                    "updated_age_days": row.updated_age_days,
+                    "access_count": row.record.access_count,
+                    "related_keys_count": row.record.related_keys.len(),
+                    "content_preview": row.content_preview,
+                    "content_truncated": row.content_truncated,
+                    "content_total_chars": row.content_total_chars,
+                })
+            })
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "read_only": true,
+            "scope": requested_scope,
+            "scope_mode": scope_mode.label(),
+            "skip_tags": skip_tags,
+            "skip_kinds": skip_kinds,
+            "min_content_len": min_content_len,
+            "max_rows": max_rows,
+            "preview_chars": preview_chars,
+            "sort": sort,
+            "examined": inventory.examined,
+            "orphan_total": inventory.orphan_total,
+            "eligible_orphans": inventory.eligible_orphans,
+            "returned_rows": rows.len(),
+            "skipped_blacklisted_orphan": inventory.skipped_blacklisted_orphan,
+            "skipped_blacklisted_kind": inventory.skipped_blacklisted_kind,
+            "by_kind": by_kind,
+            "top_tags": top_tags,
+            "rows": rows,
+            "next_step": "Inspect the remaining orphan categories. Prefer explicit links or archive decisions for coherent clusters; do not lower link thresholds just to reduce orphan_fraction.",
+        })))
     }
 }
 
@@ -18331,6 +19660,19 @@ impl McpTool for MemoryLinkOrphansTool {
                             must match the orphan's concrete non-global scope. Global or missing \
                             scopes remain compatible so older memories still participate."
                     },
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional source-orphan scope filter, e.g. project:/abs/path or domain:rust. \
+                            Use this before live runs to avoid broad cross-project graph hygiene."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only",
+                        "description": "When scope is set: local_only scans only matching source orphans; \
+                            local_plus_global also scans global/unscoped source orphans; exploratory scans \
+                            all source orphans. Candidate compatibility still follows require_scope_compatible."
+                    },
                     "dedupe_undirected_pairs": {
                         "type": "boolean",
                         "default": true,
@@ -18385,6 +19727,18 @@ impl McpTool for MemoryLinkOrphansTool {
             .get("require_scope_compatible")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
+        let requested_scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            false,
+        );
         let dedupe_undirected_pairs = args
             .get("dedupe_undirected_pairs")
             .and_then(|v| v.as_bool())
@@ -18423,6 +19777,11 @@ impl McpTool for MemoryLinkOrphansTool {
             }
             if rec.content.len() < min_content_len {
                 continue;
+            }
+            if let Some(scope) = requested_scope {
+                if !memory_search_scope_mode_matches(rec, scope, scope_mode) {
+                    continue;
+                }
             }
             examined += 1;
             let nbrs = store.memory_neighbors(&rec.key).await.unwrap_or_default();
@@ -18546,6 +19905,8 @@ impl McpTool for MemoryLinkOrphansTool {
             "skip_tags": skip_tags,
             "skip_kinds": skip_kinds,
             "require_scope_compatible": require_scope_compatible,
+            "scope": requested_scope,
+            "scope_mode": scope_mode.label(),
             "dedupe_undirected_pairs": dedupe_undirected_pairs,
             "max_inbound_per_target": max_inbound_per_target,
             "examined": examined,
@@ -23343,6 +24704,10 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Search-ranking diagnostics: read-only graph topology preflight for
     // PageRank-like centrality experiments.
     "memory_graph_topology",
+    // Graph-hygiene diagnostics: read-only orphan candidate preview. The
+    // write-capable memory_link_orphans tool stays out of codex-essential.
+    "memory_orphan_candidates",
+    "memory_orphan_inventory",
     // Linux Computer Use T9a: read-only desktop structure snapshot for Codex
     // IDE lanes. Mutating desktop actions stay out of this allowlist.
     "desktop_snapshot",
@@ -24368,6 +25733,18 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Standard,
+        Arc::new(MemoryOrphanCandidatesTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryOrphanInventoryTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
         Arc::new(MemoryLinkOrphansTool::new(hub.clone())),
     );
     reg_if(
@@ -24675,6 +26052,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Niche,
         Arc::new(BrowserNavigateTool::new(hub.clone())),
+    );
+    // Output / expression lane — E1 present() static-artifact sink (uses the
+    // browser for self-verify; opt-in via AGENT_BRIDGE_TOOL_PROFILE=all for v0).
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(PresentTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -27047,6 +28432,472 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         rec
     }
 
+    fn mk_search_hit_scoped(key: &str, scope: Option<&str>, score: f64) -> MemorySearchHit {
+        MemorySearchHit {
+            record: mk_mem_scoped(key, "lesson", "content content content content", &[], scope),
+            score,
+            cosine: Some(score as f32),
+        }
+    }
+
+    fn mk_edge(from_key: &str, to_key: &str, edge_type: &str) -> MemoryEdge {
+        MemoryEdge {
+            from_key: from_key.into(),
+            to_key: to_key.into(),
+            edge_type: edge_type.into(),
+            weight: 1.0,
+        }
+    }
+
+    #[test]
+    fn memory_search_scope_filter_is_strict_by_default() {
+        let scoped = mk_mem_scoped(
+            "scoped",
+            "decision",
+            "content content content content",
+            &[],
+            Some("project:/repo/a"),
+        );
+        let nested = mk_mem_scoped(
+            "nested",
+            "decision",
+            "content content content content",
+            &[],
+            Some("project:/repo/a/sub"),
+        );
+        let other = mk_mem_scoped(
+            "other",
+            "decision",
+            "content content content content",
+            &[],
+            Some("project:/repo/b"),
+        );
+        let global = mk_mem_scoped(
+            "global",
+            "decision",
+            "content content content content",
+            &[],
+            Some("global"),
+        );
+        let unscoped = mk_mem(
+            "unscoped",
+            "decision",
+            "content content content content",
+            &[],
+        );
+
+        assert!(memory_search_scope_mode_matches(
+            &scoped,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalOnly
+        ));
+        assert!(memory_search_scope_mode_matches(
+            &nested,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalOnly
+        ));
+        assert!(memory_search_scope_mode_matches(
+            &scoped,
+            "project:/repo/a/sub",
+            MemorySearchScopeMode::LocalOnly
+        ));
+        assert!(!memory_search_scope_mode_matches(
+            &other,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalOnly
+        ));
+        assert!(!memory_search_scope_mode_matches(
+            &global,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalOnly
+        ));
+        assert!(!memory_search_scope_mode_matches(
+            &unscoped,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalOnly
+        ));
+        assert!(memory_search_scope_mode_matches(
+            &global,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalPlusGlobal
+        ));
+        assert!(memory_search_scope_mode_matches(
+            &unscoped,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalPlusGlobal
+        ));
+    }
+
+    #[test]
+    fn memory_search_scope_filter_matches_domain_exactly() {
+        let rust = mk_mem_scoped(
+            "rust",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("domain:rust"),
+        );
+
+        assert!(memory_search_scope_mode_matches(
+            &rust,
+            "domain:rust",
+            MemorySearchScopeMode::LocalOnly
+        ));
+        assert!(!memory_search_scope_mode_matches(
+            &rust,
+            "domain:python",
+            MemorySearchScopeMode::LocalOnly
+        ));
+    }
+
+    #[test]
+    fn memory_search_scope_mode_parses_with_include_global_compat() {
+        assert_eq!(
+            MemorySearchScopeMode::parse(None, false),
+            MemorySearchScopeMode::LocalOnly
+        );
+        assert_eq!(
+            MemorySearchScopeMode::parse(None, true),
+            MemorySearchScopeMode::LocalPlusGlobal
+        );
+        assert_eq!(
+            MemorySearchScopeMode::parse(Some("exploratory"), false),
+            MemorySearchScopeMode::Exploratory
+        );
+        assert_eq!(
+            MemorySearchScopeMode::parse(Some("unknown"), true),
+            MemorySearchScopeMode::LocalOnly
+        );
+    }
+
+    #[test]
+    fn memory_search_scope_mode_local_plus_global_demotes_global() {
+        let hits = vec![
+            mk_search_hit_scoped("local", Some("project:/repo/a"), 1.0),
+            mk_search_hit_scoped("global", Some("global"), 1.0),
+            mk_search_hit_scoped("unscoped", None, 1.0),
+            mk_search_hit_scoped("cross", Some("project:/repo/b"), 1.0),
+        ];
+
+        let out = memory_search_apply_scope_mode(
+            hits,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalPlusGlobal,
+        );
+        let keys: Vec<&str> = out.iter().map(|h| h.record.key.as_str()).collect();
+
+        assert_eq!(keys, vec!["local", "global", "unscoped"]);
+        assert_eq!(out[0].score, 1.0);
+        assert_eq!(out[1].score, 0.85);
+        assert_eq!(out[2].score, 0.85);
+    }
+
+    #[test]
+    fn memory_search_scope_mode_exploratory_keeps_cross_scope_demoted() {
+        let hits = vec![
+            mk_search_hit_scoped("local", Some("project:/repo/a"), 1.0),
+            mk_search_hit_scoped("global", Some("global"), 1.0),
+            mk_search_hit_scoped("cross", Some("project:/repo/b"), 1.0),
+        ];
+
+        let out = memory_search_apply_scope_mode(
+            hits,
+            "project:/repo/a",
+            MemorySearchScopeMode::Exploratory,
+        );
+        let keys: Vec<&str> = out.iter().map(|h| h.record.key.as_str()).collect();
+
+        assert_eq!(keys, vec!["local", "global", "cross"]);
+        assert_eq!(out[0].score, 1.0);
+        assert_eq!(out[1].score, 0.85);
+        assert_eq!(out[2].score, 0.65);
+    }
+
+    #[test]
+    fn memory_search_scope_trace_skips_exploratory_cross_scope() {
+        let local = mk_mem_scoped(
+            "local",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project:/repo/a"),
+        );
+        let global = mk_mem_scoped(
+            "global",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("global"),
+        );
+        let cross = mk_mem_scoped(
+            "cross",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project:/repo/b"),
+        );
+
+        assert!(memory_search_scope_trace_allowed(
+            &local,
+            "project:/repo/a",
+            MemorySearchScopeMode::Exploratory
+        ));
+        assert!(!memory_search_scope_trace_allowed(
+            &global,
+            "project:/repo/a",
+            MemorySearchScopeMode::Exploratory
+        ));
+        assert!(!memory_search_scope_trace_allowed(
+            &cross,
+            "project:/repo/a",
+            MemorySearchScopeMode::Exploratory
+        ));
+        assert!(memory_search_scope_trace_allowed(
+            &global,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalPlusGlobal
+        ));
+    }
+
+    #[test]
+    fn memory_graph_topology_from_records_uses_induced_scope_edges() {
+        let records = vec![
+            mk_mem_scoped(
+                "local_a",
+                "lesson",
+                "alpha beta gamma delta",
+                &[],
+                Some("project:/repo/a"),
+            ),
+            mk_mem_scoped(
+                "local_b",
+                "lesson",
+                "alpha beta gamma delta",
+                &[],
+                Some("project:/repo/a"),
+            ),
+            mk_mem_scoped(
+                "global_c",
+                "decision",
+                "alpha beta gamma delta",
+                &[],
+                Some("global"),
+            ),
+        ];
+        let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+        edges_by_key.insert(
+            "local_a".into(),
+            vec![
+                mk_edge("local_a", "local_b", "relates"),
+                mk_edge("local_a", "other_project", "relates"),
+            ],
+        );
+        edges_by_key.insert(
+            "local_b".into(),
+            vec![
+                mk_edge("local_a", "local_b", "relates"),
+                mk_edge("local_b", "global_c", "evolved"),
+            ],
+        );
+        edges_by_key.insert(
+            "global_c".into(),
+            vec![mk_edge("local_b", "global_c", "evolved")],
+        );
+
+        let topo = memory_graph_topology_from_records(&records, &edges_by_key);
+
+        assert_eq!(topo.non_skill_active_total, 3);
+        assert_eq!(topo.orphan_count, 0);
+        assert_eq!(topo.p4_evolved_coverage, 2);
+        assert_eq!(topo.top_5_hubs[0], ("local_b".to_string(), 2));
+        assert_eq!(
+            topo.degree_histogram,
+            vec![
+                ("0".to_string(), 0),
+                ("1".to_string(), 2),
+                ("2-3".to_string(), 1),
+                ("4-5".to_string(), 0),
+                ("6-10".to_string(), 0),
+                ("11-20".to_string(), 0),
+                ("21+".to_string(), 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn memory_graph_topology_visibility_skips_volatile_rows() {
+        let local = mk_mem_scoped(
+            "local",
+            "decision",
+            "alpha beta gamma delta",
+            &["memory"],
+            Some("project:/repo/a"),
+        );
+        let work_memory = mk_mem_scoped(
+            "scratch",
+            "work_memory",
+            "alpha beta gamma delta",
+            &["memory"],
+            Some("project:/repo/a"),
+        );
+        let tagged = mk_mem_scoped(
+            "tagged",
+            "decision",
+            "alpha beta gamma delta",
+            &["auto_curated"],
+            Some("project:/repo/a"),
+        );
+        let cross = mk_mem_scoped(
+            "cross",
+            "decision",
+            "alpha beta gamma delta",
+            &["memory"],
+            Some("project:/repo/b"),
+        );
+        let skip_tags = vec!["auto_curated".to_string()];
+        let skip_kinds = vec!["work_memory".to_string()];
+
+        assert!(memory_graph_topology_record_visible(
+            &local,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+            &skip_tags,
+            &skip_kinds,
+        ));
+        assert!(!memory_graph_topology_record_visible(
+            &work_memory,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+            &skip_tags,
+            &skip_kinds,
+        ));
+        assert!(!memory_graph_topology_record_visible(
+            &tagged,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+            &skip_tags,
+            &skip_kinds,
+        ));
+        assert!(!memory_graph_topology_record_visible(
+            &cross,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+            &skip_tags,
+            &skip_kinds,
+        ));
+    }
+
+    #[test]
+    fn memory_orphan_inventory_groups_and_sorts_eligible_orphans() {
+        let mut old = mk_mem_scoped(
+            "old_decision",
+            "decision",
+            "alpha beta gamma delta epsilon zeta",
+            &["memory", "graph"],
+            Some("project:/repo/a"),
+        );
+        old.created_at = 1_000;
+        old.updated_at = 1_000;
+        old.importance = 0.8;
+        let mut new = mk_mem_scoped(
+            "new_todo",
+            "todo",
+            "alpha beta gamma delta epsilon zeta",
+            &["memory"],
+            Some("project:/repo/a"),
+        );
+        new.created_at = 3_000;
+        new.updated_at = 3_000;
+        let linked = mk_mem_scoped(
+            "linked",
+            "decision",
+            "alpha beta gamma delta epsilon zeta",
+            &["memory"],
+            Some("project:/repo/a"),
+        );
+        let scratch = mk_mem_scoped(
+            "scratch",
+            "work_memory",
+            "alpha beta gamma delta epsilon zeta",
+            &["memory"],
+            Some("project:/repo/a"),
+        );
+        let tagged = mk_mem_scoped(
+            "tagged",
+            "decision",
+            "alpha beta gamma delta epsilon zeta",
+            &["auto_curated"],
+            Some("project:/repo/a"),
+        );
+        let cross = mk_mem_scoped(
+            "cross",
+            "decision",
+            "alpha beta gamma delta epsilon zeta",
+            &["memory"],
+            Some("project:/repo/b"),
+        );
+        let all = vec![old, new, linked, scratch, tagged, cross];
+        let mut keys_with_edges = HashSet::new();
+        keys_with_edges.insert("linked".to_string());
+        let skip_tags = vec!["auto_curated".to_string()];
+        let skip_kinds = vec!["work_memory".to_string()];
+
+        let inventory = collect_memory_orphan_inventory(
+            &all,
+            &keys_with_edges,
+            0,
+            10,
+            12,
+            "oldest",
+            &skip_tags,
+            &skip_kinds,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+            1_000 + 3 * 86_400,
+        );
+
+        assert_eq!(inventory.examined, 5);
+        assert_eq!(inventory.orphan_total, 4);
+        assert_eq!(inventory.eligible_orphans, 2);
+        assert_eq!(inventory.skipped_blacklisted_kind, 1);
+        assert_eq!(inventory.skipped_blacklisted_orphan, 1);
+        assert_eq!(
+            inventory.by_kind,
+            vec![("decision".to_string(), 1), ("todo".to_string(), 1)]
+        );
+        assert_eq!(inventory.top_tags[0], ("memory".to_string(), 2));
+        let keys: Vec<&str> = inventory
+            .rows
+            .iter()
+            .map(|row| row.record.key.as_str())
+            .collect();
+        assert_eq!(keys, vec!["old_decision", "new_todo"]);
+        assert!(inventory.rows[0].content_truncated);
+    }
+
+    #[test]
+    fn memory_orphan_inventory_induced_edge_ignores_filtered_targets() {
+        let mut visible = HashSet::new();
+        visible.insert("durable_a".to_string());
+        visible.insert("durable_b".to_string());
+        let edges = vec![
+            mk_edge("durable_a", "work_memory_row", "relates"),
+            mk_edge("durable_a", "other_scope", "relates"),
+        ];
+        assert!(!memory_record_has_induced_edge(
+            "durable_a",
+            &edges,
+            &visible
+        ));
+
+        let edges = vec![mk_edge("durable_a", "durable_b", "relates")];
+        assert!(memory_record_has_induced_edge(
+            "durable_a",
+            &edges,
+            &visible
+        ));
+    }
+
     #[test]
     fn link_suggest_empty_blacklist_preserves_top_match() {
         // baseline: stubs tied by tag/prefix; no blacklist → highest still wins
@@ -27248,6 +29099,193 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             &skip_kinds,
             true,
         ));
+    }
+
+    #[test]
+    fn orphan_candidate_preview_is_read_only_and_scope_guarded() {
+        let orphan = mk_mem_scoped(
+            "orphan_a",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let same_scope_target = mk_mem_scoped(
+            "target_same",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let cross_scope_target = mk_mem_scoped(
+            "target_cross",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/b"),
+        );
+        let volatile_target = mk_mem_scoped(
+            "target_scratch",
+            "work_memory",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let all = vec![
+            orphan,
+            same_scope_target,
+            cross_scope_target,
+            volatile_target,
+        ];
+        let mut keys_with_edges = HashSet::new();
+        keys_with_edges.insert("target_same".to_string());
+        keys_with_edges.insert("target_cross".to_string());
+        keys_with_edges.insert("target_scratch".to_string());
+        let skip_tags: Vec<String> = Vec::new();
+        let skip_kinds = vec!["work_memory".to_string()];
+
+        let preview = preview_memory_orphan_candidates(
+            &all,
+            &keys_with_edges,
+            0.85,
+            0,
+            10,
+            5,
+            &skip_tags,
+            &skip_kinds,
+            true,
+            None,
+            MemorySearchScopeMode::LocalOnly,
+        );
+
+        assert_eq!(preview.eligible_orphans, 1);
+        assert_eq!(preview.would_link, 1);
+        let keys: Vec<&str> = preview.rows[0]
+            .suggestions
+            .iter()
+            .map(|(key, _, _)| key.as_str())
+            .collect();
+        assert_eq!(keys, vec!["target_same"]);
+    }
+
+    #[test]
+    fn orphan_candidate_preview_counts_blacklisted_and_low_score_rows() {
+        let blacklisted_orphan = mk_mem(
+            "auto_orphan",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["auto_curated"],
+        );
+        let low_score_orphan = mk_mem(
+            "low_orphan",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &[],
+        );
+        let low_score_target = mk_mem("low_target", "lesson", "theta iota kappa lambda mu nu", &[]);
+        let all = vec![blacklisted_orphan, low_score_orphan, low_score_target];
+        let mut keys_with_edges = HashSet::new();
+        keys_with_edges.insert("low_target".to_string());
+        let skip_tags = vec!["auto_curated".to_string()];
+        let skip_kinds: Vec<String> = Vec::new();
+
+        let preview = preview_memory_orphan_candidates(
+            &all,
+            &keys_with_edges,
+            0.85,
+            0,
+            10,
+            3,
+            &skip_tags,
+            &skip_kinds,
+            true,
+            None,
+            MemorySearchScopeMode::LocalOnly,
+        );
+
+        assert_eq!(preview.eligible_orphans, 1);
+        assert_eq!(preview.skipped_blacklisted_orphan, 1);
+        assert_eq!(preview.skipped_low_score, 1);
+        assert_eq!(preview.would_link, 0);
+        assert_eq!(preview.rows[0].suggestions[0].0, "low_target");
+        assert!(preview.rows[0].suggestions[0].1 < 0.85);
+    }
+
+    #[test]
+    fn orphan_candidate_preview_scope_filter_limits_source_orphans() {
+        let local_orphan = mk_mem_scoped(
+            "local_orphan",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let local_target = mk_mem_scoped(
+            "local_target",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let cross_orphan = mk_mem_scoped(
+            "cross_orphan",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/b"),
+        );
+        let global_orphan = mk_mem_scoped(
+            "global_orphan",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("global"),
+        );
+        let all = vec![local_orphan, local_target, cross_orphan, global_orphan];
+        let mut keys_with_edges = HashSet::new();
+        keys_with_edges.insert("local_target".to_string());
+        let skip_tags: Vec<String> = Vec::new();
+        let skip_kinds: Vec<String> = Vec::new();
+
+        let local_only = preview_memory_orphan_candidates(
+            &all,
+            &keys_with_edges,
+            0.85,
+            0,
+            10,
+            3,
+            &skip_tags,
+            &skip_kinds,
+            true,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+        );
+        let local_keys: Vec<&str> = local_only
+            .rows
+            .iter()
+            .map(|row| row.orphan.key.as_str())
+            .collect();
+        assert_eq!(local_keys, vec!["local_orphan"]);
+
+        let local_plus_global = preview_memory_orphan_candidates(
+            &all,
+            &keys_with_edges,
+            0.85,
+            0,
+            10,
+            3,
+            &skip_tags,
+            &skip_kinds,
+            true,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalPlusGlobal,
+        );
+        let plus_keys: Vec<&str> = local_plus_global
+            .rows
+            .iter()
+            .map(|row| row.orphan.key.as_str())
+            .collect();
+        assert_eq!(plus_keys, vec!["local_orphan", "global_orphan"]);
     }
 
     #[test]
@@ -28004,13 +30042,14 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 34 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 36 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(22: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(24: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
-        //      + memory_graph_topology + desktop_snapshot + vision_grounding_ocr).
+        //      + memory_graph_topology + memory_orphan_candidates + memory_orphan_inventory
+        //      + desktop_snapshot + vision_grounding_ocr).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        assert_eq!(extras.len(), 34);
+        assert_eq!(extras.len(), 36);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -28038,6 +30077,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"mobile_ios_apps"));
         assert!(extras.contains(&"mobile_ios_syslog_tail"));
         assert!(extras.contains(&"memory_graph_topology"));
+        assert!(extras.contains(&"memory_orphan_candidates"));
+        assert!(extras.contains(&"memory_orphan_inventory"));
         assert!(extras.contains(&"desktop_snapshot"));
         assert!(extras.contains(&"vision_grounding_ocr"));
     }
@@ -28428,6 +30469,108 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(argv.contains(&"Save"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // A5 — with no browser backend, verify degrades to no_browser and the
+    // artifact is STILL written + dual-encoded (degrade, don't fail).
+    #[tokio::test]
+    async fn present_degrades_to_no_browser_and_still_writes_artifact() {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-present-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::env::set_var("AGENT_BRIDGE_PRESENTATIONS_DIR", &dir);
+
+        let tool = PresentTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "kind": "table",
+                    "payload": [{"name": "e5", "dims": 384}],
+                    "title": "A5",
+                    "verify": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let res = result_text_as_json(&out);
+
+        assert_eq!(res["verify_status"], "no_browser");
+        assert_eq!(res["dual_encoding"], true);
+        assert_eq!(res["kind"], "table");
+        let artifact_path = res["artifact_path"].as_str().expect("artifact_path");
+        let html = std::fs::read_to_string(artifact_path).expect("artifact written");
+        assert!(html.contains("<table>"));
+        assert!(html.contains("<td>e5</td>"));
+        let recovered = crate::present::extract_ab_payload(&html).expect("payload recoverable");
+        assert_eq!(recovered, json!([{"name": "e5", "dims": 384}]));
+
+        std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // present is a Niche opt-in tool: exposed only under the `all` profile
+    // (like browser_*), absent from standard. Locks the tier against drift.
+    #[test]
+    fn present_is_niche_opt_in_and_registers_under_all() {
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        assert!(all.includes(Tier::Niche, "present"));
+        let std_p = ToolPolicy::from_values(None, None, None, Some("standard"));
+        assert!(!std_p.includes(Tier::Niche, "present"));
+        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        assert!(
+            schemas.iter().any(|s| s.name == "present"),
+            "present must register under the all profile"
+        );
+    }
+
+    // Live dogfood (opt-in) — drives the real navigate->eval->classify->screenshot
+    // seam against Chromium, which the unit suite cannot cover. Closes the
+    // adversarial-review gap ("the live verify path has zero automated coverage").
+    // Run isolated from the user's login Chrome:
+    //   AGENT_BRIDGE_HEADLESS=1 \
+    //   AGENT_BRIDGE_BROWSER_PROFILE=/tmp/ab-present-dogfood \
+    //   AGENT_BRIDGE_PRESENTATIONS_DIR=/tmp/ab-present-art \
+    //   cargo test -p ab-bridge present_live_self_verify -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "requires a launchable Chromium; opt-in live dogfood"]
+    async fn present_live_self_verify_rendered_ok_and_blank() {
+        use ab_browser::ChromiumCdpBackend;
+        let hub = Hub::builder()
+            .browser(std::sync::Arc::new(ChromiumCdpBackend::new()))
+            .build();
+        let tool = PresentTool::new(hub);
+
+        // A real table renders → rendered_ok + a screenshot is captured.
+        let ok = result_text_as_json(
+            &tool
+                .execute(
+                    json!({"kind": "table", "payload": [{"name": "e5", "dims": 384}], "title": "live"}),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("execute table"),
+        );
+        assert_eq!(ok["verify_status"], "rendered_ok", "table should render; got {ok}");
+        assert!(ok["screenshot_path"].is_string(), "screenshot should be captured");
+
+        // An empty html artifact renders nothing visible → blank (the real,
+        // end-to-end falsifier the unit suite can only approximate).
+        let blank = result_text_as_json(
+            &tool
+                .execute(
+                    json!({"kind": "html", "artifact": "", "title": "empty"}),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("execute empty"),
+        );
+        assert_eq!(blank["verify_status"], "blank", "empty artifact must be blank; got {blank}");
     }
 
     #[test]

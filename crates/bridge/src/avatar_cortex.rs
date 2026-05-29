@@ -1987,84 +1987,209 @@ fn avatar_cortex_renderer_view_frame(frame: &Value, index: usize, duration_ms: i
 
 fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
     match token {
-        "xiao_shu::soft_bounce::low" => vec![json!({
-            "variant_id": "sidecar_soft_bounce_v1",
-            "label": "sidecar soft bounce v1",
-            "sprite_row": 0,
-            "sprite_frames": 8,
-            "alert_mark": false,
-            "default": true,
-            "intent": "motion-canonical baseline bounce using Xiao Shu sidecar identity cues without requiring an installed Codex pet package",
-            "sidecar_asset": {
-                "asset_id": "xiao-shu-motion-canonical-soft-bounce-v1",
-                "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1",
-                "format": "image/svg+xml",
-                "atlas": "1536x1872",
-                "cell": "192x208",
-                "read_only": true,
-                "official_pet_package_mutation": false,
-                "art_pass": "motion_canonical_baseline_v1"
-            },
-            "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1",
-            "frame_choreography": {
-                "schema": 1,
-                "choreography_id": "soft_bounce_sidecar_v1_frame_choreo",
-                "mode": "sidecar_sprite_atlas_columns",
-                "uses_css_motion": false,
-                "loop": "soft_bounce_return",
-                "duration_ms": 1800,
-                "frames": [
-                    {"row": 0, "col": 0, "hold_ms": 180, "phase": "idle_entry", "mark": false},
-                    {"row": 0, "col": 1, "hold_ms": 160, "phase": "compress", "mark": false},
-                    {"row": 0, "col": 2, "hold_ms": 150, "phase": "lift_start", "mark": false},
-                    {"row": 0, "col": 3, "hold_ms": 190, "phase": "apex", "mark": false},
-                    {"row": 0, "col": 4, "hold_ms": 220, "phase": "float", "mark": false},
-                    {"row": 0, "col": 5, "hold_ms": 170, "phase": "descend", "mark": false},
-                    {"row": 0, "col": 6, "hold_ms": 170, "phase": "settle", "mark": false},
-                    {"row": 0, "col": 7, "hold_ms": 560, "phase": "idle_return", "mark": false}
-                ],
-                "review_note": "keeps the cheerful confirmation readable without relying on the missing installed pet spritesheet",
-            },
-            "review_question": "does the sidecar baseline bounce still feel calm after several loops",
-        })],
-        "xiao_shu::idle_breathe::low" => vec![json!({
-            "variant_id": "sidecar_idle_breathe_v1",
-            "label": "sidecar idle breathe v1",
-            "sprite_row": 0,
-            "sprite_frames": 6,
-            "alert_mark": false,
-            "default": true,
-            "intent": "motion-canonical idle loop for quiet desktop presence without requiring an installed Codex pet package",
-            "sidecar_asset": {
-                "asset_id": "xiao-shu-motion-canonical-idle-breathe-v1",
-                "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1",
-                "format": "image/svg+xml",
-                "atlas": "1536x1872",
-                "cell": "192x208",
-                "read_only": true,
-                "official_pet_package_mutation": false,
-                "art_pass": "motion_canonical_baseline_v1"
-            },
-            "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1",
-            "frame_choreography": {
-                "schema": 1,
-                "choreography_id": "idle_breathe_sidecar_v1_frame_choreo",
-                "mode": "sidecar_sprite_atlas_columns",
-                "uses_css_motion": false,
-                "loop": "quiet_breathe",
-                "duration_ms": 1800,
-                "frames": [
-                    {"row": 0, "col": 0, "hold_ms": 260, "phase": "idle_floor", "mark": false},
-                    {"row": 0, "col": 1, "hold_ms": 260, "phase": "inhale_start", "mark": false},
-                    {"row": 0, "col": 2, "hold_ms": 300, "phase": "inhale_hold", "mark": false},
-                    {"row": 0, "col": 3, "hold_ms": 300, "phase": "soft_hold", "mark": false},
-                    {"row": 0, "col": 4, "hold_ms": 260, "phase": "exhale", "mark": false},
-                    {"row": 0, "col": 5, "hold_ms": 420, "phase": "idle_return", "mark": false}
-                ],
-                "review_note": "slows the source 300ms idle fixture into a humane desktop breathing loop for visual QA",
-            },
-            "review_question": "does idle remain present without becoming needy beside a coding session",
-        })],
+        "xiao_shu::soft_bounce::low" => vec![
+            json!({
+                "variant_id": "sidecar_soft_bounce_v1",
+                "label": "sidecar soft bounce v1",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": true,
+                "intent": "motion-canonical baseline bounce using Xiao Shu sidecar identity cues without requiring an installed Codex pet package",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-motion-canonical-soft-bounce-v1",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1",
+                    "format": "image/svg+xml",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "motion_canonical_baseline_v1"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "soft_bounce_sidecar_v1_frame_choreo",
+                    "mode": "sidecar_sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "soft_bounce_return",
+                    "duration_ms": 1800,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 180, "phase": "idle_entry", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 160, "phase": "compress", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 150, "phase": "lift_start", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 190, "phase": "apex", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 220, "phase": "float", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 170, "phase": "descend", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 170, "phase": "settle", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 560, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "keeps the cheerful confirmation readable without relying on the missing installed pet spritesheet",
+                },
+                "review_question": "does the sidecar baseline bounce still feel calm after several loops",
+            }),
+            json!({
+                "variant_id": "sidecar_v3_soft_bounce_v1",
+                "label": "v3 soft bounce v1",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": false,
+                "intent": "v3 Xiao Shu small completion bounce derived from the accepted idle identity, with gentle lift, settle, and blink",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-v3-ai-soft-bounce-v1",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-soft-bounce-v1",
+                    "format": "image/png",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "v3_ai_soft_bounce_v1"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-soft-bounce-v1",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "soft_bounce_v3_ai_frame_v1_choreo",
+                    "mode": "sidecar_bitmap_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "v3_small_completion_bounce",
+                    "duration_ms": 1800,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 180, "phase": "idle_entry", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 160, "phase": "compress", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 150, "phase": "lift_start", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 190, "phase": "apex", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 220, "phase": "float", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 170, "phase": "descend", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 170, "phase": "settle_blink", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 560, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "first v3 completion-state candidate; keeps the motion quiet and avoids detached success effects",
+                },
+                "review_question": "does the v3 soft bounce read as a small happy completion without becoming distracting",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+            json!({
+                "variant_id": "sidecar_v3_completion_nod_v1",
+                "label": "v3 completion nod v1",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": false,
+                "intent": "v3 Xiao Shu anchored completion acknowledgement; body and hands stay fixed while the face performs a small nod, blink, and smile",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-v3-ai-completion-nod-v1",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v1",
+                    "format": "image/png",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "v3_ai_completion_nod_v1"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v1",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "completion_nod_v3_ai_frame_v1_choreo",
+                    "mode": "sidecar_bitmap_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "v3_anchored_completion_ack",
+                    "duration_ms": 1800,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 220, "phase": "idle_entry", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 180, "phase": "attend", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 180, "phase": "nod_down", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 180, "phase": "confirm_blink", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 180, "phase": "nod_return", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 220, "phase": "small_smile", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 220, "phase": "settle", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 420, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "human feedback rejected half-body jumping as an expression; this candidate keeps the lower anchor stable and moves only face-level cues",
+                },
+                "review_question": "does the v3 completion nod read as acknowledgement without making Xiao Shu look like a bouncing head",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+        ],
+        "xiao_shu::idle_breathe::low" => vec![
+            json!({
+                "variant_id": "sidecar_idle_breathe_v1",
+                "label": "sidecar idle breathe v1",
+                "sprite_row": 0,
+                "sprite_frames": 6,
+                "alert_mark": false,
+                "default": true,
+                "intent": "motion-canonical idle loop for quiet desktop presence without requiring an installed Codex pet package",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-motion-canonical-idle-breathe-v1",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1",
+                    "format": "image/svg+xml",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "motion_canonical_baseline_v1"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "idle_breathe_sidecar_v1_frame_choreo",
+                    "mode": "sidecar_sprite_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "quiet_breathe",
+                    "duration_ms": 1800,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 260, "phase": "idle_floor", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 260, "phase": "inhale_start", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 300, "phase": "inhale_hold", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 300, "phase": "soft_hold", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 260, "phase": "exhale", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 420, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "slows the source 300ms idle fixture into a humane desktop breathing loop for visual QA",
+                },
+                "review_question": "does idle remain present without becoming needy beside a coding session",
+            }),
+            json!({
+                "variant_id": "sidecar_v3_idle_breathe_v1",
+                "label": "v3 idle breathe v1",
+                "sprite_row": 0,
+                "sprite_frames": 6,
+                "alert_mark": false,
+                "default": false,
+                "intent": "v3 Xiao Shu quiet presence loop derived from the accepted alert_peek identity, with subtle breath and blink only",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-v3-ai-idle-breathe-v1",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-idle-breathe-v1",
+                    "format": "image/png",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "v3_ai_idle_breathe_v1"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-idle-breathe-v1",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "idle_breathe_v3_ai_frame_v1_choreo",
+                    "mode": "sidecar_bitmap_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "v3_quiet_breathe_blink",
+                    "duration_ms": 1800,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 260, "phase": "idle_floor", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 260, "phase": "inhale_start", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 300, "phase": "inhale_hold", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 300, "phase": "exhale_soft", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 260, "phase": "soft_blink", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 420, "phase": "idle_return", "mark": false}
+                    ],
+                    "review_note": "first v3 quiet-state candidate; reuses the accepted v3 face and cleanup pass without adding alert posture or audio behavior",
+                },
+                "review_question": "does the v3 quiet presence feel alive without reading as an attention request",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+        ],
         "xiao_shu::sorting_glow::medium" => vec![
             json!({
                 "variant_id": "sidecar_sorting_glow_v3",
@@ -2499,6 +2624,174 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                     "review_note": "keeps the generated frame-animation feel while baseline-aligning low entry and exit frames to remove the floating look",
                 },
                 "review_question": "does the grounded AI frame pass fix the floating first and last frames while staying close enough to Xiao Shu",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+            json!({
+                "variant_id": "sidecar_v3_peek_sheet_v1",
+                "label": "v3 sheet peek v1",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": false,
+                "intent": "sheet-derived v3 visual reference that tests the new blue-white Xiao Shu identity inside the existing alert_peek renderer path",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-v3-alert-peek-sheet-v1",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-alert-peek-sheet-v1",
+                    "format": "image/png",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "v3_character_sheet_reference_v1"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-alert-peek-sheet-v1",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "alert_peek_v3_sheet_v1_choreo",
+                    "mode": "sidecar_bitmap_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "sheet_reference_peek_raise_hold_return",
+                    "duration_ms": 1600,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 120, "phase": "edge_peek_low", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 135, "phase": "peek_start", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 160, "phase": "notice_bounce", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 180, "phase": "hand_lift", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 260, "phase": "attention_hold", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 210, "phase": "soft_concern", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 175, "phase": "return_check", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 260, "phase": "edge_return", "mark": false},
+                        {"row": 0, "col": 0, "hold_ms": 100, "phase": "loop_reset", "mark": false}
+                    ],
+                    "review_note": "uses cropped v3 character-sheet poses as a sidecar-only identity and staging probe, not as the final animation source",
+                },
+                "review_question": "does the v3 blue-white identity read better in the alert_peek renderer before commissioning final motion frames",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+            json!({
+                "variant_id": "sidecar_v3_ai_peek_v1",
+                "label": "v3 AI peek v1",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": false,
+                "intent": "AI-generated v3 Xiao Shu alert_peek sequence with one coherent low-peek, hand-raise, blink, and return motion",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-v3-ai-alert-peek-v1",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v1",
+                    "format": "image/png",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "v3_ai_frame_reference_v1"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v1",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "alert_peek_v3_ai_frame_v1_choreo",
+                    "mode": "sidecar_bitmap_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "v3_low_peek_raise_blink_return",
+                    "duration_ms": 1600,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 120, "phase": "low_idle_peek", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 140, "phase": "rise_open_eyes", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 160, "phase": "notice_viewer", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 180, "phase": "hand_lift", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 260, "phase": "attention_hold", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 210, "phase": "soft_blink_hold", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 170, "phase": "lower_return", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 260, "phase": "low_idle_return", "mark": false},
+                        {"row": 0, "col": 0, "hold_ms": 100, "phase": "loop_reset", "mark": false}
+                    ],
+                    "review_note": "uses a generated single-action frame strip rather than mixed character-sheet poses; still sidecar-only and pending visual review",
+                },
+                "review_question": "does the coherent v3 generated sequence fix the mixed-pose sheet artifact while keeping the new Xiao Shu identity readable",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+            json!({
+                "variant_id": "sidecar_v3_ai_peek_v2",
+                "label": "v3 AI peek v2 cleanup",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": false,
+                "intent": "edge-cleaned v3 Xiao Shu alert_peek sequence preserving the accepted v1 action, character consistency, and expression read",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-v3-ai-alert-peek-v2",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v2",
+                    "format": "image/png",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "v3_ai_frame_cleanup_v2"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v2",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "alert_peek_v3_ai_frame_v2_cleanup_choreo",
+                    "mode": "sidecar_bitmap_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "v3_low_peek_raise_blink_return_cleanup",
+                    "duration_ms": 1600,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 120, "phase": "low_idle_peek", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 140, "phase": "rise_open_eyes", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 160, "phase": "notice_viewer", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 180, "phase": "hand_lift", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 260, "phase": "attention_hold", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 210, "phase": "soft_blink_hold", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 170, "phase": "lower_return", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 260, "phase": "low_idle_return", "mark": false},
+                        {"row": 0, "col": 0, "hold_ms": 100, "phase": "loop_reset", "mark": false}
+                    ],
+                    "review_note": "removes faint extraction fringe and tiny specks from the accepted v1 bitmap strip while preserving the same frame timing",
+                },
+                "review_question": "does the cleanup pass keep v1's accepted personality while reducing edge artifacts at panel size",
+                "voice_policy": "silent_now_review_sparse_voice_later",
+            }),
+            json!({
+                "variant_id": "sidecar_v3_ai_peek_v3",
+                "label": "v3 AI peek v3 chroma cleanup",
+                "sprite_row": 0,
+                "sprite_frames": 8,
+                "alert_mark": false,
+                "default": false,
+                "intent": "chroma-fringe-cleaned v3 Xiao Shu alert_peek sequence preserving the accepted v1 action and v2 edge cleanup",
+                "sidecar_asset": {
+                    "asset_id": "xiao-shu-v3-ai-alert-peek-v3",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v3",
+                    "format": "image/png",
+                    "atlas": "1536x1872",
+                    "cell": "192x208",
+                    "read_only": true,
+                    "official_pet_package_mutation": false,
+                    "art_pass": "v3_ai_frame_chroma_cleanup_v3"
+                },
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v3",
+                "frame_choreography": {
+                    "schema": 1,
+                    "choreography_id": "alert_peek_v3_ai_frame_v3_chroma_cleanup_choreo",
+                    "mode": "sidecar_bitmap_atlas_columns",
+                    "uses_css_motion": false,
+                    "loop": "v3_low_peek_raise_blink_return_chroma_cleanup",
+                    "duration_ms": 1600,
+                    "frames": [
+                        {"row": 0, "col": 0, "hold_ms": 120, "phase": "low_idle_peek", "mark": false},
+                        {"row": 0, "col": 1, "hold_ms": 140, "phase": "rise_open_eyes", "mark": false},
+                        {"row": 0, "col": 2, "hold_ms": 160, "phase": "notice_viewer", "mark": false},
+                        {"row": 0, "col": 3, "hold_ms": 180, "phase": "hand_lift", "mark": false},
+                        {"row": 0, "col": 4, "hold_ms": 260, "phase": "attention_hold", "mark": false},
+                        {"row": 0, "col": 5, "hold_ms": 210, "phase": "soft_blink_hold", "mark": false},
+                        {"row": 0, "col": 6, "hold_ms": 170, "phase": "lower_return", "mark": false},
+                        {"row": 0, "col": 7, "hold_ms": 260, "phase": "low_idle_return", "mark": false},
+                        {"row": 0, "col": 0, "hold_ms": 100, "phase": "loop_reset", "mark": false}
+                    ],
+                    "review_note": "targets remaining green chroma-key residue around hair tips while preserving v2's cleaned silhouette and the accepted v1 timing",
+                },
+                "review_question": "does the chroma cleanup remove the remaining green hair fringe without making Xiao Shu look over-cut",
                 "voice_policy": "silent_now_review_sparse_voice_later",
             }),
             json!({
@@ -7956,7 +8249,7 @@ mod tests {
         );
         assert_eq!(first["renderer"]["asset_pet_id"], "xiao-shu-dev");
         assert_eq!(first["renderer"]["official_pet_package_mutation"], false);
-        assert_eq!(first["semantic_variant_count"], 1);
+        assert_eq!(first["semantic_variant_count"], 3);
         assert_eq!(
             first["semantic_variants"][0]["variant_id"],
             "sidecar_soft_bounce_v1"
@@ -7964,6 +8257,30 @@ mod tests {
         assert_eq!(
             first["semantic_variants"][0]["sidecar_asset"]["asset_id"],
             "xiao-shu-motion-canonical-soft-bounce-v1"
+        );
+        assert_eq!(
+            first["semantic_variants"][1]["variant_id"],
+            "sidecar_v3_soft_bounce_v1"
+        );
+        assert_eq!(
+            first["semantic_variants"][1]["sidecar_asset"]["asset_id"],
+            "xiao-shu-v3-ai-soft-bounce-v1"
+        );
+        assert_eq!(
+            first["semantic_variants"][1]["frame_choreography"]["choreography_id"],
+            "soft_bounce_v3_ai_frame_v1_choreo"
+        );
+        assert_eq!(
+            first["semantic_variants"][2]["variant_id"],
+            "sidecar_v3_completion_nod_v1"
+        );
+        assert_eq!(
+            first["semantic_variants"][2]["sidecar_asset"]["asset_id"],
+            "xiao-shu-v3-ai-completion-nod-v1"
+        );
+        assert_eq!(
+            first["semantic_variants"][2]["frame_choreography"]["choreography_id"],
+            "completion_nod_v3_ai_frame_v1_choreo"
         );
         assert_eq!(first["semantic_variant_review"], Value::Null);
         assert!(first["frames"][2]["css_classes"]
@@ -7982,7 +8299,7 @@ mod tests {
             .iter()
             .find(|track| track["token"] == "xiao_shu::idle_breathe::low")
             .unwrap();
-        assert_eq!(idle_breathe["semantic_variant_count"], 1);
+        assert_eq!(idle_breathe["semantic_variant_count"], 2);
         assert_eq!(
             idle_breathe["semantic_variants"][0]["variant_id"],
             "sidecar_idle_breathe_v1"
@@ -7990,6 +8307,18 @@ mod tests {
         assert_eq!(
             idle_breathe["semantic_variants"][0]["sidecar_asset"]["asset_id"],
             "xiao-shu-motion-canonical-idle-breathe-v1"
+        );
+        assert_eq!(
+            idle_breathe["semantic_variants"][1]["variant_id"],
+            "sidecar_v3_idle_breathe_v1"
+        );
+        assert_eq!(
+            idle_breathe["semantic_variants"][1]["sidecar_asset"]["asset_id"],
+            "xiao-shu-v3-ai-idle-breathe-v1"
+        );
+        assert_eq!(
+            idle_breathe["semantic_variants"][1]["frame_choreography"]["choreography_id"],
+            "idle_breathe_v3_ai_frame_v1_choreo"
         );
         assert_eq!(idle_breathe["semantic_variant_review"], Value::Null);
         let sorting_glow = tracks
@@ -8081,7 +8410,7 @@ mod tests {
             .iter()
             .find(|track| track["token"] == "xiao_shu::alert_peek::medium")
             .unwrap();
-        assert_eq!(alert_peek["semantic_variant_count"], 8);
+        assert_eq!(alert_peek["semantic_variant_count"], 12);
         assert_eq!(alert_peek["has_semantic_variants"], true);
         assert_eq!(
             alert_peek["semantic_variants"][0]["variant_id"],
@@ -8163,17 +8492,65 @@ mod tests {
         );
         assert_eq!(
             alert_peek["semantic_variants"][6]["variant_id"],
-            "sidecar_peek_v3"
+            "sidecar_v3_peek_sheet_v1"
         );
         assert_eq!(
             alert_peek["semantic_variants"][6]["sidecar_asset"]["asset_id"],
-            "xiao-shu-canonical-peek-v3"
+            "xiao-shu-v3-alert-peek-sheet-v1"
         );
         assert_eq!(
             alert_peek["semantic_variants"][6]["frame_choreography"]["choreography_id"],
+            "alert_peek_v3_sheet_v1_choreo"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][7]["variant_id"],
+            "sidecar_v3_ai_peek_v1"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][7]["sidecar_asset"]["asset_id"],
+            "xiao-shu-v3-ai-alert-peek-v1"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][7]["frame_choreography"]["choreography_id"],
+            "alert_peek_v3_ai_frame_v1_choreo"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][8]["variant_id"],
+            "sidecar_v3_ai_peek_v2"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][8]["sidecar_asset"]["asset_id"],
+            "xiao-shu-v3-ai-alert-peek-v2"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][8]["frame_choreography"]["choreography_id"],
+            "alert_peek_v3_ai_frame_v2_cleanup_choreo"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][9]["variant_id"],
+            "sidecar_v3_ai_peek_v3"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][9]["sidecar_asset"]["asset_id"],
+            "xiao-shu-v3-ai-alert-peek-v3"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][9]["frame_choreography"]["choreography_id"],
+            "alert_peek_v3_ai_frame_v3_chroma_cleanup_choreo"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][10]["variant_id"],
+            "sidecar_peek_v3"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][10]["sidecar_asset"]["asset_id"],
+            "xiao-shu-canonical-peek-v3"
+        );
+        assert_eq!(
+            alert_peek["semantic_variants"][10]["frame_choreography"]["choreography_id"],
             "alert_peek_sidecar_v3_frame_choreo"
         );
-        assert_eq!(alert_peek["semantic_variants"][7]["sprite_row"], 8);
+        assert_eq!(alert_peek["semantic_variants"][11]["sprite_row"], 8);
         assert_eq!(
             alert_peek["semantic_variant_review"]["default_variant"],
             "sidecar_ai_peek_v2"
