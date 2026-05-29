@@ -4480,7 +4480,8 @@ impl McpTool for PresentTool {
                         "description": "Source content for html/svg/mermaid/markdown_table. For kind=table, optional (data comes from payload, or a JSON array string here)."
                     },
                     "payload": {
-                        "description": "Structured JSON the artifact visualizes. Embedded as #ab-payload (dual-encoding). For kind=table, an array of objects/arrays renders the table. Strongly encouraged."
+                        "type": ["object", "array"],
+                        "description": "Structured JSON the artifact visualizes. Embedded as #ab-payload (dual-encoding). For kind=table, an array of objects/arrays renders the table. Pass a JSON object/array (NOT a stringified blob — declaring the type stops clients double-encoding; a stringified value is still defensively decoded, see #1786). Strongly encouraged."
                     },
                     "title": { "type": "string", "description": "Document title." },
                     "channel": {
@@ -4522,8 +4523,13 @@ impl McpTool for PresentTool {
             .unwrap_or("")
             .to_string();
         // Explicit `null` means "no payload" (not an embedded JSON null) so
-        // dual_encoding is not falsely reported true.
-        let payload = args.get("payload").filter(|v| !v.is_null()).cloned();
+        // dual_encoding is not falsely reported true. normalize_payload undoes
+        // a client that JSON-stringified the structured arg (forum #1786) so
+        // #ab-payload embeds the structure single-encoded, not a quoted blob.
+        let payload = args
+            .get("payload")
+            .filter(|v| !v.is_null())
+            .map(crate::present::normalize_payload);
         let title = args.get("title").and_then(|v| v.as_str());
         let channel = args
             .get("channel")

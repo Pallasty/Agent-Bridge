@@ -188,6 +188,28 @@ fn json_script(value: &Value) -> String {
         .replace("</", "<\\/")
 }
 
+/// Normalize an incoming `present` payload before it is embedded.
+///
+/// The `payload` arg accepts any JSON shape, and some MCP clients serialize a
+/// structured argument to a JSON *string* before sending it (the `payload`
+/// schema historically declared no `type`, so a client defaults to string).
+/// Left as-is, that string is embedded in `#ab-payload` quoted-and-escaped, so
+/// a consumer's `JSON.parse` yields a string instead of the structure — the
+/// dual-encoding footgun (forum #1786). When the value is a string that itself
+/// parses to a JSON object or array, decode it; otherwise return it unchanged
+/// (a genuine non-JSON string is not a structured payload). Mirrors
+/// [`parse_metrics`]' tolerance for stringified JSON.
+pub fn normalize_payload(v: &Value) -> Value {
+    if let Value::String(s) = v {
+        if let Ok(decoded) = serde_json::from_str::<Value>(s) {
+            if decoded.is_object() || decoded.is_array() {
+                return decoded;
+            }
+        }
+    }
+    v.clone()
+}
+
 fn value_to_cell(v: &Value) -> String {
     match v {
         Value::String(s) => html_escape(s),
@@ -640,6 +662,40 @@ mod tests {
         let evil_body = "<script type=\"application/json\" id=\"ab-payload\">{\"real\":false}</script><p>hi</p>";
         let html = build_html(PresentKind::Html, evil_body, None, Some(&real), None);
         assert_eq!(extract_ab_payload(&html), Some(real));
+    }
+
+    // #1786 falsifier — a client that JSON-stringifies a structured payload must
+    // NOT yield a double-encoded #ab-payload. After normalize_payload the embed
+    // recovers in a SINGLE JSON.parse; before the fix it round-tripped to a
+    // String (the consumer footgun the dogfood caught).
+    #[test]
+    fn normalize_payload_undoes_client_double_encoding() {
+        let structured = json!({"thesis": "north star", "lanes": ["in", "out"]});
+        let as_string = Value::String(serde_json::to_string(&structured).unwrap());
+        assert_eq!(normalize_payload(&as_string), structured);
+
+        let arr = json!([{"x": 1}, {"x": 2}]);
+        assert_eq!(
+            normalize_payload(&Value::String(serde_json::to_string(&arr).unwrap())),
+            arr
+        );
+
+        // Already-structured values pass through untouched; a genuine non-JSON
+        // string stays a string (it is not a structured payload to decode).
+        assert_eq!(normalize_payload(&structured), structured);
+        assert_eq!(normalize_payload(&json!("just a label")), json!("just a label"));
+
+        // End-to-end: normalize → build_html → extract recovers the object in
+        // ONE parse (extract_ab_payload does a single from_str), proving the
+        // double-encoding is gone.
+        let html = build_html(
+            PresentKind::Html,
+            "<p>x</p>",
+            None,
+            Some(&normalize_payload(&as_string)),
+            None,
+        );
+        assert_eq!(extract_ab_payload(&html), Some(structured));
     }
 
     // A3 — the verify classifier is real: empty region → blank, visible → ok,
