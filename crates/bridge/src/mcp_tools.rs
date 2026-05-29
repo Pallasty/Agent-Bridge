@@ -18018,6 +18018,14 @@ impl MemorySearchScopeMode {
             _ => Self::LocalOnly,
         }
     }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::LocalOnly => "local_only",
+            Self::LocalPlusGlobal => "local_plus_global",
+            Self::Exploratory => "exploratory",
+        }
+    }
 }
 
 fn memory_search_scope_mode(args: &Value, include_global: bool) -> MemorySearchScopeMode {
@@ -18181,6 +18189,8 @@ fn preview_memory_orphan_candidates(
     skip_tags: &[String],
     skip_kinds: &[String],
     require_scope_compatible: bool,
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
 ) -> MemoryOrphanCandidatePreview {
     let mut preview = MemoryOrphanCandidatePreview::default();
     let mut orphans: Vec<MemoryRecord> = Vec::new();
@@ -18194,6 +18204,11 @@ fn preview_memory_orphan_candidates(
         }
         if rec.content.len() < min_content_len {
             continue;
+        }
+        if let Some(scope) = requested_scope {
+            if !memory_search_scope_mode_matches(rec, scope, scope_mode) {
+                continue;
+            }
         }
         preview.examined += 1;
         if keys_with_edges.contains(&rec.key) {
@@ -18336,6 +18351,16 @@ impl McpTool for MemoryOrphanCandidatesTool {
                         "type": "boolean",
                         "default": true,
                         "description": "When true, concrete non-global scopes must match. Global/unscoped rows remain compatible."
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional source-orphan scope filter, e.g. project:/abs/path or domain:rust."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only",
+                        "description": "When scope is set: local_only scans only matching source orphans; local_plus_global also scans global/unscoped source orphans; exploratory scans all source orphans."
                     }
                 }
             }),
@@ -18375,6 +18400,18 @@ impl McpTool for MemoryOrphanCandidatesTool {
             .get("require_scope_compatible")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
+        let requested_scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            false,
+        );
 
         let all = store
             .list_memories(None, MemoryListSort::Recent, 1000)
@@ -18402,6 +18439,8 @@ impl McpTool for MemoryOrphanCandidatesTool {
             &skip_tags,
             &skip_kinds,
             require_scope_compatible,
+            requested_scope,
+            scope_mode,
         );
         let by_key: HashMap<&str, &MemoryRecord> =
             all.iter().map(|m| (m.key.as_str(), m)).collect();
@@ -18451,6 +18490,8 @@ impl McpTool for MemoryOrphanCandidatesTool {
             "skip_tags": skip_tags,
             "skip_kinds": skip_kinds,
             "require_scope_compatible": require_scope_compatible,
+            "scope": requested_scope,
+            "scope_mode": scope_mode.label(),
             "examined": preview.examined,
             "eligible_orphans": preview.eligible_orphans,
             "would_link": preview.would_link,
@@ -18550,6 +18591,19 @@ impl McpTool for MemoryLinkOrphansTool {
                             must match the orphan's concrete non-global scope. Global or missing \
                             scopes remain compatible so older memories still participate."
                     },
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional source-orphan scope filter, e.g. project:/abs/path or domain:rust. \
+                            Use this before live runs to avoid broad cross-project graph hygiene."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only",
+                        "description": "When scope is set: local_only scans only matching source orphans; \
+                            local_plus_global also scans global/unscoped source orphans; exploratory scans \
+                            all source orphans. Candidate compatibility still follows require_scope_compatible."
+                    },
                     "dedupe_undirected_pairs": {
                         "type": "boolean",
                         "default": true,
@@ -18604,6 +18658,18 @@ impl McpTool for MemoryLinkOrphansTool {
             .get("require_scope_compatible")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
+        let requested_scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            false,
+        );
         let dedupe_undirected_pairs = args
             .get("dedupe_undirected_pairs")
             .and_then(|v| v.as_bool())
@@ -18642,6 +18708,11 @@ impl McpTool for MemoryLinkOrphansTool {
             }
             if rec.content.len() < min_content_len {
                 continue;
+            }
+            if let Some(scope) = requested_scope {
+                if !memory_search_scope_mode_matches(rec, scope, scope_mode) {
+                    continue;
+                }
             }
             examined += 1;
             let nbrs = store.memory_neighbors(&rec.key).await.unwrap_or_default();
@@ -18765,6 +18836,8 @@ impl McpTool for MemoryLinkOrphansTool {
             "skip_tags": skip_tags,
             "skip_kinds": skip_kinds,
             "require_scope_compatible": require_scope_compatible,
+            "scope": requested_scope,
+            "scope_mode": scope_mode.label(),
             "dedupe_undirected_pairs": dedupe_undirected_pairs,
             "max_inbound_per_target": max_inbound_per_target,
             "examined": examined,
@@ -27740,6 +27813,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             &skip_tags,
             &skip_kinds,
             true,
+            None,
+            MemorySearchScopeMode::LocalOnly,
         );
 
         assert_eq!(preview.eligible_orphans, 1);
@@ -27783,6 +27858,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             &skip_tags,
             &skip_kinds,
             true,
+            None,
+            MemorySearchScopeMode::LocalOnly,
         );
 
         assert_eq!(preview.eligible_orphans, 1);
@@ -27791,6 +27868,83 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(preview.would_link, 0);
         assert_eq!(preview.rows[0].suggestions[0].0, "low_target");
         assert!(preview.rows[0].suggestions[0].1 < 0.85);
+    }
+
+    #[test]
+    fn orphan_candidate_preview_scope_filter_limits_source_orphans() {
+        let local_orphan = mk_mem_scoped(
+            "local_orphan",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let local_target = mk_mem_scoped(
+            "local_target",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let cross_orphan = mk_mem_scoped(
+            "cross_orphan",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/b"),
+        );
+        let global_orphan = mk_mem_scoped(
+            "global_orphan",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("global"),
+        );
+        let all = vec![local_orphan, local_target, cross_orphan, global_orphan];
+        let mut keys_with_edges = HashSet::new();
+        keys_with_edges.insert("local_target".to_string());
+        let skip_tags: Vec<String> = Vec::new();
+        let skip_kinds: Vec<String> = Vec::new();
+
+        let local_only = preview_memory_orphan_candidates(
+            &all,
+            &keys_with_edges,
+            0.85,
+            0,
+            10,
+            3,
+            &skip_tags,
+            &skip_kinds,
+            true,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+        );
+        let local_keys: Vec<&str> = local_only
+            .rows
+            .iter()
+            .map(|row| row.orphan.key.as_str())
+            .collect();
+        assert_eq!(local_keys, vec!["local_orphan"]);
+
+        let local_plus_global = preview_memory_orphan_candidates(
+            &all,
+            &keys_with_edges,
+            0.85,
+            0,
+            10,
+            3,
+            &skip_tags,
+            &skip_kinds,
+            true,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalPlusGlobal,
+        );
+        let plus_keys: Vec<&str> = local_plus_global
+            .rows
+            .iter()
+            .map(|row| row.orphan.key.as_str())
+            .collect();
+        assert_eq!(plus_keys, vec!["local_orphan", "global_orphan"]);
     }
 
     #[test]
