@@ -1511,6 +1511,272 @@ fn vision_grounding_ocr_error(error: Value) -> ToolResult {
 }
 
 // ===========================================================================
+//                              desktop_action
+// ===========================================================================
+
+pub struct DesktopActionTool {
+    _hub: Hub,
+}
+
+impl DesktopActionTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for DesktopActionTool {
+    fn name(&self) -> &'static str {
+        "desktop_action"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Gated Linux desktop input injection (ISOLATED-ONLY MVP). Wraps \
+                 scripts/desktop_action.py. Safe by construction: this MCP surface NEVER \
+                 touches the real host desktop. An action runs only as (a) dry_run=true \
+                 (logs intent + audits, injects nothing), or (b) isolated — a nested \
+                 compositor addressed by a non-host `display` plus its `swaysock`, where \
+                 absolute moveto/click go through the sway-IPC backend (which itself \
+                 refuses physical-output sockets). Host-mutating injection (--confirm) is \
+                 intentionally NOT exposed here and cannot be unlocked. Every call is \
+                 audited to desktop_action_audit.jsonl."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["type", "key", "move", "moveto", "click", "scroll"],
+                        "description": "type/key need `text`; moveto needs x,y; move needs dx,dy; scroll needs dy[,dx]; click takes optional `button`."
+                    },
+                    "text": { "type": "string", "description": "For type (literal text) or key (keysym, e.g. Return, ctrl+c)." },
+                    "x": { "type": "integer", "description": "Absolute X for moveto (nested compositor coords)." },
+                    "y": { "type": "integer", "description": "Absolute Y for moveto." },
+                    "dx": { "type": "integer", "description": "Relative X for move, or horizontal scroll." },
+                    "dy": { "type": "integer", "description": "Relative Y for move, or vertical scroll." },
+                    "button": { "type": "string", "enum": ["left", "right", "middle"], "default": "left", "description": "Mouse button for click." },
+                    "display": { "type": "string", "description": "Target WAYLAND_DISPLAY. Must be a nested (non-host) display for any real injection." },
+                    "swaysock": { "type": "string", "description": "Nested sway IPC socket; required (with a non-host display) for any non-dry-run injection. Enables the isolated sway-IPC absolute backend." },
+                    "dry_run": { "type": "boolean", "default": false, "description": "When true, log intent + audit but inject nothing. Allowed against any target." },
+                    "cwd": { "type": "string", "description": "Repo root to resolve scripts/desktop_action.py." },
+                    "script_path": { "type": "string", "description": "Explicit desktop_action.py path (tests / alternate checkouts)." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 10000, "description": "Milliseconds before the action process is killed." }
+                },
+                "required": ["action"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let action = match args.get("action").and_then(|v| v.as_str()) {
+            Some(a) if ["type", "key", "move", "moveto", "click", "scroll"].contains(&a) => {
+                a.to_string()
+            }
+            Some(a) => {
+                return Ok(desktop_action_error(json!({
+                    "code": "bad_action",
+                    "message": format!("unknown action {a}")
+                })));
+            }
+            None => {
+                return Ok(desktop_action_error(json!({
+                    "code": "missing_action",
+                    "message": "`action` is required"
+                })));
+            }
+        };
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10_000)
+            .clamp(1_000, 30_000);
+        let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
+        let display = args.get("display").and_then(|v| v.as_str());
+        let swaysock = args.get("swaysock").and_then(|v| v.as_str());
+
+        // SAFETY (isolated-only MVP): this surface never touches the host desktop.
+        // Allowed iff dry_run, or isolated = a non-host display WITH its swaysock.
+        let host_display = std::env::var("AB_HOST_WAYLAND_DISPLAY")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "wayland-1".to_string());
+        let is_isolated = swaysock.map(|s| !s.is_empty()).unwrap_or(false)
+            && display.map(|d| !d.is_empty() && d != host_display).unwrap_or(false);
+        if !dry_run && !is_isolated {
+            return Ok(desktop_action_error(json!({
+                "code": "host_mutation_not_exposed",
+                "message": "this MCP exposes only dry_run or isolated (non-host display + swaysock) \
+                            actions; host-desktop injection is not available here",
+                "hint": "set dry_run:true, or provide a nested `display` (!= host) and its `swaysock`"
+            })));
+        }
+
+        let need_text = matches!(action.as_str(), "type" | "key");
+        let text = args.get("text").and_then(|v| v.as_str());
+        if need_text && text.map(|t| t.is_empty()).unwrap_or(true) {
+            return Ok(desktop_action_error(json!({
+                "code": "missing_text",
+                "message": format!("action {action} requires a non-empty `text`")
+            })));
+        }
+
+        let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
+        let script = desktop_action_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(desktop_action_error(json!({
+                "code": "script_missing",
+                "message": format!("desktop_action.py not found at {}", script.display()),
+                "hint": "pass script_path or run from the Agent-Bridge repo root"
+            })));
+        }
+
+        let mut cmd = TokioCommand::new(
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "python3".to_string()),
+        );
+        cmd.arg(&script).arg(&action);
+        match action.as_str() {
+            "type" | "key" => {
+                cmd.arg(text.unwrap_or(""));
+            }
+            "moveto" => {
+                let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
+                let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0);
+                cmd.arg(x.to_string()).arg(y.to_string());
+            }
+            "move" => {
+                let dx = args.get("dx").and_then(|v| v.as_i64()).unwrap_or(0);
+                let dy = args.get("dy").and_then(|v| v.as_i64()).unwrap_or(0);
+                cmd.arg(dx.to_string()).arg(dy.to_string());
+            }
+            "scroll" => {
+                let dy = args.get("dy").and_then(|v| v.as_i64()).unwrap_or(0);
+                let dx = args.get("dx").and_then(|v| v.as_i64()).unwrap_or(0);
+                cmd.arg(dy.to_string()).arg(dx.to_string());
+            }
+            "click" => {
+                if let Some(btn) = args.get("button").and_then(|v| v.as_str()) {
+                    cmd.arg(btn);
+                }
+            }
+            _ => {}
+        }
+        if let Some(d) = display {
+            cmd.arg("--display").arg(d);
+        }
+        if let Some(s) = swaysock {
+            cmd.arg("--swaysock").arg(s);
+        }
+        if dry_run {
+            cmd.arg("--dry-run");
+        }
+        // NOTE: --confirm / --i-understand-this-touches-the-real-desktop are NEVER
+        // passed by this MCP surface, so host injection cannot be unlocked here.
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+
+        let started = Instant::now();
+        let output =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+                Err(_) => {
+                    return Ok(desktop_action_error(json!({
+                        "code": "timeout",
+                        "message": format!("desktop_action exceeded {timeout_ms} ms"),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Err(e)) => {
+                    return Ok(desktop_action_error(json!({
+                        "code": "spawn_failed",
+                        "message": e.to_string(),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Ok(output)) => output,
+            };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+
+        // desktop_action.py prints a JSON record; nonzero exit = blocked/error.
+        match serde_json::from_str::<Value>(&stdout) {
+            Ok(mut payload) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert(
+                        "mcp_wrapper".to_string(),
+                        json!({
+                            "tool": self.name(),
+                            "read_only": false,
+                            "mode": if dry_run { "dry-run" } else { "isolated" },
+                            "host_protected": true,
+                            "duration_ms": duration_ms,
+                            "exit_code": output.status.code().unwrap_or(-1),
+                            "stderr": stderr,
+                            "stderr_truncated": stderr_truncated
+                        }),
+                    );
+                }
+                let mut result = ToolResult::json_text(&payload);
+                if !output.status.success() {
+                    result.is_error = true;
+                }
+                Ok(result)
+            }
+            Err(e) => Ok(desktop_action_error(json!({
+                "code": "invalid_json",
+                "message": e.to_string(),
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": output.status.code().unwrap_or(-1),
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            }))),
+        }
+    }
+}
+
+fn desktop_action_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_DESKTOP_ACTION_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/desktop_action.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/desktop_action.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_action.py")
+}
+
+fn desktop_action_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "desktop_action_mcp_error.v0",
+        "status": "error",
+        "error": error,
+    }));
+    result.is_error = true;
+    result
+}
+
+// ===========================================================================
 //                        mobile / Android ADB tools
 // ===========================================================================
 
@@ -23783,6 +24049,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(VisionGroundingOcrTool::new(hub.clone())),
     );
+    // Linux Computer Use T9c: gated desktop input injection (isolated-only MVP).
+    // NOT in codex-essential (mutating); host injection is unreachable via this
+    // MCP surface — only dry-run or isolated (non-host display + swaysock).
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(DesktopActionTool::new(hub.clone())),
+    );
     reg_if(
         &mut reg,
         policy,
@@ -28151,6 +28426,158 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(argv.contains(&"sha256:snapshot"));
         assert!(argv.contains(&"--hint-text"));
         assert!(argv.contains(&"Save"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn desktop_action_not_exposed_to_codex_essential() {
+        // Mutating desktop surface must stay out of the Codex essential allowlist.
+        assert!(!codex_essential_tool(Tier::Standard, "desktop_action"));
+        assert!(!codex_essential_tool(Tier::Niche, "desktop_action"));
+        // ...while the read-only snapshot IS exposed (sanity contrast).
+        assert!(codex_essential_tool(Tier::Standard, "desktop_snapshot"));
+    }
+
+    #[test]
+    fn desktop_action_schema_hides_host_unlock_flags() {
+        let p = ToolPolicy::from_values(Some("all"), None, None, None);
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "desktop_action")
+            .expect("desktop_action schema");
+        assert!(tool.description.contains("ISOLATED"));
+        // host-mutating confirm flags must not be part of the exposed surface
+        assert!(tool.input_schema["properties"].get("confirm").is_none());
+        assert!(tool.input_schema["properties"]
+            .get("i_understand_this_touches_the_real_desktop")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn desktop_action_refuses_host_mutation() {
+        // No dry_run, no isolated (display+swaysock) => must refuse before exec.
+        let tool = DesktopActionTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({ "action": "click", "button": "left" }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["error"]["code"], "host_mutation_not_exposed");
+    }
+
+    #[tokio::test]
+    async fn desktop_action_isolated_passes_flags_without_confirm() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-action-iso-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_action.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopActionTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "action": "moveto",
+                    "x": 670,
+                    "y": 410,
+                    "display": "wayland-2",
+                    "swaysock": "/run/user/1000/sway-ipc.test.sock",
+                    "script_path": script.to_string_lossy(),
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        let argv: Vec<&str> = payload["argv"]
+            .as_array()
+            .expect("argv")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(argv.contains(&"moveto"));
+        assert!(argv.contains(&"670"));
+        assert!(argv.contains(&"410"));
+        assert!(argv.contains(&"--display"));
+        assert!(argv.contains(&"wayland-2"));
+        assert!(argv.contains(&"--swaysock"));
+        // host-unlock flags are NEVER passed by this surface
+        assert!(!argv.contains(&"--confirm"));
+        assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
+        assert!(!argv.contains(&"--dry-run"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn desktop_action_dry_run_passes_dry_run_flag() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-action-dry-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_action.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopActionTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "action": "type",
+                    "text": "hi",
+                    "dry_run": true,
+                    "script_path": script.to_string_lossy(),
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        let argv: Vec<&str> = payload["argv"]
+            .as_array()
+            .expect("argv")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(argv.contains(&"type"));
+        assert!(argv.contains(&"hi"));
+        assert!(argv.contains(&"--dry-run"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
