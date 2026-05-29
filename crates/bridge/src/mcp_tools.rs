@@ -18,9 +18,11 @@ use ab_store::{
     AgentPresenceRecord,
     CompactPolicy,
     ForumPostRecord,
+    GraphTopology,
     ImportConflictPolicy,
     McpToolCallFilter,
     MemoryCosineHit,
+    MemoryEdge,
     MemoryExportFilter,
     MemoryListSort,
     MemoryQueryRecord,
@@ -16631,16 +16633,61 @@ impl McpTool for MemoryGraphTopologyTool {
                  whether the graph is healthy enough for a bounded centrality prior without \
                  changing memory_search ranking."
                 .into(),
-            input_schema: json!({ "type": "object", "properties": {} }),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional memory scope, e.g. project:/abs/path or domain:rust. When set, reports an induced-subgraph topology for records selected by scope_mode."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "description": "Scope selection for scoped topology. local_only keeps matching project/domain rows; local_plus_global also includes global/unscoped rows; exploratory includes all source rows."
+                    }
+                }
+            }),
         }
     }
-    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let store = match &self.hub.store {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
         };
 
-        let topo = store.graph_topology().await?;
+        let requested_scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            false,
+        );
+
+        let topo = if let Some(scope) = requested_scope {
+            let records = store
+                .list_memories(None, MemoryListSort::Newest, 10_000)
+                .await?;
+            let visible_records: Vec<MemoryRecord> = records
+                .into_iter()
+                .filter(|rec| {
+                    rec.status == "active"
+                        && !rec.kind.eq_ignore_ascii_case("skill")
+                        && memory_search_scope_mode_matches(rec, scope, scope_mode)
+                })
+                .collect();
+            let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+            for rec in &visible_records {
+                edges_by_key.insert(rec.key.clone(), store.memory_neighbors(&rec.key).await?);
+            }
+            memory_graph_topology_from_records(&visible_records, &edges_by_key)
+        } else {
+            store.graph_topology().await?
+        };
         let active_total = topo.non_skill_active_total.max(1);
         let orphan_fraction = topo.orphan_count as f64 / active_total as f64;
         let p4_evolved_fraction = topo.p4_evolved_coverage as f64 / active_total as f64;
@@ -16679,6 +16726,9 @@ impl McpTool for MemoryGraphTopologyTool {
             "p4_evolved_coverage": topo.p4_evolved_coverage,
             "p4_evolved_fraction": (p4_evolved_fraction * 1000.0).round() / 1000.0,
             "pagerank_readiness": pagerank_readiness,
+            "scope": requested_scope,
+            "scope_mode": requested_scope.map(|_| scope_mode.label()),
+            "edge_scope": requested_scope.map(|_| "induced_subgraph"),
             "ranking_note": "This tool does not run PageRank and does not alter memory_search. \
                 It is the cheap preflight for deciding whether a bounded centrality prior \
                 is safe to test.",
@@ -18126,6 +18176,105 @@ fn memory_search_scope_trace_allowed(
         // crystallize them into coactivation until a later explicit-feedback
         // path can distinguish useful transfer from noisy coincidence.
         _ => false,
+    }
+}
+
+fn memory_graph_topology_from_records(
+    records: &[MemoryRecord],
+    edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
+) -> GraphTopology {
+    let visible_keys: HashSet<String> = records.iter().map(|rec| rec.key.clone()).collect();
+    let mut degrees: HashMap<String, u64> = visible_keys
+        .iter()
+        .map(|key| (key.clone(), 0_u64))
+        .collect();
+    let mut evolved_keys: HashSet<String> = HashSet::new();
+
+    for key in &visible_keys {
+        let Some(edges) = edges_by_key.get(key) else {
+            continue;
+        };
+        for edge in edges {
+            let other = if edge.from_key == *key {
+                &edge.to_key
+            } else if edge.to_key == *key {
+                &edge.from_key
+            } else {
+                continue;
+            };
+            if !visible_keys.contains(other) {
+                continue;
+            }
+            if let Some(degree) = degrees.get_mut(key) {
+                *degree += 1;
+            }
+            if edge.edge_type == "evolved" {
+                evolved_keys.insert(key.clone());
+            }
+        }
+    }
+
+    let canonical = ["0", "1", "2-3", "4-5", "6-10", "11-20", "21+"];
+    let mut bucket_counts: HashMap<String, u64> = canonical
+        .iter()
+        .map(|bucket| ((*bucket).to_string(), 0_u64))
+        .collect();
+    for degree in degrees.values() {
+        let bucket = match *degree {
+            0 => "0",
+            1 => "1",
+            2 | 3 => "2-3",
+            4 | 5 => "4-5",
+            6..=10 => "6-10",
+            11..=20 => "11-20",
+            _ => "21+",
+        };
+        *bucket_counts.entry(bucket.to_string()).or_default() += 1;
+    }
+    let degree_histogram = canonical
+        .iter()
+        .map(|bucket| {
+            (
+                (*bucket).to_string(),
+                bucket_counts.get(*bucket).copied().unwrap_or(0),
+            )
+        })
+        .collect();
+
+    let mut hubs: Vec<(String, u64)> = degrees
+        .into_iter()
+        .filter(|(_, degree)| *degree > 0)
+        .collect();
+    hubs.sort_by(|(key_a, degree_a), (key_b, degree_b)| {
+        degree_b.cmp(degree_a).then_with(|| key_a.cmp(key_b))
+    });
+    hubs.truncate(5);
+
+    GraphTopology {
+        non_skill_active_total: visible_keys.len() as u64,
+        orphan_count: visible_keys
+            .iter()
+            .filter(|key| {
+                edges_by_key
+                    .get(*key)
+                    .map(|edges| {
+                        !edges.iter().any(|edge| {
+                            let other = if edge.from_key == **key {
+                                &edge.to_key
+                            } else if edge.to_key == **key {
+                                &edge.from_key
+                            } else {
+                                return false;
+                            };
+                            visible_keys.contains(other)
+                        })
+                    })
+                    .unwrap_or(true)
+            })
+            .count() as u64,
+        degree_histogram,
+        top_5_hubs: hubs,
+        p4_evolved_coverage: evolved_keys.len() as u64,
     }
 }
 
@@ -27347,6 +27496,15 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         }
     }
 
+    fn mk_edge(from_key: &str, to_key: &str, edge_type: &str) -> MemoryEdge {
+        MemoryEdge {
+            from_key: from_key.into(),
+            to_key: to_key.into(),
+            edge_type: edge_type.into(),
+            weight: 1.0,
+        }
+    }
+
     #[test]
     fn memory_search_scope_filter_is_strict_by_default() {
         let scoped = mk_mem_scoped(
@@ -27555,6 +27713,71 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             "project:/repo/a",
             MemorySearchScopeMode::LocalPlusGlobal
         ));
+    }
+
+    #[test]
+    fn memory_graph_topology_from_records_uses_induced_scope_edges() {
+        let records = vec![
+            mk_mem_scoped(
+                "local_a",
+                "lesson",
+                "alpha beta gamma delta",
+                &[],
+                Some("project:/repo/a"),
+            ),
+            mk_mem_scoped(
+                "local_b",
+                "lesson",
+                "alpha beta gamma delta",
+                &[],
+                Some("project:/repo/a"),
+            ),
+            mk_mem_scoped(
+                "global_c",
+                "decision",
+                "alpha beta gamma delta",
+                &[],
+                Some("global"),
+            ),
+        ];
+        let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+        edges_by_key.insert(
+            "local_a".into(),
+            vec![
+                mk_edge("local_a", "local_b", "relates"),
+                mk_edge("local_a", "other_project", "relates"),
+            ],
+        );
+        edges_by_key.insert(
+            "local_b".into(),
+            vec![
+                mk_edge("local_a", "local_b", "relates"),
+                mk_edge("local_b", "global_c", "evolved"),
+            ],
+        );
+        edges_by_key.insert(
+            "global_c".into(),
+            vec![mk_edge("local_b", "global_c", "evolved")],
+        );
+
+        let topo = memory_graph_topology_from_records(&records, &edges_by_key);
+
+        assert_eq!(topo.non_skill_active_total, 3);
+        assert_eq!(topo.orphan_count, 0);
+        assert_eq!(topo.p4_evolved_coverage, 2);
+        assert_eq!(topo.top_5_hubs[0], ("local_b".to_string(), 2));
+        assert_eq!(
+            topo.degree_histogram,
+            vec![
+                ("0".to_string(), 0),
+                ("1".to_string(), 2),
+                ("2-3".to_string(), 1),
+                ("4-5".to_string(), 0),
+                ("6-10".to_string(), 0),
+                ("11-20".to_string(), 0),
+                ("21+".to_string(), 0),
+            ]
+        );
     }
 
     #[test]
