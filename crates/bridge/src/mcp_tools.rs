@@ -9826,12 +9826,18 @@ impl McpTool for MemorySearchTool {
                     "tags_any":   { "type": "array", "items": { "type": "string" }, "default": [] },
                     "scope":      {
                         "type": "string",
-                        "description": "Optional strict scope filter, e.g. project:/abs/path or domain:rust. When set, unscoped/global memories are excluded unless include_global=true."
+                        "description": "Optional scope hint/filter, e.g. project:/abs/path or domain:rust. Pair with scope_mode to choose local-only recall vs cross-project exploration."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only",
+                        "description": "When scope is set: local_only keeps only matching project/domain rows; local_plus_global also allows global/unscoped rows with a small score penalty; exploratory keeps cross-project rows as demoted analogy candidates."
                     },
                     "include_global": {
                         "type": "boolean",
                         "default": false,
-                        "description": "When scope is set, also include unscoped/global memories. Default false keeps project-focused searches from being dominated by old cross-project imports."
+                        "description": "Compatibility alias for scope_mode=local_plus_global when scope_mode is omitted."
                     },
                     "limit":      { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 },
                     "mode":       {
@@ -9897,6 +9903,7 @@ impl McpTool for MemorySearchTool {
             .get("include_global")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let scope_mode = memory_search_scope_mode(&args, include_global);
 
         let exclude_kinds: Vec<String> = args
             .get("exclude_kinds")
@@ -9976,13 +9983,13 @@ impl McpTool for MemorySearchTool {
             store.memory_search(&q, &tags, inner_limit).await?
         };
 
-        // Scope is intentionally a pre-rerank / pre-coactivation filter:
-        // callers using it want a project/domain-local result page, and we
-        // should not let discarded cross-project hits affect boosts or the
-        // synaptic trace written below.
+        // Scope mode is intentionally applied before Seed/coactivation rerank:
+        // callers asking for local work should not let discarded cross-project
+        // hits affect boosts, while exploratory mode keeps those hits as
+        // demoted analogy candidates instead of letting them dominate top-k.
         let mut hits = hits;
         if let Some(scope) = scope_filter.as_deref() {
-            hits.retain(|h| memory_search_scope_matches(&h.record, scope, include_global));
+            hits = memory_search_apply_scope_mode(hits, scope, scope_mode);
         }
 
         // Path C actuator: rerank using perception_filter hub_clusters.
@@ -10044,6 +10051,11 @@ impl McpTool for MemorySearchTool {
         let coact_keys: Vec<String> = hits
             .iter()
             .filter(|h| h.record.kind != "skill")
+            .filter(|h| {
+                scope_filter.as_deref().map_or(true, |scope| {
+                    memory_search_scope_trace_allowed(&h.record, scope, scope_mode)
+                })
+            })
             .take(10)
             .map(|h| h.record.key.clone())
             .collect();
@@ -17987,19 +17999,124 @@ fn project_scope_paths_overlap(a: &str, b: &str) -> bool {
         || a.strip_prefix(b).is_some_and(|rest| rest.starts_with('/'))
 }
 
-fn memory_search_scope_matches(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemorySearchScopeMode {
+    LocalOnly,
+    LocalPlusGlobal,
+    Exploratory,
+}
+
+impl MemorySearchScopeMode {
+    fn parse(raw: Option<&str>, include_global: bool) -> Self {
+        match raw {
+            Some("local_plus_global") => Self::LocalPlusGlobal,
+            Some("exploratory") => Self::Exploratory,
+            Some("local_only") => Self::LocalOnly,
+            // Backward compatibility for callers that adopted the first
+            // scope-filter cut before scope_mode existed.
+            None if include_global => Self::LocalPlusGlobal,
+            _ => Self::LocalOnly,
+        }
+    }
+}
+
+fn memory_search_scope_mode(args: &Value, include_global: bool) -> MemorySearchScopeMode {
+    MemorySearchScopeMode::parse(
+        args.get("scope_mode")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        include_global,
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemorySearchScopeRelation {
+    Local,
+    Global,
+    CrossScope,
+}
+
+fn memory_search_scope_relation(
     rec: &MemoryRecord,
     requested_scope: &str,
-    include_global: bool,
-) -> bool {
+) -> MemorySearchScopeRelation {
     let requested_scope = requested_scope.trim();
-    if requested_scope.is_empty() {
-        return true;
-    }
     match memory_scope_value(rec) {
-        Some(scope) if scope == requested_scope => true,
-        Some(scope) if project_scope_paths_overlap(scope, requested_scope) => true,
-        Some("global") | None => include_global,
+        Some(scope)
+            if !requested_scope.is_empty()
+                && (scope == requested_scope
+                    || project_scope_paths_overlap(scope, requested_scope)) =>
+        {
+            MemorySearchScopeRelation::Local
+        }
+        Some("global") | None => MemorySearchScopeRelation::Global,
+        _ => MemorySearchScopeRelation::CrossScope,
+    }
+}
+
+fn memory_search_scope_mode_matches(
+    rec: &MemoryRecord,
+    requested_scope: &str,
+    mode: MemorySearchScopeMode,
+) -> bool {
+    match (mode, memory_search_scope_relation(rec, requested_scope)) {
+        (MemorySearchScopeMode::LocalOnly, MemorySearchScopeRelation::Local) => true,
+        (MemorySearchScopeMode::LocalPlusGlobal, MemorySearchScopeRelation::Local)
+        | (MemorySearchScopeMode::LocalPlusGlobal, MemorySearchScopeRelation::Global) => true,
+        (MemorySearchScopeMode::Exploratory, _) => true,
+        _ => false,
+    }
+}
+
+fn memory_search_scope_score_multiplier(
+    rec: &MemoryRecord,
+    requested_scope: &str,
+    mode: MemorySearchScopeMode,
+) -> f64 {
+    match (mode, memory_search_scope_relation(rec, requested_scope)) {
+        (_, MemorySearchScopeRelation::Local) => 1.0,
+        (MemorySearchScopeMode::LocalPlusGlobal, MemorySearchScopeRelation::Global)
+        | (MemorySearchScopeMode::Exploratory, MemorySearchScopeRelation::Global) => 0.85,
+        (MemorySearchScopeMode::Exploratory, MemorySearchScopeRelation::CrossScope) => 0.65,
+        _ => 1.0,
+    }
+}
+
+fn memory_search_apply_scope_mode(
+    hits: Vec<MemorySearchHit>,
+    requested_scope: &str,
+    mode: MemorySearchScopeMode,
+) -> Vec<MemorySearchHit> {
+    let mut scoped: Vec<MemorySearchHit> = hits
+        .into_iter()
+        .filter_map(|mut hit| {
+            if !memory_search_scope_mode_matches(&hit.record, requested_scope, mode) {
+                return None;
+            }
+            hit.score *= memory_search_scope_score_multiplier(&hit.record, requested_scope, mode);
+            Some(hit)
+        })
+        .collect();
+    scoped.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    scoped
+}
+
+fn memory_search_scope_trace_allowed(
+    rec: &MemoryRecord,
+    requested_scope: &str,
+    mode: MemorySearchScopeMode,
+) -> bool {
+    match (mode, memory_search_scope_relation(rec, requested_scope)) {
+        (_, MemorySearchScopeRelation::Local) => true,
+        (MemorySearchScopeMode::LocalPlusGlobal, MemorySearchScopeRelation::Global) => true,
+        // Exploratory cross-scope hits are read-time analogies. Do not
+        // crystallize them into coactivation until a later explicit-feedback
+        // path can distinguish useful transfer from noisy coincidence.
         _ => false,
     }
 }
@@ -26828,6 +26945,14 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         rec
     }
 
+    fn mk_search_hit_scoped(key: &str, scope: Option<&str>, score: f64) -> MemorySearchHit {
+        MemorySearchHit {
+            record: mk_mem_scoped(key, "lesson", "content content content content", &[], scope),
+            score,
+            cosine: Some(score as f32),
+        }
+    }
+
     #[test]
     fn memory_search_scope_filter_is_strict_by_default() {
         let scoped = mk_mem_scoped(
@@ -26865,45 +26990,45 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             &[],
         );
 
-        assert!(memory_search_scope_matches(
+        assert!(memory_search_scope_mode_matches(
             &scoped,
             "project:/repo/a",
-            false
+            MemorySearchScopeMode::LocalOnly
         ));
-        assert!(memory_search_scope_matches(
+        assert!(memory_search_scope_mode_matches(
             &nested,
             "project:/repo/a",
-            false
+            MemorySearchScopeMode::LocalOnly
         ));
-        assert!(memory_search_scope_matches(
+        assert!(memory_search_scope_mode_matches(
             &scoped,
             "project:/repo/a/sub",
-            false
+            MemorySearchScopeMode::LocalOnly
         ));
-        assert!(!memory_search_scope_matches(
+        assert!(!memory_search_scope_mode_matches(
             &other,
             "project:/repo/a",
-            false
+            MemorySearchScopeMode::LocalOnly
         ));
-        assert!(!memory_search_scope_matches(
+        assert!(!memory_search_scope_mode_matches(
             &global,
             "project:/repo/a",
-            false
+            MemorySearchScopeMode::LocalOnly
         ));
-        assert!(!memory_search_scope_matches(
+        assert!(!memory_search_scope_mode_matches(
             &unscoped,
             "project:/repo/a",
-            false
+            MemorySearchScopeMode::LocalOnly
         ));
-        assert!(memory_search_scope_matches(
+        assert!(memory_search_scope_mode_matches(
             &global,
             "project:/repo/a",
-            true
+            MemorySearchScopeMode::LocalPlusGlobal
         ));
-        assert!(memory_search_scope_matches(
+        assert!(memory_search_scope_mode_matches(
             &unscoped,
             "project:/repo/a",
-            true
+            MemorySearchScopeMode::LocalPlusGlobal
         ));
     }
 
@@ -26917,8 +27042,125 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             Some("domain:rust"),
         );
 
-        assert!(memory_search_scope_matches(&rust, "domain:rust", false));
-        assert!(!memory_search_scope_matches(&rust, "domain:python", false));
+        assert!(memory_search_scope_mode_matches(
+            &rust,
+            "domain:rust",
+            MemorySearchScopeMode::LocalOnly
+        ));
+        assert!(!memory_search_scope_mode_matches(
+            &rust,
+            "domain:python",
+            MemorySearchScopeMode::LocalOnly
+        ));
+    }
+
+    #[test]
+    fn memory_search_scope_mode_parses_with_include_global_compat() {
+        assert_eq!(
+            MemorySearchScopeMode::parse(None, false),
+            MemorySearchScopeMode::LocalOnly
+        );
+        assert_eq!(
+            MemorySearchScopeMode::parse(None, true),
+            MemorySearchScopeMode::LocalPlusGlobal
+        );
+        assert_eq!(
+            MemorySearchScopeMode::parse(Some("exploratory"), false),
+            MemorySearchScopeMode::Exploratory
+        );
+        assert_eq!(
+            MemorySearchScopeMode::parse(Some("unknown"), true),
+            MemorySearchScopeMode::LocalOnly
+        );
+    }
+
+    #[test]
+    fn memory_search_scope_mode_local_plus_global_demotes_global() {
+        let hits = vec![
+            mk_search_hit_scoped("local", Some("project:/repo/a"), 1.0),
+            mk_search_hit_scoped("global", Some("global"), 1.0),
+            mk_search_hit_scoped("unscoped", None, 1.0),
+            mk_search_hit_scoped("cross", Some("project:/repo/b"), 1.0),
+        ];
+
+        let out = memory_search_apply_scope_mode(
+            hits,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalPlusGlobal,
+        );
+        let keys: Vec<&str> = out.iter().map(|h| h.record.key.as_str()).collect();
+
+        assert_eq!(keys, vec!["local", "global", "unscoped"]);
+        assert_eq!(out[0].score, 1.0);
+        assert_eq!(out[1].score, 0.85);
+        assert_eq!(out[2].score, 0.85);
+    }
+
+    #[test]
+    fn memory_search_scope_mode_exploratory_keeps_cross_scope_demoted() {
+        let hits = vec![
+            mk_search_hit_scoped("local", Some("project:/repo/a"), 1.0),
+            mk_search_hit_scoped("global", Some("global"), 1.0),
+            mk_search_hit_scoped("cross", Some("project:/repo/b"), 1.0),
+        ];
+
+        let out = memory_search_apply_scope_mode(
+            hits,
+            "project:/repo/a",
+            MemorySearchScopeMode::Exploratory,
+        );
+        let keys: Vec<&str> = out.iter().map(|h| h.record.key.as_str()).collect();
+
+        assert_eq!(keys, vec!["local", "global", "cross"]);
+        assert_eq!(out[0].score, 1.0);
+        assert_eq!(out[1].score, 0.85);
+        assert_eq!(out[2].score, 0.65);
+    }
+
+    #[test]
+    fn memory_search_scope_trace_skips_exploratory_cross_scope() {
+        let local = mk_mem_scoped(
+            "local",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project:/repo/a"),
+        );
+        let global = mk_mem_scoped(
+            "global",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("global"),
+        );
+        let cross = mk_mem_scoped(
+            "cross",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project:/repo/b"),
+        );
+
+        assert!(memory_search_scope_trace_allowed(
+            &local,
+            "project:/repo/a",
+            MemorySearchScopeMode::Exploratory
+        ));
+        assert!(!memory_search_scope_trace_allowed(
+            &global,
+            "project:/repo/a",
+            MemorySearchScopeMode::Exploratory
+        ));
+        assert!(!memory_search_scope_trace_allowed(
+            &cross,
+            "project:/repo/a",
+            MemorySearchScopeMode::Exploratory
+        ));
+        assert!(memory_search_scope_trace_allowed(
+            &global,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalPlusGlobal
+        ));
     }
 
     #[test]
