@@ -30239,6 +30239,65 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // present is a Niche opt-in tool: exposed only under the `all` profile
+    // (like browser_*), absent from standard. Locks the tier against drift.
+    #[test]
+    fn present_is_niche_opt_in_and_registers_under_all() {
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        assert!(all.includes(Tier::Niche, "present"));
+        let std_p = ToolPolicy::from_values(None, None, None, Some("standard"));
+        assert!(!std_p.includes(Tier::Niche, "present"));
+        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        assert!(
+            schemas.iter().any(|s| s.name == "present"),
+            "present must register under the all profile"
+        );
+    }
+
+    // Live dogfood (opt-in) — drives the real navigate->eval->classify->screenshot
+    // seam against Chromium, which the unit suite cannot cover. Closes the
+    // adversarial-review gap ("the live verify path has zero automated coverage").
+    // Run isolated from the user's login Chrome:
+    //   AGENT_BRIDGE_HEADLESS=1 \
+    //   AGENT_BRIDGE_BROWSER_PROFILE=/tmp/ab-present-dogfood \
+    //   AGENT_BRIDGE_PRESENTATIONS_DIR=/tmp/ab-present-art \
+    //   cargo test -p ab-bridge present_live_self_verify -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "requires a launchable Chromium; opt-in live dogfood"]
+    async fn present_live_self_verify_rendered_ok_and_blank() {
+        use ab_browser::ChromiumCdpBackend;
+        let hub = Hub::builder()
+            .browser(std::sync::Arc::new(ChromiumCdpBackend::new()))
+            .build();
+        let tool = PresentTool::new(hub);
+
+        // A real table renders → rendered_ok + a screenshot is captured.
+        let ok = result_text_as_json(
+            &tool
+                .execute(
+                    json!({"kind": "table", "payload": [{"name": "e5", "dims": 384}], "title": "live"}),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("execute table"),
+        );
+        assert_eq!(ok["verify_status"], "rendered_ok", "table should render; got {ok}");
+        assert!(ok["screenshot_path"].is_string(), "screenshot should be captured");
+
+        // An empty html artifact renders nothing visible → blank (the real,
+        // end-to-end falsifier the unit suite can only approximate).
+        let blank = result_text_as_json(
+            &tool
+                .execute(
+                    json!({"kind": "html", "artifact": "", "title": "empty"}),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("execute empty"),
+        );
+        assert_eq!(blank["verify_status"], "blank", "empty artifact must be blank; got {blank}");
+    }
+
     #[test]
     fn tool_atlas_schema_has_compact_controls_without_polluting_dispatch_audit() {
         let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
