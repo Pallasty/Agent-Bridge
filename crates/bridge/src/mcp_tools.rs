@@ -9824,6 +9824,15 @@ impl McpTool for MemorySearchTool {
                 "properties": {
                     "query":      { "type": "string", "description": "Search query (FTS5 match syntax for fts/hybrid; natural language for semantic)." },
                     "tags_any":   { "type": "array", "items": { "type": "string" }, "default": [] },
+                    "scope":      {
+                        "type": "string",
+                        "description": "Optional strict scope filter, e.g. project:/abs/path or domain:rust. When set, unscoped/global memories are excluded unless include_global=true."
+                    },
+                    "include_global": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When scope is set, also include unscoped/global memories. Default false keeps project-focused searches from being dominated by old cross-project imports."
+                    },
                     "limit":      { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 },
                     "mode":       {
                         "type": "string", "enum": ["fts", "hybrid", "semantic"], "default": "fts",
@@ -9878,6 +9887,16 @@ impl McpTool for MemorySearchTool {
             .unwrap_or(20)
             .min(200) as u32;
         let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("fts");
+        let scope_filter = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let include_global = args
+            .get("include_global")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let exclude_kinds: Vec<String> = args
             .get("exclude_kinds")
@@ -9888,10 +9907,10 @@ impl McpTool for MemorySearchTool {
                     .collect()
             })
             .unwrap_or_default();
-        // When exclusions are active, overfetch so the post-filter result can
-        // still hit `limit`. 5× covers up to ~80% saturation; cap at 200 (the
-        // schema's hard upper bound) to avoid pathological queries.
-        let inner_limit = if exclude_kinds.is_empty() {
+        // When output filters are active, overfetch so the post-filter result
+        // can still hit `limit`. 5× covers up to ~80% saturation; cap at 200
+        // (the schema's hard upper bound) to avoid pathological queries.
+        let inner_limit = if exclude_kinds.is_empty() && scope_filter.is_none() {
             limit
         } else {
             (limit.saturating_mul(5)).min(200)
@@ -9956,6 +9975,15 @@ impl McpTool for MemorySearchTool {
         } else {
             store.memory_search(&q, &tags, inner_limit).await?
         };
+
+        // Scope is intentionally a pre-rerank / pre-coactivation filter:
+        // callers using it want a project/domain-local result page, and we
+        // should not let discarded cross-project hits affect boosts or the
+        // synaptic trace written below.
+        let mut hits = hits;
+        if let Some(scope) = scope_filter.as_deref() {
+            hits.retain(|h| memory_search_scope_matches(&h.record, scope, include_global));
+        }
 
         // Path C actuator: rerank using perception_filter hub_clusters.
         // Fail-soft (no state file / disable env / empty hub_clusters → pass-through).
@@ -17946,6 +17974,34 @@ fn memory_scope_value(rec: &MemoryRecord) -> Option<&str> {
         .as_deref()
         .map(str::trim)
         .filter(|scope| !scope.is_empty())
+}
+
+fn project_scope_paths_overlap(a: &str, b: &str) -> bool {
+    let (Some(a), Some(b)) = (a.strip_prefix("project:"), b.strip_prefix("project:")) else {
+        return false;
+    };
+    let a = a.trim_end_matches('/');
+    let b = b.trim_end_matches('/');
+    a == b
+        || b.strip_prefix(a).is_some_and(|rest| rest.starts_with('/'))
+        || a.strip_prefix(b).is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn memory_search_scope_matches(
+    rec: &MemoryRecord,
+    requested_scope: &str,
+    include_global: bool,
+) -> bool {
+    let requested_scope = requested_scope.trim();
+    if requested_scope.is_empty() {
+        return true;
+    }
+    match memory_scope_value(rec) {
+        Some(scope) if scope == requested_scope => true,
+        Some(scope) if project_scope_paths_overlap(scope, requested_scope) => true,
+        Some("global") | None => include_global,
+        _ => false,
+    }
 }
 
 fn memory_scopes_compatible(source: &MemoryRecord, target: &MemoryRecord, required: bool) -> bool {
@@ -26770,6 +26826,99 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         let mut rec = mk_mem(key, kind, content, tags);
         rec.scope = scope.map(|s| s.to_string());
         rec
+    }
+
+    #[test]
+    fn memory_search_scope_filter_is_strict_by_default() {
+        let scoped = mk_mem_scoped(
+            "scoped",
+            "decision",
+            "content content content content",
+            &[],
+            Some("project:/repo/a"),
+        );
+        let nested = mk_mem_scoped(
+            "nested",
+            "decision",
+            "content content content content",
+            &[],
+            Some("project:/repo/a/sub"),
+        );
+        let other = mk_mem_scoped(
+            "other",
+            "decision",
+            "content content content content",
+            &[],
+            Some("project:/repo/b"),
+        );
+        let global = mk_mem_scoped(
+            "global",
+            "decision",
+            "content content content content",
+            &[],
+            Some("global"),
+        );
+        let unscoped = mk_mem(
+            "unscoped",
+            "decision",
+            "content content content content",
+            &[],
+        );
+
+        assert!(memory_search_scope_matches(
+            &scoped,
+            "project:/repo/a",
+            false
+        ));
+        assert!(memory_search_scope_matches(
+            &nested,
+            "project:/repo/a",
+            false
+        ));
+        assert!(memory_search_scope_matches(
+            &scoped,
+            "project:/repo/a/sub",
+            false
+        ));
+        assert!(!memory_search_scope_matches(
+            &other,
+            "project:/repo/a",
+            false
+        ));
+        assert!(!memory_search_scope_matches(
+            &global,
+            "project:/repo/a",
+            false
+        ));
+        assert!(!memory_search_scope_matches(
+            &unscoped,
+            "project:/repo/a",
+            false
+        ));
+        assert!(memory_search_scope_matches(
+            &global,
+            "project:/repo/a",
+            true
+        ));
+        assert!(memory_search_scope_matches(
+            &unscoped,
+            "project:/repo/a",
+            true
+        ));
+    }
+
+    #[test]
+    fn memory_search_scope_filter_matches_domain_exactly() {
+        let rust = mk_mem_scoped(
+            "rust",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("domain:rust"),
+        );
+
+        assert!(memory_search_scope_matches(&rust, "domain:rust", false));
+        assert!(!memory_search_scope_matches(&rust, "domain:python", false));
     }
 
     #[test]
