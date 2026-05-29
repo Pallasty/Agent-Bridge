@@ -946,6 +946,241 @@ fn lossy_truncate(bytes: &[u8]) -> (String, bool) {
 }
 
 // ===========================================================================
+//                              desktop_snapshot
+// ===========================================================================
+
+pub struct DesktopSnapshotTool {
+    _hub: Hub,
+}
+
+impl DesktopSnapshotTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for DesktopSnapshotTool {
+    fn name(&self) -> &'static str {
+        "desktop_snapshot"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Linux desktop structure snapshot. Wraps \
+                 scripts/desktop_snapshot.py and returns sway outputs/windows plus optional \
+                 AT-SPI semantics. It does not click, type, move windows, or expose \
+                 --activate-a11y; screenshots are opt-in to avoid surprise file writes."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Workspace/repo root used to resolve scripts/desktop_snapshot.py. Defaults to the MCP process cwd, then the build-time repo root."
+                    },
+                    "script_path": {
+                        "type": "string",
+                        "description": "Optional explicit desktop_snapshot.py path. Use mainly for tests or alternate checkouts."
+                    },
+                    "include_screenshot": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, allow grim to write per-output PNG files. Default false keeps the MCP call non-mutating except process execution."
+                    },
+                    "screenshot_dir": {
+                        "type": "string",
+                        "description": "Directory for PNG screenshots when include_screenshot=true."
+                    },
+                    "include_atspi": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Collect AT-SPI semantic elements when available. This does not enable global a11y."
+                    },
+                    "max_elements": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 120,
+                        "description": "Cap AT-SPI elements per app."
+                    },
+                    "atspi_budget": {
+                        "type": "number",
+                        "minimum": 0.25,
+                        "maximum": 10.0,
+                        "default": 2.0,
+                        "description": "Per-app AT-SPI traversal budget in seconds."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 60000,
+                        "default": 15000,
+                        "description": "Milliseconds before the snapshot process is killed."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(15_000)
+            .clamp(1_000, 60_000);
+        let include_screenshot = args
+            .get("include_screenshot")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let include_atspi = args
+            .get("include_atspi")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let max_elements = args
+            .get("max_elements")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(120)
+            .clamp(1, 1000);
+        let atspi_budget = args
+            .get("atspi_budget")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(2.0)
+            .clamp(0.25, 10.0);
+
+        let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
+        let script = desktop_snapshot_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(desktop_snapshot_error(json!({
+                "code": "script_missing",
+                "message": format!("desktop_snapshot.py not found at {}", script.display()),
+                "hint": "pass script_path or run from the Agent-Bridge repo root"
+            })));
+        }
+
+        let mut cmd = TokioCommand::new(
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "python3".to_string()),
+        );
+        cmd.arg(&script).arg("--compact");
+        if !include_screenshot {
+            cmd.arg("--no-screenshot");
+        } else if let Some(dir) = args.get("screenshot_dir").and_then(|v| v.as_str()) {
+            cmd.arg("--screenshot-dir").arg(dir);
+        }
+        if !include_atspi {
+            cmd.arg("--no-atspi");
+        }
+        cmd.arg("--max-elements").arg(max_elements.to_string());
+        cmd.arg("--atspi-budget").arg(atspi_budget.to_string());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+
+        let started = Instant::now();
+        let output =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+                Err(_) => {
+                    return Ok(desktop_snapshot_error(json!({
+                        "code": "timeout",
+                        "message": format!("desktop_snapshot exceeded {timeout_ms} ms"),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Err(e)) => {
+                    return Ok(desktop_snapshot_error(json!({
+                        "code": "spawn_failed",
+                        "message": e.to_string(),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Ok(output)) => output,
+            };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+
+        if !output.status.success() {
+            return Ok(desktop_snapshot_error(json!({
+                "code": "script_failed",
+                "exit_code": output.status.code().unwrap_or(-1),
+                "stderr": stderr,
+                "stdout": stdout,
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            })));
+        }
+
+        match serde_json::from_str::<Value>(&stdout) {
+            Ok(mut payload) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert(
+                        "mcp_wrapper".to_string(),
+                        json!({
+                            "tool": self.name(),
+                            "read_only": true,
+                            "include_screenshot": include_screenshot,
+                            "include_atspi": include_atspi,
+                            "duration_ms": duration_ms,
+                            "stderr": stderr,
+                            "stderr_truncated": stderr_truncated
+                        }),
+                    );
+                }
+                Ok(ToolResult::json_text(&payload))
+            }
+            Err(e) => Ok(desktop_snapshot_error(json!({
+                "code": "invalid_json",
+                "message": e.to_string(),
+                "stdout": stdout,
+                "stderr": stderr,
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            }))),
+        }
+    }
+}
+
+fn desktop_snapshot_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_DESKTOP_SNAPSHOT_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/desktop_snapshot.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/desktop_snapshot.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_snapshot.py")
+}
+
+fn desktop_snapshot_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "desktop_snapshot_mcp_error.v0",
+        "status": "error",
+        "error": error,
+    }));
+    result.is_error = true;
+    result
+}
+
+// ===========================================================================
 //                        mobile / Android ADB tools
 // ===========================================================================
 
@@ -22512,6 +22747,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Search-ranking diagnostics: read-only graph topology preflight for
     // PageRank-like centrality experiments.
     "memory_graph_topology",
+    // Linux Computer Use T9a: read-only desktop structure snapshot for Codex
+    // IDE lanes. Mutating desktop actions stay out of this allowlist.
+    "desktop_snapshot",
 ];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
@@ -23197,6 +23435,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Niche,
         Arc::new(IdeCommandTool::new(hub.clone())),
+    );
+    // Desktop Computer Use bridge: read-only structural snapshot. Exposed to
+    // Codex via the direct extras allowlist; mutating desktop_action is not.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(DesktopSnapshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -27144,13 +27390,13 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 32 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 33 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
         //      + DIRECT(22: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
-        //      + memory_graph_topology).
+        //      + memory_graph_topology + desktop_snapshot).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        assert_eq!(extras.len(), 32);
+        assert_eq!(extras.len(), 33);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -27178,6 +27424,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"mobile_ios_apps"));
         assert!(extras.contains(&"mobile_ios_syslog_tail"));
         assert!(extras.contains(&"memory_graph_topology"));
+        assert!(extras.contains(&"desktop_snapshot"));
     }
 
     #[test]
@@ -27397,6 +27644,80 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .collect();
 
         assert!(names.iter().any(|n| n == "tool_atlas_snapshot"));
+    }
+
+    #[test]
+    fn registry_exposes_desktop_snapshot_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "desktop_snapshot"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "desktop_snapshot")
+            .expect("desktop_snapshot schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.input_schema["properties"]
+            .get("include_screenshot")
+            .is_some());
+        assert!(tool.input_schema["properties"]
+            .get("activate_a11y")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn desktop_snapshot_wrapper_defaults_to_non_mutating_script_flags() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-snapshot-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_snapshot.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "desktop_snapshot/v0.5", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopSnapshotTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "include_screenshot": false,
+                    "include_atspi": false,
+                    "max_elements": 17,
+                    "atspi_budget": 1.25,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        let argv = payload["argv"].as_array().expect("argv");
+        let argv: Vec<&str> = argv.iter().filter_map(|v| v.as_str()).collect();
+
+        assert!(argv.contains(&"--compact"));
+        assert!(argv.contains(&"--no-screenshot"));
+        assert!(argv.contains(&"--no-atspi"));
+        assert!(argv.contains(&"--max-elements"));
+        assert!(argv.contains(&"17"));
+        assert!(argv.contains(&"--atspi-budget"));
+        assert!(argv.contains(&"1.25"));
+        assert!(!argv.contains(&"--activate-a11y"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[test]
