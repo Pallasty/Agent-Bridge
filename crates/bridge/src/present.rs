@@ -106,6 +106,44 @@ impl VerifyStatus {
     }
 }
 
+/// E2 (interactive artifact) self-verify outcome — the *second* honesty axis,
+/// orthogonal to [`VerifyStatus`]. E1 asks "did it render"; E2 additionally asks
+/// "is the interactivity REAL, not a dead control". Decided by the pure
+/// [`classify_interactivity`] so a dead control is a deterministic unit test,
+/// not a flaky live assertion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InteractStatus {
+    /// A control was driven headlessly and it actually changed the view (and the
+    /// change was reversible — not a one-way wipe).
+    Verified,
+    /// A control exists/was expected but driving it did NOT change the view
+    /// (missing handler, runtime threw, not wired) — a real fault.
+    Dead,
+    /// `interactive` was requested but this kind/payload is not enhanceable
+    /// (e.g. non-table, or a non-keyed payload) — the tool added no interactivity
+    /// and honestly says so (never `Dead` for something it didn't claim).
+    NotApplicable,
+    /// Too few rows to prove a filter changes the view (rowcount < 2).
+    Skipped,
+    /// No browser to drive the control (mirrors `VerifyStatus::NoBrowser`).
+    NoBrowser,
+    /// The interactivity probe itself errored.
+    Error,
+}
+
+impl InteractStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::Dead => "dead",
+            Self::NotApplicable => "not_applicable",
+            Self::Skipped => "skipped",
+            Self::NoBrowser => "no_browser",
+            Self::Error => "error",
+        }
+    }
+}
+
 /// Content metrics read from the rendered `#ab-render` region. Produced by the
 /// browser-driven verify path; consumed by [`classify_render`]. Kept as a plain
 /// struct so the decision is testable without a browser.
@@ -373,15 +411,34 @@ fn render_body(kind: PresentKind, artifact: &str, payload: Option<&Value>) -> St
 ///     render region), so it never inflates the verify metrics.
 ///
 /// CSS braces in the template are doubled per the `format!` raw-string idiom.
-pub fn build_html(
+fn build_html_impl(
     kind: PresentKind,
     artifact: &str,
     title: Option<&str>,
     payload: Option<&Value>,
     provenance: Option<&Value>,
+    interactive: bool,
 ) -> String {
     let title_str = title.unwrap_or("Agent-Bridge present/v0");
-    let body = render_body(kind, artifact, payload);
+    let rendered = render_body(kind, artifact, payload);
+
+    // E2: when `interactive` is requested AND this kind/payload is enhanceable,
+    // wrap the human render in #ab-controls (the runtime fills it on load) +
+    // #ab-view (the re-render target), INSIDE #ab-render so a dead/blank
+    // interactive artifact is still caught by the unchanged E1 blank check. The
+    // fixed runtime <script> is appended after </main> (outside the verified
+    // region, mirroring the mermaid-script precedent) so it never inflates the
+    // verify metrics. When not interactive/enhanceable the output is byte-for-byte
+    // the E1 document.
+    let interactive_on = interactive && is_enhanceable(kind, payload);
+    let (body, runtime_script) = if interactive_on {
+        (
+            format!("<div id=\"ab-controls\"></div><div id=\"ab-view\">{rendered}</div>"),
+            format!("<script id=\"ab-runtime\">{AB_RUNTIME_JS}</script>"),
+        )
+    } else {
+        (rendered, String::new())
+    };
 
     let payload_script = match payload {
         Some(p) => format!(
@@ -423,6 +480,7 @@ footer{{margin-top:28px;font-size:11px;color:#9a9ab0;border-top:1px solid #e3e3e
 <body>
 <main id="{region}">{body}</main>
 {prov_footer}
+{runtime_script}
 </body></html>"#,
         schema = PRESENT_SCHEMA,
         title = html_escape(title_str),
@@ -431,7 +489,160 @@ footer{{margin-top:28px;font-size:11px;color:#9a9ab0;border-top:1px solid #e3e3e
         payload_script = payload_script,
         prov_script = prov_script,
         prov_footer = prov_footer,
+        runtime_script = runtime_script,
     )
+}
+
+/// Build the E1 static-artifact document (no interactivity). Public API unchanged
+/// — the 5 existing call sites and their byte-stable tests keep working verbatim.
+pub fn build_html(
+    kind: PresentKind,
+    artifact: &str,
+    title: Option<&str>,
+    payload: Option<&Value>,
+    provenance: Option<&Value>,
+) -> String {
+    build_html_impl(kind, artifact, title, payload, provenance, false)
+}
+
+/// Build the E2 interactive-artifact document. When `kind`/`payload` is
+/// enhanceable (see [`is_enhanceable`]) the artifact gains client-side
+/// filter+sort controls over the embedded `#ab-payload`; otherwise this is
+/// byte-identical to [`build_html`] (the caller learns it was a no-op via
+/// `is_enhanceable`, surfaced as `interactive_status: not_applicable`).
+pub fn build_html_interactive(
+    kind: PresentKind,
+    artifact: &str,
+    title: Option<&str>,
+    payload: Option<&Value>,
+    provenance: Option<&Value>,
+) -> String {
+    build_html_impl(kind, artifact, title, payload, provenance, true)
+}
+
+/// Whether `interactive` rendering does anything for this kind+payload. First
+/// cut: only `kind=table` with a non-empty array of OBJECTS (the keyed-table
+/// path [`render_table`] takes). Everything else is a no-op the caller surfaces
+/// as `interactive_status: not_applicable` — the tool never claims interactivity
+/// it didn't add. (markdown_table / charts / sliders are deferred rungs.)
+pub fn is_enhanceable(kind: PresentKind, payload: Option<&Value>) -> bool {
+    if !matches!(kind, PresentKind::Table) {
+        return false;
+    }
+    match payload.and_then(|p| p.as_array()) {
+        Some(arr) => !arr.is_empty() && arr.iter().all(Value::is_object),
+        None => false,
+    }
+}
+
+/// The fixed, server-authored interactive runtime — ONE reviewed-once const baked
+/// into the binary (NOT author JS, NOT per-artifact codegen, loads NO remote
+/// module). On load it reads the full structure from `#ab-payload` (dual-encoding
+/// pays off: the machine payload IS the source for the human view), derives the
+/// columns the same union-of-keys way [`render_table`] does, populates
+/// `#ab-controls` with a filter input + makes the `<thead>` headers click/keyboard
+/// sortable, and re-renders ONLY `#ab-view tbody` via `textContent` (never
+/// innerHTML-from-data, so payload values stay inert — safer than html/svg kinds).
+/// Re-render is synchronous (NO timers/rAF/debounce) so the headless falsifier is
+/// race-free. With JS disabled #ab-controls stays empty and the server-rendered
+/// table remains valid (graceful E1 fallback).
+pub const AB_RUNTIME_JS: &str = r#"(function(){
+var pe=document.getElementById('ab-payload');var view=document.getElementById('ab-view');
+if(!pe||!view)return;var rows;try{rows=JSON.parse(pe.textContent);}catch(e){return;}
+if(!Array.isArray(rows)||!rows.length)return;
+var table=view.querySelector('table');if(!table)return;
+var tbody=table.querySelector('tbody');if(!tbody)return;
+var cols=[];rows.forEach(function(r){if(r&&typeof r==='object'&&!Array.isArray(r)){Object.keys(r).forEach(function(k){if(cols.indexOf(k)<0)cols.push(k);});}});
+if(!cols.length)return;
+var controls=document.getElementById('ab-controls');
+var filter=document.createElement('input');filter.type='search';filter.setAttribute('data-ab-filter','');filter.placeholder='filter...';filter.setAttribute('aria-label','filter rows');
+if(controls)controls.appendChild(filter);
+var sortCol=null,sortDir=1;
+function cell(v){return v==null?'':(typeof v==='string'?v:JSON.stringify(v));}
+function render(){
+var q=(filter.value||'').toLowerCase();
+var out=rows.filter(function(r){if(!q)return true;for(var i=0;i<cols.length;i++){if(cell(r&&r[cols[i]]).toLowerCase().indexOf(q)>=0)return true;}return false;});
+if(sortCol!=null){out=out.slice().sort(function(a,b){var x=cell(a&&a[sortCol]),y=cell(b&&b[sortCol]);var nx=parseFloat(x),ny=parseFloat(y),c;if(!isNaN(nx)&&!isNaN(ny)&&x!==''&&y!=='')c=nx-ny;else c=x.localeCompare(y);return c*sortDir;});}
+while(tbody.firstChild)tbody.removeChild(tbody.firstChild);
+out.forEach(function(r){var tr=document.createElement('tr');cols.forEach(function(c){var td=document.createElement('td');td.textContent=cell(r&&r[c]);tr.appendChild(td);});tbody.appendChild(tr);});
+}
+filter.addEventListener('input',render);
+var ths=table.querySelectorAll('thead th');
+for(var j=0;j<ths.length&&j<cols.length;j++){(function(idx){var th=ths[idx];th.style.cursor='pointer';th.setAttribute('role','button');th.setAttribute('tabindex','0');function doSort(){var c=cols[idx];if(sortCol===c){sortDir=-sortDir;}else{sortCol=c;sortDir=1;}render();}th.addEventListener('click',doSort);th.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();doSort();}});})(j);}
+render();
+})();"#;
+
+/// The E2 self-verify probe — ONE self-contained eval (one round-trip, no waits)
+/// that drives REAL controls and returns a JSON signature; the Live/Dead decision
+/// is the pure [`classify_interactivity`]. Sequence: snapshot tbody → set the
+/// filter to a high-entropy ABSENT token + dispatch input (a live filter MUST
+/// empty a non-empty view) → snapshot → clear + dispatch (a real filter MUST
+/// restore exactly) → snapshot → click the first header (sort) → snapshot. A dead
+/// control leaves the view unchanged; a one-way wipe cannot restore.
+pub const INTERACT_DRIVE_JS: &str = r#"(function(){
+var view=document.getElementById('ab-view');if(!view)return JSON.stringify({drove:false,reason:'no-view'});
+var table=view.querySelector('table');var tbody=table&&table.querySelector('tbody');
+if(!tbody)return JSON.stringify({drove:false,reason:'no-tbody'});
+var filter=document.querySelector('#ab-controls [data-ab-filter]');
+if(!filter)return JSON.stringify({drove:false,reason:'no-control'});
+function sig(){return tbody.innerText;}
+var sig0=sig();var rowcount0=tbody.querySelectorAll('tr').length;
+filter.value='zzqx-ABSENT-7f3a9-nomatch';filter.dispatchEvent(new Event('input',{bubbles:true}));var sigFiltered=sig();
+filter.value='';filter.dispatchEvent(new Event('input',{bubbles:true}));var sigRestored=sig();
+var th=table.querySelector('thead th');if(th)th.dispatchEvent(new MouseEvent('click',{bubbles:true}));var sigSorted=sig();
+return JSON.stringify({drove:true,rowcount0:rowcount0,filtered_changed:sigFiltered!==sig0,restored:sigRestored===sig0,sorted_changed:sigSorted!==sig0});
+})();"#;
+
+/// Signature returned by [`INTERACT_DRIVE_JS`], parsed for [`classify_interactivity`].
+#[derive(Debug, Clone, Default)]
+pub struct InteractSignature {
+    pub drove: bool,
+    pub reason: Option<String>,
+    pub rowcount0: usize,
+    pub filtered_changed: bool,
+    pub restored: bool,
+    pub sorted_changed: bool,
+}
+
+/// Parse the interact-probe JSON. Tolerant of object-or-stringified-JSON like
+/// [`parse_metrics`], so the decision doesn't depend on which the backend returns.
+pub fn parse_interact_signature(v: &Value) -> InteractSignature {
+    let obj = match v {
+        Value::String(s) => serde_json::from_str::<Value>(s).unwrap_or(Value::Null),
+        other => other.clone(),
+    };
+    let b = |k: &str| obj.get(k).and_then(Value::as_bool).unwrap_or(false);
+    InteractSignature {
+        drove: b("drove"),
+        reason: obj.get("reason").and_then(Value::as_str).map(String::from),
+        rowcount0: obj.get("rowcount0").and_then(Value::as_u64).unwrap_or(0) as usize,
+        filtered_changed: b("filtered_changed"),
+        restored: b("restored"),
+        sorted_changed: b("sorted_changed"),
+    }
+}
+
+/// The E2 falsifier decision (pure, browser-free — sibling of [`classify_render`]).
+/// `Verified` requires driving the filter with an ABSENT token CHANGED the view
+/// AND clearing it RESTORED the exact original — so a one-way wipe or a crash that
+/// blanks the table cannot masquerade as working. A dead/no-op control (missing
+/// handler, runtime threw, not wired) leaves the view unchanged → `filtered_changed
+/// == false` → `Dead`. The sort signal (`sorted_changed`) is observed and carried
+/// in the result detail but NOT gated, to avoid a false `Dead` on a degenerate
+/// all-identical-row table; the restore check alone already defeats the wipe
+/// false-positive. Too few rows to prove a filter (<2) → `Skipped`, not `Dead`.
+pub fn classify_interactivity(s: &InteractSignature) -> InteractStatus {
+    if !s.drove {
+        return InteractStatus::Dead;
+    }
+    if s.rowcount0 < 2 {
+        return InteractStatus::Skipped;
+    }
+    if s.filtered_changed && s.restored {
+        InteractStatus::Verified
+    } else {
+        InteractStatus::Dead
+    }
 }
 
 /// Recover a `<script type="application/json" id="...">` payload from a rendered
@@ -875,5 +1086,124 @@ mod tests {
         assert!(list_artifacts(std::path::Path::new("/nonexistent/ab/xyz"), 10, None).is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ----- E2 (interactive artifact) -----
+
+    // is_enhanceable gates exactly the keyed-table case the runtime can drive.
+    #[test]
+    fn e2_is_enhanceable_only_keyed_table() {
+        let objs = json!([{"a": 1}, {"a": 2}]);
+        assert!(is_enhanceable(PresentKind::Table, Some(&objs)));
+        // non-table kind, array-of-arrays, empty array, no payload → not enhanceable
+        assert!(!is_enhanceable(PresentKind::Html, Some(&objs)));
+        assert!(!is_enhanceable(PresentKind::Table, Some(&json!([[1, 2], [3, 4]]))));
+        assert!(!is_enhanceable(PresentKind::Table, Some(&json!([]))));
+        assert!(!is_enhanceable(PresentKind::Table, None));
+        assert!(!is_enhanceable(PresentKind::MarkdownTable, Some(&objs))); // deferred
+    }
+
+    // E2 enhanceable table gains controls/view/runtime; #ab-payload still recovers
+    // in ONE parse (dual-encoding byte-identical to E1), and the payload script
+    // still lives in <head> (a2b shadow protection holds).
+    #[test]
+    fn e2_interactive_table_adds_controls_keeps_payload() {
+        let payload = json!([{"name": "e5", "dims": 384}, {"name": "minilm", "dims": 384}]);
+        let html = build_html_interactive(PresentKind::Table, "", Some("dims"), Some(&payload), None);
+        assert!(html.contains("id=\"ab-controls\""));
+        assert!(html.contains("id=\"ab-view\""));
+        assert!(html.contains("<script id=\"ab-runtime\">"));
+        // controls + view are INSIDE the verified render region (honesty: a blank
+        // interactive artifact is still caught by the E1 blank check).
+        let region = render_region(&html).expect("render region");
+        assert!(region.contains("id=\"ab-controls\""));
+        assert!(region.contains("id=\"ab-view\""));
+        // the runtime <script> is OUTSIDE the region (after </main>) so it can't
+        // inflate verify metrics.
+        assert!(!region.contains("ab-runtime"));
+        // dual-encoding unchanged: payload recovers in one parse, from <head>.
+        assert_eq!(extract_ab_payload(&html), Some(payload));
+    }
+
+    // interactive on a NON-enhanceable kind is a byte-identical no-op vs E1, and
+    // E1 (build_html) for a table never gains the interactive chrome.
+    #[test]
+    fn e2_noop_is_byte_identical_to_e1() {
+        let a = build_html_interactive(PresentKind::Html, "<p>hi</p>", None, None, None);
+        let b = build_html(PresentKind::Html, "<p>hi</p>", None, None, None);
+        assert_eq!(a, b, "interactive no-op must equal E1 byte-for-byte");
+
+        let payload = json!([{"a": 1}]);
+        let e1_table = build_html(PresentKind::Table, "", None, Some(&payload), None);
+        assert!(!e1_table.contains("ab-controls"));
+        assert!(!e1_table.contains("ab-runtime"));
+    }
+
+    // The E2 falsifier decision is real (sibling of a3_classify_render): a dead
+    // control → Dead; a live+reversible filter → Verified; <2 rows → Skipped.
+    #[test]
+    fn e2_classify_interactivity_truth_table() {
+        let live = InteractSignature { drove: true, reason: None, rowcount0: 5, filtered_changed: true, restored: true, sorted_changed: true };
+        assert_eq!(classify_interactivity(&live), InteractStatus::Verified);
+
+        // sort didn't change (e.g. degenerate) but filter+restore held → still Verified.
+        let mut no_sort = live.clone();
+        no_sort.sorted_changed = false;
+        assert_eq!(classify_interactivity(&no_sort), InteractStatus::Verified);
+
+        // dead control: driving the filter changed nothing.
+        let dead = InteractSignature { drove: true, rowcount0: 5, filtered_changed: false, restored: true, ..Default::default() };
+        assert_eq!(classify_interactivity(&dead), InteractStatus::Dead);
+
+        // one-way wipe: filter changed but never restored → Dead (the falsifier's point).
+        let wipe = InteractSignature { drove: true, rowcount0: 5, filtered_changed: true, restored: false, ..Default::default() };
+        assert_eq!(classify_interactivity(&wipe), InteractStatus::Dead);
+
+        // no control found at all → Dead.
+        let none = InteractSignature { drove: false, reason: Some("no-control".into()), ..Default::default() };
+        assert_eq!(classify_interactivity(&none), InteractStatus::Dead);
+
+        // too few rows to prove a filter → Skipped, not Dead.
+        let one = InteractSignature { drove: true, rowcount0: 1, filtered_changed: false, restored: true, ..Default::default() };
+        assert_eq!(classify_interactivity(&one), InteractStatus::Skipped);
+    }
+
+    // parse_interact_signature tolerates object OR stringified JSON (mirrors parse_metrics).
+    #[test]
+    fn e2_parse_interact_signature_string_and_object() {
+        let s = parse_interact_signature(&json!(
+            "{\"drove\":true,\"rowcount0\":3,\"filtered_changed\":true,\"restored\":true,\"sorted_changed\":false}"
+        ));
+        assert!(s.drove && s.filtered_changed && s.restored && !s.sorted_changed);
+        assert_eq!(s.rowcount0, 3);
+        let o = parse_interact_signature(&json!({"drove": false, "reason": "no-view"}));
+        assert!(!o.drove);
+        assert_eq!(o.reason.as_deref(), Some("no-view"));
+    }
+
+    // Canary: the fixed runtime targets the right ids and is SYNCHRONOUS (no
+    // timers/rAF — the falsifier assumes a synchronous re-render) and can't
+    // terminate its own <script> early.
+    #[test]
+    fn e2_runtime_js_canary() {
+        for needle in ["ab-payload", "ab-view", "ab-controls", "data-ab-filter", "addEventListener"] {
+            assert!(AB_RUNTIME_JS.contains(needle), "runtime missing {needle}");
+        }
+        assert!(!AB_RUNTIME_JS.contains("setTimeout"), "runtime must re-render synchronously");
+        assert!(!AB_RUNTIME_JS.contains("requestAnimationFrame"), "runtime must re-render synchronously");
+        assert!(!AB_RUNTIME_JS.contains("</script>"), "runtime must not terminate its own script tag");
+    }
+
+    // Canary: the probe drives both controls and returns exactly the keys
+    // parse_interact_signature reads (cheap guard against silent drift).
+    #[test]
+    fn e2_drive_js_canary() {
+        for needle in ["ab-view", "ab-controls", "data-ab-filter", "'input'", "MouseEvent", "click"] {
+            assert!(INTERACT_DRIVE_JS.contains(needle), "drive-js missing {needle}");
+        }
+        for key in ["drove", "rowcount0", "filtered_changed", "restored", "sorted_changed"] {
+            assert!(INTERACT_DRIVE_JS.contains(key), "drive-js missing key {key}");
+        }
+        assert!(!INTERACT_DRIVE_JS.contains("</script>"));
     }
 }

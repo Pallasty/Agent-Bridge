@@ -4745,6 +4745,11 @@ impl McpTool for PresentTool {
                         "type": "boolean",
                         "default": true,
                         "description": "Self-verify by loading the artifact in the browser and checking the #ab-render region rendered visible content (verify_status: rendered_ok|blank|no_browser|error|skipped). Requires the Browser capability + a configured backend; otherwise returns no_browser (see verify_detail). Result also includes artifact_path, screenshot_path (when captured), dual_encoding, and provenance."
+                    },
+                    "interactive": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "E2 output-expression rung: when true AND kind=table with an array-of-objects payload, the artifact gains client-side filter + per-column sort controls over the embedded #ab-payload (no author code — a fixed server runtime; #ab-payload stays the single-encoded machine structure). Otherwise a no-op (interactive_status=not_applicable). When verify runs, a second headless probe drives a control and returns interactive_status: verified|dead|not_applicable|skipped|no_browser|error (dead = a control that does not actually change the view). Default false → E1 output is byte-identical."
                     }
                 },
                 "required": ["kind"]
@@ -4791,6 +4796,11 @@ impl McpTool for PresentTool {
             )));
         }
         let verify = args.get("verify").and_then(|v| v.as_bool()).unwrap_or(true);
+        // E2: interactivity is opt-in; `enhanced` is true only when the kind+payload
+        // can actually be driven (keyed table), so the tool never claims interactivity
+        // it didn't add.
+        let interactive_req = args.get("interactive").and_then(|v| v.as_bool()).unwrap_or(false);
+        let enhanced = interactive_req && crate::present::is_enhanceable(kind, payload.as_ref());
 
         // Provenance: caller-supplied + auto fields (generated_by/session_id/ts).
         // A non-object provenance is wrapped as {given: <value>} so the auto
@@ -4810,18 +4820,29 @@ impl McpTool for PresentTool {
             obj.insert("ts".into(), json!(crate::present::now_unix()));
         }
 
-        let html =
-            crate::present::build_html(kind, &artifact, title, payload.as_ref(), Some(&provenance));
+        let html = if interactive_req {
+            crate::present::build_html_interactive(
+                kind,
+                &artifact,
+                title,
+                payload.as_ref(),
+                Some(&provenance),
+            )
+        } else {
+            crate::present::build_html(kind, &artifact, title, payload.as_ref(), Some(&provenance))
+        };
         let dual_encoding = payload.is_some();
-        // Content-addressed id: hash the SOURCE (kind+title+artifact+payload),
+        // Content-addressed id: hash the SOURCE (kind+title+artifact+payload+enhanced),
         // NOT the rendered HTML — the HTML embeds a per-call provenance ts, so
-        // hashing it would defeat dedupe. Identical content → same id/path.
+        // hashing it would defeat dedupe. `enhanced` (not interactive_req) keys the
+        // id so an interactive-but-non-enhanceable call dedupes with its E1 twin.
         let canonical = format!(
-            "{}\u{0}{}\u{0}{}\u{0}{}",
+            "{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}",
             kind.as_str(),
             title.unwrap_or(""),
             artifact,
-            payload.as_ref().map(|p| p.to_string()).unwrap_or_default()
+            payload.as_ref().map(|p| p.to_string()).unwrap_or_default(),
+            enhanced
         );
         let id = crate::present::derive_id(&canonical);
         let dir = crate::present::presentations_dir();
@@ -4834,6 +4855,19 @@ impl McpTool for PresentTool {
         let mut verify_status = crate::present::VerifyStatus::Skipped;
         let mut verify_detail: Option<String> = None;
         let mut screenshot_path: Option<String> = None;
+        // E2 interactivity status (orthogonal to verify_status). None unless
+        // requested; not_applicable when not enhanceable; the enhanced+verify case
+        // defaults to no_browser and is overwritten iff the drive probe runs.
+        let mut interactive_status: Option<crate::present::InteractStatus> = if !interactive_req {
+            None
+        } else if !enhanced {
+            Some(crate::present::InteractStatus::NotApplicable)
+        } else if !verify {
+            Some(crate::present::InteractStatus::Skipped)
+        } else {
+            Some(crate::present::InteractStatus::NoBrowser)
+        };
+        let mut interactive_detail: Option<String> = None;
         if verify && channel == "file" {
             if let Err(e) = self.hub.security.check(Cap::Browser) {
                 verify_status = crate::present::VerifyStatus::NoBrowser;
@@ -4856,6 +4890,46 @@ impl McpTool for PresentTool {
                             let png = dir.join(format!("{id}.png"));
                             if std::fs::write(&png, bytes.as_ref()).is_ok() {
                                 screenshot_path = Some(png.display().to_string());
+                            }
+                        }
+                        // E2: after the static-render check, drive a control on the
+                        // SAME loaded page and classify whether the interactivity is
+                        // real. Only when enhanced AND the initial render passed
+                        // (no point proving interactivity on a blank artifact).
+                        if enhanced {
+                            if verify_status == crate::present::VerifyStatus::RenderedOk {
+                                match b.eval(&page, crate::present::INTERACT_DRIVE_JS).await {
+                                    Ok(sv) => {
+                                        let sig = crate::present::parse_interact_signature(&sv);
+                                        interactive_detail = Some(format!(
+                                            "filtered_changed={} restored={} sorted_changed={} rows0={}{}",
+                                            sig.filtered_changed,
+                                            sig.restored,
+                                            sig.sorted_changed,
+                                            sig.rowcount0,
+                                            sig.reason
+                                                .as_deref()
+                                                .map(|r| format!(" reason={r}"))
+                                                .unwrap_or_default()
+                                        ));
+                                        interactive_status =
+                                            Some(crate::present::classify_interactivity(&sig));
+                                    }
+                                    Err(e) => {
+                                        interactive_status =
+                                            Some(crate::present::InteractStatus::Error);
+                                        interactive_detail = Some(format!("interact eval: {e}"));
+                                    }
+                                }
+                            } else {
+                                // initial render didn't pass → interactivity unprovable;
+                                // a blank render is a real fault for an interactive artifact.
+                                interactive_status = Some(match verify_status {
+                                    crate::present::VerifyStatus::Blank => {
+                                        crate::present::InteractStatus::Dead
+                                    }
+                                    _ => crate::present::InteractStatus::Skipped,
+                                });
                             }
                         }
                     }
@@ -4881,6 +4955,8 @@ impl McpTool for PresentTool {
             "screenshot_path": screenshot_path,
             "verify_status": verify_status.as_str(),
             "verify_detail": verify_detail,
+            "interactive_status": interactive_status.map(|s| s.as_str()),
+            "interactive_detail": interactive_detail,
             "dual_encoding": dual_encoding,
             "bytes": html.len(),
             "provenance": provenance,
