@@ -16644,6 +16644,16 @@ impl McpTool for MemoryGraphTopologyTool {
                         "type": "string",
                         "enum": ["local_only", "local_plus_global", "exploratory"],
                         "description": "Scope selection for scoped topology. local_only keeps matching project/domain rows; local_plus_global also includes global/unscoped rows; exploratory includes all source rows."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Memory kinds to exclude from the topology denominator, e.g. work_memory/session_handoff/snapshot for durable-readiness checks."
+                    },
+                    "skip_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Memory tags to exclude from the topology denominator, e.g. auto_curated/alert/ttl:7d."
                     }
                 }
             }),
@@ -16667,17 +16677,25 @@ impl McpTool for MemoryGraphTopologyTool {
                 .filter(|s| !s.is_empty()),
             false,
         );
+        let skip_tags = memory_string_array_arg(&args, "skip_tags", &[]);
+        let skip_kinds = memory_string_array_arg(&args, "skip_kinds", &[]);
+        let use_filtered_path =
+            requested_scope.is_some() || !skip_tags.is_empty() || !skip_kinds.is_empty();
 
-        let topo = if let Some(scope) = requested_scope {
+        let topo = if use_filtered_path {
             let records = store
                 .list_memories(None, MemoryListSort::Newest, 10_000)
                 .await?;
             let visible_records: Vec<MemoryRecord> = records
                 .into_iter()
                 .filter(|rec| {
-                    rec.status == "active"
-                        && !rec.kind.eq_ignore_ascii_case("skill")
-                        && memory_search_scope_mode_matches(rec, scope, scope_mode)
+                    memory_graph_topology_record_visible(
+                        rec,
+                        requested_scope,
+                        scope_mode,
+                        &skip_tags,
+                        &skip_kinds,
+                    )
                 })
                 .collect();
             let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
@@ -16728,7 +16746,9 @@ impl McpTool for MemoryGraphTopologyTool {
             "pagerank_readiness": pagerank_readiness,
             "scope": requested_scope,
             "scope_mode": requested_scope.map(|_| scope_mode.label()),
-            "edge_scope": requested_scope.map(|_| "induced_subgraph"),
+            "skip_tags": skip_tags,
+            "skip_kinds": skip_kinds,
+            "edge_scope": use_filtered_path.then_some("induced_subgraph"),
             "ranking_note": "This tool does not run PageRank and does not alter memory_search. \
                 It is the cheap preflight for deciding whether a bounded centrality prior \
                 is safe to test.",
@@ -18176,6 +18196,25 @@ fn memory_search_scope_trace_allowed(
         // crystallize them into coactivation until a later explicit-feedback
         // path can distinguish useful transfer from noisy coincidence.
         _ => false,
+    }
+}
+
+fn memory_graph_topology_record_visible(
+    rec: &MemoryRecord,
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+) -> bool {
+    if rec.status != "active" || rec.kind.eq_ignore_ascii_case("skill") {
+        return false;
+    }
+    if memory_has_any_tag(rec, skip_tags) || memory_kind_is_any(rec, skip_kinds) {
+        return false;
+    }
+    match requested_scope {
+        Some(scope) => memory_search_scope_mode_matches(rec, scope, scope_mode),
+        None => true,
     }
 }
 
@@ -27778,6 +27817,69 @@ com.example.multiline, , \"Line one\nLine two\"\n";
                 ("21+".to_string(), 0),
             ]
         );
+    }
+
+    #[test]
+    fn memory_graph_topology_visibility_skips_volatile_rows() {
+        let local = mk_mem_scoped(
+            "local",
+            "decision",
+            "alpha beta gamma delta",
+            &["memory"],
+            Some("project:/repo/a"),
+        );
+        let work_memory = mk_mem_scoped(
+            "scratch",
+            "work_memory",
+            "alpha beta gamma delta",
+            &["memory"],
+            Some("project:/repo/a"),
+        );
+        let tagged = mk_mem_scoped(
+            "tagged",
+            "decision",
+            "alpha beta gamma delta",
+            &["auto_curated"],
+            Some("project:/repo/a"),
+        );
+        let cross = mk_mem_scoped(
+            "cross",
+            "decision",
+            "alpha beta gamma delta",
+            &["memory"],
+            Some("project:/repo/b"),
+        );
+        let skip_tags = vec!["auto_curated".to_string()];
+        let skip_kinds = vec!["work_memory".to_string()];
+
+        assert!(memory_graph_topology_record_visible(
+            &local,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+            &skip_tags,
+            &skip_kinds,
+        ));
+        assert!(!memory_graph_topology_record_visible(
+            &work_memory,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+            &skip_tags,
+            &skip_kinds,
+        ));
+        assert!(!memory_graph_topology_record_visible(
+            &tagged,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+            &skip_tags,
+            &skip_kinds,
+        ));
+        assert!(!memory_graph_topology_record_visible(
+            &cross,
+            Some("project:/repo/a"),
+            MemorySearchScopeMode::LocalOnly,
+            &skip_tags,
+            &skip_kinds,
+        ));
     }
 
     #[test]
