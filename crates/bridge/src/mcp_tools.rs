@@ -18152,6 +18152,318 @@ fn undirected_memory_pair_key(a: &str, b: &str) -> (String, String) {
     }
 }
 
+#[derive(Debug)]
+struct MemoryOrphanCandidatePreviewRow {
+    orphan: MemoryRecord,
+    suggestions: Vec<(String, f64, String)>,
+}
+
+#[derive(Debug, Default)]
+struct MemoryOrphanCandidatePreview {
+    examined: u64,
+    eligible_orphans: u64,
+    would_link: u64,
+    skipped_low_score: u64,
+    skipped_no_candidates: u64,
+    skipped_blacklisted_orphan: u64,
+    skipped_blacklisted_kind: u64,
+    rows: Vec<MemoryOrphanCandidatePreviewRow>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn preview_memory_orphan_candidates(
+    all: &[MemoryRecord],
+    keys_with_edges: &HashSet<String>,
+    threshold: f64,
+    min_content_len: usize,
+    max_orphans: usize,
+    candidate_limit: usize,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    require_scope_compatible: bool,
+) -> MemoryOrphanCandidatePreview {
+    let mut preview = MemoryOrphanCandidatePreview::default();
+    let mut orphans: Vec<MemoryRecord> = Vec::new();
+
+    for rec in all {
+        if rec.kind == "skill" {
+            continue;
+        }
+        if rec.status != "active" && !rec.status.is_empty() {
+            continue;
+        }
+        if rec.content.len() < min_content_len {
+            continue;
+        }
+        preview.examined += 1;
+        if keys_with_edges.contains(&rec.key) {
+            continue;
+        }
+        if memory_has_any_tag(rec, skip_tags) {
+            preview.skipped_blacklisted_orphan += 1;
+            continue;
+        }
+        if memory_kind_is_any(rec, skip_kinds) {
+            preview.skipped_blacklisted_kind += 1;
+            continue;
+        }
+        orphans.push(rec.clone());
+        if orphans.len() >= max_orphans {
+            break;
+        }
+    }
+
+    preview.eligible_orphans = orphans.len() as u64;
+    for orphan in &orphans {
+        let already_linked: HashSet<String> = HashSet::new();
+        let candidate_pool: Vec<MemoryRecord> = all
+            .iter()
+            .filter(|candidate| {
+                memory_link_orphan_candidate_allowed(
+                    orphan,
+                    candidate,
+                    skip_tags,
+                    skip_kinds,
+                    require_scope_compatible,
+                )
+            })
+            .cloned()
+            .collect();
+        let suggestions = compute_link_suggestions(
+            orphan,
+            &candidate_pool,
+            &already_linked,
+            candidate_limit,
+            skip_tags,
+        );
+        match suggestions.first() {
+            Some((_, confidence, _)) if *confidence >= threshold => preview.would_link += 1,
+            Some(_) => preview.skipped_low_score += 1,
+            None => preview.skipped_no_candidates += 1,
+        }
+        preview.rows.push(MemoryOrphanCandidatePreviewRow {
+            orphan: orphan.clone(),
+            suggestions,
+        });
+    }
+
+    preview
+}
+
+fn memory_pair_scope_relation(source: &MemoryRecord, target: &MemoryRecord) -> &'static str {
+    match (memory_scope_value(source), memory_scope_value(target)) {
+        (Some(a), Some(b)) if a == b => "same_scope",
+        (Some("global"), _) | (_, Some("global")) | (None, _) | (_, None) => "global_or_unscoped",
+        _ => "cross_scope",
+    }
+}
+
+// ===========================================================================
+//          memory_orphan_candidates (read-only graph hygiene preflight)
+// ===========================================================================
+
+/// Read-only preview companion for `memory_link_orphans`.
+///
+/// This is intentionally safe to expose to compact Codex profiles: it finds
+/// orphan memories and returns candidate links, but it never writes
+/// `memory_edges`. Operators can inspect candidate quality before running the
+/// write-capable hygiene tool or before considering PageRank-like priors.
+pub struct MemoryOrphanCandidatesTool {
+    hub: Hub,
+}
+impl MemoryOrphanCandidatesTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryOrphanCandidatesTool {
+    fn name(&self) -> &'static str {
+        "memory_orphan_candidates"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only graph hygiene preflight. Finds non-skill active memories \
+                with zero graph edges and previews top link candidates using the same scoring \
+                and guardrails as memory_link_orphans. Does not write memory_edges. Use this \
+                before PageRank-like centrality experiments or before running write-capable \
+                orphan-linking hygiene."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 2.0,
+                        "default": 0.85,
+                        "description": "Top candidate score needed to count as would_link."
+                    },
+                    "min_content_len": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 50,
+                        "description": "Skip orphans whose content is shorter than this many bytes."
+                    },
+                    "max_orphans": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50,
+                        "description": "Cap on orphans examined for candidate preview."
+                    },
+                    "candidate_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 3,
+                        "description": "Top candidates returned per orphan."
+                    },
+                    "skip_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["auto_curated", "alert", "ttl:7d"],
+                        "description": "Source orphans and target candidates with these tags are skipped."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["alert", "work_memory", "session_handoff", "snapshot"],
+                        "description": "Source orphans and target candidates with these memory kinds are skipped."
+                    },
+                    "require_scope_compatible": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, concrete non-global scopes must match. Global/unscoped rows remain compatible."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let threshold = args
+            .get("threshold")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.85);
+        let min_content_len = args
+            .get("min_content_len")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as usize;
+        let max_orphans = args
+            .get("max_orphans")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .min(500) as usize;
+        let candidate_limit = args
+            .get("candidate_limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(3)
+            .clamp(1, 10) as usize;
+        let skip_tags =
+            memory_string_array_arg(&args, "skip_tags", &["auto_curated", "alert", "ttl:7d"]);
+        let skip_kinds = memory_string_array_arg(
+            &args,
+            "skip_kinds",
+            &["alert", "work_memory", "session_handoff", "snapshot"],
+        );
+        let require_scope_compatible = args
+            .get("require_scope_compatible")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let all = store
+            .list_memories(None, MemoryListSort::Recent, 1000)
+            .await
+            .unwrap_or_default();
+        let mut keys_with_edges: HashSet<String> = HashSet::new();
+        for rec in &all {
+            if rec.kind == "skill" {
+                continue;
+            }
+            if let Ok(edges) = store.memory_neighbors(&rec.key).await {
+                if !edges.is_empty() {
+                    keys_with_edges.insert(rec.key.clone());
+                }
+            }
+        }
+
+        let preview = preview_memory_orphan_candidates(
+            &all,
+            &keys_with_edges,
+            threshold,
+            min_content_len,
+            max_orphans,
+            candidate_limit,
+            &skip_tags,
+            &skip_kinds,
+            require_scope_compatible,
+        );
+        let by_key: HashMap<&str, &MemoryRecord> =
+            all.iter().map(|m| (m.key.as_str(), m)).collect();
+        let rows: Vec<Value> = preview
+            .rows
+            .iter()
+            .map(|row| {
+                let candidates: Vec<Value> = row
+                    .suggestions
+                    .iter()
+                    .map(|(key, confidence, reason)| {
+                        let target = by_key.get(key.as_str()).copied();
+                        json!({
+                            "key": key,
+                            "confidence": confidence,
+                            "reason": reason,
+                            "kind": target.map(|m| m.kind.as_str()).unwrap_or(""),
+                            "scope": target.and_then(|m| m.scope.as_deref()),
+                            "scope_relation": target
+                                .map(|m| memory_pair_scope_relation(&row.orphan, m))
+                                .unwrap_or("unknown"),
+                        })
+                    })
+                    .collect();
+                let status = match row.suggestions.first() {
+                    Some((_, confidence, _)) if *confidence >= threshold => "would_link",
+                    Some(_) => "low_score",
+                    None => "no_candidates",
+                };
+                json!({
+                    "orphan": row.orphan.key,
+                    "kind": row.orphan.kind,
+                    "scope": row.orphan.scope,
+                    "top_confidence": row.suggestions.first().map(|(_, c, _)| *c),
+                    "status": status,
+                    "candidates": candidates,
+                })
+            })
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "read_only": true,
+            "threshold": threshold,
+            "min_content_len": min_content_len,
+            "max_orphans": max_orphans,
+            "candidate_limit": candidate_limit,
+            "skip_tags": skip_tags,
+            "skip_kinds": skip_kinds,
+            "require_scope_compatible": require_scope_compatible,
+            "examined": preview.examined,
+            "eligible_orphans": preview.eligible_orphans,
+            "would_link": preview.would_link,
+            "skipped_low_score": preview.skipped_low_score,
+            "skipped_no_candidates": preview.skipped_no_candidates,
+            "skipped_blacklisted_orphan": preview.skipped_blacklisted_orphan,
+            "skipped_blacklisted_kind": preview.skipped_blacklisted_kind,
+            "rows": rows,
+            "next_step": "Review candidate quality. If precision is acceptable, run the write-capable memory_link_orphans path separately with dry_run first; do not enable centrality ranking while orphan_fraction remains high.",
+        })))
+    }
+}
+
 // ===========================================================================
 //          memory_link_orphans (ζ-7 — clear orphan backlog)
 // ===========================================================================
@@ -23250,6 +23562,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Search-ranking diagnostics: read-only graph topology preflight for
     // PageRank-like centrality experiments.
     "memory_graph_topology",
+    // Graph-hygiene diagnostics: read-only orphan candidate preview. The
+    // write-capable memory_link_orphans tool stays out of codex-essential.
+    "memory_orphan_candidates",
     // Linux Computer Use T9a: read-only desktop structure snapshot for Codex
     // IDE lanes. Mutating desktop actions stay out of this allowlist.
     "desktop_snapshot",
@@ -24261,6 +24576,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MemorySuggestTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryOrphanCandidatesTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -27367,6 +27688,112 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn orphan_candidate_preview_is_read_only_and_scope_guarded() {
+        let orphan = mk_mem_scoped(
+            "orphan_a",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let same_scope_target = mk_mem_scoped(
+            "target_same",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let cross_scope_target = mk_mem_scoped(
+            "target_cross",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/b"),
+        );
+        let volatile_target = mk_mem_scoped(
+            "target_scratch",
+            "work_memory",
+            "alpha beta gamma delta epsilon zeta",
+            &["topic"],
+            Some("project:/repo/a"),
+        );
+        let all = vec![
+            orphan,
+            same_scope_target,
+            cross_scope_target,
+            volatile_target,
+        ];
+        let mut keys_with_edges = HashSet::new();
+        keys_with_edges.insert("target_same".to_string());
+        keys_with_edges.insert("target_cross".to_string());
+        keys_with_edges.insert("target_scratch".to_string());
+        let skip_tags: Vec<String> = Vec::new();
+        let skip_kinds = vec!["work_memory".to_string()];
+
+        let preview = preview_memory_orphan_candidates(
+            &all,
+            &keys_with_edges,
+            0.85,
+            0,
+            10,
+            5,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        );
+
+        assert_eq!(preview.eligible_orphans, 1);
+        assert_eq!(preview.would_link, 1);
+        let keys: Vec<&str> = preview.rows[0]
+            .suggestions
+            .iter()
+            .map(|(key, _, _)| key.as_str())
+            .collect();
+        assert_eq!(keys, vec!["target_same"]);
+    }
+
+    #[test]
+    fn orphan_candidate_preview_counts_blacklisted_and_low_score_rows() {
+        let blacklisted_orphan = mk_mem(
+            "auto_orphan",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &["auto_curated"],
+        );
+        let low_score_orphan = mk_mem(
+            "low_orphan",
+            "lesson",
+            "alpha beta gamma delta epsilon zeta",
+            &[],
+        );
+        let low_score_target = mk_mem("low_target", "lesson", "theta iota kappa lambda mu nu", &[]);
+        let all = vec![blacklisted_orphan, low_score_orphan, low_score_target];
+        let mut keys_with_edges = HashSet::new();
+        keys_with_edges.insert("low_target".to_string());
+        let skip_tags = vec!["auto_curated".to_string()];
+        let skip_kinds: Vec<String> = Vec::new();
+
+        let preview = preview_memory_orphan_candidates(
+            &all,
+            &keys_with_edges,
+            0.85,
+            0,
+            10,
+            3,
+            &skip_tags,
+            &skip_kinds,
+            true,
+        );
+
+        assert_eq!(preview.eligible_orphans, 1);
+        assert_eq!(preview.skipped_blacklisted_orphan, 1);
+        assert_eq!(preview.skipped_low_score, 1);
+        assert_eq!(preview.would_link, 0);
+        assert_eq!(preview.rows[0].suggestions[0].0, "low_target");
+        assert!(preview.rows[0].suggestions[0].1 < 0.85);
+    }
+
+    #[test]
     fn undirected_memory_pair_key_is_order_independent() {
         assert_eq!(
             undirected_memory_pair_key("b", "a"),
@@ -28120,13 +28547,14 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 34 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 35 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(22: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(23: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
-        //      + memory_graph_topology + desktop_snapshot + vision_grounding_ocr).
+        //      + memory_graph_topology + memory_orphan_candidates
+        //      + desktop_snapshot + vision_grounding_ocr).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        assert_eq!(extras.len(), 34);
+        assert_eq!(extras.len(), 35);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -28154,6 +28582,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"mobile_ios_apps"));
         assert!(extras.contains(&"mobile_ios_syslog_tail"));
         assert!(extras.contains(&"memory_graph_topology"));
+        assert!(extras.contains(&"memory_orphan_candidates"));
         assert!(extras.contains(&"desktop_snapshot"));
         assert!(extras.contains(&"vision_grounding_ocr"));
     }

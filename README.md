@@ -650,6 +650,8 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `memory_consolidate` | Find and merge duplicate/redundant memories by Jaccard similarity |
 | | `memory_stats` | Aggregate statistics: counts by status/kind, edge count, top tags |
 | | `memory_suggest` | Suggest related memory keys via tag/prefix/content overlap |
+| | `memory_graph_topology` | Read-only PageRank-readiness snapshot: orphan rate, hubs, edge coverage |
+| | `memory_orphan_candidates` | Read-only orphan-link candidate preview for graph hygiene |
 | | `memory_graph_export` | Export memory graph as Graphviz DOT or JSON (v0.11) |
 | | `memory_auto_curate` | Automated batch curation from `session_handoff` memories (v0.12) |
 | multi-session | `agent_message` | Append JSON payload to another session's inbox (`agent_messages`, SQLite v10 / W6) |
