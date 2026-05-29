@@ -1181,6 +1181,336 @@ fn desktop_snapshot_error(error: Value) -> ToolResult {
 }
 
 // ===========================================================================
+//                            vision_grounding_ocr
+// ===========================================================================
+
+pub struct VisionGroundingOcrTool {
+    _hub: Hub,
+}
+
+impl VisionGroundingOcrTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for VisionGroundingOcrTool {
+    fn name(&self) -> &'static str {
+        "vision_grounding_ocr"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Run the non-mutating OCR vision grounding reference runner. \
+                 It reads an existing image plus desktop_snapshot metadata and returns \
+                 `vision_grounding_result.v0` candidates; it never clicks, types, takes \
+                 screenshots, or controls the desktop."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Workspace/repo root used to resolve scripts/vision_grounding_ocr.py. Defaults to the MCP process cwd, then the build-time repo root."
+                    },
+                    "script_path": {
+                        "type": "string",
+                        "description": "Optional explicit vision_grounding_ocr.py path. Use mainly for tests or alternate checkouts."
+                    },
+                    "image": {
+                        "type": "string",
+                        "description": "Existing PNG/JPEG image path to OCR. The tool does not capture screenshots."
+                    },
+                    "engine": {
+                        "type": "string",
+                        "enum": ["tesseract", "fixture-tsv", "none"],
+                        "default": "tesseract"
+                    },
+                    "fixture_tsv": {
+                        "type": "string",
+                        "description": "TSV fixture path when engine=fixture-tsv."
+                    },
+                    "request_id": { "type": "string" },
+                    "snapshot_id": {
+                        "type": "string",
+                        "description": "desktop_snapshot snapshot id associated with this image."
+                    },
+                    "snapshot_hash": {
+                        "type": "string",
+                        "description": "Hash of the source desktop_snapshot payload."
+                    },
+                    "snapshot_schema": {
+                        "type": "string",
+                        "default": "desktop_snapshot/v0.5"
+                    },
+                    "snapshot_captured_at": { "type": "string" },
+                    "image_hash": { "type": "string" },
+                    "image_kind": {
+                        "type": "string",
+                        "enum": ["desktop", "output", "window"],
+                        "default": "window"
+                    },
+                    "coordinate_space": {
+                        "type": "string",
+                        "enum": ["desktop", "output", "window"],
+                        "default": "window"
+                    },
+                    "output": { "type": "string" },
+                    "crop_rect": {
+                        "type": "string",
+                        "description": "Optional x,y,width,height crop rect."
+                    },
+                    "window_id": { "type": "integer" },
+                    "pid": { "type": "integer" },
+                    "app_id": { "type": "string" },
+                    "title_hash": { "type": "string" },
+                    "window_rect": {
+                        "type": "string",
+                        "description": "Optional x,y,width,height target window rect."
+                    },
+                    "task": { "type": "string", "default": "find text" },
+                    "hint_text": { "type": "string" },
+                    "hint_role": { "type": "string", "default": "unknown" },
+                    "language": { "type": "string", "default": "auto" },
+                    "engine_timeout_secs": {
+                        "type": "number",
+                        "minimum": 0.5,
+                        "maximum": 60.0,
+                        "default": 8.0,
+                        "description": "Timeout forwarded to the OCR engine."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 90000,
+                        "default": 20000,
+                        "description": "Milliseconds before the wrapper process is killed."
+                    }
+                },
+                "required": ["image", "snapshot_id", "snapshot_hash"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let image = match required_str_arg(&args, "image") {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let snapshot_id = match required_str_arg(&args, "snapshot_id") {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let snapshot_hash = match required_str_arg(&args, "snapshot_hash") {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let engine = args
+            .get("engine")
+            .and_then(|v| v.as_str())
+            .unwrap_or("tesseract");
+        if !matches!(engine, "tesseract" | "fixture-tsv" | "none") {
+            return Ok(ToolResult::error(
+                "engine must be tesseract, fixture-tsv, or none",
+            ));
+        }
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20_000)
+            .clamp(1_000, 90_000);
+        let engine_timeout_secs = args
+            .get("engine_timeout_secs")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(8.0)
+            .clamp(0.5, 60.0);
+
+        let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
+        let script = vision_grounding_ocr_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(vision_grounding_ocr_error(json!({
+                "code": "script_missing",
+                "message": format!("vision_grounding_ocr.py not found at {}", script.display()),
+                "hint": "pass script_path or run from the Agent-Bridge repo root"
+            })));
+        }
+
+        let mut cmd = TokioCommand::new(
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "python3".to_string()),
+        );
+        cmd.arg(&script)
+            .arg("--compact")
+            .arg("--image")
+            .arg(image)
+            .arg("--engine")
+            .arg(engine)
+            .arg("--snapshot-id")
+            .arg(snapshot_id)
+            .arg("--snapshot-hash")
+            .arg(snapshot_hash)
+            .arg("--timeout")
+            .arg(engine_timeout_secs.to_string());
+
+        push_optional_str_arg(&mut cmd, &args, "fixture_tsv", "--fixture-tsv");
+        push_optional_str_arg(&mut cmd, &args, "request_id", "--request-id");
+        push_optional_str_arg(&mut cmd, &args, "snapshot_schema", "--snapshot-schema");
+        push_optional_str_arg(
+            &mut cmd,
+            &args,
+            "snapshot_captured_at",
+            "--snapshot-captured-at",
+        );
+        push_optional_str_arg(&mut cmd, &args, "image_hash", "--image-hash");
+        push_optional_str_arg(&mut cmd, &args, "image_kind", "--image-kind");
+        push_optional_str_arg(&mut cmd, &args, "coordinate_space", "--coordinate-space");
+        push_optional_str_arg(&mut cmd, &args, "output", "--output");
+        push_optional_str_arg(&mut cmd, &args, "crop_rect", "--crop-rect");
+        push_optional_value_arg(&mut cmd, &args, "window_id", "--window-id");
+        push_optional_value_arg(&mut cmd, &args, "pid", "--pid");
+        push_optional_str_arg(&mut cmd, &args, "app_id", "--app-id");
+        push_optional_str_arg(&mut cmd, &args, "title_hash", "--title-hash");
+        push_optional_str_arg(&mut cmd, &args, "window_rect", "--window-rect");
+        push_optional_str_arg(&mut cmd, &args, "task", "--task");
+        push_optional_str_arg(&mut cmd, &args, "hint_text", "--hint-text");
+        push_optional_str_arg(&mut cmd, &args, "hint_role", "--hint-role");
+        push_optional_str_arg(&mut cmd, &args, "language", "--language");
+
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+
+        let started = Instant::now();
+        let output =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+                Err(_) => {
+                    return Ok(vision_grounding_ocr_error(json!({
+                        "code": "timeout",
+                        "message": format!("vision_grounding_ocr exceeded {timeout_ms} ms"),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Err(e)) => {
+                    return Ok(vision_grounding_ocr_error(json!({
+                        "code": "spawn_failed",
+                        "message": e.to_string(),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Ok(output)) => output,
+            };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+
+        if !output.status.success() {
+            return Ok(vision_grounding_ocr_error(json!({
+                "code": "script_failed",
+                "exit_code": output.status.code().unwrap_or(-1),
+                "stdout": stdout,
+                "stderr": stderr,
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            })));
+        }
+
+        match serde_json::from_str::<Value>(&stdout) {
+            Ok(mut payload) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert(
+                        "mcp_wrapper".to_string(),
+                        json!({
+                            "tool": self.name(),
+                            "read_only": true,
+                            "engine": engine,
+                            "duration_ms": duration_ms,
+                            "stderr": stderr,
+                            "stderr_truncated": stderr_truncated
+                        }),
+                    );
+                }
+                Ok(ToolResult::json_text(&payload))
+            }
+            Err(e) => Ok(vision_grounding_ocr_error(json!({
+                "code": "invalid_json",
+                "message": e.to_string(),
+                "stdout": stdout,
+                "stderr": stderr,
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            }))),
+        }
+    }
+}
+
+fn required_str_arg(args: &Value, key: &str) -> std::result::Result<String, String> {
+    match args.get(key).and_then(|v| v.as_str()) {
+        Some(v) if !v.trim().is_empty() => Ok(v.to_string()),
+        _ => Err(format!("missing or empty '{key}'")),
+    }
+}
+
+fn push_optional_str_arg(cmd: &mut TokioCommand, args: &Value, key: &str, flag: &str) {
+    if let Some(value) = args.get(key).and_then(|v| v.as_str()) {
+        if !value.trim().is_empty() {
+            cmd.arg(flag).arg(value);
+        }
+    }
+}
+
+fn push_optional_value_arg(cmd: &mut TokioCommand, args: &Value, key: &str, flag: &str) {
+    if let Some(value) = args.get(key) {
+        if let Some(n) = value.as_i64() {
+            cmd.arg(flag).arg(n.to_string());
+        } else if let Some(s) = value.as_str() {
+            if !s.trim().is_empty() {
+                cmd.arg(flag).arg(s);
+            }
+        }
+    }
+}
+
+fn vision_grounding_ocr_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_VISION_GROUNDING_OCR_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/vision_grounding_ocr.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/vision_grounding_ocr.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/vision_grounding_ocr.py")
+}
+
+fn vision_grounding_ocr_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "vision_grounding_ocr_mcp_error.v0",
+        "status": "error",
+        "error": error,
+    }));
+    result.is_error = true;
+    result
+}
+
+// ===========================================================================
 //                        mobile / Android ADB tools
 // ===========================================================================
 
@@ -22750,6 +23080,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Linux Computer Use T9a: read-only desktop structure snapshot for Codex
     // IDE lanes. Mutating desktop actions stay out of this allowlist.
     "desktop_snapshot",
+    // Linux Computer Use T9b: non-mutating OCR grounding over caller-provided
+    // images. It does not capture screenshots or inject input.
+    "vision_grounding_ocr",
 ];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
@@ -23443,6 +23776,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(DesktopSnapshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(VisionGroundingOcrTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -27390,13 +27729,13 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 33 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 34 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
         //      + DIRECT(22: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
-        //      + memory_graph_topology + desktop_snapshot).
+        //      + memory_graph_topology + desktop_snapshot + vision_grounding_ocr).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        assert_eq!(extras.len(), 33);
+        assert_eq!(extras.len(), 34);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -27425,6 +27764,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"mobile_ios_syslog_tail"));
         assert!(extras.contains(&"memory_graph_topology"));
         assert!(extras.contains(&"desktop_snapshot"));
+        assert!(extras.contains(&"vision_grounding_ocr"));
     }
 
     #[test]
@@ -27716,6 +28056,101 @@ print(json.dumps({"schema": "desktop_snapshot/v0.5", "argv": sys.argv[1:]}))
         assert!(argv.contains(&"--atspi-budget"));
         assert!(argv.contains(&"1.25"));
         assert!(!argv.contains(&"--activate-a11y"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn registry_exposes_vision_grounding_ocr_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "vision_grounding_ocr"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "vision_grounding_ocr")
+            .expect("vision_grounding_ocr schema");
+
+        assert!(tool.description.contains("non-mutating"));
+        assert!(tool.input_schema["properties"].get("image").is_some());
+        assert!(tool.input_schema["properties"].get("snapshot_id").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("snapshot_hash")
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn vision_grounding_ocr_wrapper_passes_fixture_args() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-vision-grounding-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("vision_grounding_ocr.py");
+        let image = temp_dir.join("window.png");
+        let fixture_tsv = temp_dir.join("ocr.tsv");
+        tokio::fs::write(&image, b"fake image")
+            .await
+            .expect("image");
+        tokio::fs::write(&fixture_tsv, b"fake tsv")
+            .await
+            .expect("fixture");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = VisionGroundingOcrTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "image": image.to_string_lossy(),
+                    "engine": "fixture-tsv",
+                    "fixture_tsv": fixture_tsv.to_string_lossy(),
+                    "snapshot_id": "snap-test",
+                    "snapshot_hash": "sha256:snapshot",
+                    "image_hash": "sha256:image",
+                    "window_id": 42,
+                    "pid": 1234,
+                    "app_id": "demo",
+                    "title_hash": "sha256:title",
+                    "window_rect": "10,20,300,200",
+                    "hint_text": "Save",
+                    "hint_role": "button",
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        let argv = payload["argv"].as_array().expect("argv");
+        let argv: Vec<&str> = argv.iter().filter_map(|v| v.as_str()).collect();
+
+        assert!(argv.contains(&"--compact"));
+        assert!(argv.contains(&"--image"));
+        assert!(argv.contains(&image.to_string_lossy().as_ref()));
+        assert!(argv.contains(&"--engine"));
+        assert!(argv.contains(&"fixture-tsv"));
+        assert!(argv.contains(&"--fixture-tsv"));
+        assert!(argv.contains(&fixture_tsv.to_string_lossy().as_ref()));
+        assert!(argv.contains(&"--snapshot-id"));
+        assert!(argv.contains(&"snap-test"));
+        assert!(argv.contains(&"--snapshot-hash"));
+        assert!(argv.contains(&"sha256:snapshot"));
+        assert!(argv.contains(&"--hint-text"));
+        assert!(argv.contains(&"Save"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
