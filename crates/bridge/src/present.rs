@@ -499,6 +499,88 @@ pub fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+/// Summary of a persisted presentation artifact, reconstructed from the
+/// self-describing HTML — dual-encoding pays off here: the artifacts ARE the
+/// index, so we read the embedded provenance/payload back out instead of
+/// keeping a separate sidecar that could drift.
+#[derive(Debug, Clone)]
+pub struct ArtifactInfo {
+    pub id: String,
+    pub artifact_path: String,
+    pub kind: Option<String>,
+    pub ts: Option<u64>,
+    pub generated_by: Option<String>,
+    pub session_id: Option<String>,
+    pub dual_encoding: bool,
+    pub has_screenshot: bool,
+    pub bytes: u64,
+}
+
+/// List persisted artifacts in `dir`, most-recent-first (by mtime), reading each
+/// artifact's embedded `#ab-provenance` + `#ab-payload` to reconstruct the
+/// index. `kind_filter` keeps only matching kinds. Missing/unreadable dir → [].
+pub fn list_artifacts(dir: &Path, limit: usize, kind_filter: Option<&str>) -> Vec<ArtifactInfo> {
+    let read = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let mut entries: Vec<(std::time::SystemTime, PathBuf)> = read
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("html"))
+        .map(|p| {
+            let mtime = std::fs::metadata(&p)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            (mtime, p)
+        })
+        .collect();
+    entries.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let mut out = Vec::new();
+    for (_, path) in entries {
+        if out.len() >= limit {
+            break;
+        }
+        let html = match std::fs::read_to_string(&path) {
+            Ok(h) => h,
+            Err(_) => continue,
+        };
+        let prov = extract_script_json(&html, "ab-provenance");
+        let field = |k: &str| {
+            prov.as_ref()
+                .and_then(|p| p.get(k))
+                .and_then(Value::as_str)
+                .map(String::from)
+        };
+        let kind = field("kind");
+        if let Some(want) = kind_filter {
+            if kind.as_deref() != Some(want) {
+                continue;
+            }
+        }
+        out.push(ArtifactInfo {
+            id: path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_string(),
+            artifact_path: path.display().to_string(),
+            kind,
+            ts: prov
+                .as_ref()
+                .and_then(|p| p.get("ts"))
+                .and_then(Value::as_u64),
+            generated_by: field("generated_by"),
+            session_id: field("session_id"),
+            dual_encoding: extract_ab_payload(&html).is_some(),
+            has_screenshot: path.with_extension("png").exists(),
+            bytes: html.len() as u64,
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -694,6 +776,48 @@ mod tests {
         write_artifact_atomic(&path, "<p>hi</p>").unwrap();
         let read = std::fs::read_to_string(&path).unwrap();
         assert_eq!(read, "<p>hi</p>");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // list_artifacts reconstructs the index from the self-describing HTML
+    // (provenance kind + payload presence), honoring the kind filter — proving
+    // the dual-encoding consumer side end-to-end.
+    #[test]
+    fn list_artifacts_reads_kind_and_dual_encoding_from_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-present-list-test-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let prov_t = json!({"generated_by": "present/v0", "kind": "table", "ts": 111});
+        write_artifact_atomic(
+            &dir.join("aaaaaaaaaaaaaaaa.html"),
+            &build_html(PresentKind::Table, "", None, Some(&json!([{"x": 1}])), Some(&prov_t)),
+        )
+        .unwrap();
+        let prov_h = json!({"generated_by": "present/v0", "kind": "html", "ts": 222});
+        write_artifact_atomic(
+            &dir.join("bbbbbbbbbbbbbbbb.html"),
+            &build_html(PresentKind::Html, "<p>hi</p>", None, None, Some(&prov_h)),
+        )
+        .unwrap();
+
+        let all = list_artifacts(&dir, 50, None);
+        assert_eq!(all.len(), 2);
+
+        let only_table = list_artifacts(&dir, 50, Some("table"));
+        assert_eq!(only_table.len(), 1);
+        assert_eq!(only_table[0].kind.as_deref(), Some("table"));
+        assert!(only_table[0].dual_encoding, "table carried a payload");
+        assert_eq!(only_table[0].ts, Some(111));
+
+        let only_html = list_artifacts(&dir, 50, Some("html"));
+        assert_eq!(only_html.len(), 1);
+        assert!(!only_html[0].dual_encoding, "html had no payload");
+
+        // missing dir → empty, no panic.
+        assert!(list_artifacts(std::path::Path::new("/nonexistent/ab/xyz"), 10, None).is_empty());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
