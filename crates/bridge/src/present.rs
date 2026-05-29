@@ -13,6 +13,15 @@
 //! It is NOT the capability-roadmap "E1" self-modification gap — different
 //! taxonomies that collide on the label.
 //!
+//! Self-verify honesty: the human-rendered artifact is wrapped in a single
+//! `<main id="ab-render">` element and ALL chrome (the dual-encoding /
+//! provenance `<script>` blocks, the provenance footer) lives OUTSIDE it
+//! (`<script>`s in `<head>`, footer after `</main>`). The verify metrics query
+//! only `#ab-render`, so an artifact that renders nothing for a human reports
+//! `blank` even though the document still carries provenance — without the
+//! container the always-present chrome would make `blank` unreachable and the
+//! falsifier fake.
+//!
 //! This module is intentionally dependency-light (serde_json + std) so the
 //! rendering / dual-encoding / classification logic is unit-testable without a
 //! browser. The browser-driven self-verify orchestration lives in
@@ -25,6 +34,11 @@ use std::path::{Path, PathBuf};
 
 /// Result envelope schema tag returned by the `present` tool.
 pub const PRESENT_SCHEMA: &str = "present/v0";
+
+/// The id of the container wrapping the human-rendered artifact. The verify
+/// metrics query only inside this element so document chrome (provenance
+/// scripts/footer) cannot inflate the "did it render" signal.
+pub const RENDER_REGION_ID: &str = "ab-render";
 
 /// The E1 static-artifact kinds the first cut can render.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,9 +82,9 @@ impl PresentKind {
 /// "the browser actually rendered this" from "I never checked".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyStatus {
-    /// Loaded in the browser and the body had visible content.
+    /// Loaded in the browser and the artifact region had visible content.
     RenderedOk,
-    /// Loaded but the body produced nothing (no nodes, no text) — a real fault.
+    /// Loaded but the artifact region produced nothing visible — a real fault.
     Blank,
     /// No browser available / capability denied / launch failed — degraded, not failed.
     NoBrowser,
@@ -92,22 +106,34 @@ impl VerifyStatus {
     }
 }
 
-/// Content metrics read from the rendered page's `<body>`. Produced by the
+/// Content metrics read from the rendered `#ab-render` region. Produced by the
 /// browser-driven verify path; consumed by [`classify_render`]. Kept as a plain
 /// struct so the decision is testable without a browser.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RenderMetrics {
+    /// `innerHTML.trim().length` of the region (diagnostic).
     pub inner_html_len: usize,
+    /// `innerText.trim().length` of the region (visible text).
     pub text_len: usize,
+    /// element count in the region, excluding `script`/`style` (diagnostic).
     pub node_count: usize,
+    /// count of region elements with a non-empty `getClientRects()` (laid-out /
+    /// visible). Catches `display:none`-only content as not-rendered.
+    pub visible_count: usize,
 }
 
 /// The verify decision, isolated as a pure function so A3 ("an empty artifact
 /// MUST report `blank`") is a deterministic unit test rather than a flaky
 /// browser assertion. If this ever returned `RenderedOk` for empty metrics the
 /// self-verify would be fake — that is exactly the falsifier.
+///
+/// `RenderedOk` means "the artifact region contains visible text or at least
+/// one laid-out element". It does NOT assert pixel-level correctness (e.g. an
+/// element rendered off-screen or fully transparent still counts) — the honest
+/// guarantee is "something rendered into the artifact region", not "it looks
+/// right".
 pub fn classify_render(m: &RenderMetrics) -> VerifyStatus {
-    if m.node_count == 0 && m.text_len == 0 {
+    if m.text_len == 0 && m.visible_count == 0 {
         VerifyStatus::Blank
     } else {
         VerifyStatus::RenderedOk
@@ -127,13 +153,15 @@ pub fn parse_metrics(v: &Value) -> RenderMetrics {
         inner_html_len: g("h"),
         text_len: g("t"),
         node_count: g("n"),
+        visible_count: g("v"),
     }
 }
 
 /// The JS expression evaluated in the rendered page to produce [`RenderMetrics`].
-/// Returns a JSON string `{h,t,n}`. Kept here so the contract with
-/// [`parse_metrics`] stays in one place.
-pub const VERIFY_METRICS_JS: &str = "JSON.stringify({h:document.body?document.body.innerHTML.trim().length:0,t:document.body?(document.body.innerText||'').trim().length:0,n:document.body?document.body.querySelectorAll('*').length:0})";
+/// Returns a JSON string `{h,t,n,v}` measured over `#ab-render` ONLY (so the
+/// provenance chrome cannot inflate the signal). Keys MUST stay in sync with
+/// [`parse_metrics`] — guarded by a unit canary.
+pub const VERIFY_METRICS_JS: &str = "JSON.stringify((function(){var e=document.getElementById('ab-render');if(!e)return{h:0,t:0,n:0,v:0};var els=e.querySelectorAll('*:not(script):not(style)');var vis=0;els.forEach(function(x){if(x.getClientRects().length>0)vis++;});return{h:e.innerHTML.trim().length,t:(e.innerText||'').trim().length,n:els.length,v:vis};})())";
 
 // ---------------------------------------------------------------------------
 // HTML rendering (pure)
@@ -208,12 +236,7 @@ fn render_table(data: &Value) -> String {
             .map(|r| {
                 let cells: String = cols
                     .iter()
-                    .map(|c| {
-                        format!(
-                            "<td>{}</td>",
-                            r.get(c).map(value_to_cell).unwrap_or_default()
-                        )
-                    })
+                    .map(|c| format!("<td>{}</td>", r.get(c).map(value_to_cell).unwrap_or_default()))
                     .collect();
                 format!("<tr>{cells}</tr>")
             })
@@ -237,28 +260,39 @@ fn render_table(data: &Value) -> String {
     }
 }
 
-/// Convert a markdown pipe-table into an HTML `<table>`. The first non-separator
-/// row is the header; `|---|` separator rows are dropped.
+/// True iff `cells_line` is a markdown table separator row (e.g. `|---|:--:|`).
+fn is_md_separator(line: &str) -> bool {
+    let nopipe: String = line
+        .chars()
+        .filter(|c| !matches!(c, '|' | '-' | ':' | ' '))
+        .collect();
+    nopipe.is_empty() && line.contains('-')
+}
+
+/// Convert a markdown pipe-table into an HTML `<table>`. The first row is the
+/// header; ONLY the second row may be a `|---|` separator (so a legitimate
+/// all-dashes data row elsewhere is not silently dropped).
 fn render_markdown_table(src: &str) -> String {
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    for line in src.lines() {
-        let t = line.trim();
-        if t.is_empty() {
-            continue;
-        }
-        let nopipe: String = t
-            .chars()
-            .filter(|c| !matches!(c, '|' | '-' | ':' | ' '))
-            .collect();
-        if nopipe.is_empty() && t.contains('-') {
-            continue; // separator row
-        }
-        let cells: Vec<String> = t
-            .trim_matches('|')
+    let lines: Vec<&str> = src
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return "<table></table>".to_string();
+    }
+    let parse_row = |t: &str| -> Vec<String> {
+        t.trim_matches('|')
             .split('|')
             .map(|c| c.trim().to_string())
-            .collect();
-        rows.push(cells);
+            .collect()
+    };
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if i == 1 && is_md_separator(line) {
+            continue; // the canonical separator position
+        }
+        rows.push(parse_row(line));
     }
     if rows.is_empty() {
         return "<table></table>".to_string();
@@ -296,7 +330,8 @@ fn render_body(kind: PresentKind, artifact: &str, payload: Option<&Value>) -> St
         }
         PresentKind::MarkdownTable => render_markdown_table(artifact),
         // Caller-intended markup — inlined raw. Sanitization of untrusted HTML
-        // is explicitly out of scope for the first cut (documented risk).
+        // is explicitly out of scope for the first cut (documented risk); the
+        // caller is trusted for html/svg kinds.
         PresentKind::Html | PresentKind::Svg => artifact.to_string(),
         PresentKind::Mermaid => format!(
             "<pre class=\"mermaid\">{}</pre>\
@@ -306,8 +341,14 @@ fn render_body(kind: PresentKind, artifact: &str, payload: Option<&Value>) -> St
     }
 }
 
-/// Build the complete standalone HTML document: human render + embedded
-/// machine-facing `#ab-payload` (dual-encoding) + `#ab-provenance`.
+/// Build the complete standalone HTML document. Layout invariant (load-bearing
+/// for self-verify honesty + dual-encoding extraction):
+///   - `<head>` holds the `#ab-payload` / `#ab-provenance` JSON `<script>`s, so
+///     [`extract_script_json`] (first-match) always returns the generator's
+///     payload, never one injected inside a `kind=html` artifact body.
+///   - the human render lives inside `<main id="ab-render">{body}</main>`.
+///   - the provenance footer follows `</main>` (inside `<body>` but outside the
+///     render region), so it never inflates the verify metrics.
 ///
 /// CSS braces in the template are doubled per the `format!` raw-string idiom.
 pub fn build_html(
@@ -347,6 +388,8 @@ pub fn build_html(
 <html lang="en"><head><meta charset="utf-8">
 <meta name="generator" content="agent-bridge {schema}">
 <title>{title}</title>
+{payload_script}
+{prov_script}
 <style>
 body{{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;margin:24px;color:#1a1a2e;background:#fafafe}}
 table{{border-collapse:collapse;margin:8px 0}}
@@ -356,13 +399,12 @@ pre{{background:#f4f4fb;padding:10px;border-radius:6px;overflow:auto}}
 footer{{margin-top:28px;font-size:11px;color:#9a9ab0;border-top:1px solid #e3e3ef;padding-top:8px;word-break:break-all}}
 </style></head>
 <body>
-{body}
-{payload_script}
-{prov_script}
+<main id="{region}">{body}</main>
 {prov_footer}
 </body></html>"#,
         schema = PRESENT_SCHEMA,
         title = html_escape(title_str),
+        region = RENDER_REGION_ID,
         body = body,
         payload_script = payload_script,
         prov_script = prov_script,
@@ -373,6 +415,8 @@ footer{{margin-top:28px;font-size:11px;color:#9a9ab0;border-top:1px solid #e3e3e
 /// Recover a `<script type="application/json" id="...">` payload from a rendered
 /// artifact. This is the *consumer* side of dual-encoding: another agent reads
 /// structured data straight out of the HTML instead of OCR-ing the pixels.
+/// Returns the FIRST match; the generator emits these in `<head>` so a payload
+/// injected inside a `kind=html` body cannot shadow it.
 pub fn extract_script_json(html: &str, id: &str) -> Option<Value> {
     let marker = format!("id=\"{id}\">");
     let start = html.find(&marker)? + marker.len();
@@ -386,15 +430,29 @@ pub fn extract_ab_payload(html: &str) -> Option<Value> {
     extract_script_json(html, "ab-payload")
 }
 
+/// The inner HTML of the `#ab-render` region — the human-render content only,
+/// excluding provenance chrome. Used by tests to prove an empty artifact yields
+/// an empty render region (so the browser metrics would classify it `blank`).
+pub fn render_region(html: &str) -> Option<&str> {
+    let marker = format!("<main id=\"{RENDER_REGION_ID}\">");
+    let start = html.find(&marker)? + marker.len();
+    let rest = &html[start..];
+    let end = rest.find("</main>")?;
+    Some(&rest[..end])
+}
+
 // ---------------------------------------------------------------------------
 // Filesystem (sink)
 // ---------------------------------------------------------------------------
 
-/// Stable 16-hex content id (FNV-1a). Local copy per the repo convention
-/// (`fnv1a_hex16` exists privately in mcp_tools.rs / rescue.rs).
-pub fn derive_id(content: &str) -> String {
+/// Stable 16-hex id (FNV-1a) over the given canonical string. The CALLER chooses
+/// what to hash: `PresentTool` hashes the content (kind+title+artifact+payload),
+/// NOT the rendered HTML, so the id is content-addressed (identical content →
+/// same id/path → dedupes) and does not drift with the per-call provenance ts.
+/// Local copy per the repo convention (`fnv1a_hex16` exists privately elsewhere).
+pub fn derive_id(canonical: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in content.as_bytes() {
+    for b in canonical.as_bytes() {
         hash ^= u64::from(*b);
         hash = hash.wrapping_mul(0x1000_0000_01b3);
     }
@@ -460,73 +518,138 @@ mod tests {
         assert_eq!(PresentKind::parse("nope"), None);
     }
 
-    // A1 — a table payload renders a real HTML <table> with the cell values.
+    // A1 — a table payload renders a real HTML <table> with the cell values,
+    // inside the #ab-render region.
     #[test]
     fn a1_table_renders_html_table() {
         let payload = json!([{"name": "e5", "dims": 384}, {"name": "MiniLM", "dims": 384}]);
         let html = build_html(PresentKind::Table, "", Some("dims"), Some(&payload), None);
         assert!(html.contains("<!doctype html>"));
-        assert!(html.contains("<table>"));
-        assert!(html.contains("<th>name</th>"));
-        assert!(html.contains("<th>dims</th>"));
-        assert!(html.contains("<td>e5</td>"));
-        assert!(html.contains("<td>MiniLM</td>"));
+        assert!(html.contains("<main id=\"ab-render\">"));
+        let region = render_region(&html).expect("render region");
+        assert!(region.contains("<table>"));
+        assert!(region.contains("<th>name</th>"));
+        assert!(region.contains("<th>dims</th>"));
+        assert!(region.contains("<td>e5</td>"));
+        assert!(region.contains("<td>MiniLM</td>"));
     }
 
     // A2 — dual-encoding byte round-trip, including a payload that contains "</"
-    // (which the script-embed escapes to "<\/" and a JSON parser decodes back).
+    // (escaped to "<\/" so the browser parser sees clean JSON and the embed
+    // never terminates early). Asserts the escape directly, not just the trip.
     #[test]
-    fn a2_dual_encoding_roundtrips_even_with_close_tag() {
+    fn a2_dual_encoding_roundtrips_and_escapes_close_tag() {
         let payload = json!([{"a": 1, "b": "danger</script><x></y>"}]);
         let html = build_html(PresentKind::Table, "", None, Some(&payload), None);
-        // The raw HTML must NOT contain a literal "</script>" inside the payload.
+        // The escape is actually applied …
+        assert!(html.contains("danger<\\/script>"));
+        // … and no literal "</script>" leaks from the payload value.
+        assert!(!html.contains("danger</script>"));
+        // … and the value round-trips byte-for-byte.
         let recovered = extract_ab_payload(&html).expect("payload must be recoverable");
         assert_eq!(recovered, payload);
     }
 
-    // A3 — the verify classifier is real: empty body → blank, content → ok.
+    // A2b — a kind=html artifact that itself contains a fake #ab-payload must
+    // NOT shadow the generator's payload (generator emits in <head>, first-match).
+    #[test]
+    fn a2b_body_injected_payload_does_not_shadow_real_one() {
+        let real = json!({"real": true});
+        let evil_body = "<script type=\"application/json\" id=\"ab-payload\">{\"real\":false}</script><p>hi</p>";
+        let html = build_html(PresentKind::Html, evil_body, None, Some(&real), None);
+        assert_eq!(extract_ab_payload(&html), Some(real));
+    }
+
+    // A3 — the verify classifier is real: empty region → blank, visible → ok,
+    // and (the case the always-on chrome used to hide) nodes present but NOTHING
+    // visible → blank.
     #[test]
     fn a3_classify_render_blank_vs_ok() {
         let empty = RenderMetrics::default();
         assert_eq!(classify_render(&empty), VerifyStatus::Blank);
 
-        let content = RenderMetrics {
+        let visible = RenderMetrics {
             inner_html_len: 120,
             text_len: 14,
             node_count: 7,
+            visible_count: 7,
         };
-        assert_eq!(classify_render(&content), VerifyStatus::RenderedOk);
+        assert_eq!(classify_render(&visible), VerifyStatus::RenderedOk);
 
-        // text but no element nodes (e.g. a bare string body) is still NOT blank.
+        // elements exist but none are laid out / visible (e.g. display:none) and
+        // there is no visible text → blank.
+        let hidden_only = RenderMetrics {
+            inner_html_len: 60,
+            text_len: 0,
+            node_count: 3,
+            visible_count: 0,
+        };
+        assert_eq!(classify_render(&hidden_only), VerifyStatus::Blank);
+
+        // visible text but zero element nodes (a bare text body) → rendered.
         let text_only = RenderMetrics {
             inner_html_len: 5,
             text_len: 5,
             node_count: 0,
+            visible_count: 0,
         };
         assert_eq!(classify_render(&text_only), VerifyStatus::RenderedOk);
     }
 
-    // A3 — metrics parse tolerates both stringified and object forms from eval.
+    // A3 — metrics parse tolerates both stringified and object forms, incl `v`.
     #[test]
     fn a3_parse_metrics_string_and_object() {
-        let s = parse_metrics(&json!("{\"h\":10,\"t\":3,\"n\":2}"));
-        assert_eq!((s.inner_html_len, s.text_len, s.node_count), (10, 3, 2));
-        let o = parse_metrics(&json!({"h": 9, "t": 0, "n": 0}));
-        assert_eq!((o.inner_html_len, o.text_len, o.node_count), (9, 0, 0));
-        // an empty body parsed from real eval → classified blank.
+        let s = parse_metrics(&json!("{\"h\":10,\"t\":3,\"n\":2,\"v\":2}"));
         assert_eq!(
-            classify_render(&parse_metrics(&json!("{\"h\":0,\"t\":0,\"n\":0}"))),
+            (s.inner_html_len, s.text_len, s.node_count, s.visible_count),
+            (10, 3, 2, 2)
+        );
+        let o = parse_metrics(&json!({"h": 9, "t": 0, "n": 1, "v": 0}));
+        assert_eq!((o.text_len, o.visible_count), (0, 0));
+        assert_eq!(
+            classify_render(&parse_metrics(&json!("{\"h\":0,\"t\":0,\"n\":0,\"v\":0}"))),
             VerifyStatus::Blank
         );
     }
 
-    // A4 — provenance is embedded; absence of payload means dual_encoding=false.
+    // A3 end-to-end logic (without a browser): an empty artifact yields an EMPTY
+    // #ab-render region, so the metrics over that region would be all-zero and
+    // classify blank. A table yields a non-empty region. This pins the seam the
+    // adversarial review found broken (chrome inflating whole-body metrics).
+    #[test]
+    fn a3_empty_artifact_region_is_empty_table_is_not() {
+        let prov = json!({"generated_by": "present/v0"});
+        let empty_html = build_html(PresentKind::Html, "", None, None, Some(&prov));
+        assert_eq!(render_region(&empty_html).map(str::trim), Some(""));
+
+        let table_html = build_html(
+            PresentKind::Table,
+            "",
+            None,
+            Some(&json!([{"x": 1}])),
+            Some(&prov),
+        );
+        assert!(!render_region(&table_html).unwrap().trim().is_empty());
+    }
+
+    // Canary: the JS that produces the metrics MUST emit the keys parse_metrics
+    // reads, and MUST target the render region (not document.body). Cheap guard
+    // against silent drift that would re-break the falsifier.
+    #[test]
+    fn verify_metrics_js_targets_region_and_keys_match() {
+        assert!(VERIFY_METRICS_JS.contains("ab-render"));
+        for key in ["h:", "t:", "n:", "v:"] {
+            assert!(VERIFY_METRICS_JS.contains(key), "missing key {key}");
+        }
+    }
+
+    // A4 — provenance is embedded (and recoverable from <head>); absence of
+    // payload means dual_encoding=false (caller reports it).
     #[test]
     fn a4_provenance_embedded_and_no_payload_means_no_dual_encoding() {
         let prov = json!({"generated_by": "present/v0", "source_tool": "memory_search"});
         let html = build_html(PresentKind::Html, "<p>hi</p>", None, None, Some(&prov));
         assert_eq!(extract_script_json(&html, "ab-provenance"), Some(prov));
-        // no payload passed → not recoverable → caller reports dual_encoding=false
         assert_eq!(extract_ab_payload(&html), None);
     }
 
@@ -534,10 +657,24 @@ mod tests {
     fn markdown_table_parses_header_and_rows() {
         let md = "| name | dims |\n|------|------|\n| e5 | 384 |\n| minilm | 384 |";
         let html = build_html(PresentKind::MarkdownTable, md, None, None, None);
-        assert!(html.contains("<th>name</th>"));
-        assert!(html.contains("<th>dims</th>"));
-        assert!(html.contains("<td>e5</td>"));
-        assert!(html.contains("<td>minilm</td>"));
+        let region = render_region(&html).unwrap();
+        assert!(region.contains("<th>name</th>"));
+        assert!(region.contains("<th>dims</th>"));
+        assert!(region.contains("<td>e5</td>"));
+        assert!(region.contains("<td>minilm</td>"));
+    }
+
+    // An all-dashes DATA row (not at the separator position) must survive.
+    #[test]
+    fn markdown_all_dash_data_row_is_kept() {
+        let md = "| a | b |\n|---|---|\n| - | - |\n| x | y |";
+        let html = build_html(PresentKind::MarkdownTable, md, None, None, None);
+        let region = render_region(&html).unwrap();
+        // header <tr> + 2 body <tr>: the all-dash data row survived; only the
+        // idx-1 separator was dropped.
+        assert_eq!(region.matches("<tr>").count(), 3);
+        assert!(region.contains("<td>-</td>"));
+        assert!(region.contains("<td>x</td>"));
     }
 
     #[test]

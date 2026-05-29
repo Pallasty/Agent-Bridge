@@ -4207,7 +4207,7 @@ impl McpTool for PresentTool {
                     "kind": {
                         "type": "string",
                         "enum": ["table", "markdown_table", "html", "svg", "mermaid"],
-                        "description": "Artifact kind. table=structured rows (from payload); markdown_table=a markdown pipe table in artifact; html/svg=raw markup in artifact; mermaid=diagram source in artifact."
+                        "description": "Artifact kind. table=structured rows (from payload); markdown_table=a markdown pipe table in artifact; html/svg=raw markup in artifact; mermaid=diagram source in artifact. NOTE: html/svg are inlined WITHOUT sanitization and, when verify runs, are loaded in a real browser (their scripts execute) — use html/svg only with trusted/self-authored content, not untrusted input."
                     },
                     "artifact": {
                         "type": "string",
@@ -4230,7 +4230,7 @@ impl McpTool for PresentTool {
                     "verify": {
                         "type": "boolean",
                         "default": true,
-                        "description": "Self-verify by loading the artifact in the browser and checking it rendered non-empty (verify_status: rendered_ok|blank|no_browser|error|skipped)."
+                        "description": "Self-verify by loading the artifact in the browser and checking the #ab-render region rendered visible content (verify_status: rendered_ok|blank|no_browser|error|skipped). Requires the Browser capability + a configured backend; otherwise returns no_browser (see verify_detail). Result also includes artifact_path, screenshot_path (when captured), dual_encoding, and provenance."
                     }
                 },
                 "required": ["kind"]
@@ -4255,17 +4255,32 @@ impl McpTool for PresentTool {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let payload = args.get("payload").cloned();
+        // Explicit `null` means "no payload" (not an embedded JSON null) so
+        // dual_encoding is not falsely reported true.
+        let payload = args.get("payload").filter(|v| !v.is_null()).cloned();
         let title = args.get("title").and_then(|v| v.as_str());
         let channel = args
             .get("channel")
             .and_then(|v| v.as_str())
             .unwrap_or("file")
             .to_string();
+        // v0 implements only the `file` sink; reject others so the echoed
+        // channel always matches what actually happened.
+        if channel != "file" {
+            return Ok(ToolResult::error(format!(
+                "unsupported channel '{channel}': v0 implements only 'file'"
+            )));
+        }
         let verify = args.get("verify").and_then(|v| v.as_bool()).unwrap_or(true);
 
         // Provenance: caller-supplied + auto fields (generated_by/session_id/ts).
-        let mut provenance = args.get("provenance").cloned().unwrap_or_else(|| json!({}));
+        // A non-object provenance is wrapped as {given: <value>} so the auto
+        // integrity fields are never silently dropped.
+        let mut provenance = match args.get("provenance").cloned() {
+            Some(v) if v.is_object() => v,
+            Some(v) => json!({ "given": v }),
+            None => json!({}),
+        };
         if let Some(obj) = provenance.as_object_mut() {
             obj.entry("generated_by")
                 .or_insert_with(|| json!(crate::present::PRESENT_SCHEMA));
@@ -4279,7 +4294,17 @@ impl McpTool for PresentTool {
         let html =
             crate::present::build_html(kind, &artifact, title, payload.as_ref(), Some(&provenance));
         let dual_encoding = payload.is_some();
-        let id = crate::present::derive_id(&html);
+        // Content-addressed id: hash the SOURCE (kind+title+artifact+payload),
+        // NOT the rendered HTML — the HTML embeds a per-call provenance ts, so
+        // hashing it would defeat dedupe. Identical content → same id/path.
+        let canonical = format!(
+            "{}\u{0}{}\u{0}{}\u{0}{}",
+            kind.as_str(),
+            title.unwrap_or(""),
+            artifact,
+            payload.as_ref().map(|p| p.to_string()).unwrap_or_default()
+        );
+        let id = crate::present::derive_id(&canonical);
         let dir = crate::present::presentations_dir();
         let path = dir.join(format!("{id}.html"));
         if let Err(e) = crate::present::write_artifact_atomic(&path, &html) {
@@ -25753,6 +25778,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(BrowserNavigateTool::new(hub.clone())),
     );
+    // Output / expression lane — E1 present() static-artifact sink (uses the
+    // browser for self-verify; opt-in via AGENT_BRIDGE_TOOL_PROFILE=all for v0).
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(PresentTool::new(hub.clone())),
+    );
     reg_if(
         &mut reg,
         policy,
@@ -30161,6 +30194,49 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(argv.contains(&"Save"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // A5 — with no browser backend, verify degrades to no_browser and the
+    // artifact is STILL written + dual-encoded (degrade, don't fail).
+    #[tokio::test]
+    async fn present_degrades_to_no_browser_and_still_writes_artifact() {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-present-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::env::set_var("AGENT_BRIDGE_PRESENTATIONS_DIR", &dir);
+
+        let tool = PresentTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "kind": "table",
+                    "payload": [{"name": "e5", "dims": 384}],
+                    "title": "A5",
+                    "verify": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let res = result_text_as_json(&out);
+
+        assert_eq!(res["verify_status"], "no_browser");
+        assert_eq!(res["dual_encoding"], true);
+        assert_eq!(res["kind"], "table");
+        let artifact_path = res["artifact_path"].as_str().expect("artifact_path");
+        let html = std::fs::read_to_string(artifact_path).expect("artifact written");
+        assert!(html.contains("<table>"));
+        assert!(html.contains("<td>e5</td>"));
+        let recovered = crate::present::extract_ab_payload(&html).expect("payload recoverable");
+        assert_eq!(recovered, json!([{"name": "e5", "dims": 384}]));
+
+        std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
