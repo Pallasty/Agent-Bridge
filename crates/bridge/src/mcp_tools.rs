@@ -1594,7 +1594,10 @@ impl McpTool for DesktopActionTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(10_000)
             .clamp(1_000, 30_000);
-        let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let display = args.get("display").and_then(|v| v.as_str());
         let swaysock = args.get("swaysock").and_then(|v| v.as_str());
 
@@ -1605,7 +1608,9 @@ impl McpTool for DesktopActionTool {
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "wayland-1".to_string());
         let is_isolated = swaysock.map(|s| !s.is_empty()).unwrap_or(false)
-            && display.map(|d| !d.is_empty() && d != host_display).unwrap_or(false);
+            && display
+                .map(|d| !d.is_empty() && d != host_display)
+                .unwrap_or(false);
         if !dry_run && !is_isolated {
             return Ok(desktop_action_error(json!({
                 "code": "host_mutation_not_exposed",
@@ -1771,6 +1776,248 @@ fn desktop_action_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
 fn desktop_action_error(error: Value) -> ToolResult {
     let mut result = ToolResult::json_text(&json!({
         "schema": "desktop_action_mcp_error.v0",
+        "status": "error",
+        "error": error,
+    }));
+    result.is_error = true;
+    result
+}
+
+// ===========================================================================
+//   Linux Computer Use — L2 semantic AT-SPI invoke (desktop_invoke)
+// ===========================================================================
+
+pub struct DesktopInvokeTool {
+    _hub: Hub,
+}
+
+impl DesktopInvokeTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for DesktopInvokeTool {
+    fn name(&self) -> &'static str {
+        "desktop_invoke"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Gated Linux desktop SEMANTIC input via AT-SPI (ISOLATED-ONLY MVP). \
+                 Wraps scripts/desktop_invoke.py. Finds an accessible by app/role/name and \
+                 calls its AT-SPI action (e.g. a button's \"click\") — no screenshot, no OCR, \
+                 no coordinates; the L2 dual of desktop_snapshot's bus-first read. Safe by \
+                 construction: AT-SPI is a session-global bus, so isolation is by PROCESS — an \
+                 invoke runs only as (a) dry_run=true (locates + audits, invokes nothing), or \
+                 (b) isolated — `cage_pid` set to a nested compositor whose process subtree owns \
+                 the target accessible. Host-app invoke (--confirm) is intentionally NOT exposed \
+                 here and cannot be unlocked. Every call is audited to desktop_invoke_audit.jsonl."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "app": { "type": "string", "description": "Application name substring (e.g. 'firefox')." },
+                    "role": { "type": "string", "description": "AT-SPI role-name substring (e.g. 'button', 'menu item'). Note GTK buttons report 'button', not 'push button'." },
+                    "name": { "type": "string", "description": "Accessible name/label substring (e.g. 'Save')." },
+                    "nth": { "type": "integer", "minimum": 0, "default": 0, "description": "Which match if several (0-based)." },
+                    "action": { "type": "string", "description": "AT-SPI action name to invoke; default auto-picks click/press/activate/first." },
+                    "cage_pid": { "type": "integer", "description": "Nested compositor PID; the target accessible's app PID must be its descendant for an isolated (non-dry-run) invoke." },
+                    "wait": { "type": "number", "minimum": 0, "maximum": 30, "default": 4.0, "description": "Seconds to poll for the accessible to appear (a11y subtree can lag app registration)." },
+                    "dry_run": { "type": "boolean", "default": false, "description": "When true, locate + log intent but invoke nothing. Allowed against any target." },
+                    "cwd": { "type": "string", "description": "Repo root to resolve scripts/desktop_invoke.py." },
+                    "script_path": { "type": "string", "description": "Explicit desktop_invoke.py path (tests / alternate checkouts)." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 10000, "description": "Milliseconds before the invoke process is killed." }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let app = args.get("app").and_then(|v| v.as_str());
+        let role = args.get("role").and_then(|v| v.as_str());
+        let name = args.get("name").and_then(|v| v.as_str());
+        if app.map(|s| s.is_empty()).unwrap_or(true)
+            && role.map(|s| s.is_empty()).unwrap_or(true)
+            && name.map(|s| s.is_empty()).unwrap_or(true)
+        {
+            return Ok(desktop_invoke_error(json!({
+                "code": "missing_selector",
+                "message": "at least one of `app`, `role`, or `name` is required"
+            })));
+        }
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10_000)
+            .clamp(1_000, 30_000);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let cage_pid = args
+            .get("cage_pid")
+            .and_then(|v| v.as_i64())
+            .filter(|p| *p > 0);
+
+        // SAFETY (isolated-only MVP): host-app invoke is never exposed. Allowed iff
+        // dry_run, or a cage_pid is given (the script then verifies the target's app
+        // PID is actually a descendant of that nested compositor before invoking).
+        let is_isolated = cage_pid.is_some();
+        if !dry_run && !is_isolated {
+            return Ok(desktop_invoke_error(json!({
+                "code": "host_invoke_not_exposed",
+                "message": "this MCP exposes only dry_run or isolated (cage_pid) invokes; \
+                            host-desktop AT-SPI invoke is not available here",
+                "hint": "set dry_run:true, or provide `cage_pid` of the nested compositor that owns the target"
+            })));
+        }
+
+        let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
+        let script = desktop_invoke_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(desktop_invoke_error(json!({
+                "code": "script_missing",
+                "message": format!("desktop_invoke.py not found at {}", script.display()),
+                "hint": "pass script_path or run from the Agent-Bridge repo root"
+            })));
+        }
+
+        let mut cmd = TokioCommand::new(
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "python3".to_string()),
+        );
+        cmd.arg(&script);
+        if let Some(v) = app {
+            if !v.is_empty() {
+                cmd.arg("--app").arg(v);
+            }
+        }
+        if let Some(v) = role {
+            if !v.is_empty() {
+                cmd.arg("--role").arg(v);
+            }
+        }
+        if let Some(v) = name {
+            if !v.is_empty() {
+                cmd.arg("--name").arg(v);
+            }
+        }
+        if let Some(n) = args.get("nth").and_then(|v| v.as_i64()) {
+            cmd.arg("--nth").arg(n.to_string());
+        }
+        if let Some(a) = args.get("action").and_then(|v| v.as_str()) {
+            if !a.is_empty() {
+                cmd.arg("--action").arg(a);
+            }
+        }
+        if let Some(w) = args.get("wait").and_then(|v| v.as_f64()) {
+            cmd.arg("--wait").arg(format!("{w}"));
+        }
+        if let Some(p) = cage_pid {
+            cmd.arg("--cage-pid").arg(p.to_string());
+        }
+        if dry_run {
+            cmd.arg("--dry-run");
+        }
+        // NOTE: --confirm / --i-understand-this-touches-the-real-desktop are NEVER
+        // passed by this MCP surface, so host invoke cannot be unlocked here.
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+
+        let started = Instant::now();
+        let output =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+                Err(_) => {
+                    return Ok(desktop_invoke_error(json!({
+                        "code": "timeout",
+                        "message": format!("desktop_invoke exceeded {timeout_ms} ms"),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Err(e)) => {
+                    return Ok(desktop_invoke_error(json!({
+                        "code": "spawn_failed",
+                        "message": e.to_string(),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Ok(output)) => output,
+            };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+
+        match serde_json::from_str::<Value>(&stdout) {
+            Ok(mut payload) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert(
+                        "mcp_wrapper".to_string(),
+                        json!({
+                            "tool": self.name(),
+                            "read_only": false,
+                            "mode": if dry_run { "dry-run" } else { "isolated" },
+                            "host_protected": true,
+                            "duration_ms": duration_ms,
+                            "exit_code": output.status.code().unwrap_or(-1),
+                            "stderr": stderr,
+                            "stderr_truncated": stderr_truncated
+                        }),
+                    );
+                }
+                let mut result = ToolResult::json_text(&payload);
+                if !output.status.success() {
+                    result.is_error = true;
+                }
+                Ok(result)
+            }
+            Err(e) => Ok(desktop_invoke_error(json!({
+                "code": "invalid_json",
+                "message": e.to_string(),
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": output.status.code().unwrap_or(-1),
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            }))),
+        }
+    }
+}
+
+fn desktop_invoke_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_DESKTOP_INVOKE_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/desktop_invoke.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/desktop_invoke.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_invoke.py")
+}
+
+fn desktop_invoke_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "desktop_invoke_mcp_error.v0",
         "status": "error",
         "error": error,
     }));
@@ -25429,6 +25676,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(DesktopActionTool::new(hub.clone())),
     );
+    // Linux Computer Use L2: gated semantic AT-SPI invoke (isolated-only MVP).
+    // NOT in codex-essential (mutating); host-app invoke unreachable via this
+    // MCP surface — only dry-run or isolated (cage_pid process subtree).
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(DesktopInvokeTool::new(hub.clone())),
+    );
     reg_if(
         &mut reg,
         policy,
@@ -30562,8 +30818,14 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .await
                 .expect("execute table"),
         );
-        assert_eq!(ok["verify_status"], "rendered_ok", "table should render; got {ok}");
-        assert!(ok["screenshot_path"].is_string(), "screenshot should be captured");
+        assert_eq!(
+            ok["verify_status"], "rendered_ok",
+            "table should render; got {ok}"
+        );
+        assert!(
+            ok["screenshot_path"].is_string(),
+            "screenshot should be captured"
+        );
 
         // An empty html artifact renders nothing visible → blank (the real,
         // end-to-end falsifier the unit suite can only approximate).
@@ -30576,7 +30838,10 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .await
                 .expect("execute empty"),
         );
-        assert_eq!(blank["verify_status"], "blank", "empty artifact must be blank; got {blank}");
+        assert_eq!(
+            blank["verify_status"], "blank",
+            "empty artifact must be blank; got {blank}"
+        );
     }
 
     #[test]
@@ -30727,6 +30992,151 @@ print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
         assert!(argv.contains(&"type"));
         assert!(argv.contains(&"hi"));
         assert!(argv.contains(&"--dry-run"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn desktop_invoke_not_exposed_to_codex_essential() {
+        // Mutating semantic-invoke surface must stay out of the Codex essential allowlist.
+        assert!(!codex_essential_tool(Tier::Standard, "desktop_invoke"));
+        assert!(!codex_essential_tool(Tier::Niche, "desktop_invoke"));
+        // ...while the read-only snapshot IS exposed (sanity contrast).
+        assert!(codex_essential_tool(Tier::Standard, "desktop_snapshot"));
+    }
+
+    #[test]
+    fn desktop_invoke_schema_hides_host_unlock_flags() {
+        let p = ToolPolicy::from_values(Some("all"), None, None, None);
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "desktop_invoke")
+            .expect("desktop_invoke schema");
+        assert!(tool.description.contains("ISOLATED"));
+        // host-unlock confirm flags must not be part of the exposed surface
+        assert!(tool.input_schema["properties"].get("confirm").is_none());
+        assert!(tool.input_schema["properties"]
+            .get("i_understand_this_touches_the_real_desktop")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn desktop_invoke_refuses_host_invoke() {
+        // A selector but no dry_run and no cage_pid => must refuse before exec.
+        let tool = DesktopInvokeTool::new(Hub::builder().build());
+        let out = tool
+            .execute(json!({ "name": "Save" }), &ToolContext::default())
+            .await
+            .expect("execute");
+        assert!(out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["error"]["code"], "host_invoke_not_exposed");
+    }
+
+    #[tokio::test]
+    async fn desktop_invoke_isolated_passes_flags_without_confirm() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-invoke-iso-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_invoke.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopInvokeTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "name": "INVOKE_TARGET",
+                    "role": "button",
+                    "cage_pid": 12345,
+                    "script_path": script.to_string_lossy(),
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        let argv: Vec<&str> = payload["argv"]
+            .as_array()
+            .expect("argv")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(argv.contains(&"--name"));
+        assert!(argv.contains(&"INVOKE_TARGET"));
+        assert!(argv.contains(&"--cage-pid"));
+        assert!(argv.contains(&"12345"));
+        // host-unlock flags are NEVER passed by this surface
+        assert!(!argv.contains(&"--confirm"));
+        assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
+        assert!(!argv.contains(&"--dry-run"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn desktop_invoke_dry_run_passes_dry_run_flag() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-invoke-dry-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_invoke.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopInvokeTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "name": "Save",
+                    "dry_run": true,
+                    "script_path": script.to_string_lossy(),
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        let argv: Vec<&str> = payload["argv"]
+            .as_array()
+            .expect("argv")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(argv.contains(&"--name"));
+        assert!(argv.contains(&"Save"));
+        assert!(argv.contains(&"--dry-run"));
+        assert!(!argv.contains(&"--confirm"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
