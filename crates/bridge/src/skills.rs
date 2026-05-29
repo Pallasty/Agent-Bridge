@@ -1203,6 +1203,17 @@ fn route_item_json(rank: usize, routed: &RoutedSkillHit, body_chars: usize) -> s
         "show": format!("agent-bridge skills show {}", rec.key),
         "show_json": format!("agent-bridge skills show {} --json", rec.key),
     });
+    // Surface declared DIALS (authoring convention; see docs/skill-authoring-spec.md)
+    // so a caller can see a skill's tunable knobs + baselines before loading the
+    // full body. Omitted entirely for skills that don't opt into the convention,
+    // keeping the route payload lean for the common case.
+    let dials = parse_dials(&rec.content);
+    if !dials.is_empty() {
+        obj["dials"] = serde_json::json!(dials
+            .iter()
+            .map(|(name, value)| serde_json::json!({ "name": name, "value": value }))
+            .collect::<Vec<_>>());
+    }
     if routed.feedback.count > 0 {
         obj["feedback_score"] = serde_json::json!(routed.feedback.score);
         obj["feedback_count"] = serde_json::json!(routed.feedback.count);
@@ -2530,16 +2541,17 @@ fn lint_body(body: &str) -> Vec<LintFinding> {
     out
 }
 
-/// Parse the `RIGOR` dial value from a `## DIALS` section, if present.
+/// Parse every dial declared in a `## DIALS` section, in document order.
 ///
-/// Recognizes the authoring convention `- ` + "`RIGOR: N`" inside a `## DIALS`
-/// heading block (see docs/skill-authoring-spec.md). Returns `None` when the
-/// skill declares no DIALS section or no RIGOR dial, so the coherence lint in
-/// [`lint_body`] only applies to skills that opt into the convention.
-///
-/// `to_ascii_lowercase` preserves byte length, so the byte offset of the
-/// lowercased "rigor" match aligns with the original line.
-fn parse_rigor_dial(body: &str) -> Option<u32> {
+/// A dial line follows the authoring convention `- ` + "`NAME: N`" (see
+/// docs/skill-authoring-spec.md), where NAME is an UPPER_SNAKE identifier and N
+/// an integer. Returns an empty vec when the skill declares no `## DIALS`
+/// section, so anything keyed off dials (the [`lint_body`] coherence check, the
+/// `skills_route` metadata surface) only applies to skills that opt into the
+/// convention. Only ASCII tokens are inspected, so CJK prose in the same line is
+/// skipped without panicking on byte boundaries.
+fn parse_dials(body: &str) -> Vec<(String, u32)> {
+    let mut out = Vec::new();
     let mut in_dials = false;
     for line in body.lines() {
         let trimmed = line.trim_start();
@@ -2549,22 +2561,61 @@ fn parse_rigor_dial(body: &str) -> Option<u32> {
             in_dials = trimmed.to_ascii_lowercase().contains("dials");
             continue;
         }
-        if !in_dials {
-            continue;
-        }
-        let lower = line.to_ascii_lowercase();
-        if let Some(pos) = lower.find("rigor") {
-            let digits: String = line[pos + "rigor".len()..]
-                .chars()
-                .skip_while(|c| !c.is_ascii_digit())
-                .take_while(|c| c.is_ascii_digit())
-                .collect();
-            if let Ok(v) = digits.parse::<u32>() {
-                return Some(v);
+        if in_dials {
+            if let Some(pair) = parse_dial_line(line) {
+                out.push(pair);
             }
         }
     }
+    out
+}
+
+/// Extract the first `NAME: N` dial from a line, where NAME is an UPPER_SNAKE
+/// identifier (>= 2 chars) and N the first integer after the colon. Returns
+/// `None` if the line carries no dial. Scans by byte but only ever slices at
+/// ASCII positions, so non-ASCII bytes are walked over safely.
+fn parse_dial_line(line: &str) -> Option<(String, u32)> {
+    let b = line.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if !b[i].is_ascii_uppercase() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < b.len() && (b[i].is_ascii_uppercase() || b[i] == b'_' || b[i].is_ascii_digit()) {
+            i += 1;
+        }
+        let name = &line[start..i];
+        let mut j = i;
+        while j < b.len() && b[j] == b' ' {
+            j += 1;
+        }
+        if name.len() >= 2 && j < b.len() && b[j] == b':' {
+            j += 1;
+            while j < b.len() && b[j] == b' ' {
+                j += 1;
+            }
+            let dstart = j;
+            while j < b.len() && b[j].is_ascii_digit() {
+                j += 1;
+            }
+            if let Ok(v) = line[dstart..j].parse::<u32>() {
+                return Some((name.to_string(), v));
+            }
+        }
+        // `i` already sits past the uppercase run; keep scanning the rest.
+    }
     None
+}
+
+/// The `RIGOR` dial value from a `## DIALS` section, if declared. Thin wrapper
+/// over [`parse_dials`] used by the [`lint_body`] coherence check.
+fn parse_rigor_dial(body: &str) -> Option<u32> {
+    parse_dials(body)
+        .into_iter()
+        .find(|(name, _)| name == "RIGOR")
+        .map(|(_, v)| v)
 }
 
 fn lint_summary_tag(findings: &[LintFinding]) -> String {
@@ -3246,6 +3297,32 @@ mod tests {
         let body = "## DIALS\n- `RIGOR: 2` — quick draft\n";
         let f = lint_body(body);
         assert!(!f.iter().any(|x| x.rule == "rigor-without-preflight"));
+    }
+
+    #[test]
+    fn parse_dials_extracts_all_in_order() {
+        let body = "## DIALS\n- `RIGOR: 4` — production\n- `BLAST_RADIUS: 2` — single file\n\n## NEXT\n- `IGNORED: 9`\n";
+        let dials = parse_dials(body);
+        assert_eq!(
+            dials,
+            vec![("RIGOR".to_string(), 4), ("BLAST_RADIUS".to_string(), 2)]
+        );
+    }
+
+    #[test]
+    fn parse_dials_empty_without_section() {
+        assert!(parse_dials("# Skill\nNo dials. Apply RIGOR: 9 in prose.\n").is_empty());
+    }
+
+    #[test]
+    fn parse_dial_line_ignores_cjk_and_lowercase() {
+        // CJK prose around the dial must not panic or false-match; lowercase isn't a dial.
+        assert_eq!(
+            parse_dial_line("- `RIGOR: 3` — 严格度，1=草稿 5=生产"),
+            Some(("RIGOR".to_string(), 3))
+        );
+        assert_eq!(parse_dial_line("- rigor: 3 (lowercase, not a dial)"), None);
+        assert_eq!(parse_dial_line("纯中文一行，没有任何旋钮"), None);
     }
 
     #[test]
