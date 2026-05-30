@@ -5528,7 +5528,15 @@ impl McpTool for PresentDashboardTool {
                         match b.eval(&page, crate::present::DASHBOARD_READBACK_JS).await {
                             Ok(rv) => {
                                 let readback = crate::present::parse_dashboard_readback(&rv);
-                                let expected = match dashboard_replay_snapshot(
+                                // Compare the rendered head to the lane's CURRENT head,
+                                // recomputed NOW — independent of the value we embedded.
+                                // If the recompute fails we CANNOT confirm currency, so
+                                // report `error` rather than fall back to the embedded
+                                // head: comparing the DOM against the value we just
+                                // embedded would be a self-fulfilling H==H check that
+                                // could dishonestly report `embodied` (the lane never
+                                // claims an embodiment it didn't verify).
+                                match dashboard_replay_snapshot(
                                     &store,
                                     window_secs,
                                     limit,
@@ -5536,22 +5544,31 @@ impl McpTool for PresentDashboardTool {
                                 )
                                 .await
                                 {
-                                    Ok(s) => s
-                                        .get("chain_head")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string(),
-                                    Err(_) => chain_head.clone(),
-                                };
-                                embody_status =
-                                    crate::present::classify_embody(&readback, &expected);
-                                embody_detail = Some(format!(
-                                    "dom_head={} expected_head={} rendered={} rows={}",
-                                    short_head(&readback.chain_head),
-                                    short_head(&expected),
-                                    readback.rendered,
-                                    readback.rows
-                                ));
+                                    Ok(s) => {
+                                        let expected = s
+                                            .get("chain_head")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        embody_status = crate::present::classify_embody(
+                                            &readback, &expected,
+                                        );
+                                        embody_detail = Some(format!(
+                                            "dom_head={} expected_head={} rendered={} rows={}",
+                                            short_head(&readback.chain_head),
+                                            short_head(&expected),
+                                            readback.rendered,
+                                            readback.rows
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        embody_status = crate::present::EmbodyStatus::Error;
+                                        embody_detail = Some(format!(
+                                            "verify-time chain_head recompute failed \
+                                             (cannot confirm currency): {e}"
+                                        ));
+                                    }
+                                }
                             }
                             Err(e) => {
                                 embody_status = crate::present::EmbodyStatus::Error;
