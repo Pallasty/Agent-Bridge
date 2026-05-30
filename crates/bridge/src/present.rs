@@ -36,6 +36,18 @@ use std::path::{Path, PathBuf};
 /// Result envelope schema tag returned by the `present` tool.
 pub const PRESENT_SCHEMA: &str = "present/v0";
 
+/// Result envelope schema tag returned by the `present_dashboard` tool (E3).
+pub const PRESENT_DASHBOARD_SCHEMA: &str = "present_dashboard/v0";
+
+/// File stem (→ `_ab_dashboard.html`) of the E3 embodied-mirror surface. It is a
+/// STABLE path (not content-addressed) so the human keeps one browser tab open
+/// and every `present_dashboard` call refreshes the same file. It is excluded
+/// from [`list_artifacts`] so the mirror never mirrors itself (which would feed
+/// the dashboard back into the very `present_replay` chain it reflects). The
+/// leading `_` also keeps it clear of the 16-hex content-addressed ids, which
+/// never start with `_`.
+pub const DASHBOARD_BASENAME: &str = "_ab_dashboard";
+
 /// The id of the container wrapping the human-rendered artifact. The verify
 /// metrics query only inside this element so document chrome (provenance
 /// scripts/footer) cannot inflate the "did it render" signal.
@@ -141,6 +153,47 @@ impl InteractStatus {
             Self::Skipped => "skipped",
             Self::NoBrowser => "no_browser",
             Self::Error => "error",
+        }
+    }
+}
+
+/// E3 (embodied-mirror) self-verify outcome — the output-expression ladder's
+/// third honesty axis. E1 asks "did it render"; E2 "is the interactivity real";
+/// E3 asks "does the persistent surface actually REFLECT the current lane state"
+/// (the `present_replay` `chain_head`). Decided by the pure [`classify_embody`]
+/// so a stale or broken surface is a deterministic unit test, not a live
+/// assertion. The lane never claims an embodiment it didn't achieve (the E3
+/// counterpart to E1 `blank` / E2 `Dead`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmbodyStatus {
+    /// The surface rendered AND the `chain_head` it shows matches the lane's
+    /// current `chain_head` — the result faithfully inhabits the surface.
+    Embodied,
+    /// The surface rendered a `chain_head`, but it is NOT the current one — the
+    /// surface is behind the lane (a newer artifact landed). Honest "live but
+    /// out of date", distinct from a render fault.
+    Stale,
+    /// The surface produced nothing visible, or showed no `chain_head` at all —
+    /// a real render fault (the E3 `blank`/`Dead`).
+    Dead,
+    /// No browser available / capability denied / launch failed — degraded, not
+    /// failed (the artifact file was still written; mirrors `VerifyStatus::NoBrowser`).
+    NoBrowser,
+    /// The readback probe itself errored (eval threw) — surface still written.
+    Error,
+    /// Verify not requested.
+    Skipped,
+}
+
+impl EmbodyStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Embodied => "embodied",
+            Self::Stale => "stale",
+            Self::Dead => "dead",
+            Self::NoBrowser => "no_browser",
+            Self::Error => "error",
+            Self::Skipped => "skipped",
         }
     }
 }
@@ -856,6 +909,18 @@ pub fn list_artifacts(dir: &Path, limit: usize, kind_filter: Option<&str>) -> Ve
         if out.len() >= limit {
             break;
         }
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        // The E3 embodied-mirror surface is infrastructure, not a content
+        // artifact: excluding it keeps the mirror out of the present_replay
+        // chain it reflects (otherwise each dashboard write would perturb the
+        // very chain_head it displays).
+        if stem == DASHBOARD_BASENAME {
+            continue;
+        }
         let html = match std::fs::read_to_string(&path) {
             Ok(h) => h,
             Err(_) => continue,
@@ -874,11 +939,7 @@ pub fn list_artifacts(dir: &Path, limit: usize, kind_filter: Option<&str>) -> Ve
             }
         }
         out.push(ArtifactInfo {
-            id: path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or_default()
-                .to_string(),
+            id: stem,
             artifact_path: path.display().to_string(),
             kind,
             ts: prov
@@ -996,6 +1057,222 @@ fn present_hex_lower(bytes: &[u8]) -> String {
         out.push(HEX[(b & 0x0f) as usize] as char);
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// E3 — embodied-mirror surface (output-expression ladder's third rung)
+// ---------------------------------------------------------------------------
+//
+// E1 wrote a static artifact; E2 made it interactive; E3 lets the lane state
+// INHABIT a persistent surface the human already watches — a dashboard browser
+// tab. The dashboard is a read-only MIRROR of the slice-2 `present_replay`
+// snapshot (NOT a new source of truth): its content is the snapshot's
+// `chain_head` + counts + recent events. Embodiment is falsifiable: a headless
+// probe reads the `chain_head` the rendered surface shows and compares it to the
+// lane's current `chain_head`. Surface reflects current head → `embodied`;
+// reflects an older head → `stale`; renders nothing / no head → `dead`.
+//
+// Honesty discipline (shared with E1/E2): the human-facing render lives in
+// `<main id="ab-render">` and the readback target `#ab-chain-head` is INSIDE it,
+// so a surface that renders no head for a human cannot report `embodied` — the
+// machine-only `#ab-payload` chrome (in <head>) is NOT what the falsifier reads.
+
+/// Readback signature from [`DASHBOARD_READBACK_JS`], parsed for [`classify_embody`].
+#[derive(Debug, Clone, Default)]
+pub struct DashboardReadback {
+    /// `#ab-render` exists AND has ≥1 laid-out (visible) element — the E3 blank check.
+    pub rendered: bool,
+    /// The `chain_head` text the rendered `#ab-chain-head` element shows (the
+    /// human-visible head, not the machine `#ab-payload`).
+    pub chain_head: String,
+    /// Rendered event-table rows (diagnostic).
+    pub rows: usize,
+}
+
+/// The JS evaluated in the loaded dashboard to produce [`DashboardReadback`].
+/// Reads the human-rendered `#ab-chain-head` (NOT the `#ab-payload` chrome) so
+/// the falsifier proves what a human would actually see, and measures visible
+/// layout inside `#ab-render` ONLY (mirrors [`VERIFY_METRICS_JS`]). Keys MUST
+/// stay in sync with [`parse_dashboard_readback`] — guarded by a unit canary.
+pub const DASHBOARD_READBACK_JS: &str = "JSON.stringify((function(){var e=document.getElementById('ab-render');var ch=document.getElementById('ab-chain-head');var rows=document.querySelectorAll('#ab-events tbody tr').length;var vis=0;if(e){var els=e.querySelectorAll('*:not(script):not(style)');els.forEach(function(x){if(x.getClientRects().length>0)vis++;});}return{rendered:(!!e&&vis>0),chain_head:(ch?(ch.textContent||'').trim():''),rows:rows};})())";
+
+/// Parse the dashboard readback JSON. Tolerant of object-or-stringified-JSON
+/// like [`parse_metrics`], so the decision doesn't depend on which the backend returns.
+pub fn parse_dashboard_readback(v: &Value) -> DashboardReadback {
+    let obj = match v {
+        Value::String(s) => serde_json::from_str::<Value>(s).unwrap_or(Value::Null),
+        other => other.clone(),
+    };
+    DashboardReadback {
+        rendered: obj.get("rendered").and_then(Value::as_bool).unwrap_or(false),
+        chain_head: obj
+            .get("chain_head")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        rows: obj.get("rows").and_then(Value::as_u64).unwrap_or(0) as usize,
+    }
+}
+
+/// The E3 falsifier decision (pure, browser-free — sibling of [`classify_render`]
+/// / [`classify_interactivity`]). `Embodied` requires the surface rendered visible
+/// content AND the `chain_head` it shows equals the lane's current `chain_head`.
+/// A surface that renders an OLDER head is `Stale` (honest "live but behind"),
+/// not a fault; a surface that renders nothing, or shows no head at all, is `Dead`
+/// (a broken mirror cannot masquerade as embodied). The empty-lane case
+/// (`expected == ` all-zero genesis) is `Embodied` when the surface faithfully
+/// shows that genesis head — an empty lane is still faithfully mirrored.
+pub fn classify_embody(r: &DashboardReadback, expected_chain_head: &str) -> EmbodyStatus {
+    if !r.rendered {
+        return EmbodyStatus::Dead;
+    }
+    if r.chain_head.is_empty() {
+        return EmbodyStatus::Dead;
+    }
+    if r.chain_head == expected_chain_head {
+        EmbodyStatus::Embodied
+    } else {
+        EmbodyStatus::Stale
+    }
+}
+
+/// Render a [`present_replay_snapshot`] into the E3 embodied-mirror dashboard
+/// document. Pure (browser-free, unit-testable). The document mirrors the snapshot
+/// — `chain_head`, the count/drift/dual-encoding summary, and a recent-events
+/// table — and carries dual-encoding: the WHOLE snapshot is embedded as
+/// `#ab-payload` (machine bypass) while `chain_head` is ALSO rendered into the
+/// human-visible `<code id="ab-chain-head">` inside `#ab-render` (the readback
+/// target). Chrome (the `#ab-payload`/`#ab-provenance` scripts, the footer) lives
+/// OUTSIDE `#ab-render` so the E3 blank/readback check stays honest.
+pub fn build_dashboard_html(snapshot: &Value, title: Option<&str>) -> String {
+    let title_str = title.unwrap_or("Agent-Bridge present_dashboard — output lane mirror");
+    let chain_head = snapshot
+        .get("chain_head")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let u = |k: &str| snapshot.get(k).and_then(Value::as_u64).unwrap_or(0);
+    let i = |k: &str| snapshot.get(k).and_then(Value::as_i64).unwrap_or(0);
+    let artifact_count = u("artifact_count");
+    let present_calls_logged = u("present_calls_logged");
+    let drift = i("drift");
+    let dual_ok = u("dual_encoding_ok");
+    let dual_missing = u("dual_encoding_missing");
+    let window_secs = u("window_secs");
+    let generated_at = u("generated_at");
+
+    let events = snapshot
+        .get("events")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut rows_html = String::new();
+    for ev in &events {
+        let id = ev.get("artifact_id").and_then(Value::as_str).unwrap_or("");
+        let ts = ev
+            .get("ts")
+            .and_then(Value::as_u64)
+            .map(|t| t.to_string())
+            .unwrap_or_default();
+        let kind = ev.get("kind").and_then(Value::as_str).unwrap_or("—");
+        let dual = ev
+            .get("dual_encoding")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let bytes = ev.get("bytes").and_then(Value::as_u64).unwrap_or(0);
+        let hash = ev.get("hash").and_then(Value::as_str).unwrap_or("");
+        let hash_short: String = hash.chars().take(12).collect();
+        rows_html.push_str(&format!(
+            "<tr><td>{id}</td><td>{ts}</td><td>{kind}</td><td>{dual}</td><td>{bytes}</td><td><code>{hash}</code></td></tr>",
+            id = html_escape(id),
+            ts = html_escape(&ts),
+            kind = html_escape(kind),
+            dual = if dual { "✓" } else { "" },
+            bytes = bytes,
+            hash = html_escape(&hash_short),
+        ));
+    }
+    if rows_html.is_empty() {
+        rows_html =
+            "<tr><td colspan=\"6\"><em>no artifacts in window</em></td></tr>".to_string();
+    }
+
+    // The human-render region. #ab-chain-head is the readback target — it MUST be
+    // inside #ab-render so a surface that shows no head reports blank/dead.
+    let body = format!(
+        r#"<h1>{title}</h1>
+<p class="ab-head">chain_head: <code id="ab-chain-head">{head}</code></p>
+<ul class="ab-summary">
+<li>artifacts: <strong>{artifact_count}</strong></li>
+<li>present calls logged: {present_calls_logged}</li>
+<li>drift: {drift}</li>
+<li>dual-encoding: {dual_ok} ok / {dual_missing} missing</li>
+<li>window: {window_secs}s · generated_at: {generated_at}</li>
+</ul>
+<table id="ab-events"><thead><tr><th>artifact_id</th><th>ts</th><th>kind</th><th>dual</th><th>bytes</th><th>hash</th></tr></thead><tbody>{rows}</tbody></table>"#,
+        title = html_escape(title_str),
+        head = html_escape(chain_head),
+        artifact_count = artifact_count,
+        present_calls_logged = present_calls_logged,
+        drift = drift,
+        dual_ok = dual_ok,
+        dual_missing = dual_missing,
+        window_secs = window_secs,
+        generated_at = generated_at,
+        rows = rows_html,
+    );
+
+    // Dual-encoding chrome (machine side): the whole snapshot + provenance, both
+    // in <head> so a future kind=html body could never shadow them.
+    let payload_script = format!(
+        "<script type=\"application/json\" id=\"ab-payload\">{}</script>",
+        json_script(snapshot)
+    );
+    let provenance = serde_json::json!({
+        "generated_by": PRESENT_DASHBOARD_SCHEMA,
+        "surface": "browser_tab",
+        "ts": generated_at,
+        "chain_head": chain_head,
+    });
+    let prov_script = format!(
+        "<script type=\"application/json\" id=\"ab-provenance\">{}</script>",
+        json_script(&provenance)
+    );
+    let prov_footer = format!(
+        "<footer id=\"ab-provenance-view\">provenance: {}</footer>",
+        html_escape(&serde_json::to_string(&provenance).unwrap_or_default())
+    );
+
+    format!(
+        r#"<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="generator" content="agent-bridge {schema}">
+<title>{title}</title>
+{payload_script}
+{prov_script}
+<style>
+body{{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;margin:24px;color:#1a1a2e;background:#fafafe}}
+h1{{font-size:18px;margin:0 0 12px}}
+table{{border-collapse:collapse;margin:8px 0}}
+th,td{{border:1px solid #c7c7e0;padding:6px 10px;text-align:left;vertical-align:top}}
+th{{background:#eaeaf6}}
+code{{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#f4f4fb;padding:1px 5px;border-radius:4px;word-break:break-all}}
+.ab-head{{font-size:13px}}
+.ab-summary{{font-size:13px;color:#444;list-style:none;padding:0;margin:8px 0 16px;display:flex;flex-wrap:wrap;gap:6px 18px}}
+footer{{margin-top:28px;font-size:11px;color:#9a9ab0;border-top:1px solid #e3e3ef;padding-top:8px;word-break:break-all}}
+</style></head>
+<body>
+<main id="{region}">{body}</main>
+{prov_footer}
+</body></html>"#,
+        schema = PRESENT_DASHBOARD_SCHEMA,
+        title = html_escape(title_str),
+        region = RENDER_REGION_ID,
+        body = body,
+        payload_script = payload_script,
+        prov_script = prov_script,
+        prov_footer = prov_footer,
+    )
 }
 
 #[cfg(test)]
@@ -1497,5 +1774,165 @@ mod tests {
         assert_eq!(snap["chain_head"], json!(PRESENT_REPLAY_ZERO_HASH));
         assert_eq!(snap["drift"], json!(0));
         assert_eq!(snap["events"].as_array().unwrap().len(), 0);
+    }
+
+    // ----- E3 (embodied-mirror dashboard) -----
+
+    // The dashboard renders the snapshot's chain_head INTO the human #ab-render
+    // region (the readback target #ab-chain-head lives inside it, not only in the
+    // machine #ab-payload chrome), and embeds the whole snapshot as #ab-payload.
+    #[test]
+    fn e3_dashboard_mirrors_chain_head_in_render_region_and_payload() {
+        let arts = vec![
+            art("aaa", 100, "table", true),
+            art("bbb", 200, "html", false),
+        ];
+        let snap = present_replay_snapshot(&arts, 2, 86_400, 1_000);
+        let head = snap["chain_head"].as_str().unwrap().to_string();
+        assert_ne!(head, PRESENT_REPLAY_ZERO_HASH);
+
+        let html = build_dashboard_html(&snap, Some("mirror"));
+
+        // chain_head is rendered into the HUMAN region via #ab-chain-head, so a
+        // surface that shows no head reports blank/dead (the E3 falsifier hinges
+        // on this being inside #ab-render, not the machine chrome).
+        let region = render_region(&html).expect("render region present");
+        assert!(
+            region.contains("id=\"ab-chain-head\""),
+            "readback target must live inside #ab-render"
+        );
+        assert!(
+            region.contains(&head),
+            "rendered region must show the chain_head a human sees"
+        );
+        // both artifact ids appear in the events table (visible mirror content).
+        assert!(region.contains("aaa") && region.contains("bbb"));
+
+        // dual-encoding: the whole snapshot is recoverable from #ab-payload in ONE parse.
+        assert_eq!(extract_ab_payload(&html), Some(snap.clone()));
+        // provenance marks the embodied surface.
+        let prov = extract_script_json(&html, "ab-provenance").unwrap();
+        assert_eq!(prov["generated_by"], json!(PRESENT_DASHBOARD_SCHEMA));
+        assert_eq!(prov["surface"], json!("browser_tab"));
+        assert_eq!(prov["chain_head"], json!(head));
+    }
+
+    // empty lane → dashboard still renders (summary + genesis head + an explicit
+    // "no artifacts" row), so a human sees an empty-but-faithful mirror (vis>0,
+    // not blank/dead).
+    #[test]
+    fn e3_dashboard_empty_lane_still_renders_genesis_head() {
+        let snap = present_replay_snapshot(&[], 0, 86_400, 1_000);
+        let html = build_dashboard_html(&snap, None);
+        let region = render_region(&html).unwrap();
+        assert!(region.contains("id=\"ab-chain-head\""));
+        assert!(region.contains(PRESENT_REPLAY_ZERO_HASH));
+        assert!(region.contains("no artifacts in window"));
+    }
+
+    // The E3 falsifier (pure): embodied iff rendered AND head matches the current
+    // one; an older head is stale (live but behind); no render / no head is dead
+    // (a broken mirror cannot pass); the genesis head is embodied when faithfully shown.
+    #[test]
+    fn e3_classify_embody_matrix() {
+        let head = "abc123";
+        let embodied = DashboardReadback {
+            rendered: true,
+            chain_head: head.into(),
+            rows: 3,
+        };
+        assert_eq!(classify_embody(&embodied, head), EmbodyStatus::Embodied);
+
+        let stale = DashboardReadback {
+            rendered: true,
+            chain_head: "0ldhead".into(),
+            rows: 3,
+        };
+        assert_eq!(classify_embody(&stale, head), EmbodyStatus::Stale);
+
+        // rendered but no head shown → broken mirror → Dead.
+        let no_head = DashboardReadback {
+            rendered: true,
+            chain_head: String::new(),
+            rows: 0,
+        };
+        assert_eq!(classify_embody(&no_head, head), EmbodyStatus::Dead);
+
+        // nothing rendered → Dead (the E3 blank).
+        let blank = DashboardReadback {
+            rendered: false,
+            chain_head: head.into(),
+            rows: 0,
+        };
+        assert_eq!(classify_embody(&blank, head), EmbodyStatus::Dead);
+
+        // empty lane faithfully shown → Embodied.
+        let genesis = DashboardReadback {
+            rendered: true,
+            chain_head: PRESENT_REPLAY_ZERO_HASH.into(),
+            rows: 0,
+        };
+        assert_eq!(
+            classify_embody(&genesis, PRESENT_REPLAY_ZERO_HASH),
+            EmbodyStatus::Embodied
+        );
+    }
+
+    // parse_dashboard_readback tolerates object OR stringified JSON (mirrors parse_metrics)
+    // and trims the head text.
+    #[test]
+    fn e3_parse_dashboard_readback_string_and_object() {
+        let s =
+            parse_dashboard_readback(&json!("{\"rendered\":true,\"chain_head\":\"deadbeef\",\"rows\":4}"));
+        assert!(s.rendered);
+        assert_eq!(s.chain_head, "deadbeef");
+        assert_eq!(s.rows, 4);
+        let o = parse_dashboard_readback(&json!({"rendered": false, "chain_head": " x ", "rows": 0}));
+        assert!(!o.rendered);
+        assert_eq!(o.chain_head, "x");
+    }
+
+    // Canary: the readback probe targets the right ids and returns exactly the
+    // keys parse_dashboard_readback reads (cheap guard against silent drift).
+    #[test]
+    fn e3_dashboard_readback_js_canary() {
+        for needle in ["ab-render", "ab-chain-head", "ab-events", "getClientRects"] {
+            assert!(DASHBOARD_READBACK_JS.contains(needle), "readback-js missing {needle}");
+        }
+        for key in ["rendered", "chain_head", "rows"] {
+            assert!(DASHBOARD_READBACK_JS.contains(key), "readback-js missing key {key}");
+        }
+        assert!(!DASHBOARD_READBACK_JS.contains("</script>"));
+    }
+
+    // The mirror does not mirror itself: the stable dashboard file is excluded from
+    // list_artifacts, so writing it never feeds the present_replay chain it reflects.
+    #[test]
+    fn e3_list_artifacts_excludes_dashboard() {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-present-e3-test-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let prov = json!({"generated_by": "present/v0", "kind": "table", "ts": 111});
+        write_artifact_atomic(
+            &dir.join("aaaaaaaaaaaaaaaa.html"),
+            &build_html(PresentKind::Table, "", None, Some(&json!([{"x": 1}])), Some(&prov)),
+        )
+        .unwrap();
+        // a dashboard file sitting alongside the real artifacts must be skipped.
+        let snap = present_replay_snapshot(&[], 0, 86_400, 1_000);
+        write_artifact_atomic(
+            &dir.join(format!("{DASHBOARD_BASENAME}.html")),
+            &build_dashboard_html(&snap, None),
+        )
+        .unwrap();
+
+        let all = list_artifacts(&dir, 50, None);
+        assert_eq!(all.len(), 1, "dashboard must be excluded from the index");
+        assert_eq!(all[0].id, "aaaaaaaaaaaaaaaa");
+        assert!(all.iter().all(|a| a.id != DASHBOARD_BASENAME));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
