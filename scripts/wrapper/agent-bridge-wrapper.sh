@@ -214,6 +214,20 @@ if [ -f "$creds" ]; then
         export AGENT_BRIDGE_LLM_FALLBACK_MODEL="$fallback_model"
 fi
 
+# ----- Per-machine env overrides (per-host, NOT committed to the repo) -----
+# A machine-local file sets host-specific env that must not live in the shared
+# wrapper. Canonical use: AGENT_BRIDGE_CONTEXT_WINDOW=1000000 on a host running
+# the 1M-context beta — a 200K host must NOT set it or context_pressure_estimate
+# would UNDER-report fatigue (same opus-4.x id, two SKUs; see forum #1758).
+# Sourced BEFORE the always-on defaults so its values act like per-host caller
+# env: the guarded `${VAR:-}` exports below won't clobber them, yet a true
+# per-call `VAR=… agent-bridge …` still wins — so write entries here with
+# `export VAR="${VAR:-value}"` guards to preserve that precedence. Override the
+# file path via AGENT_BRIDGE_MACHINE_ENV. See scripts/wrapper/machine.env.example.
+machine_env="${AGENT_BRIDGE_MACHINE_ENV:-$HOME/.config/agent-bridge/machine.env}"
+# shellcheck source=/dev/null
+[ -f "$machine_env" ] && . "$machine_env"
+
 # Always-on flags
 export AGENT_BRIDGE_TOOL_PROFILE="${AGENT_BRIDGE_TOOL_PROFILE:-all}"
 
