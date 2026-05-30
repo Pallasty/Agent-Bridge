@@ -138,6 +138,16 @@ ExecStart=-%h/.local/bin/agent-bridge.real dream archive-orphan-stubs --older-th
 ExecStart=-%h/.local/bin/agent-bridge.real dream promote
 ExecStart=-%h/.local/bin/agent-bridge.real dream promote --tier 2
 ExecStart=-%h/.local/bin/agent-bridge.real dream reinforce-active --window-days 7 --min-access 5 --step 0.10 --ceiling 0.95
+# L7 P2 — AGENT.md drift detector (propose-only, NEVER auto-edits; user-gated
+# per the L7 safety rule). Scans recent lessons not yet covered by AGENT.md
+# and writes l7_proposed_update memories that surface in the next session
+# bootstrap as review candidates. GUARDED on AGENT.md existence via sh -c:
+# without an AGENT.md the detector treats every lesson as drift and emits
+# daily noise, so the loop stays dormant until a user opts in by creating the
+# file. Path mirrors agent_profile_path() (XDG_DATA_HOME override else
+# ~/.local/share/agent-bridge/AGENT.md). Mirrors the launchd daily-hygiene.sh
+# guard — keep the two in sync.
+ExecStart=-/bin/sh -c 'AGENT_MD="${XDG_DATA_HOME:-$HOME/.local/share}/agent-bridge/AGENT.md"; if [ -f "$AGENT_MD" ]; then "$HOME/.local/bin/agent-bridge.real" dream agent-md-drift --window-days 14; else echo "L7 drift: no AGENT.md at $AGENT_MD — skip (loop dormant until user creates it)"; fi'
 # ζ-19 — retire state machine step. Stale archived rows (updated_at
 # 14+ days ago, set by ζ-14 at archive time) get downgraded to
 # tombstoned. The 14d window comfortably outstrips ζ-18's restore

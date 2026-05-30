@@ -40,6 +40,21 @@ echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) ζ-17 daily hygiene begin ==="
 # the system is entropy-monotonic (decay only, never reward).
 "$BIN" dream reinforce-active --window-days 7 --min-access 5 --step 0.05 --ceiling 0.95 || true
 
+# L7 self-learning pass: AGENT.md drift detector (propose-only, never
+# auto-edits — user-gated per the L7 safety rule). Scans recent lessons not
+# yet covered by AGENT.md and writes l7_proposed_update memories that surface
+# in the next session bootstrap as review candidates. GUARDED on AGENT.md
+# existence: with no AGENT.md the detector would treat every lesson as drift
+# and emit daily noise, so the loop stays silent until a user opts in by
+# creating the file. Default path mirrors agent_profile_path()
+# (XDG_DATA_HOME override, else ~/.local/share/agent-bridge/AGENT.md).
+AGENT_MD="${XDG_DATA_HOME:-$HOME/.local/share}/agent-bridge/AGENT.md"
+if [[ -f "$AGENT_MD" ]]; then
+  "$BIN" dream agent-md-drift --window-days 14 || true
+else
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) ζ-17 L7 drift: no AGENT.md at $AGENT_MD — skip (propose-only loop dormant until user creates it)"
+fi
+
 # Record pass: snapshot last so it captures the post-hygiene state.
 # Tomorrow's `dream diff --auto` (ζ-16) pairs this with the previous
 # daily for the net delta.
