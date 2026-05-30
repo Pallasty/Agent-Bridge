@@ -129,6 +129,44 @@ pub fn model_supports_1m_beta(model: &str) -> bool {
     m.contains("opus-4") || m.contains("opus 4") || m.contains("sonnet-4") || m.contains("sonnet 4")
 }
 
+/// Resolve the effective context-window limit and its provenance.
+///
+/// Precedence: explicit caller arg (>0) > `env_window` (machine-level truth,
+/// read from `AGENT_BRIDGE_CONTEXT_WINDOW` by the caller) > conservative
+/// [`model_context_limit`] default.
+///
+/// The env tier is what makes the fix *take effect in practice*: a 1M-beta
+/// machine sets `AGENT_BRIDGE_CONTEXT_WINDOW=1000000` once (in the wrapper /
+/// daemon env) and every `context_pressure_estimate` reads correctly without
+/// each caller remembering to pass `context_window` — and crucially it works
+/// even when an MCP client's stale tool schema strips the unknown
+/// `context_window` arg before it reaches the server (the #1758 trap).
+///
+/// Returns `(limit, source)` where source ∈ `explicit | env | model_default`.
+pub fn resolve_context_window(
+    explicit: Option<u64>,
+    env_window: Option<u64>,
+    model: &str,
+) -> (u64, &'static str) {
+    if let Some(w) = explicit.filter(|&w| w > 0) {
+        (w, "explicit")
+    } else if let Some(w) = env_window.filter(|&w| w > 0) {
+        (w, "env")
+    } else {
+        (model_context_limit(model), "model_default")
+    }
+}
+
+/// Read `AGENT_BRIDGE_CONTEXT_WINDOW` as a positive token count, if set and
+/// parseable. Kept separate from [`resolve_context_window`] so the resolver
+/// stays pure/testable.
+pub fn env_context_window() -> Option<u64> {
+    std::env::var("AGENT_BRIDGE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|&w| w > 0)
+}
+
 pub fn budget_recommendation(pct_used: f64) -> &'static str {
     if pct_used < 60.0 {
         "nominal"
@@ -295,6 +333,34 @@ mod tests {
                 "{m} must NOT be flagged as 1M-beta"
             );
         }
+    }
+
+    #[test]
+    fn resolve_context_window_precedence() {
+        // explicit wins over both env and model default.
+        assert_eq!(
+            resolve_context_window(Some(1_000_000), Some(500_000), "claude-opus-4-8"),
+            (1_000_000, "explicit")
+        );
+        // env wins over model default when no explicit arg.
+        assert_eq!(
+            resolve_context_window(None, Some(1_000_000), "claude-opus-4-8"),
+            (1_000_000, "env")
+        );
+        // falls back to conservative model default when neither set.
+        assert_eq!(
+            resolve_context_window(None, None, "claude-opus-4-8"),
+            (200_000, "model_default")
+        );
+        // zero / invalid values are ignored at each tier.
+        assert_eq!(
+            resolve_context_window(Some(0), Some(0), "claude-opus-4-8"),
+            (200_000, "model_default")
+        );
+        assert_eq!(
+            resolve_context_window(Some(0), Some(1_000_000), "claude-opus-4-8"),
+            (1_000_000, "env")
+        );
     }
 
     #[test]

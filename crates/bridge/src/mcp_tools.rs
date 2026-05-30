@@ -45,7 +45,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
 
 use crate::context_budget::{
-    budget_recommendation, estimate_tokens_from_text, estimated_usage_tokens, model_context_limit,
+    budget_recommendation, env_context_window, estimate_tokens_from_text, estimated_usage_tokens,
+    resolve_context_window,
 };
 use crate::hub::Hub;
 use crate::ide::{queue_ide_command, read_ide_snapshot, IdeCommandOptions, IdeSnapshotOptions};
@@ -22440,7 +22441,7 @@ impl McpTool for ContextBudgetTool {
                     "context_window": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Explicit context-window size in tokens — overrides the model→limit lookup. Pass 1000000 for long-context-beta (opus-4.x / sonnet-4.x @ 1M) sessions; the model name alone can't reveal the 200K-vs-1M SKU."
+                        "description": "Explicit context-window size in tokens — overrides the model→limit lookup. Pass 1000000 for long-context-beta (opus-4.x / sonnet-4.x @ 1M) sessions; the model name alone can't reveal the 200K-vs-1M SKU. Precedence: this arg > AGENT_BRIDGE_CONTEXT_WINDOW env > model default."
                     },
                     "conversation_turns": {
                         "type": "integer",
@@ -22470,20 +22471,14 @@ impl McpTool for ContextBudgetTool {
             .get("text_sample")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        // Explicit caller-supplied window wins over the model→limit lookup;
-        // the lookup stays a conservative 200K floor since the model id can't
-        // reveal the 200K-vs-1M SKU (see context_pressure_estimate / #1758).
+        // Window precedence: explicit arg > AGENT_BRIDGE_CONTEXT_WINDOW env >
+        // conservative model default (see context_pressure_estimate / #1758).
         let explicit_window = args
             .get("context_window")
             .or_else(|| args.get("model_limit"))
-            .and_then(|v| v.as_u64())
-            .filter(|&w| w > 0);
-        let limit = explicit_window.unwrap_or_else(|| model_context_limit(model));
-        let limit_source = if explicit_window.is_some() {
-            "explicit"
-        } else {
-            "model_default"
-        };
+            .and_then(|v| v.as_u64());
+        let (limit, limit_source) =
+            resolve_context_window(explicit_window, env_context_window(), model);
         let estimated = estimated_usage_tokens(text, turns);
         let pct_raw = if limit == 0 {
             0.0
@@ -22558,7 +22553,7 @@ impl McpTool for ContextPressureEstimateTool {
                     "context_window": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Explicit context-window size in tokens — overrides the model→limit lookup. REQUIRED for accuracy on long-context-beta sessions (e.g. opus-4.x / sonnet-4.x running the 1M beta): the model name alone cannot reveal the 200K-vs-1M SKU, so omitting this defaults to a conservative 200K and inflates pressure up to 5×. Pass 1000000 when on the 1M beta."
+                        "description": "Explicit context-window size in tokens — overrides the model→limit lookup. Use on long-context-beta sessions (e.g. opus-4.x / sonnet-4.x @ 1M): the model name alone cannot reveal the 200K-vs-1M SKU, so omitting this defaults to a conservative 200K and inflates pressure up to 5×. Pass 1000000 when on the 1M beta. Precedence: this arg > AGENT_BRIDGE_CONTEXT_WINDOW env > model default (set the env once machine-wide to avoid per-call args)."
                     },
                     "conversation_turns": {
                         "type": "integer",
@@ -22576,8 +22571,8 @@ impl McpTool for ContextPressureEstimateTool {
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         use crate::context_budget::{
-            budget_recommendation, estimated_usage_tokens, fatigue_tier, model_context_limit,
-            model_supports_1m_beta,
+            budget_recommendation, env_context_window, estimated_usage_tokens, fatigue_tier,
+            model_supports_1m_beta, resolve_context_window,
         };
         let model = args
             .get("model")
@@ -22594,25 +22589,20 @@ impl McpTool for ContextPressureEstimateTool {
             .unwrap_or("");
         let text_sample_provided = !text_raw.is_empty();
 
-        // Explicit caller-supplied window wins over the model→limit lookup.
-        // (`model_limit` accepted as a defensive alias for callers following
-        // the orchestrate_scan budget_hint.) The model id alone can't reveal
-        // the 200K-vs-1M SKU, so the lookup stays a conservative 200K floor.
+        // Resolve the window: explicit caller arg > AGENT_BRIDGE_CONTEXT_WINDOW
+        // env (machine-level truth, survives a client stripping the unknown
+        // arg) > conservative model default. `model_limit` accepted as a
+        // defensive alias for callers following the orchestrate_scan hint.
         let explicit_window = args
             .get("context_window")
             .or_else(|| args.get("model_limit"))
-            .and_then(|v| v.as_u64())
-            .filter(|&w| w > 0);
-        let limit = explicit_window.unwrap_or_else(|| model_context_limit(model));
-        let limit_source = if explicit_window.is_some() {
-            "explicit"
-        } else {
-            "model_default"
-        };
-        // Flag the 1M ambiguity only when we fell back to the default AND the
-        // model is a long-context-beta family — tells the caller to pass an
-        // explicit context_window (guards the #1758 5× inflation).
-        let one_m_beta_possible = explicit_window.is_none() && model_supports_1m_beta(model);
+            .and_then(|v| v.as_u64());
+        let (limit, limit_source) =
+            resolve_context_window(explicit_window, env_context_window(), model);
+        // Flag the 1M ambiguity only when we fell all the way back to the
+        // model default AND the model is a long-context-beta family — tells
+        // the caller to set the window (guards the #1758 5× inflation).
+        let one_m_beta_possible = limit_source == "model_default" && model_supports_1m_beta(model);
         let estimated = estimated_usage_tokens(text_raw, turns);
         let pct_raw = if limit == 0 {
             0.0
@@ -22640,7 +22630,7 @@ impl McpTool for ContextPressureEstimateTool {
         });
         if one_m_beta_possible {
             note.push_str(
-                " NOTE: limit defaulted to 200K but this is a long-context-beta family (opus-4.x / sonnet-4.x); if the session runs the 1M beta, pass context_window=1000000 — otherwise pct_used / fatigue_tier are inflated up to 5×.",
+                " NOTE: limit defaulted to 200K but this is a long-context-beta family (opus-4.x / sonnet-4.x); if the session runs the 1M beta, pass context_window=1000000 (or set AGENT_BRIDGE_CONTEXT_WINDOW=1000000 once, machine-wide — survives clients that strip the arg) — otherwise pct_used / fatigue_tier are inflated up to 5×.",
             );
         }
 
