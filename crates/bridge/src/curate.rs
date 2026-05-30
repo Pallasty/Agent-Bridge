@@ -402,6 +402,68 @@ fn strip_bullet(line: &str) -> Option<&str> {
     None
 }
 
+/// Tag applied to curated rows whose content carries a precise, fabricatable
+/// identifier (bare git SHA or `#NNNN` post-id). Lets the bootstrap row
+/// formatter render them with a "verify-before-citing" marker so a fabricated
+/// identifier cannot be laundered into the substrate and re-cited as fact.
+/// (#1758 post-mortem hardening — defense-in-depth, not the primary fix.)
+pub(crate) const UNVERIFIED_IDENTIFIER_TAG: &str = "unverified_identifier";
+
+/// True if `s` contains a token that *looks like* a precise, fabricatable
+/// identifier the agent should re-verify against git/forum before citing:
+/// a bare hex run of 7–40 chars (git SHA shape) or a `#` followed by 2–6
+/// digits (forum post-id shape).
+///
+/// Pure char-scan (no regex dep). Deliberately conservative: a hex run must
+/// be a boundary-delimited word that is *all* hex AND contains BOTH at least
+/// one digit AND at least one hex-letter (a–f). That two-sided requirement is
+/// what a real git SHA prefix almost always satisfies (P(missing either in 7
+/// hex chars) ≈ 3.8%), while it rejects pure-decimal numbers ("1234567",
+/// "1978" — no hex letter) and a–f-only words ("deadbeef", "facade" — no
+/// digit). Worth the ~4% miss on rare all-digit/all-letter SHAs to avoid
+/// flagging every multi-digit count as an identifier.
+pub(crate) fn contains_unverified_identifier(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    // #NNNN post-id (2–6 digits, not part of a longer digit run).
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'#' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                j += 1;
+            }
+            let digits = j - (i + 1);
+            if (2..=6).contains(&digits) {
+                return true;
+            }
+        }
+    }
+    // Bare hex run of 7–40 chars, boundary-delimited, all-hex, ≥1 digit.
+    let is_word = |b: u8| b.is_ascii_alphanumeric();
+    let is_hex = |b: u8| b.is_ascii_hexdigit();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Skip to the start of a maximal word run.
+        if !is_word(bytes[i]) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && is_word(bytes[i]) {
+            i += 1;
+        }
+        let word = &bytes[start..i];
+        let len = word.len();
+        if (7..=40).contains(&len)
+            && word.iter().all(|&b| is_hex(b))
+            && word.iter().any(|&b| b.is_ascii_digit())
+            && word.iter().any(|&b| b.is_ascii_alphabetic())
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Push one curated record into `results`.
 pub(crate) fn push_curated(
     results: &mut Vec<MemoryRecord>,
@@ -423,11 +485,15 @@ pub(crate) fn push_curated(
         idx,
         &slug[..slug.len().min(20)]
     );
+    let mut tags = vec!["auto_curated".to_string()];
+    if contains_unverified_identifier(content) {
+        tags.push(UNVERIFIED_IDENTIFIER_TAG.to_string());
+    }
     results.push(MemoryRecord {
         key,
         kind: kind.to_string(),
         content: content.to_string(),
-        tags: vec!["auto_curated".to_string()],
+        tags,
         related_keys: vec![],
         scope: None,
         created_at: now,
@@ -577,11 +643,15 @@ fn curate_implicit(
             f64::from((0.5 + (score - opts.implicit_score_threshold) * 0.25).min(0.85));
         let key = format!("curated_implicit_{}{}", kind, simple_hash(&content));
 
+        let mut tags = vec!["auto_curated".to_string(), "implicit".to_string()];
+        if contains_unverified_identifier(&content) {
+            tags.push(UNVERIFIED_IDENTIFIER_TAG.to_string());
+        }
         results.push(MemoryRecord {
             key,
             kind: kind.to_string(),
             content,
-            tags: vec!["auto_curated".to_string(), "implicit".to_string()],
+            tags,
             related_keys: vec![],
             scope: None,
             created_at: now,
@@ -916,6 +986,85 @@ mod tests {
         assert!(
             recs.is_empty(),
             "after filtering session_handoff, vec must be empty"
+        );
+    }
+
+    // ── #1758 hardening: unverified-identifier detection + tagging ──────────
+
+    #[test]
+    fn detects_git_sha_and_post_id_shapes() {
+        // True positives: bare git SHAs (must contain ≥1 digit) and #NNNN.
+        for s in [
+            "the root cause was fixed in 2c6e76b after review",
+            "shipped as commit c63df56 to master",
+            "deployed sha 77861c1656167d11 verified",
+            "see forum #1758 for the finding",
+            "resolved in #92 (the output lane thread)",
+            "pushed a689d23",
+        ] {
+            assert!(
+                contains_unverified_identifier(s),
+                "should flag identifier in: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn does_not_flag_ordinary_prose() {
+        // False positives to avoid: all-letter words (even 7+ chars), short
+        // numbers that aren't #-prefixed, decimals, long digit IDs.
+        for s in [
+            "feedback on the deadbeef design was positive", // all-letter words, no all-hex+digit run
+            "the cafe served coffee",                       // 'cafe' is hex-only (4) but < 7 chars
+            "we shipped version 3 today",                   // bare digit, no #
+            "coactivation AUC went from 0.68 to 0.84",      // decimals, no identifier
+            "reindexed all 1978 rows",                      // 4-digit number, no #
+            "a plain sentence with no identifiers at all",
+        ] {
+            assert!(
+                !contains_unverified_identifier(s),
+                "should NOT flag: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn post_id_digit_bounds() {
+        assert!(contains_unverified_identifier("#12")); // 2 digits → flagged
+        assert!(contains_unverified_identifier("#123456")); // 6 digits → flagged
+        assert!(!contains_unverified_identifier("#1")); // 1 digit → not flagged
+        assert!(!contains_unverified_identifier("#1234567")); // 7 digits → out of post-id range
+    }
+
+    #[test]
+    fn curate_tags_sha_bearing_lesson_as_unverified() {
+        // An explicit-marker line carrying a SHA must get the tag so it can't
+        // be laundered into the substrate as a settled fact.
+        let text = "lesson: the root cause was fixed in commit 2c6e76b and deployed";
+        let recs = curate_conversation_with_options(text, None, 10, CurateOptions::default());
+        let r = recs
+            .iter()
+            .find(|r| r.kind == "lesson")
+            .expect("a lesson should be extracted");
+        assert!(
+            r.tags.iter().any(|t| t == UNVERIFIED_IDENTIFIER_TAG),
+            "SHA-bearing curated lesson must carry {UNVERIFIED_IDENTIFIER_TAG}; tags={:?}",
+            r.tags
+        );
+    }
+
+    #[test]
+    fn curate_does_not_tag_identifier_free_lesson() {
+        let text = "lesson: always scan the forum before implementing in a shared session repo";
+        let recs = curate_conversation_with_options(text, None, 10, CurateOptions::default());
+        let r = recs
+            .iter()
+            .find(|r| r.kind == "lesson")
+            .expect("a lesson should be extracted");
+        assert!(
+            !r.tags.iter().any(|t| t == UNVERIFIED_IDENTIFIER_TAG),
+            "identifier-free lesson must NOT carry the tag; tags={:?}",
+            r.tags
         );
     }
 }

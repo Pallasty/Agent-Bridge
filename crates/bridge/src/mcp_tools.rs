@@ -13080,9 +13080,23 @@ fn format_bootstrap_memory_rows(rows: &[MemoryRecord], snippet_len: usize) -> Ve
                 ""
             };
             let imp_marker = if r.importance >= 0.7 { "★" } else { "" };
+            // #1758 hardening: rows carrying a fabricatable identifier (bare
+            // git SHA / #post-id) — either flagged at curate time or detected
+            // here for rows predating the tag — get a ⚠ref marker so recalled
+            // identifiers read as "verify before citing", not settled fact.
+            let ref_marker = if r
+                .tags
+                .iter()
+                .any(|t| t == crate::curate::UNVERIFIED_IDENTIFIER_TAG)
+                || crate::curate::contains_unverified_identifier(&snippet)
+            {
+                " ⚠ref"
+            } else {
+                ""
+            };
             format!(
-                "[{}] {}{}{}: {}{}",
-                r.kind, r.key, imp_marker, tags, snippet, ellipsis
+                "[{}] {}{}{}{}: {}{}",
+                r.kind, r.key, imp_marker, ref_marker, tags, snippet, ellipsis
             )
         })
         .collect()
@@ -13793,6 +13807,14 @@ fn session_lifecycle_hint() -> String {
      1. session_curate(conversation_text=<recent context summary>) — extract and save lessons; \
         prefix lines with handoff: for next-session continuity\n\
      2. session_finalize() — compact stale memories + optional export\n\
+     --- Grounded-claim rule (#1758) ---\n\
+     Any outward claim that cites a produced identifier (commit SHA, PR#, \
+     deployed sha, post-id) MUST be emitted in a SEPARATE tool turn AFTER the \
+     producing call returns its real value — never batch the producing call \
+     (git commit / deploy) together with the forum_post / memory_save that \
+     references it; at batch time the value does not yet exist and gets \
+     confabulated. A denied or cancelled tool call did NOT run — re-verify, \
+     don't assume success.\n\
      =================================="
         .to_string()
 }
@@ -28386,6 +28408,54 @@ mod tests {
             Some(ContentBlock::Text { text }) => text.clone(),
             other => panic!("expected text result, got {other:?}"),
         }
+    }
+
+    // #1758 hardening: bootstrap rows carrying a fabricatable identifier get a
+    // ⚠ref marker (via tag or content detection); identifier-free rows do not.
+    #[test]
+    fn bootstrap_rows_mark_unverified_identifiers() {
+        let mk = |content: &str, tags: Vec<String>| MemoryRecord {
+            key: "k".into(),
+            kind: "lesson".into(),
+            content: content.into(),
+            tags,
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        let rows = vec![
+            mk("root cause fixed in 2c6e76b, deployed", vec![]), // SHA in content
+            mk("see forum #1758 for details", vec![]),          // post-id in content
+            mk(
+                "tagged at curate time",
+                vec![crate::curate::UNVERIFIED_IDENTIFIER_TAG.into()],
+            ), // tag-driven
+            mk("scan the forum before implementing", vec![]),   // clean
+        ];
+        let out = format_bootstrap_memory_rows(&rows, 200);
+        assert!(out[0].contains("⚠ref"), "SHA row must be marked: {}", out[0]);
+        assert!(
+            out[1].contains("⚠ref"),
+            "post-id row must be marked: {}",
+            out[1]
+        );
+        assert!(
+            out[2].contains("⚠ref"),
+            "tagged row must be marked: {}",
+            out[2]
+        );
+        assert!(
+            !out[3].contains("⚠ref"),
+            "clean row must NOT be marked: {}",
+            out[3]
+        );
     }
 
     fn result_json(res: &ToolResult) -> Value {
