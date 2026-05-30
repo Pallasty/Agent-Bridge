@@ -4801,7 +4801,8 @@ impl McpTool for PresentTool {
         // can actually be driven (keyed table), so the tool never claims interactivity
         // it didn't add.
         let interactive_req = args.get("interactive").and_then(|v| v.as_bool()).unwrap_or(false);
-        let enhanced = interactive_req && crate::present::is_enhanceable(kind, payload.as_ref());
+        let enhanced =
+            interactive_req && crate::present::is_enhanceable(kind, &artifact, payload.as_ref());
 
         // Provenance: caller-supplied + auto fields (generated_by/session_id/ts).
         // A non-object provenance is wrapped as {given: <value>} so the auto
@@ -4835,7 +4836,9 @@ impl McpTool for PresentTool {
         } else {
             crate::present::build_html(kind, &artifact, title, payload.as_ref(), Some(&provenance))
         };
-        let dual_encoding = payload.is_some();
+        // Enhanced markdown_table embeds a synthesized #ab-payload even though the
+        // caller passed none, so dual_encoding tracks the artifact, not just the arg.
+        let dual_encoding = payload.is_some() || enhanced;
         // Content-addressed id: hash the SOURCE (kind+title+artifact+payload+enhanced),
         // NOT the rendered HTML — the HTML embeds a per-call provenance ts, so
         // hashing it would defeat dedupe. `enhanced` (not interactive_req) keys the
@@ -5042,6 +5045,109 @@ impl McpTool for PresentListTool {
             "count": artifacts.len(),
             "artifacts": artifacts,
         })))
+    }
+}
+
+/// Output-expression lane slice 2: read-only replay/audit projection over the
+/// artifacts `present` has persisted. Complements `present_list` (flat index)
+/// with an ordered hash chain + drift + dual-encoding audit. See
+/// `crate::present::present_replay_snapshot`.
+pub struct PresentReplayTool {
+    hub: Hub,
+}
+impl PresentReplayTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for PresentReplayTool {
+    fn name(&self) -> &'static str {
+        "present_replay"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Output-expression lane slice 2: READ-ONLY replay/audit projection over \
+                 persisted present() artifacts. Does NOT create a new source of truth — it orders \
+                 the self-describing on-disk artifacts (~/.cache/agent-bridge/presentations) \
+                 oldest→newest, derives an event_spine-style SHA-256 hash chain over their \
+                 identity (chain_head makes loss/tamper detectable), cross-checks the artifact \
+                 count against the `present` calls already recorded in mcp_tool_calls (drift), and \
+                 tallies how many carry a machine-readable #ab-payload (dual_encoding). Use to \
+                 audit/replay what present() has emitted without re-reading every artifact."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window for both present calls and artifacts (by provenance ts)."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 200,
+                        "description": "Max artifacts scanned (most-recent-first) and present-call rows fetched."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Optional kind filter (table|markdown_table|html|svg|mermaid)."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 500) as usize;
+        let kind_filter = args.get("kind").and_then(|v| v.as_str());
+
+        let now = dispatch_now_secs();
+        let cutoff = now.saturating_sub(window_secs);
+
+        // Count present() calls already recorded in mcp_tool_calls within the
+        // window (bounded by `limit` fetched rows — drift is best-effort, not exact
+        // for very high-volume windows).
+        let calls = match store.recent_mcp_tool_calls(window_secs, limit as u32).await {
+            Ok(rows) => rows,
+            Err(e) => return Ok(ToolResult::error(format!("recent_mcp_tool_calls: {e}"))),
+        };
+        let present_calls_logged = calls.iter().filter(|c| c.tool_name == "present").count();
+
+        // On-disk artifacts (self-describing index), filtered to the window by
+        // provenance ts (artifacts lacking a ts are kept for visibility).
+        let dir = crate::present::presentations_dir();
+        let artifacts: Vec<_> = crate::present::list_artifacts(&dir, limit, kind_filter)
+            .into_iter()
+            .filter(|a| a.ts.map_or(true, |t| t as i64 >= cutoff))
+            .collect();
+
+        let snapshot = crate::present::present_replay_snapshot(
+            &artifacts,
+            present_calls_logged,
+            window_secs as u64,
+            now.max(0) as u64,
+        );
+        Ok(ToolResult::json_text(&snapshot))
     }
 }
 
@@ -27302,6 +27408,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(PresentTool::new(hub.clone())),
     );
+    // slice 2: read-only replay/audit projection over present() artifacts. Niche
+    // (opt-in) alongside present; no new source of truth, no mutation.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(PresentReplayTool::new(hub.clone())),
+    );
     reg_if(
         &mut reg,
         policy,
@@ -31817,10 +31931,17 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(all.includes(Tier::Niche, "present"));
         let std_p = ToolPolicy::from_values(None, None, None, Some("standard"));
         assert!(!std_p.includes(Tier::Niche, "present"));
+        // slice 2 present_replay is the same Niche opt-in shape.
+        assert!(all.includes(Tier::Niche, "present_replay"));
+        assert!(!std_p.includes(Tier::Niche, "present_replay"));
         let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
         assert!(
             schemas.iter().any(|s| s.name == "present"),
             "present must register under the all profile"
+        );
+        assert!(
+            schemas.iter().any(|s| s.name == "present_replay"),
+            "present_replay must register under the all profile"
         );
     }
 

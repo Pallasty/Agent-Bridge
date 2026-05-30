@@ -29,6 +29,7 @@
 //! back into [`classify_render`] here.
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -420,17 +421,29 @@ fn build_html_impl(
     interactive: bool,
 ) -> String {
     let title_str = title.unwrap_or("Agent-Bridge present/v0");
-    let rendered = render_body(kind, artifact, payload);
 
-    // E2: when `interactive` is requested AND this kind/payload is enhanceable,
-    // wrap the human render in #ab-controls (the runtime fills it on load) +
-    // #ab-view (the re-render target), INSIDE #ab-render so a dead/blank
-    // interactive artifact is still caught by the unchanged E1 blank check. The
-    // fixed runtime <script> is appended after </main> (outside the verified
-    // region, mirroring the mermaid-script precedent) so it never inflates the
-    // verify metrics. When not interactive/enhanceable the output is byte-for-byte
-    // the E1 document.
-    let interactive_on = interactive && is_enhanceable(kind, payload);
+    // E2: the single enhancement decision. `enh` is Some(structured rows) iff
+    // interactivity was requested AND this kind+artifact+payload can be driven
+    // (see [`enhancement_payload`]). When enhanced, the human view is re-rendered
+    // from THAT structure via [`render_table`] so the server-render, the embedded
+    // #ab-payload, and the client re-render all share one column order (no serde
+    // map-order dependency); markdown_table thereby also gains the #ab-payload it
+    // lacked at E1. When not enhanced the output is byte-for-byte the E1 document.
+    let enh = if interactive {
+        enhancement_payload(kind, artifact, payload)
+    } else {
+        None
+    };
+    let interactive_on = enh.is_some();
+    let rendered = match &enh {
+        Some(p) => render_table(p),
+        None => render_body(kind, artifact, payload),
+    };
+    // Controls live INSIDE #ab-render (the runtime fills #ab-controls on load)
+    // so a dead/blank interactive artifact is still caught by the unchanged E1
+    // blank check. The fixed runtime <script> is appended after </main> (outside
+    // the verified region, mirroring the mermaid-script precedent) so it never
+    // inflates the verify metrics.
     let (body, runtime_script) = if interactive_on {
         (
             format!("<div id=\"ab-controls\"></div><div id=\"ab-view\">{rendered}</div>"),
@@ -440,7 +453,12 @@ fn build_html_impl(
         (rendered, String::new())
     };
 
-    let payload_script = match payload {
+    // #ab-payload embeds the enhancement payload when enhanced (covers
+    // markdown_table, which carries no caller payload), else the caller payload.
+    // For kind=table the enhancement payload IS the caller payload → bytes
+    // unchanged.
+    let payload_for_embed: Option<&Value> = if interactive_on { enh.as_ref() } else { payload };
+    let payload_script = match payload_for_embed {
         Some(p) => format!(
             "<script type=\"application/json\" id=\"ab-payload\">{}</script>",
             json_script(p)
@@ -520,19 +538,82 @@ pub fn build_html_interactive(
     build_html_impl(kind, artifact, title, payload, provenance, true)
 }
 
-/// Whether `interactive` rendering does anything for this kind+payload. First
-/// cut: only `kind=table` with a non-empty array of OBJECTS (the keyed-table
-/// path [`render_table`] takes). Everything else is a no-op the caller surfaces
-/// as `interactive_status: not_applicable` — the tool never claims interactivity
-/// it didn't add. (markdown_table / charts / sliders are deferred rungs.)
-pub fn is_enhanceable(kind: PresentKind, payload: Option<&Value>) -> bool {
-    if !matches!(kind, PresentKind::Table) {
-        return false;
+/// Parse a markdown pipe-table into an array-of-objects keyed by the header row,
+/// so the E2 runtime can filter/sort it exactly like a `kind=table` payload.
+/// Returns `None` unless there is a header row PLUS at least one data row (nothing
+/// to drive otherwise). Mirrors [`render_markdown_table`]'s row parsing (the
+/// 2nd line may be a `|---|` separator). This is what earns `markdown_table` a
+/// `#ab-payload` (dual-encoding) it never had at E1 — the enhanced human view is
+/// re-rendered from THIS structure via [`render_table`], so the column order is
+/// identical across server-render / embedded payload / client re-render and does
+/// not depend on serde map ordering.
+pub fn md_table_to_payload(src: &str) -> Option<Value> {
+    let lines: Vec<&str> = src
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return None;
     }
-    match payload.and_then(|p| p.as_array()) {
-        Some(arr) => !arr.is_empty() && arr.iter().all(Value::is_object),
-        None => false,
+    let parse_row = |t: &str| -> Vec<String> {
+        t.trim_matches('|')
+            .split('|')
+            .map(|c| c.trim().to_string())
+            .collect()
+    };
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if i == 1 && is_md_separator(line) {
+            continue;
+        }
+        rows.push(parse_row(line));
     }
+    if rows.len() < 2 {
+        return None; // need header + >=1 data row
+    }
+    let headers = rows[0].clone();
+    let mut out = Vec::with_capacity(rows.len() - 1);
+    for r in &rows[1..] {
+        let mut obj = serde_json::Map::new();
+        for (c, h) in headers.iter().enumerate() {
+            let v = r.get(c).cloned().unwrap_or_default();
+            obj.insert(h.clone(), Value::String(v));
+        }
+        out.push(Value::Object(obj));
+    }
+    Some(Value::Array(out))
+}
+
+/// The structured array-of-objects that should DRIVE interactivity (and be
+/// embedded as `#ab-payload`), or `None` if this kind+content can't be enhanced.
+/// Single source of truth shared by [`is_enhanceable`] and [`build_html_impl`] so
+/// the tool's `enhanced` flag and the actual rendered runtime never disagree.
+///   - `table`: the caller payload, iff a non-empty array of OBJECTS (the keyed
+///     path [`render_table`] takes). The enhancement payload IS the caller
+///     payload, so the embedded bytes are unchanged from E1.
+///   - `markdown_table`: the artifact parsed via [`md_table_to_payload`].
+///   - everything else (html/svg/mermaid, or a non-keyed table): `None`.
+pub fn enhancement_payload(kind: PresentKind, artifact: &str, payload: Option<&Value>) -> Option<Value> {
+    match kind {
+        PresentKind::Table => match payload.and_then(|p| p.as_array()) {
+            Some(arr) if !arr.is_empty() && arr.iter().all(Value::is_object) => {
+                Some(Value::Array(arr.clone()))
+            }
+            _ => None,
+        },
+        PresentKind::MarkdownTable => md_table_to_payload(artifact),
+        _ => None,
+    }
+}
+
+/// Whether `interactive` rendering does anything for this kind+artifact+payload.
+/// `kind=table` with a non-empty array of OBJECTS, or `kind=markdown_table` whose
+/// artifact parses to a header + >=1 row. Everything else is a no-op the caller
+/// surfaces as `interactive_status: not_applicable` — the tool never claims
+/// interactivity it didn't add. (charts / sliders are deferred rungs.)
+pub fn is_enhanceable(kind: PresentKind, artifact: &str, payload: Option<&Value>) -> bool {
+    enhancement_payload(kind, artifact, payload).is_some()
 }
 
 /// The fixed, server-authored interactive runtime — ONE reviewed-once const baked
@@ -814,6 +895,109 @@ pub fn list_artifacts(dir: &Path, limit: usize, kind_filter: Option<&str>) -> Ve
     out
 }
 
+// ---------------------------------------------------------------------------
+// slice 2 — read-only replay/audit projection (NOT a new source of truth)
+// ---------------------------------------------------------------------------
+
+/// All-zero SHA-256, the chain's genesis `prev_hash` (mirrors `event_spine`).
+const PRESENT_REPLAY_ZERO_HASH: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
+
+/// Read-only replay/audit projection over persisted `present()` artifacts — the
+/// slice-2 counterpart to [`crate::event_spine`]: it does NOT create a new source
+/// of truth. It orders the self-describing on-disk artifacts ([`list_artifacts`])
+/// oldest→newest, derives an `event_spine`-style SHA-256 hash chain over their
+/// identity (so loss/tamper is detectable via `chain_head`), and cross-checks the
+/// artifact count against `present_calls_logged` (the number of `present` calls
+/// already recorded in `mcp_tool_calls`) to surface `drift`. The dual-encoding
+/// tally audits how many artifacts carry a machine-readable `#ab-payload`.
+///
+/// Returns a `serde_json::Value` so this module stays dependency-light (no
+/// `Serialize` derives); the `present_replay` MCP tool returns it verbatim.
+pub fn present_replay_snapshot(
+    artifacts: &[ArtifactInfo],
+    present_calls_logged: usize,
+    window_secs: u64,
+    generated_at: u64,
+) -> Value {
+    let mut ordered: Vec<&ArtifactInfo> = artifacts.iter().collect();
+    // oldest → newest; stable tiebreak on id keeps the chain deterministic when
+    // two artifacts share a ts (or both lack one — None sorts first, then by id).
+    ordered.sort_by(|a, b| a.ts.cmp(&b.ts).then_with(|| a.id.cmp(&b.id)));
+
+    let mut prev = PRESENT_REPLAY_ZERO_HASH.to_string();
+    let mut dual_ok = 0usize;
+    let mut events: Vec<Value> = Vec::with_capacity(ordered.len());
+    for a in &ordered {
+        if a.dual_encoding {
+            dual_ok += 1;
+        }
+        let hash = present_replay_hash(a, &prev);
+        events.push(serde_json::json!({
+            "artifact_id": a.id,
+            "ts": a.ts,
+            "kind": a.kind,
+            "generated_by": a.generated_by,
+            "session_id": a.session_id,
+            "dual_encoding": a.dual_encoding,
+            "has_screenshot": a.has_screenshot,
+            "bytes": a.bytes,
+            "artifact_path": a.artifact_path,
+            "prev_hash": prev,
+            "hash": hash,
+        }));
+        prev = hash;
+    }
+    let artifact_count = events.len();
+    serde_json::json!({
+        "schema_version": 1u32,
+        "hash_algorithm": "sha256",
+        "generated_at": generated_at,
+        "window_secs": window_secs,
+        "artifact_count": artifact_count,
+        "present_calls_logged": present_calls_logged,
+        // logged calls minus on-disk artifacts: +N = calls deduped/cleaned up
+        // (content-addressed writes collapse, files may be GC'd); -N = artifacts
+        // whose call rows fell outside the window or predate telemetry.
+        "drift": present_calls_logged as i64 - artifact_count as i64,
+        "dual_encoding_ok": dual_ok,
+        "dual_encoding_missing": artifact_count - dual_ok,
+        "chain_head": prev,
+        "events": events,
+    })
+}
+
+/// One link of the [`present_replay_snapshot`] chain: SHA-256 over the canonical
+/// JSON of the artifact identity + the previous hash (event_spine `sha256_json`
+/// idiom). Excludes volatile fields (path, screenshot presence) so the chain is
+/// stable across moves/GC of sidecar files.
+fn present_replay_hash(a: &ArtifactInfo, prev_hash: &str) -> String {
+    let v = serde_json::json!({
+        "artifact_id": a.id,
+        "ts": a.ts,
+        "kind": a.kind,
+        "bytes": a.bytes,
+        "dual_encoding": a.dual_encoding,
+        "prev_hash": prev_hash,
+    });
+    let bytes = serde_json::to_vec(&v).unwrap_or_else(|_| v.to_string().into_bytes());
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    present_hex_lower(&hasher.finalize())
+}
+
+/// Lowercase hex (local copy per the repo convention — `hex_lower` is private to
+/// `event_spine`).
+fn present_hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1090,17 +1274,30 @@ mod tests {
 
     // ----- E2 (interactive artifact) -----
 
-    // is_enhanceable gates exactly the keyed-table case the runtime can drive.
+    // is_enhanceable gates the keyed-table case (via payload) and the
+    // markdown_table case (via artifact) the runtime can drive.
     #[test]
     fn e2_is_enhanceable_only_keyed_table() {
         let objs = json!([{"a": 1}, {"a": 2}]);
-        assert!(is_enhanceable(PresentKind::Table, Some(&objs)));
+        assert!(is_enhanceable(PresentKind::Table, "", Some(&objs)));
         // non-table kind, array-of-arrays, empty array, no payload → not enhanceable
-        assert!(!is_enhanceable(PresentKind::Html, Some(&objs)));
-        assert!(!is_enhanceable(PresentKind::Table, Some(&json!([[1, 2], [3, 4]]))));
-        assert!(!is_enhanceable(PresentKind::Table, Some(&json!([]))));
-        assert!(!is_enhanceable(PresentKind::Table, None));
-        assert!(!is_enhanceable(PresentKind::MarkdownTable, Some(&objs))); // deferred
+        assert!(!is_enhanceable(PresentKind::Html, "", Some(&objs)));
+        assert!(!is_enhanceable(PresentKind::Table, "", Some(&json!([[1, 2], [3, 4]]))));
+        assert!(!is_enhanceable(PresentKind::Table, "", Some(&json!([]))));
+        assert!(!is_enhanceable(PresentKind::Table, "", None));
+        // markdown_table is enhanceable via its ARTIFACT (header + >=1 row), never
+        // via a payload arg; header-only does not qualify.
+        assert!(!is_enhanceable(PresentKind::MarkdownTable, "", Some(&objs)));
+        assert!(is_enhanceable(
+            PresentKind::MarkdownTable,
+            "| a | b |\n|---|---|\n| 1 | 2 |",
+            None
+        ));
+        assert!(!is_enhanceable(
+            PresentKind::MarkdownTable,
+            "| a | b |",
+            None
+        ));
     }
 
     // E2 enhanceable table gains controls/view/runtime; #ab-payload still recovers
@@ -1123,6 +1320,44 @@ mod tests {
         assert!(!region.contains("ab-runtime"));
         // dual-encoding unchanged: payload recovers in one parse, from <head>.
         assert_eq!(extract_ab_payload(&html), Some(payload));
+    }
+
+    // E2 markdown_table: interactive synthesizes a #ab-payload from the pipe
+    // table (dual-encoding it never had at E1), re-renders the human view from
+    // THAT payload via the keyed-table path, and adds the same controls/runtime.
+    #[test]
+    fn e2_interactive_markdown_table_synthesizes_payload() {
+        let md = "| name | dims |\n|---|---|\n| e5 | 384 |\n| minilm | 256 |";
+        let html = build_html_interactive(PresentKind::MarkdownTable, md, Some("emb"), None, None);
+        assert!(html.contains("id=\"ab-controls\""));
+        assert!(html.contains("id=\"ab-view\""));
+        assert!(html.contains("<script id=\"ab-runtime\">"));
+        // synthesized payload recovers in one parse, rows keyed by the header row
+        // (order-independent Value equality), giving md_table dual-encoding.
+        let p = extract_ab_payload(&html).expect("synthesized #ab-payload");
+        assert_eq!(
+            p,
+            json!([
+                {"name": "e5", "dims": "384"},
+                {"name": "minilm", "dims": "256"}
+            ])
+        );
+        // the human view is the keyed render of that payload (so column order is
+        // consistent with the embedded payload + client re-render).
+        let region = render_region(&html).expect("render region");
+        assert!(region.contains("<th>name</th>"));
+        assert!(region.contains("<td>minilm</td>"));
+    }
+
+    // A markdown_table with only a header (no data row) is NOT enhanceable, so
+    // interactive is a byte-identical E1 no-op (no synthesized payload, no chrome).
+    #[test]
+    fn e2_markdown_table_header_only_is_noop() {
+        let md = "| a | b |";
+        let a = build_html_interactive(PresentKind::MarkdownTable, md, None, None, None);
+        let b = build_html(PresentKind::MarkdownTable, md, None, None, None);
+        assert_eq!(a, b, "non-enhanceable md_table interactive must equal E1");
+        assert!(!a.contains("ab-runtime"));
     }
 
     // interactive on a NON-enhanceable kind is a byte-identical no-op vs E1, and
@@ -1205,5 +1440,62 @@ mod tests {
             assert!(INTERACT_DRIVE_JS.contains(key), "drive-js missing key {key}");
         }
         assert!(!INTERACT_DRIVE_JS.contains("</script>"));
+    }
+
+    // ----- slice 2 (read-only replay/audit projection) -----
+
+    fn art(id: &str, ts: u64, kind: &str, dual: bool) -> ArtifactInfo {
+        ArtifactInfo {
+            id: id.into(),
+            artifact_path: format!("/p/{id}.html"),
+            kind: Some(kind.into()),
+            ts: Some(ts),
+            generated_by: Some("present/v0".into()),
+            session_id: None,
+            dual_encoding: dual,
+            has_screenshot: false,
+            bytes: 1000 + ts,
+        }
+    }
+
+    // present_replay orders oldest→newest, chains hashes from a zero genesis,
+    // tallies dual-encoding, and reports logged-vs-on-disk drift — deterministically.
+    #[test]
+    fn slice2_present_replay_projection_chain_and_drift() {
+        // intentionally out of ts order on input
+        let arts = vec![
+            art("bbb", 200, "table", true),
+            art("aaa", 100, "html", false),
+        ];
+        let snap = present_replay_snapshot(&arts, 3, 86_400, 1_000);
+        assert_eq!(snap["artifact_count"], json!(2));
+        assert_eq!(snap["present_calls_logged"], json!(3));
+        assert_eq!(snap["drift"], json!(1)); // 3 logged − 2 on disk
+        assert_eq!(snap["dual_encoding_ok"], json!(1));
+        assert_eq!(snap["dual_encoding_missing"], json!(1));
+        assert_eq!(snap["hash_algorithm"], json!("sha256"));
+
+        let events = snap["events"].as_array().unwrap();
+        // ordered oldest→newest by ts: aaa(100) then bbb(200)
+        assert_eq!(events[0]["artifact_id"], json!("aaa"));
+        assert_eq!(events[1]["artifact_id"], json!("bbb"));
+        // genesis prev is zero; each link chains the previous hash; head == last hash
+        assert_eq!(events[0]["prev_hash"], json!(PRESENT_REPLAY_ZERO_HASH));
+        assert_eq!(events[1]["prev_hash"], events[0]["hash"]);
+        assert_eq!(snap["chain_head"], events[1]["hash"]);
+        assert_ne!(snap["chain_head"], json!(PRESENT_REPLAY_ZERO_HASH));
+
+        // deterministic for identical inputs
+        assert_eq!(snap, present_replay_snapshot(&arts, 3, 86_400, 1_000));
+    }
+
+    // empty disk → empty chain (head stays genesis), no panic, drift = logged calls.
+    #[test]
+    fn slice2_present_replay_empty_is_genesis() {
+        let snap = present_replay_snapshot(&[], 0, 86_400, 1_000);
+        assert_eq!(snap["artifact_count"], json!(0));
+        assert_eq!(snap["chain_head"], json!(PRESENT_REPLAY_ZERO_HASH));
+        assert_eq!(snap["drift"], json!(0));
+        assert_eq!(snap["events"].as_array().unwrap().len(), 0);
     }
 }
