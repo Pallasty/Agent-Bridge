@@ -22437,6 +22437,11 @@ impl McpTool for ContextBudgetTool {
                         "description": "Model name hint for context window size (default: claude-sonnet-4).",
                         "default": "claude-sonnet-4"
                     },
+                    "context_window": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Explicit context-window size in tokens — overrides the model→limit lookup. Pass 1000000 for long-context-beta (opus-4.x / sonnet-4.x @ 1M) sessions; the model name alone can't reveal the 200K-vs-1M SKU."
+                    },
                     "conversation_turns": {
                         "type": "integer",
                         "minimum": 0,
@@ -22465,7 +22470,20 @@ impl McpTool for ContextBudgetTool {
             .get("text_sample")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let limit = model_context_limit(model);
+        // Explicit caller-supplied window wins over the model→limit lookup;
+        // the lookup stays a conservative 200K floor since the model id can't
+        // reveal the 200K-vs-1M SKU (see context_pressure_estimate / #1758).
+        let explicit_window = args
+            .get("context_window")
+            .or_else(|| args.get("model_limit"))
+            .and_then(|v| v.as_u64())
+            .filter(|&w| w > 0);
+        let limit = explicit_window.unwrap_or_else(|| model_context_limit(model));
+        let limit_source = if explicit_window.is_some() {
+            "explicit"
+        } else {
+            "model_default"
+        };
         let estimated = estimated_usage_tokens(text, turns);
         let pct_raw = if limit == 0 {
             0.0
@@ -22477,6 +22495,7 @@ impl McpTool for ContextBudgetTool {
         Ok(ToolResult::json_text(&json!({
             "model_hint": model,
             "model_limit": limit,
+            "model_limit_source": limit_source,
             "estimated_tokens_used": estimated,
             "pct_used": pct_used,
             "recommendation": recommendation,
@@ -22536,6 +22555,11 @@ impl McpTool for ContextPressureEstimateTool {
                         "description": "Model name hint for context window size (default: claude-sonnet-4).",
                         "default": "claude-sonnet-4"
                     },
+                    "context_window": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Explicit context-window size in tokens — overrides the model→limit lookup. REQUIRED for accuracy on long-context-beta sessions (e.g. opus-4.x / sonnet-4.x running the 1M beta): the model name alone cannot reveal the 200K-vs-1M SKU, so omitting this defaults to a conservative 200K and inflates pressure up to 5×. Pass 1000000 when on the 1M beta."
+                    },
                     "conversation_turns": {
                         "type": "integer",
                         "minimum": 0,
@@ -22553,6 +22577,7 @@ impl McpTool for ContextPressureEstimateTool {
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         use crate::context_budget::{
             budget_recommendation, estimated_usage_tokens, fatigue_tier, model_context_limit,
+            model_supports_1m_beta,
         };
         let model = args
             .get("model")
@@ -22569,7 +22594,25 @@ impl McpTool for ContextPressureEstimateTool {
             .unwrap_or("");
         let text_sample_provided = !text_raw.is_empty();
 
-        let limit = model_context_limit(model);
+        // Explicit caller-supplied window wins over the model→limit lookup.
+        // (`model_limit` accepted as a defensive alias for callers following
+        // the orchestrate_scan budget_hint.) The model id alone can't reveal
+        // the 200K-vs-1M SKU, so the lookup stays a conservative 200K floor.
+        let explicit_window = args
+            .get("context_window")
+            .or_else(|| args.get("model_limit"))
+            .and_then(|v| v.as_u64())
+            .filter(|&w| w > 0);
+        let limit = explicit_window.unwrap_or_else(|| model_context_limit(model));
+        let limit_source = if explicit_window.is_some() {
+            "explicit"
+        } else {
+            "model_default"
+        };
+        // Flag the 1M ambiguity only when we fell back to the default AND the
+        // model is a long-context-beta family — tells the caller to pass an
+        // explicit context_window (guards the #1758 5× inflation).
+        let one_m_beta_possible = explicit_window.is_none() && model_supports_1m_beta(model);
         let estimated = estimated_usage_tokens(text_raw, turns);
         let pct_raw = if limit == 0 {
             0.0
@@ -22590,15 +22633,22 @@ impl McpTool for ContextPressureEstimateTool {
         // tier accordingly rather than treating heuristic-only as ground
         // truth.
         let confidence = if text_sample_provided { "high" } else { "low" };
-        let note = if text_sample_provided {
+        let mut note = String::from(if text_sample_provided {
             "Estimate uses turn × per-turn guess + actual sample tokens + system baseline."
         } else {
             "No text_sample passed — estimate is heuristic-only and may under-count tool-heavy turns. Pass `text_sample` (recent transcript excerpt) for higher confidence."
-        };
+        });
+        if one_m_beta_possible {
+            note.push_str(
+                " NOTE: limit defaulted to 200K but this is a long-context-beta family (opus-4.x / sonnet-4.x); if the session runs the 1M beta, pass context_window=1000000 — otherwise pct_used / fatigue_tier are inflated up to 5×.",
+            );
+        }
 
         Ok(ToolResult::json_text(&json!({
             "model_hint": model,
             "model_limit": limit,
+            "model_limit_source": limit_source,
+            "long_context_beta_possible": one_m_beta_possible,
             "estimated_tokens_used": estimated,
             "pct_used": pct_used,
             "fatigue_tier": tier,
@@ -26345,7 +26395,7 @@ impl McpTool for AgentOrchestrateScanTool {
             "n_awaiting_gate": n_awaiting,
             "n_needs_human": n_needs_human,
             "workers": workers,
-            "budget_hint": "call context_pressure_estimate (pass real model_limit for 1M models) to guard orchestrator budget",
+            "budget_hint": "call context_pressure_estimate (pass context_window=1000000 for 1M-beta sessions) to guard orchestrator budget",
             "boundary": "exec/collect drivable; research judgments (needs_human_gate) require a human ground-truth check (#1745)",
         })))
     }
@@ -33713,6 +33763,92 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             json!(0),
             "clamps at zero past trigger"
         );
+    }
+
+    /// Regression for #1758 — the bug that bit this very session: an
+    /// opus-4.8 @ 1M session read 247% "saturated/urgent" because the limit
+    /// defaulted to 200K. With an explicit `context_window=1_000_000` the
+    /// same 30-turn load (15k + 30*4k = 135k = 13.5%) reads "fresh", and the
+    /// 1M-beta hint is suppressed (caller already supplied the truth).
+    #[tokio::test]
+    async fn context_pressure_estimate_explicit_window_fixes_1m_inflation() {
+        let tool = ContextPressureEstimateTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "model": "claude-opus-4-8",
+                    "conversation_turns": 30,
+                    "context_window": 1_000_000
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["model_limit"], json!(1_000_000));
+        assert_eq!(v["model_limit_source"], json!("explicit"));
+        assert_eq!(v["fatigue_tier"], json!("fresh"));
+        assert_eq!(v["long_context_beta_possible"], json!(false));
+        // Same load WITHOUT the override would be 67.5% (strained) on 200K —
+        // prove the override actually moved the needle.
+        let res_default = tool
+            .execute(
+                json!({"model": "claude-opus-4-8", "conversation_turns": 30}),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let td = match res_default.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let vd: Value = serde_json::from_str(&td).expect("valid json");
+        assert_eq!(vd["model_limit"], json!(200_000));
+        assert_eq!(vd["fatigue_tier"], json!("strained"));
+    }
+
+    /// On a 1M-beta family with NO explicit window, the tool keeps the
+    /// conservative 200K default but flags `long_context_beta_possible` so
+    /// the caller knows to pass `context_window`. A non-beta model is not
+    /// flagged.
+    #[tokio::test]
+    async fn context_pressure_estimate_flags_1m_beta_when_no_window() {
+        let tool = ContextPressureEstimateTool::new();
+        let ctx = ToolContext::default();
+
+        let res = tool
+            .execute(json!({"model": "claude-opus-4-8"}), &ctx)
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["model_limit"], json!(200_000));
+        assert_eq!(v["model_limit_source"], json!("model_default"));
+        assert_eq!(v["long_context_beta_possible"], json!(true));
+        assert!(
+            v["note"].as_str().unwrap().contains("1M beta"),
+            "note must carry the 1M-beta caveat"
+        );
+
+        // Non-beta family (sonnet-3.5): default limit, NOT flagged.
+        let res2 = tool
+            .execute(json!({"model": "claude-3-5-sonnet-20241022"}), &ctx)
+            .await
+            .expect("execute ok");
+        let t2 = match res2.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v2: Value = serde_json::from_str(&t2).expect("valid json");
+        assert_eq!(v2["long_context_beta_possible"], json!(false));
     }
 
     // ── L6 P2 — tool_call_attention_report (pure aggregator) ──────────

@@ -109,6 +109,26 @@ pub fn model_context_limit(model: &str) -> u64 {
     200_000
 }
 
+/// Whether `model` belongs to an Anthropic family that offers a ≥1M-token
+/// long-context beta.
+///
+/// The model id alone CANNOT distinguish the 200K-vs-1M SKU — the 1M window
+/// is enabled by a request-time beta header, not encoded in the name — so
+/// [`model_context_limit`] deliberately keeps the conservative 200K default.
+/// This flag exists only so callers can be told they SHOULD pass an explicit
+/// `context_window` when the session is actually running the long-context
+/// beta. Without it, pressure is inflated up to 5× — the 2026-05-30 dogfood
+/// failure (#1758): an opus-4.8 @ 1M session read 247% "saturated/urgent"
+/// when real utilization was ~50%.
+///
+/// Scoped to opus-4.x / sonnet-4.x (the families with a documented 1M beta).
+/// Gemini already resolves to its true ≥1M window in [`model_context_limit`],
+/// so it is intentionally not flagged here.
+pub fn model_supports_1m_beta(model: &str) -> bool {
+    let m = model.to_lowercase();
+    m.contains("opus-4") || m.contains("opus 4") || m.contains("sonnet-4") || m.contains("sonnet 4")
+}
+
 pub fn budget_recommendation(pct_used: f64) -> &'static str {
     if pct_used < 60.0 {
         "nominal"
@@ -241,6 +261,40 @@ mod tests {
     #[test]
     fn model_defaults_claude_family() {
         assert_eq!(model_context_limit("claude-sonnet-4-20250514"), 200_000);
+    }
+
+    #[test]
+    fn one_m_beta_families_flagged_but_default_stays_200k() {
+        // opus-4.x / sonnet-4.x: flagged as 1M-beta-capable, yet the
+        // conservative default limit is unchanged (SKU is ambiguous from
+        // the name — the caller must pass an explicit context_window).
+        for m in [
+            "claude-opus-4-8",
+            "claude-opus-4.8",
+            "claude-opus-4-1-20250805",
+            "claude-sonnet-4-6",
+            "claude-sonnet-4-20250514",
+        ] {
+            assert!(model_supports_1m_beta(m), "{m} should be 1M-beta-capable");
+            assert_eq!(
+                model_context_limit(m),
+                200_000,
+                "{m} default must stay conservative 200K"
+            );
+        }
+        // Not 1M-beta families: older Claude, haiku, non-Anthropic.
+        for m in [
+            "claude-3-5-sonnet-20241022",
+            "claude-haiku-4-5-20251001",
+            "claude-3-opus",
+            "gpt-4o",
+            "gpt-4-turbo",
+        ] {
+            assert!(
+                !model_supports_1m_beta(m),
+                "{m} must NOT be flagged as 1M-beta"
+            );
+        }
     }
 
     #[test]
