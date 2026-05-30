@@ -1565,6 +1565,7 @@ impl McpTool for DesktopActionTool {
                     "swaysock": { "type": "string", "description": "Nested sway IPC socket; required (with a non-host display) for any non-dry-run injection. Enables the isolated sway-IPC absolute backend." },
                     "dry_run": { "type": "boolean", "default": false, "description": "When true, log intent + audit but inject nothing. Allowed against any target." },
                     "confirm_host": { "type": "boolean", "default": false, "description": "Host target only: do not inject; stage a single-use pending token + on-screen notify for a two-phase human-approved confirm (then call desktop_confirm). Default false keeps host injection closed." },
+                    "use_grant": { "type": "boolean", "default": false, "description": "Host target only: inject directly IF a human-minted capability grant (scripts/desktop_grant.py) covers this action. Default false; no covering grant => denied. Trades per-action confirm for a bounded (ttl/max-uses/scope), revocable window (path C)." },
                     "cwd": { "type": "string", "description": "Repo root to resolve scripts/desktop_action.py." },
                     "script_path": { "type": "string", "description": "Explicit desktop_action.py path (tests / alternate checkouts)." },
                     "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 10000, "description": "Milliseconds before the action process is killed." }
@@ -1614,22 +1615,27 @@ impl McpTool for DesktopActionTool {
             .get("confirm_host")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let use_grant = args
+            .get("use_grant")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let is_isolated = swaysock.map(|s| !s.is_empty()).unwrap_or(false)
             && display
                 .map(|d| !d.is_empty() && d != host_display)
                 .unwrap_or(false);
-        // A host action is refused by default; with confirm_host it does NOT inject — it
-        // stages a single-use pending token for a separate human-approved desktop_confirm
-        // (two-phase host-confirm path A). Host injection never happens inline here.
+        // A host action is refused by default. Two opt-in host paths: confirm_host stages a
+        // single-use pending token for a human-approved desktop_confirm (path A); use_grant
+        // injects directly IF a human-minted capability grant covers it (path C). Neither
+        // ever passes --confirm; host injection is never silent/inline.
         let host_target = !dry_run && !is_isolated;
-        if host_target && !confirm_host {
+        if host_target && !confirm_host && !use_grant {
             return Ok(desktop_action_error(json!({
                 "code": "host_mutation_not_exposed",
                 "message": "this MCP injects only dry_run or isolated (non-host display + swaysock) \
-                            actions; for a host action set confirm_host:true to stage a pending \
-                            two-phase confirm token (executed later via desktop_confirm)",
+                            actions; for a host action set confirm_host:true (two-phase confirm) or \
+                            use_grant:true (a human-minted capability grant must cover it)",
                 "hint": "set dry_run:true, provide a nested `display` (!= host) and its `swaysock`, \
-                         or set confirm_host:true for a human-approved host action"
+                         set confirm_host:true, or set use_grant:true with a desktop_grant.py grant"
             })));
         }
 
@@ -1694,15 +1700,17 @@ impl McpTool for DesktopActionTool {
         if dry_run {
             cmd.arg("--dry-run");
         }
-        if host_target && confirm_host {
-            // Phase 1: stage a pending token, inject NOTHING. The backend writes the
-            // pending record + fires an on-screen notify; execution waits for a
+        if host_target && use_grant {
+            // Path C: inject directly IF a human-minted capability grant covers it.
+            cmd.arg("--use-grant");
+        } else if host_target && confirm_host {
+            // Path A phase 1: stage a pending token, inject NOTHING; execution waits for a
             // human-approved desktop_confirm(token).
             cmd.arg("--request-host-confirm");
         }
-        // NOTE: --confirm / --i-understand-this-touches-the-real-desktop are NEVER
-        // passed by this MCP surface. Host injection is reachable ONLY via the two-phase
-        // desktop_confirm path (a human approves a staged token), never inline.
+        // NOTE: --confirm / --i-understand-this-touches-the-real-desktop are NEVER passed by
+        // this MCP surface. Host injection is reachable only via a human-approved confirm
+        // token (path A) or a human-minted grant (path C), never silent/inline.
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         if let Some(cwd) = cwd {
@@ -1741,7 +1749,7 @@ impl McpTool for DesktopActionTool {
                         json!({
                             "tool": self.name(),
                             "read_only": false,
-                            "mode": if dry_run { "dry-run" } else if host_target { "pending-host-confirm" } else { "isolated" },
+                            "mode": if dry_run { "dry-run" } else if !host_target { "isolated" } else if use_grant { "host-grant" } else { "pending-host-confirm" },
                             "host_protected": true,
                             "duration_ms": duration_ms,
                             "exit_code": output.status.code().unwrap_or(-1),
@@ -1850,6 +1858,7 @@ impl McpTool for DesktopInvokeTool {
                     "wait": { "type": "number", "minimum": 0, "maximum": 30, "default": 4.0, "description": "Seconds to poll for the accessible to appear (a11y subtree can lag app registration)." },
                     "dry_run": { "type": "boolean", "default": false, "description": "When true, locate + log intent but invoke nothing. Allowed against any target." },
                     "confirm_host": { "type": "boolean", "default": false, "description": "Host target only: do not invoke; mint a single-use pending token + on-screen notify for a two-phase human-approved confirm (then call desktop_confirm). Default false keeps host invoke closed." },
+                    "use_grant": { "type": "boolean", "default": false, "description": "Host target only: invoke directly IF a human-minted capability grant (scripts/desktop_grant.py) covers this app/action. Default false; no covering grant => denied. Trades per-action confirm for a bounded (ttl/max-uses/scope), revocable window (path C)." },
                     "cwd": { "type": "string", "description": "Repo root to resolve scripts/desktop_invoke.py." },
                     "script_path": { "type": "string", "description": "Explicit desktop_invoke.py path (tests / alternate checkouts)." },
                     "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 10000, "description": "Milliseconds before the invoke process is killed." }
@@ -1893,15 +1902,23 @@ impl McpTool for DesktopInvokeTool {
             .get("confirm_host")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let use_grant = args
+            .get("use_grant")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let is_isolated = cage_pid.is_some();
+        // Host invoke is refused by default. Two opt-in host paths: confirm_host stages a
+        // single-use pending token for a human-approved desktop_confirm (path A); use_grant
+        // invokes directly IF a human-minted capability grant covers it (path C). Neither
+        // passes --confirm; host mutation is never silent/inline.
         let host_target = !dry_run && !is_isolated;
-        if host_target && !confirm_host {
+        if host_target && !confirm_host && !use_grant {
             return Ok(desktop_invoke_error(json!({
                 "code": "host_invoke_not_exposed",
                 "message": "this MCP invokes only dry_run or isolated (cage_pid) targets; \
-                            for a host target set confirm_host:true to mint a pending two-phase \
-                            confirm token (executed later via desktop_confirm)",
-                "hint": "set dry_run:true, provide `cage_pid`, or set confirm_host:true for a human-approved host action"
+                            for a host target set confirm_host:true (two-phase confirm) or \
+                            use_grant:true (a human-minted capability grant must cover it)",
+                "hint": "set dry_run:true, provide `cage_pid`, set confirm_host:true, or set use_grant:true with a desktop_grant.py grant"
             })));
         }
 
@@ -1954,15 +1971,17 @@ impl McpTool for DesktopInvokeTool {
         if dry_run {
             cmd.arg("--dry-run");
         }
-        if host_target && confirm_host {
-            // Phase 1: mint a pending token, invoke NOTHING. The backend writes the
-            // pending record + fires an on-screen notify; execution waits for a
+        if host_target && use_grant {
+            // Path C: invoke directly IF a human-minted capability grant covers it.
+            cmd.arg("--use-grant");
+        } else if host_target && confirm_host {
+            // Path A phase 1: mint a pending token, invoke NOTHING; execution waits for a
             // human-approved desktop_confirm(token).
             cmd.arg("--request-host-confirm");
         }
-        // NOTE: --confirm / --i-understand-this-touches-the-real-desktop are NEVER
-        // passed by this MCP surface. Host mutation is reachable ONLY via the two-phase
-        // desktop_confirm path (a human approves a minted token), never inline.
+        // NOTE: --confirm / --i-understand-this-touches-the-real-desktop are NEVER passed by
+        // this MCP surface. Host mutation is reachable only via a human-approved confirm
+        // token (path A) or a human-minted grant (path C), never silent/inline.
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         if let Some(cwd) = cwd {
@@ -2000,7 +2019,7 @@ impl McpTool for DesktopInvokeTool {
                         json!({
                             "tool": self.name(),
                             "read_only": false,
-                            "mode": if dry_run { "dry-run" } else if host_target { "pending-host-confirm" } else { "isolated" },
+                            "mode": if dry_run { "dry-run" } else if !host_target { "isolated" } else if use_grant { "host-grant" } else { "pending-host-confirm" },
                             "host_protected": true,
                             "duration_ms": duration_ms,
                             "exit_code": output.status.code().unwrap_or(-1),
@@ -32510,10 +32529,11 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(tool.input_schema["properties"]
             .get("i_understand_this_touches_the_real_desktop")
             .is_none());
-        // ...but the two-phase host-confirm opt-in IS exposed (stages a token, never injects inline)
+        // ...but the two-phase host-confirm + grant opt-ins ARE exposed (never inject silently)
         assert!(tool.input_schema["properties"]
             .get("confirm_host")
             .is_some());
+        assert!(tool.input_schema["properties"].get("use_grant").is_some());
     }
 
     #[tokio::test]
@@ -32702,6 +32722,61 @@ print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
+    #[tokio::test]
+    async fn desktop_action_use_grant_passes_flag_not_confirm() {
+        // use_grant:true on a host action must NOT refuse, and must pass --use-grant (path C),
+        // not --request-host-confirm, and never the host-unlock flags.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-action-grant-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_action.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopActionTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "action": "click",
+                    "button": "left",
+                    "use_grant": true,
+                    "script_path": script.to_string_lossy(),
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(!out.is_error, "use_grant host action must not be refused");
+        let payload = result_text_as_json(&out);
+        let argv: Vec<&str> = payload["argv"]
+            .as_array()
+            .expect("argv")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(argv.contains(&"--use-grant"));
+        assert!(!argv.contains(&"--request-host-confirm"));
+        assert!(!argv.contains(&"--confirm"));
+        assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
     #[test]
     fn desktop_pending_kind_rejects_non_hex_token() {
         // path-safety: a non-hex token never resolves to a file read.
@@ -32735,10 +32810,11 @@ print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
         assert!(tool.input_schema["properties"]
             .get("i_understand_this_touches_the_real_desktop")
             .is_none());
-        // ...but the two-phase host-confirm opt-in IS exposed (mints a token, never invokes inline)
+        // ...but the two-phase host-confirm + grant opt-ins ARE exposed (never invoke silently)
         assert!(tool.input_schema["properties"]
             .get("confirm_host")
             .is_some());
+        assert!(tool.input_schema["properties"].get("use_grant").is_some());
     }
 
     #[tokio::test]
@@ -32915,6 +32991,60 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!argv.contains(&"--confirm"));
         assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
         assert!(!argv.contains(&"--dry-run"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn desktop_invoke_use_grant_passes_flag_not_confirm() {
+        // use_grant:true on a host invoke must NOT refuse, and must pass --use-grant (path C),
+        // not --request-host-confirm, and never the host-unlock flags.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-invoke-grant-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_invoke.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopInvokeTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "name": "Save",
+                    "use_grant": true,
+                    "script_path": script.to_string_lossy(),
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(!out.is_error, "use_grant host invoke must not be refused");
+        let payload = result_text_as_json(&out);
+        let argv: Vec<&str> = payload["argv"]
+            .as_array()
+            .expect("argv")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(argv.contains(&"--use-grant"));
+        assert!(!argv.contains(&"--request-host-confirm"));
+        assert!(!argv.contains(&"--confirm"));
+        assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

@@ -31,11 +31,13 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from desktop_confirm_store import (  # noqa: E402  shared two-phase host-confirm store
+from desktop_confirm_store import (  # noqa: E402  shared host-confirm store (tokens + grants)
     DEFAULT_CONFIRM_TTL,
+    find_matching_grant,
     load_and_consume_pending,
     mint_token,
     notify_pending,
+    record_grant_use,
     write_pending,
 )
 
@@ -246,6 +248,8 @@ def main() -> int:
                     help="explicit host acknowledgement (never passed by the MCP wrapper)")
     ap.add_argument("--request-host-confirm", action="store_true",
                     help="host target: do not invoke; mint a token + pending record for two-phase confirm")
+    ap.add_argument("--use-grant", action="store_true",
+                    help="host target: execute directly IF a human-minted capability grant covers it (path C)")
     ap.add_argument("--confirm-token", default=None,
                     help="execute a previously-minted pending host invoke by its token (human-approved phase 2)")
     ap.add_argument("--confirm-ttl", type=int, default=DEFAULT_CONFIRM_TTL,
@@ -284,6 +288,22 @@ def main() -> int:
 
     isolated = bool(args.cage_pid and app_pid and pid_is_descendant(app_pid, args.cage_pid))
     record["found"] = {"app": app_name, "app_pid": app_pid, "isolated": isolated}
+
+    # Host-confirm path C: host target + --use-grant → execute IF a human-minted grant
+    # covers it (no per-action pending). Default-closed unless such a grant exists.
+    if args.use_grant and not isolated and not args.dry_run:
+        grant = find_matching_grant("invoke", app=args.app, name=args.name, action=args.action)
+        if grant is None:
+            record.update(allowed=False, rc=3,
+                          error="no covering capability grant for this host invoke "
+                                "(mint one with scripts/desktop_grant.py)")
+            audit(record); print(json.dumps(record, ensure_ascii=False)); return 3
+        record_grant_use(grant["grant_id"])
+        record["grant_id"] = grant["grant_id"]
+        rc, detail = do_invoke(element, args.action)
+        record.update(allowed=True, rc=rc, detail=detail,
+                      gate_reason=f"authorized by capability grant {grant['grant_id']} (path C)")
+        audit(record); print(json.dumps(record, ensure_ascii=False)); return rc
 
     # Host-confirm phase 1: host target + explicit request → mint pending, invoke nothing.
     if args.request_host_confirm and not isolated and not args.dry_run:

@@ -95,3 +95,123 @@ def notify_pending(summary: str, token: str) -> None:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         pass
+
+
+# ===========================================================================
+# Pre-authorized capability grants (host-confirm path C). A human mints a
+# time-boxed, scope-limited grant via scripts/desktop_grant.py; within the
+# window a COVERED host action executes without a per-action pending token.
+# Grants are minted ONLY by the human CLI (never exposed via MCP) — the MCP
+# tools only CHECK them. Honest threat model (same as path A): on a shell-
+# accessible box this is not agent-proof; it prevents silent/accidental
+# escalation and bounds blast radius (ttl + max_uses + scope + revocable +
+# audited), requiring a deliberate human pre-authorization step.
+# ===========================================================================
+GRANTS_DIR = _CACHE_ROOT / "desktop_grants"
+
+
+def mint_grant_id() -> str:
+    return secrets.token_hex(8)
+
+
+def _grant_path(grant_id: str) -> Path:
+    safe = "".join(c for c in (grant_id or "") if c in "0123456789abcdef")
+    return GRANTS_DIR / f"{safe}.json"
+
+
+def write_grant(grant_id: str, kind: str, scope: dict[str, Any],
+                expires_at: int, max_uses: int | None, note: str = "") -> dict[str, Any]:
+    """Persist a human-minted capability grant. `scope` is {app?, name?, action?} where
+    a missing/'*' field matches anything. max_uses None = unlimited within the ttl."""
+    GRANTS_DIR.mkdir(parents=True, exist_ok=True)
+    rec = {
+        "schema": SCHEMA_VERSION, "grant_id": grant_id, "kind": kind, "scope": scope,
+        "created_at": int(time.time()), "expires_at": expires_at,
+        "max_uses": max_uses, "uses": 0, "status": "active", "note": note,
+    }
+    _grant_path(grant_id).write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+    return rec
+
+
+def _iter_grants():
+    if not GRANTS_DIR.exists():
+        return
+    for p in sorted(GRANTS_DIR.glob("*.json")):
+        try:
+            yield json.loads(p.read_text(encoding="utf-8")), p
+        except (OSError, ValueError):
+            continue
+
+
+def _grant_live(rec: dict[str, Any], now: int) -> bool:
+    if rec.get("status") != "active" or now > int(rec.get("expires_at", 0)):
+        return False
+    mu = rec.get("max_uses")
+    return not (mu is not None and int(rec.get("uses", 0)) >= int(mu))
+
+
+def list_grants(active_only: bool = True) -> list[dict[str, Any]]:
+    now = int(time.time())
+    return [rec for rec, _ in _iter_grants() if (not active_only) or _grant_live(rec, now)]
+
+
+def revoke_grant(grant_id: str) -> bool:
+    path = _grant_path(grant_id)
+    try:
+        rec = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    rec["status"] = "revoked"
+    rec["revoked_at"] = int(time.time())
+    try:
+        path.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def revoke_all_grants() -> int:
+    n = 0
+    for rec, _ in list((r, p) for r, p in _iter_grants()):
+        if rec.get("status") == "active" and revoke_grant(rec.get("grant_id", "")):
+            n += 1
+    return n
+
+
+def _scope_covers(scope_val, req_val, exact: bool = False) -> bool:
+    if scope_val in (None, "*", ""):
+        return True
+    if req_val is None:
+        return False
+    if exact:
+        return str(scope_val).lower() == str(req_val).lower()
+    return str(scope_val).lower() in str(req_val).lower()
+
+
+def find_matching_grant(kind: str, app=None, name=None, action=None) -> dict[str, Any] | None:
+    """First live grant of `kind` whose scope covers the request. app/name match by
+    substring, action matches exactly. Returns None if nothing covers it."""
+    now = int(time.time())
+    for rec, _ in _iter_grants():
+        if rec.get("kind") != kind or not _grant_live(rec, now):
+            continue
+        scope = rec.get("scope", {}) or {}
+        if (_scope_covers(scope.get("app", "*"), app)
+                and _scope_covers(scope.get("name", "*"), name)
+                and _scope_covers(scope.get("action", "*"), action, exact=True)):
+            return rec
+    return None
+
+
+def record_grant_use(grant_id: str) -> None:
+    path = _grant_path(grant_id)
+    try:
+        rec = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    rec["uses"] = int(rec.get("uses", 0)) + 1
+    rec["last_used_at"] = int(time.time())
+    try:
+        path.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass

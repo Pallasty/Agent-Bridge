@@ -61,11 +61,13 @@ from types import SimpleNamespace
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from desktop_confirm_store import (  # noqa: E402  shared two-phase host-confirm store
+from desktop_confirm_store import (  # noqa: E402  shared host-confirm store (tokens + grants)
     DEFAULT_CONFIRM_TTL,
+    find_matching_grant,
     load_and_consume_pending,
     mint_token,
     notify_pending,
+    record_grant_use,
     write_pending,
 )
 
@@ -321,6 +323,8 @@ def main() -> int:
         p.add_argument("--dry-run", action="store_true", help="log intent, inject nothing")
         p.add_argument("--request-host-confirm", action="store_true",
                        help="host target: do not inject; stage a token + pending record for two-phase confirm")
+        p.add_argument("--use-grant", action="store_true",
+                       help="host target: inject directly IF a human-minted capability grant covers it (path C)")
         p.add_argument("--confirm-ttl", type=int, default=DEFAULT_CONFIRM_TTL,
                        help=f"seconds a staged pending token stays valid (default {DEFAULT_CONFIRM_TTL})")
     args = ap.parse_args()
@@ -333,6 +337,26 @@ def main() -> int:
     target = args.display or os.environ.get("WAYLAND_DISPLAY", "")
     host = host_display()
     is_host = (target == host) or (not target)
+
+    # Host-confirm path C: host action + --use-grant -> inject IF a human-minted grant covers it.
+    if getattr(args, "use_grant", False) and is_host and not args.dry_run:
+        grant = find_matching_grant("action", action=args.action)
+        record = {
+            "schema": SCHEMA_VERSION, "ts": int(time.time()), "action": args.action,
+            "target_display": target, "host_display": host_display(),
+        }
+        if grant is None:
+            record.update(allowed=False, rc=3, result="blocked",
+                          gate_reason="no covering capability grant for this host action "
+                                      "(mint one with scripts/desktop_grant.py)")
+            audit(record); print(json.dumps(record, ensure_ascii=False)); return 3
+        record_grant_use(grant["grant_id"])
+        rc, detail = run_backend(args, target)
+        record.update(allowed=True, rc=rc, detail=detail, grant_id=grant["grant_id"],
+                      result="ok" if rc == 0 else "error",
+                      gate_reason=f"authorized by capability grant {grant['grant_id']} (path C)")
+        audit(record); print(json.dumps(record, ensure_ascii=False)); return 0 if rc == 0 else 1
+
     # Host-confirm phase 1: host target + explicit request -> stage pending, inject nothing.
     if getattr(args, "request_host_confirm", False) and is_host and not args.dry_run:
         return stage_host_confirm(args, target)

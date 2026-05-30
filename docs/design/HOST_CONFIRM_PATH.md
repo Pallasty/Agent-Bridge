@@ -80,13 +80,29 @@ at confirm time so the action reflects the live tree.
   now reached only via a validated token (a human-approved confirm), never by the agent
   directly.
 
-## C — sketch (after A)
+## C — pre-authorized capability window (shipped)
 
-`ab-desktop-grant --app X --action click --ttl 5m` writes
-`~/.cache/agent-bridge/desktop_grants/<id>.json` (scope + expiry). A host action whose
-selector matches an unexpired grant executes without a pending step. Grants are
-human-minted only (a CLI the human runs), narrow by app/action, time-boxed, and audited.
-Trades per-action review for a bounded, revocable window — opt-in for trusted repetition.
+A human mints a time-boxed, scope-limited **grant** with
+`scripts/desktop_grant.py grant --kind invoke|action [--app X] [--name Y] [--action click] --ttl S [--max-uses N]`
+(also `list` / `revoke <id>|--all`). It writes `~/.cache/agent-bridge/desktop_grants/<id>.json`
+`{kind, scope:{app,name,action}, expires_at, max_uses, uses, status}`. Within the window a
+**covered** host action runs without a per-action pending token: the MCP tools gain
+`use_grant:true`, which passes `--use-grant` to the backend; the backend calls
+`find_matching_grant(kind, app, name, action)` (app/name substring, action exact) — if a
+live grant covers it, it executes and `record_grant_use` increments the counter; otherwise
+DENIED. Default-closed (no `use_grant`, or no covering grant ⇒ refused). Bounded by
+**ttl + max_uses + scope + revoke**, every use audited with the `grant_id`.
+
+The grant CLI is **human-only — deliberately NOT exposed via MCP** (the desktop_* tools
+only *check* grants, never mint them). Same honest threat model as path A: on a shell-
+accessible box this is not agent-proof; it requires a deliberate human pre-authorization
+and bounds blast radius, rather than sandboxing an adversarial agent. C weakens per-action
+review (window-blind within scope) — it is the opt-in escalation for trusted repetition,
+strictly after the safe default (A).
+
+Shared store: `scripts/desktop_confirm_store.py` holds both the one-shot tokens (A) and the
+grants (C). Acceptance: `scripts/desktop_accept/run_grant_accept.sh` (cover / deny /
+max-uses / expiry / revoke / scope-mismatch, 8/8).
 
 ## B — sketch (last, coordinate with present #92)
 
