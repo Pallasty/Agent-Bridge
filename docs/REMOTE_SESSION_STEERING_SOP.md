@@ -131,6 +131,41 @@ finding — `needs_human_gate:true` is the worker raising its hand for exactly t
 
 ---
 
+## Kilo — free headless executor (A/B/C validated 2026-05-30 on aio2)
+
+`kilo` (v7.3.x, an OpenCode-lineage agent) is deployed on aio2 at `~/.kilo/bin/kilo`
+(**not on PATH** — use the full path). Its default model `kilo/kilo-auto/free` runs on
+Kilo's own free gateway, so kilo is a **zero-quota** executor — ideal for the cheap
+exec/collect half of this boundary, leaving the scarce codex quota untouched.
+
+Three integration modes were validated end-to-end:
+
+- **A — one-shot `kilo run`** (no tmux, no session): fire a task, get the result. Driven via
+  `scripts/ab-kilo-run.sh "<task>"`, which ssh's to the node, runs `kilo run --dir ~/ab-kilo`,
+  and **retries on the free pool's intermittent `ProviderModelNotFoundError`** (retry-on-miss is
+  mandatory — the same call usually succeeds on the 2nd try). `--json` selects raw JSON events.
+- **B — interactive TUI under steer**: `agent_steer_launch(project=kilo, role=tui, command="bash -lc 'cd <dir> && exec \"$HOME/.kilo/bin/kilo\"'")` → `ab__kilo__tui`, then drive with
+  `agent_steer_drive`. The kilo TUI boots with no trust/auth gate and renders responses in-pane.
+- **C — kilo wields the agent-bridge toolset**: a standing workspace **`~/ab-kilo/`** on the node
+  holds a `kilo.jsonc` whose `mcp` block wires agent-bridge:
+
+  ```jsonc
+  "mcp": { "agent-bridge": { "type": "local",
+    "command": ["/home/pallasting/.local/bin/agent-bridge-mcp-wrapper.sh", "mcp"],
+    "enabled": true } }
+  ```
+
+  From that dir `kilo mcp list` shows `✓ agent-bridge connected` and kilo can invoke all AB tools.
+
+⚠️ A config-file `mcp` block **REPLACES** (not merges) kilo's DB-stored global servers for that
+scope — so we keep agent-bridge in the dedicated `~/ab-kilo/` workspace and **never edit the user's
+global `~/.config/kilo/kilo.jsonc`** (which keeps its own playwright/notion/neon servers).
+
+**Boundary still holds**: kilo may be driven freely for exec/collect; any *research judgment* it
+produces needs a human ground-truth gate before it is trusted.
+
+---
+
 ## Operational notes / constraints
 
 - tmux must exist on the **target** node (installed locally via `brew install tmux`; aio2 has it).
