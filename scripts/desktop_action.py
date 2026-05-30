@@ -57,7 +57,17 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from desktop_confirm_store import (  # noqa: E402  shared two-phase host-confirm store
+    DEFAULT_CONFIRM_TTL,
+    load_and_consume_pending,
+    mint_token,
+    notify_pending,
+    write_pending,
+)
 
 SCHEMA_VERSION = "desktop_action/v1.2"
 AUDIT_LOG = Path(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))) \
@@ -213,9 +223,86 @@ def run_backend(args: argparse.Namespace, target: str) -> tuple[int, str]:
         return 1, f"exec error: {e}"
 
 
+# --------------------------------------------------------------------------
+# Host-confirm path A: a host action is never injected inline. Phase 1
+# (--request-host-confirm) stages a single-use token + pending record; phase 2
+# (--confirm-token) re-runs the stored action once, after a human approved.
+# Mirrors desktop_invoke.py; shares desktop_confirm_store. See
+# docs/design/HOST_CONFIRM_PATH.md.
+# --------------------------------------------------------------------------
+_ACTION_PARAM_KEYS = ("action", "text", "dx", "dy", "x", "y", "button", "display", "swaysock")
+
+
+def action_spec(args: argparse.Namespace) -> dict[str, Any]:
+    """Capture the action verb + its params + target so it re-runs faithfully at confirm."""
+    return {k: getattr(args, k, None) for k in _ACTION_PARAM_KEYS}
+
+
+def build_action_summary(args: argparse.Namespace, target: str) -> str:
+    """Human-readable one-liner describing the host action awaiting approval."""
+    parts: list[str] = [str(args.action)]
+    for k in ("text", "x", "y", "dx", "dy", "button"):
+        v = getattr(args, k, None)
+        if v is not None:
+            parts.append(f"{k}={v!r}")
+    return (f"desktop_action {' '.join(parts)} on the REAL desktop "
+            f"(display={target or 'host'})")
+
+
+def stage_host_confirm(args: argparse.Namespace, target: str) -> int:
+    """Phase 1: stage a pending host action + mint token + notify; inject nothing."""
+    summary = build_action_summary(args, target)
+    token = mint_token()
+    expires_at = int(time.time()) + max(1, args.confirm_ttl)
+    write_pending(token, "action", action_spec(args), summary, expires_at)
+    notify_pending(summary, token)
+    record = {
+        "schema": SCHEMA_VERSION, "ts": int(time.time()), "action": args.action,
+        "target_display": target, "host_display": host_display(),
+        "allowed": False, "pending": True, "token": token, "summary": summary,
+        "expires_at": expires_at, "rc": 0,
+        "gate_reason": "host target: pending two-phase confirm "
+                       "(approve, then --confirm-token <token> to execute)",
+    }
+    audit(record)
+    print(json.dumps(record, ensure_ascii=False))
+    return 0
+
+
+def run_confirm_token(args: argparse.Namespace) -> int:
+    """Phase 2: execute a human-approved pending action by token (single-use).
+
+    The token is loaded, validated, and marked consumed BEFORE injection; then the
+    stored action spec is re-run. Approval is implicit in possessing a valid token."""
+    token = args.confirm_token
+    record: dict[str, Any] = {
+        "schema": SCHEMA_VERSION, "ts": int(time.time()), "phase": "confirm", "token": token,
+    }
+    rec, reason = load_and_consume_pending(token, expect_kind="action")
+    if rec is None:
+        record.update(allowed=False, rc=3, error=reason)
+        audit(record); print(json.dumps(record, ensure_ascii=False)); return 3
+    spec = rec.get("payload", {}) or {}
+    record["action"] = spec.get("action")
+    record["summary"] = rec.get("summary")
+    ns = SimpleNamespace(dry_run=False, **{k: spec.get(k) for k in _ACTION_PARAM_KEYS})
+    target = ns.display or os.environ.get("WAYLAND_DISPLAY", "")
+    rc, detail = run_backend(ns, target)
+    record.update(allowed=True, rc=rc, detail=detail,
+                  result="ok" if rc == 0 else "error",
+                  gate_reason="host-approved via consumed confirm token (phase 2)")
+    audit(record)
+    print(json.dumps(record, ensure_ascii=False))
+    return 0 if rc == 0 else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="gated desktop input injection (v1)")
-    sub = ap.add_subparsers(dest="action", required=True)
+    ap.add_argument("--confirm-token", default=None,
+                    help="execute a previously-staged pending host action by its token "
+                         "(human-approved phase 2; no subcommand needed)")
+    ap.add_argument("--wait", type=float, default=4.0, help=argparse.SUPPRESS)  # accepted+ignored: CLI parity with desktop_invoke for the shared desktop_confirm dispatcher
+    sub = ap.add_subparsers(dest="action", required=False)
     p_type = sub.add_parser("type"); p_type.add_argument("text")
     p_key = sub.add_parser("key"); p_key.add_argument("text", help="keysym e.g. Return, Tab, ctrl+c")
     p_move = sub.add_parser("move"); p_move.add_argument("dx", type=int); p_move.add_argument("dy", type=int)
@@ -232,9 +319,24 @@ def main() -> int:
                        dest="i_understand_this_touches_the_real_desktop",
                        action="store_true", help="required ack to act on host display")
         p.add_argument("--dry-run", action="store_true", help="log intent, inject nothing")
+        p.add_argument("--request-host-confirm", action="store_true",
+                       help="host target: do not inject; stage a token + pending record for two-phase confirm")
+        p.add_argument("--confirm-ttl", type=int, default=DEFAULT_CONFIRM_TTL,
+                       help=f"seconds a staged pending token stays valid (default {DEFAULT_CONFIRM_TTL})")
     args = ap.parse_args()
 
+    if args.confirm_token:  # phase 2: execute a human-approved pending action
+        return run_confirm_token(args)
+    if not args.action:
+        ap.error("need a subcommand (type/key/move/moveto/click/scroll) or --confirm-token")
+
     target = args.display or os.environ.get("WAYLAND_DISPLAY", "")
+    host = host_display()
+    is_host = (target == host) or (not target)
+    # Host-confirm phase 1: host target + explicit request -> stage pending, inject nothing.
+    if getattr(args, "request_host_confirm", False) and is_host and not args.dry_run:
+        return stage_host_confirm(args, target)
+
     allowed, reason = gate(args)
     record: dict[str, Any] = {
         "schema": SCHEMA_VERSION, "ts": int(time.time()), "action": args.action,

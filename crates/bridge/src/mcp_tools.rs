@@ -1542,9 +1542,10 @@ impl McpTool for DesktopActionTool {
                  (logs intent + audits, injects nothing), or (b) isolated — a nested \
                  compositor addressed by a non-host `display` plus its `swaysock`, where \
                  absolute moveto/click go through the sway-IPC backend (which itself \
-                 refuses physical-output sockets). Host-mutating injection (--confirm) is \
-                 intentionally NOT exposed here and cannot be unlocked. Every call is \
-                 audited to desktop_action_audit.jsonl."
+                 refuses physical-output sockets). Host injection stays closed by default; \
+                 set confirm_host:true to instead stage a single-use, TTL-bounded pending \
+                 token (executed only by a subsequent human-approved desktop_confirm) — host \
+                 injection never happens inline. Every call is audited to desktop_action_audit.jsonl."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -1563,6 +1564,7 @@ impl McpTool for DesktopActionTool {
                     "display": { "type": "string", "description": "Target WAYLAND_DISPLAY. Must be a nested (non-host) display for any real injection." },
                     "swaysock": { "type": "string", "description": "Nested sway IPC socket; required (with a non-host display) for any non-dry-run injection. Enables the isolated sway-IPC absolute backend." },
                     "dry_run": { "type": "boolean", "default": false, "description": "When true, log intent + audit but inject nothing. Allowed against any target." },
+                    "confirm_host": { "type": "boolean", "default": false, "description": "Host target only: do not inject; stage a single-use pending token + on-screen notify for a two-phase human-approved confirm (then call desktop_confirm). Default false keeps host injection closed." },
                     "cwd": { "type": "string", "description": "Repo root to resolve scripts/desktop_action.py." },
                     "script_path": { "type": "string", "description": "Explicit desktop_action.py path (tests / alternate checkouts)." },
                     "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 10000, "description": "Milliseconds before the action process is killed." }
@@ -1608,16 +1610,26 @@ impl McpTool for DesktopActionTool {
             .ok()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "wayland-1".to_string());
+        let confirm_host = args
+            .get("confirm_host")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let is_isolated = swaysock.map(|s| !s.is_empty()).unwrap_or(false)
             && display
                 .map(|d| !d.is_empty() && d != host_display)
                 .unwrap_or(false);
-        if !dry_run && !is_isolated {
+        // A host action is refused by default; with confirm_host it does NOT inject — it
+        // stages a single-use pending token for a separate human-approved desktop_confirm
+        // (two-phase host-confirm path A). Host injection never happens inline here.
+        let host_target = !dry_run && !is_isolated;
+        if host_target && !confirm_host {
             return Ok(desktop_action_error(json!({
                 "code": "host_mutation_not_exposed",
-                "message": "this MCP exposes only dry_run or isolated (non-host display + swaysock) \
-                            actions; host-desktop injection is not available here",
-                "hint": "set dry_run:true, or provide a nested `display` (!= host) and its `swaysock`"
+                "message": "this MCP injects only dry_run or isolated (non-host display + swaysock) \
+                            actions; for a host action set confirm_host:true to stage a pending \
+                            two-phase confirm token (executed later via desktop_confirm)",
+                "hint": "set dry_run:true, provide a nested `display` (!= host) and its `swaysock`, \
+                         or set confirm_host:true for a human-approved host action"
             })));
         }
 
@@ -1682,8 +1694,15 @@ impl McpTool for DesktopActionTool {
         if dry_run {
             cmd.arg("--dry-run");
         }
+        if host_target && confirm_host {
+            // Phase 1: stage a pending token, inject NOTHING. The backend writes the
+            // pending record + fires an on-screen notify; execution waits for a
+            // human-approved desktop_confirm(token).
+            cmd.arg("--request-host-confirm");
+        }
         // NOTE: --confirm / --i-understand-this-touches-the-real-desktop are NEVER
-        // passed by this MCP surface, so host injection cannot be unlocked here.
+        // passed by this MCP surface. Host injection is reachable ONLY via the two-phase
+        // desktop_confirm path (a human approves a staged token), never inline.
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         if let Some(cwd) = cwd {
@@ -1722,7 +1741,7 @@ impl McpTool for DesktopActionTool {
                         json!({
                             "tool": self.name(),
                             "read_only": false,
-                            "mode": if dry_run { "dry-run" } else { "isolated" },
+                            "mode": if dry_run { "dry-run" } else if host_target { "pending-host-confirm" } else { "isolated" },
                             "host_protected": true,
                             "duration_ms": duration_ms,
                             "exit_code": output.status.code().unwrap_or(-1),
@@ -2043,13 +2062,37 @@ fn desktop_invoke_error(error: Value) -> ToolResult {
     result
 }
 
+/// Read a pending host-confirm record's `kind` ("invoke" | "action") WITHOUT consuming
+/// it, so desktop_confirm can dispatch to the right backend script. Token must be hex
+/// (path safety); returns None if malformed, missing, or unreadable (caller defaults to
+/// the invoke backend, which then reports "no such pending token").
+fn desktop_pending_kind(token: &str) -> Option<String> {
+    if token.is_empty() || !token.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let cache = std::env::var("XDG_CACHE_HOME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "{}/.cache",
+                std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
+            )
+        });
+    let path = format!("{cache}/agent-bridge/desktop_pending/{token}.json");
+    let txt = std::fs::read_to_string(path).ok()?;
+    let v: Value = serde_json::from_str(&txt).ok()?;
+    v.get("kind").and_then(|k| k.as_str()).map(str::to_string)
+}
+
 /// Phase 2 of the host-confirm path: execute a host action a human approved.
 ///
-/// `desktop_invoke` with `confirm_host:true` mints a single-use, TTL-bounded pending
-/// token (and an on-screen notify); it invokes NOTHING. This tool takes that token and
-/// executes the pending host action — the only way host mutation reaches the real
-/// desktop through MCP. The backend validates the token (exists, unconsumed, unexpired)
-/// and marks it consumed before invoking, so it can run at most once.
+/// `desktop_invoke`/`desktop_action` with `confirm_host:true` mint a single-use,
+/// TTL-bounded pending token (and an on-screen notify); they act on NOTHING. This tool
+/// takes that token and executes the pending host action — the only way host mutation
+/// reaches the real desktop through MCP. It dispatches by the record's kind (invoke ->
+/// desktop_invoke.py, action -> desktop_action.py); the backend validates the token
+/// (exists, unconsumed, unexpired) and marks it consumed before acting, so it runs once.
 pub struct DesktopConfirmTool {
     _hub: Hub,
 }
@@ -2079,7 +2122,7 @@ impl McpTool for DesktopConfirmTool {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "token": { "type": "string", "description": "The single-use token minted by desktop_invoke(confirm_host:true)." },
+                    "token": { "type": "string", "description": "The single-use token minted by desktop_invoke or desktop_action with confirm_host:true. desktop_confirm dispatches to the right backend by the token's kind." },
                     "wait": { "type": "number", "minimum": 0, "maximum": 30, "default": 4.0, "description": "Seconds to poll for the accessible to reappear before invoking." },
                     "cwd": { "type": "string", "description": "Repo root to resolve scripts/desktop_invoke.py." },
                     "script_path": { "type": "string", "description": "Explicit desktop_invoke.py path (tests / alternate checkouts)." },
@@ -2095,7 +2138,7 @@ impl McpTool for DesktopConfirmTool {
         if token.is_empty() {
             return Ok(desktop_invoke_error(json!({
                 "code": "missing_token",
-                "message": "`token` is required (minted by desktop_invoke confirm_host:true)"
+                "message": "`token` is required (minted by desktop_invoke/desktop_action with confirm_host:true)"
             })));
         }
         let timeout_ms = args
@@ -2105,11 +2148,17 @@ impl McpTool for DesktopConfirmTool {
             .clamp(1_000, 30_000);
 
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
-        let script = desktop_invoke_script_path(&args, cwd.as_ref());
+        // Dispatch to the right backend by the pending record's kind: an "action" token
+        // executes via desktop_action.py, otherwise desktop_invoke.py.
+        let script = if desktop_pending_kind(token).as_deref() == Some("action") {
+            desktop_action_script_path(&args, cwd.as_ref())
+        } else {
+            desktop_invoke_script_path(&args, cwd.as_ref())
+        };
         if !script.exists() {
             return Ok(desktop_invoke_error(json!({
                 "code": "script_missing",
-                "message": format!("desktop_invoke.py not found at {}", script.display()),
+                "message": format!("backend confirm script not found at {}", script.display()),
                 "hint": "pass script_path or run from the Agent-Bridge repo root"
             })));
         }
@@ -5314,6 +5363,235 @@ impl McpTool for PresentReplayTool {
             now.max(0) as u64,
         );
         Ok(ToolResult::json_text(&snapshot))
+    }
+}
+
+/// Build the read-only `present_replay` snapshot the E3 dashboard mirrors. Shared
+/// by `present_dashboard` for both the embedded render AND the verify-time
+/// recompute (so the embodiment check compares the surface against a freshly
+/// derived current `chain_head`, not an echo of the value it embedded). The
+/// stable dashboard file is excluded by [`crate::present::list_artifacts`], so it
+/// never perturbs the chain it reflects.
+async fn dashboard_replay_snapshot(
+    store: &Arc<dyn StateStore>,
+    window_secs: i64,
+    limit: usize,
+    kind_filter: Option<&str>,
+) -> std::result::Result<Value, String> {
+    let calls = store
+        .recent_mcp_tool_calls(window_secs, limit as u32)
+        .await
+        .map_err(|e| format!("recent_mcp_tool_calls: {e}"))?;
+    let present_calls_logged = calls.iter().filter(|c| c.tool_name == "present").count();
+    let now = dispatch_now_secs();
+    let cutoff = now.saturating_sub(window_secs);
+    let dir = crate::present::presentations_dir();
+    let artifacts: Vec<_> = crate::present::list_artifacts(&dir, limit, kind_filter)
+        .into_iter()
+        .filter(|a| a.ts.map_or(true, |t| t as i64 >= cutoff))
+        .collect();
+    Ok(crate::present::present_replay_snapshot(
+        &artifacts,
+        present_calls_logged,
+        window_secs as u64,
+        now.max(0) as u64,
+    ))
+}
+
+/// First 12 chars of a chain head, for compact `embody_detail` diagnostics.
+fn short_head(h: &str) -> String {
+    h.chars().take(12).collect()
+}
+
+/// Output-expression lane E3 (embodied mirror): renders a PERSISTENT dashboard
+/// surface that mirrors the `present_replay` snapshot, and self-verifies the
+/// embodiment by reading back the `chain_head` the rendered surface shows. See
+/// `crate::present::build_dashboard_html` / `classify_embody`.
+pub struct PresentDashboardTool {
+    hub: Hub,
+}
+impl PresentDashboardTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for PresentDashboardTool {
+    fn name(&self) -> &'static str {
+        "present_dashboard"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Output-expression lane E3 (embodied mirror): render a PERSISTENT \
+                 dashboard surface (~/.cache/agent-bridge/presentations/_ab_dashboard.html) that \
+                 MIRRORS the present_replay snapshot — the lane's current chain_head, the \
+                 count/drift/dual-encoding summary, and a recent-artifacts table — into one stable \
+                 browser tab a human keeps open (every call refreshes the same file). Read-only \
+                 over present() artifacts (NOT a new source of truth). When verify runs, a headless \
+                 probe reads the chain_head the rendered surface shows and compares it to the \
+                 lane's CURRENT chain_head, returning embody_status: \
+                 embodied|stale|dead|no_browser|error|skipped (stale = the surface is behind the \
+                 lane; dead = it rendered nothing / no head — the lane never claims an embodiment \
+                 it didn't achieve). The whole snapshot is dual-encoded as #ab-payload for bypass \
+                 agents. Degrades to no_browser when no browser is available."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window for both present calls and artifacts (by provenance ts)."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 200,
+                        "description": "Max artifacts scanned (most-recent-first) and present-call rows fetched."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Optional kind filter (table|markdown_table|html|svg|mermaid)."
+                    },
+                    "title": { "type": "string", "description": "Dashboard document title." },
+                    "verify": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Self-verify embodiment by loading the dashboard in the browser and comparing the chain_head it renders to the lane's current chain_head (embody_status). Degrades to no_browser when no browser is available."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 500) as usize;
+        let kind_filter = args.get("kind").and_then(|v| v.as_str());
+        let title = args.get("title").and_then(|v| v.as_str());
+        let verify = args.get("verify").and_then(|v| v.as_bool()).unwrap_or(true);
+
+        // Snapshot the lane state the dashboard will mirror, then render + write
+        // the stable surface (refreshing the one tab the human keeps open).
+        let snapshot =
+            match dashboard_replay_snapshot(&store, window_secs, limit, kind_filter).await {
+                Ok(s) => s,
+                Err(e) => return Ok(ToolResult::error(e)),
+            };
+        let chain_head = snapshot
+            .get("chain_head")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let dir = crate::present::presentations_dir();
+        let path = dir.join(format!("{}.html", crate::present::DASHBOARD_BASENAME));
+        let html = crate::present::build_dashboard_html(&snapshot, title);
+        if let Err(e) = crate::present::write_artifact_atomic(&path, &html) {
+            return Ok(ToolResult::error(format!(
+                "present_dashboard: write failed: {e}"
+            )));
+        }
+
+        // Self-verify embodiment: load the surface, read the chain_head it shows,
+        // and compare to the lane's head recomputed NOW (a genuine cross-check —
+        // a concurrent present() that landed since the write makes the surface
+        // honestly `stale`, not a fault).
+        let mut embody_status = crate::present::EmbodyStatus::Skipped;
+        let mut embody_detail: Option<String> = None;
+        let mut screenshot_path: Option<String> = None;
+        if verify {
+            if let Err(e) = self.hub.security.check(Cap::Browser) {
+                embody_status = crate::present::EmbodyStatus::NoBrowser;
+                embody_detail = Some(format!("capability: {e}"));
+            } else if let Some(b) = self.hub.browser.clone() {
+                let file_url = format!("file://{}", path.display());
+                match b.navigate(&file_url).await {
+                    Ok(page) => {
+                        match b.eval(&page, crate::present::DASHBOARD_READBACK_JS).await {
+                            Ok(rv) => {
+                                let readback = crate::present::parse_dashboard_readback(&rv);
+                                let expected = match dashboard_replay_snapshot(
+                                    &store,
+                                    window_secs,
+                                    limit,
+                                    kind_filter,
+                                )
+                                .await
+                                {
+                                    Ok(s) => s
+                                        .get("chain_head")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    Err(_) => chain_head.clone(),
+                                };
+                                embody_status =
+                                    crate::present::classify_embody(&readback, &expected);
+                                embody_detail = Some(format!(
+                                    "dom_head={} expected_head={} rendered={} rows={}",
+                                    short_head(&readback.chain_head),
+                                    short_head(&expected),
+                                    readback.rendered,
+                                    readback.rows
+                                ));
+                            }
+                            Err(e) => {
+                                embody_status = crate::present::EmbodyStatus::Error;
+                                embody_detail = Some(format!("readback eval: {e}"));
+                            }
+                        }
+                        if let Ok(bytes) = b.screenshot(&page).await {
+                            let png =
+                                dir.join(format!("{}.png", crate::present::DASHBOARD_BASENAME));
+                            if std::fs::write(&png, bytes.as_ref()).is_ok() {
+                                screenshot_path = Some(png.display().to_string());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        embody_status = crate::present::EmbodyStatus::NoBrowser;
+                        embody_detail = Some(format!("navigate: {e}"));
+                    }
+                }
+            } else {
+                embody_status = crate::present::EmbodyStatus::NoBrowser;
+                embody_detail = Some("no browser backend configured".to_string());
+            }
+        }
+
+        let result = json!({
+            "schema": crate::present::PRESENT_DASHBOARD_SCHEMA,
+            "dashboard_path": path.display().to_string(),
+            "screenshot_path": screenshot_path,
+            "chain_head": chain_head,
+            "artifact_count": snapshot.get("artifact_count"),
+            "present_calls_logged": snapshot.get("present_calls_logged"),
+            "drift": snapshot.get("drift"),
+            "dual_encoding_ok": snapshot.get("dual_encoding_ok"),
+            "dual_encoding_missing": snapshot.get("dual_encoding_missing"),
+            "embody_status": embody_status.as_str(),
+            "embody_detail": embody_detail,
+            "bytes": html.len(),
+        });
+        Ok(ToolResult::json_text(&result))
     }
 }
 
@@ -27591,6 +27869,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(PresentReplayTool::new(hub.clone())),
     );
+    // E3 embodied mirror: persistent dashboard surface that reflects the
+    // present_replay snapshot, self-verified by chain_head readback. Niche
+    // (opt-in), read-only over present() artifacts.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(PresentDashboardTool::new(hub.clone())),
+    );
     reg_if(
         &mut reg,
         policy,
@@ -32110,9 +32397,11 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(all.includes(Tier::Niche, "present"));
         let std_p = ToolPolicy::from_values(None, None, None, Some("standard"));
         assert!(!std_p.includes(Tier::Niche, "present"));
-        // slice 2 present_replay is the same Niche opt-in shape.
+        // slice 2 present_replay + E3 present_dashboard are the same Niche opt-in shape.
         assert!(all.includes(Tier::Niche, "present_replay"));
         assert!(!std_p.includes(Tier::Niche, "present_replay"));
+        assert!(all.includes(Tier::Niche, "present_dashboard"));
+        assert!(!std_p.includes(Tier::Niche, "present_dashboard"));
         let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
         assert!(
             schemas.iter().any(|s| s.name == "present"),
@@ -32121,6 +32410,10 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(
             schemas.iter().any(|s| s.name == "present_replay"),
             "present_replay must register under the all profile"
+        );
+        assert!(
+            schemas.iter().any(|s| s.name == "present_dashboard"),
+            "present_dashboard must register under the all profile"
         );
     }
 
@@ -32200,6 +32493,10 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(tool.input_schema["properties"]
             .get("i_understand_this_touches_the_real_desktop")
             .is_none());
+        // ...but the two-phase host-confirm opt-in IS exposed (stages a token, never injects inline)
+        assert!(tool.input_schema["properties"]
+            .get("confirm_host")
+            .is_some());
     }
 
     #[tokio::test]
@@ -32327,6 +32624,75 @@ print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
         assert!(argv.contains(&"--dry-run"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn desktop_action_confirm_host_stages_pending_not_inline() {
+        // confirm_host:true on a host action must NOT refuse, and must pass
+        // --request-host-confirm (phase 1 = stage pending), never the host-unlock flags.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-action-confirm-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_action.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopActionTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "action": "click",
+                    "button": "left",
+                    "confirm_host": true,
+                    "script_path": script.to_string_lossy(),
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(
+            !out.is_error,
+            "confirm_host host action must not be refused"
+        );
+        let payload = result_text_as_json(&out);
+        let argv: Vec<&str> = payload["argv"]
+            .as_array()
+            .expect("argv")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(argv.contains(&"--request-host-confirm"));
+        // host injection never happens inline: the unlock flags are still never passed
+        assert!(!argv.contains(&"--confirm"));
+        assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
+        assert!(!argv.contains(&"--dry-run"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn desktop_pending_kind_rejects_non_hex_token() {
+        // path-safety: a non-hex token never resolves to a file read.
+        assert_eq!(desktop_pending_kind(""), None);
+        assert_eq!(desktop_pending_kind("../etc/passwd"), None);
+        assert_eq!(desktop_pending_kind("not-hex-zzzz"), None);
+        // a well-formed hex token with no backing file is also None (caller defaults to invoke).
+        assert_eq!(desktop_pending_kind("deadbeefdeadbeef"), None);
     }
 
     #[test]

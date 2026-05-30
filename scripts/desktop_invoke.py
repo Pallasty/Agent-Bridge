@@ -25,20 +25,23 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import secrets
-import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from desktop_confirm_store import (  # noqa: E402  shared two-phase host-confirm store
+    DEFAULT_CONFIRM_TTL,
+    load_and_consume_pending,
+    mint_token,
+    notify_pending,
+    write_pending,
+)
+
 SCHEMA_VERSION = "desktop_invoke/v0"
 _CACHE_ROOT = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "agent-bridge"
 AUDIT_PATH = _CACHE_ROOT / "desktop_invoke_audit.jsonl"
-# Host-confirm path (A): two-phase pending store. A host-targeted invoke is never
-# executed inline; --request-host-confirm mints a token + pending record here, and a
-# separate --confirm-token <token> (a human-approved second call) executes it once.
-PENDING_DIR = _CACHE_ROOT / "desktop_pending"
-DEFAULT_CONFIRM_TTL = 120  # seconds a pending host-invoke token stays valid
 _ACTION_PRIORITY = ("click", "press", "activate", "do", "toggle")
 
 
@@ -49,62 +52,6 @@ def audit(record: dict[str, Any]) -> None:
         with AUDIT_PATH.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except OSError:
-        pass
-
-
-def _pending_path(token: str) -> Path:
-    # token is hex (validated by mint); reject anything else so the path can't escape.
-    safe = "".join(c for c in token if c in "0123456789abcdef")
-    return PENDING_DIR / f"{safe}.json"
-
-
-def write_pending(token: str, selector: dict[str, Any], action: str | None,
-                  summary: str, expires_at: int) -> None:
-    """Persist a pending host invoke. The SELECTOR (not a stale handle) is stored so
-    the element is re-resolved fresh at confirm time."""
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    rec = {
-        "schema": SCHEMA_VERSION, "kind": "invoke", "ts": int(time.time()),
-        "token": token, "selector": selector, "action": action,
-        "summary": summary, "expires_at": expires_at, "status": "pending",
-    }
-    _pending_path(token).write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
-
-
-def load_and_consume_pending(token: str) -> tuple[dict[str, Any] | None, str]:
-    """Load a pending record, validate (exists, unconsumed, unexpired), and mark it
-    consumed (single-use). Returns (record, reason). record is None on any failure."""
-    path = _pending_path(token)
-    if not token or not path.exists():
-        return None, "no such pending token (expired, already used, or never issued)"
-    try:
-        rec = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        return None, f"unreadable pending record: {exc}"
-    if rec.get("status") != "pending":
-        return None, f"token already {rec.get('status', 'consumed')} (single-use)"
-    if int(time.time()) > int(rec.get("expires_at", 0)):
-        return None, "token expired"
-    rec["status"] = "consumed"
-    rec["consumed_at"] = int(time.time())
-    try:  # mark consumed BEFORE executing so a token can never be replayed
-        path.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
-    except OSError as exc:
-        return None, f"could not mark token consumed: {exc}"
-    return rec, "ok"
-
-
-def notify_pending(summary: str, token: str) -> None:
-    """Best-effort: mirror a pending host action onto the human's screen. Non-critical —
-    the primary approval channel is the agent surfacing the summary to the user."""
-    try:
-        subprocess.run(
-            ["notify-send", "-u", "critical",
-             "Agent-Bridge: host desktop action pending approval",
-             f"{summary}\nconfirm token: {token}"],
-            timeout=3, check=False,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
         pass
 
 
@@ -244,13 +191,14 @@ def run_confirm_token(args: argparse.Namespace) -> int:
     record: dict[str, Any] = {
         "schema": SCHEMA_VERSION, "ts": int(time.time()), "phase": "confirm", "token": token,
     }
-    rec, reason = load_and_consume_pending(token)
+    rec, reason = load_and_consume_pending(token, expect_kind="invoke")
     if rec is None:
         record.update(allowed=False, rc=3, error=reason)
         audit(record); print(json.dumps(record, ensure_ascii=False)); return 3
 
-    sel = rec.get("selector", {}) or {}
-    action = rec.get("action")
+    payload = rec.get("payload", {}) or {}
+    sel = payload.get("selector", {}) or {}
+    action = payload.get("action")
     record["selector"] = sel
     record["summary"] = rec.get("summary")
 
@@ -340,9 +288,11 @@ def main() -> int:
     # Host-confirm phase 1: host target + explicit request → mint pending, invoke nothing.
     if args.request_host_confirm and not isolated and not args.dry_run:
         summary = build_summary(element, app_name, app_pid, args)
-        token = secrets.token_hex(16)
+        token = mint_token()
         expires_at = int(time.time()) + max(1, args.confirm_ttl)
-        write_pending(token, record["selector"], args.action, summary, expires_at)
+        write_pending(token, "invoke",
+                      {"selector": record["selector"], "action": args.action},
+                      summary, expires_at)
         notify_pending(summary, token)
         record.update(allowed=False, pending=True, token=token, summary=summary,
                       expires_at=expires_at, rc=0,
