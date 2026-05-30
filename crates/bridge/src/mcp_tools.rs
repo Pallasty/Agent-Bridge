@@ -4963,6 +4963,10 @@ impl McpTool for PresentTool {
                         "description": "Structured JSON the artifact visualizes. Embedded as #ab-payload (dual-encoding). For kind=table, an array of objects/arrays renders the table. Pass a JSON object/array (NOT a stringified blob — declaring the type stops clients double-encoding; a stringified value is still defensively decoded, see #1786). Strongly encouraged."
                     },
                     "title": { "type": "string", "description": "Document title." },
+                    "intent": {
+                        "type": "string",
+                        "description": "Optional: what this render is the outcome of (the intent half of the action→outcome record). Recorded in the `<id>.outcome.json` sidecar and surfaced by present_outcomes; does not affect the artifact."
+                    },
                     "channel": {
                         "type": "string",
                         "enum": ["file"],
@@ -5015,6 +5019,9 @@ impl McpTool for PresentTool {
             .filter(|v| !v.is_null())
             .map(crate::present::normalize_payload);
         let title = args.get("title").and_then(|v| v.as_str());
+        // Slice A: optional caller-supplied "what was this the outcome of" — the
+        // intent half of the (intent → action → verified-outcome) record.
+        let intent = args.get("intent").and_then(|v| v.as_str());
         let channel = args
             .get("channel")
             .and_then(|v| v.as_str())
@@ -5186,6 +5193,34 @@ impl McpTool for PresentTool {
                 verify_detail = Some("no browser backend configured".to_string());
             }
         }
+
+        // Slice A: persist a falsifier-gated action→outcome record sidecar
+        // (`<id>.outcome.json`, next to the artifact + its `<id>.png`) so the
+        // lane's verified results become a queryable training-signal stream
+        // (`present_outcomes`), not a one-shot tool result. Best-effort: a sidecar
+        // write failure never fails the present() call. The gate that decides
+        // eligibility lives in present_outcomes (read side), so this record stays
+        // a faithful log of what actually happened (verified or not).
+        let verify_method = if !verify {
+            "none"
+        } else if verify_status.as_str() == "no_browser" {
+            "no_browser"
+        } else {
+            "browser_eval"
+        };
+        let outcome_record = json!({
+            "artifact_id": id,
+            "intent": intent,
+            "action_tool": "present",
+            "kind": kind.as_str(),
+            "verify_status": verify_status.as_str(),
+            "interactive_status": interactive_status.map(|s| s.as_str()),
+            "verify_method": verify_method,
+            "dual_encoding": dual_encoding,
+            "session_id": ctx.session_id.as_ref().map(|s| s.to_string()),
+            "ts": crate::present::now_unix(),
+        });
+        let _ = crate::present::write_outcome_sidecar(&dir, &id, &outcome_record);
 
         let result = json!({
             "schema": crate::present::PRESENT_SCHEMA,
@@ -5628,6 +5663,99 @@ impl McpTool for PresentDashboardTool {
             "bytes": html.len(),
         });
         Ok(ToolResult::json_text(&result))
+    }
+}
+
+/// Output-expression lane Slice A: READ-ONLY, falsifier-gated projection of the
+/// `<id>.outcome.json` sidecars present() persists — the verified
+/// (intent → action → outcome) training-signal stream. Applies the pure
+/// `outcome_gate` (verify_status==rendered_ok and any present embody/interact
+/// axis did not fail); `verified_only` (default) surfaces only eligible records
+/// while the tallies always reflect the full set. Produces the stream; consuming
+/// it (memory ingestion, a learner) is a separate lane's slice.
+pub struct PresentOutcomesTool {
+    _hub: Hub,
+}
+impl PresentOutcomesTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for PresentOutcomesTool {
+    fn name(&self) -> &'static str {
+        "present_outcomes"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Output-expression lane Slice A: READ-ONLY, falsifier-gated stream of \
+                 verified (intent → action → outcome) records. Reads the `<id>.outcome.json` \
+                 sidecars present() writes after self-verify and applies the outcome gate \
+                 (eligible iff verify_status=rendered_ok AND any present embodiment/interactivity \
+                 axis did not fail). With verified_only=true (default) only eligible records are \
+                 surfaced, but eligible_count/rejected_count ALWAYS reflect the full set (a \
+                 consumer never mistakes a filtered list for 'all verified'). Each surfaced record \
+                 carries eligible + gate_reason. This is the training-signal stream a downstream \
+                 consumer (memory ingestion, a learner) would read; it never claims a verified \
+                 label it didn't earn."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window over outcome records (by ts)."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 200,
+                        "description": "Max records scanned (most-recent-first)."
+                    },
+                    "verified_only": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, surface only gate-eligible (verified) records; tallies still reflect the full set. False surfaces all records annotated with eligible + gate_reason."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 1000) as usize;
+        let verified_only = args
+            .get("verified_only")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let now = dispatch_now_secs();
+        let cutoff = now.saturating_sub(window_secs).max(0) as u64;
+        let dir = crate::present::presentations_dir();
+        let records = crate::present::read_outcome_records(&dir, limit, cutoff);
+        let mut projection = crate::present::present_outcomes_projection(&records, verified_only);
+        if let Some(obj) = projection.as_object_mut() {
+            obj.insert("schema".into(), json!("present_outcomes/v0"));
+            obj.insert("dir".into(), json!(dir.display().to_string()));
+            obj.insert("window_secs".into(), json!(window_secs));
+            obj.insert("generated_at".into(), json!(now.max(0)));
+        }
+        Ok(ToolResult::json_text(&projection))
     }
 }
 
@@ -27914,6 +28042,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(PresentDashboardTool::new(hub.clone())),
     );
+    // Slice A: read-only falsifier-gated verified (intent→action→outcome) stream
+    // over the present() outcome sidecars. Niche (opt-in), no new source of truth.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(PresentOutcomesTool::new(hub.clone())),
+    );
     reg_if(
         &mut reg,
         policy,
@@ -32438,6 +32574,9 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(!std_p.includes(Tier::Niche, "present_replay"));
         assert!(all.includes(Tier::Niche, "present_dashboard"));
         assert!(!std_p.includes(Tier::Niche, "present_dashboard"));
+        // Slice A present_outcomes is the same Niche opt-in shape.
+        assert!(all.includes(Tier::Niche, "present_outcomes"));
+        assert!(!std_p.includes(Tier::Niche, "present_outcomes"));
         let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
         assert!(
             schemas.iter().any(|s| s.name == "present"),
@@ -32450,6 +32589,10 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(
             schemas.iter().any(|s| s.name == "present_dashboard"),
             "present_dashboard must register under the all profile"
+        );
+        assert!(
+            schemas.iter().any(|s| s.name == "present_outcomes"),
+            "present_outcomes must register under the all profile"
         );
     }
 

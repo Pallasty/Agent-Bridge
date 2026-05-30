@@ -1275,6 +1275,137 @@ footer{{margin-top:28px;font-size:11px;color:#9a9ab0;border-top:1px solid #e3e3e
     )
 }
 
+// ---------------------------------------------------------------------------
+// Slice A — falsifier-gated verified (intent → action → outcome) stream
+// ---------------------------------------------------------------------------
+//
+// The output lane already produces falsifier-LABELED records (VerifyStatus /
+// InteractStatus / EmbodyStatus) but they die as one-shot tool results. This
+// slice persists each render's outcome as a `<id>.outcome.json` sidecar (next to
+// the artifact + its `<id>.png`) and exposes a READ-ONLY, gate-filtered
+// projection (`present_outcomes`). The gate is a PURE decision — the E-ladder's
+// fourth honesty surface: "is this a VERIFIED outcome, eligible for a downstream
+// training signal?" — so what counts as a clean label is unit-tested, never a
+// self-fulfilling claim. This slice only PRODUCES the gated stream; consuming it
+// (memory ingestion, a learner) is a separate lane's slice. It does NOT touch
+// event_spine or the memory schema.
+
+/// Sidecar filename suffix: `<artifact_id>.outcome.json`.
+pub const OUTCOME_SIDECAR_SUFFIX: &str = "outcome.json";
+
+/// Pure falsifier gate over a render's honesty axes — is this action→outcome
+/// record eligible for the verified training-signal stream? Eligible iff the
+/// render verified (`verify_status == rendered_ok`) AND, where the axis applies,
+/// embodiment did not fail (`embody_status` absent or `embodied`) AND
+/// interactivity did not fail (`interactive_status` absent or one of
+/// `verified` / `not_applicable`). Mirrors [`classify_render`] / [`classify_embody`]:
+/// a deterministic, browser-free decision, so "what counts as a verified label"
+/// is a unit test, not a runtime hand-wave. Returns `(eligible, reason)`.
+pub fn outcome_gate(
+    verify_status: &str,
+    embody_status: Option<&str>,
+    interactive_status: Option<&str>,
+) -> (bool, String) {
+    if verify_status != "rendered_ok" {
+        return (
+            false,
+            format!("verify_status={verify_status} (need rendered_ok)"),
+        );
+    }
+    if let Some(e) = embody_status {
+        if e != "embodied" {
+            return (false, format!("embody_status={e} (need embodied)"));
+        }
+    }
+    if let Some(i) = interactive_status {
+        if i != "verified" && i != "not_applicable" {
+            return (
+                false,
+                format!("interactive_status={i} (need verified|not_applicable)"),
+            );
+        }
+    }
+    (true, "verified".to_string())
+}
+
+/// Persist an action→outcome record as a `<id>.outcome.json` sidecar next to the
+/// artifact (mirrors the `<id>.png` screenshot sidecar). Atomic; best-effort.
+pub fn write_outcome_sidecar(dir: &Path, id: &str, record: &Value) -> std::io::Result<()> {
+    let path = dir.join(format!("{id}.{OUTCOME_SIDECAR_SUFFIX}"));
+    let body = serde_json::to_string(record).unwrap_or_else(|_| "{}".to_string());
+    write_artifact_atomic(&path, &body)
+}
+
+/// Read persisted action→outcome sidecars, newest-first (by `ts`), within the
+/// look-back window (`ts >= cutoff_ts`; records lacking a ts are kept). Missing
+/// dir → []. Read-only.
+pub fn read_outcome_records(dir: &Path, limit: usize, cutoff_ts: u64) -> Vec<Value> {
+    let read = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let suffix = format!(".{OUTCOME_SIDECAR_SUFFIX}");
+    let mut recs: Vec<Value> = read
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map_or(false, |n| n.ends_with(&suffix))
+        })
+        .filter_map(|p| std::fs::read_to_string(&p).ok())
+        .filter_map(|s| serde_json::from_str::<Value>(&s).ok())
+        .filter(|v| {
+            v.get("ts")
+                .and_then(Value::as_u64)
+                .map_or(true, |t| t >= cutoff_ts)
+        })
+        .collect();
+    recs.sort_by(|a, b| {
+        let ta = a.get("ts").and_then(Value::as_u64).unwrap_or(0);
+        let tb = b.get("ts").and_then(Value::as_u64).unwrap_or(0);
+        tb.cmp(&ta)
+    });
+    recs.truncate(limit);
+    recs
+}
+
+/// Apply [`outcome_gate`] over a set of outcome records, returning the
+/// training-signal projection: each surfaced record annotated with `eligible` +
+/// `gate_reason`, plus eligible/rejected tallies. `verified_only` drops rejected
+/// records from the `outcomes` list (the strict training-signal view); the
+/// tallies ALWAYS reflect the full input set (so a consumer never mistakes a
+/// filtered list for "everything was verified"). Pure / browser-free.
+pub fn present_outcomes_projection(records: &[Value], verified_only: bool) -> Value {
+    let mut eligible = 0usize;
+    let mut out: Vec<Value> = Vec::with_capacity(records.len());
+    for r in records {
+        let vs = r.get("verify_status").and_then(Value::as_str).unwrap_or("");
+        let es = r.get("embody_status").and_then(Value::as_str);
+        let is = r.get("interactive_status").and_then(Value::as_str);
+        let (ok, reason) = outcome_gate(vs, es, is);
+        if ok {
+            eligible += 1;
+        }
+        if ok || !verified_only {
+            let mut rec = r.clone();
+            if let Some(obj) = rec.as_object_mut() {
+                obj.insert("eligible".into(), Value::Bool(ok));
+                obj.insert("gate_reason".into(), Value::String(reason));
+            }
+            out.push(rec);
+        }
+    }
+    serde_json::json!({
+        "schema_version": 1u32,
+        "total_records": records.len(),
+        "eligible_count": eligible,
+        "rejected_count": records.len() - eligible,
+        "verified_only": verified_only,
+        "outcomes": out,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1932,6 +2063,86 @@ mod tests {
         assert_eq!(all.len(), 1, "dashboard must be excluded from the index");
         assert_eq!(all[0].id, "aaaaaaaaaaaaaaaa");
         assert!(all.iter().all(|a| a.id != DASHBOARD_BASENAME));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ----- Slice A (falsifier-gated verified outcome stream) -----
+
+    // The gate is the fourth honesty surface: only a fully-verified render is
+    // eligible for the training-signal stream; any failed axis rejects with a
+    // reason naming it. Absent axes (verify-only renders) don't reject.
+    #[test]
+    fn slice_a_outcome_gate_truth_table() {
+        // fully verified, no embody/interact axes → eligible.
+        assert!(outcome_gate("rendered_ok", None, None).0);
+        // verified + embodied + interactive verified → eligible.
+        assert!(outcome_gate("rendered_ok", Some("embodied"), Some("verified")).0);
+        // verified + interactive not_applicable → eligible (no interactivity claimed).
+        assert!(outcome_gate("rendered_ok", None, Some("not_applicable")).0);
+
+        // render did not verify → rejected, reason names verify_status.
+        let (ok, why) = outcome_gate("blank", None, None);
+        assert!(!ok && why.contains("verify_status=blank"));
+        let (ok, _) = outcome_gate("no_browser", None, None);
+        assert!(!ok, "unverified render is not a training label");
+
+        // rendered but embodiment stale/dead → rejected on the embody axis.
+        let (ok, why) = outcome_gate("rendered_ok", Some("stale"), None);
+        assert!(!ok && why.contains("embody_status=stale"));
+
+        // rendered but a dead interactive control → rejected on the interact axis.
+        let (ok, why) = outcome_gate("rendered_ok", None, Some("dead"));
+        assert!(!ok && why.contains("interactive_status=dead"));
+    }
+
+    // The projection tallies the FULL set regardless of verified_only, and
+    // verified_only drops rejected rows from the surfaced list (so a consumer
+    // never mistakes a filtered list for "all verified").
+    #[test]
+    fn slice_a_projection_tallies_full_set_and_filters() {
+        let records = vec![
+            json!({"artifact_id": "a", "verify_status": "rendered_ok", "ts": 3}),
+            json!({"artifact_id": "b", "verify_status": "blank", "ts": 2}),
+            json!({"artifact_id": "c", "verify_status": "rendered_ok", "interactive_status": "dead", "ts": 1}),
+        ];
+        let strict = present_outcomes_projection(&records, true);
+        assert_eq!(strict["total_records"], json!(3));
+        assert_eq!(strict["eligible_count"], json!(1));
+        assert_eq!(strict["rejected_count"], json!(2));
+        assert_eq!(strict["outcomes"].as_array().unwrap().len(), 1, "verified_only surfaces only eligible");
+        assert_eq!(strict["outcomes"][0]["artifact_id"], json!("a"));
+        assert_eq!(strict["outcomes"][0]["eligible"], json!(true));
+
+        let full = present_outcomes_projection(&records, false);
+        assert_eq!(full["eligible_count"], json!(1));
+        assert_eq!(full["outcomes"].as_array().unwrap().len(), 3, "verified_only=false surfaces all, annotated");
+        // each surfaced row carries the gate verdict + reason.
+        let b = full["outcomes"].as_array().unwrap().iter().find(|r| r["artifact_id"] == json!("b")).unwrap();
+        assert_eq!(b["eligible"], json!(false));
+        assert!(b["gate_reason"].as_str().unwrap().contains("verify_status=blank"));
+    }
+
+    // Sidecar write → read roundtrip, newest-first, window-filtered.
+    #[test]
+    fn slice_a_outcome_sidecar_roundtrip_and_window() {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-sliceA-test-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        write_outcome_sidecar(&dir, "old", &json!({"artifact_id": "old", "verify_status": "rendered_ok", "ts": 100})).unwrap();
+        write_outcome_sidecar(&dir, "new", &json!({"artifact_id": "new", "verify_status": "rendered_ok", "ts": 300})).unwrap();
+        // a non-sidecar file must be ignored.
+        write_artifact_atomic(&dir.join("decoy.html"), "<p>x</p>").unwrap();
+
+        let all = read_outcome_records(&dir, 50, 0);
+        assert_eq!(all.len(), 2, "reads both sidecars, ignores non-sidecar files");
+        assert_eq!(all[0]["artifact_id"], json!("new"), "newest-first");
+
+        let windowed = read_outcome_records(&dir, 50, 200);
+        assert_eq!(windowed.len(), 1, "ts<cutoff dropped");
+        assert_eq!(windowed[0]["artifact_id"], json!("new"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
