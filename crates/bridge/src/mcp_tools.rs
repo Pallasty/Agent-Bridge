@@ -4818,6 +4818,9 @@ impl McpTool for PresentTool {
                     .or_insert_with(|| json!(sid.to_string()));
             }
             obj.insert("ts".into(), json!(crate::present::now_unix()));
+            // record the kind so present_list can reconstruct the index from
+            // the self-describing artifact (dual-encoding consumer side).
+            obj.insert("kind".into(), json!(kind.as_str()));
         }
 
         let html = if interactive_req {
@@ -4962,6 +4965,82 @@ impl McpTool for PresentTool {
             "provenance": provenance,
         });
         Ok(ToolResult::json_text(&result))
+    }
+}
+
+/// Output / expression lane — list persisted `present()` artifacts by reading
+/// their self-describing HTML (embedded provenance + payload). Read-only.
+pub struct PresentListTool {
+    _hub: Hub,
+}
+impl PresentListTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+#[async_trait]
+impl McpTool for PresentListTool {
+    fn name(&self) -> &'static str {
+        "present_list"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "List artifacts previously written by `present` (read-only). Scans \
+                 ~/.cache/agent-bridge/presentations and reconstructs each entry from the \
+                 artifact's embedded provenance + payload (id, kind, ts, generated_by, \
+                 session_id, dual_encoding, has_screenshot, bytes), most-recent first."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50,
+                        "description": "Max artifacts to return (most-recent first)."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["table", "markdown_table", "html", "svg", "mermaid"],
+                        "description": "Optional kind filter."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .clamp(1, 500) as usize;
+        let kind = args.get("kind").and_then(|v| v.as_str());
+        let dir = crate::present::presentations_dir();
+        let infos = crate::present::list_artifacts(&dir, limit, kind);
+        let artifacts: Vec<Value> = infos
+            .iter()
+            .map(|a| {
+                json!({
+                    "id": a.id,
+                    "artifact_path": a.artifact_path,
+                    "kind": a.kind,
+                    "ts": a.ts,
+                    "generated_by": a.generated_by,
+                    "session_id": a.session_id,
+                    "dual_encoding": a.dual_encoding,
+                    "has_screenshot": a.has_screenshot,
+                    "bytes": a.bytes,
+                })
+            })
+            .collect();
+        Ok(ToolResult::json_text(&json!({
+            "schema": "present_list/v0",
+            "dir": dir.display().to_string(),
+            "count": artifacts.len(),
+            "artifacts": artifacts,
+        })))
     }
 }
 
@@ -25043,6 +25122,15 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Linux Computer Use T9b: non-mutating OCR grounding over caller-provided
     // images. It does not capture screenshots or inject input.
     "vision_grounding_ocr",
+    // Remote session steering: a Codex orchestrator (which already carries
+    // agent_spawn + agent_session_*) can launch/drive/observe long-lived agents
+    // in named tmux sessions and roll up a worker blackboard.
+    "agent_steer_launch",
+    "agent_steer_drive",
+    "agent_steer_capture",
+    "agent_steer_list",
+    "agent_steer_kill",
+    "agent_orchestrate_scan",
 ];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
@@ -25548,6 +25636,721 @@ pub fn exposed_tool_count_for(
     .len()
 }
 
+// ── remote session steering (agent_steer_* / agent_orchestrate_scan) ─────────
+//
+// AB-owned launch + gate-aware driving of long-lived agents inside named
+// multiplexer sessions (`ab__<project>__<role>`), plus a blackboard roll-up for
+// supervising N remote workers. Pure mux/ssh/gate logic lives in
+// `crate::remote_steer`; these are the thin MCP wrappers.
+// Boundary: execution/collection may be driven; research judgment stays
+// human-gated (quota/approval/unknown gates surface as needs_human).
+
+/// Build a steer [`crate::remote_steer::Target`] from `node`/`user` args. An
+/// absent node, "local"/"localhost", or this host's own name → local.
+fn steer_target_from_args(args: &Value) -> crate::remote_steer::Target {
+    let node = args
+        .get("node")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let user = args
+        .get("user")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    match node {
+        None => crate::remote_steer::Target::local(),
+        Some(n) => {
+            let local = crate::sync::hostname_short();
+            if n.eq_ignore_ascii_case("local") || n.eq_ignore_ascii_case("localhost") || n == local
+            {
+                crate::remote_steer::Target::local()
+            } else {
+                crate::remote_steer::Target {
+                    node: Some(n.to_string()),
+                    user,
+                }
+            }
+        }
+    }
+}
+
+/// Node label used in presence (explicit remote node, else local hostname).
+fn steer_node_label(args: &Value) -> String {
+    args.get("node")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| {
+            !s.is_empty()
+                && !s.eq_ignore_ascii_case("local")
+                && !s.eq_ignore_ascii_case("localhost")
+        })
+        .unwrap_or_else(crate::sync::hostname_short)
+}
+
+/// Resolve the tmux session name (+ optional logical handle) from either an
+/// explicit `session` arg or a `project`+`role` pair.
+fn steer_resolve_session(args: &Value) -> std::result::Result<(String, Option<String>), String> {
+    if let Some(s) = args
+        .get("session")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        let logical = crate::remote_steer::parse_tmux_session(s)
+            .map(|(p, r)| crate::remote_steer::logical_handle(&p, &r));
+        return Ok((s.to_string(), logical));
+    }
+    let project = args.get("project").and_then(|v| v.as_str()).unwrap_or("");
+    let role = args.get("role").and_then(|v| v.as_str()).unwrap_or("");
+    if project.is_empty() || role.is_empty() {
+        return Err("provide either 'session' or both 'project' and 'role'".to_string());
+    }
+    Ok((
+        crate::remote_steer::tmux_session_name(project, role),
+        Some(crate::remote_steer::logical_handle(project, role)),
+    ))
+}
+
+pub struct AgentSteerLaunchTool {
+    hub: Hub,
+}
+impl AgentSteerLaunchTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentSteerLaunchTool {
+    fn name(&self) -> &'static str {
+        "agent_steer_launch"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Launch a long-lived agent inside a named tmux session \
+                 (`ab__<project>__<role>`) so it can later be human-attached or \
+                 driven with agent_steer_drive. Runs locally or on a tailnet node \
+                 (set `node`+`user` for ssh). Registers a steer handle into \
+                 presence. Supply a low-gate startup via `command`/`env` (e.g. a \
+                 pre-trusted dir + bypass flags); the profile is recorded for audit. \
+                 tmux must be installed on the target."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string", "description": "Project slug (REQUIRED)." },
+                    "role":    { "type": "string", "description": "Role, e.g. codex|reviewer (REQUIRED)." },
+                    "command": { "type": "string", "description": "Shell command to run in the session, e.g. 'codex resume' (REQUIRED)." },
+                    "node":    { "type": "string", "description": "Target node/IP. Omit or 'local' for this host." },
+                    "user":    { "type": "string", "description": "ssh user (when node is remote)." },
+                    "cwd":     { "type": "string", "description": "Working directory for the session." },
+                    "env":     { "type": "object", "description": "Env vars injected into the session.", "additionalProperties": { "type": "string" } },
+                    "low_gate_profile": { "type": "string", "description": "Free-text label recording the gate-reduction profile used (for audit)." }
+                },
+                "required": ["project", "role", "command"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::AgentSpawn) {
+            return Ok(ToolResult::error(e));
+        }
+        let project = match args
+            .get("project")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing 'project'")),
+        };
+        let role = match args
+            .get("role")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing 'role'")),
+        };
+        let command = match args
+            .get("command")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing 'command'")),
+        };
+        let cwd = args
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let low_gate = args
+            .get("low_gate_profile")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let mut env: Vec<(String, String)> = Vec::new();
+        if let Some(obj) = args.get("env").and_then(|v| v.as_object()) {
+            for (k, v) in obj {
+                if let Some(val) = v.as_str() {
+                    env.push((k.clone(), val.to_string()));
+                }
+            }
+        }
+
+        let target = steer_target_from_args(&args);
+        let node_label = steer_node_label(&args);
+        let mux = crate::remote_steer::TmuxBackend::default();
+        let session = crate::remote_steer::tmux_session_name(&project, &role);
+        let logical = crate::remote_steer::logical_handle(&project, &role);
+
+        if crate::remote_steer::has_session(&target, &mux, &session).await {
+            return Ok(ToolResult::error(format!(
+                "session already live: {session} ({logical}) on {} — attach or kill first",
+                target.label()
+            )));
+        }
+
+        let present = match crate::remote_steer::launch(
+            &target,
+            &mux,
+            &session,
+            &command,
+            cwd.as_deref(),
+            &env,
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+
+        // Best-effort presence registration of the steer handle.
+        let presence_id = crate::remote_steer::steer_presence_id(&node_label, &session);
+        let mut presence_registered = false;
+        if let Some(store) = &self.hub.store {
+            let caps = json!({
+                "steer": {
+                    "mux": "tmux",
+                    "tmux_session": session,
+                    "logical": logical,
+                    "node": node_label,
+                    "command": command,
+                    "cwd": cwd,
+                    "low_gate_profile": low_gate,
+                    "launched_by": "agent_steer_launch"
+                }
+            });
+            let name = format!("steer {logical}");
+            let upsert = ab_store::AgentPresenceUpsert {
+                name: Some(&name),
+                description: Some("AB-owned steerable session"),
+                version: None,
+                url: None,
+                node: Some(&node_label),
+                project: Some(&project),
+                role: Some(&role),
+                tag: Some("steer"),
+                cwd: cwd.as_deref(),
+                pid: None,
+                capabilities: Some(&caps),
+                skills: None,
+            };
+            match store.agent_presence_announce(&presence_id, upsert).await {
+                Ok(_) => presence_registered = true,
+                Err(e) => tracing::warn!(error = %e, "steer: presence register failed"),
+            }
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "status": "launched",
+            "tmux_session": session,
+            "logical_handle": logical,
+            "node": node_label,
+            "target": target.label(),
+            "present": present,
+            "presence_id": presence_id,
+            "presence_registered": presence_registered,
+            "note": if present { Value::Null } else {
+                json!("session not present after launch — the command may have exited immediately")
+            }
+        })))
+    }
+}
+
+pub struct AgentSteerDriveTool {
+    hub: Hub,
+}
+impl AgentSteerDriveTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentSteerDriveTool {
+    fn name(&self) -> &'static str {
+        "agent_steer_drive"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Drive a steerable session: send `input`, then poll the pane \
+                 until `expect` appears (or timeout). Auto-answers ONLY the \
+                 trust-folder gate (when auto_gate); quota/approval/unknown prompts \
+                 are returned as `awaiting_gate` with needs_human=true and are never \
+                 auto-answered. Echoes `purpose` — purpose='research' flags the \
+                 output as requiring a human ground-truth gate before use (#1745). \
+                 Identify the session by `session` or by `project`+`role`."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "session": { "type": "string", "description": "tmux session name (ab__proj__role). Or pass project+role." },
+                    "project": { "type": "string" },
+                    "role":    { "type": "string" },
+                    "node":    { "type": "string", "description": "Target node/IP. Omit for local." },
+                    "user":    { "type": "string", "description": "ssh user (remote)." },
+                    "input":   { "type": "string", "description": "Text to send to the session (REQUIRED)." },
+                    "submit":  { "type": "boolean", "default": true, "description": "Press Enter after the input." },
+                    "expect":  { "type": "string", "description": "Substring to wait for in the pane before returning." },
+                    "capture_lines": { "type": "integer", "default": 60, "minimum": 1, "maximum": 2000 },
+                    "settle_ms":  { "type": "integer", "default": 1200, "description": "Initial wait before first capture." },
+                    "poll_ms":    { "type": "integer", "default": 800, "description": "Interval between captures." },
+                    "timeout_ms": { "type": "integer", "default": 12000, "description": "Max time to poll for expect/gate." },
+                    "auto_gate":  { "type": "boolean", "default": true, "description": "Auto-answer the trust-folder gate only." },
+                    "purpose":    { "type": "string", "enum": ["exec", "collect", "research"], "default": "exec" }
+                },
+                "required": ["input"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
+            return Ok(ToolResult::error(e));
+        }
+        let input = match args.get("input").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing 'input'")),
+        };
+        let (session, logical) = match steer_resolve_session(&args) {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let submit = args.get("submit").and_then(|v| v.as_bool()).unwrap_or(true);
+        let expect = args
+            .get("expect")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let capture_lines = args
+            .get("capture_lines")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(60) as u32;
+        let settle_ms = args
+            .get("settle_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1200);
+        let poll_ms = args
+            .get("poll_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(800)
+            .max(100);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(12_000);
+        let auto_gate = args
+            .get("auto_gate")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let purpose = args
+            .get("purpose")
+            .and_then(|v| v.as_str())
+            .unwrap_or("exec")
+            .to_string();
+
+        let target = steer_target_from_args(&args);
+        let mux = crate::remote_steer::TmuxBackend::default();
+
+        if !crate::remote_steer::has_session(&target, &mux, &session).await {
+            return Ok(ToolResult::error(format!(
+                "no such session: {session} on {}",
+                target.label()
+            )));
+        }
+
+        if let Err(e) = crate::remote_steer::send(&target, &mux, &session, &input, submit).await {
+            return Ok(ToolResult::error(e));
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(settle_ms)).await;
+
+        let start = std::time::Instant::now();
+        let deadline = std::time::Duration::from_millis(timeout_ms);
+        let mut capture: String;
+        let mut matched = false;
+        let mut awaiting_gate: Option<crate::remote_steer::Gate> = None;
+        let mut auto_answered: Vec<String> = Vec::new();
+
+        loop {
+            capture =
+                match crate::remote_steer::capture(&target, &mux, &session, capture_lines).await {
+                    Ok(c) => c,
+                    Err(e) => return Ok(ToolResult::error(e)),
+                };
+
+            if let Some(gate) = crate::remote_steer::detect_gate(&capture) {
+                let auto = gate.class == crate::remote_steer::GateClass::AutoAnswerable;
+                if auto && auto_gate {
+                    if let Some(key) = gate.suggested_key {
+                        let _ = crate::remote_steer::send_key(&target, &mux, &session, key).await;
+                        auto_answered.push(format!("{}→{}", gate.kind, key));
+                        tokio::time::sleep(std::time::Duration::from_millis(poll_ms)).await;
+                        if start.elapsed() < deadline {
+                            continue;
+                        }
+                    }
+                } else {
+                    // needs-human (or auto disabled): stop, surface the gate.
+                    awaiting_gate = Some(gate);
+                    break;
+                }
+            }
+
+            if let Some(exp) = &expect {
+                if capture.contains(exp.as_str()) {
+                    matched = true;
+                    break;
+                }
+            }
+            if start.elapsed() >= deadline {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(poll_ms)).await;
+        }
+
+        let is_research = purpose == "research";
+        let mut out = json!({
+            "status": "ok",
+            "tmux_session": session,
+            "logical_handle": logical,
+            "target": target.label(),
+            "purpose": purpose,
+            "submitted": submit,
+            "auto_answered_gates": auto_answered,
+            "elapsed_ms": start.elapsed().as_millis() as u64,
+            "capture": capture,
+        });
+        if let Some(obj) = out.as_object_mut() {
+            if expect.is_some() {
+                obj.insert("expect_matched".into(), json!(matched));
+            }
+            if let Some(gate) = &awaiting_gate {
+                obj.insert(
+                    "awaiting_gate".into(),
+                    serde_json::to_value(gate).unwrap_or(Value::Null),
+                );
+                obj.insert("needs_human_gate".into(), json!(true));
+            }
+            if is_research {
+                obj.insert("needs_human_gate".into(), json!(true));
+                obj.insert(
+                    "boundary".into(),
+                    json!("research output requires a human ground-truth gate before being treated as a finding (#1745)"),
+                );
+            }
+        }
+        Ok(ToolResult::json_text(&out))
+    }
+}
+
+pub struct AgentSteerCaptureTool {
+    hub: Hub,
+}
+impl AgentSteerCaptureTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentSteerCaptureTool {
+    fn name(&self) -> &'static str {
+        "agent_steer_capture"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read + ANSI-clean the recent pane contents of a steerable \
+                 session (read-only). Identify by `session` or `project`+`role`."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "session": { "type": "string" },
+                    "project": { "type": "string" },
+                    "role":    { "type": "string" },
+                    "node":    { "type": "string" },
+                    "user":    { "type": "string" },
+                    "lines":   { "type": "integer", "default": 60, "minimum": 1, "maximum": 2000 }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let (session, logical) = match steer_resolve_session(&args) {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let lines = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(60) as u32;
+        let target = steer_target_from_args(&args);
+        let mux = crate::remote_steer::TmuxBackend::default();
+        match crate::remote_steer::capture(&target, &mux, &session, lines).await {
+            Ok(cap) => Ok(ToolResult::json_text(&json!({
+                "tmux_session": session,
+                "logical_handle": logical,
+                "target": target.label(),
+                "capture": cap,
+            }))),
+            Err(e) => Ok(ToolResult::error(e)),
+        }
+    }
+}
+
+pub struct AgentSteerListTool {
+    hub: Hub,
+}
+impl AgentSteerListTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentSteerListTool {
+    fn name(&self) -> &'static str {
+        "agent_steer_list"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "List live steerable (`ab__`) tmux sessions on a target \
+                 (mux ground-truth). Omit node for local; set node+user for a \
+                 tailnet host."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "node": { "type": "string" },
+                    "user": { "type": "string" }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let target = steer_target_from_args(&args);
+        let mux = crate::remote_steer::TmuxBackend::default();
+        match crate::remote_steer::list_steer_sessions(&target, &mux).await {
+            Ok(names) => {
+                let sessions: Vec<Value> = names
+                    .iter()
+                    .map(|n| {
+                        let (project, role) = crate::remote_steer::parse_tmux_session(n)
+                            .unwrap_or_else(|| ("?".into(), "?".into()));
+                        json!({
+                            "tmux_session": n,
+                            "project": project,
+                            "role": role,
+                            "logical_handle": crate::remote_steer::logical_handle(&project, &role),
+                        })
+                    })
+                    .collect();
+                Ok(ToolResult::json_text(&json!({
+                    "target": target.label(),
+                    "count": sessions.len(),
+                    "sessions": sessions,
+                })))
+            }
+            Err(e) => Ok(ToolResult::error(e)),
+        }
+    }
+}
+
+pub struct AgentSteerKillTool {
+    hub: Hub,
+}
+impl AgentSteerKillTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentSteerKillTool {
+    fn name(&self) -> &'static str {
+        "agent_steer_kill"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Kill a steerable session. Identify by `session` or \
+                 `project`+`role`. Presence handle ages out via TTL."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "session": { "type": "string" },
+                    "project": { "type": "string" },
+                    "role":    { "type": "string" },
+                    "node":    { "type": "string" },
+                    "user":    { "type": "string" }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::AgentSpawn) {
+            return Ok(ToolResult::error(e));
+        }
+        let (session, logical) = match steer_resolve_session(&args) {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let target = steer_target_from_args(&args);
+        let mux = crate::remote_steer::TmuxBackend::default();
+        if !crate::remote_steer::has_session(&target, &mux, &session).await {
+            return Ok(ToolResult::json_text(&json!({
+                "status": "not_found",
+                "tmux_session": session,
+                "logical_handle": logical,
+                "target": target.label(),
+            })));
+        }
+        match crate::remote_steer::kill(&target, &mux, &session).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({
+                "status": "killed",
+                "tmux_session": session,
+                "logical_handle": logical,
+                "target": target.label(),
+            }))),
+            Err(e) => Ok(ToolResult::error(e)),
+        }
+    }
+}
+
+pub struct AgentOrchestrateScanTool {
+    hub: Hub,
+}
+impl AgentOrchestrateScanTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentOrchestrateScanTool {
+    fn name(&self) -> &'static str {
+        "agent_orchestrate_scan"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Blackboard roll-up for supervising remote worker agents: \
+                 lists presence rows that carry a steer handle and/or a \
+                 `capabilities.steer_status` blob and returns a LAZY summary \
+                 (focus / last_action / awaiting / needs_human_gate — never \
+                 transcripts) plus aggregate counts. Pair with \
+                 context_pressure_estimate to guard the orchestrator's own budget. \
+                 Boundary: dispatch exec/collect freely; any research judgment \
+                 (needs_human_gate=true) must pass a human ground-truth check."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string", "description": "Filter by project." },
+                    "role":    { "type": "string", "description": "Filter by role." },
+                    "max_idle_secs": { "type": "integer", "default": 600, "description": "Skip workers idle longer than this." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let project = args.get("project").and_then(|v| v.as_str());
+        let role = args.get("role").and_then(|v| v.as_str());
+        let max_idle = args
+            .get("max_idle_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(600);
+
+        let rows = store
+            .agent_presence_list(project, role, max_idle, 200)
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("agent_presence_list: {e}")))?;
+
+        let mut workers: Vec<Value> = Vec::new();
+        let (mut n_awaiting, mut n_needs_human, mut n_with_status) = (0u32, 0u32, 0u32);
+        for row in &rows {
+            let caps = row.capabilities.as_ref();
+            let steer = caps.and_then(|c| c.get("steer"));
+            let status = caps.and_then(|c| c.get("steer_status"));
+            if steer.is_none() && status.is_none() {
+                continue;
+            }
+            let focus = status
+                .and_then(|s| s.get("focus"))
+                .and_then(|v| v.as_str())
+                .or(row.description.as_deref());
+            let last_action = status
+                .and_then(|s| s.get("last_action"))
+                .and_then(|v| v.as_str());
+            let awaiting = status.and_then(|s| s.get("awaiting")).and_then(|v| {
+                if v.is_null() {
+                    None
+                } else {
+                    v.as_str()
+                }
+            });
+            let needs_human = status
+                .and_then(|s| s.get("needs_human_gate"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if status.is_some() {
+                n_with_status += 1;
+            }
+            if awaiting.is_some() {
+                n_awaiting += 1;
+            }
+            if needs_human {
+                n_needs_human += 1;
+            }
+            workers.push(json!({
+                "session_id": row.session_id,
+                "node": row.node,
+                "project": row.project,
+                "role": row.role,
+                "steer_handle": steer.and_then(|s| s.get("tmux_session")).cloned().unwrap_or(Value::Null),
+                "focus": focus,
+                "last_action": last_action,
+                "awaiting": awaiting,
+                "needs_human_gate": needs_human,
+            }));
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "n_steerable": workers.len(),
+            "n_with_status": n_with_status,
+            "n_awaiting_gate": n_awaiting,
+            "n_needs_human": n_needs_human,
+            "workers": workers,
+            "budget_hint": "call context_pressure_estimate (pass real model_limit for 1M models) to guard orchestrator budget",
+            "boundary": "exec/collect drivable; research judgments (needs_human_gate) require a human ground-truth check (#1745)",
+        })))
+    }
+}
+
 pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry {
     let mut reg = ToolRegistry::new();
 
@@ -25671,6 +26474,44 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(ShellExecTool::new(hub.clone())),
+    );
+    // Remote session steering (P2/P3/P4): AB-owned launch + gate-aware drive +
+    // blackboard roll-up. Standard tier (multi-agent ops, not minimal-essential).
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AgentSteerLaunchTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AgentSteerDriveTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AgentSteerCaptureTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AgentSteerListTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AgentSteerKillTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(AgentOrchestrateScanTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -26398,6 +27239,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Niche,
         Arc::new(PresentTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(PresentListTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,

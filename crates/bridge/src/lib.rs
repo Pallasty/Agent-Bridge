@@ -35,6 +35,7 @@ pub mod pet_presence;
 pub mod pet_state;
 pub mod present;
 pub mod project;
+pub mod remote_steer;
 pub mod rescue;
 pub mod router;
 pub mod security;
