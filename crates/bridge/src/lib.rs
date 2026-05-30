@@ -34,6 +34,7 @@ pub mod peer_client;
 pub mod pet_presence;
 pub mod pet_state;
 pub mod present;
+pub mod present_approval;
 pub mod project;
 pub mod remote_steer;
 pub mod rescue;

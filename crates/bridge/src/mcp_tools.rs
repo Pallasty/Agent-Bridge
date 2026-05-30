@@ -5666,6 +5666,204 @@ impl McpTool for PresentDashboardTool {
     }
 }
 
+/// Host-confirm path B (Linux Computer Use, thread 79): the present-lane decision
+/// channel an Approve/Reject card needs. Renders a pending HOST desktop action's
+/// summary + confirm token as an interactive card in the daemon's OWN browser, blocks
+/// server-side until a human clicks (stamping `#ab-decision`), then reads the verdict
+/// back via `eval` — turning a client-side click into a server-side decision with NO
+/// new HTTP origin (the E3 readback-from-DOM pattern). It mints NO authority: Approve
+/// only matters because the caller then presents the (human-minted, single-use, TTL'd)
+/// token to `desktop_confirm`. Additive + isolated in `crate::present_approval` so it
+/// does not perturb the present lane's existing one-way `file://` artifacts.
+pub struct PresentApprovalTool {
+    hub: Hub,
+}
+impl PresentApprovalTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for PresentApprovalTool {
+    fn name(&self) -> &'static str {
+        "present_await_decision"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Output-expression lane host-confirm card (path B): render a pending HOST \
+                 desktop action (its `summary` + confirm `token`) as an Approve/Reject card in the \
+                 daemon's browser and BLOCK until a human clicks, returning decision: \
+                 approved|rejected|pending(timeout)|no_browser|error. The click stamps #ab-decision; \
+                 the server reads it back via eval (no new HTTP origin). Mints no authority — on \
+                 `approved`, call desktop_confirm(token) to execute the action (token is single-use + \
+                 TTL'd). Mint the token first via desktop_invoke/desktop_action confirm_host:true. \
+                 Degrades to no_browser when no browser is available."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "summary": { "type": "string", "description": "Human-readable description of the pending host action (from the confirm_host pending record's `summary`)." },
+                    "token": { "type": "string", "description": "The single-use confirm token minted by desktop_invoke/desktop_action confirm_host:true." },
+                    "title": { "type": "string", "description": "Optional card document title." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 60000, "default": 60000, "description": "How long to block waiting for the human click before returning pending(timeout)." },
+                    "simulate": { "type": "string", "enum": ["approve", "reject"], "description": "TEST/DEMO ONLY: stamp the decision via eval (no human). Production omits this. Does not weaken the model — eval-stamp is already possible to any browser-capable agent." }
+                },
+                "required": ["summary", "token"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let summary = args.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+        let token = args.get("token").and_then(|v| v.as_str()).unwrap_or("");
+        if summary.is_empty() || token.is_empty() {
+            return Ok(present_approval_error(
+                "missing_args",
+                "both `summary` and `token` are required",
+            ));
+        }
+        let title = args.get("title").and_then(|v| v.as_str());
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(60_000)
+            .clamp(1_000, 60_000);
+        let simulate = args
+            .get("simulate")
+            .and_then(|v| v.as_str())
+            .filter(|s| *s == "approve" || *s == "reject");
+
+        let html = crate::present_approval::build_approval_html(summary, token, title);
+        let dir = crate::present::presentations_dir();
+        let safe_token: String = token
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .take(32)
+            .collect();
+        let path = dir.join(format!("_ab_approval_{safe_token}.html"));
+        if let Err(e) = crate::present::write_artifact_atomic(&path, &html) {
+            return Ok(present_approval_error(
+                "write_failed",
+                &format!("could not write approval card: {e}"),
+            ));
+        }
+        let card_path = path.display().to_string();
+
+        // Render the card in the daemon's own browser and block until a human decides.
+        if let Err(e) = self.hub.security.check(Cap::Browser) {
+            return Ok(present_approval_pending(
+                "no_browser",
+                token,
+                summary,
+                &card_path,
+                &format!("capability: {e}"),
+            ));
+        }
+        let b = match self.hub.browser.clone() {
+            Some(b) => b,
+            None => {
+                return Ok(present_approval_pending(
+                    "no_browser",
+                    token,
+                    summary,
+                    &card_path,
+                    "no browser backend configured",
+                ))
+            }
+        };
+        let file_url = format!("file://{}", path.display());
+        let page = match b.navigate(&file_url).await {
+            Ok(p) => p,
+            Err(e) => {
+                return Ok(present_approval_pending(
+                    "no_browser",
+                    token,
+                    summary,
+                    &card_path,
+                    &format!("navigate: {e}"),
+                ))
+            }
+        };
+        // TEST/DEMO: stamp the decision so the wait_for resolves without a human.
+        if let Some(sim) = simulate {
+            let _ = b
+                .eval(&page, &crate::present_approval::approval_stamp_js(sim))
+                .await;
+        }
+        // Block until #ab-decision is stamped (human click), or timeout.
+        let _ = b
+            .wait_for(
+                &page,
+                Some(crate::present_approval::APPROVAL_DECIDED_SELECTOR),
+                None,
+                timeout_ms,
+            )
+            .await;
+        let readback = match b
+            .eval(&page, crate::present_approval::APPROVAL_READBACK_JS)
+            .await
+        {
+            Ok(rv) => crate::present_approval::parse_approval_readback(&rv),
+            Err(e) => {
+                return Ok(present_approval_error(
+                    "readback_failed",
+                    &format!("decision readback eval: {e}"),
+                ))
+            }
+        };
+        let decision = crate::present_approval::classify_approval(&readback);
+        // Integrity: the card must have rendered THE token (verdict refers to this action).
+        let token_match = readback.token == token;
+        let approved = decision.is_approved() && token_match;
+        let result = json!({
+            "schema": crate::present_approval::PRESENT_APPROVAL_SCHEMA,
+            "decision": decision.as_str(),
+            "approved": approved,
+            "token": token,
+            "token_match": token_match,
+            "summary": summary,
+            "card_path": card_path,
+            "simulated": simulate.is_some(),
+            "next": if approved {
+                "approved — call desktop_confirm(token) to execute the action"
+            } else {
+                "not approved — do NOT execute; the token stays unconsumed"
+            }
+        });
+        Ok(ToolResult::json_text(&result))
+    }
+}
+
+fn present_approval_error(code: &str, message: &str) -> ToolResult {
+    let mut r = ToolResult::json_text(&json!({
+        "schema": "present_approval_error.v0",
+        "status": "error",
+        "error": { "code": code, "message": message }
+    }));
+    r.is_error = true;
+    r
+}
+
+fn present_approval_pending(
+    decision: &str,
+    token: &str,
+    summary: &str,
+    card_path: &str,
+    detail: &str,
+) -> ToolResult {
+    ToolResult::json_text(&json!({
+        "schema": crate::present_approval::PRESENT_APPROVAL_SCHEMA,
+        "decision": decision,
+        "approved": false,
+        "token": token,
+        "summary": summary,
+        "card_path": card_path,
+        "detail": detail,
+        "next": "not approved — do NOT execute; the token stays unconsumed"
+    }))
+}
+
 /// Output-expression lane Slice A: READ-ONLY, falsifier-gated projection of the
 /// `<id>.outcome.json` sidecars present() persists — the verified
 /// (intent → action → outcome) training-signal stream. Applies the pure
@@ -28049,6 +28247,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Niche,
         Arc::new(PresentOutcomesTool::new(hub.clone())),
+    );
+    // Host-confirm path B (Linux Computer Use): present an Approve/Reject card for a
+    // pending host desktop action, block until a human decides, return the verdict.
+    // Standard tier; mints no authority (reuses the desktop_pending token + desktop_confirm).
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(PresentApprovalTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
