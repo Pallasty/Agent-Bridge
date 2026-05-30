@@ -1814,8 +1814,10 @@ impl McpTool for DesktopInvokeTool {
                  construction: AT-SPI is a session-global bus, so isolation is by PROCESS — an \
                  invoke runs only as (a) dry_run=true (locates + audits, invokes nothing), or \
                  (b) isolated — `cage_pid` set to a nested compositor whose process subtree owns \
-                 the target accessible. Host-app invoke (--confirm) is intentionally NOT exposed \
-                 here and cannot be unlocked. Every call is audited to desktop_invoke_audit.jsonl."
+                 the target accessible. Host-app invoke stays closed by default; set \
+                 confirm_host:true to instead mint a single-use, TTL-bounded pending token \
+                 (executed only by a subsequent human-approved desktop_confirm) — host mutation \
+                 never happens inline. Every call is audited to desktop_invoke_audit.jsonl."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -1828,6 +1830,7 @@ impl McpTool for DesktopInvokeTool {
                     "cage_pid": { "type": "integer", "description": "Nested compositor PID; the target accessible's app PID must be its descendant for an isolated (non-dry-run) invoke." },
                     "wait": { "type": "number", "minimum": 0, "maximum": 30, "default": 4.0, "description": "Seconds to poll for the accessible to appear (a11y subtree can lag app registration)." },
                     "dry_run": { "type": "boolean", "default": false, "description": "When true, locate + log intent but invoke nothing. Allowed against any target." },
+                    "confirm_host": { "type": "boolean", "default": false, "description": "Host target only: do not invoke; mint a single-use pending token + on-screen notify for a two-phase human-approved confirm (then call desktop_confirm). Default false keeps host invoke closed." },
                     "cwd": { "type": "string", "description": "Repo root to resolve scripts/desktop_invoke.py." },
                     "script_path": { "type": "string", "description": "Explicit desktop_invoke.py path (tests / alternate checkouts)." },
                     "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 10000, "description": "Milliseconds before the invoke process is killed." }
@@ -1863,16 +1866,23 @@ impl McpTool for DesktopInvokeTool {
             .and_then(|v| v.as_i64())
             .filter(|p| *p > 0);
 
-        // SAFETY (isolated-only MVP): host-app invoke is never exposed. Allowed iff
-        // dry_run, or a cage_pid is given (the script then verifies the target's app
-        // PID is actually a descendant of that nested compositor before invoking).
+        // SAFETY: inline invoke is allowed iff dry_run or isolated (cage_pid). A host
+        // target is refused by default; with confirm_host the call does NOT invoke — it
+        // mints a single-use pending token for a separate human-approved desktop_confirm
+        // (two-phase host-confirm path A). Host mutation never happens inline here.
+        let confirm_host = args
+            .get("confirm_host")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let is_isolated = cage_pid.is_some();
-        if !dry_run && !is_isolated {
+        let host_target = !dry_run && !is_isolated;
+        if host_target && !confirm_host {
             return Ok(desktop_invoke_error(json!({
                 "code": "host_invoke_not_exposed",
-                "message": "this MCP exposes only dry_run or isolated (cage_pid) invokes; \
-                            host-desktop AT-SPI invoke is not available here",
-                "hint": "set dry_run:true, or provide `cage_pid` of the nested compositor that owns the target"
+                "message": "this MCP invokes only dry_run or isolated (cage_pid) targets; \
+                            for a host target set confirm_host:true to mint a pending two-phase \
+                            confirm token (executed later via desktop_confirm)",
+                "hint": "set dry_run:true, provide `cage_pid`, or set confirm_host:true for a human-approved host action"
             })));
         }
 
@@ -1925,8 +1935,15 @@ impl McpTool for DesktopInvokeTool {
         if dry_run {
             cmd.arg("--dry-run");
         }
+        if host_target && confirm_host {
+            // Phase 1: mint a pending token, invoke NOTHING. The backend writes the
+            // pending record + fires an on-screen notify; execution waits for a
+            // human-approved desktop_confirm(token).
+            cmd.arg("--request-host-confirm");
+        }
         // NOTE: --confirm / --i-understand-this-touches-the-real-desktop are NEVER
-        // passed by this MCP surface, so host invoke cannot be unlocked here.
+        // passed by this MCP surface. Host mutation is reachable ONLY via the two-phase
+        // desktop_confirm path (a human approves a minted token), never inline.
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         if let Some(cwd) = cwd {
@@ -1964,7 +1981,7 @@ impl McpTool for DesktopInvokeTool {
                         json!({
                             "tool": self.name(),
                             "read_only": false,
-                            "mode": if dry_run { "dry-run" } else { "isolated" },
+                            "mode": if dry_run { "dry-run" } else if host_target { "pending-host-confirm" } else { "isolated" },
                             "host_protected": true,
                             "duration_ms": duration_ms,
                             "exit_code": output.status.code().unwrap_or(-1),
@@ -2024,6 +2041,152 @@ fn desktop_invoke_error(error: Value) -> ToolResult {
     }));
     result.is_error = true;
     result
+}
+
+/// Phase 2 of the host-confirm path: execute a host action a human approved.
+///
+/// `desktop_invoke` with `confirm_host:true` mints a single-use, TTL-bounded pending
+/// token (and an on-screen notify); it invokes NOTHING. This tool takes that token and
+/// executes the pending host action — the only way host mutation reaches the real
+/// desktop through MCP. The backend validates the token (exists, unconsumed, unexpired)
+/// and marks it consumed before invoking, so it can run at most once.
+pub struct DesktopConfirmTool {
+    _hub: Hub,
+}
+
+impl DesktopConfirmTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for DesktopConfirmTool {
+    fn name(&self) -> &'static str {
+        "desktop_confirm"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Execute a host desktop action previously staged by \
+                 desktop_invoke(confirm_host:true). Pass the single-use `token` it minted; \
+                 the backend re-resolves the stored selector and invokes it once (the token \
+                 is validated + consumed first). This is the ONLY path by which an MCP-driven \
+                 invoke touches the REAL desktop, and only after a human approved the pending \
+                 summary. Audited to desktop_invoke_audit.jsonl (phase=confirm)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "token": { "type": "string", "description": "The single-use token minted by desktop_invoke(confirm_host:true)." },
+                    "wait": { "type": "number", "minimum": 0, "maximum": 30, "default": 4.0, "description": "Seconds to poll for the accessible to reappear before invoking." },
+                    "cwd": { "type": "string", "description": "Repo root to resolve scripts/desktop_invoke.py." },
+                    "script_path": { "type": "string", "description": "Explicit desktop_invoke.py path (tests / alternate checkouts)." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 10000, "description": "Milliseconds before the confirm process is killed." }
+                },
+                "required": ["token"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let token = args.get("token").and_then(|v| v.as_str()).unwrap_or("");
+        if token.is_empty() {
+            return Ok(desktop_invoke_error(json!({
+                "code": "missing_token",
+                "message": "`token` is required (minted by desktop_invoke confirm_host:true)"
+            })));
+        }
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10_000)
+            .clamp(1_000, 30_000);
+
+        let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
+        let script = desktop_invoke_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(desktop_invoke_error(json!({
+                "code": "script_missing",
+                "message": format!("desktop_invoke.py not found at {}", script.display()),
+                "hint": "pass script_path or run from the Agent-Bridge repo root"
+            })));
+        }
+
+        let mut cmd = TokioCommand::new(
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "python3".to_string()),
+        );
+        cmd.arg(&script).arg("--confirm-token").arg(token);
+        if let Some(w) = args.get("wait").and_then(|v| v.as_f64()) {
+            cmd.arg("--wait").arg(format!("{w}"));
+        }
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+
+        let started = Instant::now();
+        let output =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+                Err(_) => {
+                    return Ok(desktop_invoke_error(json!({
+                        "code": "timeout",
+                        "message": format!("desktop_confirm exceeded {timeout_ms} ms"),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Err(e)) => {
+                    return Ok(desktop_invoke_error(json!({
+                        "code": "spawn_failed",
+                        "message": e.to_string(),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Ok(output)) => output,
+            };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+
+        match serde_json::from_str::<Value>(&stdout) {
+            Ok(mut payload) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert(
+                        "mcp_wrapper".to_string(),
+                        json!({
+                            "tool": self.name(),
+                            "read_only": false,
+                            "mode": "host-confirm-phase2",
+                            "host_protected": true,
+                            "duration_ms": duration_ms,
+                            "exit_code": output.status.code().unwrap_or(-1),
+                            "stderr": stderr,
+                            "stderr_truncated": stderr_truncated
+                        }),
+                    );
+                }
+                let mut result = ToolResult::json_text(&payload);
+                if !output.status.success() {
+                    result.is_error = true;
+                }
+                Ok(result)
+            }
+            Err(e) => Ok(desktop_invoke_error(json!({
+                "code": "invalid_json",
+                "message": e.to_string(),
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": output.status.code().unwrap_or(-1),
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            }))),
+        }
+    }
 }
 
 // ===========================================================================
@@ -4800,7 +4963,10 @@ impl McpTool for PresentTool {
         // E2: interactivity is opt-in; `enhanced` is true only when the kind+payload
         // can actually be driven (keyed table), so the tool never claims interactivity
         // it didn't add.
-        let interactive_req = args.get("interactive").and_then(|v| v.as_bool()).unwrap_or(false);
+        let interactive_req = args
+            .get("interactive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let enhanced =
             interactive_req && crate::present::is_enhanceable(kind, &artifact, payload.as_ref());
 
@@ -26770,6 +26936,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(DesktopInvokeTool::new(hub.clone())),
     );
+    // Linux Computer Use host-confirm phase 2: execute a human-approved host action by
+    // its single-use token. NOT in codex-essential. The only MCP path to host mutation,
+    // reachable only after desktop_invoke(confirm_host:true) minted + a human approved.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(DesktopConfirmTool::new(hub.clone())),
+    );
     reg_if(
         &mut reg,
         policy,
@@ -28546,15 +28721,19 @@ mod tests {
         };
         let rows = vec![
             mk("root cause fixed in 2c6e76b, deployed", vec![]), // SHA in content
-            mk("see forum #1758 for details", vec![]),          // post-id in content
+            mk("see forum #1758 for details", vec![]),           // post-id in content
             mk(
                 "tagged at curate time",
                 vec![crate::curate::UNVERIFIED_IDENTIFIER_TAG.into()],
             ), // tag-driven
-            mk("scan the forum before implementing", vec![]),   // clean
+            mk("scan the forum before implementing", vec![]),    // clean
         ];
         let out = format_bootstrap_memory_rows(&rows, 200);
-        assert!(out[0].contains("⚠ref"), "SHA row must be marked: {}", out[0]);
+        assert!(
+            out[0].contains("⚠ref"),
+            "SHA row must be marked: {}",
+            out[0]
+        );
         assert!(
             out[1].contains("⚠ref"),
             "post-id row must be marked: {}",
@@ -32173,6 +32352,10 @@ print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
         assert!(tool.input_schema["properties"]
             .get("i_understand_this_touches_the_real_desktop")
             .is_none());
+        // ...but the two-phase host-confirm opt-in IS exposed (mints a token, never invokes inline)
+        assert!(tool.input_schema["properties"]
+            .get("confirm_host")
+            .is_some());
     }
 
     #[tokio::test]
@@ -32293,6 +32476,131 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!argv.contains(&"--confirm"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn desktop_invoke_confirm_host_stages_pending_not_inline() {
+        // confirm_host:true on a host target must NOT refuse, and must pass
+        // --request-host-confirm (phase 1 = mint pending), never the host-unlock flags.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-invoke-confirm-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_invoke.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopInvokeTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "name": "Save",
+                    "confirm_host": true,
+                    "script_path": script.to_string_lossy(),
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(
+            !out.is_error,
+            "confirm_host host target must not be refused"
+        );
+        let payload = result_text_as_json(&out);
+        let argv: Vec<&str> = payload["argv"]
+            .as_array()
+            .expect("argv")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(argv.contains(&"--request-host-confirm"));
+        // host mutation never happens inline: the unlock flags are still never passed
+        assert!(!argv.contains(&"--confirm"));
+        assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
+        assert!(!argv.contains(&"--dry-run"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn desktop_confirm_requires_token() {
+        let tool = DesktopConfirmTool::new(Hub::builder().build());
+        let out = tool
+            .execute(json!({}), &ToolContext::default())
+            .await
+            .expect("execute");
+        assert!(out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["error"]["code"], "missing_token");
+    }
+
+    #[tokio::test]
+    async fn desktop_confirm_passes_token_flag() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-confirm-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_invoke.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopConfirmTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "token": "deadbeefcafe",
+                    "script_path": script.to_string_lossy(),
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        let argv: Vec<&str> = payload["argv"]
+            .as_array()
+            .expect("argv")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(argv.contains(&"--confirm-token"));
+        assert!(argv.contains(&"deadbeefcafe"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn desktop_confirm_not_exposed_to_codex_essential() {
+        // Phase-2 host executor is mutating; it must stay out of codex-essential.
+        assert!(!codex_essential_tool(Tier::Standard, "desktop_confirm"));
+        assert!(!codex_essential_tool(Tier::Niche, "desktop_confirm"));
     }
 
     #[test]

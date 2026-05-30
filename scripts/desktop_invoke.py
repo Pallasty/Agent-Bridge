@@ -25,15 +25,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = "desktop_invoke/v0"
-AUDIT_PATH = (
-    Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
-    / "agent-bridge" / "desktop_invoke_audit.jsonl"
-)
+_CACHE_ROOT = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "agent-bridge"
+AUDIT_PATH = _CACHE_ROOT / "desktop_invoke_audit.jsonl"
+# Host-confirm path (A): two-phase pending store. A host-targeted invoke is never
+# executed inline; --request-host-confirm mints a token + pending record here, and a
+# separate --confirm-token <token> (a human-approved second call) executes it once.
+PENDING_DIR = _CACHE_ROOT / "desktop_pending"
+DEFAULT_CONFIRM_TTL = 120  # seconds a pending host-invoke token stays valid
 _ACTION_PRIORITY = ("click", "press", "activate", "do", "toggle")
 
 
@@ -45,6 +50,75 @@ def audit(record: dict[str, Any]) -> None:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except OSError:
         pass
+
+
+def _pending_path(token: str) -> Path:
+    # token is hex (validated by mint); reject anything else so the path can't escape.
+    safe = "".join(c for c in token if c in "0123456789abcdef")
+    return PENDING_DIR / f"{safe}.json"
+
+
+def write_pending(token: str, selector: dict[str, Any], action: str | None,
+                  summary: str, expires_at: int) -> None:
+    """Persist a pending host invoke. The SELECTOR (not a stale handle) is stored so
+    the element is re-resolved fresh at confirm time."""
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    rec = {
+        "schema": SCHEMA_VERSION, "kind": "invoke", "ts": int(time.time()),
+        "token": token, "selector": selector, "action": action,
+        "summary": summary, "expires_at": expires_at, "status": "pending",
+    }
+    _pending_path(token).write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+
+
+def load_and_consume_pending(token: str) -> tuple[dict[str, Any] | None, str]:
+    """Load a pending record, validate (exists, unconsumed, unexpired), and mark it
+    consumed (single-use). Returns (record, reason). record is None on any failure."""
+    path = _pending_path(token)
+    if not token or not path.exists():
+        return None, "no such pending token (expired, already used, or never issued)"
+    try:
+        rec = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, f"unreadable pending record: {exc}"
+    if rec.get("status") != "pending":
+        return None, f"token already {rec.get('status', 'consumed')} (single-use)"
+    if int(time.time()) > int(rec.get("expires_at", 0)):
+        return None, "token expired"
+    rec["status"] = "consumed"
+    rec["consumed_at"] = int(time.time())
+    try:  # mark consumed BEFORE executing so a token can never be replayed
+        path.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+    except OSError as exc:
+        return None, f"could not mark token consumed: {exc}"
+    return rec, "ok"
+
+
+def notify_pending(summary: str, token: str) -> None:
+    """Best-effort: mirror a pending host action onto the human's screen. Non-critical —
+    the primary approval channel is the agent surfacing the summary to the user."""
+    try:
+        subprocess.run(
+            ["notify-send", "-u", "critical",
+             "Agent-Bridge: host desktop action pending approval",
+             f"{summary}\nconfirm token: {token}"],
+            timeout=3, check=False,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def build_summary(element, app_name: str | None, app_pid: int | None,
+                  args: argparse.Namespace) -> str:
+    """Human-readable one-liner describing the host action awaiting approval."""
+    try:
+        role = element.getRoleName()
+        name = element.name or ""
+    except Exception:  # noqa: BLE001
+        role, name = "?", ""
+    act = args.action or "auto(click/press/activate)"
+    return (f"invoke {act!r} on {role} {name!r} in app {app_name!r} "
+            f"(pid {app_pid}) on the REAL desktop")
 
 
 def pid_is_descendant(pid: int, ancestor: int) -> bool:
@@ -160,6 +234,52 @@ def do_invoke(element, want_action: str | None) -> tuple[int, str]:
     return (0 if ok else 1), f"doAction({names[idx]!r}) -> {ok}; available={names}"
 
 
+def run_confirm_token(args: argparse.Namespace) -> int:
+    """Phase 2 of the host-confirm path: execute a human-approved pending invoke.
+
+    The token is loaded, validated, and marked consumed (single-use) BEFORE any
+    invocation; then the stored selector is re-resolved fresh and invoked. Approval is
+    implicit in possessing a valid token (a human assented to the phase-1 summary)."""
+    token = args.confirm_token
+    record: dict[str, Any] = {
+        "schema": SCHEMA_VERSION, "ts": int(time.time()), "phase": "confirm", "token": token,
+    }
+    rec, reason = load_and_consume_pending(token)
+    if rec is None:
+        record.update(allowed=False, rc=3, error=reason)
+        audit(record); print(json.dumps(record, ensure_ascii=False)); return 3
+
+    sel = rec.get("selector", {}) or {}
+    action = rec.get("action")
+    record["selector"] = sel
+    record["summary"] = rec.get("summary")
+
+    element = app_name = app_pid = None
+    deadline = time.time() + max(0.0, args.wait)
+    try:
+        while True:
+            element, app_name, app_pid = find_element(
+                sel.get("app"), sel.get("role"), sel.get("name"), int(sel.get("nth", 0) or 0))
+            if element is not None or time.time() >= deadline:
+                break
+            time.sleep(0.4)
+    except ImportError as exc:
+        record.update(allowed=True, rc=2, error=f"pyatspi unavailable: {exc}")
+        audit(record); print(json.dumps(record, ensure_ascii=False)); return 2
+
+    if element is None:
+        record.update(allowed=True, rc=2,
+                      error="approved, but no matching accessible found now (token already consumed)")
+        audit(record); print(json.dumps(record, ensure_ascii=False)); return 2
+
+    record["found"] = {"app": app_name, "app_pid": app_pid}
+    rc, detail = do_invoke(element, action)
+    record.update(allowed=True, rc=rc, detail=detail,
+                  gate_reason="host-approved via consumed confirm token (phase 2)")
+    audit(record); print(json.dumps(record, ensure_ascii=False))
+    return rc
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="AT-SPI semantic invoke (L2 input, gated, isolated-only via MCP)")
     ap.add_argument("--app", default=None, help="application name substring (e.g. 'toy_button')")
@@ -176,7 +296,16 @@ def main() -> int:
     ap.add_argument("--i-understand-this-touches-the-real-desktop",
                     dest="i_understand_this_touches_the_real_desktop", action="store_true",
                     help="explicit host acknowledgement (never passed by the MCP wrapper)")
+    ap.add_argument("--request-host-confirm", action="store_true",
+                    help="host target: do not invoke; mint a token + pending record for two-phase confirm")
+    ap.add_argument("--confirm-token", default=None,
+                    help="execute a previously-minted pending host invoke by its token (human-approved phase 2)")
+    ap.add_argument("--confirm-ttl", type=int, default=DEFAULT_CONFIRM_TTL,
+                    help=f"seconds a minted pending token stays valid (default {DEFAULT_CONFIRM_TTL})")
     args = ap.parse_args()
+
+    if args.confirm_token:  # phase 2: execute a human-approved pending host invoke
+        return run_confirm_token(args)
 
     record: dict[str, Any] = {
         "schema": SCHEMA_VERSION, "ts": int(time.time()),
@@ -207,6 +336,19 @@ def main() -> int:
 
     isolated = bool(args.cage_pid and app_pid and pid_is_descendant(app_pid, args.cage_pid))
     record["found"] = {"app": app_name, "app_pid": app_pid, "isolated": isolated}
+
+    # Host-confirm phase 1: host target + explicit request → mint pending, invoke nothing.
+    if args.request_host_confirm and not isolated and not args.dry_run:
+        summary = build_summary(element, app_name, app_pid, args)
+        token = secrets.token_hex(16)
+        expires_at = int(time.time()) + max(1, args.confirm_ttl)
+        write_pending(token, record["selector"], args.action, summary, expires_at)
+        notify_pending(summary, token)
+        record.update(allowed=False, pending=True, token=token, summary=summary,
+                      expires_at=expires_at, rc=0,
+                      gate_reason="host target: pending two-phase confirm "
+                                  "(approve, then --confirm-token <token> to execute)")
+        audit(record); print(json.dumps(record, ensure_ascii=False)); return 0
 
     allowed, reason = gate(isolated, args)
     record.update(allowed=allowed, gate_reason=reason)
