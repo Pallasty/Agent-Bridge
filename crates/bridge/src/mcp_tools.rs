@@ -5208,6 +5208,20 @@ impl McpTool for PresentTool {
         } else {
             "browser_eval"
         };
+        // Provenance: the present_replay chain_head over the lane's artifacts NOW
+        // (including the one just written) — the chain state this outcome
+        // contributes to. A future opt-in memory ingest can back-link the verified
+        // outcome to the chain that produced it. Local SHA-256 chain only (the same
+        // idiom present_replay reports); does NOT touch event_spine. Best-effort —
+        // a listing failure leaves it empty rather than failing the render.
+        let chain_head = {
+            let artifacts = crate::present::list_artifacts(&dir, 500, None);
+            crate::present::present_replay_snapshot(&artifacts, 0usize, 0u64, crate::present::now_unix())
+                .get("chain_head")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default()
+        };
         let outcome_record = json!({
             "artifact_id": id,
             "intent": intent,
@@ -5217,6 +5231,7 @@ impl McpTool for PresentTool {
             "interactive_status": interactive_status.map(|s| s.as_str()),
             "verify_method": verify_method,
             "dual_encoding": dual_encoding,
+            "chain_head": chain_head,
             "session_id": ctx.session_id.as_ref().map(|s| s.to_string()),
             "ts": crate::present::now_unix(),
         });
@@ -5523,7 +5538,7 @@ impl McpTool for PresentDashboardTool {
         }
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let store = match &self.hub.store {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
@@ -5647,6 +5662,42 @@ impl McpTool for PresentDashboardTool {
                 embody_detail = Some("no browser backend configured".to_string());
             }
         }
+
+        // Producer-side outcome sidecar: the dashboard is the FIRST producer to
+        // populate the embody axis with a REAL value, so its embodiment outcome
+        // enters the same queryable, gate-filtered stream as present()
+        // (`present_outcomes`). The render axis is derived honestly from the embody
+        // outcome (`EmbodyStatus::implied_verify_status`: a Stale surface rendered
+        // real content so it's `rendered_ok`, and the `embody_status=stale` rung is
+        // what — correctly — makes it ineligible; a Dead surface is `blank`). Only
+        // an `embodied` dashboard passes `outcome_gate`; a stale/dead mirror is
+        // never minted as a verified outcome. `chain_head` records the lane head the
+        // surface mirrors (provenance). Best-effort — a sidecar write failure never
+        // fails the call. Single basename → this reflects the LATEST embodiment.
+        let dash_verify_method = if !verify {
+            "none"
+        } else if matches!(embody_status, crate::present::EmbodyStatus::NoBrowser) {
+            "no_browser"
+        } else {
+            "browser_eval"
+        };
+        let outcome_record = json!({
+            "artifact_id": crate::present::DASHBOARD_BASENAME,
+            "intent": title.unwrap_or("E3 embodied mirror of the present_replay chain_head"),
+            "action_tool": "present_dashboard",
+            "kind": "dashboard",
+            "verify_status": embody_status.implied_verify_status().as_str(),
+            "embody_status": embody_status.as_str(),
+            "verify_method": dash_verify_method,
+            "chain_head": chain_head,
+            "session_id": ctx.session_id.as_ref().map(|s| s.to_string()),
+            "ts": crate::present::now_unix(),
+        });
+        let _ = crate::present::write_outcome_sidecar(
+            &dir,
+            crate::present::DASHBOARD_BASENAME,
+            &outcome_record,
+        );
 
         let result = json!({
             "schema": crate::present::PRESENT_DASHBOARD_SCHEMA,

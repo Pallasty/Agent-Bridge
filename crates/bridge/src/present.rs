@@ -196,6 +196,27 @@ impl EmbodyStatus {
             Self::Skipped => "skipped",
         }
     }
+
+    /// The [`VerifyStatus`] this embodiment outcome implies for the dashboard's
+    /// action→outcome sidecar — the render axis ("did the surface show visible
+    /// content") collapsed out of the embody axis ("does it reflect the CURRENT
+    /// head"). A dashboard outcome carries BOTH axes, so the gate first checks
+    /// the render axis then the embody axis; this keeps the render axis honest:
+    /// `Stale` rendered REAL content (it's only *behind*), so its render axis is
+    /// `RenderedOk` and the `embody_status=stale` rung is what (correctly) makes
+    /// it ineligible — never the other way around. `Dead` produced nothing
+    /// visible → `Blank`. The degraded/unverified arms mirror their `VerifyStatus`
+    /// namesakes so a dashboard that was never browser-checked never claims
+    /// `rendered_ok`. Pure — unit-tested rather than asserted live.
+    pub fn implied_verify_status(&self) -> VerifyStatus {
+        match self {
+            Self::Embodied | Self::Stale => VerifyStatus::RenderedOk,
+            Self::Dead => VerifyStatus::Blank,
+            Self::NoBrowser => VerifyStatus::NoBrowser,
+            Self::Error => VerifyStatus::Error,
+            Self::Skipped => VerifyStatus::Skipped,
+        }
+    }
 }
 
 /// Content metrics read from the rendered `#ab-render` region. Produced by the
@@ -2206,6 +2227,57 @@ mod tests {
             classify_embody(&genesis, PRESENT_REPLAY_ZERO_HASH),
             EmbodyStatus::Embodied
         );
+    }
+
+    // EmbodyStatus::implied_verify_status — the dashboard's render axis collapsed
+    // out of its embody axis. The falsifier: a Stale surface rendered REAL content,
+    // so its render axis is rendered_ok and ONLY the embody rung makes it
+    // ineligible (never a dishonest blank); a Dead surface produced nothing, so it
+    // is blank. If Stale ever mapped to blank (or Dead to rendered_ok) the gate
+    // semantics would be a lie.
+    #[test]
+    fn e3_implied_verify_status_is_honest() {
+        assert_eq!(EmbodyStatus::Embodied.implied_verify_status(), VerifyStatus::RenderedOk);
+        // Stale RENDERED (it's only behind) → render axis ok; embody rung gates it.
+        assert_eq!(EmbodyStatus::Stale.implied_verify_status(), VerifyStatus::RenderedOk);
+        // Dead produced nothing visible → blank, never rendered_ok.
+        assert_eq!(EmbodyStatus::Dead.implied_verify_status(), VerifyStatus::Blank);
+        assert_eq!(EmbodyStatus::NoBrowser.implied_verify_status(), VerifyStatus::NoBrowser);
+        assert_eq!(EmbodyStatus::Error.implied_verify_status(), VerifyStatus::Error);
+        assert_eq!(EmbodyStatus::Skipped.implied_verify_status(), VerifyStatus::Skipped);
+
+        // Composition with outcome_gate: a dashboard outcome carries BOTH axes.
+        // Embodied → eligible; Stale → rendered_ok render axis but rejected on the
+        // embody rung (the axis doing the real work), NOT on a faked render axis.
+        let embodied = EmbodyStatus::Embodied;
+        assert!(
+            outcome_gate(
+                embodied.implied_verify_status().as_str(),
+                Some(embodied.as_str()),
+                None,
+                None,
+            )
+            .0
+        );
+        let stale = EmbodyStatus::Stale;
+        let (ok, why) = outcome_gate(
+            stale.implied_verify_status().as_str(),
+            Some(stale.as_str()),
+            None,
+            None,
+        );
+        assert!(!ok);
+        assert!(why.contains("embody_status=stale"), "rejected on embody rung, got: {why}");
+        // Dead → rejected on the render axis (blank), before embody even matters.
+        let dead = EmbodyStatus::Dead;
+        let (ok2, why2) = outcome_gate(
+            dead.implied_verify_status().as_str(),
+            Some(dead.as_str()),
+            None,
+            None,
+        );
+        assert!(!ok2);
+        assert!(why2.contains("verify_status=blank"), "rejected on render rung, got: {why2}");
     }
 
     // parse_dashboard_readback tolerates object OR stringified JSON (mirrors parse_metrics)
