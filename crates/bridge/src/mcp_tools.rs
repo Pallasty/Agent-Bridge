@@ -6101,11 +6101,17 @@ impl McpTool for OutcomesMemoryDriftTool {
             .unwrap_or_default();
 
         // Read-only representation probe: for each verified artifact_id, search
-        // memory for matching keys. memory_search is NON-MUTATING (unlike
-        // memory_get). A row is "represented" if any hit's key references the
-        // artifact_id (the deterministic outcome_<id> key, or any human memory
-        // body mentioning it).
+        // memory (memory_search is NON-MUTATING, unlike memory_get). STRICT
+        // semantics (review fix): "represented" means the DETERMINISTIC outcome
+        // row exists — a hit whose key == outcome_<artifact_id> — so drift ==
+        // missing_count equals exactly the writes the ingest tool would make
+        // (same exact-key predicate). A mere substring mention in some unrelated
+        // memory body no longer counts as represented (it would understate
+        // drift); such loose mentions are reported separately as `mentions` for
+        // the operator without inflating represented.
         let mut represented: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        let mut mentions: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
         for rec in &verified {
             let artifact_id = match rec.get("artifact_id").and_then(Value::as_str) {
@@ -6115,23 +6121,30 @@ impl McpTool for OutcomesMemoryDriftTool {
             if represented.contains_key(artifact_id) {
                 continue;
             }
+            let outcome_key = format!("outcome_{artifact_id}");
             let hits = store
                 .memory_search(artifact_id, &[], probe_limit)
                 .await
                 .unwrap_or_default();
-            let keys: Vec<String> = hits
-                .into_iter()
-                .filter(|h| {
-                    h.record.key.contains(artifact_id) || h.record.content.contains(artifact_id)
-                })
-                .map(|h| h.record.key)
-                .collect();
-            represented.insert(artifact_id.to_string(), keys);
+            let mut strict: Vec<String> = Vec::new();
+            let mut loose: Vec<String> = Vec::new();
+            for h in hits {
+                if h.record.key == outcome_key {
+                    strict.push(h.record.key);
+                } else if h.record.key.contains(artifact_id)
+                    || h.record.content.contains(artifact_id)
+                {
+                    loose.push(h.record.key);
+                }
+            }
+            represented.insert(artifact_id.to_string(), strict);
+            mentions.insert(artifact_id.to_string(), loose);
         }
 
         let snapshot = crate::present::outcomes_memory_drift_snapshot(
             &verified,
             &represented,
+            &mentions,
             now.max(0) as u64,
             window_secs as u64,
         );
@@ -6165,13 +6178,15 @@ impl McpTool for PresentOutcomesIngestTool {
             name: self.name().into(),
             description: "Output-expression lane Slice B (v0): opt-in ingestion of gate-verified \
                  outcomes into memory as ordinary rows (kind=present_outcome, \
-                 key=outcome_<artifact_id>, additive tags, related_keys=[], importance 0.5). \
+                 key=outcome_<artifact_id>, scope=outcome:<artifact_id> [distinct per artifact — \
+                 the auto-supersede guard], additive tags, related_keys=[], importance 0.5). \
                  Reuses the verified_only stream (gate inherited, never re-run). dry_run=TRUE by \
-                 DEFAULT: returns the would-write set + per-row already_present (so an operator \
-                 sees ON CONFLICT resurrection of a tombstoned/superseded row BEFORE committing) \
-                 and writes NOTHING. Set dry_run=false to persist (capped by max_writes). No \
-                 schema/column/table change, no event_spine write. Not automatic — there is no \
-                 lifecycle hook; a human triggers it."
+                 DEFAULT: returns the would-write set + per-row active_row_exists (true = an ACTIVE \
+                 row with that key already exists → a benign content refresh on save; the \
+                 active-only probe cannot see a superseded/tombstoned row, so it is NOT a \
+                 resurrection oracle) and writes NOTHING. Set dry_run=false to persist (capped by \
+                 max_writes). No schema/column/table change, no event_spine write. Not automatic — \
+                 there is no lifecycle hook; a human triggers it."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -6255,24 +6270,31 @@ impl McpTool for PresentOutcomesIngestTool {
             if !seen_keys.insert(mem.key.clone()) {
                 continue;
             }
-            // Non-mutating existence probe (NEVER memory_get): does a row with
-            // this exact key already exist? Surfaces ON CONFLICT resurrection.
-            let already_present = store
+            // Cap BEFORE the existence probe so a huge sidecar dir doesn't issue
+            // `limit` DB round-trips for records we'll never report/write.
+            if planned.len() >= max_writes {
+                skipped_cap += 1;
+                continue;
+            }
+            // Non-mutating existence probe (NEVER memory_get, which bumps
+            // access_count/last_accessed_at). HONEST SCOPE: memory_search only
+            // returns ACTIVE rows, so this detects an existing *active* row (a
+            // benign ON CONFLICT content refresh) — it does NOT and cannot see a
+            // superseded/tombstoned row (no non-mutating status-aware keyed read
+            // exists in the store trait). Named `active_row_exists` accordingly;
+            // it is not a resurrection oracle.
+            let active_row_exists = store
                 .memory_search(&mem.key, &[], 5)
                 .await
                 .unwrap_or_default()
                 .iter()
                 .any(|h| h.record.key == mem.key);
 
-            if planned.len() >= max_writes {
-                skipped_cap += 1;
-                continue;
-            }
-
             let mut row = json!({
                 "key": mem.key,
                 "kind": mem.kind,
-                "already_present": already_present,
+                "scope": mem.scope,
+                "active_row_exists": active_row_exists,
                 "tags": mem.tags,
             });
             if !dry_run {
@@ -6294,9 +6316,6 @@ impl McpTool for PresentOutcomesIngestTool {
             planned.push(row);
         }
 
-        let resurrection_warning = planned.iter().any(|r| {
-            r.get("already_present").and_then(Value::as_bool).unwrap_or(false)
-        });
         Ok(ToolResult::json_text(&json!({
             "schema": "present_outcomes_ingest/v0",
             "dry_run": dry_run,
@@ -6308,11 +6327,10 @@ impl McpTool for PresentOutcomesIngestTool {
             "skipped_over_cap": skipped_cap,
             "max_writes": max_writes,
             "memory_kind": crate::present_ingest::OUTCOME_MEMORY_KIND,
-            "resurrection_possible": resurrection_warning,
             "note": if dry_run {
-                "dry_run: nothing written. already_present=true rows would be ON CONFLICT updates (and would resurrect a superseded/tombstoned row to active). Set dry_run=false to persist."
+                "dry_run: nothing written. active_row_exists=true → an active row with that key exists (ON CONFLICT would refresh content, NOT resurrect). NOTE: a superseded/tombstoned same-key row is invisible to the active-only probe, so this flag does not detect resurrection. With per-artifact distinct scope, auto-supersede no longer creates retired rows; the only resurrection source is manual delete/tombstone. Set dry_run=false to persist."
             } else {
-                "persisted gate-verified outcomes as memory rows."
+                "persisted gate-verified outcomes as memory rows (distinct scope per artifact prevents cross-supersede)."
             },
             "rows": planned,
         })))

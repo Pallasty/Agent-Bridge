@@ -22,26 +22,65 @@
 //! **Write-path hazards (verified in `store/sqlite.rs`) and how v0 neutralizes
 //! them — see the Slice B design audit:**
 //! - *auto-supersede clobber* (a new active row with >0.5 token overlap vs a
-//!   same-kind+same-scope active row silently supersedes the older): isolated by
-//!   a DISTINCT `kind = "present_outcome"` used by no other writer, AND by
-//!   embedding the artifact_id+ts in the content so rows stay lexically varied
-//!   (token overlap < 0.5).
-//! - *idempotency / resurrection*: the deterministic `outcome_<artifact_id>` key
-//!   makes re-ingest an `ON CONFLICT(key)` update (not a duplicate). The caller
-//!   must surface that ON CONFLICT resurrects a superseded/tombstoned row to
-//!   active — the dry-run report's `already_present` flag exposes this before any
-//!   write.
+//!   same-kind+SAME-SCOPE active row silently supersedes the older): neutralized
+//!   by a DISTINCT per-artifact `scope = outcome:<artifact_id>` (see
+//!   [`outcome_scope`]) — the candidate scan is `WHERE kind=?1 AND scope IS ?2`,
+//!   so a distinct scope makes the candidate set a singleton and no peer is ever
+//!   found. (The original "content stays token-overlap < 0.5" bet was FALSE —
+//!   the Slice B review measured ~0.83 — so scope, not content, is the guard.)
+//! - *idempotency*: the deterministic `outcome_<artifact_id>` key makes re-ingest
+//!   an `ON CONFLICT(key)` update (not a duplicate). NOTE: `memory_search` only
+//!   returns active rows, so the dry-run `active_row_exists` flag detects an
+//!   existing ACTIVE row (a benign content refresh) but CANNOT see a
+//!   superseded/tombstoned row (no non-mutating status-aware keyed read exists
+//!   in the store trait) — it does not claim to. With the distinct-scope guard
+//!   above, auto-supersede no longer manufactures retired rows, so the residual
+//!   resurrection source is only manual delete/tombstone.
 //! - *search/decay pollution*: `related_keys = []` (no graph edges in v0 → does
 //!   not regress the orphan_fraction / PageRank-readiness #6 tracks) and the
-//!   distinct kind/tags let the cohort be filtered out of human-facing recall.
+//!   distinct kind/tags/scope let the cohort be filtered out of human-facing recall.
 
 use ab_store::MemoryRecord;
 use serde_json::Value;
 
 /// The distinct memory `kind` for ingested verified outcomes. Used by NO other
 /// writer so the auto-supersede candidate scan (`WHERE kind=?1 AND scope IS ?2`)
-/// is isolated to this cohort and can never clobber unrelated rows.
+/// never pulls in unrelated kinds.
 pub const OUTCOME_MEMORY_KIND: &str = "present_outcome";
+
+/// Per-artifact scope for an outcome row: `outcome:<artifact_id>`.
+///
+/// **This is the load-bearing auto-supersede guard** (Slice B review fix). The
+/// store's contradiction detector supersedes any *same-kind, same-scope* active
+/// row whose token-overlap exceeds 0.5 (`store/sqlite.rs` candidate query
+/// `WHERE kind=?1 AND (scope IS ?2) AND status='active'`). Outcome rows share a
+/// kind AND their content is boilerplate-heavy (the embedded JSON field names
+/// alone push pairwise Jaccard overlap to ~0.83 — well past 0.5), so a shared
+/// scope would make the whole cohort mutually supersede down to ONE survivor.
+/// A DISTINCT scope per artifact makes the candidate set a singleton → the
+/// detector never finds a peer → every outcome row survives. `memory_search`
+/// (the probe both Slice B tools use) does not filter on scope, so the rows
+/// stay fully queryable; project-scoped human recall naturally excludes them.
+pub fn outcome_scope(artifact_id: &str) -> String {
+    format!("outcome:{artifact_id}")
+}
+
+/// Integrity admission check applied ON TOP of the verified gate, for both Slice
+/// B consumers (ingest + drift). The gate (`outcome_gate`) admits an approval on
+/// `decision ∈ {approved,rejected}` alone, but the approval card's authoritative
+/// verdict also requires `token_match` (the rendered `#ab-token` matching the
+/// daemon-minted token) — a DOM-tampered "approved" with `token_match:false` is
+/// NOT a genuine human approval. The gate (output-lane-owned, separately tested)
+/// does not see `token_match`, so we enforce it fail-closed here at the consumer:
+/// a record carrying `token_match:false` is inadmissible (never minted, never
+/// counted as a closable outcome). Records without a `token_match` field (every
+/// non-approval present() outcome) are unaffected.
+pub fn outcome_integrity_ok(record: &Value) -> bool {
+    match record.get("token_match").and_then(Value::as_bool) {
+        Some(false) => false,
+        _ => true,
+    }
+}
 
 /// Build the [`MemoryRecord`] a verified outcome record would persist, or `None`
 /// if the record cannot be safely ingested (missing `artifact_id`).
@@ -52,10 +91,12 @@ pub const OUTCOME_MEMORY_KIND: &str = "present_outcome";
 /// the gate, but it does refuse a keyless record so it can never mint garbage.
 ///
 /// - `key = outcome_<artifact_id>` (deterministic → idempotent ON CONFLICT update)
-/// - `kind = present_outcome` (distinct; isolates auto-supersede candidate set)
-/// - `content` embeds artifact_id+ts+intent+verify fields as a compact, VARIED,
-///   self-contained JSON line (human-readable head + machine-readable body) so
-///   token overlap between rows stays < 0.5
+/// - `kind = present_outcome` (distinct; no other writer uses it)
+/// - `scope = outcome:<artifact_id>` (distinct PER ROW — the real auto-supersede
+///   guard; see [`outcome_scope`]. NOT a content-overlap bet, which was false:
+///   measured pairwise Jaccard is ~0.83.)
+/// - `content` = human-readable head + embedded machine-readable JSON body
+///   (dual-encoding; carries artifact_id+ts+intent+verify fields)
 /// - `tags = [present_outcome, verified_outcome, auto_ingested, verify:<s>, method:<m>]`
 /// - `related_keys = []` (graph-orphan by design in v0)
 /// - `importance = 0.5` (the `importance_for_kind` fallback for an unknown kind)
@@ -64,8 +105,29 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
     if artifact_id.is_empty() {
         return None;
     }
+    // Fail-closed integrity: a token-mismatched approval is not a genuine
+    // verified outcome (see outcome_integrity_ok). Never mint it.
+    if !outcome_integrity_ok(record) {
+        return None;
+    }
     let ts = record.get("ts").and_then(Value::as_u64).unwrap_or(0);
-    let intent = record.get("intent").and_then(Value::as_str).unwrap_or("");
+    // Cap intent before embedding (it is otherwise unbounded — present()/
+    // present_await_decision write it verbatim). Without this, a pathologically
+    // large intent pushes content past MEMORY_CONTENT_CAP (256 KiB) and the
+    // store's clamp cuts inside the trailing JSON body, silently corrupting the
+    // machine-readable dual-encoding while the row still saves. We also put the
+    // JSON body FIRST below so the structured half survives even if a clamp
+    // ever fires on the human tail.
+    const INTENT_CAP: usize = 4096;
+    let intent_full = record.get("intent").and_then(Value::as_str).unwrap_or("");
+    let intent: String = if intent_full.chars().count() > INTENT_CAP {
+        let mut s: String = intent_full.chars().take(INTENT_CAP).collect();
+        s.push('…');
+        s
+    } else {
+        intent_full.to_string()
+    };
+    let intent = intent.as_str();
     let action_tool = record
         .get("action_tool")
         .and_then(Value::as_str)
@@ -81,9 +143,11 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
     let kind_label = record.get("kind").and_then(Value::as_str).unwrap_or("");
     let decision = record.get("decision").and_then(Value::as_str);
 
-    // Content: a human line + an embedded machine-readable JSON body, both
-    // carrying artifact_id+ts so the row text is lexically varied (anti
-    // auto-supersede) and self-describing. NOT a fixed boilerplate skeleton.
+    // Content: a human line + an embedded machine-readable JSON body
+    // (dual-encoding; carries artifact_id+ts so the row is self-describing).
+    // NOTE: content is NOT relied on to dodge auto-supersede — that guard is
+    // the distinct per-artifact `scope` below (review found content overlap is
+    // ~0.83, far above the 0.5 supersede threshold).
     let body = serde_json::json!({
         "artifact_id": artifact_id,
         "ts": ts,
@@ -99,8 +163,12 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
     } else {
         format!("verified outcome: \"{intent}\" via {action_tool} {kind_label} → {verify_status} [{artifact_id}]")
     };
+    // JSON body FIRST: with intent already capped, content stays well under the
+    // 256 KiB cap, but ordering the machine-readable block ahead of the human
+    // tail means even a future clamp would truncate prose, never the structured
+    // dual-encoding payload.
     let content = format!(
-        "{human}\n\n```json ab-outcome\n{}\n```",
+        "```json ab-outcome\n{}\n```\n\n{human}",
         serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string())
     );
 
@@ -125,7 +193,7 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
         content,
         tags,
         related_keys: Vec::new(),
-        scope: None,
+        scope: Some(outcome_scope(artifact_id)),
         created_at: now,
         updated_at: now,
         last_accessed_at: now,
@@ -162,7 +230,7 @@ mod tests {
         assert_eq!(m.kind, "present_outcome");
         assert_eq!(m.importance, 0.5);
         assert!(m.related_keys.is_empty(), "v0 is graph-orphan by design");
-        assert_eq!(m.scope, None);
+        assert_eq!(m.scope, Some("outcome:abc123def456".to_string()));
         assert_eq!(m.status, "active");
     }
 
@@ -173,15 +241,28 @@ mod tests {
     }
 
     #[test]
-    fn content_is_varied_per_artifact_anti_supersede() {
-        // Two different artifacts must produce content with <0.5 token overlap
-        // failure mode avoided: the artifact_id + ts appear in BOTH the human
-        // line and the JSON body, so the rows differ substantially.
+    fn distinct_scope_per_artifact_is_the_supersede_guard() {
+        // Slice B review fix: the auto-supersede guard is the DISTINCT per-artifact
+        // scope, NOT content variance (measured overlap ~0.83, far above 0.5).
+        // The store's candidate scan is `WHERE kind=?1 AND (scope IS ?2)`, so two
+        // outcome rows with different scopes are never mutual supersede candidates.
         let a = build_outcome_memory(&rec("aaaaaaaa1111"), 1).unwrap();
         let b = build_outcome_memory(&rec("bbbbbbbb2222"), 1).unwrap();
-        assert_ne!(a.content, b.content);
+        assert_eq!(a.scope, Some("outcome:aaaaaaaa1111".to_string()));
+        assert_eq!(b.scope, Some("outcome:bbbbbbbb2222".to_string()));
+        assert_ne!(a.scope, b.scope, "distinct scope = distinct supersede candidate set");
+        // same kind (cohort) but never same scope → singleton candidate set each.
+        assert_eq!(a.kind, b.kind);
+        assert_eq!(a.kind, "present_outcome");
+        // content still carries the artifact_id for dual-encoding / self-describing.
         assert!(a.content.contains("aaaaaaaa1111"));
         assert!(b.content.contains("bbbbbbbb2222"));
+    }
+
+    #[test]
+    fn scope_helper_matches_record() {
+        let m = build_outcome_memory(&rec("c0ffee123456"), 0).unwrap();
+        assert_eq!(m.scope, Some(outcome_scope("c0ffee123456")));
     }
 
     #[test]
@@ -215,5 +296,62 @@ mod tests {
         let m = build_outcome_memory(&rec("feed1234abcd"), 0).unwrap();
         assert!(m.content.contains("```json ab-outcome"));
         assert!(m.content.contains("\"artifact_id\": \"feed1234abcd\""));
+    }
+
+    #[test]
+    fn refuses_token_mismatched_approval() {
+        // MED fix: a DOM-tampered approval (decision=approved but token_match=false)
+        // is NOT a genuine verified outcome — must never be minted.
+        let tampered = json!({
+            "artifact_id": "tampered01234",
+            "ts": 1u64,
+            "action_tool": "present_await_decision",
+            "kind": "approval",
+            "verify_status": "rendered_ok",
+            "verify_method": "human_decision",
+            "decision": "approved",
+            "token_match": false,
+        });
+        assert!(build_outcome_memory(&tampered, 0).is_none());
+        assert!(!outcome_integrity_ok(&tampered));
+        // genuine approval (token_match=true) is admitted.
+        let genuine = json!({
+            "artifact_id": "genuine012345",
+            "ts": 1u64,
+            "action_tool": "present_await_decision",
+            "kind": "approval",
+            "verify_status": "rendered_ok",
+            "verify_method": "human_decision",
+            "decision": "approved",
+            "token_match": true,
+        });
+        assert!(build_outcome_memory(&genuine, 0).is_some());
+        assert!(outcome_integrity_ok(&genuine));
+        // present() outcomes carry no token_match field → unaffected.
+        assert!(outcome_integrity_ok(&rec("plain00001234")));
+    }
+
+    #[test]
+    fn oversized_intent_capped_and_json_body_first() {
+        // MED fix: unbounded intent must be capped so content stays under the
+        // 256 KiB store cap, and the JSON body must come FIRST so a clamp can
+        // never corrupt the machine-readable dual-encoding.
+        let huge = "x".repeat(100_000);
+        let v = json!({
+            "artifact_id": "bigintent0001",
+            "ts": 1u64,
+            "action_tool": "present",
+            "kind": "table",
+            "verify_status": "rendered_ok",
+            "verify_method": "browser_eval",
+            "intent": huge,
+        });
+        let m = build_outcome_memory(&v, 0).unwrap();
+        // content far below the 256 KiB cap despite a 100k-char intent.
+        assert!(m.content.len() < 16_384, "content len = {}", m.content.len());
+        // JSON body precedes the human tail.
+        assert!(m.content.starts_with("```json ab-outcome"));
+        // the embedded body's intent is the capped form (truncation marker).
+        assert!(m.content.contains('…'));
     }
 }

@@ -1442,11 +1442,23 @@ pub fn present_outcomes_projection(records: &[Value], verified_only: bool) -> Va
 ///
 /// For each missing (verified, not-yet-represented) record it also emits the
 /// `proposed_*` candidate a future opt-in ingest WOULD persist (deterministic
-/// `outcome_<artifact_id>` key, distinct `present_outcome` kind, additive tags)
-/// — as REPORT DATA ONLY; this fn never writes memory.
+/// `outcome_<artifact_id>` key, distinct `present_outcome` kind, additive tags
+/// INCLUDING `decision:<d>` for approval outcomes — byte-identical to what
+/// [`crate::present_ingest::build_outcome_memory`] writes) — as REPORT DATA
+/// ONLY; this fn never writes memory. The proposed candidate is omitted for a
+/// keyless (empty artifact_id) record, matching the ingest path's refusal.
+///
+/// **STRICT `represented`** (review fix): `represented_keys_by_artifact` carries
+/// only EXACT outcome-row keys (`outcome_<artifact_id>`), so `drift ==
+/// distinct_missing` equals exactly the writes the ingest tool would make. Loose
+/// substring mentions in unrelated memory bodies are passed via `mentions` and
+/// surfaced per-event WITHOUT counting as represented (they would understate the
+/// gap). Counts are over DISTINCT artifact_ids (a duplicate artifact_id closes
+/// with ONE write, so it must not double-count).
 pub fn outcomes_memory_drift_snapshot(
     verified_records: &[Value],
     represented_keys_by_artifact: &std::collections::HashMap<String, Vec<String>>,
+    mentions_by_artifact: &std::collections::HashMap<String, Vec<String>>,
     generated_at: u64,
     window_secs: u64,
 ) -> Value {
@@ -1465,7 +1477,13 @@ pub fn outcomes_memory_drift_snapshot(
 
     let mut prev = PRESENT_REPLAY_ZERO_HASH.to_string();
     let mut events: Vec<Value> = Vec::with_capacity(recs.len());
-    let mut represented_count = 0usize;
+    // DISTINCT-artifact counting: one deterministic row closes the loop per
+    // artifact_id, so dedupe before counting (mirrors the ingest seen_keys
+    // discipline). All records still emit an event (full audit), but the
+    // headline counts reflect distinct artifacts.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut distinct_verified = 0usize;
+    let mut distinct_represented = 0usize;
     let mut embody_unknown = 0usize;
     for r in recs {
         let artifact_id = r.get("artifact_id").and_then(Value::as_str).unwrap_or("");
@@ -1475,6 +1493,7 @@ pub fn outcomes_memory_drift_snapshot(
         let verify_method = r.get("verify_method").and_then(Value::as_str).unwrap_or("");
         let action_tool = r.get("action_tool").and_then(Value::as_str).unwrap_or("");
         let gate_reason = r.get("gate_reason").and_then(Value::as_str).unwrap_or("");
+        let decision = r.get("decision").and_then(Value::as_str);
         // Known limitation surfaced honestly: present()-origin sidecars omit
         // embody_status, so outcome_gate's embodiment rung was skipped (Option
         // None passes). Flag it rather than implying the embody axis was checked.
@@ -1485,9 +1504,17 @@ pub fn outcomes_memory_drift_snapshot(
             .get(artifact_id)
             .cloned()
             .unwrap_or_default();
+        let mentions = mentions_by_artifact
+            .get(artifact_id)
+            .cloned()
+            .unwrap_or_default();
         let represented = !matched.is_empty();
-        if represented {
-            represented_count += 1;
+        let first_seen = !artifact_id.is_empty() && seen.insert(artifact_id.to_string());
+        if first_seen {
+            distinct_verified += 1;
+            if represented {
+                distinct_represented += 1;
+            }
         }
 
         let hash = outcomes_drift_hash(artifact_id, ts, verify_status, gate_reason, represented, &prev);
@@ -1500,44 +1527,53 @@ pub fn outcomes_memory_drift_snapshot(
             "gate_reason": gate_reason,
             "represented": represented,
             "memory_keys": matched,
+            "mentions": mentions,
             "prev_hash": prev,
             "hash": hash,
         });
-        // would-write candidate for the missing ones — REPORT DATA ONLY.
-        if !represented {
+        // would-write candidate for the missing ones — REPORT DATA ONLY. Omit
+        // for keyless records (ingest refuses them) so the preview matches what
+        // build_outcome_memory would actually mint, INCLUDING the decision tag.
+        if !represented && !artifact_id.is_empty() {
+            let mut proposed_tags = vec![
+                Value::String("present_outcome".into()),
+                Value::String("verified_outcome".into()),
+                Value::String("auto_ingested".into()),
+            ];
+            if !verify_status.is_empty() {
+                proposed_tags.push(Value::String(format!("verify:{verify_status}")));
+            }
+            if !verify_method.is_empty() {
+                proposed_tags.push(Value::String(format!("method:{verify_method}")));
+            }
+            if let Some(d) = decision {
+                proposed_tags.push(Value::String(format!("decision:{d}")));
+            }
             if let Some(obj) = ev.as_object_mut() {
                 obj.insert(
                     "proposed_key".into(),
                     Value::String(format!("outcome_{artifact_id}")),
                 );
                 obj.insert("proposed_kind".into(), Value::String("present_outcome".into()));
-                obj.insert(
-                    "proposed_tags".into(),
-                    serde_json::json!([
-                        "present_outcome",
-                        "verified_outcome",
-                        "auto_ingested",
-                        format!("verify:{verify_status}"),
-                        format!("method:{verify_method}"),
-                    ]),
-                );
+                obj.insert("proposed_scope".into(), Value::String(format!("outcome:{artifact_id}")));
+                obj.insert("proposed_tags".into(), Value::Array(proposed_tags));
             }
         }
         events.push(ev);
         prev = hash;
     }
 
-    let verified_count = events.len();
-    let missing_count = verified_count - represented_count;
+    let distinct_missing = distinct_verified - distinct_represented;
     serde_json::json!({
         "schema": "outcomes_memory_drift/v0",
         "hash_algorithm": "sha256",
         "generated_at": generated_at,
         "window_secs": window_secs,
-        "verified_count": verified_count,
-        "represented_count": represented_count,
-        "missing_count": missing_count,
-        "drift": missing_count,
+        "event_count": events.len(),
+        "verified_count": distinct_verified,
+        "represented_count": distinct_represented,
+        "missing_count": distinct_missing,
+        "drift": distinct_missing,
         "embody_status_absent": embody_unknown,
         "chain_head": prev,
         "events": events,
@@ -2342,6 +2378,10 @@ mod tests {
         })
     }
 
+    fn empty_mentions() -> std::collections::HashMap<String, Vec<String>> {
+        std::collections::HashMap::new()
+    }
+
     #[test]
     fn slice_b_drift_computes_represented_and_missing() {
         // T1: K of N have a probe match → represented_count==K, drift==N-K.
@@ -2351,7 +2391,7 @@ mod tests {
         probe.insert("aaa1".into(), vec!["outcome_aaa1".into()]); // represented
         probe.insert("bbb2".into(), vec![]); // missing
         // ccc3 absent from map → missing
-        let snap = outcomes_memory_drift_snapshot(&recs, &probe, 999, 86400);
+        let snap = outcomes_memory_drift_snapshot(&recs, &probe, &empty_mentions(), 999, 86400);
         assert_eq!(snap["verified_count"], json!(3));
         assert_eq!(snap["represented_count"], json!(1));
         assert_eq!(snap["missing_count"], json!(2));
@@ -2363,16 +2403,51 @@ mod tests {
         use std::collections::HashMap;
         let recs = vec![vrec("dead1", 5)];
         let probe: HashMap<String, Vec<String>> = HashMap::new(); // missing
-        let snap = outcomes_memory_drift_snapshot(&recs, &probe, 1, 1);
+        let snap = outcomes_memory_drift_snapshot(&recs, &probe, &empty_mentions(), 1, 1);
         let ev = &snap["events"][0];
         assert_eq!(ev["represented"], json!(false));
         assert_eq!(ev["proposed_key"], json!("outcome_dead1"));
         assert_eq!(ev["proposed_kind"], json!("present_outcome"));
+        assert_eq!(ev["proposed_scope"], json!("outcome:dead1"));
         // represented record must NOT carry a proposed_* candidate.
         let mut p: HashMap<String, Vec<String>> = HashMap::new();
         p.insert("dead1".into(), vec!["outcome_dead1".into()]);
-        let snap2 = outcomes_memory_drift_snapshot(&recs, &p, 1, 1);
+        let snap2 = outcomes_memory_drift_snapshot(&recs, &p, &empty_mentions(), 1, 1);
         assert!(snap2["events"][0].get("proposed_key").is_none());
+    }
+
+    #[test]
+    fn slice_b_drift_proposed_tags_include_decision_for_approval() {
+        // LOW fix: proposed_tags must match build_outcome_memory (decision tag).
+        use std::collections::HashMap;
+        let mut approval = vrec("appr00001234", 1);
+        approval["action_tool"] = json!("present_await_decision");
+        approval["decision"] = json!("approved");
+        let snap = outcomes_memory_drift_snapshot(&[approval], &HashMap::new(), &empty_mentions(), 0, 1);
+        let tags = snap["events"][0]["proposed_tags"].as_array().unwrap();
+        assert!(tags.iter().any(|t| t == "decision:approved"));
+    }
+
+    #[test]
+    fn slice_b_drift_keyless_record_emits_no_proposed_candidate() {
+        // LOW fix: a keyless (empty artifact_id) record must NOT advertise a
+        // proposed candidate (build_outcome_memory refuses it).
+        use std::collections::HashMap;
+        let keyless = json!({"ts": 1u64, "verify_status": "rendered_ok", "gate_reason": "verified"});
+        let snap = outcomes_memory_drift_snapshot(&[keyless], &HashMap::new(), &empty_mentions(), 0, 1);
+        assert!(snap["events"][0].get("proposed_key").is_none());
+    }
+
+    #[test]
+    fn slice_b_drift_dedupes_duplicate_artifact_id() {
+        // LOW fix: a repeated artifact_id closes with ONE write, so counts are
+        // over DISTINCT artifacts — two missing records with the same id → drift==1.
+        use std::collections::HashMap;
+        let recs = vec![vrec("dup00001234", 1), vrec("dup00001234", 2)];
+        let snap = outcomes_memory_drift_snapshot(&recs, &HashMap::new(), &empty_mentions(), 0, 1);
+        assert_eq!(snap["verified_count"], json!(1), "distinct artifacts");
+        assert_eq!(snap["drift"], json!(1), "one write closes the loop, not two");
+        assert_eq!(snap["event_count"], json!(2), "but both records still audited");
     }
 
     #[test]
@@ -2381,23 +2456,22 @@ mod tests {
         use std::collections::HashMap;
         let probe: HashMap<String, Vec<String>> = HashMap::new();
         let a = vec![vrec("id1", 1), vrec("id2", 2)];
-        let h1 = outcomes_memory_drift_snapshot(&a, &probe, 0, 1)["chain_head"].clone();
+        let h1 = outcomes_memory_drift_snapshot(&a, &probe, &empty_mentions(), 0, 1)["chain_head"].clone();
         // reorder by giving id2 an earlier ts so sort order flips
         let b = vec![vrec("id1", 5), vrec("id2", 2)];
-        let h2 = outcomes_memory_drift_snapshot(&b, &probe, 0, 1)["chain_head"].clone();
+        let h2 = outcomes_memory_drift_snapshot(&b, &probe, &empty_mentions(), 0, 1)["chain_head"].clone();
         assert_ne!(h1, h2, "different ts ordering must change chain_head");
         // flip a represented bit → chain changes (represented is in the hash)
         let mut p: HashMap<String, Vec<String>> = HashMap::new();
-        p.insert("id1".into(), vec!["k".into()]);
-        let h3 = outcomes_memory_drift_snapshot(&a, &p, 0, 1)["chain_head"].clone();
+        p.insert("id1".into(), vec!["outcome_id1".into()]);
+        let h3 = outcomes_memory_drift_snapshot(&a, &p, &empty_mentions(), 0, 1)["chain_head"].clone();
         assert_ne!(h1, h3, "flipping represented must change chain_head");
     }
 
     #[test]
     fn slice_b_drift_empty_is_genesis_not_error() {
         // T4: empty stream → counts 0, chain_head == genesis.
-        use std::collections::HashMap;
-        let snap = outcomes_memory_drift_snapshot(&[], &HashMap::new(), 7, 9);
+        let snap = outcomes_memory_drift_snapshot(&[], &empty_mentions(), &empty_mentions(), 7, 9);
         assert_eq!(snap["verified_count"], json!(0));
         assert_eq!(snap["drift"], json!(0));
         assert_eq!(snap["chain_head"], json!(PRESENT_REPLAY_ZERO_HASH));
@@ -2408,11 +2482,11 @@ mod tests {
         // T5: one record's zero matches yields represented=false even when
         // another record in the same snapshot matches.
         use std::collections::HashMap;
-        let recs = vec![vrec("hit0", 1), vrec("miss0", 2)];
+        let recs = vec![vrec("hit0aaaa", 1), vrec("miss0bbb", 2)];
         let mut probe: HashMap<String, Vec<String>> = HashMap::new();
-        probe.insert("hit0".into(), vec!["outcome_hit0".into()]);
-        probe.insert("miss0".into(), vec![]);
-        let snap = outcomes_memory_drift_snapshot(&recs, &probe, 0, 1);
+        probe.insert("hit0aaaa".into(), vec!["outcome_hit0aaaa".into()]);
+        probe.insert("miss0bbb".into(), vec![]);
+        let snap = outcomes_memory_drift_snapshot(&recs, &probe, &empty_mentions(), 0, 1);
         let by_id: std::collections::HashMap<String, bool> = snap["events"]
             .as_array()
             .unwrap()
@@ -2424,17 +2498,31 @@ mod tests {
                 )
             })
             .collect();
-        assert_eq!(by_id["hit0"], true);
-        assert_eq!(by_id["miss0"], false);
+        assert_eq!(by_id["hit0aaaa"], true);
+        assert_eq!(by_id["miss0bbb"], false);
+    }
+
+    #[test]
+    fn slice_b_drift_mentions_do_not_count_as_represented() {
+        // review fix: a loose substring mention (not the outcome_ row) must NOT
+        // mark represented — it is surfaced separately so drift is not understated.
+        use std::collections::HashMap;
+        let recs = vec![vrec("mention01234", 1)];
+        let probe: HashMap<String, Vec<String>> = HashMap::new(); // no exact outcome_ row
+        let mut mentions: HashMap<String, Vec<String>> = HashMap::new();
+        mentions.insert("mention01234".into(), vec!["some_lesson_key".into()]);
+        let snap = outcomes_memory_drift_snapshot(&recs, &probe, &mentions, 0, 1);
+        assert_eq!(snap["represented_count"], json!(0));
+        assert_eq!(snap["drift"], json!(1), "a mere mention is not representation");
+        assert_eq!(snap["events"][0]["mentions"], json!(["some_lesson_key"]));
     }
 
     #[test]
     fn slice_b_drift_flags_absent_embody_status() {
         // T6 (honesty): present()-origin records omit embody_status; surface it
         // as a known limitation rather than implying the embody axis was checked.
-        use std::collections::HashMap;
-        let recs = vec![vrec("noembody", 1)]; // vrec has no embody_status
-        let snap = outcomes_memory_drift_snapshot(&recs, &HashMap::new(), 0, 1);
+        let recs = vec![vrec("noembody1234", 1)]; // vrec has no embody_status
+        let snap = outcomes_memory_drift_snapshot(&recs, &empty_mentions(), &empty_mentions(), 0, 1);
         assert_eq!(snap["embody_status_absent"], json!(1));
     }
 }
