@@ -354,4 +354,44 @@ mod tests {
         // the embedded body's intent is the capped form (truncation marker).
         assert!(m.content.contains('…'));
     }
+
+    #[test]
+    fn never_fabricates_graph_signal() {
+        // **Anti-fabrication invariant (Slice B graph-design verdict, thread 94).**
+        // The graph-design workflow (3 lenses, unanimous) ruled that outcome rows
+        // must NOT receive minted edges: cofires/co_referenced are the ONLY edge
+        // types PageRank/hebbian_clusters/M5 consume, and they are EARNED via
+        // record_coactivation → dream promote on REAL co-fire. Minting any edge at
+        // ingest time fabricates the exact signal #6 measures (the decorative-edge
+        // / surprise-starvation anti-pattern). build_outcome_memory must therefore
+        // NEVER populate related_keys (a row-local hyperlink list that doesn't even
+        // enter the PageRank subgraph) and the ingest tool must never write
+        // memory_edges. This test locks the row half so a future edge-mint cannot
+        // land silently; the "no memory_edges write" half is enforced structurally
+        // (PresentOutcomesIngestTool::execute calls only memory_save, never
+        // memory_link — there is no edge-writing call site in the Slice B path).
+        for (aid, decision) in [
+            ("orphan00aaaa", None),
+            ("orphan00bbbb", Some("approved")),
+        ] {
+            let mut v = rec(aid);
+            if let Some(d) = decision {
+                v["action_tool"] = json!("present_await_decision");
+                v["kind"] = json!("approval");
+                v["verify_method"] = json!("human_decision");
+                v["decision"] = json!(d);
+                v["token_match"] = json!(true);
+            }
+            let m = build_outcome_memory(&v, 0).expect("builds");
+            assert!(
+                m.related_keys.is_empty(),
+                "Slice B must never mint related_keys (graph-orphan by design); got {:?}",
+                m.related_keys
+            );
+            assert!(
+                m.superseded_by.is_none() && m.trigger_pattern.is_none(),
+                "no synthetic graph/structural fields"
+            );
+        }
+    }
 }
