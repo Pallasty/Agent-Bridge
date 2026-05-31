@@ -32338,14 +32338,17 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 36 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 42 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(24: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(30: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_orphan_candidates + memory_orphan_inventory
-        //      + desktop_snapshot + vision_grounding_ocr).
+        //      + desktop_snapshot + vision_grounding_ocr
+        //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
+        //      + agent_orchestrate_scan, added by d4fd74d).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        assert_eq!(extras.len(), 36);
+        // +6 steering DIRECT extras (d4fd74d) brought DIRECT 24→30, total 36→42.
+        assert_eq!(extras.len(), 42);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -32377,6 +32380,14 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"memory_orphan_inventory"));
         assert!(extras.contains(&"desktop_snapshot"));
         assert!(extras.contains(&"vision_grounding_ocr"));
+        // Remote session steering (d4fd74d) — direct-exposed for Codex
+        // orchestrators that already carry agent_spawn + agent_session_*.
+        assert!(extras.contains(&"agent_steer_launch"));
+        assert!(extras.contains(&"agent_steer_drive"));
+        assert!(extras.contains(&"agent_steer_capture"));
+        assert!(extras.contains(&"agent_steer_list"));
+        assert!(extras.contains(&"agent_steer_kill"));
+        assert!(extras.contains(&"agent_orchestrate_scan"));
     }
 
     #[test]
