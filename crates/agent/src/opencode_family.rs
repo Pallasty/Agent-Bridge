@@ -178,6 +178,67 @@ fn build_remote_run_cmd(
     cmd
 }
 
+/// The kilo/opencode `*/free` gateway intermittently returns this when its pool
+/// is momentarily empty; the same call almost always succeeds on the next try.
+/// Detected in either stream because kilo prints it to stderr while exiting 0.
+fn is_provider_miss(output: &str) -> bool {
+    output.contains("ProviderModelNotFoundError") || output.contains("Model not found")
+}
+
+/// Everything needed to (re)build the one-shot run Command, so the background
+/// wait loop can retry the SAME invocation on a free-pool miss without
+/// re-deriving it. `build()` is pure construction — no I/O.
+struct SpawnPlan {
+    remote: bool,
+    // remote (ssh) fields
+    ssh_dest: String,
+    ssh_key: Option<String>,
+    remote_cmd: String,
+    // local fields
+    binary: String,
+    auto_flag: &'static str,
+    model: Option<String>,
+    prompt: String,
+    cwd: String,
+    env: HashMap<String, String>,
+}
+
+impl SpawnPlan {
+    fn build(&self) -> Command {
+        if self.remote {
+            let mut c = Command::new("ssh");
+            c.arg("-o")
+                .arg("BatchMode=yes")
+                .arg("-o")
+                .arg("ConnectTimeout=10");
+            if let Some(key) = &self.ssh_key {
+                c.arg("-i").arg(key);
+            }
+            c.arg(&self.ssh_dest).arg(&self.remote_cmd);
+            // env is injected into remote_cmd; cwd is a remote path → no current_dir.
+            c.stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            c
+        } else {
+            let mut c = Command::new(&self.binary);
+            c.arg("run").arg(self.auto_flag);
+            if let Some(m) = &self.model {
+                c.arg("--model").arg(m);
+            }
+            // The prompt comes last as a positional argument so any preceding
+            // flag values (model strings, etc.) can't shadow it.
+            c.arg(&self.prompt);
+            c.current_dir(&self.cwd)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            apply_env(&mut c, &self.env);
+            c
+        }
+    }
+}
+
 fn resolve_kilo_binary_from(home: &Path, path_env: &str, env_override: Option<String>) -> String {
     if let Some(binary) = env_override {
         return binary;
@@ -302,7 +363,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         }
 
         let remote = is_remote_node(cfg.node.as_deref());
-        let mut cmd = if remote {
+        let plan = if remote {
             // Dispatch the one-shot run to a tailnet node via ssh. The local ssh
             // child's stdout/stderr capture the remote output and ssh's exit
             // status mirrors the remote command's, so the background wait +
@@ -337,39 +398,43 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                 dest = %dest,
                 "dispatching one-shot run to remote node via ssh"
             );
-            let mut c = Command::new("ssh");
-            c.arg("-o")
-                .arg("BatchMode=yes")
-                .arg("-o")
-                .arg("ConnectTimeout=10");
-            if let Some(key) = env_nonempty("AGENT_BRIDGE_SSH_KEY") {
-                c.arg("-i").arg(key);
+            SpawnPlan {
+                remote: true,
+                ssh_dest: dest,
+                ssh_key: env_nonempty("AGENT_BRIDGE_SSH_KEY"),
+                remote_cmd,
+                binary: String::new(),
+                auto_flag: self.auto_approve_flag,
+                model: model.clone(),
+                prompt: prompt.clone(),
+                cwd: cwd.clone(),
+                env: cfg.env.clone(),
             }
-            c.arg(&dest).arg(&remote_cmd);
-            // env is injected into remote_cmd (not the local ssh process); cwd is
-            // a remote path, so we do NOT set current_dir on the local child.
-            c.stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            c
         } else {
-            let mut c = Command::new(&self.binary);
-            c.arg("run").arg(self.auto_approve_flag);
-            if let Some(m) = &model {
-                c.arg("--model").arg(m);
+            SpawnPlan {
+                remote: false,
+                ssh_dest: String::new(),
+                ssh_key: None,
+                remote_cmd: String::new(),
+                binary: self.binary.clone(),
+                auto_flag: self.auto_approve_flag,
+                model: model.clone(),
+                prompt: prompt.clone(),
+                cwd: cwd.clone(),
+                env: cfg.env.clone(),
             }
-            // The prompt comes last as a positional argument so any preceding
-            // flag values (model strings, etc.) can't shadow it.
-            c.arg(&prompt);
-            c.current_dir(&cwd)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            apply_env(&mut c, &cfg.env);
-            c
         };
 
-        let child = match cmd.spawn() {
+        // Free-pool retry-on-miss: the kilo/opencode `*/free` gateway intermittently
+        // returns ProviderModelNotFoundError with an empty pool; the same call
+        // usually succeeds on retry. Mirrors scripts/ab-kilo-run.sh. Default 3
+        // total attempts; override with AGENT_BRIDGE_KILO_RETRIES.
+        let max_attempts = env_nonempty("AGENT_BRIDGE_KILO_RETRIES")
+            .and_then(|s| s.parse::<u32>().ok())
+            .filter(|n| *n >= 1)
+            .unwrap_or(3);
+
+        let child = match plan.build().spawn() {
             Ok(child) => child,
             Err(e) => {
                 let message = format!("spawn {}: {e}", self.runtime_id);
@@ -413,61 +478,109 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         let store_bg = self.store.clone();
         let children_bg = self.children.clone();
         tokio::spawn(async move {
-            let out = child.wait_with_output().await;
-            children_bg.remove(sid_bg.as_str());
-            let ended_at = now_secs();
-            match out {
-                Ok(o) => {
-                    let stdout = String::from_utf8_lossy(&o.stdout).into_owned();
-                    let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
-                    info!(
-                        session = %sid_bg,
-                        runtime = %runtime_id,
-                        exit = ?o.status.code(),
-                        stdout_preview = %truncate(&stdout, 200),
-                        stderr_preview = %truncate(&stderr, 200),
-                        "session finished"
-                    );
-                    let exit_code = o.status.code().or_else(|| {
-                        #[cfg(unix)]
+            let mut child = child;
+            let mut attempt: u32 = 1;
+            loop {
+                let out = child.wait_with_output().await;
+                let ended_at = now_secs();
+                match out {
+                    Ok(o) => {
+                        let stdout = String::from_utf8_lossy(&o.stdout).into_owned();
+                        let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
+                        // Retry the SAME invocation on a free-pool miss while
+                        // attempts remain (kilo exits 0 yet prints the error).
+                        if attempt < max_attempts
+                            && (is_provider_miss(&stdout) || is_provider_miss(&stderr))
                         {
-                            use std::os::unix::process::ExitStatusExt;
-                            o.status.signal().map(|s| -(s as i32))
+                            warn!(
+                                session = %sid_bg,
+                                runtime = %runtime_id,
+                                attempt,
+                                max_attempts,
+                                "free-pool miss (ProviderModelNotFoundError) — retrying"
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                            match plan.build().spawn() {
+                                Ok(next) => {
+                                    let npid = next.id().unwrap_or(0);
+                                    if npid != 0 {
+                                        children_bg.insert(sid_bg.as_str().to_string(), npid);
+                                    }
+                                    child = next;
+                                    attempt += 1;
+                                    continue;
+                                }
+                                Err(e) => {
+                                    children_bg.remove(sid_bg.as_str());
+                                    if let Some(store) = store_bg.clone() {
+                                        let _ = store
+                                            .finalise_session(
+                                                &sid_bg,
+                                                now_secs(),
+                                                Some(127),
+                                                None,
+                                                Some(format!("retry spawn failed: {e}")),
+                                            )
+                                            .await;
+                                    }
+                                    break;
+                                }
+                            }
                         }
-                        #[cfg(not(unix))]
-                        {
-                            None
+                        children_bg.remove(sid_bg.as_str());
+                        info!(
+                            session = %sid_bg,
+                            runtime = %runtime_id,
+                            attempt,
+                            exit = ?o.status.code(),
+                            stdout_preview = %truncate(&stdout, 200),
+                            stderr_preview = %truncate(&stderr, 200),
+                            "session finished"
+                        );
+                        let exit_code = o.status.code().or_else(|| {
+                            #[cfg(unix)]
+                            {
+                                use std::os::unix::process::ExitStatusExt;
+                                o.status.signal().map(|s| -(s as i32))
+                            }
+                            #[cfg(not(unix))]
+                            {
+                                None
+                            }
+                        });
+                        if let Some(store) = store_bg.clone() {
+                            let _ = store
+                                .finalise_session(
+                                    &sid_bg,
+                                    ended_at,
+                                    exit_code,
+                                    Some(stdout),
+                                    Some(stderr),
+                                )
+                                .await;
                         }
-                    });
-                    if let Some(store) = store_bg {
-                        let _ = store
-                            .finalise_session(
-                                &sid_bg,
-                                ended_at,
-                                exit_code,
-                                Some(stdout),
-                                Some(stderr),
-                            )
-                            .await;
+                        break;
                     }
-                }
-                Err(e) => {
-                    warn!(
-                        session = %sid_bg,
-                        runtime = %runtime_id,
-                        error = %e,
-                        "wait failed"
-                    );
-                    if let Some(store) = store_bg {
-                        let _ = store
-                            .finalise_session(
-                                &sid_bg,
-                                ended_at,
-                                None,
-                                None,
-                                Some(format!("wait failed: {e}")),
-                            )
-                            .await;
+                    Err(e) => {
+                        children_bg.remove(sid_bg.as_str());
+                        warn!(
+                            session = %sid_bg,
+                            runtime = %runtime_id,
+                            error = %e,
+                            "wait failed"
+                        );
+                        if let Some(store) = store_bg.clone() {
+                            let _ = store
+                                .finalise_session(
+                                    &sid_bg,
+                                    ended_at,
+                                    None,
+                                    None,
+                                    Some(format!("wait failed: {e}")),
+                                )
+                                .await;
+                        }
+                        break;
                     }
                 }
             }
@@ -653,6 +766,17 @@ mod tests {
         env.insert("1leading".to_string(), "x".to_string()); // digit-led → skipped
         let cmd = build_remote_run_cmd("kilo", "--auto", "", None, "p", &env);
         assert_eq!(cmd, "\"kilo\" run --auto 'p'");
+    }
+
+    #[test]
+    fn is_provider_miss_detects_free_pool_errors() {
+        assert!(is_provider_miss("ProviderModelNotFoundError: ProviderModelNotFoundError"));
+        assert!(is_provider_miss(
+            "\u{1b}[91mError: Model not found: kilo/kilo-auto/free.\n"
+        ));
+        // a normal successful result must not look like a miss
+        assert!(!is_provider_miss("4784d188c9f3\n"));
+        assert!(!is_provider_miss(""));
     }
 
     #[tokio::test]
