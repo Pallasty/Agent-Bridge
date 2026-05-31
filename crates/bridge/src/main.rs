@@ -4061,16 +4061,20 @@ async fn main() -> Result<()> {
                                             .duration_since(std::time::UNIX_EPOCH)
                                             .map(|d| d.as_secs() as i64)
                                             .unwrap_or(0);
+                                        let node_label = ab_bridge::c3_self_check::c3_node_label();
                                         for ev in events {
                                             let title = format!(
-                                                "[C3 alert] {}: {} -> {}",
+                                                "[C3 alert][{}] {}: {} -> {}",
+                                                node_label,
                                                 ev.signal.as_str(),
                                                 ev.before,
                                                 ev.after,
                                             );
                                             let body =
-                                                ab_bridge::c3_self_check::format_s234_alert_body(
-                                                    &ev, ts_unix,
+                                                ab_bridge::c3_self_check::format_s234_alert_body_for_node(
+                                                    &ev,
+                                                    ts_unix,
+                                                    &node_label,
                                                 );
                                             if let Err(e) = store
                                                 .forum_post(

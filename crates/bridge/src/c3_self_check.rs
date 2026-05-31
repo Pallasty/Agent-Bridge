@@ -320,6 +320,11 @@ pub struct S234DropEvent {
     pub signal: S234Signal,
     pub before: u64,
     pub after: u64,
+    /// Retired-tier count from the same [`S234Counts`] snapshots. Meaningful
+    /// for S2; carried on all events so alert formatting can show the exact
+    /// lifecycle evidence that was available at firing time.
+    pub retired_before: u64,
+    pub retired_after: u64,
     /// Fraction of `before` lost (0.0..=1.0). For S3 the threshold is
     /// "any drop" but we still report the percentage for the alert body.
     pub drop_pct: f64,
@@ -365,6 +370,8 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
                 signal: S234Signal::S2Memories,
                 before: prev.memories_active,
                 after: current.memories_active,
+                retired_before: prev.memories_retired,
+                retired_after: current.memories_retired,
                 drop_pct: pct,
                 unexplained_drop: unexplained,
             });
@@ -382,6 +389,8 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
             signal: S234Signal::S3ForumThreads,
             before: prev.forum_threads,
             after: current.forum_threads,
+            retired_before: prev.memories_retired,
+            retired_after: current.memories_retired,
             drop_pct: pct,
             unexplained_drop: drop,
         });
@@ -395,6 +404,8 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
                 signal: S234Signal::S4MemoryEdges,
                 before: prev.memory_edges,
                 after: current.memory_edges,
+                retired_before: prev.memories_retired,
+                retired_after: current.memories_retired,
                 drop_pct: pct,
                 unexplained_drop: drop,
             });
@@ -462,11 +473,46 @@ pub fn s234_check_against_snapshot(
     out
 }
 
+/// Resolve the sync/host label used in C3 S2-S4 alerts. `AB_SYNC_NODE` is the
+/// preferred stable machine id because it matches memory sync commits.
+pub fn c3_node_label() -> String {
+    std::env::var("AB_SYNC_NODE")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::env::var("HOSTNAME")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            std::env::var("COMPUTERNAME")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| "unknown-node".to_string())
+}
+
 /// Format an S2-S4 alert body per design §3.4.5. The forum_post tool
 /// receives this as the body; the title is built separately by the
 /// caller to keep the heading short.
-pub fn format_s234_alert_body(ev: &S234DropEvent, ts_unix: i64) -> String {
+pub fn format_s234_alert_body_for_node(
+    ev: &S234DropEvent,
+    ts_unix: i64,
+    node_label: &str,
+) -> String {
     let raw_drop = ev.before.saturating_sub(ev.after);
+    let retired_delta = ev.retired_after as i128 - ev.retired_before as i128;
+    let retired_line = if ev.signal == S234Signal::S2Memories {
+        format!(
+            "\n[retired] {} → {} ({retired_delta:+})",
+            ev.retired_before, ev.retired_after,
+        )
+    } else {
+        String::new()
+    };
     // When part of the active drop was a benign active→retired transition,
     // surface the split so the reader doesn't re-triage it as data loss.
     let lifecycle_line = if ev.unexplained_drop < raw_drop {
@@ -482,19 +528,27 @@ pub fn format_s234_alert_body(ev: &S234DropEvent, ts_unix: i64) -> String {
     };
     format!(
         "[ALERT] {} at ts_unix={}\n\
+         [node] {}\n\
          [evidence] {} → {} ({:.1}% drop in <={}s window)\n\
-         [fd_state] state.db = live (non-DB-anomaly tier){}\n\
+         [fd_state] state.db = live (non-DB-anomaly tier){}{}\n\
          [suggested action] inspect dream-tier output / GC logs / \
          recent retire ops; see docs/DESIGN-COLLAB-PROTOCOL-v0.md §3.4.4 \
          for false-positive mitigations",
         ev.signal.as_str(),
         ts_unix,
+        node_label,
         ev.before,
         ev.after,
         ev.drop_pct * 100.0,
         S234_WINDOW_SECS,
+        retired_line,
         lifecycle_line,
     )
+}
+
+pub fn format_s234_alert_body(ev: &S234DropEvent, ts_unix: i64) -> String {
+    let node_label = c3_node_label();
+    format_s234_alert_body_for_node(ev, ts_unix, &node_label)
 }
 
 /// Test-only: clear the S2-S4 anchor so a fresh test run isn't biased
@@ -802,11 +856,14 @@ mod tests {
             signal: S234Signal::S4MemoryEdges,
             before: 500,
             after: 400,
+            retired_before: 10,
+            retired_after: 10,
             drop_pct: 0.20,
             unexplained_drop: 100,
         };
-        let body = format_s234_alert_body(&ev, 1_700_000_000);
+        let body = format_s234_alert_body_for_node(&ev, 1_700_000_000, "test-node");
         assert!(body.contains("s4-memory-edges-drop"), "signal in body");
+        assert!(body.contains("[node] test-node"), "node in body");
         assert!(body.contains("500"), "before in body");
         assert!(body.contains("400"), "after in body");
         assert!(body.contains("20"), "percent in body");
@@ -857,7 +914,11 @@ mod tests {
         assert_eq!(events[0].signal, S234Signal::S2Memories);
         assert_eq!(events[0].unexplained_drop, 10);
         assert!((events[0].drop_pct - 0.30).abs() < 1e-9, "drop_pct is raw");
-        let body = format_s234_alert_body(&events[0], 1_700_000_000);
+        let body = format_s234_alert_body_for_node(&events[0], 1_700_000_000, "test-node");
+        assert!(
+            body.contains("[retired] 50 → 70 (+20)"),
+            "retired evidence in body"
+        );
         assert!(body.contains("[lifecycle]"), "partial explanation surfaces lifecycle line");
         assert!(body.contains("20 of 30"), "shows explained/raw split");
     }
