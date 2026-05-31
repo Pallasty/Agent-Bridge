@@ -17796,6 +17796,30 @@ async fn mobile_capabilities_json(policy: ToolPolicy) -> Value {
     })
 }
 
+fn compact_instinct_observer_status_json(mut status: Value, include_sessions: bool) -> Value {
+    if include_sessions {
+        return status;
+    }
+    let Some(obj) = status.as_object_mut() else {
+        return status;
+    };
+    let omitted = obj
+        .remove("per_session")
+        .and_then(|v| v.as_object().map(|o| o.len()))
+        .unwrap_or(0);
+    if omitted > 0 {
+        obj.insert("per_session_omitted".to_string(), json!(true));
+        obj.insert("per_session_count".to_string(), json!(omitted));
+        obj.insert(
+            "detail_hint".to_string(),
+            json!(
+                "pass include_instinct_sessions:true or compact:false to include per-session diagnostics"
+            ),
+        );
+    }
+    status
+}
+
 // ===========================================================================
 //                              capabilities
 // ===========================================================================
@@ -17822,10 +17846,30 @@ impl McpTool for CapabilitiesTool {
                  detected frontend, security policy, binary version. Call at session \
                  start to avoid wasted tokens on unavailable features."
                 .into(),
-            input_schema: json!({ "type": "object", "properties": {} }),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "compact": {
+                        "type": "boolean",
+                        "description": "Use compact diagnostics. Omitted = true for Codex compact toolsets, false otherwise."
+                    },
+                    "include_instinct_sessions": {
+                        "type": "boolean",
+                        "description": "Include full instinct-observer per-session diagnostics. Omitted = false in compact output."
+                    }
+                }
+            }),
         }
     }
-    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let compact = args
+            .get("compact")
+            .and_then(|v| v.as_bool())
+            .unwrap_or_else(compact_mcp_output_default);
+        let include_instinct_sessions = args
+            .get("include_instinct_sessions")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(!compact);
         // Terminal — capability flags come from each backend (Warp IPC is probed sync).
         let (
             terminal_id,
@@ -17915,6 +17959,10 @@ impl McpTool for CapabilitiesTool {
         let exposed_tool_count = build_registry_with_policy(Hub::builder().build(), policy)
             .list()
             .len();
+        let instinct_observer = compact_instinct_observer_status_json(
+            crate::instinct::observer_status_json(),
+            include_instinct_sessions,
+        );
         Ok(ToolResult::json_text(&json!({
             "mcp": {
                 "client": std::env::var("AGENT_BRIDGE_CLIENT").ok(),
@@ -17963,7 +18011,7 @@ impl McpTool for CapabilitiesTool {
             "hooks": {
                 "configured": configured_hooks,
                 "frontend": frontend,
-                "instinct_observer": crate::instinct::observer_status_json()
+                "instinct_observer": instinct_observer
             },
             "security": {
                 "shell_exec": sec.allow_shell_exec,
@@ -29974,6 +30022,30 @@ mod tests {
         assert!(!compact_mcp_output_default_for_policy(
             ToolPolicy::from_values(Some("claude-standard"), None, None, Some("compact"))
         ));
+    }
+
+    #[test]
+    fn compact_instinct_observer_status_omits_per_session_details() {
+        let status = json!({
+            "enabled": true,
+            "sessions": 2,
+            "verdict": "DENSITY_OK_PROCEED_PHASE1",
+            "per_session": {
+                "session-a": { "prompts": 1 },
+                "session-b": { "prompts": 2 }
+            }
+        });
+
+        let compact = compact_instinct_observer_status_json(status.clone(), false);
+        assert_eq!(compact["enabled"], json!(true));
+        assert_eq!(compact["sessions"], json!(2));
+        assert!(compact.get("per_session").is_none());
+        assert_eq!(compact["per_session_omitted"], json!(true));
+        assert_eq!(compact["per_session_count"], json!(2));
+
+        let detailed = compact_instinct_observer_status_json(status, true);
+        assert!(detailed.get("per_session").is_some());
+        assert!(detailed.get("per_session_omitted").is_none());
     }
 
     #[test]
