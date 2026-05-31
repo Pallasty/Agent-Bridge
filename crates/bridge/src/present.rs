@@ -1293,18 +1293,23 @@ footer{{margin-top:28px;font-size:11px;color:#9a9ab0;border-top:1px solid #e3e3e
 /// Sidecar filename suffix: `<artifact_id>.outcome.json`.
 pub const OUTCOME_SIDECAR_SUFFIX: &str = "outcome.json";
 
-/// Pure falsifier gate over a render's honesty axes — is this action→outcome
+/// Pure falsifier gate over a record's honesty axes — is this action→outcome
 /// record eligible for the verified training-signal stream? Eligible iff the
 /// render verified (`verify_status == rendered_ok`) AND, where the axis applies,
 /// embodiment did not fail (`embody_status` absent or `embodied`) AND
 /// interactivity did not fail (`interactive_status` absent or one of
-/// `verified` / `not_applicable`). Mirrors [`classify_render`] / [`classify_embody`]:
-/// a deterministic, browser-free decision, so "what counts as a verified label"
-/// is a unit test, not a runtime hand-wave. Returns `(eligible, reason)`.
+/// `verified` / `not_applicable`) AND, for a record that carries a human-decision
+/// axis (an approval card), the human actually DECIDED (`decision` absent or one
+/// of `approved` / `rejected` — a `timed_out` / `dead` / `pending` decision is NOT
+/// a verified outcome). Mirrors [`classify_render`] / [`classify_embody`] /
+/// [`crate::present_approval::classify_approval`]: a deterministic, browser-free
+/// decision, so "what counts as a verified label" is a unit test, not a runtime
+/// hand-wave. Returns `(eligible, reason)`.
 pub fn outcome_gate(
     verify_status: &str,
     embody_status: Option<&str>,
     interactive_status: Option<&str>,
+    decision: Option<&str>,
 ) -> (bool, String) {
     if verify_status != "rendered_ok" {
         return (
@@ -1322,6 +1327,17 @@ pub fn outcome_gate(
             return (
                 false,
                 format!("interactive_status={i} (need verified|not_applicable)"),
+            );
+        }
+    }
+    // Human-decision axis: an approval surface is a verified outcome only when a
+    // human actually decided. A render that timed out / a dead card / a still-pending
+    // card carries no verified human label (fail-closed — timeout is never approval).
+    if let Some(d) = decision {
+        if d != "approved" && d != "rejected" {
+            return (
+                false,
+                format!("decision={d} (need approved|rejected)"),
             );
         }
     }
@@ -1383,7 +1399,8 @@ pub fn present_outcomes_projection(records: &[Value], verified_only: bool) -> Va
         let vs = r.get("verify_status").and_then(Value::as_str).unwrap_or("");
         let es = r.get("embody_status").and_then(Value::as_str);
         let is = r.get("interactive_status").and_then(Value::as_str);
-        let (ok, reason) = outcome_gate(vs, es, is);
+        let ds = r.get("decision").and_then(Value::as_str);
+        let (ok, reason) = outcome_gate(vs, es, is, ds);
         if ok {
             eligible += 1;
         }
@@ -2074,26 +2091,38 @@ mod tests {
     // reason naming it. Absent axes (verify-only renders) don't reject.
     #[test]
     fn slice_a_outcome_gate_truth_table() {
-        // fully verified, no embody/interact axes → eligible.
-        assert!(outcome_gate("rendered_ok", None, None).0);
+        // fully verified, no embody/interact/decision axes → eligible.
+        assert!(outcome_gate("rendered_ok", None, None, None).0);
         // verified + embodied + interactive verified → eligible.
-        assert!(outcome_gate("rendered_ok", Some("embodied"), Some("verified")).0);
+        assert!(outcome_gate("rendered_ok", Some("embodied"), Some("verified"), None).0);
         // verified + interactive not_applicable → eligible (no interactivity claimed).
-        assert!(outcome_gate("rendered_ok", None, Some("not_applicable")).0);
+        assert!(outcome_gate("rendered_ok", None, Some("not_applicable"), None).0);
 
         // render did not verify → rejected, reason names verify_status.
-        let (ok, why) = outcome_gate("blank", None, None);
+        let (ok, why) = outcome_gate("blank", None, None, None);
         assert!(!ok && why.contains("verify_status=blank"));
-        let (ok, _) = outcome_gate("no_browser", None, None);
+        let (ok, _) = outcome_gate("no_browser", None, None, None);
         assert!(!ok, "unverified render is not a training label");
 
         // rendered but embodiment stale/dead → rejected on the embody axis.
-        let (ok, why) = outcome_gate("rendered_ok", Some("stale"), None);
+        let (ok, why) = outcome_gate("rendered_ok", Some("stale"), None, None);
         assert!(!ok && why.contains("embody_status=stale"));
 
         // rendered but a dead interactive control → rejected on the interact axis.
-        let (ok, why) = outcome_gate("rendered_ok", None, Some("dead"));
+        let (ok, why) = outcome_gate("rendered_ok", None, Some("dead"), None);
         assert!(!ok && why.contains("interactive_status=dead"));
+
+        // human-decision axis (approval cards): a real human decision (approve OR
+        // reject) is a verified outcome; an undecided/timed-out/dead card is not.
+        assert!(outcome_gate("rendered_ok", None, None, Some("approved")).0);
+        assert!(
+            outcome_gate("rendered_ok", None, None, Some("rejected")).0,
+            "a human Reject is still a verified decision outcome"
+        );
+        let (ok, why) = outcome_gate("rendered_ok", None, None, Some("timed_out"));
+        assert!(!ok && why.contains("decision=timed_out"), "timeout is never approval");
+        let (ok, why) = outcome_gate("rendered_ok", None, None, Some("dead"));
+        assert!(!ok && why.contains("decision=dead"));
     }
 
     // The projection tallies the FULL set regardless of verified_only, and

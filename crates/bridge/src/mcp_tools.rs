@@ -5714,7 +5714,7 @@ impl McpTool for PresentApprovalTool {
         }
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let summary = args.get("summary").and_then(|v| v.as_str()).unwrap_or("");
         let token = args.get("token").and_then(|v| v.as_str()).unwrap_or("");
         if summary.is_empty() || token.is_empty() {
@@ -5813,15 +5813,57 @@ impl McpTool for PresentApprovalTool {
             }
         };
         let decision = crate::present_approval::classify_approval(&readback);
+        // Provenance (narrows the last-mile: the readback proves the DOM was stamped,
+        // not that a HUMAN stamped it — record where/when so the verdict is auditable;
+        // who is not provable, the assurance leans on the daemon-owned page + token).
+        let page_id = page.to_string();
+        let decided_at = crate::present::now_unix();
         // Integrity: the card must have rendered THE token (verdict refers to this action).
         let token_match = readback.token == token;
         let approved = decision.is_approved() && token_match;
+        // Tool-level status: a `Pending` that survived the wait_for window is a
+        // timeout (fail-closed — never an approval). Dead/Approved/Rejected pass through.
+        let decision_status = match decision {
+            crate::present_approval::ApprovalDecision::Approved => "approved",
+            crate::present_approval::ApprovalDecision::Rejected => "rejected",
+            crate::present_approval::ApprovalDecision::Dead => "dead",
+            crate::present_approval::ApprovalDecision::Pending => "timed_out",
+        };
+
+        // Slice A composition: the verdict IS a verified (intent→action→outcome)
+        // record. Emit an outcome sidecar so the approval joins the present_outcomes
+        // training-signal stream, where outcome_gate's human-decision axis treats a
+        // real decided card (approved|rejected) as eligible and timed_out/dead as
+        // rejected. Best-effort; never fails the call.
+        let card_id = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        let outcome = json!({
+            "artifact_id": card_id,
+            "intent": summary,
+            "action_tool": "present_await_decision",
+            "kind": "approval",
+            "verify_status": "rendered_ok",
+            "decision": decision_status,
+            "verify_method": "human_decision",
+            "token_match": token_match,
+            "page_id": page_id,
+            "decided_at": decided_at,
+            "session_id": ctx.session_id.as_ref().map(|s| s.to_string()),
+            "ts": decided_at,
+        });
+        let _ = crate::present::write_outcome_sidecar(&dir, &card_id, &outcome);
+
         let result = json!({
             "schema": crate::present_approval::PRESENT_APPROVAL_SCHEMA,
-            "decision": decision.as_str(),
+            "decision": decision_status,
             "approved": approved,
             "token": token,
             "token_match": token_match,
+            "page_id": page_id,
+            "decided_at": decided_at,
             "summary": summary,
             "card_path": card_path,
             "simulated": simulate.is_some(),

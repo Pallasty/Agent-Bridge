@@ -31,9 +31,12 @@ pub const APPROVAL_DECIDED_SELECTOR: &str = "#ab-decision[data-decided=\"1\"]";
 
 /// JS evaluated in the loaded card to read the human's verdict back out of the DOM.
 /// Mirrors [`crate::present::DASHBOARD_READBACK_JS`]: reads the human-clicked
-/// `#ab-decision` (not machine chrome). Keys MUST stay in sync with
-/// [`parse_approval_readback`] — guarded by a unit canary.
-pub const APPROVAL_READBACK_JS: &str = "JSON.stringify((function(){var d=document.getElementById('ab-decision');var t=document.getElementById('ab-token');return{decided:(d?d.getAttribute('data-decided')==='1':false),decision:(d?(d.textContent||'').trim():''),token:(t?(t.textContent||'').trim():'')};})())";
+/// `#ab-decision` (not machine chrome). `wired` reports whether the decision
+/// affordance actually exists (the `#ab-decision` element AND both buttons), so a
+/// card that rendered but offers no working approve/reject path is detectable as
+/// `dead` rather than indistinguishable from "not yet decided". Keys MUST stay in
+/// sync with [`parse_approval_readback`] — guarded by a unit canary.
+pub const APPROVAL_READBACK_JS: &str = "JSON.stringify((function(){var d=document.getElementById('ab-decision');var t=document.getElementById('ab-token');var wired=(!!d&&!!document.getElementById('ab-approve')&&!!document.getElementById('ab-reject'));return{decided:(d?d.getAttribute('data-decided')==='1':false),decision:(d?(d.textContent||'').trim():''),token:(t?(t.textContent||'').trim():''),wired:wired};})())";
 
 /// JS that simulates a human click (sets the decision) — used only by acceptance
 /// harnesses / live-verify to exercise the readback machinery without a real human
@@ -56,6 +59,9 @@ pub struct ApprovalReadback {
     pub decision: String,
     /// The token the card rendered (so the verdict provably refers to THIS action).
     pub token: String,
+    /// The decision affordance exists: the `#ab-decision` element AND both buttons.
+    /// `false` means the card cannot ever be decided (broken/tampered) → `Dead`.
+    pub wired: bool,
 }
 
 /// Parse the approval readback JSON. Tolerant of object-or-stringified-JSON like
@@ -79,17 +85,24 @@ pub fn parse_approval_readback(v: &Value) -> ApprovalReadback {
             .unwrap_or("")
             .trim()
             .to_string(),
+        // Absent `wired` (older readback / tolerant default) assumes a wired card so
+        // we don't spuriously report `dead`; the readback JS always emits it now.
+        wired: obj.get("wired").and_then(Value::as_bool).unwrap_or(true),
     }
 }
 
 /// The verdict a human gave (pure, browser-free — sibling of
-/// [`crate::present::classify_embody`]). `Pending` until a button is clicked; an
-/// unrecognized stamp stays `Pending` (the lane never reads a verdict it can't name).
+/// [`crate::present::classify_embody`]). `Dead` when the card offers no working
+/// decision affordance (cannot ever be decided — broken/tampered); `Pending` while
+/// a wired card awaits a click; an unrecognized stamp stays `Pending` (the lane
+/// never reads a verdict it can't name). The tool layer maps a `Pending` that
+/// survived the `wait_for` window to `timed_out` (a timeout is never an approval).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalDecision {
     Pending,
     Approved,
     Rejected,
+    Dead,
 }
 
 impl ApprovalDecision {
@@ -98,6 +111,7 @@ impl ApprovalDecision {
             ApprovalDecision::Pending => "pending",
             ApprovalDecision::Approved => "approved",
             ApprovalDecision::Rejected => "rejected",
+            ApprovalDecision::Dead => "dead",
         }
     }
     /// True only for an explicit human Approve — the single point that authorizes
@@ -108,6 +122,11 @@ impl ApprovalDecision {
 }
 
 pub fn classify_approval(r: &ApprovalReadback) -> ApprovalDecision {
+    // A card with no decision affordance can never be decided → Dead (distinct from
+    // a wired card that simply hasn't been clicked yet, which is Pending).
+    if !r.wired {
+        return ApprovalDecision::Dead;
+    }
     if !r.decided {
         return ApprovalDecision::Pending;
     }
@@ -182,16 +201,19 @@ mod tests {
 
     #[test]
     fn classify_approval_truth_table() {
+        // a wired card awaiting a click → Pending.
         let pending = ApprovalReadback {
             decided: false,
             decision: String::new(),
             token: "t".into(),
+            wired: true,
         };
         assert_eq!(classify_approval(&pending), ApprovalDecision::Pending);
         let approved = ApprovalReadback {
             decided: true,
             decision: "approve".into(),
             token: "t".into(),
+            wired: true,
         };
         assert_eq!(classify_approval(&approved), ApprovalDecision::Approved);
         assert!(classify_approval(&approved).is_approved());
@@ -199,6 +221,7 @@ mod tests {
             decided: true,
             decision: "reject".into(),
             token: "t".into(),
+            wired: true,
         };
         assert_eq!(classify_approval(&rejected), ApprovalDecision::Rejected);
         assert!(!classify_approval(&rejected).is_approved());
@@ -207,25 +230,39 @@ mod tests {
             decided: true,
             decision: "xyz".into(),
             token: "t".into(),
+            wired: true,
         };
         assert_eq!(classify_approval(&weird), ApprovalDecision::Pending);
+        // no decision affordance (broken/tampered card) → Dead, NOT Pending — and a
+        // dead card is never approved.
+        let dead = ApprovalReadback {
+            decided: false,
+            decision: String::new(),
+            token: "t".into(),
+            wired: false,
+        };
+        assert_eq!(classify_approval(&dead), ApprovalDecision::Dead);
+        assert!(!classify_approval(&dead).is_approved());
     }
 
     #[test]
     fn readback_parse_tolerates_object_and_string() {
-        let as_obj = json!({"decided": true, "decision": "approve", "token": "abc"});
+        let as_obj = json!({"decided": true, "decision": "approve", "token": "abc", "wired": true});
         let r1 = parse_approval_readback(&as_obj);
-        assert!(r1.decided && r1.decision == "approve" && r1.token == "abc");
+        assert!(r1.decided && r1.decision == "approve" && r1.token == "abc" && r1.wired);
         // stringified JSON (some backends return eval results as strings)
-        let as_str = json!("{\"decided\":true,\"decision\":\"reject\",\"token\":\"def\"}");
+        let as_str = json!("{\"decided\":true,\"decision\":\"reject\",\"token\":\"def\",\"wired\":true}");
         let r2 = parse_approval_readback(&as_str);
-        assert!(r2.decided && r2.decision == "reject" && r2.token == "def");
+        assert!(r2.decided && r2.decision == "reject" && r2.token == "def" && r2.wired);
+        // a readback reporting no affordance parses wired=false.
+        let unwired = parse_approval_readback(&json!({"decided": false, "wired": false}));
+        assert!(!unwired.wired);
     }
 
     #[test]
     fn readback_js_keys_match_parser() {
         // canary: the readback JS must emit exactly the keys the parser reads.
-        for k in ["decided", "decision", "token"] {
+        for k in ["decided", "decision", "token", "wired"] {
             assert!(
                 APPROVAL_READBACK_JS.contains(k),
                 "APPROVAL_READBACK_JS missing key {k} that parse_approval_readback reads"
