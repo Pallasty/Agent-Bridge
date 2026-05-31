@@ -27112,6 +27112,131 @@ fn steer_node_label(args: &Value) -> String {
         .unwrap_or_else(crate::sync::hostname_short)
 }
 
+fn steer_target_from_node_label(node: &str) -> crate::remote_steer::Target {
+    let trimmed = node.trim();
+    let local = crate::sync::hostname_short();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("local")
+        || trimmed.eq_ignore_ascii_case("localhost")
+        || trimmed == local
+    {
+        crate::remote_steer::Target::local()
+    } else {
+        crate::remote_steer::Target {
+            node: Some(trimmed.to_string()),
+            user: None,
+        }
+    }
+}
+
+fn steer_error_indicates_missing_mux(error: &str) -> bool {
+    let e = error.to_ascii_lowercase();
+    e.contains("no server running")
+        || e.contains("can't find session")
+        || e.contains("can't find pane")
+        || e.contains("can't find window")
+        || e.contains("session not found")
+}
+
+fn steer_status_is_stale(status: Option<&Value>) -> bool {
+    let Some(status) = status else {
+        return false;
+    };
+    status
+        .get("stale")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || status
+            .get("live")
+            .and_then(|v| v.as_bool())
+            .map(|live| !live)
+            .unwrap_or(false)
+}
+
+async fn mark_steer_presence_stale(
+    hub: &Hub,
+    args: &Value,
+    session: &str,
+    logical: Option<&String>,
+    reason: &str,
+) -> bool {
+    let Some(store) = &hub.store else {
+        return false;
+    };
+    let node_label = steer_node_label(args);
+    let presence_id = crate::remote_steer::steer_presence_id(&node_label, session);
+    let logical_str = logical.cloned().unwrap_or_else(|| session.to_string());
+    let mut caps = match store.agent_presence_get(&presence_id).await {
+        Ok(Some(rec)) => rec.capabilities.unwrap_or_else(|| json!({})),
+        _ => json!({}),
+    };
+    if !caps.is_object() {
+        caps = json!({});
+    }
+    let now_secs = unix_now_secs();
+    if let Some(o) = caps.as_object_mut() {
+        if !o.contains_key("steer") {
+            o.insert(
+                "steer".into(),
+                json!({
+                    "mux": "tmux",
+                    "tmux_session": session,
+                    "logical": logical_str.clone(),
+                    "node": node_label.clone(),
+                    "launched_by": "stale-marker"
+                }),
+            );
+        }
+        o.insert(
+            "steer_status".into(),
+            json!({
+                "stale": true,
+                "live": false,
+                "last_action": format!("stale: {reason}"),
+                "awaiting": null,
+                "needs_human_gate": false,
+                "focus": format!("stale mux: {session}"),
+                "reason": reason,
+                "ts": now_secs,
+            }),
+        );
+    }
+    let (project, role) = crate::remote_steer::parse_tmux_session(session).unwrap_or_else(|| {
+        (
+            args.get("project")
+                .and_then(|v| v.as_str())
+                .unwrap_or("steer")
+                .to_string(),
+            args.get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("worker")
+                .to_string(),
+        )
+    });
+    let name = format!("steer {logical_str}");
+    let upsert = ab_store::AgentPresenceUpsert {
+        name: Some(&name),
+        description: Some("stale steerable session (mux missing)"),
+        version: None,
+        url: None,
+        node: Some(&node_label),
+        project: Some(&project),
+        role: Some(&role),
+        tag: Some("steer"),
+        cwd: None,
+        pid: None,
+        capabilities: Some(&caps),
+        skills: None,
+    };
+    match store.agent_presence_announce(&presence_id, upsert).await {
+        Ok(_) => true,
+        Err(e) => {
+            tracing::warn!(error = %e, "steer: stale presence mark failed");
+            false
+        }
+    }
+}
+
 /// Resolve the tmux session name (+ optional logical handle) from either an
 /// explicit `session` arg or a `project`+`role` pair.
 fn steer_resolve_session(args: &Value) -> std::result::Result<(String, Option<String>), String> {
@@ -27394,9 +27519,17 @@ impl McpTool for AgentSteerDriveTool {
         let mux = crate::remote_steer::TmuxBackend::default();
 
         if !crate::remote_steer::has_session(&target, &mux, &session).await {
+            let stale_marked = mark_steer_presence_stale(
+                &self.hub,
+                &args,
+                &session,
+                logical.as_ref(),
+                "drive session missing",
+            )
+            .await;
             return Ok(ToolResult::error(format!(
-                "no such session: {session} on {}",
-                target.label()
+                "no such session: {session} on {} (presence_stale_marked={stale_marked})",
+                target.label(),
             )));
         }
 
@@ -27417,7 +27550,23 @@ impl McpTool for AgentSteerDriveTool {
             capture =
                 match crate::remote_steer::capture(&target, &mux, &session, capture_lines).await {
                     Ok(c) => c,
-                    Err(e) => return Ok(ToolResult::error(e)),
+                    Err(e) => {
+                        let stale_marked = if steer_error_indicates_missing_mux(&e) {
+                            mark_steer_presence_stale(
+                                &self.hub,
+                                &args,
+                                &session,
+                                logical.as_ref(),
+                                "drive capture missing mux",
+                            )
+                            .await
+                        } else {
+                            false
+                        };
+                        return Ok(ToolResult::error(format!(
+                            "{e} (presence_stale_marked={stale_marked})"
+                        )));
+                    }
                 };
 
             if let Some(gate) = crate::remote_steer::detect_gate(&capture) {
@@ -27643,7 +27792,23 @@ impl McpTool for AgentSteerCaptureTool {
                 "target": target.label(),
                 "capture": cap,
             }))),
-            Err(e) => Ok(ToolResult::error(e)),
+            Err(e) => {
+                let stale_marked = if steer_error_indicates_missing_mux(&e) {
+                    mark_steer_presence_stale(
+                        &self.hub,
+                        &args,
+                        &session,
+                        logical.as_ref(),
+                        "capture missing mux",
+                    )
+                    .await
+                } else {
+                    false
+                };
+                Ok(ToolResult::error(format!(
+                    "{e} (presence_stale_marked={stale_marked})"
+                )))
+            }
         }
     }
 }
@@ -27726,7 +27891,7 @@ impl McpTool for AgentSteerKillTool {
         ToolSchema {
             name: self.name().into(),
             description: "Kill a steerable session. Identify by `session` or \
-                 `project`+`role`. Presence handle ages out via TTL."
+                 `project`+`role`. Presence handle is marked stale when the mux is missing or killed."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -27751,20 +27916,40 @@ impl McpTool for AgentSteerKillTool {
         let target = steer_target_from_args(&args);
         let mux = crate::remote_steer::TmuxBackend::default();
         if !crate::remote_steer::has_session(&target, &mux, &session).await {
+            let stale_marked = mark_steer_presence_stale(
+                &self.hub,
+                &args,
+                &session,
+                logical.as_ref(),
+                "kill not found",
+            )
+            .await;
             return Ok(ToolResult::json_text(&json!({
                 "status": "not_found",
                 "tmux_session": session,
                 "logical_handle": logical,
                 "target": target.label(),
+                "presence_stale_marked": stale_marked,
             })));
         }
         match crate::remote_steer::kill(&target, &mux, &session).await {
-            Ok(()) => Ok(ToolResult::json_text(&json!({
-                "status": "killed",
-                "tmux_session": session,
-                "logical_handle": logical,
-                "target": target.label(),
-            }))),
+            Ok(()) => {
+                let stale_marked = mark_steer_presence_stale(
+                    &self.hub,
+                    &args,
+                    &session,
+                    logical.as_ref(),
+                    "killed",
+                )
+                .await;
+                Ok(ToolResult::json_text(&json!({
+                    "status": "killed",
+                    "tmux_session": session,
+                    "logical_handle": logical,
+                    "target": target.label(),
+                    "presence_stale_marked": stale_marked,
+                })))
+            }
             Err(e) => Ok(ToolResult::error(e)),
         }
     }
@@ -27800,7 +27985,12 @@ impl McpTool for AgentOrchestrateScanTool {
                 "properties": {
                     "project": { "type": "string", "description": "Filter by project." },
                     "role":    { "type": "string", "description": "Filter by role." },
-                    "max_idle_secs": { "type": "integer", "default": 600, "description": "Skip workers idle longer than this." }
+                    "max_idle_secs": { "type": "integer", "default": 600, "description": "Skip workers idle longer than this." },
+                    "verify_mux": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Verify tmux ground truth before reporting a steer row as drivable. Rows missing from mux are returned under stale_workers."
+                    }
                 }
             }),
         }
@@ -27816,6 +28006,10 @@ impl McpTool for AgentOrchestrateScanTool {
             .get("max_idle_secs")
             .and_then(|v| v.as_i64())
             .unwrap_or(600);
+        let verify_mux = args
+            .get("verify_mux")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
 
         let rows = store
             .agent_presence_list(project, role, max_idle, 200)
@@ -27823,13 +28017,61 @@ impl McpTool for AgentOrchestrateScanTool {
             .map_err(|e| ab_core::Error::Backend(format!("agent_presence_list: {e}")))?;
 
         let mut workers: Vec<Value> = Vec::new();
+        let mut stale_workers: Vec<Value> = Vec::new();
         let (mut n_awaiting, mut n_needs_human, mut n_with_status) = (0u32, 0u32, 0u32);
+        let mut mux_cache: HashMap<String, std::result::Result<HashSet<String>, String>> =
+            HashMap::new();
         for row in &rows {
             let caps = row.capabilities.as_ref();
             let steer = caps.and_then(|c| c.get("steer"));
             let status = caps.and_then(|c| c.get("steer_status"));
             if steer.is_none() && status.is_none() {
                 continue;
+            }
+            let steer_handle = steer
+                .and_then(|s| s.get("tmux_session"))
+                .and_then(|v| v.as_str());
+            let mut stale_reason = if steer_status_is_stale(status) {
+                Some(
+                    status
+                        .and_then(|s| s.get("reason"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("presence marked stale")
+                        .to_string(),
+                )
+            } else {
+                None
+            };
+            let mut mux_liveness = Value::Null;
+            let mut mux_error = Value::Null;
+            if verify_mux {
+                if let Some(handle) = steer_handle {
+                    let node = row.node.clone();
+                    if !mux_cache.contains_key(&node) {
+                        let target = steer_target_from_node_label(&node);
+                        let mux = crate::remote_steer::TmuxBackend::default();
+                        let sessions =
+                            crate::remote_steer::list_steer_sessions(&target, &mux).await;
+                        mux_cache.insert(
+                            node.clone(),
+                            sessions.map(|names| names.into_iter().collect::<HashSet<_>>()),
+                        );
+                    }
+                    match mux_cache.get(&node).expect("mux cache populated") {
+                        Ok(live) => {
+                            if live.contains(handle) {
+                                mux_liveness = json!("live");
+                            } else {
+                                mux_liveness = json!("missing");
+                                stale_reason.get_or_insert_with(|| "mux missing".to_string());
+                            }
+                        }
+                        Err(e) => {
+                            mux_liveness = json!("unknown");
+                            mux_error = json!(e);
+                        }
+                    }
+                }
             }
             let focus = status
                 .and_then(|s| s.get("focus"))
@@ -27858,25 +28100,45 @@ impl McpTool for AgentOrchestrateScanTool {
             if needs_human {
                 n_needs_human += 1;
             }
+            if let Some(reason) = stale_reason {
+                stale_workers.push(json!({
+                    "session_id": row.session_id,
+                    "node": row.node,
+                    "project": row.project,
+                    "role": row.role,
+                    "steer_handle": steer_handle.map(Value::from).unwrap_or(Value::Null),
+                    "focus": focus,
+                    "last_action": last_action,
+                    "reason": reason,
+                    "mux_liveness": mux_liveness,
+                    "mux_error": mux_error,
+                }));
+                continue;
+            }
             workers.push(json!({
                 "session_id": row.session_id,
                 "node": row.node,
                 "project": row.project,
                 "role": row.role,
-                "steer_handle": steer.and_then(|s| s.get("tmux_session")).cloned().unwrap_or(Value::Null),
+                "steer_handle": steer_handle.map(Value::from).unwrap_or(Value::Null),
                 "focus": focus,
                 "last_action": last_action,
                 "awaiting": awaiting,
                 "needs_human_gate": needs_human,
+                "mux_liveness": mux_liveness,
+                "mux_error": mux_error,
             }));
         }
 
         Ok(ToolResult::json_text(&json!({
             "n_steerable": workers.len(),
+            "n_stale_steer": stale_workers.len(),
             "n_with_status": n_with_status,
             "n_awaiting_gate": n_awaiting,
             "n_needs_human": n_needs_human,
             "workers": workers,
+            "stale_workers": stale_workers,
+            "verify_mux": verify_mux,
             "budget_hint": "call context_pressure_estimate (pass context_window=1000000 for 1M-beta sessions) to guard orchestrator budget",
             "boundary": "exec/collect drivable; research judgments (needs_human_gate) require a human ground-truth check (#1745)",
         })))
@@ -30046,6 +30308,24 @@ mod tests {
         let detailed = compact_instinct_observer_status_json(status, true);
         assert!(detailed.get("per_session").is_some());
         assert!(detailed.get("per_session_omitted").is_none());
+    }
+
+    #[test]
+    fn steer_stale_helpers_classify_missing_mux() {
+        assert!(steer_error_indicates_missing_mux(
+            "capture failed (code 1): no server running on /tmp/tmux-1000/default"
+        ));
+        assert!(steer_error_indicates_missing_mux(
+            "capture failed (code 1): can't find pane: ab__x__y"
+        ));
+        assert!(!steer_error_indicates_missing_mux(
+            "capture failed (code 1): permission denied"
+        ));
+
+        assert!(steer_status_is_stale(Some(&json!({"stale": true}))));
+        assert!(steer_status_is_stale(Some(&json!({"live": false}))));
+        assert!(!steer_status_is_stale(Some(&json!({"live": true}))));
+        assert!(!steer_status_is_stale(None));
     }
 
     #[test]
