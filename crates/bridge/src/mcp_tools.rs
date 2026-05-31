@@ -1184,6 +1184,246 @@ fn desktop_snapshot_error(error: Value) -> ToolResult {
 }
 
 // ===========================================================================
+//                            desktop_verify
+// ===========================================================================
+// Read-only postflight verifier — the "verify"+"recover" leg of the Linux Computer
+// Use loop (thread 79). After a desktop_invoke / desktop_action, this re-observes the
+// bus (AT-SPI registry + sway tree) and checks ONE expectation, POLLING until it holds
+// or times out, returning a `recover` hint (proceed|retry|replan|escalate) that maps
+// 1:1 to the caller's next move. It never clicks/types/moves anything, so observing the
+// REAL desktop is safe + ungated (like desktop_snapshot); --cage-pid / --swaysock only
+// SCOPE what counts as present.
+
+pub struct DesktopVerifyTool {
+    _hub: Hub,
+}
+
+impl DesktopVerifyTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for DesktopVerifyTool {
+    fn name(&self) -> &'static str {
+        "desktop_verify"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only postflight verifier for the desktop act loop. After a \
+                 desktop_invoke/desktop_action, re-observes the bus (AT-SPI + sway tree) and \
+                 checks ONE expectation, polling until it holds or `poll_timeout_secs` elapses \
+                 (GUIs animate — a single check races the toolkit). Reuses the SAME selector you \
+                 acted on. Returns verdict (verified|unmet|error) and a `recover` hint \
+                 (proceed|retry|replan|escalate) that maps 1:1 to your next move; an optional \
+                 before-fingerprint splits a miss into unchanged (retry) vs diverged (replan). \
+                 Never clicks/types/moves — observing the real desktop is safe; cage_pid/swaysock \
+                 only scope what counts as present."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": { "type": "string", "description": "Repo root to resolve scripts/desktop_verify.py." },
+                    "script_path": { "type": "string", "description": "Explicit desktop_verify.py path (tests/alternate checkouts)." },
+                    "expect": {
+                        "type": "string",
+                        "enum": ["element_gone", "element_appeared", "state_is", "state_not", "window_gone", "window_appeared", "focus_is"],
+                        "description": "The postcondition to check. element_*/state_* use the AT-SPI selector (app/role/name); window_*/focus_is use the window selector (win_*)."
+                    },
+                    "app": { "type": "string", "description": "AT-SPI application name substring (element_*/state_*)." },
+                    "role": { "type": "string", "description": "AT-SPI role substring, e.g. button." },
+                    "name": { "type": "string", "description": "AT-SPI accessible name substring, e.g. OK." },
+                    "nth": { "type": "integer", "default": 0 },
+                    "cage_pid": { "type": "integer", "description": "Scope AT-SPI matches to this process subtree (isolated verify)." },
+                    "state": { "type": "string", "description": "For state_is/state_not: checked|expanded|selected|showing|visible|focused|sensitive|enabled|pressed|active." },
+                    "win_app_id": { "type": "string", "description": "sway app_id substring (window_*/focus_is)." },
+                    "win_pid": { "type": "integer", "description": "Window PID (exact)." },
+                    "win_title": { "type": "string", "description": "Window title substring." },
+                    "swaysock": { "type": "string", "description": "Nested sway IPC socket for window checks (isolated verify)." },
+                    "poll_timeout_secs": {
+                        "type": "number", "minimum": 0.0, "maximum": 30.0, "default": 4.0,
+                        "description": "Poll until the expectation holds or this many seconds elapse."
+                    },
+                    "poll_interval_secs": { "type": "number", "minimum": 0.05, "maximum": 5.0, "default": 0.3 },
+                    "settle_secs": {
+                        "type": "number", "minimum": 0.0, "maximum": 5.0, "default": 0.0,
+                        "description": "Initial delay before the first check (let the GUI start reacting)."
+                    },
+                    "before_present": {
+                        "type": "string", "enum": ["true", "false"],
+                        "description": "Was the AT-SPI target present BEFORE the act? Splits a miss into unchanged vs diverged."
+                    },
+                    "before_focus": { "type": "string", "description": "Focused 'app_id|title' BEFORE the act (for focus_is)." },
+                    "timeout_ms": {
+                        "type": "integer", "minimum": 2000, "maximum": 60000, "default": 12000,
+                        "description": "Milliseconds before the verify process is killed (kept above poll_timeout_secs)."
+                    }
+                },
+                "required": ["expect"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let expect = match required_str_arg(&args, "expect") {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let poll_timeout_secs = args
+            .get("poll_timeout_secs")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(4.0)
+            .clamp(0.0, 30.0);
+        // keep the process-kill timeout safely above the in-script poll window
+        let min_proc_ms = (poll_timeout_secs * 1000.0) as u64 + 3000;
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(12_000)
+            .clamp(2_000, 60_000)
+            .max(min_proc_ms);
+
+        let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
+        let script = desktop_verify_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(desktop_verify_error(json!({
+                "code": "script_missing",
+                "message": format!("desktop_verify.py not found at {}", script.display()),
+                "hint": "pass script_path or run from the Agent-Bridge repo root"
+            })));
+        }
+
+        let mut cmd = TokioCommand::new(
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "python3".to_string()),
+        );
+        cmd.arg(&script)
+            .arg("--compact")
+            .arg("--expect")
+            .arg(expect)
+            .arg("--timeout")
+            .arg(poll_timeout_secs.to_string());
+        push_optional_str_arg(&mut cmd, &args, "app", "--app");
+        push_optional_str_arg(&mut cmd, &args, "role", "--role");
+        push_optional_str_arg(&mut cmd, &args, "name", "--name");
+        push_optional_value_arg(&mut cmd, &args, "nth", "--nth");
+        push_optional_value_arg(&mut cmd, &args, "cage_pid", "--cage-pid");
+        push_optional_str_arg(&mut cmd, &args, "state", "--state");
+        push_optional_str_arg(&mut cmd, &args, "win_app_id", "--win-app-id");
+        push_optional_value_arg(&mut cmd, &args, "win_pid", "--win-pid");
+        push_optional_str_arg(&mut cmd, &args, "win_title", "--win-title");
+        push_optional_str_arg(&mut cmd, &args, "swaysock", "--swaysock");
+        push_optional_str_arg(&mut cmd, &args, "before_present", "--before-present");
+        push_optional_str_arg(&mut cmd, &args, "before_focus", "--before-focus");
+        if let Some(pi) = args.get("poll_interval_secs").and_then(|v| v.as_f64()) {
+            cmd.arg("--poll-interval").arg(pi.clamp(0.05, 5.0).to_string());
+        }
+        if let Some(s) = args.get("settle_secs").and_then(|v| v.as_f64()) {
+            if s > 0.0 {
+                cmd.arg("--settle").arg(s.clamp(0.0, 5.0).to_string());
+            }
+        }
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+
+        let started = Instant::now();
+        let output =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+                Err(_) => {
+                    return Ok(desktop_verify_error(json!({
+                        "code": "timeout",
+                        "message": format!("desktop_verify exceeded {timeout_ms} ms"),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Err(e)) => {
+                    return Ok(desktop_verify_error(json!({
+                        "code": "spawn_failed",
+                        "message": e.to_string(),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Ok(output)) => output,
+            };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+        // NOTE: the script exits 2 for unmet and 3 for error by design, so a non-zero
+        // status is NOT a wrapper failure — parse stdout regardless and only fall back
+        // to an error envelope when the JSON itself is unreadable.
+        match serde_json::from_str::<Value>(&stdout) {
+            Ok(mut payload) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert(
+                        "mcp_wrapper".to_string(),
+                        json!({
+                            "tool": self.name(),
+                            "read_only": true,
+                            "exit_code": output.status.code().unwrap_or(-1),
+                            "duration_ms": duration_ms,
+                            "stderr": stderr,
+                            "stderr_truncated": stderr_truncated
+                        }),
+                    );
+                }
+                Ok(ToolResult::json_text(&payload))
+            }
+            Err(e) => Ok(desktop_verify_error(json!({
+                "code": "invalid_json",
+                "message": e.to_string(),
+                "exit_code": output.status.code().unwrap_or(-1),
+                "stdout": stdout,
+                "stderr": stderr,
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            }))),
+        }
+    }
+}
+
+fn desktop_verify_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_DESKTOP_VERIFY_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/desktop_verify.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/desktop_verify.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_verify.py")
+}
+
+fn desktop_verify_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "desktop_verify_mcp_error.v0",
+        "status": "error",
+        "error": error,
+    }));
+    result.is_error = true;
+    result
+}
+
+// ===========================================================================
 //                            vision_grounding_ocr
 // ===========================================================================
 
@@ -26629,6 +26869,10 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Linux Computer Use T9b: non-mutating OCR grounding over caller-provided
     // images. It does not capture screenshots or inject input.
     "vision_grounding_ocr",
+    // Linux Computer Use: read-only postflight verifier (the verify/recover leg of
+    // the act loop). Never clicks/types; completes the read-only triad with
+    // desktop_snapshot + vision_grounding_ocr. Mutating act tools stay out.
+    "desktop_verify",
     // Remote session steering: a Codex orchestrator (which already carries
     // agent_spawn + agent_session_*) can launch/drive/observe long-lived agents
     // in named tmux sessions and roll up a worker blackboard.
@@ -28454,6 +28698,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(DesktopSnapshotTool::new(hub.clone())),
+    );
+    // Linux Computer Use: read-only postflight verifier (verify/recover leg of the act
+    // loop). In codex-essential — completes the read-only triad with desktop_snapshot.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(DesktopVerifyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -33258,17 +33510,18 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 42 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 43 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(30: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(31: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_orphan_candidates + memory_orphan_inventory
-        //      + desktop_snapshot + vision_grounding_ocr
+        //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
         //      + agent_orchestrate_scan, added by d4fd74d).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // +6 steering DIRECT extras (d4fd74d) brought DIRECT 24→30, total 36→42.
-        assert_eq!(extras.len(), 42);
+        // +desktop_verify (read-only postflight verifier) brought DIRECT 30→31, 42→43.
+        assert_eq!(extras.len(), 43);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -33300,6 +33553,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"memory_orphan_inventory"));
         assert!(extras.contains(&"desktop_snapshot"));
         assert!(extras.contains(&"vision_grounding_ocr"));
+        assert!(extras.contains(&"desktop_verify"));
         // Remote session steering (d4fd74d) — direct-exposed for Codex
         // orchestrators that already carry agent_spawn + agent_session_*.
         assert!(extras.contains(&"agent_steer_launch"));

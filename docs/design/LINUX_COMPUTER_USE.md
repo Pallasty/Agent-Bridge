@@ -19,13 +19,17 @@ for history read the project memory `project_linux_computer_use_v0_v1_shipped_20
 |---|---|---|---|---|---|---|
 | `desktop_snapshot` | **read** | swaymsg outputs/tree + grim + AT-SPI | — | `scripts/desktop_snapshot.py` | `desktop_snapshot/v0.5` | read-only (no mutation, no gate) |
 | `vision_grounding_ocr` | **read** | OCR over a screenshot region → (x,y) | pixels | `scripts/vision_grounding_ocr.py` | — | read-only |
+| `desktop_verify` | **read** | AT-SPI + sway tree, polled to timeout → verdict + `recover` | semantic / window | `scripts/desktop_verify.py` | `desktop_verify/v0` | read-only; `--cage-pid`/`--swaysock` only *scope* presence |
 | `desktop_action` | **write** | wtype / wlrctl / ydotool / sway-IPC cursor | **coordinate** | `scripts/desktop_action.py` | `desktop_action/v1` | **by display** (nested `WAYLAND_DISPLAY` + sway-IPC abs cursor) |
 | `desktop_invoke` | **write** | AT-SPI `Action.do_action` | **semantic** (zero coords) | `scripts/desktop_invoke.py` | `desktop_invoke/v0` | **by process** (target app PID ∈ `--cage-pid` subtree) |
 
-The two read tools are a "look" pair (structure vs pixels); the two write tools are
-an "act" pair (meaning vs coordinates). `desktop_invoke` is the input-side dual of
-the bus-first read path: where `desktop_snapshot` *enumerates* AT-SPI accessibles,
-`desktop_invoke` *activates* one by app/role/name with no screenshot and no OCR.
+The three read tools are the "look + confirm" set (structure / pixels / *did it
+work?*); the two write tools are the "act" pair (meaning vs coordinates).
+`desktop_invoke` is the input-side dual of the bus-first read path: where
+`desktop_snapshot` *enumerates* AT-SPI accessibles, `desktop_invoke` *activates* one
+by app/role/name with no screenshot and no OCR, and `desktop_verify` *re-reads* one to
+confirm the effect landed. All three read tools are in `codex-essential`; the two
+mutating tools are not.
 
 ### Grounding ladder (verified on aio2 sway 1.11, kernel 7.0 / Ubuntu 26.04)
 
@@ -160,13 +164,85 @@ majority-vote falsifier discipline).
 
 ---
 
-## 7. The deferred frontier — host-confirm
+## 7. host-confirm — SHIPPED (three paths above the closed default)
 
-The four tools are complete and **isolated-only**. The next rung is the
-**host-mutating confirm path**: making `desktop_action`/`desktop_invoke` reachable
-against the *real* desktop behind a human-in-the-loop confirmation. The backend gate
-already supports it (`--confirm --i-understand-this-touches-the-real-desktop`); what
-is missing — deliberately — is the **confirm-UI surface** (terminal prompt? `notify`?
-an interactive `present()` artifact?) and the product decision to open a boundary the
-whole design has so far kept structurally closed. That is a product-level call, parked
-until explicitly chosen.
+The host-mutating confirm path — making `desktop_action`/`desktop_invoke` reachable
+against the *real* desktop behind a human-in-the-loop confirmation — is **shipped**.
+Three paths, all keeping host mutation NON-inline, with the default still DENY. See
+`docs/design/HOST_CONFIRM_PATH.md` for the full design + honest threat model.
+
+| path | how | MCP surface |
+|---|---|---|
+| **A** two-phase token | `confirm_host:true` mints a single-use TTL token + pending record + screen notify (zero exec); `desktop_confirm(token)` is the only MCP path that touches the real desktop, after a human assents | `desktop_confirm` |
+| **B** present approval card | `present_await_decision(summary, token)` renders an Approve/Reject card in the daemon browser, blocks on a human click read back from the DOM, then the caller proceeds to `desktop_confirm(token)` | `present_await_decision` |
+| **C** pre-authorized grant | a human mints a scoped/TTL'd grant via `scripts/desktop_grant.py` (CLI only, never MCP); `use_grant:true` lets covered host actions skip per-call confirm inside the window | `use_grant` flag |
+
+Honest threat model: on a box where the agent has a shell + browser eval, none of these
+is an agent-proof sandbox. Their job is to keep host mutation deliberate and auditable
+(single-use, TTL, scope, screen notify, JSONL audit) — to bound blast radius and defeat
+*silent* mutation, not to defeat an adversarial agent.
+
+---
+
+## 8. The act loop — snapshot → act → verify → recover
+
+The primitives compose into a closed loop; `desktop_verify` is the leg that closes it.
+After an act it re-reads the bus and returns a `recover` hint that maps 1:1 to the next
+move, so the caller reads ONE field instead of re-deriving intent from a fresh full
+snapshot.
+
+```
+desktop_snapshot ─▶ pick target ─▶ desktop_invoke / desktop_action ─▶ desktop_verify
+       ▲                                                                    │
+       │            proceed ─▶ next step                                    │
+       │            retry   ─▶ re-act, SAME selector  ◀────────────────────┤
+       └──────────  replan  ─▶ re-snapshot + re-plan  ◀────────────────────┤
+                    escalate ─▶ human / rethink       ◀────────────────────┘
+```
+
+### verify expectations (reuse the selector you just acted on)
+
+| expect | holds when | typical act it confirms |
+|---|---|---|
+| `element_gone` | the AT-SPI selector no longer resolves | clicked a button that closes a dialog |
+| `element_appeared` | the selector now resolves | opened a menu / dialog |
+| `state_is` / `state_not` | the element has / lacks a state (checked, expanded, …) | toggled a checkbox |
+| `window_gone` / `window_appeared` | a sway window matching app_id/pid/title is absent / present | closed / launched a window |
+| `focus_is` | the focused window matches the selector | focus / activate |
+
+### recover decision table
+
+| verdict | change (needs before-fingerprint) | `recover` | next move |
+|---|---|---|---|
+| `verified` | — | `proceed` | effect landed; advance |
+| `unmet` | `unchanged` (or no before) | `retry` | nothing moved → idempotent re-act, same selector |
+| `unmet` | `diverged` | `replan` | state moved but not as expected → re-snapshot, re-plan |
+| `error` | — | `escalate` | can't observe (AT-SPI down, bad selector) → human / rethink |
+
+`change` is emitted only when a cheap before-fingerprint is supplied (`before_present`
+for elements, `before_focus` for `focus_is`) — the caller already knows the before-state
+of the one thing it is about to change, so it need not capture a whole before-snapshot.
+
+### two hard-won constraints baked into the loop
+
+1. **Always poll, never check once (settle).** GUIs animate; AT-SPI registration and
+   window teardown lag the action by tens-to-hundreds of ms. `desktop_verify` polls to
+   `poll_timeout_secs` and returns the instant the expectation holds (`held_after_ms`
+   records when). A single check races the toolkit and yields a false `unmet`.
+
+2. **The daemon's own browser fights host GUI apps on a tiling compositor.** When a
+   `present()`-family card (path B `present_await_decision`) opens, it is a *headed*
+   Chrome window on the same sway. sway tiles it in, reconfiguring sibling windows; a
+   GTK4/Vulkan dialog (e.g. zenity) can lose its surface (`VK_ERROR_SURFACE_LOST_KHR`)
+   and die — taking the pending host target with it *before* `desktop_confirm` runs.
+   Mitigation, verified on aio2: **float the daemon card window** so it does not reflow
+   the target — `swaymsg 'for_window [title="(?i)approve host"] floating enable'`. Any
+   loop pairing the daemon browser with a host GUI target should float / isolate the
+   daemon window (separate workspace or output) so the observer does not perturb the
+   observed.
+
+> Nested-cage caveat: a `WLR_BACKENDS=wayland` + pixman nested sway is unstable for
+> GTK4/Vulkan clients (surface loss). For `desktop_invoke`/`desktop_verify` live checks,
+> prefer the real GPU desktop + process-subtree (`--cage-pid`) scoping over a
+> nested-display cage; the nested-display cage is for `desktop_action` coordinate
+> isolation only.
