@@ -11,9 +11,11 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -66,6 +68,11 @@ def make_base(args: argparse.Namespace, image_hash: str) -> dict[str, Any]:
                 "coordinate_space": args.coordinate_space,
                 "output": args.output,
                 "crop_rect": crop_rect,
+                "preprocess": {
+                    "crop_image": bool(getattr(args, "crop_image", False)),
+                    "upscale": float(getattr(args, "upscale", 1.0) or 1.0),
+                    "psm": getattr(args, "psm", None),
+                },
             },
             "target_window": {
                 "window_id": int(args.window_id) if args.window_id is not None else None,
@@ -95,10 +102,73 @@ def make_base(args: argparse.Namespace, image_hash: str) -> dict[str, Any]:
     }
 
 
+def _pil_image():
+    """Lazy Pillow import — only needed when --crop-image/--upscale are used."""
+    try:
+        from PIL import Image  # noqa: PLC0415
+
+        return Image
+    except Exception:  # pragma: no cover - environment without Pillow
+        return None
+
+
+def prepare_ocr_input(
+    args: argparse.Namespace,
+) -> tuple[Path, bool, float, str | None, str | None]:
+    """Build the actual image tesseract should OCR.
+
+    The #1803 gap: feeding a full 4K desktop frame to tesseract misses small UI text
+    (sub ~30px cap-height). The fix is to crop to the region of interest and upscale it
+    so the glyphs clear tesseract's resolution floor. This function applies that:
+
+    - ``--crop-image`` crops the pixels to ``--crop-rect`` (vs the legacy behaviour where
+      ``--crop-rect`` only translated coordinates and the caller pre-cropped).
+    - ``--upscale F`` LANCZOS-upscales the (cropped) image by F so glyphs reach the OCR
+      floor; output coordinates are divided back by F in :func:`candidate_bbox`.
+
+    Returns ``(ocr_path, did_crop, scale, tmp_path, error)``. Backward compatible:
+    with no ``--crop-image`` and ``--upscale==1.0`` it returns the original image
+    untouched (``scale==1.0``, ``did_crop=False``, no temp) so existing callers and the
+    external-pre-crop path are unchanged."""
+    crop = parse_rect(args.crop_rect)
+    want_crop = bool(getattr(args, "crop_image", False))
+    upscale = float(getattr(args, "upscale", 1.0) or 1.0)
+    want_upscale = abs(upscale - 1.0) > 1e-6
+    if not want_crop and not want_upscale:
+        return Path(args.image), False, 1.0, None, None
+    if want_crop and not crop:
+        return Path(args.image), False, 1.0, None, "--crop-image requires --crop-rect"
+    if upscale <= 0:
+        return Path(args.image), False, 1.0, None, "--upscale must be > 0"
+    Image = _pil_image()
+    if Image is None:
+        return Path(args.image), False, 1.0, None, "Pillow required for --crop-image/--upscale"
+    resampling = getattr(Image, "Resampling", None)
+    lanczos = resampling.LANCZOS if resampling is not None else Image.LANCZOS
+    try:
+        im = Image.open(args.image).convert("RGB")
+        if want_crop:
+            x, y, w, h = crop["x"], crop["y"], crop["width"], crop["height"]
+            im = im.crop((x, y, x + w, y + h))
+        scale = upscale if want_upscale else 1.0
+        if want_upscale:
+            im = im.resize((max(1, int(im.width * scale)), max(1, int(im.height * scale))), lanczos)
+        fd, tmp = tempfile.mkstemp(suffix=".png", prefix="vg_ocr_")
+        os.close(fd)
+        im.save(tmp)
+        return Path(tmp), want_crop, scale, tmp, None
+    except Exception as exc:  # pragma: no cover - corrupt image / IO
+        return Path(args.image), False, 1.0, None, f"image preprocessing failed: {exc}"
+
+
 def load_tsv(args: argparse.Namespace) -> tuple[str, str | None]:
     if args.engine == "fixture-tsv":
         if not args.fixture_tsv:
             return "", "--fixture-tsv is required for engine=fixture-tsv"
+        # fixture coords are authored in upscaled-crop space when --upscale is exercised;
+        # candidate_bbox divides by this so fixtures can test the scale-aware mapping.
+        args._ocr_scale = float(getattr(args, "upscale", 1.0) or 1.0)
+        args._ocr_cropped = bool(getattr(args, "crop_image", False))
         try:
             return Path(args.fixture_tsv).read_text(encoding="utf-8"), None
         except OSError as exc:
@@ -110,11 +180,27 @@ def load_tsv(args: argparse.Namespace) -> tuple[str, str | None]:
     exe = shutil.which("tesseract")
     if not exe:
         return "", "tesseract not installed"
-    cmd = [exe, str(args.image), "stdout", "tsv"]
+    ocr_path, did_crop, scale, tmp, prep_err = prepare_ocr_input(args)
+    if prep_err:
+        return "", prep_err
+    # record the transform actually applied so candidate_bbox maps coords back correctly
+    args._ocr_scale = scale
+    args._ocr_cropped = did_crop
+    psm = getattr(args, "psm", None)
+    cmd = [exe, str(ocr_path), "stdout"]
+    if psm is not None:
+        cmd += ["--psm", str(psm)]
+    cmd += ["tsv"]
     try:
         proc = subprocess.run(cmd, text=True, capture_output=True, timeout=args.timeout)
     except subprocess.TimeoutExpired:
         return "", "tesseract timed out"
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
     if proc.returncode != 0:
         return "", proc.stderr.strip() or f"tesseract exited {proc.returncode}"
     return proc.stdout, None
@@ -149,15 +235,26 @@ def risk_notes(label: str, confidence: float) -> list[str]:
 
 
 def candidate_bbox(row: dict[str, str], args: argparse.Namespace) -> dict[str, int]:
-    x = int(float(row["left"]))
-    y = int(float(row["top"]))
-    width = int(float(row["width"]))
-    height = int(float(row["height"]))
+    # OCR ran on a possibly cropped+upscaled image; map the box back to the requested
+    # coordinate space. Order matters: undo the upscale first (box is in upscaled-crop
+    # pixels), THEN add the crop origin (in unscaled target pixels).
+    scale = float(getattr(args, "_ocr_scale", 1.0) or 1.0)
+    x = float(row["left"]) / scale
+    y = float(row["top"]) / scale
+    width = float(row["width"]) / scale
+    height = float(row["height"]) / scale
     crop = parse_rect(args.crop_rect)
-    if args.coordinate_space == "desktop" and crop:
+    # Add the crop origin when coords must be expressed in the un-cropped space: the
+    # legacy desktop+crop case (external pre-crop) OR when this runner did the crop.
+    if crop and (args.coordinate_space == "desktop" or getattr(args, "_ocr_cropped", False)):
         x += crop["x"]
         y += crop["y"]
-    return {"x": x, "y": y, "width": width, "height": height}
+    return {
+        "x": int(round(x)),
+        "y": int(round(y)),
+        "width": int(round(width)),
+        "height": int(round(height)),
+    }
 
 
 def tsv_candidates(tsv_text: str, args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -240,6 +337,26 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--coordinate-space", choices=["desktop", "output", "window"], default="window")
     ap.add_argument("--output")
     ap.add_argument("--crop-rect")
+    ap.add_argument(
+        "--crop-image",
+        action="store_true",
+        help="actually crop the OCR input to --crop-rect before OCR (not just translate "
+        "coords); fixes small-UI-text misses on full-frame images (#1803)",
+    )
+    ap.add_argument(
+        "--upscale",
+        type=float,
+        default=1.0,
+        help="LANCZOS upscale factor for the OCR input so <~30px UI glyphs clear "
+        "tesseract's resolution floor; output coords are divided back by this factor",
+    )
+    ap.add_argument(
+        "--psm",
+        type=int,
+        default=None,
+        help="tesseract page segmentation mode (7=single line, 8=single word — good for "
+        "a cropped button/label)",
+    )
     ap.add_argument("--window-id")
     ap.add_argument("--pid")
     ap.add_argument("--app-id")

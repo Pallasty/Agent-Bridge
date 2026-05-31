@@ -139,6 +139,135 @@ class VisionGroundingOcrTests(unittest.TestCase):
             self.assertTrue(first["evidence"]["matched_hint"])
             self.assertEqual(first["coordinate_space"], "window")
 
+    def _single_word_fixture(self, base, left, top, width, height, conf=90, text="OK"):
+        tsv = base / "ocr.tsv"
+        header = "\t".join(
+            [
+                "level",
+                "page_num",
+                "block_num",
+                "par_num",
+                "line_num",
+                "word_num",
+                "left",
+                "top",
+                "width",
+                "height",
+                "conf",
+                "text",
+            ]
+        )
+        row = f"5\t1\t1\t1\t1\t1\t{left}\t{top}\t{width}\t{height}\t{conf}\t{text}"
+        tsv.write_text(header + "\n" + row + "\n", encoding="utf-8")
+        return tsv
+
+    def test_upscale_and_crop_offset_map_coords_back_scale_aware(self):
+        # #1803 scale-aware mapping: OCR ran on a cropped+upscaled image, so the box
+        # must be divided by the upscale factor THEN shifted by the crop origin.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = pathlib.Path(tmp)
+            image = base / "frame.png"
+            image.write_bytes(b"fake image bytes")
+            tsv = self._single_word_fixture(base, left=20, top=40, width=60, height=20)
+
+            proc = run_grounding(
+                "--image",
+                str(image),
+                "--engine",
+                "fixture-tsv",
+                "--fixture-tsv",
+                str(tsv),
+                "--snapshot-id",
+                "snap-3",
+                "--snapshot-hash",
+                "sha256:snapshot3",
+                "--crop-image",
+                "--crop-rect",
+                "200,300,400,400",
+                "--upscale",
+                "2",
+                "--coordinate-space",
+                "desktop",
+                "--compact",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["status"], "ok")
+            self.assertEqual(len(data["candidates"]), 1)
+            # (20,40,60,20)/2 -> (10,20,30,10); + crop origin (200,300) -> (210,320)
+            self.assertEqual(
+                data["candidates"][0]["bbox"],
+                {"x": 210, "y": 320, "width": 30, "height": 10},
+            )
+            prep = data["request"]["image"]["preprocess"]
+            self.assertTrue(prep["crop_image"])
+            self.assertEqual(prep["upscale"], 2.0)
+
+    def test_crop_image_on_fixture_engine_is_metadata_only_noop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = pathlib.Path(tmp)
+            image = base / "frame.png"
+            image.write_bytes(b"fake image bytes")
+            tsv = self._single_word_fixture(base, left=1, top=1, width=2, height=2)
+
+            proc = run_grounding(
+                "--image",
+                str(image),
+                "--engine",
+                "fixture-tsv",
+                "--fixture-tsv",
+                str(tsv),
+                "--snapshot-id",
+                "snap-4",
+                "--snapshot-hash",
+                "sha256:snapshot4",
+                "--crop-image",
+                "--compact",
+            )
+
+            # fixture engine never prepares an image, so --crop-image without a rect is
+            # tolerated there (no preprocessing happens); the guard is exercised on the
+            # tesseract path. Here we only assert it does not crash and records intent.
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertTrue(data["request"]["image"]["preprocess"]["crop_image"])
+
+    def test_default_path_records_noop_preprocess(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = pathlib.Path(tmp)
+            image = base / "frame.png"
+            image.write_bytes(b"fake image bytes")
+            tsv = self._single_word_fixture(base, left=5, top=6, width=7, height=8)
+
+            proc = run_grounding(
+                "--image",
+                str(image),
+                "--engine",
+                "fixture-tsv",
+                "--fixture-tsv",
+                str(tsv),
+                "--snapshot-id",
+                "snap-5",
+                "--snapshot-hash",
+                "sha256:snapshot5",
+                "--coordinate-space",
+                "window",
+                "--compact",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            prep = data["request"]["image"]["preprocess"]
+            self.assertFalse(prep["crop_image"])
+            self.assertEqual(prep["upscale"], 1.0)
+            self.assertIsNone(prep["psm"])
+            # scale 1.0 noop + window space (no offset) -> coords unchanged
+            self.assertEqual(
+                data["candidates"][0]["bbox"],
+                {"x": 5, "y": 6, "width": 7, "height": 8},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1265,6 +1265,24 @@ impl McpTool for VisionGroundingOcrTool {
                         "type": "string",
                         "description": "Optional x,y,width,height crop rect."
                     },
+                    "crop_image": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Actually crop the OCR input to crop_rect before OCR (not just translate coords). Fixes small-UI-text misses on full-frame images (#1803). Output coords are mapped back to coordinate_space."
+                    },
+                    "upscale": {
+                        "type": "number",
+                        "minimum": 1.0,
+                        "maximum": 8.0,
+                        "default": 1.0,
+                        "description": "LANCZOS upscale factor for the OCR input so sub-~30px UI glyphs clear tesseract's resolution floor; output coords are divided back by this factor. Pair with crop_rect + crop_image on a small region (e.g. a button bbox from desktop_snapshot)."
+                    },
+                    "psm": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 13,
+                        "description": "tesseract page segmentation mode (7=single text line, 8=single word — good for a cropped button/label)."
+                    },
                     "window_id": { "type": "integer" },
                     "pid": { "type": "integer" },
                     "app_id": { "type": "string" },
@@ -1373,6 +1391,20 @@ impl McpTool for VisionGroundingOcrTool {
         push_optional_str_arg(&mut cmd, &args, "coordinate_space", "--coordinate-space");
         push_optional_str_arg(&mut cmd, &args, "output", "--output");
         push_optional_str_arg(&mut cmd, &args, "crop_rect", "--crop-rect");
+        if args
+            .get("crop_image")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            cmd.arg("--crop-image");
+        }
+        // upscale is a float; push_optional_value_arg only handles ints/strings.
+        if let Some(u) = args.get("upscale").and_then(|v| v.as_f64()) {
+            if (u - 1.0).abs() > 1e-9 {
+                cmd.arg("--upscale").arg(u.to_string());
+            }
+        }
+        push_optional_value_arg(&mut cmd, &args, "psm", "--psm");
         push_optional_value_arg(&mut cmd, &args, "window_id", "--window-id");
         push_optional_value_arg(&mut cmd, &args, "pid", "--pid");
         push_optional_str_arg(&mut cmd, &args, "app_id", "--app-id");
