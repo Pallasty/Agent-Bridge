@@ -311,6 +311,8 @@ mod tests {
                 env: HashMap::new(),
                 initial_prompt: None,
                 model: None,
+                node: None,
+                user: None,
             })
             .await
             .expect_err("empty prompt must fail");

@@ -10334,7 +10334,9 @@ impl McpTool for AgentSpawnTool {
             description: "Spawn a sibling AI agent (one-shot). Pass prompt + cwd; runs to \
                  completion, returns session id. Pick a backend explicitly, or a policy \
                  ('cheap'=kilo, 'second_opinion'/'openai'=codex). backend takes precedence \
-                 over policy; both omitted = daemon default."
+                 over policy; both omitted = daemon default. Set `node` (+`user`) to dispatch \
+                 a kilo/opencode run to a tailnet host via ssh — it stays free yet is recorded \
+                 in agent_sessions; `cwd` is then a remote-absolute path."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -10355,6 +10357,14 @@ impl McpTool for AgentSpawnTool {
                     "model": {
                         "type": "string",
                         "description": "Provider/model string honored by opencode/kilo/gemini/codex (e.g. 'opencode/gpt-5-nano', 'gpt-5.4')."
+                    },
+                    "node": {
+                        "type": "string",
+                        "description": "Optional remote node/IP to run on via ssh (kilo/opencode only). Omit or 'local' for this host. Remote runs are still recorded in agent_sessions. `cwd` must be a remote-absolute path."
+                    },
+                    "user": {
+                        "type": "string",
+                        "description": "ssh user for remote dispatch (paired with 'node')."
                     }
                 },
                 "required": ["cwd", "prompt"]
@@ -10405,11 +10415,23 @@ impl McpTool for AgentSpawnTool {
             .get("model")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        let node = args
+            .get("node")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let user = args
+            .get("user")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         let cfg = SpawnConfig {
             cwd,
             env,
             initial_prompt: prompt,
             model,
+            node,
+            user,
         };
         match agent.spawn(cfg).await {
             Ok(s) => Ok(ToolResult::json_text(
@@ -27381,6 +27403,110 @@ impl McpTool for AgentSteerDriveTool {
         }
 
         let is_research = purpose == "research";
+
+        // Publish a steer_status blob back to presence so agent_orchestrate_scan
+        // can see this worker's live state (focus / last_action / awaiting /
+        // needs_human_gate) without holding the transcript. Best-effort: a failed
+        // write never fails the drive. Read-modify-write preserves the `steer`
+        // blob agent_steer_launch registered (announce replaces capabilities
+        // wholesale, it does not deep-merge).
+        let mut steer_status_published = false;
+        if let Some(store) = &self.hub.store {
+            let node_label = steer_node_label(&args);
+            let presence_id = crate::remote_steer::steer_presence_id(&node_label, &session);
+            let needs_human = awaiting_gate.is_some() || is_research;
+            let awaiting_kind: Option<&'static str> = awaiting_gate.as_ref().map(|g| g.kind);
+            let last_action = if let Some(g) = awaiting_gate.as_ref() {
+                format!("awaiting gate: {}", g.kind)
+            } else if !auto_answered.is_empty() {
+                format!("auto-answered {}", auto_answered.join(", "))
+            } else if matched {
+                "expect matched".to_string()
+            } else if expect.is_some() {
+                format!("drove {} ms, expect not matched", start.elapsed().as_millis())
+            } else {
+                format!("drove {} ms", start.elapsed().as_millis())
+            };
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let mut status = json!({
+                "last_action": last_action,
+                "awaiting": awaiting_kind,
+                "needs_human_gate": needs_human,
+                "purpose": purpose.clone(),
+                "ts": now_secs,
+            });
+            // focus = the task being driven (truncated); skip on bare-Enter/gate
+            // answers so the prior focus is preserved.
+            let trimmed = input.trim();
+            if !trimmed.is_empty() {
+                let focus: String = trimmed.chars().take(80).collect();
+                if let Some(o) = status.as_object_mut() {
+                    o.insert("focus".into(), json!(focus));
+                }
+            }
+            // Merge into the existing capabilities, preserving the `steer` blob.
+            let mut caps = match store.agent_presence_get(&presence_id).await {
+                Ok(Some(rec)) => rec.capabilities.unwrap_or_else(|| json!({})),
+                _ => json!({}),
+            };
+            if !caps.is_object() {
+                caps = json!({});
+            }
+            let logical_str = logical.clone().unwrap_or_else(|| session.clone());
+            if let Some(o) = caps.as_object_mut() {
+                if !o.contains_key("steer") {
+                    o.insert(
+                        "steer".into(),
+                        json!({
+                            "mux": "tmux",
+                            "tmux_session": session.clone(),
+                            "logical": logical_str.clone(),
+                            "node": node_label.clone(),
+                            "launched_by": "agent_steer_drive"
+                        }),
+                    );
+                }
+                o.insert("steer_status".into(), status);
+            }
+            // project/role for the INSERT path (a driven session AB never launched):
+            // parse from the ab__proj__role session name, else fall back to args.
+            let (proj, rl) =
+                crate::remote_steer::parse_tmux_session(&session).unwrap_or_else(|| {
+                    (
+                        args.get("project")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("steer")
+                            .to_string(),
+                        args.get("role")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("worker")
+                            .to_string(),
+                    )
+                });
+            let name = format!("steer {logical_str}");
+            let upsert = ab_store::AgentPresenceUpsert {
+                name: Some(&name),
+                description: Some("AB-owned steerable session"),
+                version: None,
+                url: None,
+                node: Some(&node_label),
+                project: Some(&proj),
+                role: Some(&rl),
+                tag: Some("steer"),
+                cwd: None,
+                pid: None,
+                capabilities: Some(&caps),
+                skills: None,
+            };
+            match store.agent_presence_announce(&presence_id, upsert).await {
+                Ok(_) => steer_status_published = true,
+                Err(e) => tracing::warn!(error = %e, "steer: steer_status publish failed"),
+            }
+        }
+
         let mut out = json!({
             "status": "ok",
             "tmux_session": session,
@@ -27410,6 +27536,10 @@ impl McpTool for AgentSteerDriveTool {
                     json!("research output requires a human ground-truth gate before being treated as a finding (#1745)"),
                 );
             }
+            obj.insert(
+                "steer_status_published".into(),
+                json!(steer_status_published),
+            );
         }
         Ok(ToolResult::json_text(&out))
     }

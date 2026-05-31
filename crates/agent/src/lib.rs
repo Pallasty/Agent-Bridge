@@ -44,6 +44,17 @@ pub struct SpawnConfig {
     /// now (Claude Code's `-p` mode has no model flag).
     #[serde(default)]
     pub model: Option<String>,
+    /// Optional remote node/IP to dispatch the one-shot run to via ssh. When
+    /// set (and not `local`/`localhost`/this host), [`OpenCodeFamilyRuntime`]
+    /// wraps the run in `ssh <user@node> <remote-cmd>` so the executor (e.g. a
+    /// free remote `kilo`) runs remotely while lifecycle (start/finish/exit) is
+    /// still recorded in `agent_sessions`. Other runtimes ignore it.
+    #[serde(default)]
+    pub node: Option<String>,
+    /// ssh user for remote dispatch (paired with `node`). Ignored when `node`
+    /// is unset/local.
+    #[serde(default)]
+    pub user: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

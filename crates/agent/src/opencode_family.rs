@@ -115,6 +115,69 @@ fn env_nonempty(key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// POSIX single-quote escape so an arbitrary value (prompt, model, env value,
+/// cwd) is transported intact inside the single remote-command string we hand
+/// to `ssh`. The remote login shell parses that string exactly once, so each
+/// untrusted piece is wrapped in `'…'` with embedded quotes escaped as `'\''`.
+fn sh_single_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for ch in s.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
+}
+
+/// Whether a `node` value designates a real remote host (not this machine).
+fn is_remote_node(node: Option<&str>) -> bool {
+    node.map(|n| {
+        let n = n.trim();
+        !n.is_empty() && !n.eq_ignore_ascii_case("local") && !n.eq_ignore_ascii_case("localhost")
+    })
+    .unwrap_or(false)
+}
+
+/// Build the single remote-shell command string for an ssh-dispatched one-shot
+/// run: `[cd <cwd> &&] <ENV…> "<bin>" run <auto> [--model <m>] <prompt>`.
+/// `cwd`/`model`/`prompt`/env values are single-quoted; `bin` is wrapped in
+/// double quotes so a leading `$HOME` (the kilo default) expands on the remote
+/// while the path stays space-safe. Mirrors the proven `ab-kilo-run.sh` path.
+fn build_remote_run_cmd(
+    bin: &str,
+    auto_flag: &str,
+    cwd: &str,
+    model: Option<&str>,
+    prompt: &str,
+    env: &HashMap<String, String>,
+) -> String {
+    let mut cmd = String::new();
+    if !cwd.is_empty() {
+        cmd.push_str(&format!("cd {} && ", sh_single_quote(cwd)));
+    }
+    // env assignments prefix the command (apply only to it). Skip keys that
+    // are not safe shell identifiers rather than risk an injection.
+    for (k, v) in env {
+        if !k.is_empty()
+            && k.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && !k.chars().next().unwrap().is_ascii_digit()
+        {
+            cmd.push_str(&format!("{}={} ", k, sh_single_quote(v)));
+        }
+    }
+    cmd.push_str(&format!("\"{bin}\" run {auto_flag}"));
+    if let Some(m) = model {
+        cmd.push_str(&format!(" --model {}", sh_single_quote(m)));
+    }
+    cmd.push_str(&format!(" {}", sh_single_quote(prompt)));
+    cmd
+}
+
 fn resolve_kilo_binary_from(home: &Path, path_env: &str, env_override: Option<String>) -> String {
     if let Some(binary) = env_override {
         return binary;
@@ -238,19 +301,73 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             }
         }
 
-        let mut cmd = Command::new(&self.binary);
-        cmd.arg("run").arg(self.auto_approve_flag);
-        if let Some(m) = &model {
-            cmd.arg("--model").arg(m);
-        }
-        // The prompt comes last as a positional argument so any preceding
-        // flag values (model strings, etc.) can't shadow it.
-        cmd.arg(&prompt);
-        cmd.current_dir(&cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        apply_env(&mut cmd, &cfg.env);
+        let remote = is_remote_node(cfg.node.as_deref());
+        let mut cmd = if remote {
+            // Dispatch the one-shot run to a tailnet node via ssh. The local ssh
+            // child's stdout/stderr capture the remote output and ssh's exit
+            // status mirrors the remote command's, so the background wait +
+            // finalise_session path below works unchanged — the run becomes
+            // visible in agent_sessions / event_spine while staying free.
+            let node = cfg.node.as_deref().unwrap_or_default();
+            let dest = match cfg.user.as_deref().filter(|u| !u.is_empty()) {
+                Some(u) => format!("{u}@{node}"),
+                None => node.to_string(),
+            };
+            // Remote binary: kilo is not on PATH on the canonical node, so default
+            // to the workspace convention `$HOME/.kilo/bin/kilo` (expanded by the
+            // remote shell), overridable via AGENT_BRIDGE_KILO_REMOTE_BIN. Other
+            // runtimes fall back to their bare id (resolved on the remote PATH).
+            let remote_bin = if self.runtime_id == "kilo" {
+                env_nonempty("AGENT_BRIDGE_KILO_REMOTE_BIN")
+                    .unwrap_or_else(|| "$HOME/.kilo/bin/kilo".to_string())
+            } else {
+                self.runtime_id.to_string()
+            };
+            let remote_cmd = build_remote_run_cmd(
+                &remote_bin,
+                self.auto_approve_flag,
+                &cwd,
+                model.as_deref(),
+                &prompt,
+                &cfg.env,
+            );
+            info!(
+                session = %session_id,
+                runtime = %self.runtime_id,
+                dest = %dest,
+                "dispatching one-shot run to remote node via ssh"
+            );
+            let mut c = Command::new("ssh");
+            c.arg("-o")
+                .arg("BatchMode=yes")
+                .arg("-o")
+                .arg("ConnectTimeout=10");
+            if let Some(key) = env_nonempty("AGENT_BRIDGE_SSH_KEY") {
+                c.arg("-i").arg(key);
+            }
+            c.arg(&dest).arg(&remote_cmd);
+            // env is injected into remote_cmd (not the local ssh process); cwd is
+            // a remote path, so we do NOT set current_dir on the local child.
+            c.stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            c
+        } else {
+            let mut c = Command::new(&self.binary);
+            c.arg("run").arg(self.auto_approve_flag);
+            if let Some(m) = &model {
+                c.arg("--model").arg(m);
+            }
+            // The prompt comes last as a positional argument so any preceding
+            // flag values (model strings, etc.) can't shadow it.
+            c.arg(&prompt);
+            c.current_dir(&cwd)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            apply_env(&mut c, &cfg.env);
+            c
+        };
 
         let child = match cmd.spawn() {
             Ok(child) => child,
@@ -471,6 +588,73 @@ mod tests {
         assert_eq!(runtime.auto_approve_flag, "--auto");
     }
 
+    #[test]
+    fn sh_single_quote_wraps_and_escapes() {
+        assert_eq!(sh_single_quote("plain"), "'plain'");
+        assert_eq!(sh_single_quote(""), "''");
+        // an embedded single quote becomes close-quote, escaped quote, reopen
+        assert_eq!(sh_single_quote("a'b"), "'a'\\''b'");
+        // shell metacharacters are inert inside single quotes
+        assert_eq!(sh_single_quote("$(rm -rf /)"), "'$(rm -rf /)'");
+    }
+
+    #[test]
+    fn is_remote_node_only_true_for_real_hosts() {
+        assert!(!is_remote_node(None));
+        assert!(!is_remote_node(Some("")));
+        assert!(!is_remote_node(Some("  ")));
+        assert!(!is_remote_node(Some("local")));
+        assert!(!is_remote_node(Some("LOCALHOST")));
+        assert!(is_remote_node(Some("100.93.4.56")));
+        assert!(is_remote_node(Some("aio2")));
+    }
+
+    #[test]
+    fn build_remote_run_cmd_minimal() {
+        let cmd = build_remote_run_cmd(
+            "$HOME/.kilo/bin/kilo",
+            "--auto",
+            "/home/pallasting/ab-kilo",
+            None,
+            "do the thing",
+            &HashMap::new(),
+        );
+        assert_eq!(
+            cmd,
+            "cd '/home/pallasting/ab-kilo' && \"$HOME/.kilo/bin/kilo\" run --auto 'do the thing'"
+        );
+    }
+
+    #[test]
+    fn build_remote_run_cmd_with_model_and_env_is_injection_safe() {
+        let mut env = HashMap::new();
+        env.insert("AB_FLAG".to_string(), "v1".to_string());
+        let cmd = build_remote_run_cmd(
+            "$HOME/.kilo/bin/kilo",
+            "--auto",
+            "/w",
+            Some("kilo/kilo-auto/free"),
+            "; rm -rf / #",
+            &env,
+        );
+        // The malicious prompt is inert: it is single-quoted into one positional
+        // arg, and the env assignment binds only to this command.
+        assert_eq!(
+            cmd,
+            "cd '/w' && AB_FLAG='v1' \"$HOME/.kilo/bin/kilo\" run --auto \
+             --model 'kilo/kilo-auto/free' '; rm -rf / #'"
+        );
+    }
+
+    #[test]
+    fn build_remote_run_cmd_skips_unsafe_env_keys() {
+        let mut env = HashMap::new();
+        env.insert("BAD KEY".to_string(), "x".to_string()); // space → skipped
+        env.insert("1leading".to_string(), "x".to_string()); // digit-led → skipped
+        let cmd = build_remote_run_cmd("kilo", "--auto", "", None, "p", &env);
+        assert_eq!(cmd, "\"kilo\" run --auto 'p'");
+    }
+
     #[tokio::test]
     async fn spawn_failure_finalises_persisted_session() {
         use ab_store::{SessionFilter, SqliteStore, StateStore as _};
@@ -493,6 +677,8 @@ mod tests {
                 env: HashMap::new(),
                 initial_prompt: Some("hello".to_string()),
                 model: None,
+                node: None,
+                user: None,
             })
             .await
             .expect_err("missing binary should fail");
