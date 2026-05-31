@@ -1423,6 +1423,152 @@ pub fn present_outcomes_projection(records: &[Value], verified_only: bool) -> Va
     })
 }
 
+/// **Output-expression lane Slice B (v0) — read-only outcome→memory drift
+/// projection.** Given the gate-eligible verified outcome records (the
+/// `outcomes` list of [`present_outcomes_projection`] with `verified_only=true`)
+/// and a caller-supplied map of `artifact_id → matched memory keys` (the
+/// representation probe, run read-only by the tool wrapper via the store's
+/// non-mutating `memory_search`), folds an event_spine-style SHA-256 chain over
+/// each verified outcome and reports which are vs are NOT already represented in
+/// memory. `drift == missing_count` is the literal size of the open
+/// output→memory loop.
+///
+/// PURE / store-free / browser-free: it writes nothing it later reads
+/// (`represented` is decided by the passed-in probe map, not by anything this
+/// fn authored) so it provably cannot self-fulfill. The chain reuses the
+/// [`present_replay_hash`] idiom (local SHA-256 + [`present_hex_lower`], seeded
+/// with [`PRESENT_REPLAY_ZERO_HASH`]) — it does NOT touch `event_spine` (a
+/// read-only #56 projection) and adds no source of truth.
+///
+/// For each missing (verified, not-yet-represented) record it also emits the
+/// `proposed_*` candidate a future opt-in ingest WOULD persist (deterministic
+/// `outcome_<artifact_id>` key, distinct `present_outcome` kind, additive tags)
+/// — as REPORT DATA ONLY; this fn never writes memory.
+pub fn outcomes_memory_drift_snapshot(
+    verified_records: &[Value],
+    represented_keys_by_artifact: &std::collections::HashMap<String, Vec<String>>,
+    generated_at: u64,
+    window_secs: u64,
+) -> Value {
+    // Stable order: by ts ascending, artifact_id as tiebreak — same idiom as
+    // present_replay so the chain is deterministic and reorder/loss is evident.
+    let mut recs: Vec<&Value> = verified_records.iter().collect();
+    recs.sort_by(|a, b| {
+        let ta = a.get("ts").and_then(Value::as_u64).unwrap_or(0);
+        let tb = b.get("ts").and_then(Value::as_u64).unwrap_or(0);
+        ta.cmp(&tb).then_with(|| {
+            let ia = a.get("artifact_id").and_then(Value::as_str).unwrap_or("");
+            let ib = b.get("artifact_id").and_then(Value::as_str).unwrap_or("");
+            ia.cmp(ib)
+        })
+    });
+
+    let mut prev = PRESENT_REPLAY_ZERO_HASH.to_string();
+    let mut events: Vec<Value> = Vec::with_capacity(recs.len());
+    let mut represented_count = 0usize;
+    let mut embody_unknown = 0usize;
+    for r in recs {
+        let artifact_id = r.get("artifact_id").and_then(Value::as_str).unwrap_or("");
+        let ts = r.get("ts").and_then(Value::as_u64).unwrap_or(0);
+        let intent = r.get("intent").and_then(Value::as_str).unwrap_or("");
+        let verify_status = r.get("verify_status").and_then(Value::as_str).unwrap_or("");
+        let verify_method = r.get("verify_method").and_then(Value::as_str).unwrap_or("");
+        let action_tool = r.get("action_tool").and_then(Value::as_str).unwrap_or("");
+        let gate_reason = r.get("gate_reason").and_then(Value::as_str).unwrap_or("");
+        // Known limitation surfaced honestly: present()-origin sidecars omit
+        // embody_status, so outcome_gate's embodiment rung was skipped (Option
+        // None passes). Flag it rather than implying the embody axis was checked.
+        if r.get("embody_status").is_none() {
+            embody_unknown += 1;
+        }
+        let matched = represented_keys_by_artifact
+            .get(artifact_id)
+            .cloned()
+            .unwrap_or_default();
+        let represented = !matched.is_empty();
+        if represented {
+            represented_count += 1;
+        }
+
+        let hash = outcomes_drift_hash(artifact_id, ts, verify_status, gate_reason, represented, &prev);
+        let mut ev = serde_json::json!({
+            "artifact_id": artifact_id,
+            "ts": ts,
+            "intent": intent,
+            "action_tool": action_tool,
+            "verify_method": verify_method,
+            "gate_reason": gate_reason,
+            "represented": represented,
+            "memory_keys": matched,
+            "prev_hash": prev,
+            "hash": hash,
+        });
+        // would-write candidate for the missing ones — REPORT DATA ONLY.
+        if !represented {
+            if let Some(obj) = ev.as_object_mut() {
+                obj.insert(
+                    "proposed_key".into(),
+                    Value::String(format!("outcome_{artifact_id}")),
+                );
+                obj.insert("proposed_kind".into(), Value::String("present_outcome".into()));
+                obj.insert(
+                    "proposed_tags".into(),
+                    serde_json::json!([
+                        "present_outcome",
+                        "verified_outcome",
+                        "auto_ingested",
+                        format!("verify:{verify_status}"),
+                        format!("method:{verify_method}"),
+                    ]),
+                );
+            }
+        }
+        events.push(ev);
+        prev = hash;
+    }
+
+    let verified_count = events.len();
+    let missing_count = verified_count - represented_count;
+    serde_json::json!({
+        "schema": "outcomes_memory_drift/v0",
+        "hash_algorithm": "sha256",
+        "generated_at": generated_at,
+        "window_secs": window_secs,
+        "verified_count": verified_count,
+        "represented_count": represented_count,
+        "missing_count": missing_count,
+        "drift": missing_count,
+        "embody_status_absent": embody_unknown,
+        "chain_head": prev,
+        "events": events,
+    })
+}
+
+/// SHA-256 over a verified outcome's stable identity + `prev_hash` — the
+/// drift-chain analogue of [`present_replay_hash`]. Local copy of the idiom
+/// (does not import from `event_spine`).
+fn outcomes_drift_hash(
+    artifact_id: &str,
+    ts: u64,
+    verify_status: &str,
+    gate_reason: &str,
+    represented: bool,
+    prev_hash: &str,
+) -> String {
+    let v = serde_json::json!({
+        "artifact_id": artifact_id,
+        "ts": ts,
+        "verify_status": verify_status,
+        "gate_reason": gate_reason,
+        "represented": represented,
+        "prev_hash": prev_hash,
+    });
+    let bytes = serde_json::to_vec(&v).unwrap_or_else(|_| v.to_string().into_bytes());
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    present_hex_lower(&hasher.finalize())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2174,5 +2320,121 @@ mod tests {
         assert_eq!(windowed[0]["artifact_id"], json!("new"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── Slice B (v0) — outcomes_memory_drift_snapshot falsifiers (T1-T6) ──
+    // The pure fn takes represented_keys_by_artifact as a plain HashMap so the
+    // tests are store-free and browser-free — and the fn provably cannot
+    // self-fulfill (represented is decided by the passed-in probe, not by
+    // anything the fn authored).
+
+    fn vrec(artifact_id: &str, ts: u64) -> Value {
+        // shape of a present_outcomes_projection(verified_only=true) entry
+        json!({
+            "artifact_id": artifact_id,
+            "ts": ts,
+            "intent": "x",
+            "action_tool": "present",
+            "verify_status": "rendered_ok",
+            "verify_method": "browser_eval",
+            "gate_reason": "verified",
+            "eligible": true,
+        })
+    }
+
+    #[test]
+    fn slice_b_drift_computes_represented_and_missing() {
+        // T1: K of N have a probe match → represented_count==K, drift==N-K.
+        use std::collections::HashMap;
+        let recs = vec![vrec("aaa1", 1), vrec("bbb2", 2), vrec("ccc3", 3)];
+        let mut probe: HashMap<String, Vec<String>> = HashMap::new();
+        probe.insert("aaa1".into(), vec!["outcome_aaa1".into()]); // represented
+        probe.insert("bbb2".into(), vec![]); // missing
+        // ccc3 absent from map → missing
+        let snap = outcomes_memory_drift_snapshot(&recs, &probe, 999, 86400);
+        assert_eq!(snap["verified_count"], json!(3));
+        assert_eq!(snap["represented_count"], json!(1));
+        assert_eq!(snap["missing_count"], json!(2));
+        assert_eq!(snap["drift"], json!(2));
+    }
+
+    #[test]
+    fn slice_b_drift_missing_emits_proposed_candidate() {
+        use std::collections::HashMap;
+        let recs = vec![vrec("dead1", 5)];
+        let probe: HashMap<String, Vec<String>> = HashMap::new(); // missing
+        let snap = outcomes_memory_drift_snapshot(&recs, &probe, 1, 1);
+        let ev = &snap["events"][0];
+        assert_eq!(ev["represented"], json!(false));
+        assert_eq!(ev["proposed_key"], json!("outcome_dead1"));
+        assert_eq!(ev["proposed_kind"], json!("present_outcome"));
+        // represented record must NOT carry a proposed_* candidate.
+        let mut p: HashMap<String, Vec<String>> = HashMap::new();
+        p.insert("dead1".into(), vec!["outcome_dead1".into()]);
+        let snap2 = outcomes_memory_drift_snapshot(&recs, &p, 1, 1);
+        assert!(snap2["events"][0].get("proposed_key").is_none());
+    }
+
+    #[test]
+    fn slice_b_drift_tamper_and_reorder_evident() {
+        // T3: flipping an identity field OR reordering changes chain_head.
+        use std::collections::HashMap;
+        let probe: HashMap<String, Vec<String>> = HashMap::new();
+        let a = vec![vrec("id1", 1), vrec("id2", 2)];
+        let h1 = outcomes_memory_drift_snapshot(&a, &probe, 0, 1)["chain_head"].clone();
+        // reorder by giving id2 an earlier ts so sort order flips
+        let b = vec![vrec("id1", 5), vrec("id2", 2)];
+        let h2 = outcomes_memory_drift_snapshot(&b, &probe, 0, 1)["chain_head"].clone();
+        assert_ne!(h1, h2, "different ts ordering must change chain_head");
+        // flip a represented bit → chain changes (represented is in the hash)
+        let mut p: HashMap<String, Vec<String>> = HashMap::new();
+        p.insert("id1".into(), vec!["k".into()]);
+        let h3 = outcomes_memory_drift_snapshot(&a, &p, 0, 1)["chain_head"].clone();
+        assert_ne!(h1, h3, "flipping represented must change chain_head");
+    }
+
+    #[test]
+    fn slice_b_drift_empty_is_genesis_not_error() {
+        // T4: empty stream → counts 0, chain_head == genesis.
+        use std::collections::HashMap;
+        let snap = outcomes_memory_drift_snapshot(&[], &HashMap::new(), 7, 9);
+        assert_eq!(snap["verified_count"], json!(0));
+        assert_eq!(snap["drift"], json!(0));
+        assert_eq!(snap["chain_head"], json!(PRESENT_REPLAY_ZERO_HASH));
+    }
+
+    #[test]
+    fn slice_b_drift_no_cross_contamination() {
+        // T5: one record's zero matches yields represented=false even when
+        // another record in the same snapshot matches.
+        use std::collections::HashMap;
+        let recs = vec![vrec("hit0", 1), vrec("miss0", 2)];
+        let mut probe: HashMap<String, Vec<String>> = HashMap::new();
+        probe.insert("hit0".into(), vec!["outcome_hit0".into()]);
+        probe.insert("miss0".into(), vec![]);
+        let snap = outcomes_memory_drift_snapshot(&recs, &probe, 0, 1);
+        let by_id: std::collections::HashMap<String, bool> = snap["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| {
+                (
+                    e["artifact_id"].as_str().unwrap().to_string(),
+                    e["represented"].as_bool().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(by_id["hit0"], true);
+        assert_eq!(by_id["miss0"], false);
+    }
+
+    #[test]
+    fn slice_b_drift_flags_absent_embody_status() {
+        // T6 (honesty): present()-origin records omit embody_status; surface it
+        // as a known limitation rather than implying the embody axis was checked.
+        use std::collections::HashMap;
+        let recs = vec![vrec("noembody", 1)]; // vrec has no embody_status
+        let snap = outcomes_memory_drift_snapshot(&recs, &HashMap::new(), 0, 1);
+        assert_eq!(snap["embody_status_absent"], json!(1));
     }
 }

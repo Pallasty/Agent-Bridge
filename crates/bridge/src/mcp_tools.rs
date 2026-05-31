@@ -5999,6 +5999,326 @@ impl McpTool for PresentOutcomesTool {
     }
 }
 
+// ── Output-expression lane Slice B (v0) ───────────────────────────────────
+// Two tools: a read-only outcome→memory drift projection (always-on, zero
+// risk, zero owner coordination), and an opt-in, dry-run-default, capped
+// ingestion that closes the loop on explicit operator action. See
+// present_ingest.rs for the write-path-hazard analysis.
+
+/// **Slice B read-only projection** — `outcomes_memory_drift`. Reports which
+/// gate-verified outcomes are vs are NOT already represented in memory, as a
+/// tamper-evident SHA-256-chained snapshot. Writes nothing; the representation
+/// probe uses the store's non-mutating `memory_search` (NEVER `memory_get`,
+/// which bumps access_count/last_accessed_at). Mirrors PresentReplayTool wiring.
+pub struct OutcomesMemoryDriftTool {
+    hub: Hub,
+}
+impl OutcomesMemoryDriftTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for OutcomesMemoryDriftTool {
+    fn name(&self) -> &'static str {
+        "outcomes_memory_drift"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Output-expression lane Slice B (v0): READ-ONLY outcome→memory drift \
+                 projection. Reads the verified (intent→action→outcome) stream (the same \
+                 gate-eligible records as present_outcomes(verified_only=true)) and, for each, \
+                 probes existing memory READ-ONLY (via non-mutating memory_search) to report \
+                 which verified outcomes are already represented vs missing. `drift` == \
+                 `missing_count` is the literal size of the open output→memory loop. Output is \
+                 a tamper-evident SHA-256 hash chain (reorder/loss changes chain_head). Each \
+                 missing record also carries the `proposed_*` candidate a future opt-in ingest \
+                 would persist — as REPORT DATA ONLY; this tool writes nothing. It cannot \
+                 self-fulfill (representation is decided by querying memory it never authored)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window over outcome records (by ts)."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 200,
+                        "description": "Max outcome records scanned (most-recent-first)."
+                    },
+                    "probe_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 5,
+                        "description": "Max memory hits fetched per representation probe."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 1000) as usize;
+        let probe_limit = args
+            .get("probe_limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5)
+            .clamp(1, 50) as u32;
+
+        let now = dispatch_now_secs();
+        let cutoff = now.saturating_sub(window_secs).max(0) as u64;
+        let dir = crate::present::presentations_dir();
+        let records = crate::present::read_outcome_records(&dir, limit, cutoff);
+        // Gate is inherited transitively — only eligible (verified) records flow on.
+        let projection = crate::present::present_outcomes_projection(&records, true);
+        let verified: Vec<Value> = projection
+            .get("outcomes")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        // Read-only representation probe: for each verified artifact_id, search
+        // memory for matching keys. memory_search is NON-MUTATING (unlike
+        // memory_get). A row is "represented" if any hit's key references the
+        // artifact_id (the deterministic outcome_<id> key, or any human memory
+        // body mentioning it).
+        let mut represented: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for rec in &verified {
+            let artifact_id = match rec.get("artifact_id").and_then(Value::as_str) {
+                Some(a) if !a.is_empty() => a,
+                _ => continue,
+            };
+            if represented.contains_key(artifact_id) {
+                continue;
+            }
+            let hits = store
+                .memory_search(artifact_id, &[], probe_limit)
+                .await
+                .unwrap_or_default();
+            let keys: Vec<String> = hits
+                .into_iter()
+                .filter(|h| {
+                    h.record.key.contains(artifact_id) || h.record.content.contains(artifact_id)
+                })
+                .map(|h| h.record.key)
+                .collect();
+            represented.insert(artifact_id.to_string(), keys);
+        }
+
+        let snapshot = crate::present::outcomes_memory_drift_snapshot(
+            &verified,
+            &represented,
+            now.max(0) as u64,
+            window_secs as u64,
+        );
+        Ok(ToolResult::json_text(&snapshot))
+    }
+}
+
+/// **Slice B opt-in ingestion** — `present_outcomes_ingest`. Persists
+/// gate-verified outcomes as ordinary memory rows (kind=present_outcome,
+/// key=outcome_<artifact_id>) via the existing memory_save. `dry_run=true` by
+/// DEFAULT — never automatic, capped by `max_writes`. The always-on Slice B
+/// surface is the read-only drift projection; this tool closes the loop only on
+/// explicit operator action with dry_run:false. Additive: no schema/column/table
+/// change, no event_spine write.
+pub struct PresentOutcomesIngestTool {
+    hub: Hub,
+}
+impl PresentOutcomesIngestTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for PresentOutcomesIngestTool {
+    fn name(&self) -> &'static str {
+        "present_outcomes_ingest"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Output-expression lane Slice B (v0): opt-in ingestion of gate-verified \
+                 outcomes into memory as ordinary rows (kind=present_outcome, \
+                 key=outcome_<artifact_id>, additive tags, related_keys=[], importance 0.5). \
+                 Reuses the verified_only stream (gate inherited, never re-run). dry_run=TRUE by \
+                 DEFAULT: returns the would-write set + per-row already_present (so an operator \
+                 sees ON CONFLICT resurrection of a tombstoned/superseded row BEFORE committing) \
+                 and writes NOTHING. Set dry_run=false to persist (capped by max_writes). No \
+                 schema/column/table change, no event_spine write. Not automatic — there is no \
+                 lifecycle hook; a human triggers it."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window over outcome records (by ts)."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 200,
+                        "description": "Max outcome records scanned (most-recent-first)."
+                    },
+                    "max_writes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 25,
+                        "description": "Hard cap on rows written (or proposed in dry_run)."
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true (default) compute and report the would-write set + already_present, writing NOTHING. Set false to actually persist."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 1000) as usize;
+        let max_writes = args
+            .get("max_writes")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(25)
+            .clamp(1, 200) as usize;
+        let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
+
+        let now = dispatch_now_secs();
+        let cutoff = now.saturating_sub(window_secs).max(0) as u64;
+        let dir = crate::present::presentations_dir();
+        let records = crate::present::read_outcome_records(&dir, limit, cutoff);
+        let projection = crate::present::present_outcomes_projection(&records, true);
+        let verified: Vec<Value> = projection
+            .get("outcomes")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        let mut planned: Vec<Value> = Vec::new();
+        let mut written = 0usize;
+        let mut skipped_cap = 0usize;
+        let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for rec in &verified {
+            let mem = match crate::present_ingest::build_outcome_memory(rec, now.max(0)) {
+                Some(m) => m,
+                None => continue, // keyless / unsafe → never minted
+            };
+            // Deterministic key → de-dupe within this batch (lossy stream can
+            // surface the same artifact more than once).
+            if !seen_keys.insert(mem.key.clone()) {
+                continue;
+            }
+            // Non-mutating existence probe (NEVER memory_get): does a row with
+            // this exact key already exist? Surfaces ON CONFLICT resurrection.
+            let already_present = store
+                .memory_search(&mem.key, &[], 5)
+                .await
+                .unwrap_or_default()
+                .iter()
+                .any(|h| h.record.key == mem.key);
+
+            if planned.len() >= max_writes {
+                skipped_cap += 1;
+                continue;
+            }
+
+            let mut row = json!({
+                "key": mem.key,
+                "kind": mem.kind,
+                "already_present": already_present,
+                "tags": mem.tags,
+            });
+            if !dry_run {
+                match store.memory_save(&mem).await {
+                    Ok(()) => {
+                        written += 1;
+                        if let Some(o) = row.as_object_mut() {
+                            o.insert("written".into(), Value::Bool(true));
+                        }
+                    }
+                    Err(e) => {
+                        if let Some(o) = row.as_object_mut() {
+                            o.insert("written".into(), Value::Bool(false));
+                            o.insert("error".into(), Value::String(e.to_string()));
+                        }
+                    }
+                }
+            }
+            planned.push(row);
+        }
+
+        let resurrection_warning = planned.iter().any(|r| {
+            r.get("already_present").and_then(Value::as_bool).unwrap_or(false)
+        });
+        Ok(ToolResult::json_text(&json!({
+            "schema": "present_outcomes_ingest/v0",
+            "dry_run": dry_run,
+            "generated_at": now.max(0),
+            "window_secs": window_secs,
+            "verified_count": verified.len(),
+            "planned_count": planned.len(),
+            "written_count": written,
+            "skipped_over_cap": skipped_cap,
+            "max_writes": max_writes,
+            "memory_kind": crate::present_ingest::OUTCOME_MEMORY_KIND,
+            "resurrection_possible": resurrection_warning,
+            "note": if dry_run {
+                "dry_run: nothing written. already_present=true rows would be ON CONFLICT updates (and would resurrect a superseded/tombstoned row to active). Set dry_run=false to persist."
+            } else {
+                "persisted gate-verified outcomes as memory rows."
+            },
+            "rows": planned,
+        })))
+    }
+}
+
 pub struct BrowserEvalTool {
     hub: Hub,
 }
@@ -28289,6 +28609,23 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Niche,
         Arc::new(PresentOutcomesTool::new(hub.clone())),
+    );
+    // Slice B (v0): read-only outcome→memory drift projection. Reports which
+    // verified outcomes are/aren't represented in memory (tamper-evident chain);
+    // writes nothing, non-mutating probe. Niche (opt-in).
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(OutcomesMemoryDriftTool::new(hub.clone())),
+    );
+    // Slice B (v0): opt-in, dry-run-default, capped ingestion of verified
+    // outcomes into memory as ordinary rows. Never automatic. Niche (opt-in).
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(PresentOutcomesIngestTool::new(hub.clone())),
     );
     // Host-confirm path B (Linux Computer Use): present an Approve/Reject card for a
     // pending host desktop action, block until a human decides, return the verdict.
