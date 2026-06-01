@@ -16,7 +16,11 @@ thiserror = { workspace = true }
 # default `cargo build` of the workspace never compiles the ONNX Runtime.
 ort = { version = "=2.0.0-rc.12", optional = true }            # ONNX Runtime (inference)
 ndarray = { version = "0.16", optional = true }                # tensor I/O for ort
-misaki-rs = { version = "0.3", optional = true }               # Kokoro g2p (pure Rust)
+# Kokoro g2p. default-features=false DROPS the optional `espeak` feature (which
+# pulls espeak-rs-sys: a C/bindgen build + GPL-3.0) → misaki-rs stays pure-Rust,
+# MIT, no C toolchain, GPL-free. Trade-off: out-of-vocabulary words use misaki's
+# embedded lexicon + rules instead of an espeak fallback (acceptable for v0).
+misaki-rs = { version = "0.3", optional = true, default-features = false }
 espeak-ng = { version = "0.1", optional = true }               # Piper/general phonemes (pure Rust)
 hound = { version = "3", optional = true }                     # WAV encode for falsifier capture
 

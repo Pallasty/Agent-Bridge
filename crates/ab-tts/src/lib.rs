@@ -95,13 +95,16 @@ impl fmt::Display for TtsError {
 
 impl std::error::Error for TtsError {}
 
-/// Grapheme→phoneme→token-id, in pure Rust. Kokoro and Piper both consume
-/// espeak-style phoneme token ids; the backend owns the phoneme→id table while
-/// the [`Phonemizer`] owns text→phoneme. Kept a trait so `misaki-rs` (Kokoro) and
-/// `espeak-ng` (Piper) plug in behind the same surface and are unit-testable.
+/// Text → phoneme string, in pure Rust. The phonemizer owns text→phoneme; each
+/// backend owns the phoneme→token-id table (Kokoro's is a fixed ~178-symbol vocab;
+/// Piper's is a per-voice map in the model's `.onnx.json`), so this surface returns
+/// the IPA phoneme string and id-mapping lives backend-side. Kept a trait so
+/// `misaki-rs` (Kokoro, MIT) and `espeak-ng` (Piper, GPL-3.0 — opt-in) plug in
+/// behind the same surface and are unit-testable.
 pub trait Phonemizer: Send + Sync {
-    /// Map text to the backend's input token ids (phoneme ids).
-    fn to_token_ids(&self, text: &str) -> Result<Vec<i64>, TtsError>;
+    /// Convert text to an IPA phoneme string (with stress marks), e.g.
+    /// `"hɛlˈəʊ wˈɜːld"`. Errors honestly on empty/failed g2p.
+    fn phonemize(&self, text: &str) -> Result<String, TtsError>;
 }
 
 /// A synthesizer backend: text + voice → audio. Offline, no network at call time.
