@@ -220,10 +220,14 @@ desktop_snapshot ─▶ pick target ─▶ desktop_invoke / desktop_action ─�
 | `error` | — | `escalate` | can't observe (AT-SPI down, bad selector) → human / rethink |
 
 `change` is emitted only when a cheap before-fingerprint is supplied (`before_present`
-for elements, `before_focus` for `focus_is`) — the caller already knows the before-state
-of the one thing it is about to change, so it need not capture a whole before-snapshot.
+for elements, `before_focus` for `focus_is`). The caller need not capture a whole
+before-snapshot — and need not even hand-track it: **the act tools auto-emit a `before`
+block** (`before.focus` = focused window `app_id|title`; `before.target_present` = the
+selector resolved), so the loop just threads `before.focus → verify(before_focus)` and
+`before.target_present → before_present`. (Surfaced by dogfooding: the act→verify handoff
+was otherwise fully manual.)
 
-### two hard-won constraints baked into the loop
+### three hard-won constraints baked into the loop
 
 1. **Always poll, never check once (settle).** GUIs animate; AT-SPI registration and
    window teardown lag the action by tens-to-hundreds of ms. `desktop_verify` polls to
@@ -240,6 +244,20 @@ of the one thing it is about to change, so it need not capture a whole before-sn
    loop pairing the daemon browser with a host GUI target should float / isolate the
    daemon window (separate workspace or output) so the observer does not perturb the
    observed.
+
+3. **A shared interactive desktop perturbs the target (isolation by workspace).** A
+   throwaway target on the user's *active* workspace can be activated by the user's own
+   focus/keystrokes (or compositor default-button behaviour) *before* the agent acts —
+   dogfooded: a 2-step dialog self-completed (both `exit 0`) with zero agent input. Note
+   `--cage-pid` isolates the *invoke authority* (by process lineage) but NOT the app from
+   the shared display. A **third, lightweight isolation** closes this without a nested
+   compositor: move the target off the user's active workspace —
+   `swaymsg 'for_window [title="<tag>"] move to workspace 9'`. Same compositor (stable, no
+   nested-GTK4/Vulkan surface loss), and AT-SPI being session-global still reaches it for
+   invoke/verify. The 2-step loop then completed cleanly end-to-end. So the three
+   isolation handles are: **by display** (nested `WAYLAND_DISPLAY`, `desktop_action`
+   coords), **by process** (`--cage-pid`, `desktop_invoke` authority), and **by workspace**
+   (off the user's active ws — input/focus isolation, same stable compositor).
 
 > Nested-cage caveat: a `WLR_BACKENDS=wayland` + pixman nested sway is unstable for
 > GTK4/Vulkan clients (surface loss). For `desktop_invoke`/`desktop_verify` live checks,
