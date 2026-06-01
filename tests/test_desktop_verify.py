@@ -58,6 +58,17 @@ class WindowMatchesTests(unittest.TestCase):
         self.assertTrue(dv.window_matches(win, "zenity", 4242, "delete"))
         self.assertFalse(dv.window_matches(win, "zenity", 4242, "save"))
 
+    def test_title_matches_the_sway_name_key(self):
+        # regression: sway windows carry the title under 'name' (desktop_snapshot
+        # _walk_tree), NOT 'title'. win_title matching must read 'name' or it silently
+        # never matches (the latent bug the act-loop dogfood surfaced).
+        win = {"app_id": "zenity", "pid": 7, "name": "Really delete?"}
+        self.assertTrue(dv.window_matches(win, None, None, "delete"))
+        self.assertEqual(dv._win_title(win), "Really delete?")
+        # 'title' is still accepted as a fallback for any caller that set it
+        self.assertEqual(dv._win_title({"title": "X"}), "X")
+        self.assertEqual(dv._win_title({}), "")
+
 
 class ClassifyChangeTests(unittest.TestCase):
     def test_element_unchanged_when_presence_equals_before(self):

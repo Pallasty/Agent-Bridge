@@ -168,6 +168,27 @@ def collect_windows(env: dict[str, Any]) -> list[dict[str, Any]]:
     return windows
 
 
+def focused_window_fingerprint(swaysock: str | None = None) -> str | None:
+    """'app_id|title' of the currently focused sway window (best-effort, None on failure).
+
+    The cheap before-fingerprint the act tools (desktop_invoke/desktop_action) emit so
+    desktop_verify can later split a focus_is miss into unchanged vs diverged without the
+    caller capturing a whole before-snapshot."""
+    try:
+        env = _sway_env()
+        if swaysock:
+            env["SWAYSOCK"] = swaysock
+        wins = collect_windows(env)
+        if not wins or (isinstance(wins[0], dict) and wins[0].get("error")):
+            return None
+        foc = next((w for w in wins if w.get("focused")), None)
+        if not foc:
+            return None
+        return f"{foc.get('app_id') or ''}|{foc.get('name') or ''}"
+    except Exception:  # noqa: BLE001  best-effort fingerprint, never fatal
+        return None
+
+
 def collect_screenshots(outputs: list[dict[str, Any]], screenshot_dir: Path,
                         env: dict[str, str]) -> list[dict[str, Any]]:
     """Per-output PNG via grim. Optional; returns metadata (path + size)."""

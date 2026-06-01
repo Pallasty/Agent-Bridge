@@ -137,6 +137,18 @@ def find_element(app_match, role_match, name_match, nth):
     return matches[nth]
 
 
+def _current_focus() -> str | None:
+    """Best-effort 'app_id|title' of the focused sway window — the before-fingerprint
+    desktop_verify consumes to split a focus_is miss into unchanged vs diverged. Lazy
+    import so a missing desktop_snapshot never breaks an invoke."""
+    try:
+        from desktop_snapshot import focused_window_fingerprint  # noqa: PLC0415
+
+        return focused_window_fingerprint()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def gate(isolated: bool, args: argparse.Namespace) -> tuple[bool, str]:
     if args.dry_run:
         return True, "dry-run: logged intent, invoked nothing"
@@ -288,6 +300,10 @@ def main() -> int:
 
     isolated = bool(args.cage_pid and app_pid and pid_is_descendant(app_pid, args.cage_pid))
     record["found"] = {"app": app_name, "app_pid": app_pid, "isolated": isolated}
+    # Before-fingerprint: the target resolved (so it was present), plus the focus before we
+    # act. Pass these to desktop_verify (before_present / before_focus) and a miss splits
+    # into unchanged (retry) vs diverged (replan) — no separate before-snapshot needed.
+    record["before"] = {"focus": _current_focus(), "target_present": True}
 
     # Host-confirm path C: host target + --use-grant → execute IF a human-minted grant
     # covers it (no per-action pending). Default-closed unless such a grant exists.

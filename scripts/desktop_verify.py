@@ -164,6 +164,12 @@ def collect_sway_windows(swaysock):
     return wins, None
 
 
+def _win_title(win):
+    """sway windows carry the title under 'name' (see desktop_snapshot._walk_tree);
+    a couple of code paths historically read 'title' — accept either, prefer 'name'."""
+    return win.get("name") or win.get("title") or ""
+
+
 def window_matches(win, app_id, pid, title):
     ok = True
     if app_id:
@@ -171,7 +177,7 @@ def window_matches(win, app_id, pid, title):
     if pid is not None:
         ok = ok and win.get("pid") == pid
     if title:
-        ok = ok and title.lower() in (win.get("title") or "").lower()
+        ok = ok and title.lower() in _win_title(win).lower()
     # require at least one selector to have been provided
     return ok if (app_id or pid is not None or title) else False
 
@@ -209,13 +215,13 @@ def evaluate(args) -> tuple[bool, dict[str, Any], str | None]:
         ]
         focused = next((w for w in wins if w.get("focused")), None)
         focused_brief = (
-            {"app_id": focused.get("app_id"), "title": focused.get("title"), "pid": focused.get("pid")}
+            {"app_id": focused.get("app_id"), "title": _win_title(focused) or None, "pid": focused.get("pid")}
             if focused
             else None
         )
         observed = {
             "windows": [
-                {"app_id": w.get("app_id"), "title": w.get("title"), "pid": w.get("pid"),
+                {"app_id": w.get("app_id"), "title": _win_title(w) or None, "pid": w.get("pid"),
                  "focused": w.get("focused")}
                 for w in matched
             ],

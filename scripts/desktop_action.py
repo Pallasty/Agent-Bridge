@@ -298,6 +298,18 @@ def run_confirm_token(args: argparse.Namespace) -> int:
     return 0 if rc == 0 else 1
 
 
+def _current_focus() -> str | None:
+    """Best-effort 'app_id|title' of the focused sway window — the before-fingerprint
+    desktop_verify consumes to split a focus_is miss into unchanged vs diverged. Lazy
+    import so a missing desktop_snapshot never breaks an action."""
+    try:
+        from desktop_snapshot import focused_window_fingerprint  # noqa: PLC0415
+
+        return focused_window_fingerprint()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="gated desktop input injection (v1)")
     ap.add_argument("--confirm-token", default=None,
@@ -369,6 +381,10 @@ def main() -> int:
         "args": {k: v for k, v in vars(args).items()
                  if k not in ("action",) and v not in (None, False)},
     }
+    # Before-fingerprint: the focus before we act (coordinate actions have no AT-SPI
+    # target, so target_present is N/A). desktop_verify(before_focus=...) splits a
+    # focus_is miss into unchanged (retry) vs diverged (replan).
+    record["before"] = {"focus": _current_focus()}
     if not allowed:
         record["result"] = "blocked"
         audit(record)
