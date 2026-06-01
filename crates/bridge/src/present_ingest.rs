@@ -96,8 +96,9 @@ pub fn outcome_integrity_ok(record: &Value) -> bool {
 ///   guard; see [`outcome_scope`]. NOT a content-overlap bet, which was false:
 ///   measured pairwise Jaccard is ~0.83.)
 /// - `content` = human-readable head + embedded machine-readable JSON body
-///   (dual-encoding; carries artifact_id+ts+intent+verify fields)
-/// - `tags = [present_outcome, verified_outcome, auto_ingested, verify:<s>, method:<m>]`
+///   (dual-encoding; carries artifact_id+ts+intent+verify fields, plus
+///   embody_status + chain_head provenance when the producer stamped them)
+/// - `tags = [present_outcome, verified_outcome, auto_ingested, verify:<s>, method:<m>, embody:<e>?]`
 /// - `related_keys = []` (graph-orphan by design in v0)
 /// - `importance = 0.5` (the `importance_for_kind` fallback for an unknown kind)
 pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
@@ -142,6 +143,17 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
         .unwrap_or("");
     let kind_label = record.get("kind").and_then(Value::as_str).unwrap_or("");
     let decision = record.get("decision").and_then(Value::as_str);
+    // Provenance forward (P-defer #2, thread 94): the dashboard stamps a REAL
+    // embody_status and present()/dashboard now stamp chain_head. Carry both into
+    // the durable memory body so a downstream consumer sees the SAME provenance the
+    // Slice A stream (present_outcomes / outcomes_memory_drift) already sees, closing
+    // the producer→memory provenance gap the adversarial review flagged. Additive
+    // only — null for a present() render that carries no embody axis / no head.
+    let embody_status = record.get("embody_status").and_then(Value::as_str);
+    let chain_head = record
+        .get("chain_head")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
 
     // Content: a human line + an embedded machine-readable JSON body
     // (dual-encoding; carries artifact_id+ts so the row is self-describing).
@@ -156,7 +168,9 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
         "present_kind": kind_label,
         "verify_status": verify_status,
         "verify_method": verify_method,
+        "embody_status": embody_status,
         "decision": decision,
+        "chain_head": chain_head,
     });
     let human = if intent.is_empty() {
         format!("verified outcome: {action_tool} {kind_label} → {verify_status} [{artifact_id}]")
@@ -185,6 +199,9 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
     }
     if let Some(d) = decision {
         tags.push(format!("decision:{d}"));
+    }
+    if let Some(e) = embody_status {
+        tags.push(format!("embody:{e}"));
     }
 
     Some(MemoryRecord {
@@ -296,6 +313,45 @@ mod tests {
         let m = build_outcome_memory(&rec("feed1234abcd"), 0).unwrap();
         assert!(m.content.contains("```json ab-outcome"));
         assert!(m.content.contains("\"artifact_id\": \"feed1234abcd\""));
+    }
+
+    #[test]
+    fn forwards_embody_and_chain_head_provenance() {
+        // P-defer #2 (thread 94): a dashboard outcome carries a REAL embody_status +
+        // chain_head — both must reach the durable memory body + an `embody:<s>` tag
+        // so a consumer of the memory row sees the SAME provenance the Slice A stream
+        // (present_outcomes / drift) sees, closing the producer→memory gap.
+        let dash = json!({
+            "artifact_id": "_ab_dashboard",
+            "ts": 1u64,
+            "action_tool": "present_dashboard",
+            "kind": "dashboard",
+            "verify_status": "rendered_ok",
+            "verify_method": "browser_eval",
+            "embody_status": "embodied",
+            "chain_head": "f4bbe660912587cd",
+        });
+        let m = build_outcome_memory(&dash, 0).unwrap();
+        assert!(m.content.contains("\"embody_status\": \"embodied\""));
+        assert!(m.content.contains("\"chain_head\": \"f4bbe660912587cd\""));
+        assert!(m.tags.contains(&"embody:embodied".to_string()));
+
+        // A present() outcome carries chain_head but NO embody axis: chain_head
+        // forwards, embody_status is honestly null, and there is NO embody tag
+        // (the absence is not silently turned into a claim).
+        let plain = json!({
+            "artifact_id": "plainprov0001",
+            "ts": 1u64,
+            "action_tool": "present",
+            "kind": "table",
+            "verify_status": "rendered_ok",
+            "verify_method": "browser_eval",
+            "chain_head": "deadbeefcafe0000",
+        });
+        let m2 = build_outcome_memory(&plain, 0).unwrap();
+        assert!(m2.content.contains("\"chain_head\": \"deadbeefcafe0000\""));
+        assert!(m2.content.contains("\"embody_status\": null"));
+        assert!(!m2.tags.iter().any(|t| t.starts_with("embody:")));
     }
 
     #[test]
