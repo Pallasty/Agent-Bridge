@@ -5748,6 +5748,195 @@ fn short_head(h: &str) -> String {
 /// surface that mirrors the `present_replay` snapshot, and self-verifies the
 /// embodiment by reading back the `chain_head` the rendered surface shows. See
 /// `crate::present::build_dashboard_html` / `classify_embody`.
+// ===========================================================================
+//                            present_voice (audio embodiment)
+// ===========================================================================
+// Output-expression lane, AUDIO domain. Emits a KNOWN signal (a defined-frequency
+// tone) to an output sink and reads it back off the SYSTEM BUS (the PipeWire sink
+// `.monitor` loopback) to prove the requested signal actually reached the bus — a
+// SPECTRAL-PEAK falsifier (Goertzel at the target freq vs the local spectral floor),
+// robust to concurrent audio. HONEST BOUNDARY (the unverifiable last mile): this
+// verifies the signal reached the OUTPUT BUS, NOT the physical transducer
+// (headphone/speaker driver) — only a human, or (for speakers) the mic channel,
+// can confirm that. Thin wrapper over scripts/audio_embody.py (the analysis +
+// pure decision live there with Python truth-table tests), mirroring the
+// desktop_verify / vision_grounding_ocr pattern. Writes a verified-outcome sidecar
+// that flows into present_outcomes exactly like the display surfaces.
+pub struct PresentVoiceTool {
+    _hub: Hub,
+}
+
+impl PresentVoiceTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for PresentVoiceTool {
+    fn name(&self) -> &'static str {
+        "present_voice"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Output-expression lane, AUDIO embodiment. Emits a known tone (freq/duration) to \
+                 an output sink and reads it back off the system bus (PipeWire sink .monitor loopback) to \
+                 prove the signal reached the bus — a spectral-peak falsifier (Goertzel at the target freq \
+                 vs the local spectral floor), robust to concurrent audio. Returns status \
+                 (emitted|silent|mismatch|no_capture|error) plus an HONEST boundary: verified_to=output_bus, \
+                 NOT the physical headphone/speaker driver (the unverifiable last mile — only a human, or the \
+                 mic channel for speakers, confirms that). Writes a verified-outcome sidecar that flows into \
+                 present_outcomes. capture_channel=sink_monitor (bus loopback, default) or mic (acoustic, \
+                 phase 2). Requires PipeWire + ffmpeg/paplay. Opt-in (Niche)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "freq": {"type": "number", "minimum": 50, "maximum": 18000, "default": 440, "description": "Tone frequency (Hz) whose presence on the bus is verified."},
+                    "duration_ms": {"type": "integer", "minimum": 100, "maximum": 8000, "default": 1500},
+                    "amplitude": {"type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.25, "description": "Output amplitude 0..1 (gentle by default)."},
+                    "sink": {"type": "string", "description": "PipeWire output sink to emit to. Defaults to the system default sink; the SAME sink's .monitor is the bus-loopback readback."},
+                    "capture_channel": {"type": "string", "enum": ["sink_monitor", "mic"], "default": "sink_monitor", "description": "Readback channel: sink_monitor = emit sink's .monitor (bus loopback, default); mic = default input (acoustic, phase 2)."},
+                    "intent": {"type": "string", "description": "What this emission is the outcome of (recorded in the outcome sidecar; does not affect playback)."},
+                    "cwd": {"type": "string", "description": "Repo root to resolve scripts/audio_embody.py."},
+                    "script_path": {"type": "string", "description": "Explicit audio_embody.py path (tests/alternate checkouts)."}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let freq = args.get("freq").and_then(|v| v.as_f64()).unwrap_or(440.0).clamp(50.0, 18000.0);
+        let duration_ms = args.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(1500).clamp(100, 8000);
+        let amplitude = args.get("amplitude").and_then(|v| v.as_f64()).unwrap_or(0.25).clamp(0.0, 1.0);
+        let capture_channel = args
+            .get("capture_channel").and_then(|v| v.as_str()).unwrap_or("sink_monitor").to_string();
+        let intent = args.get("intent").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
+        let script = present_voice_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(ToolResult::error(format!(
+                "audio_embody.py not found at {} (pass script_path or run from the Agent-Bridge repo root)",
+                script.display()
+            )));
+        }
+
+        let mut cmd = TokioCommand::new(
+            std::env::var("PYTHON").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "python3".to_string()),
+        );
+        cmd.arg(&script)
+            .arg("--json")
+            .arg("--freq").arg(format!("{freq}"))
+            .arg("--duration-ms").arg(duration_ms.to_string())
+            .arg("--amplitude").arg(format!("{amplitude}"))
+            .arg("--capture-channel").arg(&capture_channel);
+        push_optional_str_arg(&mut cmd, &args, "sink", "--sink");
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd.as_ref() {
+            cmd.current_dir(cwd);
+        }
+
+        // process kill ceiling: emit (duration) + capture margin + ffmpeg startup
+        let timeout_ms = duration_ms + 8_000;
+        let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+            Err(_) => return Ok(ToolResult::error(format!("present_voice: audio_embody exceeded {timeout_ms} ms"))),
+            Ok(Err(e)) => return Ok(ToolResult::error(format!("present_voice: spawn failed: {e}"))),
+            Ok(Ok(o)) => o,
+        };
+        let (stdout, _) = lossy_truncate(&output.stdout);
+        let (stderr, _) = lossy_truncate(&output.stderr);
+        let res: Value = match serde_json::from_str(&stdout) {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "present_voice: audio_embody returned invalid JSON: {e}; stderr={stderr}"
+                )));
+            }
+        };
+
+        let status = res.get("status").and_then(|v| v.as_str()).unwrap_or("error");
+        let verify_status = res.get("verify_status").and_then(|v| v.as_str()).unwrap_or("error");
+
+        // Provenance: the present_replay chain_head over the lane's artifacts NOW
+        // (same idiom present()/present_dashboard use). build_outcome_memory now
+        // forwards chain_head into the durable row (P-defer #2), so an ingested
+        // voice outcome carries the same provenance the bus readback saw.
+        let dir = crate::present::presentations_dir();
+        let chain_head = {
+            let artifacts = crate::present::list_artifacts(&dir, 500, None);
+            crate::present::present_replay_snapshot(&artifacts, 0usize, 0u64, crate::present::now_unix())
+                .get("chain_head").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default()
+        };
+        let ts = crate::present::now_unix();
+        let id = format!("voice_{}hz_{}", freq as u64, ts);
+        // Faithful log regardless of outcome (the gate decides eligibility on the
+        // read side). verify_status=rendered_ok ONLY when the tone peaked on the bus.
+        let outcome_record = json!({
+            "artifact_id": id,
+            "intent": intent,
+            "action_tool": "present_voice",
+            "kind": "voice",
+            "verify_status": verify_status,
+            "verify_method": "audio_bus_readback",
+            "audio_status": status,
+            "capture_channel": capture_channel,
+            "verified_to": res.get("verified_to"),
+            "not_verified": res.get("not_verified"),
+            "freq": freq,
+            "rms": res.get("rms"),
+            "goertzel": res.get("goertzel"),
+            "goertzel_floor": res.get("goertzel_floor"),
+            "peak_ratio": res.get("peak_ratio"),
+            "chain_head": chain_head,
+            "session_id": ctx.session_id.as_ref().map(|s| s.to_string()),
+            "ts": ts,
+        });
+        let _ = crate::present::write_outcome_sidecar(&dir, &id, &outcome_record);
+
+        let mut result = res;
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("id".to_string(), json!(id));
+            obj.insert("action_tool".to_string(), json!("present_voice"));
+            obj.insert("verify_method".to_string(), json!("audio_bus_readback"));
+            obj.insert("chain_head".to_string(), json!(chain_head));
+            obj.insert("outcome_sidecar".to_string(), json!(format!("{id}.outcome.json")));
+            obj.insert("mcp_wrapper".to_string(), json!({
+                "tool": "present_voice",
+                "exit_code": output.status.code().unwrap_or(-1),
+                "stderr_present": !stderr.is_empty()
+            }));
+        }
+        Ok(ToolResult::json_text(&result))
+    }
+}
+
+fn present_voice_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_AUDIO_EMBODY_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/audio_embody.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/audio_embody.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/audio_embody.py")
+}
+
 pub struct PresentDashboardTool {
     hub: Hub,
 }
@@ -29423,6 +29612,16 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(PresentOutcomesIngestTool::new(hub.clone())),
     );
+    // Audio embodiment: emit a known tone + read it back off the system bus (sink
+    // .monitor loopback) via a spectral-peak falsifier; writes a verified-outcome
+    // sidecar that flows into present_outcomes. Honest boundary: verifies the bus,
+    // not the physical transducer. Niche (opt-in); thin wrapper over audio_embody.py.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(PresentVoiceTool::new(hub.clone())),
+    );
     // Host-confirm path B (Linux Computer Use): present an Approve/Reject card for a
     // pending host desktop action, block until a human decides, return the verdict.
     // Standard tier; mints no authority (reuses the desktop_pending token + desktop_confirm).
@@ -34014,6 +34213,9 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         // Slice A present_outcomes is the same Niche opt-in shape.
         assert!(all.includes(Tier::Niche, "present_outcomes"));
         assert!(!std_p.includes(Tier::Niche, "present_outcomes"));
+        // Audio embodiment present_voice is the same Niche opt-in shape.
+        assert!(all.includes(Tier::Niche, "present_voice"));
+        assert!(!std_p.includes(Tier::Niche, "present_voice"));
         let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
         assert!(
             schemas.iter().any(|s| s.name == "present"),
@@ -34030,6 +34232,10 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(
             schemas.iter().any(|s| s.name == "present_outcomes"),
             "present_outcomes must register under the all profile"
+        );
+        assert!(
+            schemas.iter().any(|s| s.name == "present_voice"),
+            "present_voice must register under the all profile"
         );
     }
 
