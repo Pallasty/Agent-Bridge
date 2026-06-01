@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude · dock</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --line: #232a33;
+    --fg: #e6edf3; --dim: #8b949e; --faint: #6e7681;
+    --ok: #2ea043; --info: #4493f8; --warn: #d29922; --bad: #f85149; --idle: #6e7681;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 12px/1.45 -apple-system, "Segoe UI", "Noto Sans CJK SC", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; overflow: hidden; }
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  /* header / the face */
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px;
+    border-bottom: 1px solid var(--line); }
+  .orb { width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto;
+    background: radial-gradient(circle at 35% 30%, #fff6, var(--mood, var(--info)) 60%, #0000 100%);
+    box-shadow: 0 0 0 2px #0006, 0 0 14px 2px var(--mood, var(--info));
+    animation: breathe 3.6s ease-in-out infinite; }
+  @keyframes breathe { 0%,100% { transform: scale(1); opacity: .82; }
+                       50% { transform: scale(1.12); opacity: 1; } }
+  .who { flex: 1 1 auto; min-width: 0; }
+  .who .name { font-weight: 600; letter-spacing: .2px; }
+  .who .name .node { color: var(--dim); font-weight: 400; }
+  .who .reason { color: var(--dim); font-size: 11px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .mode-badge { font-size: 10px; color: var(--faint); border: 1px solid var(--line);
+    border-radius: 999px; padding: 1px 7px; flex: 0 0 auto; }
+
+  main { flex: 1 1 auto; overflow-y: auto; padding: 4px 0 6px; }
+  main::-webkit-scrollbar { width: 7px; }
+  main::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+  section { padding: 8px 12px 4px; }
+  .sec-h { font-size: 10px; text-transform: uppercase; letter-spacing: .8px;
+    color: var(--faint); margin-bottom: 5px; display: flex; justify-content: space-between; }
+  .row { display: flex; align-items: baseline; gap: 7px; padding: 3px 0; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; align-self: center;
+    background: var(--idle); }
+  .dot.live { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .grow { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .age { color: var(--faint); font-size: 10px; flex: 0 0 auto; }
+  .sev { width: 3px; align-self: stretch; border-radius: 2px; background: var(--idle); }
+  .sev.success { background: var(--ok); } .sev.info { background: var(--info); }
+  .sev.warn, .sev.warning { background: var(--warn); }
+  .sev.error, .sev.critical { background: var(--bad); }
+  .ntitle { font-weight: 500; }
+  .muted { color: var(--dim); }
+  .empty { color: var(--faint); font-style: italic; padding: 2px 0; }
+
+  /* approvals — the one thing that stands out (Slice 1 makes it clickable) */
+  .approval { border: 1px solid #5a4a17; background: #20180a; border-radius: 7px;
+    padding: 7px 9px; margin-bottom: 6px; }
+  .approval .k { color: var(--warn); font-weight: 600; }
+
+  footer { border-top: 1px solid var(--line); padding: 7px 12px;
+    display: flex; gap: 12px; color: var(--faint); font-size: 10px; flex-wrap: wrap; }
+  footer .hb { color: var(--dim); }
+  footer .hb b { color: var(--fg); font-weight: 600; }
+  .pill { padding: 0 5px; border-radius: 4px; }
+  .pill.ok { color: var(--ok); } .pill.bad { color: var(--bad); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="orb" id="orb"></div>
+    <div class="who">
+      <div class="name">Claude <span class="node" id="self">·</span></div>
+      <div class="reason" id="reason">连接中…</div>
+    </div>
+    <div class="mode-badge" id="mode">—</div>
+  </header>
+  <main id="main"></main>
+  <footer id="footer"></footer>
+</div>
+
+<script>
+const MOOD = {
+  happy:'#2ea043', calm:'#39c5cf', content:'#39c5cf',
+  thinking:'#4493f8', orienting:'#4493f8', working:'#4493f8', focused:'#4493f8',
+  alert:'#d29922', concerned:'#d29922', tired:'#8b949e', idle:'#6e7681',
+  error:'#f85149', sad:'#f85149',
+};
+const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function ago(sec){
+  if (sec==null || sec<0) return '—';
+  if (sec<60) return sec+'s';
+  if (sec<3600) return Math.floor(sec/60)+'m';
+  if (sec<86400) return Math.floor(sec/3600)+'h';
+  return Math.floor(sec/86400)+'d';
+}
+function sectionEmpty(t){ return `<div class="empty">${t}</div>`; }
+
+function render(d){
+  // face
+  const mood = (d.face && d.face.mood) || 'idle';
+  document.documentElement.style.setProperty('--mood', MOOD[mood] || MOOD.idle);
+  document.getElementById('self').textContent = '· ' + (d.node_self || '?');
+  document.getElementById('reason').textContent =
+    (d.face && (d.face.reason || d.face.last_event)) || '静默';
+  document.getElementById('mode').textContent = (d.face && (d.face.mode || d.face.mood)) || '—';
+
+  let h = '';
+
+  // approvals (only when present)
+  if (d.approvals && d.approvals.length){
+    h += `<section><div class="sec-h">待你拍板 · approvals</div>`;
+    for (const a of d.approvals){
+      const kind = (a.data && (a.data.kind || a.data.action || a.data.tool)) || a.file;
+      h += `<div class="approval"><span class="k">⚠ ${esc(kind)}</span>
+            <span class="muted"> · ${esc(a.file)}</span></div>`;
+    }
+    h += `</section>`;
+  }
+
+  // presence
+  h += `<section><div class="sec-h"><span>在场 · presence</span>
+        <span>${(d.presence||[]).filter(p=>p.fresh).length} live</span></div>`;
+  if (!d.presence || !d.presence.length) h += sectionEmpty('无在场记录');
+  else for (const p of d.presence.slice(0,5)){
+    h += `<div class="row"><span class="dot ${p.fresh?'live':''}"></span>
+          <span class="grow">${esc(p.node)}<span class="muted">:${esc(p.project)}:${esc(p.role)}</span></span>
+          <span class="age">${ago(p.age_s)}</span></div>`;
+  }
+  h += `</section>`;
+
+  // notifications
+  h += `<section><div class="sec-h">通知 · notifications</div>`;
+  if (!d.notifications || !d.notifications.length) h += sectionEmpty('暂无通知');
+  else for (const n of d.notifications.slice(0,4)){
+    h += `<div class="row"><span class="sev ${esc(n.severity)}"></span>
+          <span class="grow"><span class="ntitle">${esc(n.title)}</span></span>
+          <span class="age">${ago(n.age_s)}</span></div>`;
+  }
+  h += `</section>`;
+
+  // sessions
+  const act = (d.sessions||[]).filter(s=>s.active);
+  h += `<section><div class="sec-h"><span>会话 · sessions</span>
+        <span>${act.length} active</span></div>`;
+  if (!d.sessions || !d.sessions.length) h += sectionEmpty('无会话记录');
+  else for (const s of d.sessions.slice(0,4)){
+    const tag = s.active ? `<span class="pill ok">running</span>`
+      : (s.exit_code===0 ? `<span class="muted">ok</span>`
+         : `<span class="pill bad">exit ${esc(s.exit_code)}</span>`);
+    h += `<div class="row"><span class="dot ${s.active?'live':''}"></span>
+          <span class="grow">${esc(s.runtime_id)}<span class="muted"> · ${esc((s.cwd||'').split('/').pop())}</span></span>
+          ${tag} <span class="age">${ago(s.age_s)}</span></div>`;
+  }
+  h += `</section>`;
+
+  document.getElementById('main').innerHTML = h;
+
+  // footer: sync + daemon heartbeat + freshness
+  const sync = d.sync || {};
+  const fails = sync.consecutive_failures;
+  const syncTxt = (fails==null) ? 'sync —'
+    : (fails>0 ? `<span class="pill bad">sync ✗${fails}</span>` : `<span class="pill ok">sync ok</span>`);
+  const dm = d.daemon || {};
+  const dmTxt = dm.fresh ? `<span class="pill ok">♥ ${ago(dm.age_s)}</span>`
+    : `<span class="muted">♥ ${ago(dm.age_s)}</span>`;
+  document.getElementById('footer').innerHTML =
+    `<span class="hb">daemon ${dmTxt}</span>
+     <span class="hb">${syncTxt}</span>
+     <span class="hb" style="margin-left:auto">更新于 <b id="upd"></b></span>`;
+  document.getElementById('upd').textContent =
+    ago(Math.floor(Date.now()/1000) - (d.generated_at||0)) + '前';
+}
+
+async function tick(){
+  try {
+    const r = await fetch('dock_snapshot.json?_=' + Date.now(), {cache:'no-store'});
+    render(await r.json());
+  } catch(e) {
+    document.getElementById('reason').textContent = '聚合器未连接 (' + e + ')';
+  }
+}
+tick();
+setInterval(tick, 3000);
+</script>
+</body>
+</html>
