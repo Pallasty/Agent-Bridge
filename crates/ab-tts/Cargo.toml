@@ -1,0 +1,29 @@
+[package]
+name = "ab-tts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Pluggable, offline, Rust-native TTS backends (Kokoro / Piper via ort) for the output-expression audio-embodiment lane (present_voice). Each backend is feature-gated so the core workspace never carries the ONNX Runtime dependency unless TTS is enabled."
+
+[dependencies]
+# Always-on: lightweight error handling for the backend-agnostic surface.
+thiserror = { workspace = true }
+
+# Feature-gated heavy/native deps — pulled ONLY when a backend is enabled, so a
+# default `cargo build` of the workspace never compiles the ONNX Runtime.
+ort = { version = "=2.0.0-rc.12", optional = true }            # ONNX Runtime (inference)
+ndarray = { version = "0.16", optional = true }                # tensor I/O for ort
+misaki-rs = { version = "0.3", optional = true }               # Kokoro g2p (pure Rust)
+espeak-ng = { version = "0.1", optional = true }               # Piper/general phonemes (pure Rust)
+hound = { version = "3", optional = true }                     # WAV encode for falsifier capture
+
+[features]
+default = []
+# Kokoro-82M (StyleTTS2, Apache-2.0, 24kHz): misaki-rs g2p + ort ONNX.
+kokoro = ["dep:ort", "dep:ndarray", "dep:misaki-rs", "dep:hound"]
+# Piper (VITS, MIT, 22.05kHz): espeak-ng phonemes + ort ONNX.
+piper = ["dep:ort", "dep:ndarray", "dep:espeak-ng", "dep:hound"]
+all-backends = ["kokoro", "piper"]

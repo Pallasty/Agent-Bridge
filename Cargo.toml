@@ -9,6 +9,7 @@ members = [
     "crates/store",
     "crates/mcp",
     "crates/bridge",
+    "crates/ab-tts",
     "crates/seed-bridge",
     "crates/oob-alert",
     "bin/agent-cli",
