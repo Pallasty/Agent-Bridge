@@ -15,7 +15,7 @@ python3 "$DIR/aggregate.py" >/dev/null 2>&1 || true
 
 # ensure the http server (idempotent, detached from this click)
 if ! curl -s -o /dev/null "http://127.0.0.1:$PORT/dock.html" 2>/dev/null; then
-  ( cd "$DIR" && setsid python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1 </dev/null & )
+  ( cd "$DIR" && setsid python3 "$DIR/dock_server.py" "$PORT" >/dev/null 2>&1 </dev/null & )
   sleep 0.4
 fi
 

@@ -15,7 +15,10 @@ import glob
 import json
 import os
 import pathlib
+import re
+import shutil
 import sqlite3
+import subprocess
 import time
 
 HOME = pathlib.Path.home()
@@ -94,17 +97,60 @@ try:
 except Exception:
     pass
 
-# ── pending approvals (best-effort, read-only; clickable arrives in Slice 1) ──
+# ── pending approvals (the canonical host-confirm `desktop_pending` store) ────
+# Slice 1 makes these clickable: the dock RECORDS the human's decision to
+# dock_decisions/; the gated Rust `desktop_confirm` still owns single-use
+# consumption + execution, so surfacing here never bypasses the gate.
+PENDING_DIR = HOME / ".cache/agent-bridge/desktop_pending"
+DECISIONS_DIR = HOME / ".cache/agent-bridge/dock_decisions"
+
+
+def _safe_token(t):
+    return re.sub(r"[^A-Za-z0-9_-]", "_", str(t))[:128]
+
+
 approvals = []
-for pat in (
-    str(HOME / ".cache/agent-bridge/*pending*.json"),
-    str(HOME / ".cache/agent-bridge/confirm*/*.json"),
-    str(HOME / ".cache/agent-bridge/host-confirm/*.json"),
-):
-    for f in glob.glob(pat):
-        data = load_json(f)
-        if isinstance(data, dict) and data:
-            approvals.append({"file": os.path.basename(f), "data": data})
+for f in glob.glob(str(PENDING_DIR / "*.json")):
+    rec = load_json(f)
+    if not isinstance(rec, dict) or rec.get("status") != "pending":
+        continue
+    if NOW > int(rec.get("expires_at", 0)):
+        continue  # expired tokens are dead; don't surface
+    token = rec.get("token") or pathlib.Path(f).stem
+    decided = load_json(DECISIONS_DIR / f"{_safe_token(token)}.json")
+    approvals.append({
+        "token": token,
+        "kind": rec.get("kind"),
+        "summary": rec.get("summary") or rec.get("kind"),
+        "expires_in_s": int(rec.get("expires_at", 0)) - NOW,
+        "decided": decided.get("decision") if isinstance(decided, dict) else None,
+    })
+
+
+# ── the face, deepened: avatar cortex motion semantics ───────────────────────
+def cortex_motion():
+    """Best-effort parse of `agent-bridge avatar cortex-motion` key=value output
+    into {gesture, mood, attention, animation, intensity, state}. Returns {} on
+    any failure (binary missing / slow / output changed) so the orb cleanly
+    falls back to mood-only expression."""
+    ab = shutil.which("agent-bridge") or str(HOME / ".local/bin/agent-bridge.real")
+    try:
+        out = subprocess.run(
+            [ab, "avatar", "cortex-motion"],
+            capture_output=True, text=True, timeout=3,
+        )
+        kv = {}
+        for tok in out.stdout.split():
+            if "=" in tok:
+                k, v = tok.split("=", 1)
+                kv[k] = v
+        keys = ("gesture", "mood", "attention", "animation", "intensity", "state")
+        return {k: kv[k] for k in keys if kv.get(k)}
+    except Exception:
+        return {}
+
+
+CORTEX = cortex_motion()
 
 snapshot = {
     "generated_at": NOW,
@@ -116,6 +162,7 @@ snapshot = {
         "last_event": pet.get("last_event"),
         "project": pet.get("project"),
         "updated_at": pet.get("updated_at"),
+        "cortex": CORTEX,
     },
     "presence": presence,
     "notifications": notifications,

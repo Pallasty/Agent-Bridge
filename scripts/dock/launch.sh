@@ -29,7 +29,7 @@ python3 aggregate.py >/dev/null   # first snapshot before the window opens
 AGG_PID=$!
 
 # background: serve the dock dir on localhost
-( python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1 ) &
+( python3 "$DIR/dock_server.py" "$PORT" >/dev/null 2>&1 ) &
 HTTP_PID=$!
 
 cleanup() { kill "$AGG_PID" "$HTTP_PID" "${CHROME_PID:-}" 2>/dev/null || true; }

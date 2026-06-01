@@ -21,15 +21,19 @@
     border-bottom: 1px solid var(--line); }
   .orb { width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto;
     background: radial-gradient(circle at 35% 30%, #fff6, var(--mood, var(--info)) 60%, #0000 100%);
-    box-shadow: 0 0 0 2px #0006, 0 0 14px 2px var(--mood, var(--info));
-    animation: breathe 3.6s ease-in-out infinite; }
-  @keyframes breathe { 0%,100% { transform: scale(1); opacity: .82; }
-                       50% { transform: scale(1.12); opacity: 1; } }
+    box-shadow: 0 0 0 2px #0006, 0 0 var(--glow, 14px) 2px var(--mood, var(--info));
+    animation: breathe var(--breath-dur, 3.6s) ease-in-out infinite;
+    transition: box-shadow .6s ease; }
+  /* breath amplitude + speed are driven by avatar cortex intensity (set in JS) */
+  @keyframes breathe { 0%,100% { transform: scale(1); opacity: .80; }
+                       50% { transform: scale(var(--breath-amp, 1.12)); opacity: 1; } }
   .who { flex: 1 1 auto; min-width: 0; }
   .who .name { font-weight: 600; letter-spacing: .2px; }
   .who .name .node { color: var(--dim); font-weight: 400; }
   .who .reason { color: var(--dim); font-size: 11px; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
+  .who .cortex { color: var(--faint); font-size: 10px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; letter-spacing: .2px; }
   .mode-badge { font-size: 10px; color: var(--faint); border: 1px solid var(--line);
     border-radius: 999px; padding: 1px 7px; flex: 0 0 auto; }
 
@@ -54,10 +58,25 @@
   .muted { color: var(--dim); }
   .empty { color: var(--faint); font-style: italic; padding: 2px 0; }
 
-  /* approvals — the one thing that stands out (Slice 1 makes it clickable) */
+  /* approvals — clickable (Slice 1): the row records the human's decision */
   .approval { border: 1px solid #5a4a17; background: #20180a; border-radius: 7px;
     padding: 7px 9px; margin-bottom: 6px; }
   .approval .k { color: var(--warn); font-weight: 600; }
+  .approval .ap-row { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; }
+  .approval .ap-sum { font-size: 10px; color: var(--dim); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .approval .ap-btns { display: flex; gap: 6px; margin-top: 6px; }
+  .approval button { flex: 1; font: inherit; font-size: 11px; padding: 3px 0;
+    border-radius: 5px; cursor: pointer; border: 1px solid var(--line);
+    background: #1b2230; color: var(--fg); transition: background .15s ease; }
+  .approval .ap-yes { border-color: #2e6b3a; color: #a6e3a1; }
+  .approval .ap-yes:hover { background: #16301c; }
+  .approval .ap-no { border-color: #6b2e34; color: #f3a0a8; }
+  .approval .ap-no:hover { background: #301619; }
+  .approval button:disabled { opacity: .5; cursor: default; }
+  .approval.decided { opacity: .8; }
+  .approval.decided .k.yes { color: var(--ok); }
+  .approval.decided .k.no { color: var(--bad); }
 
   footer { border-top: 1px solid var(--line); padding: 7px 12px;
     display: flex; gap: 12px; color: var(--faint); font-size: 10px; flex-wrap: wrap; }
@@ -92,6 +111,7 @@
     <div class="who">
       <div class="name">Claude <span class="node" id="self">·</span></div>
       <div class="reason" id="reason">连接中…</div>
+      <div class="cortex" id="cortex"></div>
     </div>
     <div class="mode-badge" id="mode">—</div>
   </header>
@@ -126,15 +146,39 @@ function render(d){
     (d.face && (d.face.reason || d.face.last_event)) || '静默';
   document.getElementById('mode').textContent = (d.face && (d.face.mode || d.face.mood)) || '—';
 
+  // cortex motion → orb expression (breath speed / amplitude / glow) + gesture line
+  const cx = (d.face && d.face.cortex) || {};
+  const INTENS = { low:['4.8s','1.06','10px'], medium:['3.4s','1.11','16px'],
+                   med:['3.4s','1.11','16px'], high:['2.1s','1.18','22px'] };
+  const [bdur,bamp,glow] = INTENS[cx.intensity] || ['3.6s','1.12','14px'];
+  const rs = document.documentElement.style;
+  rs.setProperty('--breath-dur', bdur);
+  rs.setProperty('--breath-amp', bamp);
+  rs.setProperty('--glow', glow);
+  document.getElementById('cortex').textContent =
+    [cx.gesture, cx.attention].filter(Boolean).join(' · ').replace(/_/g,' ');
+
   let h = '';
 
-  // approvals (only when present)
+  // approvals (only when present) — clickable; the click RECORDS the decision
+  // (the gated desktop_confirm still executes; the dock never runs host actions)
   if (d.approvals && d.approvals.length){
     h += `<section><div class="sec-h">待你拍板 · approvals</div>`;
     for (const a of d.approvals){
-      const kind = (a.data && (a.data.kind || a.data.action || a.data.tool)) || a.file;
-      h += `<div class="approval"><span class="k">⚠ ${esc(kind)}</span>
-            <span class="muted"> · ${esc(a.file)}</span></div>`;
+      const sum = esc(a.summary || a.kind || a.token || '');
+      const kind = esc(a.kind || 'host action');
+      if (a.decided){
+        const yes = a.decided === 'approve';
+        h += `<div class="approval decided"><span class="k ${yes?'yes':'no'}">${yes?'✓ 已批准':'✗ 已拒绝'}</span>
+              <span class="ap-sum"> · ${sum} · 待执行</span></div>`;
+      } else {
+        h += `<div class="approval"><div class="ap-row"><span class="k">⚠ ${kind}</span></div>
+              <div class="ap-sum">${sum}</div>
+              <div class="ap-btns">
+                <button class="ap-yes" data-token="${esc(a.token)}">允许</button>
+                <button class="ap-no" data-token="${esc(a.token)}">拒绝</button>
+              </div></div>`;
+      }
     }
     h += `</section>`;
   }
@@ -207,6 +251,26 @@ async function tick(){
     document.getElementById('reason').textContent = '聚合器未连接 (' + e + ')';
   }
 }
+
+// approval buttons are rebuilt every render → delegate clicks on #main.
+// A click only RECORDS the decision (POST /api/decide); the gated executor
+// still consumes the single-use token and performs the action.
+document.getElementById('main').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.ap-yes, .ap-no');
+  if (!btn) return;
+  const token = btn.getAttribute('data-token');
+  const decision = btn.classList.contains('ap-yes') ? 'approve' : 'reject';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/decide', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, decision }),
+    });
+    const j = await r.json();
+    if (j && j.ok) tick(); else btn.disabled = false;
+  } catch (err) { btn.disabled = false; }
+});
+
 tick();
 setInterval(tick, 3000);
 </script>
