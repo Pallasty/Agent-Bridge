@@ -77,6 +77,15 @@
   .approval.decided { opacity: .8; }
   .approval.decided .k.yes { color: var(--ok); }
   .approval.decided .k.no { color: var(--bad); }
+  /* steer payload (cross-process control plane probe): make the injection legible */
+  .approval .ap-steer { margin: 5px 0 2px; display: flex; flex-wrap: wrap; gap: 5px;
+                        align-items: baseline; font-size: 10px; }
+  .approval .ap-steer-sess { color: var(--accent, #89b4fa); font-weight: 600; }
+  .approval .ap-steer-text { flex: 1; min-width: 100%; padding: 3px 6px; border-radius: 4px;
+                             background: #11100c; border: 1px solid #3a3320; color: #e6dcc0;
+                             font-family: ui-monospace, monospace; white-space: pre-wrap;
+                             word-break: break-all; }
+  .approval .ap-steer-by { color: var(--dim); }
 
   footer { border-top: 1px solid var(--line); padding: 7px 12px;
     display: flex; gap: 12px; color: var(--faint); font-size: 10px; flex-wrap: wrap; }
@@ -172,8 +181,16 @@ function render(d){
         h += `<div class="approval decided"><span class="k ${yes?'yes':'no'}">${yes?'✓ 已批准':'✗ 已拒绝'}</span>
               <span class="ap-sum"> · ${sum} · 待执行</span></div>`;
       } else {
+        // cross-process control plane (probe): for a steer pending, show the EXACT
+        // text + target session so the human can SEE what they're releasing.
+        const steer = (a.kind === 'steer' && a.steer)
+          ? `<div class="ap-steer"><span class="ap-steer-sess">↳ ${esc(a.steer.session || '?')}</span>
+               <code class="ap-steer-text">${esc(a.steer.text || '')}${a.steer.submit ? ' ⏎' : ''}</code>
+               ${a.steer.staged_by ? `<span class="ap-steer-by">by ${esc(a.steer.staged_by)}</span>` : ''}</div>`
+          : '';
         h += `<div class="approval"><div class="ap-row"><span class="k">⚠ ${kind}</span></div>
               <div class="ap-sum">${sum}</div>
+              ${steer}
               <div class="ap-btns">
                 <button class="ap-yes" data-token="${esc(a.token)}">允许</button>
                 <button class="ap-no" data-token="${esc(a.token)}">拒绝</button>
@@ -253,8 +270,10 @@ async function tick(){
 }
 
 // approval buttons are rebuilt every render → delegate clicks on #main.
-// A click only RECORDS the decision (POST /api/decide); the gated executor
-// still consumes the single-use token and performs the action.
+// A click RELEASES the decision (POST /api/decide): reject subtracts the pending,
+// approve shells the blessed phase-2 executor by kind, which consumes the single-use
+// token BEFORE acting. The localhost POST is a human-click transport, not a trust
+// boundary (see dock_server.py); the executor owns the whole token lifecycle.
 document.getElementById('main').addEventListener('click', async (e) => {
   const btn = e.target.closest('.ap-yes, .ap-no');
   if (!btn) return;
@@ -263,7 +282,7 @@ document.getElementById('main').addEventListener('click', async (e) => {
   btn.disabled = true;
   try {
     const r = await fetch('/api/decide', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-AB-Dock': '1' },
       body: JSON.stringify({ token, decision }),
     });
     const j = await r.json();

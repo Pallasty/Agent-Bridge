@@ -101,8 +101,11 @@ except Exception:
 # Slice 1 makes these clickable: the dock RECORDS the human's decision to
 # dock_decisions/; the gated Rust `desktop_confirm` still owns single-use
 # consumption + execution, so surfacing here never bypasses the gate.
-PENDING_DIR = HOME / ".cache/agent-bridge/desktop_pending"
-DECISIONS_DIR = HOME / ".cache/agent-bridge/dock_decisions"
+# honor XDG_CACHE_HOME like desktop_confirm_store does, so a sandboxed run
+# (e.g. try_steer_demo.sh) reads the SAME isolated store the dock_server writes to.
+_CACHE_ROOT = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or (HOME / ".cache")) / "agent-bridge"
+PENDING_DIR = _CACHE_ROOT / "desktop_pending"
+DECISIONS_DIR = _CACHE_ROOT / "dock_decisions"
 
 
 def _safe_token(t):
@@ -118,13 +121,25 @@ for f in glob.glob(str(PENDING_DIR / "*.json")):
         continue  # expired tokens are dead; don't surface
     token = rec.get("token") or pathlib.Path(f).stem
     decided = load_json(DECISIONS_DIR / f"{_safe_token(token)}.json")
-    approvals.append({
+    entry = {
         "token": token,
         "kind": rec.get("kind"),
         "summary": rec.get("summary") or rec.get("kind"),
         "expires_in_s": int(rec.get("expires_at", 0)) - NOW,
         "decided": decided.get("decision") if isinstance(decided, dict) else None,
-    })
+    }
+    # cross-process control plane (probe): a steer pending injects into ANOTHER
+    # session, so surface the payload legibly — the human must see EXACTLY what text
+    # lands in which session before approving (the security crux of this direction).
+    if rec.get("kind") == "steer":
+        pl = rec.get("payload") or {}
+        entry["steer"] = {
+            "session": pl.get("session"),
+            "text": pl.get("text"),
+            "submit": bool(pl.get("submit")),
+            "staged_by": pl.get("staged_by"),
+        }
+    approvals.append(entry)
 
 
 # ── the face, deepened: avatar cortex motion semantics ───────────────────────
