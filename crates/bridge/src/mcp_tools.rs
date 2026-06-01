@@ -27874,9 +27874,11 @@ impl McpTool for AgentSteerDriveTool {
         let mut auto_answered: Vec<String> = Vec::new();
 
         loop {
-            capture =
-                match crate::remote_steer::capture(&target, &mux, &session, capture_lines).await {
-                    Ok(c) => c,
+            let snap =
+                match crate::remote_steer::capture_snapshot(&target, &mux, &session, capture_lines)
+                    .await
+                {
+                    Ok(s) => s,
                     Err(e) => {
                         let stale_marked = if steer_error_indicates_missing_mux(&e) {
                             mark_steer_presence_stale(
@@ -27895,8 +27897,9 @@ impl McpTool for AgentSteerDriveTool {
                         )));
                     }
                 };
+            capture = snap.text.clone();
 
-            if let Some(gate) = crate::remote_steer::detect_gate(&capture) {
+            if let Some(gate) = crate::remote_steer::detect_gate_snapshot(&snap) {
                 let auto = gate.class == crate::remote_steer::GateClass::AutoAnswerable;
                 if auto && auto_gate {
                     if let Some(key) = gate.suggested_key {

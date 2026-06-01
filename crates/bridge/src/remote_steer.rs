@@ -236,6 +236,12 @@ pub trait Multiplexer: Send + Sync {
     fn send_key_cmd(&self, session: &str, key: &str) -> String;
     /// Print the last `lines` of the pane (incl. scrollback) to stdout.
     fn capture_cmd(&self, session: &str, lines: u32) -> String;
+    /// One-line pane metadata for a structured snapshot, formatted as
+    /// `w=<cols> h=<rows> cx=<cursor_x> cy=<cursor_y>` (0-based cursor).
+    fn snapshot_meta_cmd(&self, session: &str) -> String;
+    /// Like [`Self::capture_cmd`] but KEEPS SGR escapes (so highlighted /
+    /// reverse-video menu items survive) and joins wrapped lines.
+    fn capture_styled_cmd(&self, session: &str, lines: u32) -> String;
     /// Exit 0 iff the session exists.
     fn has_cmd(&self, session: &str) -> String;
     /// One session name per line.
@@ -307,6 +313,28 @@ impl Multiplexer for TmuxBackend {
     fn capture_cmd(&self, session: &str, lines: u32) -> String {
         format!(
             "{bin} capture-pane -p -t {sess} -S -{lines}",
+            bin = self.bin,
+            sess = session,
+            lines = lines,
+        )
+    }
+
+    fn snapshot_meta_cmd(&self, session: &str) -> String {
+        // Pane-target (bare session name, like capture). `cursor_x/y` are
+        // 0-based and pane-relative, aligning with `capture-pane -p` lines.
+        format!(
+            "{bin} display-message -p -t {sess} \
+             'w=#{{pane_width}} h=#{{pane_height}} cx=#{{cursor_x}} cy=#{{cursor_y}}'",
+            bin = self.bin,
+            sess = session,
+        )
+    }
+
+    fn capture_styled_cmd(&self, session: &str, lines: u32) -> String {
+        // `-e` keeps SGR escapes; `-J` joins wrapped lines so a styled line
+        // aligns by index with the plain capture.
+        format!(
+            "{bin} capture-pane -p -e -J -t {sess} -S -{lines}",
             bin = self.bin,
             sess = session,
             lines = lines,
@@ -442,6 +470,47 @@ pub async fn capture(
     }
 }
 
+/// Like [`capture`] but returns a structured [`PaneSnapshot`] (dimensions,
+/// cursor, cleaned lines, highlighted-line indices). The meta/styled probes are
+/// best-effort: a backend that cannot supply them yields an empty cursor /
+/// no highlights rather than an error, so the plain capture still drives gate
+/// detection.
+pub async fn capture_snapshot(
+    target: &Target,
+    mux: &dyn Multiplexer,
+    session: &str,
+    lines: u32,
+) -> Result<PaneSnapshot, String> {
+    let plain = run_shell(
+        target,
+        &mux.capture_cmd(session, lines),
+        Duration::from_secs(15),
+    )
+    .await;
+    if !plain.ok() {
+        return Err(format!(
+            "capture failed (code {}): {}",
+            plain.code,
+            plain.stderr.trim()
+        ));
+    }
+    let meta = run_shell(
+        target,
+        &mux.snapshot_meta_cmd(session),
+        Duration::from_secs(15),
+    )
+    .await;
+    let styled = run_shell(
+        target,
+        &mux.capture_styled_cmd(session, lines),
+        Duration::from_secs(15),
+    )
+    .await;
+    let meta_s = if meta.ok() { meta.stdout } else { String::new() };
+    let styled_s = if styled.ok() { styled.stdout } else { String::new() };
+    Ok(PaneSnapshot::parse(&meta_s, &plain.stdout, &styled_s))
+}
+
 /// List live steerable (`ab__`) session names on `target`.
 pub async fn list_steer_sessions(
     target: &Target,
@@ -522,6 +591,119 @@ pub fn clean_capture(raw: &str) -> String {
         end -= 1;
     }
     trimmed[..end].join("\n")
+}
+
+// ── structured snapshot ──────────────────────────────────────────────────────
+
+/// A structured snapshot of a pane: dimensions, cursor position, cleaned lines,
+/// and which lines carried a reverse-video (highlight) SGR. This is richer
+/// input for gate detection than flat ANSI-stripped text — the cursor row marks
+/// the *active* prompt and a highlighted line marks the *selected* menu option.
+///
+/// The shape intentionally mirrors a terminal-multiplexer pane snapshot so a
+/// future non-tmux backend (e.g. an in-process SDK) could fill the same struct
+/// without changing [`detect_gate`]'s structured path.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+pub struct PaneSnapshot {
+    pub cols: u16,
+    pub rows: u16,
+    /// 0-based pane-relative `(x, y)` cursor; `None` if it could not be read.
+    pub cursor: Option<(u16, u16)>,
+    /// Cleaned (ANSI-stripped) pane lines, top-to-bottom, trailing blanks
+    /// trimmed (same cleaning as [`clean_capture`]).
+    pub lines: Vec<String>,
+    /// Indices into [`Self::lines`] that contained a reverse-video span — the
+    /// likely "selected" item in a TUI menu.
+    pub highlighted: Vec<usize>,
+    /// [`Self::lines`] joined with `\n` — the back-compatible flat text, equal
+    /// to what [`clean_capture`] would produce.
+    pub text: String,
+}
+
+impl PaneSnapshot {
+    /// The line the cursor currently sits on, if the cursor row is in range.
+    pub fn cursor_line(&self) -> Option<&str> {
+        let y = self.cursor?.1 as usize;
+        self.lines.get(y).map(String::as_str)
+    }
+
+    /// Build from raw backend outputs: a `meta` line
+    /// (`w=.. h=.. cx=.. cy=..`), the `plain` capture, and the `styled`
+    /// (SGR-preserving) capture. `meta` and `styled` may be empty.
+    pub fn parse(meta: &str, plain: &str, styled: &str) -> Self {
+        let (mut cols, mut rows) = (0u16, 0u16);
+        let (mut cx, mut cy): (Option<u16>, Option<u16>) = (None, None);
+        for tok in meta.split_whitespace() {
+            let Some((k, v)) = tok.split_once('=') else {
+                continue;
+            };
+            match k {
+                "w" => cols = v.parse().unwrap_or(0),
+                "h" => rows = v.parse().unwrap_or(0),
+                "cx" => cx = v.parse().ok(),
+                "cy" => cy = v.parse().ok(),
+                _ => {}
+            }
+        }
+        let cursor = match (cx, cy) {
+            (Some(x), Some(y)) => Some((x, y)),
+            _ => None,
+        };
+
+        let cleaned = clean_capture(plain);
+        let lines: Vec<String> = if cleaned.is_empty() {
+            Vec::new()
+        } else {
+            cleaned.lines().map(str::to_string).collect()
+        };
+
+        // A styled line aligns by index with the plain line (both `-J`-joined).
+        let mut highlighted = Vec::new();
+        for (i, sline) in styled.lines().enumerate() {
+            if i >= lines.len() {
+                break;
+            }
+            if line_has_reverse_sgr(sline) {
+                highlighted.push(i);
+            }
+        }
+
+        let text = lines.join("\n");
+        Self {
+            cols,
+            rows,
+            cursor,
+            lines,
+            highlighted,
+            text,
+        }
+    }
+}
+
+/// True iff `s` contains an SGR sequence with the reverse-video parameter `7`.
+/// A highlighted menu item is typically `ESC[7m…ESC[0m` — the span is closed
+/// before the line ends, so we test for *presence* of `7`, not whether reverse
+/// is still active at end-of-line. Foreground colours like `37` are distinct
+/// `;`-delimited tokens and never match.
+fn line_has_reverse_sgr(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == 0x1b && bytes[i + 1] == b'[' {
+            let start = i + 2;
+            let mut j = start;
+            while j < bytes.len() && !bytes[j].is_ascii_alphabetic() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'm' && s[start..j].split(';').any(|p| p == "7") {
+                return true;
+            }
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    false
 }
 
 // ── gate detection ──────────────────────────────────────────────────────────
@@ -659,6 +841,65 @@ pub fn detect_gate(capture: &str) -> Option<Gate> {
     None
 }
 
+/// Does `l` look like a selectable menu option, e.g. `1) Yes`, `2. No`,
+/// `> 1. Yes`? Used by the structured path to recognise a choice prompt even
+/// when no wording needle matched.
+fn is_option_line(l: &str) -> bool {
+    let t = l
+        .trim_start()
+        .trim_start_matches(['>', '*', '•', '-'])
+        .trim_start();
+    let mut cs = t.chars();
+    match cs.next() {
+        Some(d) if d.is_ascii_digit() => matches!(cs.next(), Some(')') | Some('.') | Some(' ')),
+        _ => false,
+    }
+}
+
+/// Structured-snapshot gate detection. Delegates wording + class to
+/// [`detect_gate`] (single source of truth — so the trust-folder prompt stays
+/// the only auto-answerable gate), then uses cursor / highlight signal to:
+///
+/// 1. replace the excerpt with the actually-*highlighted* option, which the
+///    flat-text path cannot see, and
+/// 2. catch a reverse-video menu with no literal `1)`/`1.` markers as an
+///    `unknown_choice` — always `NeedsHuman`, never blind-answered.
+pub fn detect_gate_snapshot(snap: &PaneSnapshot) -> Option<Gate> {
+    if let Some(mut gate) = detect_gate(&snap.text) {
+        if let Some(line) = snap
+            .highlighted
+            .first()
+            .and_then(|&i| snap.lines.get(i))
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+        {
+            gate.excerpt = line.to_string();
+        }
+        return Some(gate);
+    }
+
+    // No wording match, but a highlighted menu of ≥2 option-like lines is still
+    // a blocking choice the human must resolve.
+    if !snap.highlighted.is_empty() {
+        let option_like = snap.lines.iter().filter(|l| is_option_line(l)).count();
+        if option_like >= 2 {
+            let excerpt = snap
+                .highlighted
+                .first()
+                .and_then(|&i| snap.lines.get(i))
+                .map(|l| l.trim().to_string())
+                .unwrap_or_default();
+            return Some(Gate {
+                kind: "unknown_choice",
+                class: GateClass::NeedsHuman,
+                suggested_key: None,
+                excerpt,
+            });
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -719,6 +960,97 @@ mod tests {
     fn clean_capture_strips_ansi_and_trailing_blanks() {
         let raw = "\u{1b}[31mred\u{1b}[0m line\n\u{1b}]0;title\u{07}ok\n\n\n";
         assert_eq!(clean_capture(raw), "red line\nok");
+    }
+
+    #[test]
+    fn snapshot_parse_dims_cursor_and_lines() {
+        let meta = "w=100 h=24 cx=8 cy=2";
+        let plain = "Do you trust this folder?\n> 1. Yes\n  2. No\n\n\n";
+        let snap = PaneSnapshot::parse(meta, plain, "");
+        assert_eq!((snap.cols, snap.rows), (100, 24));
+        assert_eq!(snap.cursor, Some((8, 2)));
+        // Trailing blank lines trimmed by clean_capture.
+        assert_eq!(snap.lines.len(), 3);
+        assert_eq!(snap.cursor_line(), Some("  2. No"));
+        assert_eq!(snap.text, "Do you trust this folder?\n> 1. Yes\n  2. No");
+    }
+
+    #[test]
+    fn snapshot_missing_meta_yields_no_cursor() {
+        let snap = PaneSnapshot::parse("", "line one\nline two", "");
+        assert_eq!(snap.cursor, None);
+        assert_eq!(snap.cursor_line(), None);
+        assert_eq!(snap.lines.len(), 2);
+    }
+
+    #[test]
+    fn snapshot_detects_reverse_video_highlight() {
+        let plain = "  1. Yes\n  2. No";
+        // The first option is wrapped in reverse-video and reset before EOL.
+        let styled = "  \u{1b}[7m1. Yes\u{1b}[0m\n  2. No";
+        let snap = PaneSnapshot::parse("", plain, styled);
+        assert_eq!(snap.highlighted, vec![0]);
+    }
+
+    #[test]
+    fn reverse_sgr_presence_not_fooled_by_fg_color_or_reset() {
+        // foreground white (37) and reverse-off (27) must NOT count as reverse.
+        assert!(!line_has_reverse_sgr("\u{1b}[37mwhite\u{1b}[0m"));
+        assert!(!line_has_reverse_sgr("\u{1b}[27mno-reverse"));
+        assert!(!line_has_reverse_sgr("plain text, no escapes"));
+        // a closed reverse span and a bold+reverse combo both count.
+        assert!(line_has_reverse_sgr("\u{1b}[7mrev\u{1b}[0m"));
+        assert!(line_has_reverse_sgr("\u{1b}[1;7mbold-rev\u{1b}[0m"));
+    }
+
+    #[test]
+    fn snapshot_gate_delegates_and_keeps_trust_auto_answerable() {
+        let plain = "Do you trust the files in this folder?\n> 1. Yes\n  2. No";
+        let snap = PaneSnapshot::parse("w=80 h=24 cx=0 cy=3", plain, "");
+        let g = detect_gate_snapshot(&snap).expect("gate");
+        assert_eq!(g.kind, "trust_dir");
+        assert_eq!(g.class, GateClass::AutoAnswerable);
+        assert_eq!(g.suggested_key, Some("Enter"));
+    }
+
+    #[test]
+    fn snapshot_gate_excerpt_uses_highlighted_option() {
+        let plain =
+            "Approaching your weekly usage limit\n  1. Continue\n  2. Switch to a smaller model";
+        let styled = "Approaching your weekly usage limit\n  1. Continue\n  \u{1b}[7m2. Switch to a smaller model\u{1b}[0m";
+        let snap = PaneSnapshot::parse("", plain, styled);
+        let g = detect_gate_snapshot(&snap).expect("gate");
+        assert_eq!(g.kind, "quota_model_switch");
+        assert_eq!(g.class, GateClass::NeedsHuman);
+        // Excerpt is the actually-highlighted option (flat text cannot know this).
+        assert_eq!(g.excerpt, "2. Switch to a smaller model");
+    }
+
+    #[test]
+    fn snapshot_gate_catches_highlighted_menu_without_literal_markers() {
+        // Options are arrow-prefixed, so no line *starts* with "1)"/"1." and the
+        // flat-text classifier misses it entirely.
+        let plain = "  Pick an action\n  > 1. Deploy to prod\n    2. Roll back";
+        let styled = "  Pick an action\n  \u{1b}[7m> 1. Deploy to prod\u{1b}[0m\n    2. Roll back";
+        let snap = PaneSnapshot::parse("", plain, styled);
+        assert!(
+            detect_gate(&snap.text).is_none(),
+            "flat-text path should miss this menu"
+        );
+        let g = detect_gate_snapshot(&snap).expect("structured gate");
+        assert_eq!(g.kind, "unknown_choice");
+        assert_eq!(g.class, GateClass::NeedsHuman);
+        assert_eq!(g.excerpt, "> 1. Deploy to prod");
+    }
+
+    #[test]
+    fn is_option_line_recognises_common_menu_shapes() {
+        assert!(is_option_line("1) Yes"));
+        assert!(is_option_line("  2. No"));
+        assert!(is_option_line("> 1. Yes"));
+        assert!(is_option_line("- 3 Maybe"));
+        assert!(!is_option_line("Do you trust this folder?"));
+        assert!(!is_option_line("  Select: "));
     }
 
     #[test]
