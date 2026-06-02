@@ -13499,10 +13499,15 @@ impl McpTool for MemoryCompactTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Prune low-value memories. Removes only when BOTH match: min_uses \
-                 (access_count <) AND older_than_days (last_accessed_at older than). \
-                 1-hour grace on created_at. dry_run=true previews. Both omitted → \
-                 defaults (min_uses=2, older_than_days=90)."
+            description: "Retire low-value memories by tombstoning them (NOT hard-delete; \
+                 final removal is memory_purge_tombstones' 7d ladder, and tombstones \
+                 propagate the deletion across peers via NewerWins sync). Acts only on \
+                 status='active' rows, and only when BOTH match: min_uses (access_count <) \
+                 AND older_than_days (last_accessed_at older than). Durable rows are \
+                 protected and never retired: importance ≥ 0.6, author-linked \
+                 (related_keys), or graph-connected (has edges). 1-hour grace on \
+                 created_at. dry_run=true previews. Both omitted → defaults \
+                 (min_uses=2, older_than_days=90)."
                 .into(),
             input_schema: json!({
                 "type": "object",

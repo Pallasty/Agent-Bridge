@@ -1802,7 +1802,12 @@ pub trait StateStore: Send + Sync {
     }
 
     /// Apply [`CompactPolicy`]; returns the keys that were (or would be)
-    /// removed. Honours `dry_run`.
+    /// retired. Honours `dry_run`. Retirement is a **tombstone** (not a hard
+    /// DELETE) so the count stays conservation-consistent for the C3 s2 check
+    /// and the deletion propagates across peers via NewerWins sync; final row
+    /// removal is `memory_purge_tombstones`. Acts only on `status='active'`
+    /// rows and skips durable ones (importance ≥ 0.6, author-linked via
+    /// `related_keys`, or graph-connected).
     async fn memory_compact(&self, policy: CompactPolicy) -> Result<Vec<String>>;
 
     /// Hard-DELETE rows that have been tombstoned for at least `older_than_days`.
