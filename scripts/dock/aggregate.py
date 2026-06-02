@@ -112,6 +112,37 @@ def _safe_token(t):
     return re.sub(r"[^A-Za-z0-9_-]", "_", str(t))[:128]
 
 
+# Risk classifier for cross-process steer payloads. A NUDGE, not a security boundary:
+# it red-flags injection text that matches destructive/privilege/remote-exec/credential
+# patterns so the human slows down before approving. Heuristics are evadable — a flag's
+# ABSENCE must never read as "safe" (the real boundary stays human judgment + single-use).
+_RISK_HIGH = [
+    (r"\brm\s+-[rfRF]", "rm -rf"), (r"\bdd\b", "dd"), (r"\bmkfs", "mkfs"),
+    (r">\s*/dev/\w", "写 /dev/"), (r":\s*\(\s*\)\s*\{.*\|.*&\s*\}", "fork bomb"),
+    (r"\bsudo\b", "sudo"), (r"\bdoas\b", "doas"), (r"(^|\s)su\s", "su"),
+    (r"curl\b[^|]*\|\s*(sh|bash|zsh)", "curl|sh"), (r"wget\b[^|]*\|\s*(sh|bash|zsh)", "wget|sh"),
+    (r"\beval\b", "eval"), (r"(~/\.ssh|id_rsa|id_ed25519|\.env\b|secret)", "凭据/密钥"),
+    (r"\bchmod\s+-R", "chmod -R"), (r"\bchown\s+-R", "chown -R"),
+    (r"git\s+push\b[^\n]*(-f\b|--force)", "git push --force"),
+    (r"\b(shutdown|reboot|halt|poweroff)\b", "关机/重启"),
+]
+_RISK_CAUTION = [
+    (r"\|\s*(sh|bash|zsh|python\d?)\b", "管道入解释器"), (r">>?\s*\S", "重定向写文件"),
+    (r"\brm\b", "rm"), (r"\b(docker|kubectl|systemctl|apt|apt-get|pip\d?|npm|cargo)\b", "有副作用工具"),
+]
+
+
+def classify_steer_risk(text):
+    t = text or ""
+    hits = [lbl for pat, lbl in _RISK_HIGH if re.search(pat, t, re.I)]
+    if hits:
+        return {"level": "high", "reasons": hits[:3]}
+    hits = [lbl for pat, lbl in _RISK_CAUTION if re.search(pat, t, re.I)]
+    if hits:
+        return {"level": "caution", "reasons": hits[:3]}
+    return {"level": "normal", "reasons": []}
+
+
 approvals = []
 for f in glob.glob(str(PENDING_DIR / "*.json")):
     rec = load_json(f)
@@ -139,6 +170,7 @@ for f in glob.glob(str(PENDING_DIR / "*.json")):
             "submit": bool(pl.get("submit")),
             "staged_by": pl.get("staged_by"),
         }
+        entry["risk"] = classify_steer_risk(pl.get("text"))
     approvals.append(entry)
 
 

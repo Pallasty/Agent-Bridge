@@ -45,7 +45,7 @@ python3 stage_steer.py --session "$SESS" --submit --by demo-worker-A --ttl 1800 
 python3 stage_steer.py --session "$SESS" --submit --by demo-worker-B --ttl 1800 \
   --text "date '+被批准注入于 %H:%M:%S'" >/dev/null
 python3 stage_steer.py --session "$SESS" --submit --by sketchy-worker --ttl 1800 \
-  --text "echo '[假装危险] 我看着像该拒绝的命令 —— 因为你看得清我,请拒绝我'" >/dev/null
+  --text "echo '⚠ rm -rf ~/项目 —— 高危示例:会标红 + 需二次确认(其实只 echo,批了也只打印)'" >/dev/null
 python3 aggregate.py >/dev/null
 
 # keep the snapshot fresh so each card vanishes once you decide it
@@ -69,7 +69,9 @@ cat <<EOF
          tmux attach -t $SESS -r          (看完按 Ctrl-b 然后 d 脱离)
     ② 在坞里:每张 steer 卡都标明「注入什么 · 进哪个会话 · 谁排的」
          【允许】→ 该命令真的注入 $SESS 并执行(你在 ① 里能看见它跑出来)
-         【拒绝】→ 该 pending 被杀,什么都不跑(那张"假装危险"的卡专门用来体验拒绝)
+         【拒绝】→ 该 pending 被杀,什么都不跑
+         那张红色「⛔ 高危 · rm -rf」卡:点【允许】会先变「⛔ 确认执行?」,
+         要再点一下才发送(两步确认);命中危险模式的卡才有,普通卡一点即发。
     ③ 每决定一张卡,它就从坞里消失(approve=已消费单用 / reject=已杀)
 
     在本终端按 Ctrl-C(或关掉坞窗口)→ 全部拆掉,live 侧零影响。

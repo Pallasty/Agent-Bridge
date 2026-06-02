@@ -86,6 +86,16 @@
                              font-family: ui-monospace, monospace; white-space: pre-wrap;
                              word-break: break-all; }
   .approval .ap-steer-by { color: var(--dim); }
+  /* risk nudge: red-flag high-risk steer payloads + a two-step 允许 (not a security boundary) */
+  .approval.risk-hi { border-color: #7a2230; background: #241015; }
+  .approval.risk-caut { border-color: #6b5417; }
+  .approval .ap-risk { font-size: 9px; padding: 1px 6px; border-radius: 8px; font-weight: 600;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
+  .approval .ap-risk.hi { color: #f3a0a8; background: #3a151b; border: 1px solid #7a2230; }
+  .approval .ap-risk.caut { color: #f9d77a; background: #2a2410; border: 1px solid #5a4a17; }
+  .approval .ap-yes.ap-arm { border-color: #b5343f; color: #fff; background: #5a1820;
+                             animation: ab-armpulse 1s ease-in-out infinite; }
+  @keyframes ab-armpulse { 0%,100% { background: #5a1820; } 50% { background: #7a2230; } }
 
   footer { border-top: 1px solid var(--line); padding: 7px 12px;
     display: flex; gap: 12px; color: var(--faint); font-size: 10px; flex-wrap: wrap; }
@@ -188,11 +198,21 @@ function render(d){
                <code class="ap-steer-text">${esc(a.steer.text || '')}${a.steer.submit ? ' ⏎' : ''}</code>
                ${a.steer.staged_by ? `<span class="ap-steer-by">by ${esc(a.steer.staged_by)}</span>` : ''}</div>`
           : '';
-        h += `<div class="approval"><div class="ap-row"><span class="k">⚠ ${kind}</span></div>
+        // risk nudge: a high-risk steer gets a red flag + reason, and its 允许 becomes
+        // two-step (first click arms "⛔ 确认执行?", second sends). A NUDGE, not a boundary.
+        const risk = a.risk || { level: 'normal', reasons: [] };
+        const rsn = (risk.reasons && risk.reasons.length) ? ' · ' + esc(risk.reasons.join('、')) : '';
+        const riskBadge = risk.level === 'high' ? `<span class="ap-risk hi">⛔ 高危${rsn}</span>`
+                        : risk.level === 'caution' ? `<span class="ap-risk caut">⚠ 留意${rsn}</span>` : '';
+        const armed = risk.level === 'high' && (ARMED.get(a.token) || 0) > Date.now();
+        const yesCls = 'ap-yes' + (armed ? ' ap-arm' : '');
+        const hiAttr = risk.level === 'high' ? ' data-risk="high"' : '';
+        const cardCls = risk.level === 'high' ? ' risk-hi' : risk.level === 'caution' ? ' risk-caut' : '';
+        h += `<div class="approval${cardCls}"><div class="ap-row"><span class="k">⚠ ${kind}</span>${riskBadge}</div>
               <div class="ap-sum">${sum}</div>
               ${steer}
               <div class="ap-btns">
-                <button class="ap-yes" data-token="${esc(a.token)}">允许</button>
+                <button class="${yesCls}"${hiAttr} data-token="${esc(a.token)}">${armed ? '⛔ 确认执行?' : '允许'}</button>
                 <button class="ap-no" data-token="${esc(a.token)}">拒绝</button>
               </div></div>`;
       }
@@ -260,10 +280,16 @@ function render(d){
   if (window.DOCKCHARTS) window.DOCKCHARTS.renderCharts(d, window.__dockHist);
 }
 
+// high-risk approve arms for a few seconds on first click (two-step confirm); the map
+// survives re-renders so the auto-3s tick doesn't disarm a confirm you're mid-way through.
+const ARMED = new Map();   // token -> expiry(ms)
+let LAST = null;           // last snapshot, so a click can re-render to reflect ARMED
+
 async function tick(){
   try {
     const r = await fetch('dock_snapshot.json?_=' + Date.now(), {cache:'no-store'});
-    render(await r.json());
+    LAST = await r.json();
+    render(LAST);
   } catch(e) {
     document.getElementById('reason').textContent = '聚合器未连接 (' + e + ')';
   }
@@ -279,6 +305,17 @@ document.getElementById('main').addEventListener('click', async (e) => {
   if (!btn) return;
   const token = btn.getAttribute('data-token');
   const decision = btn.classList.contains('ap-yes') ? 'approve' : 'reject';
+  // high-risk approve = two-step: first click ARMS ("⛔ 确认执行?"), a second click within
+  // 4s actually sends. Reject and normal/caution approve stay one click.
+  if (decision === 'approve' && btn.dataset.risk === 'high') {
+    const now = Date.now();
+    if ((ARMED.get(token) || 0) <= now) {   // not armed → arm + reflect, do NOT send
+      ARMED.set(token, now + 4000);
+      if (LAST) render(LAST);
+      return;
+    }
+    ARMED.delete(token);                     // armed → fall through to send
+  }
   btn.disabled = true;
   try {
     const r = await fetch('/api/decide', {
