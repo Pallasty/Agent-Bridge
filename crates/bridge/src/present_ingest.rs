@@ -336,9 +336,9 @@ mod tests {
         assert!(m.content.contains("\"chain_head\": \"f4bbe660912587cd\""));
         assert!(m.tags.contains(&"embody:embodied".to_string()));
 
-        // A present() outcome carries chain_head but NO embody axis: chain_head
-        // forwards, embody_status is honestly null, and there is NO embody tag
-        // (the absence is not silently turned into a claim).
+        // A present() outcome carries chain_head and explicitly says its embody
+        // axis is n/a. The producer no longer leaves consumers guessing whether
+        // the missing axis is a bug or a non-embodied surface.
         let plain = json!({
             "artifact_id": "plainprov0001",
             "ts": 1u64,
@@ -346,12 +346,13 @@ mod tests {
             "kind": "table",
             "verify_status": "rendered_ok",
             "verify_method": "browser_eval",
+            "embody_status": "not_applicable",
             "chain_head": "deadbeefcafe0000",
         });
         let m2 = build_outcome_memory(&plain, 0).unwrap();
         assert!(m2.content.contains("\"chain_head\": \"deadbeefcafe0000\""));
-        assert!(m2.content.contains("\"embody_status\": null"));
-        assert!(!m2.tags.iter().any(|t| t.starts_with("embody:")));
+        assert!(m2.content.contains("\"embody_status\": \"not_applicable\""));
+        assert!(m2.tags.contains(&"embody:not_applicable".to_string()));
     }
 
     #[test]

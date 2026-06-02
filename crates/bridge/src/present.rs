@@ -176,6 +176,10 @@ pub enum EmbodyStatus {
     /// The surface produced nothing visible, or showed no `chain_head` at all —
     /// a real render fault (the E3 `blank`/`Dead`).
     Dead,
+    /// This producer has no persistent embodied surface to verify. Mirrors
+    /// `InteractStatus::NotApplicable`: an explicit n/a axis is more honest
+    /// than leaving the field absent and making consumers guess.
+    NotApplicable,
     /// No browser available / capability denied / launch failed — degraded, not
     /// failed (the artifact file was still written; mirrors `VerifyStatus::NoBrowser`).
     NoBrowser,
@@ -191,6 +195,7 @@ impl EmbodyStatus {
             Self::Embodied => "embodied",
             Self::Stale => "stale",
             Self::Dead => "dead",
+            Self::NotApplicable => "not_applicable",
             Self::NoBrowser => "no_browser",
             Self::Error => "error",
             Self::Skipped => "skipped",
@@ -211,6 +216,7 @@ impl EmbodyStatus {
     pub fn implied_verify_status(&self) -> VerifyStatus {
         match self {
             Self::Embodied | Self::Stale => VerifyStatus::RenderedOk,
+            Self::NotApplicable => VerifyStatus::RenderedOk,
             Self::Dead => VerifyStatus::Blank,
             Self::NoBrowser => VerifyStatus::NoBrowser,
             Self::Error => VerifyStatus::Error,
@@ -1317,7 +1323,8 @@ pub const OUTCOME_SIDECAR_SUFFIX: &str = "outcome.json";
 /// Pure falsifier gate over a record's honesty axes — is this action→outcome
 /// record eligible for the verified training-signal stream? Eligible iff the
 /// render verified (`verify_status == rendered_ok`) AND, where the axis applies,
-/// embodiment did not fail (`embody_status` absent or `embodied`) AND
+/// embodiment did not fail (`embody_status` absent or `embodied` /
+/// `not_applicable`) AND
 /// interactivity did not fail (`interactive_status` absent or one of
 /// `verified` / `not_applicable`) AND, for a record that carries a human-decision
 /// axis (an approval card), the human actually DECIDED (`decision` absent or one
@@ -1339,8 +1346,8 @@ pub fn outcome_gate(
         );
     }
     if let Some(e) = embody_status {
-        if e != "embodied" {
-            return (false, format!("embody_status={e} (need embodied)"));
+        if e != "embodied" && e != "not_applicable" {
+            return (false, format!("embody_status={e} (need embodied|not_applicable)"));
         }
     }
     if let Some(i) = interactive_status {
@@ -1505,7 +1512,8 @@ pub fn outcomes_memory_drift_snapshot(
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut distinct_verified = 0usize;
     let mut distinct_represented = 0usize;
-    let mut embody_unknown = 0usize;
+    let mut embody_absent = 0usize;
+    let mut embody_not_applicable = 0usize;
     for r in recs {
         let artifact_id = r.get("artifact_id").and_then(Value::as_str).unwrap_or("");
         let ts = r.get("ts").and_then(Value::as_u64).unwrap_or(0);
@@ -1515,12 +1523,7 @@ pub fn outcomes_memory_drift_snapshot(
         let action_tool = r.get("action_tool").and_then(Value::as_str).unwrap_or("");
         let gate_reason = r.get("gate_reason").and_then(Value::as_str).unwrap_or("");
         let decision = r.get("decision").and_then(Value::as_str);
-        // Known limitation surfaced honestly: present()-origin sidecars omit
-        // embody_status, so outcome_gate's embodiment rung was skipped (Option
-        // None passes). Flag it rather than implying the embody axis was checked.
-        if r.get("embody_status").is_none() {
-            embody_unknown += 1;
-        }
+        let embody_status = r.get("embody_status").and_then(Value::as_str);
         let matched = represented_keys_by_artifact
             .get(artifact_id)
             .cloned()
@@ -1535,6 +1538,13 @@ pub fn outcomes_memory_drift_snapshot(
             distinct_verified += 1;
             if represented {
                 distinct_represented += 1;
+            }
+            // Keep honesty buckets on the same DISTINCT-artifact denominator as
+            // verified/drift so duplicate sidecars cannot inflate them.
+            match embody_status {
+                None => embody_absent += 1,
+                Some("not_applicable") => embody_not_applicable += 1,
+                _ => {}
             }
         }
 
@@ -1595,7 +1605,8 @@ pub fn outcomes_memory_drift_snapshot(
         "represented_count": distinct_represented,
         "missing_count": distinct_missing,
         "drift": distinct_missing,
-        "embody_status_absent": embody_unknown,
+        "embody_status_absent": embody_absent,
+        "embody_not_applicable": embody_not_applicable,
         "chain_head": prev,
         "events": events,
     })
@@ -2240,6 +2251,7 @@ mod tests {
         assert_eq!(EmbodyStatus::Embodied.implied_verify_status(), VerifyStatus::RenderedOk);
         // Stale RENDERED (it's only behind) → render axis ok; embody rung gates it.
         assert_eq!(EmbodyStatus::Stale.implied_verify_status(), VerifyStatus::RenderedOk);
+        assert_eq!(EmbodyStatus::NotApplicable.implied_verify_status(), VerifyStatus::RenderedOk);
         // Dead produced nothing visible → blank, never rendered_ok.
         assert_eq!(EmbodyStatus::Dead.implied_verify_status(), VerifyStatus::Blank);
         assert_eq!(EmbodyStatus::NoBrowser.implied_verify_status(), VerifyStatus::NoBrowser);
@@ -2349,6 +2361,8 @@ mod tests {
         assert!(outcome_gate("rendered_ok", None, None, None).0);
         // verified + embodied + interactive verified → eligible.
         assert!(outcome_gate("rendered_ok", Some("embodied"), Some("verified"), None).0);
+        // verified + embody not_applicable → eligible (no embodied surface claimed).
+        assert!(outcome_gate("rendered_ok", Some("not_applicable"), None, None).0);
         // verified + interactive not_applicable → eligible (no interactivity claimed).
         assert!(outcome_gate("rendered_ok", None, Some("not_applicable"), None).0);
 
@@ -2386,20 +2400,21 @@ mod tests {
     fn slice_a_projection_tallies_full_set_and_filters() {
         let records = vec![
             json!({"artifact_id": "a", "verify_status": "rendered_ok", "ts": 3}),
+            json!({"artifact_id": "n", "verify_status": "rendered_ok", "embody_status": "not_applicable", "ts": 4}),
             json!({"artifact_id": "b", "verify_status": "blank", "ts": 2}),
             json!({"artifact_id": "c", "verify_status": "rendered_ok", "interactive_status": "dead", "ts": 1}),
         ];
         let strict = present_outcomes_projection(&records, true);
-        assert_eq!(strict["total_records"], json!(3));
-        assert_eq!(strict["eligible_count"], json!(1));
+        assert_eq!(strict["total_records"], json!(4));
+        assert_eq!(strict["eligible_count"], json!(2));
         assert_eq!(strict["rejected_count"], json!(2));
-        assert_eq!(strict["outcomes"].as_array().unwrap().len(), 1, "verified_only surfaces only eligible");
+        assert_eq!(strict["outcomes"].as_array().unwrap().len(), 2, "verified_only surfaces only eligible");
         assert_eq!(strict["outcomes"][0]["artifact_id"], json!("a"));
         assert_eq!(strict["outcomes"][0]["eligible"], json!(true));
 
         let full = present_outcomes_projection(&records, false);
-        assert_eq!(full["eligible_count"], json!(1));
-        assert_eq!(full["outcomes"].as_array().unwrap().len(), 3, "verified_only=false surfaces all, annotated");
+        assert_eq!(full["eligible_count"], json!(2));
+        assert_eq!(full["outcomes"].as_array().unwrap().len(), 4, "verified_only=false surfaces all, annotated");
         // each surfaced row carries the gate verdict + reason.
         let b = full["outcomes"].as_array().unwrap().iter().find(|r| r["artifact_id"] == json!("b")).unwrap();
         assert_eq!(b["eligible"], json!(false));
@@ -2591,10 +2606,61 @@ mod tests {
 
     #[test]
     fn slice_b_drift_flags_absent_embody_status() {
-        // T6 (honesty): present()-origin records omit embody_status; surface it
-        // as a known limitation rather than implying the embody axis was checked.
+        // T6 (honesty): legacy/synthetic records that omit embody_status remain
+        // visible as a real gap; present()-origin records now stamp n/a instead.
         let recs = vec![vrec("noembody1234", 1)]; // vrec has no embody_status
         let snap = outcomes_memory_drift_snapshot(&recs, &empty_mentions(), &empty_mentions(), 0, 1);
         assert_eq!(snap["embody_status_absent"], json!(1));
+        assert_eq!(snap["embody_not_applicable"], json!(0));
+    }
+
+    #[test]
+    fn slice_b_drift_splits_not_applicable_and_counts_distinct_artifacts() {
+        let mut a1 = vrec("plainna1234", 1);
+        a1["embody_status"] = json!("not_applicable");
+        let mut a2 = vrec("plainna1234", 2);
+        a2["embody_status"] = json!("not_applicable");
+        let legacy = vrec("legacy000001", 3);
+        let snap = outcomes_memory_drift_snapshot(&[a1, a2, legacy], &empty_mentions(), &empty_mentions(), 0, 1);
+        assert_eq!(snap["event_count"], json!(3));
+        assert_eq!(snap["verified_count"], json!(2), "distinct artifacts");
+        assert_eq!(snap["embody_not_applicable"], json!(1), "duplicate n/a artifact counted once");
+        assert_eq!(snap["embody_status_absent"], json!(1), "legacy absent artifact counted once");
+    }
+
+    #[test]
+    fn slice_b_not_applicable_is_value_invariant_for_drift_counts() {
+        // #2149 / #1983: swapping legacy None for explicit n/a must not change
+        // the eligible cohort or drift values. Otherwise this fix would silently
+        // "heal" drift by cutting records out of verified_only.
+        use std::collections::HashMap;
+        let legacy_raw = vec![
+            json!({"artifact_id": "represented1", "verify_status": "rendered_ok", "ts": 1}),
+            json!({"artifact_id": "missing0001", "verify_status": "rendered_ok", "ts": 2}),
+        ];
+        let na_raw: Vec<Value> = legacy_raw
+            .iter()
+            .cloned()
+            .map(|mut v| {
+                v["embody_status"] = json!("not_applicable");
+                v
+            })
+            .collect();
+        let legacy_projection = present_outcomes_projection(&legacy_raw, true);
+        let na_projection = present_outcomes_projection(&na_raw, true);
+        let legacy_records = legacy_projection["outcomes"].as_array().unwrap().clone();
+        let na_records = na_projection["outcomes"].as_array().unwrap().clone();
+        assert_eq!(legacy_records.len(), na_records.len(), "eligible cohort size unchanged");
+
+        let mut represented: HashMap<String, Vec<String>> = HashMap::new();
+        represented.insert("represented1".into(), vec!["outcome_represented1".into()]);
+        let legacy_snap = outcomes_memory_drift_snapshot(&legacy_records, &represented, &empty_mentions(), 0, 1);
+        let na_snap = outcomes_memory_drift_snapshot(&na_records, &represented, &empty_mentions(), 0, 1);
+        assert_eq!(legacy_snap["verified_count"], na_snap["verified_count"]);
+        assert_eq!(legacy_snap["represented_count"], na_snap["represented_count"]);
+        assert_eq!(legacy_snap["drift"], na_snap["drift"]);
+        assert_eq!(legacy_snap["embody_status_absent"], json!(2));
+        assert_eq!(na_snap["embody_status_absent"], json!(0));
+        assert_eq!(na_snap["embody_not_applicable"], json!(2));
     }
 }

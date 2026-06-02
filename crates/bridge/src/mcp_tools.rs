@@ -5500,6 +5500,7 @@ impl McpTool for PresentTool {
             "action_tool": "present",
             "kind": kind.as_str(),
             "verify_status": verify_status.as_str(),
+            "embody_status": crate::present::EmbodyStatus::NotApplicable.as_str(),
             "interactive_status": interactive_status.map(|s| s.as_str()),
             "verify_method": verify_method,
             "dual_encoding": dual_encoding,
@@ -5880,6 +5881,7 @@ impl McpTool for PresentVoiceTool {
             "action_tool": "present_voice",
             "kind": "voice",
             "verify_status": verify_status,
+            "embody_status": crate::present::EmbodyStatus::NotApplicable.as_str(),
             "verify_method": "audio_bus_readback",
             "audio_status": status,
             "capture_channel": capture_channel,
@@ -6358,6 +6360,7 @@ impl McpTool for PresentApprovalTool {
             "action_tool": "present_await_decision",
             "kind": "approval",
             "verify_status": "rendered_ok",
+            "embody_status": crate::present::EmbodyStatus::NotApplicable.as_str(),
             "decision": decision_status,
             "verify_method": "human_decision",
             "token_match": token_match,
@@ -34192,6 +34195,13 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(html.contains("<td>e5</td>"));
         let recovered = crate::present::extract_ab_payload(&html).expect("payload recoverable");
         assert_eq!(recovered, json!([{"name": "e5", "dims": 384}]));
+        let id = res["id"].as_str().expect("id");
+        let outcome_path = dir.join(format!("{id}.outcome.json"));
+        let outcome: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(outcome_path).expect("outcome sidecar"))
+                .expect("outcome json");
+        assert_eq!(outcome["action_tool"], "present");
+        assert_eq!(outcome["embody_status"], "not_applicable");
 
         std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
         let _ = std::fs::remove_dir_all(&dir);
