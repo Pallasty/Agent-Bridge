@@ -268,6 +268,123 @@ enum AvatarOp {
         #[arg(long)]
         include_compat: bool,
     },
+    /// Open the Linux avatar renderer in a small browser app window.
+    LinuxFloater {
+        /// Base URL for a running daemon-http instance.
+        #[arg(long, default_value = "http://127.0.0.1:7878")]
+        base_url: String,
+        /// Filter by project slug.
+        #[arg(long)]
+        project: Option<String>,
+        /// Filter by role.
+        #[arg(long)]
+        role: Option<String>,
+        /// Equivalent to renderer include_stale=true.
+        #[arg(long)]
+        include_stale: bool,
+        /// Request the pet-only transparent renderer route and browser hints.
+        #[arg(long)]
+        transparent: bool,
+        /// Browser binary. Defaults to the first supported browser on PATH.
+        #[arg(long)]
+        browser: Option<String>,
+        /// Floater window width in pixels.
+        #[arg(long, default_value_t = 360)]
+        width: u32,
+        /// Floater window height in pixels.
+        #[arg(long, default_value_t = 520)]
+        height: u32,
+        /// After launch, ask Sway to make the renderer floating/sticky.
+        #[arg(long)]
+        sway_manage: bool,
+        /// Sway X coordinate used with --sway-manage.
+        #[arg(long, default_value_t = 40)]
+        sway_x: i32,
+        /// Sway Y coordinate used with --sway-manage.
+        #[arg(long, default_value_t = 80)]
+        sway_y: i32,
+        /// Print the launch plan without spawning the browser.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit raw JSON payload instead of a command line summary.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run a native Wayland/layer-shell transparent avatar probe.
+    LinuxNativeTransparent {
+        /// Probe surface width in pixels.
+        #[arg(long, default_value_t = 360)]
+        width: u32,
+        /// Probe surface height in pixels.
+        #[arg(long, default_value_t = 520)]
+        height: u32,
+        /// Layer-shell layer: top or overlay.
+        #[arg(long, default_value = "overlay")]
+        layer: String,
+        /// Screen anchor: top-left, top-right, bottom-left, bottom-right.
+        #[arg(long, default_value = "bottom-right")]
+        anchor: String,
+        /// Top margin in pixels.
+        #[arg(long, default_value_t = 0)]
+        margin_top: i32,
+        /// Right margin in pixels.
+        #[arg(long, default_value_t = 96)]
+        margin_right: i32,
+        /// Bottom margin in pixels.
+        #[arg(long, default_value_t = 96)]
+        margin_bottom: i32,
+        /// Left margin in pixels.
+        #[arg(long, default_value_t = 0)]
+        margin_left: i32,
+        /// How long to keep the probe visible.
+        #[arg(long, default_value_t = 2_000)]
+        duration_ms: u64,
+        /// Avatar lifecycle mode used to choose a native PNG sprite asset.
+        #[arg(long, default_value = "idle")]
+        mode: String,
+        /// Pet sidecar id to poll for live state updates. Omit for static --mode.
+        #[arg(long)]
+        pet_id: Option<String>,
+        /// HTTP renderer-state endpoint to poll for live state updates.
+        #[arg(long)]
+        state_url: Option<String>,
+        /// Milliseconds between live state polls when --pet-id or --state-url is set.
+        #[arg(long, default_value_t = ab_bridge::avatar_native::DEFAULT_NATIVE_STATE_POLL_MS)]
+        state_poll_ms: u64,
+        /// HTTP timeout in milliseconds when --state-url is set.
+        #[arg(long, default_value_t = ab_bridge::avatar_native::DEFAULT_NATIVE_STATE_HTTP_TIMEOUT_MS)]
+        state_http_timeout_ms: u64,
+        /// Override the sidecar sprite asset id. Use `none` for marker-only probe.
+        #[arg(long)]
+        asset: Option<String>,
+        /// Atlas frame column.
+        #[arg(long, default_value_t = 0)]
+        frame_col: u32,
+        /// Atlas frame row.
+        #[arg(long, default_value_t = 0)]
+        frame_row: u32,
+        /// Atlas cell width.
+        #[arg(long, default_value_t = ab_bridge::avatar_native::DEFAULT_NATIVE_SPRITE_CELL_WIDTH)]
+        cell_width: u32,
+        /// Atlas cell height.
+        #[arg(long, default_value_t = ab_bridge::avatar_native::DEFAULT_NATIVE_SPRITE_CELL_HEIGHT)]
+        cell_height: u32,
+        /// Sprite scale as a percentage.
+        #[arg(long, default_value_t = ab_bridge::avatar_native::DEFAULT_NATIVE_SPRITE_SCALE_PERCENT)]
+        sprite_scale_percent: u32,
+        /// Number of atlas frames to animate from the selected base frame.
+        #[arg(long, default_value_t = ab_bridge::avatar_native::DEFAULT_NATIVE_FRAME_COUNT)]
+        frame_count: u32,
+        /// Milliseconds between native sprite frames.
+        #[arg(long, default_value_t = ab_bridge::avatar_native::DEFAULT_NATIVE_FRAME_INTERVAL_MS)]
+        frame_interval_ms: u64,
+        /// Print the launch plan without opening the native surface.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit raw JSON payload instead of a command line summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Sync the current pet sidecar into a presence row for CLI/launchd heartbeats.
     SyncPresence {
         /// Pet id to sync. Defaults to AB_PET_ID, current Codex avatar, then xiao-shu-v2.
@@ -2741,6 +2858,92 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
+            AvatarOp::LinuxFloater {
+                base_url,
+                project,
+                role,
+                include_stale,
+                transparent,
+                browser,
+                width,
+                height,
+                sway_manage,
+                sway_x,
+                sway_y,
+                dry_run,
+                json: as_json,
+            } => {
+                run_avatar_linux_floater(
+                    base_url.clone(),
+                    project.clone(),
+                    role.clone(),
+                    *include_stale,
+                    *transparent,
+                    browser.clone(),
+                    *width,
+                    *height,
+                    *sway_manage,
+                    *sway_x,
+                    *sway_y,
+                    *dry_run,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::LinuxNativeTransparent {
+                width,
+                height,
+                layer,
+                anchor,
+                margin_top,
+                margin_right,
+                margin_bottom,
+                margin_left,
+                duration_ms,
+                mode,
+                pet_id,
+                state_url,
+                state_poll_ms,
+                state_http_timeout_ms,
+                asset,
+                frame_col,
+                frame_row,
+                cell_width,
+                cell_height,
+                sprite_scale_percent,
+                frame_count,
+                frame_interval_ms,
+                dry_run,
+                json: as_json,
+            } => {
+                run_avatar_linux_native_transparent(
+                    *width,
+                    *height,
+                    layer.clone(),
+                    anchor.clone(),
+                    *margin_top,
+                    *margin_right,
+                    *margin_bottom,
+                    *margin_left,
+                    *duration_ms,
+                    mode.clone(),
+                    pet_id.clone(),
+                    state_url.clone(),
+                    *state_poll_ms,
+                    *state_http_timeout_ms,
+                    asset.clone(),
+                    *frame_col,
+                    *frame_row,
+                    *cell_width,
+                    *cell_height,
+                    *sprite_scale_percent,
+                    *frame_count,
+                    *frame_interval_ms,
+                    *dry_run,
+                    *as_json,
+                )
+                .await
+            }
             AvatarOp::SyncPresence {
                 pet_id,
                 session_id,
@@ -4221,6 +4424,266 @@ async fn run_avatar_surface(
         );
     } else {
         println!("{report}");
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_linux_floater(
+    base_url: String,
+    project: Option<String>,
+    role: Option<String>,
+    include_stale: bool,
+    transparent: bool,
+    browser: Option<String>,
+    width: u32,
+    height: u32,
+    sway_manage: bool,
+    sway_x: i32,
+    sway_y: i32,
+    dry_run: bool,
+    as_json: bool,
+) -> Result<()> {
+    let opts = ab_bridge::avatar_floater::LinuxFloaterOptions {
+        base_url,
+        project,
+        role,
+        include_stale,
+        width,
+        height,
+        browser,
+        transparent,
+    };
+    let url = ab_bridge::avatar_floater::linux_renderer_url(&opts);
+    let candidates = ab_bridge::avatar_floater::browser_candidates_from_path();
+    let browser = ab_bridge::avatar_floater::choose_browser(opts.browser.as_deref(), &candidates)
+        .ok_or_else(|| {
+        anyhow::anyhow!(
+            "no supported browser found on PATH; pass --browser google-chrome or similar"
+        )
+    })?;
+    let args = ab_bridge::avatar_floater::browser_app_args(
+        &url,
+        opts.width,
+        opts.height,
+        opts.transparent,
+    );
+    let sway_command = sway_manage.then(|| {
+        ab_bridge::avatar_floater::sway_manage_command(
+            ab_bridge::avatar_floater::LINUX_RENDERER_TITLE,
+            opts.width,
+            opts.height,
+            sway_x,
+            sway_y,
+        )
+    });
+
+    if dry_run {
+        if as_json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "surface": "linux_avatar_floater_launch_plan",
+                    "read_only": true,
+                    "browser": browser,
+                    "args": args,
+                    "url": url,
+                    "width": opts.width,
+                    "height": opts.height,
+                    "transparent": opts.transparent,
+                    "sway_manage": sway_manage,
+                    "sway_command": sway_command,
+                    "spawned": false,
+                }))?
+            );
+        } else {
+            println!("browser: {browser}");
+            println!("url: {url}");
+            println!("args: {}", args.join(" "));
+            if let Some(command) = &sway_command {
+                println!("swaymsg: {command}");
+            }
+        }
+        return Ok(());
+    }
+
+    let mut command = if cfg!(unix) {
+        let mut command = std::process::Command::new("setsid");
+        command.arg(&browser);
+        command
+    } else {
+        std::process::Command::new(&browser)
+    };
+    command
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let child = command
+        .spawn()
+        .with_context(|| format!("spawn Linux avatar floater launcher for `{browser}`"))?;
+
+    let mut sway_managed = false;
+    if let Some(command) = &sway_command {
+        run_sway_manage_command(command).await?;
+        sway_managed = true;
+    }
+
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "surface": "linux_avatar_floater_launch_plan",
+                "read_only": true,
+                "browser": browser,
+                "args": args,
+                "url": url,
+                "width": opts.width,
+                "height": opts.height,
+                "transparent": opts.transparent,
+                "sway_manage": sway_manage,
+                "sway_command": sway_command,
+                "sway_managed": sway_managed,
+                "spawned": true,
+                "pid": child.id(),
+            }))?
+        );
+    } else {
+        println!("launched Linux avatar floater pid={} url={url}", child.id());
+        if sway_managed {
+            println!("managed Linux avatar floater with swaymsg");
+        }
+    }
+    Ok(())
+}
+
+async fn run_sway_manage_command(command: &str) -> Result<()> {
+    let mut last_exit = None;
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let status = std::process::Command::new("swaymsg")
+            .arg(command)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .with_context(|| format!("spawn swaymsg for Linux avatar floater: {command}"))?;
+        if status.success() {
+            return Ok(());
+        }
+        last_exit = status.code();
+    }
+    anyhow::bail!("swaymsg failed for Linux avatar floater after retries: exit={last_exit:?}")
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_linux_native_transparent(
+    width: u32,
+    height: u32,
+    layer: String,
+    anchor: String,
+    margin_top: i32,
+    margin_right: i32,
+    margin_bottom: i32,
+    margin_left: i32,
+    duration_ms: u64,
+    mode: String,
+    pet_id: Option<String>,
+    state_url: Option<String>,
+    state_poll_ms: u64,
+    state_http_timeout_ms: u64,
+    asset: Option<String>,
+    frame_col: u32,
+    frame_row: u32,
+    cell_width: u32,
+    cell_height: u32,
+    sprite_scale_percent: u32,
+    frame_count: u32,
+    frame_interval_ms: u64,
+    dry_run: bool,
+    as_json: bool,
+) -> Result<()> {
+    let layer = ab_bridge::avatar_native::parse_native_layer(&layer)
+        .ok_or_else(|| anyhow::anyhow!("invalid --layer; expected top or overlay"))?;
+    let anchor = ab_bridge::avatar_native::parse_native_anchor(&anchor).ok_or_else(|| {
+        anyhow::anyhow!(
+            "invalid --anchor; expected top-left, top-right, bottom-left, or bottom-right"
+        )
+    })?;
+    let state_pet_id = pet_id
+        .as_deref()
+        .map(|value| ab_bridge::pet_state::normalize_pet_id(Some(value)));
+    let state_url = state_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let sprite_asset = match asset.as_deref().map(str::trim) {
+        Some("none") | Some("None") | Some("NONE") => None,
+        Some(value) if !value.is_empty() => Some(value.to_string()),
+        _ => ab_bridge::avatar_native::native_sprite_asset_for_mode(&mode),
+    };
+    let mut opts = ab_bridge::avatar_native::NativeTransparentOptions {
+        width,
+        height,
+        layer,
+        anchor,
+        margin_top,
+        margin_right,
+        margin_bottom,
+        margin_left,
+        duration_ms,
+        sprite_asset,
+        frame_col,
+        frame_row,
+        cell_width,
+        cell_height,
+        sprite_scale_percent,
+        frame_count,
+        frame_interval_ms,
+        state_pet_id: state_pet_id.clone(),
+        state_url,
+        state_poll_ms,
+        state_http_timeout_ms,
+        ..ab_bridge::avatar_native::NativeTransparentOptions::default()
+    };
+    if let Some(pet_id) = state_pet_id.as_deref() {
+        if let Some(state) = ab_bridge::pet_state::read_pet_state(pet_id)
+            .with_context(|| format!("read native avatar pet sidecar state for {pet_id}"))?
+        {
+            let plan = ab_bridge::avatar_native::native_sprite_plan_from_state_value(&state);
+            ab_bridge::avatar_native::apply_native_sprite_plan(&mut opts, &plan);
+        }
+    }
+
+    if dry_run {
+        let plan = ab_bridge::avatar_native::native_transparent_plan_json(&opts, false);
+        if as_json {
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+        } else {
+            println!(
+                "native transparent probe: {}x{} layer={} anchor={} duration={}ms",
+                opts.width,
+                opts.height,
+                ab_bridge::avatar_native::native_layer_name(opts.layer),
+                ab_bridge::avatar_native::native_anchor_name(opts.anchor).replace('_', "-"),
+                opts.duration_ms
+            );
+            println!("backend: wayland_wlr_layer_shell");
+            println!("pixel_format: wl_shm::Argb8888");
+        }
+        return Ok(());
+    }
+
+    ab_bridge::avatar_native::run_native_transparent_probe(opts.clone())?;
+    let plan = ab_bridge::avatar_native::native_transparent_plan_json(&opts, true);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+    } else {
+        println!(
+            "native transparent probe completed: {}x{} duration={}ms",
+            opts.width, opts.height, opts.duration_ms
+        );
     }
     Ok(())
 }

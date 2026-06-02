@@ -5,7 +5,10 @@
 pub mod anthropic_api;
 pub mod avatar_alert;
 pub mod avatar_cortex;
+pub mod avatar_floater;
 pub mod avatar_health;
+pub mod avatar_native;
+pub mod avatar_renderer;
 pub mod avatar_seed;
 pub mod avatar_surface;
 pub mod bootstrap_bfs;

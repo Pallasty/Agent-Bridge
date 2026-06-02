@@ -47,6 +47,11 @@ axum = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # C2 lockfile primitive (kill(pid, 0) liveness probe).
 libc = "0.2"
+png = "0.17"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+smithay-client-toolkit = "0.20"
+wayland-client = "0.31"
 
 [dev-dependencies]
 tempfile = "3"

@@ -20,6 +20,8 @@
 //!   - `GET /avatar-surface/cortex-binding-fixture?...` — sidecar preview fixtures
 //!   - `GET /avatar-surface/cortex-visual-adapter?...` — sidecar frame preview
 //!   - `GET /avatar-surface/cortex-renderer-view?...` — browser sidecar renderer view
+//!   - `GET /avatar-surface/linux-renderer-state?...` — project-aware Linux renderer state
+//!   - `GET /avatar-surface/linux-renderer?...` — browser proof for Linux floater renderer
 //!   - `GET /avatar-surface/pet-spritesheet?...` — read-only installed pet sprite source
 //!   - `GET /avatar-surface/sidecar-spritesheet?...` — read-only prototype sprite source
 //!   - `GET /avatar-surface/cortex-review-gate?...` — read-only renderer review gate
@@ -153,6 +155,11 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
             "/avatar-surface/cortex-renderer-view",
             get(avatar_cortex_renderer_view),
         )
+        .route(
+            "/avatar-surface/linux-renderer-state",
+            get(avatar_linux_renderer_state),
+        )
+        .route("/avatar-surface/linux-renderer", get(avatar_linux_renderer))
         .route(
             "/avatar-surface/pet-spritesheet",
             get(avatar_pet_spritesheet),
@@ -579,6 +586,8 @@ struct AvatarSurfaceQuery {
     include_raw_presence: bool,
     #[serde(default)]
     include_compat: bool,
+    #[serde(default)]
+    transparent: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -1173,6 +1182,120 @@ async fn avatar_cortex_renderer_view(
         q.track_index,
         q.variant.as_deref(),
     )))
+}
+
+fn str_value(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+}
+
+fn avatar_renderer_pet_id_from_entry(entry: Option<&Value>) -> String {
+    entry
+        .and_then(|value| str_value(value, "avatar_id"))
+        .or_else(|| {
+            entry.and_then(|value| {
+                value
+                    .get("compat_pet_state")
+                    .and_then(|compat| str_value(compat, "pet_id"))
+            })
+        })
+        .unwrap_or_else(crate::pet_state::default_pet_id)
+}
+
+async fn avatar_linux_renderer_payload(
+    s: &AppState,
+    q: &AvatarSurfaceQuery,
+) -> Result<Value, (StatusCode, String)> {
+    let avatars = avatar_surface_entries(s, q).await?;
+    let projected = avatars.first();
+    let pet_id = avatar_renderer_pet_id_from_entry(projected);
+    let raw_pet = crate::pet_state::read_pet_state(&pet_id).map_err(internal_error)?;
+    let raw_ref = raw_pet.as_ref();
+    let project = q
+        .project
+        .clone()
+        .or_else(|| projected.and_then(|value| str_value(value, "project")))
+        .or_else(|| raw_ref.and_then(|value| str_value(value, "project")))
+        .unwrap_or_else(|| "agent-bridge".to_string());
+    let cwd = projected
+        .and_then(|value| str_value(value, "cwd"))
+        .or_else(|| raw_ref.and_then(|value| str_value(value, "cwd")));
+    let scope = crate::avatar_renderer::RendererScope { project, cwd };
+    let mut payload =
+        crate::avatar_renderer::renderer_payload_from_sources(&scope, projected, raw_ref);
+    payload["input"] = json!({
+        "presence_avatar_count": avatars.len(),
+        "pet_id": pet_id,
+        "raw_pet_state_available": raw_ref.is_some(),
+        "presence_project": q.project,
+        "presence_role": q.role,
+        "max_idle_secs": q.effective_max_idle_secs(),
+    });
+    Ok(payload)
+}
+
+async fn avatar_linux_renderer_state(
+    State(s): State<AppState>,
+    Query(q): Query<AvatarSurfaceQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    Ok(Json(avatar_linux_renderer_payload(&s, &q).await?))
+}
+
+async fn avatar_linux_renderer(
+    State(s): State<AppState>,
+    Query(q): Query<AvatarSurfaceQuery>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let payload = avatar_linux_renderer_payload(&s, &q).await?;
+    let state_href = avatar_linux_renderer_state_href(&q);
+    Ok(Html(avatar_surface_linux_renderer_html(
+        &payload,
+        unix_now(),
+        &state_href,
+        q.transparent,
+    )))
+}
+
+fn append_query_param(href: &mut String, sep: &mut &str, key: &str, value: &str) {
+    if value.trim().is_empty() {
+        return;
+    }
+    href.push_str(sep);
+    href.push_str(key);
+    href.push('=');
+    href.push_str(&url_query_component(value));
+    *sep = "&";
+}
+
+fn avatar_linux_renderer_state_href(q: &AvatarSurfaceQuery) -> String {
+    let mut href = "/avatar-surface/linux-renderer-state".to_string();
+    let mut sep = "?";
+    if let Some(project) = q.project.as_deref() {
+        append_query_param(&mut href, &mut sep, "project", project);
+    }
+    if let Some(role) = q.role.as_deref() {
+        append_query_param(&mut href, &mut sep, "role", role);
+    }
+    if q.include_stale {
+        append_query_param(&mut href, &mut sep, "include_stale", "true");
+    } else if q.max_idle_secs != default_max_idle() {
+        append_query_param(
+            &mut href,
+            &mut sep,
+            "max_idle_secs",
+            &q.max_idle_secs.to_string(),
+        );
+    }
+    if q.limit != default_limit() {
+        append_query_param(&mut href, &mut sep, "limit", &q.limit.to_string());
+    }
+    if q.transparent {
+        append_query_param(&mut href, &mut sep, "transparent", "true");
+    }
+    href
 }
 
 fn avatar_pet_package_dir(pet_id: &str) -> Result<std::path::PathBuf, (StatusCode, String)> {
@@ -5237,21 +5360,13 @@ fn avatar_surface_xiao_shu_action_console_html(
         let intent = avatar_surface_html_json_value(record.get("intent"), "-");
         let track = avatar_surface_html_json_value(record.get("mapped_track"), "-");
         let cue = avatar_surface_html_json_value(
-            request
-                .get("cue_id")
-                .or_else(|| record.get("cue_id")),
+            request.get("cue_id").or_else(|| record.get("cue_id")),
             "-",
         );
-        let line = avatar_surface_html_json_value(
-            request
-                .get("line")
-                .or_else(|| record.get("line")),
-            "-",
-        );
+        let line =
+            avatar_surface_html_json_value(request.get("line").or_else(|| record.get("line")), "-");
         let message = avatar_surface_html_json_value(
-            request
-                .get("message")
-                .or_else(|| record.get("message")),
+            request.get("message").or_else(|| record.get("message")),
             "-",
         );
         let context_only = avatar_surface_html_json_value(
@@ -5408,6 +5523,177 @@ fn avatar_surface_xiao_shu_action_console_command_html(label: &str, command: &st
         r#"<div class="command-row"><div class="command-head"><dt>{label}</dt><button class="copy-command" type="button" data-copy="{command}">copy</button></div><dd><code>{command}</code></dd></div>"#,
         label = html_escape(label),
         command = command
+    )
+}
+
+fn avatar_surface_linux_renderer_html(
+    payload: &Value,
+    generated_at: i64,
+    state_url: &str,
+    transparent: bool,
+) -> String {
+    let project = avatar_surface_html_json_value(payload.get("project"), "unknown");
+    let state = payload.get("state").unwrap_or(&Value::Null);
+    let plan = payload.get("plan").unwrap_or(&Value::Null);
+    let selection = payload.get("selection").unwrap_or(&Value::Null);
+    let safety = payload.get("safety").unwrap_or(&Value::Null);
+
+    let mode = avatar_surface_html_json_value(state.get("mode"), "idle");
+    let activity = avatar_surface_html_json_value(state.get("activity_state"), &mode);
+    let source = avatar_surface_html_json_value(selection.get("source"), "idle_fallback");
+    let selection_fallback =
+        avatar_surface_html_json_value(selection.get("fallback_reason"), "none");
+    let track = avatar_surface_html_json_value(plan.get("track"), "idle_breathe");
+    let token =
+        avatar_surface_html_json_value(plan.get("renderer_token"), "xiao_shu::idle_breathe::low");
+    let asset_route = avatar_surface_html_json_value(
+        plan.get("asset_route"),
+        "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-idle-breathe-v1",
+    );
+    let plan_fallback = avatar_surface_html_json_value(plan.get("fallback_reason"), "none");
+    let codex_pet_mutation =
+        avatar_surface_html_json_value(safety.get("codex_pet_package_mutation"), "false");
+    let emits_audio = avatar_surface_html_json_value(safety.get("emits_audio"), "false");
+    let controls_desktop = avatar_surface_html_json_value(safety.get("controls_desktop"), "false");
+    let writes_files = avatar_surface_html_json_value(safety.get("writes_files"), "false");
+    let mutates_renderer = avatar_surface_html_json_value(safety.get("mutates_renderer"), "false");
+    let payload_json = html_json_script(payload);
+    let route_json = html_json_script(&json!(asset_route.clone()));
+    let state_url_json = html_json_script(&json!(state_url));
+    let transparent_attr = if transparent { "true" } else { "false" };
+    let transparent_css = if transparent {
+        r#"
+    html, body { background:transparent !important; }
+    body { overflow:hidden; }
+    main { width:100vw; height:100vh; margin:0; display:grid; place-items:center; background:transparent; }
+    header, .debug-panel { display:none; }
+    .stage { margin:0; width:100vw; height:100vh; min-height:0; border:0; background:transparent; }
+    .sprite { transform:scale(1.55); }
+"#
+    } else {
+        ""
+    };
+
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Linux Codex Avatar Renderer</title>
+  <style>
+    :root {{ color-scheme: light dark; --bg:#f7f9f7; --fg:#1b1e1b; --muted:#68706a; --line:#d5ddd6; --surface:#fff; --accent:#147a74; --stage:#edf6f2; }}
+    @media (prefers-color-scheme: dark) {{ :root {{ --bg:#121512; --fg:#eef4ef; --muted:#a6b0a9; --line:#303831; --surface:#1c211d; --accent:#5bd0c3; --stage:#202820; }} }}
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
+    main {{ width:min(860px,calc(100vw - 28px)); margin:22px auto 34px; }}
+    header {{ display:flex; justify-content:space-between; gap:16px; align-items:flex-end; border-bottom:1px solid var(--line); padding-bottom:14px; }}
+    h1 {{ margin:0; font-size:24px; line-height:1.1; letter-spacing:0; }}
+    .meta,.safety {{ color:var(--muted); overflow-wrap:anywhere; }}
+    .stage {{ margin-top:18px; min-height:360px; border:1px solid var(--line); background:var(--stage); display:grid; place-items:center; overflow:hidden; }}
+    .sprite {{ width:192px; height:208px; background-image:url("{asset_route}"); background-size:1536px 1872px; background-repeat:no-repeat; image-rendering:auto; transform:scale(1.35); transform-origin:center bottom; }}
+    .panel {{ margin-top:14px; padding:12px; border:1px solid var(--line); background:var(--surface); }}
+    dl {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:0; }}
+    dt {{ color:var(--muted); font-size:11px; text-transform:uppercase; font-weight:700; }}
+    dd {{ margin:3px 0 0; overflow-wrap:anywhere; }}
+    code {{ display:block; margin-top:12px; padding:10px; background:rgba(127,127,127,.12); overflow:auto; white-space:pre-wrap; }}
+    @media (max-width:720px) {{ header {{ display:block; }} dl {{ grid-template-columns:1fr; }} .stage {{ min-height:300px; }} }}
+    {transparent_css}
+  </style>
+</head>
+<body>
+  <main data-state-url="{state_url}" data-transparent="{transparent_attr}">
+    <header>
+      <div>
+        <h1>Linux Codex Avatar Renderer</h1>
+        <div class="meta">project={project} generated_at={generated_at}</div>
+      </div>
+      <div class="meta">read_only=true source={source}</div>
+    </header>
+    <section class="stage" data-track="{track}" data-token="{token}">
+      <div class="sprite" role="img" aria-label="Xiao Shu {track}"></div>
+    </section>
+    <section class="panel debug-panel">
+      <dl>
+        <div><dt>state</dt><dd data-field="state">mode={mode} activity={activity}</dd></div>
+        <div><dt>plan</dt><dd data-field="plan">track={track} token={token}</dd></div>
+        <div><dt>asset</dt><dd data-field="asset">{asset_route}</dd></div>
+        <div><dt>fallback</dt><dd data-field="fallback">selection={selection_fallback} plan={plan_fallback}</dd></div>
+        <div><dt>safety</dt><dd data-field="safety">codex_pet_package_mutation={codex_pet_mutation} emits_audio={emits_audio} controls_desktop={controls_desktop}</dd></div>
+        <div><dt>mutation</dt><dd data-field="mutation">writes_files={writes_files} mutates_renderer={mutates_renderer}</dd></div>
+      </dl>
+      <code id="payload-json"></code>
+    </section>
+  </main>
+  <script>
+    const initialPayload = {payload_json};
+    const fallbackAssetRoute = {route_json};
+    const stateUrl = {state_url_json};
+    const stage = document.querySelector(".stage");
+    const sprite = document.querySelector(".sprite");
+    const payloadJson = document.getElementById("payload-json");
+    const field = (name) => document.querySelector(`[data-field="${{name}}"]`);
+    const value = (source, key, fallback) => {{
+      const next = source && source[key];
+      return next === null || next === undefined || next === "" ? fallback : String(next);
+    }};
+    const setField = (name, text) => {{
+      const node = field(name);
+      if (node) node.textContent = text;
+    }};
+    function applyRendererPayload(nextPayload) {{
+      const state = nextPayload.state || {{}};
+      const plan = nextPayload.plan || {{}};
+      const selection = nextPayload.selection || {{}};
+      const safety = nextPayload.safety || {{}};
+      const track = value(plan, "track", "idle_breathe");
+      const token = value(plan, "renderer_token", "xiao_shu::idle_breathe::low");
+      const assetRoute = value(plan, "asset_route", fallbackAssetRoute);
+      stage.dataset.track = track;
+      stage.dataset.token = token;
+      sprite.setAttribute("aria-label", `Xiao Shu ${{track}}`);
+      sprite.style.backgroundImage = `url("${{assetRoute}}")`;
+      setField("state", `mode=${{value(state, "mode", "idle")}} activity=${{value(state, "activity_state", value(state, "mode", "idle"))}}`);
+      setField("plan", `track=${{track}} token=${{token}}`);
+      setField("asset", assetRoute);
+      setField("fallback", `selection=${{value(selection, "fallback_reason", "none")}} plan=${{value(plan, "fallback_reason", "none")}}`);
+      setField("safety", `codex_pet_package_mutation=${{value(safety, "codex_pet_package_mutation", "false")}} emits_audio=${{value(safety, "emits_audio", "false")}} controls_desktop=${{value(safety, "controls_desktop", "false")}}`);
+      setField("mutation", `writes_files=${{value(safety, "writes_files", "false")}} mutates_renderer=${{value(safety, "mutates_renderer", "false")}}`);
+      payloadJson.textContent = JSON.stringify(nextPayload, null, 2);
+    }}
+    async function refreshRendererState() {{
+      try {{
+        const response = await fetch(stateUrl, {{ cache: "no-store" }});
+        if (!response.ok) return;
+        applyRendererPayload(await response.json());
+      }} catch (_err) {{}}
+    }}
+    applyRendererPayload(initialPayload);
+    setInterval(refreshRendererState, 1000);
+  </script>
+</body>
+</html>"#,
+        state_url = html_escape(state_url),
+        transparent_attr = transparent_attr,
+        transparent_css = transparent_css,
+        project = html_escape(&project),
+        generated_at = generated_at,
+        source = html_escape(&source),
+        track = html_escape(&track),
+        token = html_escape(&token),
+        mode = html_escape(&mode),
+        activity = html_escape(&activity),
+        asset_route = html_escape(&asset_route),
+        selection_fallback = html_escape(&selection_fallback),
+        plan_fallback = html_escape(&plan_fallback),
+        codex_pet_mutation = html_escape(&codex_pet_mutation),
+        emits_audio = html_escape(&emits_audio),
+        controls_desktop = html_escape(&controls_desktop),
+        writes_files = html_escape(&writes_files),
+        mutates_renderer = html_escape(&mutates_renderer),
+        payload_json = payload_json,
+        route_json = route_json,
+        state_url_json = state_url_json,
     )
 }
 
@@ -7018,6 +7304,83 @@ mod tests {
         assert!(payload["posts"][0].get("refs").is_none());
     }
 
+    #[test]
+    fn linux_renderer_html_embeds_plan_and_sidecar_asset_route() {
+        let payload = json!({
+            "surface": "linux_codex_avatar_renderer_state",
+            "read_only": true,
+            "project": "agent-bridge",
+            "selection": {"source": "projected_avatar", "fallback_reason": null},
+            "state": {"mode": "working", "activity_state": "implementing"},
+            "plan": {
+                "track": "sorting_glow",
+                "renderer_token": "xiao_shu::sorting_glow::medium",
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v3",
+                "fallback_reason": null
+            },
+            "safety": {
+                "codex_pet_package_mutation": false,
+                "emits_audio": false,
+                "controls_desktop": false
+            }
+        });
+
+        let html = avatar_surface_linux_renderer_html(
+            &payload,
+            1780294000,
+            "/avatar-surface/linux-renderer-state?project=agent-bridge&include_stale=true",
+            false,
+        );
+
+        assert!(html.contains("Linux Codex Avatar Renderer"));
+        assert!(html.contains("data-track=\"sorting_glow\""));
+        assert!(html.contains("xiao_shu::sorting_glow::medium"));
+        assert!(html.contains(
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v3"
+        ));
+        assert!(html.contains("data-state-url=\"/avatar-surface/linux-renderer-state"));
+        assert!(html.contains("setInterval(refreshRendererState, 1000)"));
+        assert!(html.contains("fetch(stateUrl"));
+        assert!(html.contains("function applyRendererPayload(nextPayload)"));
+        assert!(html.contains("codex_pet_package_mutation=false"));
+        assert!(html.contains("emits_audio=false"));
+    }
+
+    #[test]
+    fn linux_renderer_html_transparent_mode_renders_pet_only_surface() {
+        let payload = json!({
+            "surface": "linux_codex_avatar_renderer_state",
+            "read_only": true,
+            "project": "agent-bridge",
+            "selection": {"source": "projected_avatar", "fallback_reason": null},
+            "state": {"mode": "verified", "activity_state": "dogfood"},
+            "plan": {
+                "track": "completion_nod",
+                "renderer_token": "xiao_shu::completion_nod::low",
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v1",
+                "fallback_reason": null
+            },
+            "safety": {
+                "codex_pet_package_mutation": false,
+                "emits_audio": false,
+                "controls_desktop": false
+            }
+        });
+
+        let html = avatar_surface_linux_renderer_html(
+            &payload,
+            1780294000,
+            "/avatar-surface/linux-renderer-state?project=agent-bridge&include_stale=true&transparent=true",
+            true,
+        );
+
+        assert!(html.contains("data-transparent=\"true\""));
+        assert!(html.contains("background:transparent"));
+        assert!(html.contains(".debug-panel { display:none; }"));
+        assert!(html.contains("data-track=\"completion_nod\""));
+        assert!(html.contains("xiao-shu-v3-ai-completion-nod-v1"));
+    }
+
     fn presence_fixture() -> AgentPresenceRecord {
         AgentPresenceRecord {
             session_id: "aio2:agent-bridge:main".into(),
@@ -7142,6 +7505,7 @@ mod tests {
             stale_secs: 1_000_000,
             include_raw_presence: false,
             include_compat: false,
+            transparent: false,
         };
 
         assert_eq!(q.effective_max_idle_secs(), 0);
@@ -7166,6 +7530,7 @@ mod tests {
             stale_secs: 300,
             include_raw_presence: false,
             include_compat: true,
+            transparent: false,
         };
         let avatar =
             crate::avatar_surface::entry_from_presence(&avatar_presence_fixture(), false, true);
@@ -7202,6 +7567,7 @@ mod tests {
             stale_secs: 300,
             include_raw_presence: false,
             include_compat: false,
+            transparent: false,
         };
         let avatar = json!({
             "agent_id": "<script>alert(1)</script>",
@@ -7505,11 +7871,8 @@ mod tests {
         assert!(html.contains("http_emit_route_added=false auto_emit=0"));
         assert!(html.contains("voice policy json"));
         assert!(html.contains("Xiao Shu Voice Request"));
-        assert!(
-            html.contains(
-                "state=ready_for_operator_confirmation token=xiao_shu::alert_peek::medium"
-            )
-        );
+        assert!(html
+            .contains("state=ready_for_operator_confirmation token=xiao_shu::alert_peek::medium"));
         assert!(html.contains(
             "xiao_shu_alert_peek_sparse_voice_v1 cue=soft_attention_needed llm_replace_line=false"
         ));
@@ -7545,7 +7908,9 @@ mod tests {
         assert!(html.contains("Xiao Shu Action Requests"));
         assert!(html.contains("state=pending_human_confirmation details=false"));
         assert!(html.contains("/avatar-surface/xiao-shu-action-console?project=agent-bridge"));
-        assert!(html.contains("/avatar-surface/xiao-shu-action-console?project=agent-bridge&amp;request_id=xsr-test"));
+        assert!(html.contains(
+            "/avatar-surface/xiao-shu-action-console?project=agent-bridge&amp;request_id=xsr-test"
+        ));
         assert!(html.contains("/avatar-surface/xiao-shu-action-requests?project=agent-bridge&amp;request_id=xsr-test&amp;details=true"));
         assert!(html.contains("console"));
         assert!(html.contains("detail json"));
@@ -7742,18 +8107,16 @@ mod tests {
         assert!(html.contains(
             "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-soft-bounce-v1"
         ));
-        assert!(html.contains(
-            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-soft-bounce-v1"
-        ));
+        assert!(html
+            .contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-soft-bounce-v1"));
         assert!(html.contains(
             "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v1"
         ));
         assert!(html.contains(
             "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1"
         ));
-        assert!(html.contains(
-            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-idle-breathe-v1"
-        ));
+        assert!(html
+            .contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-idle-breathe-v1"));
         assert!(html.contains(
             "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-sorting-glow-v1"
         ));
@@ -7808,18 +8171,17 @@ mod tests {
         assert!(
             html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-ai-alert-peek-v2")
         );
-        assert!(html.contains(
-            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-alert-peek-sheet-v1"
-        ));
-        assert!(html.contains(
-            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v1"
-        ));
-        assert!(html.contains(
-            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v2"
-        ));
-        assert!(html.contains(
-            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v3"
-        ));
+        assert!(html
+            .contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-alert-peek-sheet-v1"));
+        assert!(
+            html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v1")
+        );
+        assert!(
+            html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v2")
+        );
+        assert!(
+            html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-alert-peek-v3")
+        );
         assert!(
             html.contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-canonical-peek-v3")
         );
@@ -7837,9 +8199,7 @@ mod tests {
         assert!(html.contains("\"asset_id\":\"xiao-shu-canonical-peek-v3\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_frame_choreo_v1\""));
         assert!(html.contains("\"choreography_id\":\"soft_bounce_v3_ai_frame_v1_choreo\""));
-        assert!(
-            html.contains("\"choreography_id\":\"completion_nod_v3_ai_frame_v1_choreo\"")
-        );
+        assert!(html.contains("\"choreography_id\":\"completion_nod_v3_ai_frame_v1_choreo\""));
         assert!(html.contains("\"choreography_id\":\"idle_breathe_v3_ai_frame_v1_choreo\""));
         assert!(html.contains("\"choreography_id\":\"sorting_glow_sidecar_v3_frame_choreo\""));
         assert!(html.contains("\"choreography_id\":\"sorting_glow_sidecar_v2_frame_choreo\""));
@@ -7850,12 +8210,9 @@ mod tests {
         assert!(html.contains("\"choreography_id\":\"alert_peek_ai_frame_v2_grounded_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_v3_sheet_v1_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_v3_ai_frame_v1_choreo\""));
-        assert!(html.contains(
-            "\"choreography_id\":\"alert_peek_v3_ai_frame_v2_cleanup_choreo\""
-        ));
-        assert!(html.contains(
-            "\"choreography_id\":\"alert_peek_v3_ai_frame_v3_chroma_cleanup_choreo\""
-        ));
+        assert!(html.contains("\"choreography_id\":\"alert_peek_v3_ai_frame_v2_cleanup_choreo\""));
+        assert!(html
+            .contains("\"choreography_id\":\"alert_peek_v3_ai_frame_v3_chroma_cleanup_choreo\""));
         assert!(html.contains("\"choreography_id\":\"alert_peek_sidecar_v3_frame_choreo\""));
         assert!(html.contains("\"surface\":\"alert_peek_voice_linkage_preview\""));
         assert!(html.contains("\"utterance\":\"小舒发现一点需要你看一下。\""));
