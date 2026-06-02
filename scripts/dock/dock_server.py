@@ -129,7 +129,11 @@ class Handler(SimpleHTTPRequestHandler):
             if script_name is None:
                 return self._json(422, {"ok": False, "decision": "approve",
                                         "reason": f"no executor for kind {kind!r}"})
-            script = os.path.join(REPO, "scripts", script_name)
+            # prefer an executor deployed BESIDE this server (a self-contained dock that
+            # doesn't depend on a synced checkout), else the repo's scripts/ — same
+            # DOCK_DIR-first philosophy as the store import above.
+            local_exec = os.path.join(str(DOCK_DIR), script_name)
+            script = local_exec if os.path.exists(local_exec) else os.path.join(REPO, "scripts", script_name)
             try:
                 cp = subprocess.run(
                     ["python3", script, "--confirm-token", token],

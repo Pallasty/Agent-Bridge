@@ -20,8 +20,14 @@ import pathlib
 import sys
 import time
 
-# import the canonical store (same one the host-confirm gate uses)
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # scripts/
+# import the canonical store (same one the host-confirm gate uses). Resolve it whether
+# we run from the repo (scripts/dock/ → store in scripts/ = parents[1]) or flat-deployed
+# beside the dock runtime (store sits in our own dir = parent).
+_here = pathlib.Path(__file__).resolve()
+for _cand in (_here.parent, _here.parents[1]):
+    if (_cand / "desktop_confirm_store.py").exists():
+        sys.path.insert(0, str(_cand))
+        break
 from desktop_confirm_store import DEFAULT_CONFIRM_TTL, mint_token, write_pending  # noqa: E402
 
 
