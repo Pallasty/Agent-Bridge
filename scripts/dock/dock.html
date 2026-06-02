@@ -77,6 +77,25 @@
   .approval.decided { opacity: .8; }
   .approval.decided .k.yes { color: var(--ok); }
   .approval.decided .k.no { color: var(--bad); }
+  /* steer payload (cross-process control plane probe): make the injection legible */
+  .approval .ap-steer { margin: 5px 0 2px; display: flex; flex-wrap: wrap; gap: 5px;
+                        align-items: baseline; font-size: 10px; }
+  .approval .ap-steer-sess { color: var(--accent, #89b4fa); font-weight: 600; }
+  .approval .ap-steer-text { flex: 1; min-width: 100%; padding: 3px 6px; border-radius: 4px;
+                             background: #11100c; border: 1px solid #3a3320; color: #e6dcc0;
+                             font-family: ui-monospace, monospace; white-space: pre-wrap;
+                             word-break: break-all; }
+  .approval .ap-steer-by { color: var(--dim); }
+  /* risk nudge: red-flag high-risk steer payloads + a two-step 允许 (not a security boundary) */
+  .approval.risk-hi { border-color: #7a2230; background: #241015; }
+  .approval.risk-caut { border-color: #6b5417; }
+  .approval .ap-risk { font-size: 9px; padding: 1px 6px; border-radius: 8px; font-weight: 600;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
+  .approval .ap-risk.hi { color: #f3a0a8; background: #3a151b; border: 1px solid #7a2230; }
+  .approval .ap-risk.caut { color: #f9d77a; background: #2a2410; border: 1px solid #5a4a17; }
+  .approval .ap-yes.ap-arm { border-color: #b5343f; color: #fff; background: #5a1820;
+                             animation: ab-armpulse 1s ease-in-out infinite; }
+  @keyframes ab-armpulse { 0%,100% { background: #5a1820; } 50% { background: #7a2230; } }
 
   footer { border-top: 1px solid var(--line); padding: 7px 12px;
     display: flex; gap: 12px; color: var(--faint); font-size: 10px; flex-wrap: wrap; }
@@ -167,15 +186,39 @@ function render(d){
     for (const a of d.approvals){
       const sum = esc(a.summary || a.kind || a.token || '');
       const kind = esc(a.kind || 'host action');
-      if (a.decided){
-        const yes = a.decided === 'approve';
-        h += `<div class="approval decided"><span class="k ${yes?'yes':'no'}">${yes?'✓ 已批准':'✗ 已拒绝'}</span>
-              <span class="ap-sum"> · ${sum} · 待执行</span></div>`;
+      const dec = DECIDED.get(a.token);
+      if (dec){
+        // optimistic decided-state: INSTANT feedback the moment the server responds,
+        // held (greyed, no buttons) until the ~3s snapshot refresh reconciles the card away.
+        let cls, txt;
+        if (!dec.ok)                        { cls = 'no';  txt = '⚠ 未生效:' + esc(dec.reason || 'failed'); }
+        else if (dec.decision === 'reject') { cls = 'no';  txt = '✗ 已拒绝 · 已杀,不会执行'; }
+        else                                { cls = 'yes'; txt = '✓ 已批准 · 已执行'; }
+        h += `<div class="approval decided"><span class="k ${cls}">${txt}</span>
+              <span class="ap-sum"> · ${sum}</span></div>`;
       } else {
-        h += `<div class="approval"><div class="ap-row"><span class="k">⚠ ${kind}</span></div>
+        // cross-process control plane (probe): for a steer pending, show the EXACT
+        // text + target session so the human can SEE what they're releasing.
+        const steer = (a.kind === 'steer' && a.steer)
+          ? `<div class="ap-steer"><span class="ap-steer-sess">↳ ${esc(a.steer.session || '?')}</span>
+               <code class="ap-steer-text">${esc(a.steer.text || '')}${a.steer.submit ? ' ⏎' : ''}</code>
+               ${a.steer.staged_by ? `<span class="ap-steer-by">by ${esc(a.steer.staged_by)}</span>` : ''}</div>`
+          : '';
+        // risk nudge: a high-risk steer gets a red flag + reason, and its 允许 becomes
+        // two-step (first click arms "⛔ 确认执行?", second sends). A NUDGE, not a boundary.
+        const risk = a.risk || { level: 'normal', reasons: [] };
+        const rsn = (risk.reasons && risk.reasons.length) ? ' · ' + esc(risk.reasons.join('、')) : '';
+        const riskBadge = risk.level === 'high' ? `<span class="ap-risk hi">⛔ 高危${rsn}</span>`
+                        : risk.level === 'caution' ? `<span class="ap-risk caut">⚠ 留意${rsn}</span>` : '';
+        const armed = risk.level === 'high' && (ARMED.get(a.token) || 0) > Date.now();
+        const yesCls = 'ap-yes' + (armed ? ' ap-arm' : '');
+        const hiAttr = risk.level === 'high' ? ' data-risk="high"' : '';
+        const cardCls = risk.level === 'high' ? ' risk-hi' : risk.level === 'caution' ? ' risk-caut' : '';
+        h += `<div class="approval${cardCls}"><div class="ap-row"><span class="k">⚠ ${kind}</span>${riskBadge}</div>
               <div class="ap-sum">${sum}</div>
+              ${steer}
               <div class="ap-btns">
-                <button class="ap-yes" data-token="${esc(a.token)}">允许</button>
+                <button class="${yesCls}"${hiAttr} data-token="${esc(a.token)}">${armed ? '⛔ 确认执行?' : '允许'}</button>
                 <button class="ap-no" data-token="${esc(a.token)}">拒绝</button>
               </div></div>`;
       }
@@ -243,32 +286,62 @@ function render(d){
   if (window.DOCKCHARTS) window.DOCKCHARTS.renderCharts(d, window.__dockHist);
 }
 
+// high-risk approve arms for a few seconds on first click (two-step confirm); the map
+// survives re-renders so the auto-3s tick doesn't disarm a confirm you're mid-way through.
+const ARMED = new Map();   // token -> expiry(ms)
+const DECIDED = new Map(); // token -> {decision, ok, reason} — optimistic decided-state for instant feedback
+let LAST = null;           // last snapshot, so a click can re-render to reflect ARMED/DECIDED
+
 async function tick(){
   try {
     const r = await fetch('dock_snapshot.json?_=' + Date.now(), {cache:'no-store'});
-    render(await r.json());
+    LAST = await r.json();
+    // drop optimistic decided-states whose card the snapshot has now reconciled away
+    const liveTokens = new Set((LAST.approvals || []).map(a => a.token));
+    for (const t of [...DECIDED.keys()]) if (!liveTokens.has(t)) DECIDED.delete(t);
+    render(LAST);
   } catch(e) {
     document.getElementById('reason').textContent = '聚合器未连接 (' + e + ')';
   }
 }
 
 // approval buttons are rebuilt every render → delegate clicks on #main.
-// A click only RECORDS the decision (POST /api/decide); the gated executor
-// still consumes the single-use token and performs the action.
+// A click RELEASES the decision (POST /api/decide): reject subtracts the pending,
+// approve shells the blessed phase-2 executor by kind, which consumes the single-use
+// token BEFORE acting. The localhost POST is a human-click transport, not a trust
+// boundary (see dock_server.py); the executor owns the whole token lifecycle.
 document.getElementById('main').addEventListener('click', async (e) => {
   const btn = e.target.closest('.ap-yes, .ap-no');
   if (!btn) return;
   const token = btn.getAttribute('data-token');
   const decision = btn.classList.contains('ap-yes') ? 'approve' : 'reject';
+  // high-risk approve = two-step: first click ARMS ("⛔ 确认执行?"), a second click within
+  // 4s actually sends. Reject and normal/caution approve stay one click.
+  if (decision === 'approve' && btn.dataset.risk === 'high') {
+    const now = Date.now();
+    if ((ARMED.get(token) || 0) <= now) {   // not armed → arm + reflect, do NOT send
+      ARMED.set(token, now + 4000);
+      if (LAST) render(LAST);
+      return;
+    }
+    ARMED.delete(token);                     // armed → fall through to send
+  }
   btn.disabled = true;
   try {
     const r = await fetch('/api/decide', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-AB-Dock': '1' },
       body: JSON.stringify({ token, decision }),
     });
     const j = await r.json();
-    if (j && j.ok) tick(); else btn.disabled = false;
-  } catch (err) { btn.disabled = false; }
+    // INSTANT feedback: flip this card to a decided result the moment the server responds
+    // (greyed, buttons gone). The 3s snapshot refresh then removes it; tick() prunes DECIDED.
+    DECIDED.set(token, { decision, ok: !!(j && j.ok), reason: (j && j.reason) || '' });
+    ARMED.delete(token);
+    if (LAST) render(LAST);
+  } catch (err) {
+    DECIDED.set(token, { decision, ok: false, reason: '网络错误' });
+    if (LAST) render(LAST);
+  }
 });
 
 tick();

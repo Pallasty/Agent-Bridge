@@ -5500,6 +5500,7 @@ impl McpTool for PresentTool {
             "action_tool": "present",
             "kind": kind.as_str(),
             "verify_status": verify_status.as_str(),
+            "embody_status": crate::present::EmbodyStatus::NotApplicable.as_str(),
             "interactive_status": interactive_status.map(|s| s.as_str()),
             "verify_method": verify_method,
             "dual_encoding": dual_encoding,
@@ -5926,6 +5927,7 @@ impl McpTool for PresentVoiceTool {
             "kind": "voice",
             "backend": backend,
             "verify_status": verify_status,
+            "embody_status": crate::present::EmbodyStatus::NotApplicable.as_str(),
             "verify_method": "audio_bus_readback",
             "audio_status": status,
             "capture_channel": capture_channel,
@@ -6416,6 +6418,7 @@ impl McpTool for PresentApprovalTool {
             "action_tool": "present_await_decision",
             "kind": "approval",
             "verify_status": "rendered_ok",
+            "embody_status": crate::present::EmbodyStatus::NotApplicable.as_str(),
             "decision": decision_status,
             "verify_method": "human_decision",
             "token_match": token_match,
@@ -13554,10 +13557,15 @@ impl McpTool for MemoryCompactTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Prune low-value memories. Removes only when BOTH match: min_uses \
-                 (access_count <) AND older_than_days (last_accessed_at older than). \
-                 1-hour grace on created_at. dry_run=true previews. Both omitted → \
-                 defaults (min_uses=2, older_than_days=90)."
+            description: "Retire low-value memories by tombstoning them (NOT hard-delete; \
+                 final removal is memory_purge_tombstones' 7d ladder, and tombstones \
+                 propagate the deletion across peers via NewerWins sync). Acts only on \
+                 status='active' rows, and only when BOTH match: min_uses (access_count <) \
+                 AND older_than_days (last_accessed_at older than). Durable rows are \
+                 protected and never retired: importance ≥ 0.6, author-linked \
+                 (related_keys), or graph-connected (has edges). 1-hour grace on \
+                 created_at. dry_run=true previews. Both omitted → defaults \
+                 (min_uses=2, older_than_days=90)."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -34250,6 +34258,13 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(html.contains("<td>e5</td>"));
         let recovered = crate::present::extract_ab_payload(&html).expect("payload recoverable");
         assert_eq!(recovered, json!([{"name": "e5", "dims": 384}]));
+        let id = res["id"].as_str().expect("id");
+        let outcome_path = dir.join(format!("{id}.outcome.json"));
+        let outcome: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(outcome_path).expect("outcome sidecar"))
+                .expect("outcome json");
+        assert_eq!(outcome["action_tool"], "present");
+        assert_eq!(outcome["embody_status"], "not_applicable");
 
         std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
         let _ = std::fs::remove_dir_all(&dir);

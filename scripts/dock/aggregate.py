@@ -101,12 +101,46 @@ except Exception:
 # Slice 1 makes these clickable: the dock RECORDS the human's decision to
 # dock_decisions/; the gated Rust `desktop_confirm` still owns single-use
 # consumption + execution, so surfacing here never bypasses the gate.
-PENDING_DIR = HOME / ".cache/agent-bridge/desktop_pending"
-DECISIONS_DIR = HOME / ".cache/agent-bridge/dock_decisions"
+# honor XDG_CACHE_HOME like desktop_confirm_store does, so a sandboxed run
+# (e.g. try_steer_demo.sh) reads the SAME isolated store the dock_server writes to.
+_CACHE_ROOT = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or (HOME / ".cache")) / "agent-bridge"
+PENDING_DIR = _CACHE_ROOT / "desktop_pending"
+DECISIONS_DIR = _CACHE_ROOT / "dock_decisions"
 
 
 def _safe_token(t):
     return re.sub(r"[^A-Za-z0-9_-]", "_", str(t))[:128]
+
+
+# Risk classifier for cross-process steer payloads. A NUDGE, not a security boundary:
+# it red-flags injection text that matches destructive/privilege/remote-exec/credential
+# patterns so the human slows down before approving. Heuristics are evadable — a flag's
+# ABSENCE must never read as "safe" (the real boundary stays human judgment + single-use).
+_RISK_HIGH = [
+    (r"\brm\s+-[rfRF]", "rm -rf"), (r"\bdd\b", "dd"), (r"\bmkfs", "mkfs"),
+    (r">\s*/dev/\w", "写 /dev/"), (r":\s*\(\s*\)\s*\{.*\|.*&\s*\}", "fork bomb"),
+    (r"\bsudo\b", "sudo"), (r"\bdoas\b", "doas"), (r"(^|\s)su\s", "su"),
+    (r"curl\b[^|]*\|\s*(sh|bash|zsh)", "curl|sh"), (r"wget\b[^|]*\|\s*(sh|bash|zsh)", "wget|sh"),
+    (r"\beval\b", "eval"), (r"(~/\.ssh|id_rsa|id_ed25519|\.env\b|secret)", "凭据/密钥"),
+    (r"\bchmod\s+-R", "chmod -R"), (r"\bchown\s+-R", "chown -R"),
+    (r"git\s+push\b[^\n]*(-f\b|--force)", "git push --force"),
+    (r"\b(shutdown|reboot|halt|poweroff)\b", "关机/重启"),
+]
+_RISK_CAUTION = [
+    (r"\|\s*(sh|bash|zsh|python\d?)\b", "管道入解释器"), (r">>?\s*\S", "重定向写文件"),
+    (r"\brm\b", "rm"), (r"\b(docker|kubectl|systemctl|apt|apt-get|pip\d?|npm|cargo)\b", "有副作用工具"),
+]
+
+
+def classify_steer_risk(text):
+    t = text or ""
+    hits = [lbl for pat, lbl in _RISK_HIGH if re.search(pat, t, re.I)]
+    if hits:
+        return {"level": "high", "reasons": hits[:3]}
+    hits = [lbl for pat, lbl in _RISK_CAUTION if re.search(pat, t, re.I)]
+    if hits:
+        return {"level": "caution", "reasons": hits[:3]}
+    return {"level": "normal", "reasons": []}
 
 
 approvals = []
@@ -118,13 +152,26 @@ for f in glob.glob(str(PENDING_DIR / "*.json")):
         continue  # expired tokens are dead; don't surface
     token = rec.get("token") or pathlib.Path(f).stem
     decided = load_json(DECISIONS_DIR / f"{_safe_token(token)}.json")
-    approvals.append({
+    entry = {
         "token": token,
         "kind": rec.get("kind"),
         "summary": rec.get("summary") or rec.get("kind"),
         "expires_in_s": int(rec.get("expires_at", 0)) - NOW,
         "decided": decided.get("decision") if isinstance(decided, dict) else None,
-    })
+    }
+    # cross-process control plane (probe): a steer pending injects into ANOTHER
+    # session, so surface the payload legibly — the human must see EXACTLY what text
+    # lands in which session before approving (the security crux of this direction).
+    if rec.get("kind") == "steer":
+        pl = rec.get("payload") or {}
+        entry["steer"] = {
+            "session": pl.get("session"),
+            "text": pl.get("text"),
+            "submit": bool(pl.get("submit")),
+            "staged_by": pl.get("staged_by"),
+        }
+        entry["risk"] = classify_steer_risk(pl.get("text"))
+    approvals.append(entry)
 
 
 # ── the face, deepened: avatar cortex motion semantics ───────────────────────

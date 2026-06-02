@@ -83,6 +83,35 @@ def peek_kind(token: str) -> str | None:
         return None
 
 
+def reject_pending(token: str) -> tuple[bool, str]:
+    """Human REJECT (e.g. from the presence dock): transition a pending host action
+    pending->rejected so it can NEVER execute (load_and_consume_pending refuses
+    status!='pending'). Distinct from 'consumed' so a human-killed action and an
+    executed action stay auditable apart — the silent-mutation-prevention legibility
+    the host-confirm posture exists for. Reject only SUBTRACTS capability; it shells
+    nothing. Idempotent; never overwrites an already-consumed record."""
+    path = _pending_path(token)
+    if not token or not path.exists():
+        return False, "no such pending token"
+    try:
+        rec = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return False, f"unreadable: {exc}"
+    st = rec.get("status")
+    if st == "rejected":
+        return True, "already rejected (idempotent)"
+    if st != "pending":
+        return False, f"already {st}, cannot reject"  # never overwrite a consumed record
+    rec["status"] = "rejected"
+    rec["rejected_at"] = int(time.time())
+    rec["rejected_via"] = "dock"
+    try:
+        path.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+    except OSError as exc:
+        return False, f"could not write reject: {exc}"
+    return True, "rejected"
+
+
 def notify_pending(summary: str, token: str) -> None:
     """Best-effort: mirror a pending host action onto the human's screen. Non-critical —
     the primary approval channel is the agent surfacing the summary to the user."""

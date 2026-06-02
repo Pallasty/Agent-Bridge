@@ -256,12 +256,16 @@ impl ChromiumCdpBackend {
         }
         for stale in ["SingletonLock", "SingletonCookie", "SingletonSocket"] {
             let p = user_data.join(stale);
-            if p.exists() {
-                if let Err(e) = std::fs::remove_file(&p) {
-                    warn!(path = %p.display(), error = %e, "could not remove stale Singleton artifact");
-                } else {
-                    debug!(path = %p.display(), "removed stale Singleton artifact");
-                }
+            // These are SYMLINKS whose target is "hostname-pid" (not a real path). A dead
+            // chrome's SingletonLock is therefore a DANGLING symlink — Path::exists()
+            // FOLLOWS the link and returns false for it, which used to leave the stale lock
+            // in place and HANG relaunch (the new chrome waits on the dead instance, whose
+            // pid lingers as a <defunct> zombie). remove_file() removes the symlink itself
+            // without following it; ignore NotFound so a clean profile is a no-op.
+            match std::fs::remove_file(&p) {
+                Ok(()) => debug!(path = %p.display(), "removed stale Singleton artifact"),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => warn!(path = %p.display(), error = %e, "could not remove stale Singleton artifact"),
             }
         }
         info!(profile = %user_data.display(), "chrome user-data-dir");

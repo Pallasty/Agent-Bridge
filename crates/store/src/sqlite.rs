@@ -3663,11 +3663,18 @@ impl StateStore for SqliteStore {
         // directly inside UPDATE without the SQLITE_ENABLE_UPDATE_DELETE_LIMIT
         // build option which we don't rely on. The subquery + LIMIT keeps a
         // single live run bounded.
+        // Durable-memory guard (2026-06-02, thread 97 #97): `importance <
+        // 0.6` so a high-importance row is never orphan-archived even when it
+        // carries a blacklisted tag and has no edges. ζ-14 keys on
+        // edge-count + tag and otherwise ignores importance, which had
+        // retired hand-authored lessons (e.g. importance 0.79 +
+        // auto_curated + edgeless). Genuine low-value stubs stay eligible.
         let select_keys_sql = format!(
             "SELECT key FROM memories
               WHERE status = 'active'
                 AND ({tag_or})
                 AND created_at <= ?
+                AND importance < 0.6
                 AND NOT EXISTS (
                   SELECT 1 FROM memory_edges e
                   WHERE e.from_key = memories.key OR e.to_key = memories.key
@@ -4469,17 +4476,41 @@ impl StateStore for SqliteStore {
         let archived = self
             .conn
             .call(move |c| -> RusqliteResult<u64> {
-                // Fetch all active memories with their updated_at + current importance.
+                // Durable-memory guard (2026-06-02, thread 97 #97): pre-load
+                // the set of keys that participate in at least one edge. A
+                // graph-connected or author-linked (`related_keys`) memory is
+                // NOT archived even when its decayed importance falls below
+                // the threshold — decay is a ranking signal, not a reason to
+                // retire a hub. (This decay compounds per call and does not
+                // bump updated_at, so frequent session_finalize runs can sink
+                // a well-connected durable row below the floor purely on call
+                // count — that was the thread 97 collateral root cause.)
+                let mut edge_keys: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                {
+                    let mut estmt = c.prepare(
+                        "SELECT from_key FROM memory_edges \
+                         UNION SELECT to_key FROM memory_edges",
+                    )?;
+                    let rows = estmt.query_map([], |r| r.get::<_, String>(0))?;
+                    for k in rows.flatten() {
+                        edge_keys.insert(k);
+                    }
+                }
+
+                // Fetch all active memories with their updated_at + current
+                // importance + related_keys (for the durable guard).
                 let mut stmt = c.prepare(
-                    "SELECT key, importance, updated_at FROM memories
+                    "SELECT key, importance, updated_at, related_keys FROM memories
                      WHERE status = 'active'",
                 )?;
-                let candidates: Vec<(String, f64, i64)> = stmt
+                let candidates: Vec<(String, f64, i64, Option<String>)> = stmt
                     .query_map([], |row| {
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, f64>(1)?,
                             row.get::<_, i64>(2)?,
+                            row.get::<_, Option<String>>(3)?,
                         ))
                     })?
                     .filter_map(|r| r.ok())
@@ -4487,11 +4518,16 @@ impl StateStore for SqliteStore {
 
                 let tx = c.unchecked_transaction()?;
                 let mut archived_count = 0u64;
-                for (key, importance, updated_at) in candidates {
+                for (key, importance, updated_at, related_keys) in candidates {
                     let age_days = ((now - updated_at).max(0) as f64) / 86_400.0;
                     // importance × 0.5^(age_days / half_life_days)
                     let new_importance = importance * (0.5f64).powf(age_days / half_life_days);
-                    if new_importance < archive_threshold {
+                    let has_related = related_keys
+                        .as_deref()
+                        .map(|s| !matches!(s.trim(), "" | "[]" | "null"))
+                        .unwrap_or(false);
+                    let durable = has_related || edge_keys.contains(&key);
+                    if new_importance < archive_threshold && !durable {
                         tx.execute(
                             "UPDATE memories SET importance = ?2, status = 'archived'
                              WHERE key = ?1",
@@ -4727,27 +4763,56 @@ impl StateStore for SqliteStore {
         //      that fire faster than memory has time to accumulate hits.
         const GRACE_SECS: i64 = 3600;
         let grace_cutoff = now_secs() - GRACE_SECS;
+        // Durable-memory guard (2026-06-02, thread 97 #97): never compact a
+        // row that is high-importance, author-linked (`related_keys`), or
+        // graph-connected (has edges). Compaction is for low-value transient
+        // junk (auto-curated implicit stubs), not hand-authored lessons /
+        // decisions that simply went unaccessed for a while.
+        const DURABLE_IMPORTANCE_FLOOR: f64 = 0.6;
+        let now = now_secs();
 
         let keys = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<String>> {
+                // status='active' so we only retire live rows (and the count
+                // delta stays conservation-consistent for the C3 s2 check);
+                // the durable guard protects connected / linked / important
+                // memories from age-only retirement.
                 let mut stmt = c.prepare(
                     "SELECT key FROM memories
-                     WHERE created_at < ?3
+                     WHERE status = 'active'
+                       AND created_at < ?3
                        AND (?1 IS NOT NULL OR ?2 IS NOT NULL)
                        AND (?1 IS NULL OR access_count < ?1)
-                       AND (?2 IS NULL OR last_accessed_at < ?2)",
+                       AND (?2 IS NULL OR last_accessed_at < ?2)
+                       AND importance < ?4
+                       AND (related_keys IS NULL OR related_keys IN ('[]', ''))
+                       AND NOT EXISTS (
+                         SELECT 1 FROM memory_edges e
+                         WHERE e.from_key = memories.key OR e.to_key = memories.key
+                       )",
                 )?;
                 let keys: Vec<String> = stmt
-                    .query_map(params![min_uses_i, cutoff_lat, grace_cutoff], |r| {
-                        r.get::<_, String>(0)
-                    })?
+                    .query_map(
+                        params![min_uses_i, cutoff_lat, grace_cutoff, DURABLE_IMPORTANCE_FLOOR],
+                        |r| r.get::<_, String>(0),
+                    )?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
 
+                // Tombstone (not hard DELETE): keeps the row as `status !=
+                // 'active'` so (a) the C3 s2 conservation check sees active↓
+                // matched by retired↑ and stays silent on benign GC, and (b)
+                // the deletion propagates across peers via NewerWins sync
+                // (a local hard-DELETE just gets re-pulled). Final removal is
+                // the job of memory_purge_tombstones (7d ladder).
                 if !dry_run && !keys.is_empty() {
                     let tx = c.unchecked_transaction()?;
                     for k in &keys {
-                        tx.execute("DELETE FROM memories WHERE key = ?1", params![k])?;
+                        tx.execute(
+                            "UPDATE memories SET status='tombstoned', updated_at=?2 \
+                             WHERE key = ?1",
+                            params![k, now],
+                        )?;
                     }
                     tx.commit()?;
                 }
@@ -11939,6 +12004,229 @@ mod tests {
             .await
             .expect("empty");
         assert_eq!(zero, 0);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_compact_tombstones_not_deletes_and_protects_durable() {
+        // thread 97 #97: memory_compact must (a) TOMBSTONE rows, not hard-DELETE
+        // (so the C3 s2 conservation check sees active↓ matched by retired↑, and
+        // the deletion propagates via NewerWins sync), and (b) never retire a
+        // durable row — importance ≥ 0.6, author-linked (related_keys), or
+        // graph-connected (has edges).
+        use crate::embedding::{set_default_backend, HashBackend};
+        use crate::{CompactPolicy, MemoryRecord};
+        // Pin the deterministic backend (idempotent) so memory_save here does
+        // not lazy-init a real embedder and perturb the process-global default
+        // that sibling backend-sensitive tests (e.g. memory_reindex_*) assume.
+        let _ = set_default_backend(std::sync::Arc::new(HashBackend));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-compact-tombstone-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("c.db")).await.expect("open");
+
+        let now = now_secs();
+        let mk = |key: &str, importance: f64, related: Vec<String>| MemoryRecord {
+            key: key.to_string(),
+            // Unique kind per row defeats Phase-1-P2 auto supersede on save.
+            kind: format!("kind_{key}"),
+            content: format!("body-{key}"),
+            tags: vec![],
+            related_keys: related,
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        // junk: low importance, no links, no edges → the only eligible row.
+        store.memory_save(&mk("junk_old", 0.2, vec![])).await.expect("save");
+        // durable by importance.
+        store.memory_save(&mk("durable_imp", 0.8, vec![])).await.expect("save");
+        // durable by related_keys (note: related_keys does NOT create edges).
+        store
+            .memory_save(&mk("durable_linked", 0.2, vec!["junk_old".into()]))
+            .await
+            .expect("save");
+        // durable by edge.
+        store.memory_save(&mk("edge_a", 0.2, vec![])).await.expect("save");
+        store.memory_save(&mk("edge_b", 0.2, vec![])).await.expect("save");
+        store
+            .memory_link("edge_a", "edge_b", "relates", 1.0)
+            .await
+            .expect("link");
+
+        // Backdate created_at + last_accessed_at so every row clears the
+        // age/access window (memory_save stamps both to now).
+        let old = now - 200 * 86_400;
+        let keys_all = vec!["junk_old", "durable_imp", "durable_linked", "edge_a", "edge_b"];
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                let q = format!(
+                    "UPDATE memories SET created_at=?, last_accessed_at=? WHERE key IN ({})",
+                    keys_all.iter().map(|_| "?").collect::<Vec<_>>().join(",")
+                );
+                let mut p: Vec<rusqlite::types::Value> = vec![
+                    rusqlite::types::Value::Integer(old),
+                    rusqlite::types::Value::Integer(old),
+                ];
+                p.extend(
+                    keys_all
+                        .into_iter()
+                        .map(|k| rusqlite::types::Value::Text(k.to_string())),
+                );
+                c.execute(&q, rusqlite::params_from_iter(p.iter()))
+            })
+            .await
+            .expect("backdate");
+
+        let policy = CompactPolicy {
+            min_uses: Some(2),
+            older_than_secs: Some(90 * 86_400),
+            dry_run: false,
+        };
+        let retired = store.memory_compact(policy).await.expect("compact");
+        assert_eq!(
+            retired,
+            vec!["junk_old".to_string()],
+            "only the junk row is eligible; durable rows are protected"
+        );
+
+        let statuses = store
+            .conn
+            .call(|c| -> RusqliteResult<Vec<(String, String)>> {
+                let mut stmt = c.prepare("SELECT key, status FROM memories ORDER BY key")?;
+                let rows =
+                    stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+                rows.collect()
+            })
+            .await
+            .expect("statuses");
+        let get = |k: &str| {
+            statuses
+                .iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, s)| s.as_str())
+        };
+        assert_eq!(
+            get("junk_old"),
+            Some("tombstoned"),
+            "compact must TOMBSTONE the junk row, not hard-DELETE it"
+        );
+        assert_eq!(get("durable_imp"), Some("active"), "high-importance row survives");
+        assert_eq!(get("durable_linked"), Some("active"), "author-linked row survives");
+        assert_eq!(get("edge_a"), Some("active"), "connected row survives");
+        assert_eq!(get("edge_b"), Some("active"), "connected row survives");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_importance_spares_connected_and_linked_rows() {
+        // thread 97 #97: importance decay must not ARCHIVE a row that is
+        // graph-connected or author-linked, even when its decayed importance
+        // drops below the archive threshold. An isolated low row IS archived.
+        use crate::embedding::{set_default_backend, HashBackend};
+        use crate::MemoryRecord;
+        // Pin the deterministic backend (idempotent) — see the note in
+        // memory_compact_tombstones_not_deletes_and_protects_durable.
+        let _ = set_default_backend(std::sync::Arc::new(HashBackend));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-decay-guard-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("d.db")).await.expect("open");
+
+        let now = now_secs();
+        let mk = |key: &str, related: Vec<String>| MemoryRecord {
+            key: key.to_string(),
+            kind: format!("kind_{key}"),
+            content: format!("body-{key}"),
+            tags: vec![],
+            related_keys: related,
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.1,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&mk("isolated_low", vec![])).await.expect("save");
+        store
+            .memory_save(&mk("linked_low", vec!["isolated_low".into()]))
+            .await
+            .expect("save");
+        store.memory_save(&mk("hub_a", vec![])).await.expect("save");
+        store.memory_save(&mk("hub_b", vec![])).await.expect("save");
+        store
+            .memory_link("hub_a", "hub_b", "relates", 1.0)
+            .await
+            .expect("link");
+
+        // Backdate updated_at so decay drives importance below the threshold.
+        let old = now - 365 * 86_400;
+        let keys_all = vec!["isolated_low", "linked_low", "hub_a", "hub_b"];
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                let q = format!(
+                    "UPDATE memories SET updated_at=? WHERE key IN ({})",
+                    keys_all.iter().map(|_| "?").collect::<Vec<_>>().join(",")
+                );
+                let mut p: Vec<rusqlite::types::Value> =
+                    vec![rusqlite::types::Value::Integer(old)];
+                p.extend(
+                    keys_all
+                        .into_iter()
+                        .map(|k| rusqlite::types::Value::Text(k.to_string())),
+                );
+                c.execute(&q, rusqlite::params_from_iter(p.iter()))
+            })
+            .await
+            .expect("backdate");
+
+        // 0.1 × 0.5^(365/30) ≈ 2e-5 << 0.05 → all 4 would archive without the guard.
+        let archived = store.memory_decay_importance(30.0, 0.05).await.expect("decay");
+        assert_eq!(archived, 1, "only the isolated low-importance row is archived");
+
+        let statuses = store
+            .conn
+            .call(|c| -> RusqliteResult<Vec<(String, String)>> {
+                let mut stmt = c.prepare("SELECT key, status FROM memories ORDER BY key")?;
+                let rows =
+                    stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+                rows.collect()
+            })
+            .await
+            .expect("statuses");
+        let get = |k: &str| {
+            statuses
+                .iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, s)| s.as_str())
+        };
+        assert_eq!(get("isolated_low"), Some("archived"), "isolated low row archived");
+        assert_eq!(get("linked_low"), Some("active"), "author-linked row spared");
+        assert_eq!(get("hub_a"), Some("active"), "connected row spared");
+        assert_eq!(get("hub_b"), Some("active"), "connected row spared");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

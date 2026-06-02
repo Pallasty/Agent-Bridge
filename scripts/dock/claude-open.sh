@@ -34,8 +34,11 @@ fi
 swaymsg 'for_window [app_id="(?i).*dock\.html.*"] floating enable, sticky enable, border pixel 2' >/dev/null 2>&1 || true
 swaymsg 'for_window [app_id="ab-dock"] floating enable, sticky enable, border pixel 2' >/dev/null 2>&1 || true
 
+# cache-bust by dock.html mtime so a redeployed panel always loads fresh (not from
+# Chrome's disk cache). Changes only when dock.html actually changes.
+DOCK_V="$(stat -c %Y "$DIR/dock.html" 2>/dev/null || echo 0)"
 setsid "$CHROME" \
-  --app="http://127.0.0.1:$PORT/dock.html" \
+  --app="http://127.0.0.1:$PORT/dock.html?v=$DOCK_V" \
   --class=ab-dock \
   --user-data-dir="$PROFILE" \
   --window-size=400,480 \
