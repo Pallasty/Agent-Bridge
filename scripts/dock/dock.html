@@ -186,10 +186,16 @@ function render(d){
     for (const a of d.approvals){
       const sum = esc(a.summary || a.kind || a.token || '');
       const kind = esc(a.kind || 'host action');
-      if (a.decided){
-        const yes = a.decided === 'approve';
-        h += `<div class="approval decided"><span class="k ${yes?'yes':'no'}">${yes?'✓ 已批准':'✗ 已拒绝'}</span>
-              <span class="ap-sum"> · ${sum} · 待执行</span></div>`;
+      const dec = DECIDED.get(a.token);
+      if (dec){
+        // optimistic decided-state: INSTANT feedback the moment the server responds,
+        // held (greyed, no buttons) until the ~3s snapshot refresh reconciles the card away.
+        let cls, txt;
+        if (!dec.ok)                        { cls = 'no';  txt = '⚠ 未生效:' + esc(dec.reason || 'failed'); }
+        else if (dec.decision === 'reject') { cls = 'no';  txt = '✗ 已拒绝 · 已杀,不会执行'; }
+        else                                { cls = 'yes'; txt = '✓ 已批准 · 已执行'; }
+        h += `<div class="approval decided"><span class="k ${cls}">${txt}</span>
+              <span class="ap-sum"> · ${sum}</span></div>`;
       } else {
         // cross-process control plane (probe): for a steer pending, show the EXACT
         // text + target session so the human can SEE what they're releasing.
@@ -283,12 +289,16 @@ function render(d){
 // high-risk approve arms for a few seconds on first click (two-step confirm); the map
 // survives re-renders so the auto-3s tick doesn't disarm a confirm you're mid-way through.
 const ARMED = new Map();   // token -> expiry(ms)
-let LAST = null;           // last snapshot, so a click can re-render to reflect ARMED
+const DECIDED = new Map(); // token -> {decision, ok, reason} — optimistic decided-state for instant feedback
+let LAST = null;           // last snapshot, so a click can re-render to reflect ARMED/DECIDED
 
 async function tick(){
   try {
     const r = await fetch('dock_snapshot.json?_=' + Date.now(), {cache:'no-store'});
     LAST = await r.json();
+    // drop optimistic decided-states whose card the snapshot has now reconciled away
+    const liveTokens = new Set((LAST.approvals || []).map(a => a.token));
+    for (const t of [...DECIDED.keys()]) if (!liveTokens.has(t)) DECIDED.delete(t);
     render(LAST);
   } catch(e) {
     document.getElementById('reason').textContent = '聚合器未连接 (' + e + ')';
@@ -323,8 +333,15 @@ document.getElementById('main').addEventListener('click', async (e) => {
       body: JSON.stringify({ token, decision }),
     });
     const j = await r.json();
-    if (j && j.ok) tick(); else btn.disabled = false;
-  } catch (err) { btn.disabled = false; }
+    // INSTANT feedback: flip this card to a decided result the moment the server responds
+    // (greyed, buttons gone). The 3s snapshot refresh then removes it; tick() prunes DECIDED.
+    DECIDED.set(token, { decision, ok: !!(j && j.ok), reason: (j && j.reason) || '' });
+    ARMED.delete(token);
+    if (LAST) render(LAST);
+  } catch (err) {
+    DECIDED.set(token, { decision, ok: false, reason: '网络错误' });
+    if (LAST) render(LAST);
+  }
 });
 
 tick();
