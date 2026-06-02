@@ -2343,6 +2343,34 @@ fn desktop_invoke_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_invoke.py")
 }
 
+/// Resolve scripts/desktop_steer.py — the blessed phase-2 executor for `kind=steer`
+/// pendings (cross-process tmux injection). Mirrors desktop_{action,invoke}_script_path:
+/// explicit `script_path` arg > AGENT_BRIDGE_DESKTOP_STEER_SCRIPT env > cwd/scripts >
+/// current_dir/scripts > compile-time repo fallback.
+fn desktop_steer_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_DESKTOP_STEER_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/desktop_steer.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/desktop_steer.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_steer.py")
+}
+
 fn desktop_invoke_error(error: Value) -> ToolResult {
     let mut result = ToolResult::json_text(&json!({
         "schema": "desktop_invoke_mcp_error.v0",
@@ -2353,9 +2381,9 @@ fn desktop_invoke_error(error: Value) -> ToolResult {
     result
 }
 
-/// Read a pending host-confirm record's `kind` ("invoke" | "action") WITHOUT consuming
-/// it, so desktop_confirm can dispatch to the right backend script. Token must be hex
-/// (path safety); returns None if malformed, missing, or unreadable (caller defaults to
+/// Read a pending host-confirm record's `kind` ("invoke" | "action" | "steer") WITHOUT
+/// consuming it, so desktop_confirm can dispatch to the right backend script. Token must be
+/// hex (path safety); returns None if malformed, missing, or unreadable (caller defaults to
 /// the invoke backend, which then reports "no such pending token").
 fn desktop_pending_kind(token: &str) -> Option<String> {
     if token.is_empty() || !token.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -2382,8 +2410,9 @@ fn desktop_pending_kind(token: &str) -> Option<String> {
 /// TTL-bounded pending token (and an on-screen notify); they act on NOTHING. This tool
 /// takes that token and executes the pending host action — the only way host mutation
 /// reaches the real desktop through MCP. It dispatches by the record's kind (invoke ->
-/// desktop_invoke.py, action -> desktop_action.py); the backend validates the token
-/// (exists, unconsumed, unexpired) and marks it consumed before acting, so it runs once.
+/// desktop_invoke.py, action -> desktop_action.py, steer -> desktop_steer.py cross-process
+/// tmux injection); the backend validates the token (exists, unconsumed, unexpired) and
+/// marks it consumed before acting, so it runs once.
 pub struct DesktopConfirmTool {
     _hub: Hub,
 }
@@ -2439,12 +2468,14 @@ impl McpTool for DesktopConfirmTool {
             .clamp(1_000, 30_000);
 
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
-        // Dispatch to the right backend by the pending record's kind: an "action" token
-        // executes via desktop_action.py, otherwise desktop_invoke.py.
-        let script = if desktop_pending_kind(token).as_deref() == Some("action") {
-            desktop_action_script_path(&args, cwd.as_ref())
-        } else {
-            desktop_invoke_script_path(&args, cwd.as_ref())
+        // Dispatch to the right backend by the pending record's kind: "action" ->
+        // desktop_action.py (coordinate click), "steer" -> desktop_steer.py (cross-process
+        // tmux injection), otherwise desktop_invoke.py (AT-SPI doAction). All three share the
+        // single-use --confirm-token contract (validate + consume before acting).
+        let script = match desktop_pending_kind(token).as_deref() {
+            Some("action") => desktop_action_script_path(&args, cwd.as_ref()),
+            Some("steer") => desktop_steer_script_path(&args, cwd.as_ref()),
+            _ => desktop_invoke_script_path(&args, cwd.as_ref()),
         };
         if !script.exists() {
             return Ok(desktop_invoke_error(json!({
@@ -34644,6 +34675,25 @@ print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
         assert_eq!(desktop_pending_kind("not-hex-zzzz"), None);
         // a well-formed hex token with no backing file is also None (caller defaults to invoke).
         assert_eq!(desktop_pending_kind("deadbeefdeadbeef"), None);
+    }
+
+    #[test]
+    fn desktop_steer_script_path_resolution() {
+        // item 3: desktop_confirm dispatches kind=steer pendings to scripts/desktop_steer.py.
+        // explicit script_path arg wins (tests / alternate checkouts) — pure, no globals.
+        let args = json!({ "script_path": "/tmp/custom/desktop_steer.py" });
+        assert_eq!(
+            desktop_steer_script_path(&args, None),
+            PathBuf::from("/tmp/custom/desktop_steer.py")
+        );
+        // with no overrides and no co-located file, it falls back to the repo copy — the
+        // tail is stable regardless of which resolution branch wins.
+        let p = desktop_steer_script_path(&json!({}), None);
+        assert!(
+            p.ends_with("scripts/desktop_steer.py"),
+            "steer fallback should resolve scripts/desktop_steer.py, got {}",
+            p.display()
+        );
     }
 
     #[test]
