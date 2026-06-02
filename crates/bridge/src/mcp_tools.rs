@@ -5808,6 +5808,9 @@ impl McpTool for PresentVoiceTool {
                     "capture_channel": {"type": "string", "enum": ["sink_monitor", "mic"], "default": "sink_monitor", "description": "Readback channel: sink_monitor = emit sink's .monitor (bus loopback, default); mic = default input (acoustic, phase 2)."},
                     "intent": {"type": "string", "description": "What this emission is the outcome of (recorded in the outcome sidecar; does not affect playback)."},
                     "synth_bin": {"type": "string", "description": "backend=kokoro: explicit ab-tts-synth path (else env AB_TTS_SYNTH_BIN)."},
+                    "verify_intelligibility": {"type": "boolean", "default": false, "description": "backend=kokoro: ALSO transcribe the bus capture (whisper.cpp) and check the requested words came back — a stronger, layered falsifier. Needs ab-tts STT (env AB_TTS_STT_BIN/_MODEL or stt_bin/stt_model)."},
+                    "stt_bin": {"type": "string", "description": "verify_intelligibility: whisper.cpp CLI path (else env AB_TTS_STT_BIN)."},
+                    "stt_model": {"type": "string", "description": "verify_intelligibility: whisper ggml model path (else env AB_TTS_STT_MODEL)."},
                     "cwd": {"type": "string", "description": "Repo root to resolve scripts/audio_embody.py."},
                     "script_path": {"type": "string", "description": "Explicit audio_embody.py path (tests/alternate checkouts)."}
                 }
@@ -5824,6 +5827,7 @@ impl McpTool for PresentVoiceTool {
         let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let voice = args.get("voice").and_then(|v| v.as_str()).unwrap_or("af_sarah").to_string();
         let speed = args.get("speed").and_then(|v| v.as_f64()).unwrap_or(1.0).clamp(0.5, 2.0);
+        let verify_intelligibility = args.get("verify_intelligibility").and_then(|v| v.as_bool()).unwrap_or(false);
         let capture_channel = args
             .get("capture_channel").and_then(|v| v.as_str()).unwrap_or("sink_monitor").to_string();
         let intent = args.get("intent").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -5855,6 +5859,11 @@ impl McpTool for PresentVoiceTool {
                 .arg("--speed").arg(format!("{speed}"))
                 .arg("--capture-channel").arg(&capture_channel);
             push_optional_str_arg(&mut cmd, &args, "synth_bin", "--synth-bin");
+            if verify_intelligibility {
+                cmd.arg("--check-intelligibility");
+                push_optional_str_arg(&mut cmd, &args, "stt_bin", "--stt-bin");
+                push_optional_str_arg(&mut cmd, &args, "stt_model", "--stt-model");
+            }
         } else {
             cmd.arg("--freq").arg(format!("{freq}"))
                 .arg("--duration-ms").arg(duration_ms.to_string())
@@ -5929,6 +5938,10 @@ impl McpTool for PresentVoiceTool {
             "env_corr": res.get("env_corr"),
             "voiced_secs": res.get("voiced_secs"),
             "capture_rms": res.get("capture_rms"),
+            // intelligibility (STT round-trip; present only when verify_intelligibility)
+            "intelligibility": res.get("intelligibility"),
+            "word_overlap": res.get("word_overlap"),
+            "stt_transcript": res.get("stt_transcript"),
             // tone-mode fields
             "freq": if is_speech { Value::Null } else { json!(freq) },
             "rms": res.get("rms"),

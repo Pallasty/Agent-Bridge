@@ -20,7 +20,7 @@ Pluggable capture channel:
 This is the Python half (analysis + decision) wrapped by the thin Rust MCP tool
 `present_voice`, matching the desktop_verify / vision_grounding_ocr pattern.
 """
-import argparse, array, json, math, os, subprocess, sys, tempfile, time, wave
+import argparse, array, json, math, os, re, subprocess, sys, tempfile, time, wave
 
 # --- pure decision (unit-tested; no audio needed) -------------------------------
 
@@ -105,6 +105,43 @@ def classify_speech_embody(capture_rms, env_corr, voiced_secs, expected_secs, fr
     if env_corr >= env_corr_min and enough_span:
         return "emitted"           # envelope shape matches what we played -> on the bus
     return "mismatch"              # bus has audio, but not the speech we played
+
+
+# --- intelligibility (STT round-trip) -------------------------------------------
+# The envelope correlation (above) proves the bus carried OUR signal's shape; this
+# proves the WORDS survived — transcribe the bus capture and check the requested
+# words come back. A STRONGER, layered falsifier (not a replacement): the envelope
+# status still gates the outcome; intelligibility is recorded as extra evidence.
+# Honest boundary unchanged: this verifies intelligibility AT THE BUS, not at the
+# physical transducer (a human ear is still the only judge of the last mile).
+
+INTELLIGIBLE_MIN = 0.6   # fraction of requested words that must come back from the bus
+
+_WORD_RE = re.compile(r"[a-z0-9']+")
+
+
+def _norm_words(text):
+    return _WORD_RE.findall((text or "").lower())
+
+
+def word_overlap(reference, hypothesis):
+    """Recall of reference words present in the hypothesis — order-, case- and
+    punctuation-insensitive. Returns (ratio, n_reference_words). 1.0 = every
+    requested word was transcribed off the bus."""
+    ref = _norm_words(reference)
+    if not ref:
+        return 0.0, 0
+    hyp = set(_norm_words(hypothesis))
+    hit = sum(1 for w in ref if w in hyp)
+    return hit / len(ref), len(ref)
+
+
+def classify_intelligibility(overlap_ratio, n_ref_words, threshold=INTELLIGIBLE_MIN):
+    """Pure: did STT recover enough of the requested words from the bus capture?
+    Returns intelligible | garbled | no_words."""
+    if n_ref_words <= 0:
+        return "no_words"
+    return "intelligible" if overlap_ratio >= threshold else "garbled"
 
 
 # --- audio analysis (pure over samples) -----------------------------------------
@@ -331,9 +368,37 @@ def synth_speech(text, voice, speed, synth_bin):
     return wav, info
 
 
-def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin):
+def resolve_stt(stt_bin_arg, model_arg):
+    """Locate whisper.cpp CLI + ggml model: explicit args → env → None."""
+    b = stt_bin_arg or os.environ.get("AB_TTS_STT_BIN", "").strip()
+    m = model_arg or os.environ.get("AB_TTS_STT_MODEL", "").strip()
+    return (b or None), (m or None)
+
+
+def transcribe(wav_path, stt_bin, model):
+    """whisper.cpp transcription of `wav_path` → (text, None) or (None, error).
+    Resamples to 16 kHz mono first (whisper.cpp's required input rate)."""
+    if not stt_bin or not os.path.exists(stt_bin):
+        return None, f"stt bin not found ({stt_bin!r}); set --stt-bin or AB_TTS_STT_BIN"
+    if not model or not os.path.exists(model):
+        return None, f"stt model not found ({model!r}); set --stt-model or AB_TTS_STT_MODEL"
+    wav16 = os.path.join(tempfile.gettempdir(), "ab_voice_capture_16k.wav")
+    _sh(f"ffmpeg -y -i {wav_path} -ac 1 -ar 16000 {wav16} 2>&1")
+    if not os.path.exists(wav16):
+        return None, "resample to 16k failed"
+    p = subprocess.run([stt_bin, "-m", model, "-f", wav16, "-l", "en", "-nt", "-np"],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        return None, f"whisper rc={p.returncode}: {p.stderr[:200]}"
+    return p.stdout.strip(), None
+
+
+def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
+               check_intelligibility=False, stt_bin=None, stt_model=None):
     """Speech-mode embodiment: synthesize `text` → play to the sink while capturing
-    the bus → verify by energy-envelope correlation + voiced span (NOT a tone peak)."""
+    the bus → verify by energy-envelope correlation + voiced span (NOT a tone peak).
+    Optionally also transcribe the bus capture (whisper.cpp) and check the requested
+    words came back — a stronger, layered intelligibility falsifier."""
     sink, src, verified_to, not_verified = resolve_targets(sink_arg, capture_channel)
     out = {
         "mode": "speech", "text": text, "voice": voice, "speed": speed, "sink": sink,
@@ -381,6 +446,22 @@ def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin):
         frames=parsed["frames"], sr=cap_sr,
         detail=f"env_corr={env_corr} voiced_secs={voiced}/{round(played_dur,2)} capture_rms={capture_rms} frames={parsed['frames']}",
     )
+
+    # Layered intelligibility falsifier (STT round-trip): transcribe the BUS
+    # CAPTURE (not the synth) and check the requested words survived the emit→bus
+    # path. Recorded as extra evidence; does NOT override the envelope-based status.
+    if check_intelligibility:
+        sb, sm = resolve_stt(stt_bin, stt_model)
+        transcript, stt_err = transcribe(cap_path, sb, sm)
+        if transcript is not None:
+            ratio, nref = word_overlap(text, transcript)
+            out["stt_transcript"] = transcript
+            out["word_overlap"] = round(ratio, 3)
+            out["intelligibility"] = classify_intelligibility(ratio, nref)
+            out["detail"] += f" | stt: '{transcript[:80]}' overlap={round(ratio,3)} -> {out['intelligibility']}"
+        else:
+            out["intelligibility"] = "unavailable"
+            out["stt_detail"] = stt_err
     return out
 
 
@@ -399,6 +480,10 @@ def main():
     ap.add_argument("--voice", default="af_sarah", help="speech mode: TTS voice name")
     ap.add_argument("--speed", type=float, default=1.0, help="speech mode: speech speed (0.5-2.0)")
     ap.add_argument("--synth-bin", default=None, help="speech mode: path to ab-tts-synth (or env AB_TTS_SYNTH_BIN)")
+    ap.add_argument("--check-intelligibility", action="store_true",
+                    help="speech mode: also transcribe the bus capture (whisper.cpp) and check words came back")
+    ap.add_argument("--stt-bin", default=None, help="whisper.cpp CLI path (or env AB_TTS_STT_BIN)")
+    ap.add_argument("--stt-model", default=None, help="whisper ggml model path (or env AB_TTS_STT_MODEL)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     if a.mode == "speech":
@@ -407,7 +492,9 @@ def main():
                    "detail": "speech mode requires --text"}
         else:
             res = run_speech(a.text, a.voice, max(0.5, min(a.speed, 2.0)), a.sink,
-                             a.capture_channel, resolve_synth_bin(a.synth_bin))
+                             a.capture_channel, resolve_synth_bin(a.synth_bin),
+                             check_intelligibility=a.check_intelligibility,
+                             stt_bin=a.stt_bin, stt_model=a.stt_model)
         if a.json:
             print(json.dumps(res))
         else:

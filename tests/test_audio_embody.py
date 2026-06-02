@@ -160,6 +160,34 @@ def test_voiced_seconds_counts_above_floor():
     assert ae.voiced_seconds(silence, sr) == 0.0
 
 
+# --- intelligibility (STT round-trip) truth table -------------------------------
+
+def test_word_overlap_is_recall_order_case_punct_insensitive():
+    # live P5 dogfood TRUE: transcript == text (modulo case/punct) -> 1.0
+    r, n = ae.word_overlap("Hello, brave world!", "hello brave world")
+    assert (round(r, 3), n) == (1.0, 3)
+    # missing words lower recall; extra hypothesis words don't help
+    r, n = ae.word_overlap("a b c d", "a b zzz qqq")
+    assert (round(r, 3), n) == (0.5, 4)
+    # no reference words -> (0.0, 0)
+    assert ae.word_overlap("", "anything") == (0.0, 0)
+
+
+def test_classify_intelligibility_threshold():
+    assert ae.classify_intelligibility(1.0, 10) == "intelligible"
+    assert ae.classify_intelligibility(ae.INTELLIGIBLE_MIN, 10) == "intelligible"     # at threshold
+    assert ae.classify_intelligibility(ae.INTELLIGIBLE_MIN - 0.01, 10) == "garbled"   # just under
+    assert ae.classify_intelligibility(0.0, 10) == "garbled"                          # FALSE: nothing recovered
+    assert ae.classify_intelligibility(0.0, 0) == "no_words"                          # nothing to check
+
+
+def test_intelligibility_garbled_when_transcript_unrelated():
+    # bus carried *some* speech but the words don't match what we asked for.
+    ratio, nref = ae.word_overlap("activate the reactor core sequence",
+                                  "the weather today is quite nice")
+    assert ae.classify_intelligibility(ratio, nref) == "garbled"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
