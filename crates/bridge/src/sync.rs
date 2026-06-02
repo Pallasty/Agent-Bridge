@@ -755,6 +755,7 @@ fn push_origin_primary_aware(
 /// mode forever, with every subsequent sync committing on detached HEAD
 /// and silently failing the push (see commit msg for the 1.5-day outage).
 fn git_pull_rebase(repo: &Path, verbose: bool) {
+    reap_stale_index_lock(repo, verbose);
     abort_leftover_rebase(repo, verbose);
     let out = Command::new("git")
         .arg("-C")
@@ -848,6 +849,78 @@ fn abort_leftover_rebase(repo: &Path, verbose: bool) {
         .arg(repo)
         .args(["rebase", "--abort"])
         .status();
+}
+
+/// Threshold past which a *non-empty* `.git/index.lock` is treated as stale.
+/// No legitimate git index write in the sync flow holds the lock this long
+/// (the memory-sync repo is local and each round takes seconds), so a lock
+/// older than this was orphaned by a killed git process. Kept well above one
+/// sync round's duration so a live concurrent sync is never disturbed.
+const INDEX_LOCK_MAX_AGE_SECS: u64 = 120;
+
+/// Why an existing `index.lock` is considered safe to remove.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StaleLock {
+    /// 0 bytes — git was killed after `open(O_CREAT|O_EXCL)` but before
+    /// writing the lock body. The exact signature of both recurrences.
+    Empty,
+    /// Non-empty but older than `INDEX_LOCK_MAX_AGE_SECS` (carries the age).
+    Aged(u64),
+}
+
+/// Pure decision: is an `index.lock` with this `size`/`age_secs` stale?
+/// `None` ⇒ recent + non-empty ⇒ likely a live concurrent sync mid-write,
+/// leave it alone. Split out from the IO so it is unit-testable.
+fn classify_index_lock(size: u64, age_secs: u64, max_age_secs: u64) -> Option<StaleLock> {
+    if size == 0 {
+        Some(StaleLock::Empty)
+    } else if age_secs >= max_age_secs {
+        Some(StaleLock::Aged(age_secs))
+    } else {
+        None
+    }
+}
+
+/// Remove a stale `.git/index.lock` left by a git process killed mid-op.
+/// Without this, every subsequent sync's `git pull`/`git add` fails with
+/// "Unable to create '.../index.lock': File exists" and `consecutive_fails`
+/// climbs unbounded — a chronic *silent* cross-node memory stall (recurred
+/// 2026-05-26 @45 fails, 2026-06-02 @227 fails / 27h; see
+/// `lesson_stale_git_index_lock_breaks_sync`). Safe because the memory-sync
+/// repo is single-writer (only `agent-bridge sync` touches it): a lock here
+/// is either a dead prior run (0 bytes, or aged past a sync round) or a live
+/// concurrent sync (recent + non-empty), and the age guard leaves the latter
+/// untouched.
+fn reap_stale_index_lock(repo: &Path, verbose: bool) {
+    let lock = repo.join(".git/index.lock");
+    let Ok(meta) = std::fs::metadata(&lock) else {
+        return; // no lock present — the overwhelmingly common path
+    };
+    let size = meta.len();
+    let age_secs = meta
+        .modified()
+        .ok()
+        .and_then(|m| m.elapsed().ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match classify_index_lock(size, age_secs, INDEX_LOCK_MAX_AGE_SECS) {
+        // Always log a reap (not just under -v): it is a recovery event, like
+        // the consecutive_fails reset.
+        Some(reason) => match std::fs::remove_file(&lock) {
+            Ok(()) => eprintln!(
+                "[sync] reaped stale .git/index.lock ({reason:?}, size={size} age={age_secs}s) — \
+                 prior git killed mid-op; see lesson_stale_git_index_lock_breaks_sync"
+            ),
+            Err(e) => eprintln!("[sync] could not remove stale index.lock: {e}"),
+        },
+        None => {
+            if verbose {
+                eprintln!(
+                    "[sync] index.lock present but looks live (size={size} age={age_secs}s < {INDEX_LOCK_MAX_AGE_SECS}s) — leaving it"
+                );
+            }
+        }
+    }
 }
 
 /// Returns the current branch name (e.g. `"main"`). Errors when HEAD is
@@ -976,5 +1049,27 @@ mod tests {
         // Unverifiable primary (fetch failed → u64::MAX sentinel) is also
         // treated conservatively as a real failure.
         assert_eq!(classify_push(false, u64::MAX), PushVerdict::RealFailure);
+    }
+
+    #[test]
+    fn empty_index_lock_is_stale_at_any_age() {
+        // 0 bytes = git killed before writing the lock body — the exact
+        // signature of both the 2026-05-26 and 2026-06-02 recurrences.
+        // Reap regardless of age.
+        assert_eq!(classify_index_lock(0, 0, 120), Some(StaleLock::Empty));
+        assert_eq!(classify_index_lock(0, 5, 120), Some(StaleLock::Empty));
+    }
+
+    #[test]
+    fn aged_nonempty_index_lock_is_stale() {
+        assert_eq!(classify_index_lock(17, 120, 120), Some(StaleLock::Aged(120)));
+        assert_eq!(classify_index_lock(17, 9_999, 120), Some(StaleLock::Aged(9_999)));
+    }
+
+    #[test]
+    fn recent_nonempty_index_lock_is_left_alone() {
+        // A live concurrent sync just created it — must NOT be reaped.
+        assert_eq!(classify_index_lock(17, 0, 120), None);
+        assert_eq!(classify_index_lock(17, 119, 120), None);
     }
 }
