@@ -88,6 +88,78 @@ def test_full_chain_on_synthesized_samples():
                                     ae.spectral_floor(sil, sr, 440.0), n) == "silent"
 
 
+# --- SPEECH mode: classify_speech_embody truth table ----------------------------
+# (capture_rms, env_corr, voiced_secs, expected_secs, frames)
+
+def test_speech_emitted_when_envelope_matches_and_voiced():
+    # live P4 dogfood TRUE: played 7.2s, bus envelope correlated 0.992, voiced 5.9s.
+    assert ae.classify_speech_embody(2541.72, 0.992, 5.9, 7.2, 404508) == "emitted"
+
+
+def test_speech_silent_when_below_floor():
+    # live P4 dogfood FALSE (no playback): silent bus -> silent, NOT emitted.
+    assert ae.classify_speech_embody(0.0, 0.0, 0.0, 3.4, 169955) == "silent"
+    assert ae.classify_speech_embody(3.0, 0.99, 2.0, 3.0, 144000) == "silent"  # under rms floor
+
+
+def test_speech_mismatch_when_envelope_decorrelated():
+    # busy bus (loud) but playing something else -> envelope shape doesn't match.
+    assert ae.classify_speech_embody(8000.0, 0.12, 5.0, 7.0, 300000) == "mismatch"
+
+
+def test_speech_mismatch_when_voiced_span_too_short():
+    # envelope correlates on a brief blip, but voiced span is a tiny fraction of
+    # the played duration -> reject (a click that happens to correlate isn't speech).
+    assert ae.classify_speech_embody(5000.0, 0.9, 0.2, 7.0, 300000) == "mismatch"
+
+
+def test_speech_no_capture_when_no_frames():
+    assert ae.classify_speech_embody(0.0, 0.0, 0.0, 7.0, 0) == "no_capture"
+    assert ae.classify_speech_embody(9999.0, 0.99, 7.0, 7.0, 0) == "no_capture"
+
+
+def test_speech_env_corr_boundary():
+    # at the correlation min (with enough voiced span) -> emitted; just under -> mismatch.
+    exp, voiced = 4.0, 3.0
+    assert ae.classify_speech_embody(5000.0, ae.ENV_CORR_MIN, voiced, exp, 100000) == "emitted"
+    assert ae.classify_speech_embody(5000.0, ae.ENV_CORR_MIN - 0.01, voiced, exp, 100000) == "mismatch"
+
+
+def test_speech_only_emitted_maps_to_rendered_ok():
+    assert ae.verify_status_for("emitted") == "rendered_ok"
+    for s in ("silent", "mismatch", "no_capture"):
+        assert ae.verify_status_for(s) == s
+
+
+# --- envelope cross-correlation discriminates shape (the speech falsifier core) --
+
+def test_envelope_xcorr_finds_matching_shape_at_lag():
+    played = [0.0, 0.0, 8.0, 16.0, 8.0, 0.0, 0.0, 0.0]
+    # same shape embedded at lag 3 in a longer (constant-padded) captured envelope.
+    captured = [3.0, 3.0, 3.0] + played + [3.0, 3.0]
+    assert ae.envelope_xcorr(played, captured) > 0.9
+
+
+def test_envelope_xcorr_low_for_unrelated_shape():
+    played = [0.0, 0.0, 8.0, 16.0, 8.0, 0.0, 0.0, 0.0]
+    unrelated = [0.0, 16.0] * 8          # alternating, nothing like the pulse
+    assert ae.envelope_xcorr(played, unrelated) < 0.6
+
+
+def test_envelope_xcorr_zero_for_flat():
+    played = [0.0, 0.0, 8.0, 16.0, 8.0, 0.0, 0.0, 0.0]
+    flat = [5.0] * 12                    # flat capture has no shape to correlate
+    assert ae.envelope_xcorr(played, flat) == 0.0
+
+
+def test_voiced_seconds_counts_above_floor():
+    sr = 48000
+    voiced = array.array("h", [1000] * (sr // 2))   # 0.5s above floor
+    silence = array.array("h", [0] * (sr // 2))      # 0.5s silent
+    assert abs(ae.voiced_seconds(voiced, sr) - 0.5) < 0.06
+    assert ae.voiced_seconds(silence, sr) == 0.0
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

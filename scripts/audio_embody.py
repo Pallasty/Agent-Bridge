@@ -72,6 +72,41 @@ def verify_status_for(status):
     }.get(status, "error")
 
 
+# Speech-mode thresholds. A single-frequency Goertzel peak is the WRONG
+# discriminator for broadband speech (no isolated tone), so speech is verified by
+# ENERGY-ENVELOPE CROSS-CORRELATION: the bus capture must carry a signal whose
+# loudness-over-time SHAPE matches the WAV we played (concurrent background audio
+# decorrelates, so this stays robust on a busy bus — the speech analog of the
+# tone path's spectral-peak test), AND the voiced span must cover a real fraction
+# of the played duration. Passed as args so the truth table is pinned in tests.
+SPEECH_RMS_FLOOR = 5.0     # below this the bus is silent (no audio at all)
+ENV_CORR_MIN = 0.45        # min normalized envelope correlation (shape match)
+SPEECH_DUR_FRAC = 0.40     # voiced span must be >= this fraction of played duration
+
+
+def classify_speech_embody(capture_rms, env_corr, voiced_secs, expected_secs, frames,
+                           rms_floor=SPEECH_RMS_FLOOR, env_corr_min=ENV_CORR_MIN,
+                           dur_frac=SPEECH_DUR_FRAC):
+    """Pure: given bus-readback metrics for SPEECH, decide the embodiment outcome.
+
+    `env_corr` = peak normalized cross-correlation between the played WAV's energy
+    envelope and the captured bus envelope; `voiced_secs` = total span of the
+    capture above the voiced floor; `expected_secs` = the played WAV's duration.
+
+    emitted iff the bus carried audio (rms>=floor) whose envelope shape matches
+    what we played (env_corr>=min) over a real fraction of its duration.
+    Returns one of: emitted | silent | mismatch | no_capture.
+    """
+    if frames <= 0:
+        return "no_capture"
+    if capture_rms < rms_floor:
+        return "silent"            # nothing on the bus at all
+    enough_span = expected_secs <= 0 or voiced_secs >= dur_frac * expected_secs
+    if env_corr >= env_corr_min and enough_span:
+        return "emitted"           # envelope shape matches what we played -> on the bus
+    return "mismatch"              # bus has audio, but not the speech we played
+
+
 # --- audio analysis (pure over samples) -----------------------------------------
 
 def _read_wav_mono_s16(path):
@@ -133,6 +168,67 @@ def spectral_floor(samples, sr, freq):
     level our pure tone must peak above. Median (not max) so one loud neighbor
     doesn't mask a real tone."""
     return _median([goertzel(samples, sr, freq * f) for f in _FLOOR_OFFSETS])
+
+
+# --- speech-mode analysis (energy envelope, pure over samples) ------------------
+
+def energy_envelope(samples, sr, frame_ms=50):
+    """Per-frame RMS loudness over time (frames of `frame_ms`). Time-domain, so a
+    24 kHz played WAV and a 48 kHz bus capture yield directly comparable envelopes."""
+    n = max(1, int(sr * frame_ms / 1000))
+    env = []
+    for i in range(0, len(samples), n):
+        frame = samples[i:i + n]
+        if frame:
+            env.append(math.sqrt(sum(x * x for x in frame) / len(frame)))
+    return env
+
+
+def _zscore(xs):
+    n = len(xs)
+    if n == 0:
+        return []
+    mean = sum(xs) / n
+    var = sum((x - mean) ** 2 for x in xs) / n
+    sd = math.sqrt(var)
+    if sd < 1e-9:
+        return [0.0] * n            # flat envelope carries no shape to correlate
+    return [(x - mean) / sd for x in xs]
+
+
+def envelope_xcorr(played_env, captured_env):
+    """Peak normalized cross-correlation of two energy envelopes over all lags
+    where `played` fits inside `captured`. Returns a value in [-1, 1]: ~1 means the
+    bus capture contains a loudness-over-time shape matching what we played.
+    Amplitude-invariant (z-scored), so it measures SHAPE, not level."""
+    p = _zscore(played_env)
+    if not p:
+        return 0.0
+    if len(captured_env) < len(p):
+        # capture shorter than playback: compare the overlap head-to-head
+        c = _zscore(captured_env)
+        m = min(len(p), len(c))
+        if m == 0:
+            return 0.0
+        return sum(p[i] * c[i] for i in range(m)) / m
+    best = -1.0
+    max_lag = len(captured_env) - len(p)
+    for lag in range(0, max_lag + 1):
+        window = _zscore(captured_env[lag:lag + len(p)])
+        if not window:
+            continue
+        corr = sum(p[i] * window[i] for i in range(len(p))) / len(p)
+        if corr > best:
+            best = corr
+    return best
+
+
+def voiced_seconds(samples, sr, frame_ms=50, floor=SPEECH_RMS_FLOOR):
+    """Total time (s) the signal spends above the voiced floor — the span of real
+    energy on the bus, guarding against a brief blip that happens to correlate."""
+    env = energy_envelope(samples, sr, frame_ms)
+    voiced_frames = sum(1 for e in env if e >= floor)
+    return voiced_frames * (frame_ms / 1000.0)
 
 
 # --- orchestration (emit + capture) ---------------------------------------------
@@ -211,16 +307,113 @@ def run(freq, dur_ms, amp, sink_arg, capture_channel, emit):
     return out
 
 
+def resolve_synth_bin(arg):
+    """Locate the ab-tts-synth CLI: explicit arg → env → None (caller errors)."""
+    cand = arg or os.environ.get("AB_TTS_SYNTH_BIN", "").strip()
+    return cand or None
+
+
+def synth_speech(text, voice, speed, synth_bin):
+    """Invoke ab-tts-synth (Rust/Kokoro) to render `text` → WAV. Returns
+    (wav_path, info_dict) or (None, error_dict)."""
+    if not synth_bin or not os.path.exists(synth_bin):
+        return None, {"detail": f"ab-tts-synth not found ({synth_bin!r}); set --synth-bin or AB_TTS_SYNTH_BIN"}
+    wav = os.path.join(tempfile.gettempdir(), "ab_voice_speech.wav")
+    proc = subprocess.run(
+        [synth_bin, "--text", text, "--voice", voice, "--speed", str(speed), "--out", wav],
+        capture_output=True, text=True)
+    try:
+        info = json.loads(proc.stdout.strip().splitlines()[-1]) if proc.stdout.strip() else {}
+    except Exception:  # noqa
+        info = {}
+    if proc.returncode != 0 or not info.get("ok") or not os.path.exists(wav):
+        return None, {"detail": f"synth failed rc={proc.returncode}: {info.get('error') or proc.stderr[:300]}"}
+    return wav, info
+
+
+def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin):
+    """Speech-mode embodiment: synthesize `text` → play to the sink while capturing
+    the bus → verify by energy-envelope correlation + voiced span (NOT a tone peak)."""
+    sink, src, verified_to, not_verified = resolve_targets(sink_arg, capture_channel)
+    out = {
+        "mode": "speech", "text": text, "voice": voice, "speed": speed, "sink": sink,
+        "capture_channel": capture_channel, "capture_source": src,
+        "verified_to": verified_to, "not_verified": not_verified,
+    }
+
+    wav, info = synth_speech(text, voice, speed, synth_bin)
+    if wav is None:
+        out.update(status="error", verify_status="error", **info)
+        return out
+    played = _read_wav_mono_s16(wav)
+    if played is None or not len(played["samples"]):
+        out.update(status="error", verify_status="error", detail="synthesized WAV unreadable/empty")
+        return out
+    played_sr = played["sr"] or 24000
+    played_dur = played["frames"] / played_sr
+    out["played_dur_s"] = round(played_dur, 3)
+
+    cap_path = os.path.join(tempfile.gettempdir(), "ab_voice_capture.wav")
+    secs = played_dur + 1.2  # lead-in (0.4) + tail margin
+    try:
+        cap = capture_async(src, secs, cap_path)
+        time.sleep(0.4)  # let capture spin up before playback
+        _sh(f"paplay --device={sink} {wav}")  # blocks ~played_dur, to the target sink
+        cap.wait()
+    except Exception as e:  # noqa
+        out.update(status="error", verify_status="error", detail=f"orchestration: {e}")
+        return out
+
+    parsed = _read_wav_mono_s16(cap_path)
+    if parsed is None:
+        out.update(status="no_capture", verify_status="no_capture", detail="no capture file")
+        return out
+    cap_samples, cap_sr = parsed["samples"], parsed["sr"] or 48000
+    capture_rms = round(rms_of(cap_samples), 2)
+    played_env = energy_envelope(played["samples"], played_sr)
+    captured_env = energy_envelope(cap_samples, cap_sr)
+    env_corr = round(envelope_xcorr(played_env, captured_env), 3)
+    voiced = round(voiced_seconds(cap_samples, cap_sr), 2)
+    status = classify_speech_embody(capture_rms, env_corr, voiced, played_dur, parsed["frames"])
+    out.update(
+        status=status, verify_status=verify_status_for(status),
+        capture_rms=capture_rms, env_corr=env_corr, voiced_secs=voiced,
+        frames=parsed["frames"], sr=cap_sr,
+        detail=f"env_corr={env_corr} voiced_secs={voiced}/{round(played_dur,2)} capture_rms={capture_rms} frames={parsed['frames']}",
+    )
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description="present_voice audio-embodiment falsifier")
+    ap.add_argument("--mode", choices=["tone", "speech"], default="tone",
+                    help="tone = fixed-freq Goertzel peak (default); speech = TTS envelope-correlation falsifier")
     ap.add_argument("--freq", type=float, default=440.0)
     ap.add_argument("--duration-ms", type=int, default=1500)
     ap.add_argument("--amplitude", type=float, default=0.25)
     ap.add_argument("--sink", default=None)
     ap.add_argument("--capture-channel", choices=["sink_monitor", "mic"], default="sink_monitor")
     ap.add_argument("--no-emit", action="store_true", help="capture-only (silence/external check)")
+    # speech-mode args
+    ap.add_argument("--text", default=None, help="speech mode: text to synthesize + speak")
+    ap.add_argument("--voice", default="af_sarah", help="speech mode: TTS voice name")
+    ap.add_argument("--speed", type=float, default=1.0, help="speech mode: speech speed (0.5-2.0)")
+    ap.add_argument("--synth-bin", default=None, help="speech mode: path to ab-tts-synth (or env AB_TTS_SYNTH_BIN)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.mode == "speech":
+        if not a.text or not a.text.strip():
+            res = {"mode": "speech", "status": "error", "verify_status": "error",
+                   "detail": "speech mode requires --text"}
+        else:
+            res = run_speech(a.text, a.voice, max(0.5, min(a.speed, 2.0)), a.sink,
+                             a.capture_channel, resolve_synth_bin(a.synth_bin))
+        if a.json:
+            print(json.dumps(res))
+        else:
+            for k, v in res.items():
+                print(f"{k}: {v}")
+        return
     dur = max(100, min(a.duration_ms, 8000))
     amp = max(0.0, min(a.amplitude, 1.0))
     res = run(a.freq, dur, amp, a.sink, a.capture_channel, emit=not a.no_emit)

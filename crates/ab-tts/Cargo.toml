@@ -31,3 +31,11 @@ kokoro = ["dep:ort", "dep:ndarray", "dep:misaki-rs", "dep:hound"]
 # Piper (VITS, MIT, 22.05kHz): espeak-ng phonemes + ort ONNX.
 piper = ["dep:ort", "dep:ndarray", "dep:espeak-ng", "dep:hound"]
 all-backends = ["kokoro", "piper"]
+
+# Production synthesis CLI (text → WAV), invoked by scripts/audio_embody.py in
+# speech mode. Gated on `kokoro` so the heavy `ort` link only happens when the
+# TTS backend is actually built — the agent-bridge binary never carries it.
+[[bin]]
+name = "ab-tts-synth"
+path = "src/bin/ab_tts_synth.rs"
+required-features = ["kokoro"]

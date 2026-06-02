@@ -5781,25 +5781,33 @@ impl McpTool for PresentVoiceTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Output-expression lane, AUDIO embodiment. Emits a known tone (freq/duration) to \
-                 an output sink and reads it back off the system bus (PipeWire sink .monitor loopback) to \
-                 prove the signal reached the bus — a spectral-peak falsifier (Goertzel at the target freq \
-                 vs the local spectral floor), robust to concurrent audio. Returns status \
-                 (emitted|silent|mismatch|no_capture|error) plus an HONEST boundary: verified_to=output_bus, \
-                 NOT the physical headphone/speaker driver (the unverifiable last mile — only a human, or the \
-                 mic channel for speakers, confirms that). Writes a verified-outcome sidecar that flows into \
-                 present_outcomes. capture_channel=sink_monitor (bus loopback, default) or mic (acoustic, \
-                 phase 2). Requires PipeWire + ffmpeg/paplay. Opt-in (Niche)."
+            description: "Output-expression lane, AUDIO embodiment. backend=tone (default) emits a known \
+                 tone (freq/duration); backend=kokoro SPEAKS `text` via the offline Rust Kokoro TTS engine. \
+                 Either way the audio is played to an output sink and read back off the system bus (PipeWire \
+                 sink .monitor loopback) to prove it reached the bus: tone uses a spectral-peak falsifier \
+                 (Goertzel vs local floor); speech uses an energy-envelope cross-correlation falsifier (the \
+                 captured bus signal's loudness-over-time must match the played WAV's shape) + voiced span — \
+                 both robust to concurrent audio. Returns status (emitted|silent|mismatch|no_capture|error) \
+                 plus an HONEST boundary: verified_to=output_bus, NOT the physical headphone/speaker driver \
+                 (the unverifiable last mile — only a human, or the mic channel for speakers, confirms that). \
+                 Writes a verified-outcome sidecar that flows into present_outcomes. capture_channel= \
+                 sink_monitor (bus loopback, default) or mic. Requires PipeWire + ffmpeg/paplay; backend=kokoro \
+                 needs ab-tts-synth (env AB_TTS_SYNTH_BIN) + the Kokoro model assets. Opt-in (Niche)."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "freq": {"type": "number", "minimum": 50, "maximum": 18000, "default": 440, "description": "Tone frequency (Hz) whose presence on the bus is verified."},
+                    "backend": {"type": "string", "enum": ["tone", "kokoro"], "default": "tone", "description": "tone = fixed-freq tone (default, no model); kokoro = synthesize + speak `text` via offline Rust TTS."},
+                    "text": {"type": "string", "description": "backend=kokoro: the text to speak (required for kokoro)."},
+                    "voice": {"type": "string", "default": "af_sarah", "description": "backend=kokoro: TTS voice name (e.g. af_sarah, af_heart, bf_*)."},
+                    "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0, "description": "backend=kokoro: speech speed."},
+                    "freq": {"type": "number", "minimum": 50, "maximum": 18000, "default": 440, "description": "backend=tone: tone frequency (Hz) whose presence on the bus is verified."},
                     "duration_ms": {"type": "integer", "minimum": 100, "maximum": 8000, "default": 1500},
-                    "amplitude": {"type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.25, "description": "Output amplitude 0..1 (gentle by default)."},
+                    "amplitude": {"type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.25, "description": "backend=tone: output amplitude 0..1 (gentle by default)."},
                     "sink": {"type": "string", "description": "PipeWire output sink to emit to. Defaults to the system default sink; the SAME sink's .monitor is the bus-loopback readback."},
                     "capture_channel": {"type": "string", "enum": ["sink_monitor", "mic"], "default": "sink_monitor", "description": "Readback channel: sink_monitor = emit sink's .monitor (bus loopback, default); mic = default input (acoustic, phase 2)."},
                     "intent": {"type": "string", "description": "What this emission is the outcome of (recorded in the outcome sidecar; does not affect playback)."},
+                    "synth_bin": {"type": "string", "description": "backend=kokoro: explicit ab-tts-synth path (else env AB_TTS_SYNTH_BIN)."},
                     "cwd": {"type": "string", "description": "Repo root to resolve scripts/audio_embody.py."},
                     "script_path": {"type": "string", "description": "Explicit audio_embody.py path (tests/alternate checkouts)."}
                 }
@@ -5808,13 +5816,25 @@ impl McpTool for PresentVoiceTool {
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let backend = args.get("backend").and_then(|v| v.as_str()).unwrap_or("tone").to_string();
+        let is_speech = backend != "tone";
         let freq = args.get("freq").and_then(|v| v.as_f64()).unwrap_or(440.0).clamp(50.0, 18000.0);
         let duration_ms = args.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(1500).clamp(100, 8000);
         let amplitude = args.get("amplitude").and_then(|v| v.as_f64()).unwrap_or(0.25).clamp(0.0, 1.0);
+        let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let voice = args.get("voice").and_then(|v| v.as_str()).unwrap_or("af_sarah").to_string();
+        let speed = args.get("speed").and_then(|v| v.as_f64()).unwrap_or(1.0).clamp(0.5, 2.0);
         let capture_channel = args
             .get("capture_channel").and_then(|v| v.as_str()).unwrap_or("sink_monitor").to_string();
         let intent = args.get("intent").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
+
+        if is_speech && text.trim().is_empty() {
+            return Ok(ToolResult::error(
+                "present_voice backend=kokoro requires a non-empty `text` to speak".to_string(),
+            ));
+        }
+
         let script = present_voice_script_path(&args, cwd.as_ref());
         if !script.exists() {
             return Ok(ToolResult::error(format!(
@@ -5826,12 +5846,21 @@ impl McpTool for PresentVoiceTool {
         let mut cmd = TokioCommand::new(
             std::env::var("PYTHON").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "python3".to_string()),
         );
-        cmd.arg(&script)
-            .arg("--json")
-            .arg("--freq").arg(format!("{freq}"))
-            .arg("--duration-ms").arg(duration_ms.to_string())
-            .arg("--amplitude").arg(format!("{amplitude}"))
-            .arg("--capture-channel").arg(&capture_channel);
+        cmd.arg(&script).arg("--json");
+        if is_speech {
+            // backend=kokoro: synthesize `text` and verify via envelope correlation.
+            cmd.arg("--mode").arg("speech")
+                .arg("--text").arg(&text)
+                .arg("--voice").arg(&voice)
+                .arg("--speed").arg(format!("{speed}"))
+                .arg("--capture-channel").arg(&capture_channel);
+            push_optional_str_arg(&mut cmd, &args, "synth_bin", "--synth-bin");
+        } else {
+            cmd.arg("--freq").arg(format!("{freq}"))
+                .arg("--duration-ms").arg(duration_ms.to_string())
+                .arg("--amplitude").arg(format!("{amplitude}"))
+                .arg("--capture-channel").arg(&capture_channel);
+        }
         push_optional_str_arg(&mut cmd, &args, "sink", "--sink");
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -5839,8 +5868,9 @@ impl McpTool for PresentVoiceTool {
             cmd.current_dir(cwd);
         }
 
-        // process kill ceiling: emit (duration) + capture margin + ffmpeg startup
-        let timeout_ms = duration_ms + 8_000;
+        // process kill ceiling. tone: emit duration + capture/ffmpeg margin. speech:
+        // generous — first call loads the ~300 MB model (~3-4s) + synth + realtime play.
+        let timeout_ms = if is_speech { 120_000 } else { duration_ms + 8_000 };
         let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
             Err(_) => return Ok(ToolResult::error(format!("present_voice: audio_embody exceeded {timeout_ms} ms"))),
             Ok(Err(e)) => return Ok(ToolResult::error(format!("present_voice: spawn failed: {e}"))),
@@ -5871,21 +5901,36 @@ impl McpTool for PresentVoiceTool {
                 .get("chain_head").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default()
         };
         let ts = crate::present::now_unix();
-        let id = format!("voice_{}hz_{}", freq as u64, ts);
+        let id = if is_speech {
+            format!("voice_{backend}_{ts}")
+        } else {
+            format!("voice_{}hz_{}", freq as u64, ts)
+        };
         // Faithful log regardless of outcome (the gate decides eligibility on the
-        // read side). verify_status=rendered_ok ONLY when the tone peaked on the bus.
+        // read side). verify_status=rendered_ok ONLY when the played audio was
+        // confirmed on the bus (tone: spectral peak; speech: envelope correlation).
+        // Mode-specific metrics are present for the active backend, null otherwise.
         let outcome_record = json!({
             "artifact_id": id,
             "intent": intent,
             "action_tool": "present_voice",
             "kind": "voice",
+            "backend": backend,
             "verify_status": verify_status,
             "verify_method": "audio_bus_readback",
             "audio_status": status,
             "capture_channel": capture_channel,
             "verified_to": res.get("verified_to"),
             "not_verified": res.get("not_verified"),
-            "freq": freq,
+            // speech-mode fields
+            "text": if is_speech { json!(text) } else { Value::Null },
+            "voice": res.get("voice"),
+            "played_dur_s": res.get("played_dur_s"),
+            "env_corr": res.get("env_corr"),
+            "voiced_secs": res.get("voiced_secs"),
+            "capture_rms": res.get("capture_rms"),
+            // tone-mode fields
+            "freq": if is_speech { Value::Null } else { json!(freq) },
             "rms": res.get("rms"),
             "goertzel": res.get("goertzel"),
             "goertzel_floor": res.get("goertzel_floor"),

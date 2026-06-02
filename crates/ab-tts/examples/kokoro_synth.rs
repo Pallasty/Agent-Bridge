@@ -13,7 +13,6 @@
 
 use ab_tts::kokoro::KokoroBackend;
 use ab_tts::TtsBackend;
-use std::io::Write;
 
 fn main() {
     let text = std::env::args().nth(1).unwrap_or_else(|| {
@@ -54,33 +53,9 @@ fn main() {
     );
 
     let out = std::env::var("AB_TTS_OUT").unwrap_or_else(|_| "/tmp/ab-kokoro-rust.wav".to_string());
-    if let Err(e) = write_wav(&out, &audio.to_i16(), audio.sample_rate) {
+    if let Err(e) = audio.write_wav(&out) {
         eprintln!("write wav {out}: {e}");
         std::process::exit(4);
     }
     println!("wrote {out}");
-}
-
-/// Minimal canonical 16-bit mono PCM WAV — hand-rolled to keep the dogfood free
-/// of any encoder-dependency ambiguity.
-fn write_wav(path: &str, samples: &[i16], sr: u32) -> std::io::Result<()> {
-    let mut f = std::fs::File::create(path)?;
-    let data_len = (samples.len() * 2) as u32;
-    f.write_all(b"RIFF")?;
-    f.write_all(&(36 + data_len).to_le_bytes())?;
-    f.write_all(b"WAVE")?;
-    f.write_all(b"fmt ")?;
-    f.write_all(&16u32.to_le_bytes())?; // PCM fmt chunk size
-    f.write_all(&1u16.to_le_bytes())?; // audio format = PCM
-    f.write_all(&1u16.to_le_bytes())?; // channels = mono
-    f.write_all(&sr.to_le_bytes())?;
-    f.write_all(&(sr * 2).to_le_bytes())?; // byte rate
-    f.write_all(&2u16.to_le_bytes())?; // block align
-    f.write_all(&16u16.to_le_bytes())?; // bits/sample
-    f.write_all(b"data")?;
-    f.write_all(&data_len.to_le_bytes())?;
-    for &s in samples {
-        f.write_all(&s.to_le_bytes())?;
-    }
-    Ok(())
 }

@@ -63,6 +63,34 @@ impl AudioBuf {
             .map(|&x| (x.clamp(-1.0, 1.0) * 32767.0) as i16)
             .collect()
     }
+
+    /// Write this buffer as a canonical 16-bit mono PCM WAV — the format the
+    /// audio-embodiment falsifier plays to the sink and reads back off the bus.
+    /// Hand-rolled (no encoder dependency) so WAV output is always available,
+    /// independent of which backend feature is enabled.
+    pub fn write_wav(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+        use std::io::Write as _;
+        let samples = self.to_i16();
+        let data_len = (samples.len() * 2) as u32;
+        let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
+        f.write_all(b"RIFF")?;
+        f.write_all(&(36 + data_len).to_le_bytes())?;
+        f.write_all(b"WAVE")?;
+        f.write_all(b"fmt ")?;
+        f.write_all(&16u32.to_le_bytes())?; // PCM fmt chunk size
+        f.write_all(&1u16.to_le_bytes())?; // audio format = PCM
+        f.write_all(&1u16.to_le_bytes())?; // channels = mono
+        f.write_all(&self.sample_rate.to_le_bytes())?;
+        f.write_all(&(self.sample_rate * 2).to_le_bytes())?; // byte rate (mono, 2 bytes/sample)
+        f.write_all(&2u16.to_le_bytes())?; // block align
+        f.write_all(&16u16.to_le_bytes())?; // bits/sample
+        f.write_all(b"data")?;
+        f.write_all(&data_len.to_le_bytes())?;
+        for s in samples {
+            f.write_all(&s.to_le_bytes())?;
+        }
+        f.flush()
+    }
 }
 
 /// Why a synthesis attempt could not produce audio — surfaced honestly rather
@@ -145,5 +173,32 @@ mod tests {
         // out-of-range samples clamp, not wrap
         let clipped = AudioBuf::new(vec![2.0, -2.0], 48_000).to_i16();
         assert_eq!(clipped, vec![32767i16, -32767i16]);
+    }
+
+    #[test]
+    fn audiobuf_write_wav_has_canonical_header() {
+        let buf = AudioBuf::new(vec![0.0, 0.5, -0.5, 1.0], 24_000);
+        let path = std::env::temp_dir().join("ab_tts_write_wav_test.wav");
+        buf.write_wav(&path).expect("write wav");
+        let bytes = std::fs::read(&path).expect("read back");
+        let _ = std::fs::remove_file(&path);
+        // RIFF/WAVE magic, fmt fields, and data chunk for 4 mono s16 samples (8 bytes)
+        assert_eq!(&bytes[0..4], b"RIFF");
+        assert_eq!(&bytes[8..12], b"WAVE");
+        assert_eq!(&bytes[12..16], b"fmt ");
+        assert_eq!(u16::from_le_bytes([bytes[22], bytes[23]]), 1, "mono");
+        assert_eq!(
+            u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]),
+            24_000,
+            "sample rate"
+        );
+        assert_eq!(u16::from_le_bytes([bytes[34], bytes[35]]), 16, "bits/sample");
+        assert_eq!(&bytes[36..40], b"data");
+        assert_eq!(
+            u32::from_le_bytes([bytes[40], bytes[41], bytes[42], bytes[43]]),
+            8,
+            "4 samples * 2 bytes"
+        );
+        assert_eq!(bytes.len(), 44 + 8, "header + data");
     }
 }
