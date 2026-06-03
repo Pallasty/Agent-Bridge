@@ -36,7 +36,7 @@
 1. ~~合 MCP wedge 修复入 master~~ → **已作废:修复 `4eae961` 早已在 `origin/master`(551bb8d),live binary(01:52)已含 `AGENT_BRIDGE_MCP_CALL_DEADLINE`,运行中 server 已激活。本条 SHIPPED+DEPLOYED,非债务。**(workflow 拿陈旧本地 HEAD 比对的假象)
 2. **[high] AB stuck-task 不随 client-cancel 取消 + 线程无界累积(83→242 全 futex)** — Layer3(每 call spawn 独立 task + per-id cancel-token + blocking 池限额)有意 defer;Layer1+2 backstop 只压永久 wedge 不解线程泄漏根因。需核心循环重写。(TD-02)
 3. **[med·逾期] GATE-2 sibling-activation 14d gate**(deadline 06-02)— **AiOT `#e6fe8c44` owns**,depth_ratio_ema 是 AiOT 指标非 AB;AB 侧 cross-reference(P-α Day-14)已 05-29 闭合 clean。binding verdict 待 owner。
-4. **[med] F6 C3 s2-drop 误报族 5 个 open 线程(36/39/93/95/97)** — 分类器修复已合 master `119faca`,fleet 未全重部署 → peer 节点 pull+rebuild+restart 后批量 resolve。
+4. ~~[med] F6 C3 s2-drop 误报族 5 个 open 线程~~ → **✅ 已闭(2026-06-03)**:6 线程(36/39/93/95/97 + thread 35 ISO)全 resolved + **aio2 daemon trio 重启到含 `119faca` 的当前 binary**(新 PID 1701482-4,c3-self-check 用守恒逻辑),告警源已断。
 5. **[med] memory-sync 真跨网两节点 wet-test 从未跑** — VersionVectorMerge stamping 靠 env 兜底,未 stamp 行回退 NewerWins(LWW data-loss 形状);唯一消除该窗口的验证未跑。
 
 ---
@@ -74,7 +74,7 @@
 - **[low]** Replay `--seed` 形参保留但无效(等上游 AiOT seeded 接线)(DEBT-05) / A1/B1/B3 recall-timing v0 待 sibling cross-check(AB-DEBT-10) / Avatar 协议长会话非-Codex dogfood pending(AB-DEBT-08) / event-spine 10 轨只 ship 2 轨(AB-DEBT-05) / avatar 透明仅 wlroots 验证,GNOME/KDE/X11 alpha 未验(owner 用 sway 不阻塞)(DEBT-10)
 
 ### 🏗️ 协作协议 / 基础设施脆弱性
-- **[med] daemon trio 非 systemd 管理:reboot 后靠 ad-hoc shell 启动** — `.service` 已存在于 `scripts/systemd/`,本机未 enable。`systemctl --user enable --now` 3 个 service。(TD-14)
+- **[✅ TD-14 已闭/勘误] daemon trio systemd 管理** — 核实推翻初稿:`~/.config/systemd/user/` 已装 daemon/daemon-http/palace + sync.timer,全 `active`+`enabled`+`Linger=yes` → reboot 声明式自启 + `Restart=on-failure` 自愈。**非债务**(初稿据 05-19 ad-hoc 旧态误判;systemd sibling #273 后来已装)。(TD-14 RESOLVED)
 - **[med] /Data /Programs /Media 在 ntfs-3g fuseblk,重 CPU 负载下 D-state wedge** — state.db 在 /home ext4 不受影响。治本=热路径迁原生 ext4/xfs。`lesson_data_partition_ntfs3g_fuseblk_dstate_under_load_20260602` (TD-15)
 - **[med] aio2 kernel vmap lock 争用 soft-hang** — 主源 AiOT daemon 已 P6 停用,26.04+内核7.0 是治本赌注(需累积 uptime 复核)。`lesson_kernel_vmap_softhang_2026_05_19` (TD-16)
 - **[med] deploy 后跑的 binary 非 deploy 的那个(wrapper 被 ELF 覆盖→.real 孤儿+SVD env 丢)** — 部署后必 `file ~/.local/bin/agent-bridge` 确认是 shell script。`lesson_wrapper_clobbered_orphans_real_deploys_2026_05_23` (TD-11)
