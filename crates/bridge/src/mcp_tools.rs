@@ -55,6 +55,20 @@ use crate::security::Cap;
 use crate::session_handoff::build_handoff_brief;
 use crate::warp_actions::warp_status_snapshot;
 
+/// Build a tokio process Command with `kill_on_drop(true)`. Every TokioCommand in
+/// this module awaits its child inline (output/status/wait/wait_with_output), so
+/// if the awaiting tools/call future is dropped — by the Layer-2 deadline or by an
+/// abort from `notifications/cancelled` (both newly reachable since the concurrent
+/// dispatch in crates/mcp/src/server.rs) — the child is SIGKILLed and reaped
+/// instead of orphaned/reparented-to-init. There are no fire-and-forget subprocess
+/// spawns here, so this never kills a process meant to outlive the call. See
+/// lesson_mcp_server_wedge_sequential_loop_no_timeout (audit fix).
+fn killable_command<S: AsRef<std::ffi::OsStr>>(program: S) -> TokioCommand {
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.kill_on_drop(true);
+    cmd
+}
+
 // ===========================================================================
 //                                   notify
 // ===========================================================================
@@ -860,7 +874,7 @@ impl McpTool for ShellExecTool {
             .clamp(1_000, timeout_max);
 
         let mut child = {
-            let mut builder = TokioCommand::new("sh");
+            let mut builder = killable_command("sh");
             builder.arg("-c").arg(&cmd);
             builder.stdout(std::process::Stdio::piped());
             builder.stderr(std::process::Stdio::piped());
@@ -1062,7 +1076,7 @@ impl McpTool for DesktopSnapshotTool {
             })));
         }
 
-        let mut cmd = TokioCommand::new(
+        let mut cmd = killable_command(
             std::env::var("PYTHON")
                 .ok()
                 .filter(|s| !s.trim().is_empty())
@@ -1296,7 +1310,7 @@ impl McpTool for DesktopVerifyTool {
             })));
         }
 
-        let mut cmd = TokioCommand::new(
+        let mut cmd = killable_command(
             std::env::var("PYTHON")
                 .ok()
                 .filter(|s| !s.trim().is_empty())
@@ -1598,7 +1612,7 @@ impl McpTool for VisionGroundingOcrTool {
             })));
         }
 
-        let mut cmd = TokioCommand::new(
+        let mut cmd = killable_command(
             std::env::var("PYTHON")
                 .ok()
                 .filter(|s| !s.trim().is_empty())
@@ -1930,7 +1944,7 @@ impl McpTool for DesktopActionTool {
             })));
         }
 
-        let mut cmd = TokioCommand::new(
+        let mut cmd = killable_command(
             std::env::var("PYTHON")
                 .ok()
                 .filter(|s| !s.trim().is_empty())
@@ -2204,7 +2218,7 @@ impl McpTool for DesktopInvokeTool {
             })));
         }
 
-        let mut cmd = TokioCommand::new(
+        let mut cmd = killable_command(
             std::env::var("PYTHON")
                 .ok()
                 .filter(|s| !s.trim().is_empty())
@@ -2485,7 +2499,7 @@ impl McpTool for DesktopConfirmTool {
             })));
         }
 
-        let mut cmd = TokioCommand::new(
+        let mut cmd = killable_command(
             std::env::var("PYTHON")
                 .ok()
                 .filter(|s| !s.trim().is_empty())
@@ -2974,7 +2988,7 @@ async fn run_adb_command(
     args: &[String],
     timeout_ms: u64,
 ) -> std::result::Result<AdbCommandOutput, String> {
-    let mut cmd = TokioCommand::new(resolve_adb_bin());
+    let mut cmd = killable_command(resolve_adb_bin());
     if let Some(serial) = serial.filter(|s| !s.trim().is_empty()) {
         cmd.arg("-s").arg(serial);
     }
@@ -3015,7 +3029,7 @@ async fn run_adb_binary_command(
     args: &[String],
     timeout_ms: u64,
 ) -> std::result::Result<AdbBinaryOutput, String> {
-    let mut cmd = TokioCommand::new(resolve_adb_bin());
+    let mut cmd = killable_command(resolve_adb_bin());
     if let Some(serial) = serial.filter(|s| !s.trim().is_empty()) {
         cmd.arg("-s").arg(serial);
     }
@@ -4488,7 +4502,7 @@ async fn run_local_mobile_command(
 ) -> std::result::Result<AdbCommandOutput, String> {
     let started = Instant::now();
     let output = tokio::time::timeout(Duration::from_millis(timeout_ms), async {
-        TokioCommand::new(program)
+        killable_command(program)
             .args(args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -5879,7 +5893,7 @@ impl McpTool for PresentVoiceTool {
             )));
         }
 
-        let mut cmd = TokioCommand::new(
+        let mut cmd = killable_command(
             std::env::var("PYTHON").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "python3".to_string()),
         );
         cmd.arg(&script).arg("--json");
@@ -17087,7 +17101,7 @@ impl McpTool for PetStateRitualTool {
 
         if should_emit && matches!(channel.as_str(), "tts" | "both") {
             if cfg!(target_os = "macos") {
-                let mut cmd = TokioCommand::new("say");
+                let mut cmd = killable_command("say");
                 if let Some(voice) = &tts_voice {
                     cmd.arg("-v").arg(voice);
                 }
@@ -18961,7 +18975,7 @@ async fn audit_stdio_smoke(command: &str, args: &[String], timeout: Duration) ->
     }
 
     let input = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"agent-bridge-audit\",\"version\":\"0\"}}}\n";
-    let mut child = match TokioCommand::new(command)
+    let mut child = match killable_command(command)
         .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -19019,7 +19033,7 @@ async fn audit_stdio_smoke(command: &str, args: &[String], timeout: Duration) ->
 }
 
 async fn command_output_json(command: &str, args: &[&str], timeout: Duration) -> Value {
-    let fut = TokioCommand::new(command).args(args).output();
+    let fut = killable_command(command).args(args).output();
     match tokio::time::timeout(timeout, fut).await {
         Ok(Ok(o)) => json!({
             "ok": o.status.success(),
@@ -23558,7 +23572,7 @@ impl McpTool for OzRunListTool {
             cmd_args.push("--state".to_string());
             cmd_args.push(st.to_string());
         }
-        let out = tokio::process::Command::new(&bin)
+        let out = killable_command(&bin)
             .args(&cmd_args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -23652,7 +23666,7 @@ impl McpTool for OzRunCancelTool {
         // The oz CLI has no 'oz run cancel' subcommand; we call the REST API directly.
         // Endpoint: POST https://app.warp.dev/api/v1/agent/runs/{runId}/cancel
         let url = format!("https://app.warp.dev/api/v1/agent/runs/{}/cancel", run_id);
-        let out = tokio::process::Command::new("curl")
+        let out = killable_command("curl")
             .args([
                 "-s", // silent
                 "-X",

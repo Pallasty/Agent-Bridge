@@ -74,6 +74,11 @@ done
 say()  { printf '%s\n' "$*"; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+# The anti-regression gate depends on `strings` (binutils). If it is missing,
+# markers_in would return EMPTY for every binary and the gate would falsely pass
+# ("superset" of nothing) — deploying completely unguarded. Fail closed instead.
+command -v strings >/dev/null 2>&1 || die "strings (binutils) is required for the regression gate; install binutils"
+
 # pipe-free ELF check (avoids `head | grep -q` SIGPIPE-under-pipefail flake)
 is_elf() {
     local magic
@@ -118,7 +123,10 @@ else
     # Build in a worktree placed as a SIBLING of the repo so the cross-repo path
     # dep (crates/seed-bridge -> ../../../AiOT/rust/seed_neuron) resolves natively
     # without symlinks. AiOT is always a sibling of the repo on every node.
-    BUILD_DIR="$(dirname "$REPO")/.ab-deploy-build"
+    # Unique per-run (PID-suffixed) so two concurrent deploys don't rm -rf / build
+    # into the SAME staging worktree and corrupt each other — the build dir must
+    # stay a sibling of the repo (and thus of AiOT) for ../AiOT to resolve.
+    BUILD_DIR="$(dirname "$REPO")/.ab-deploy-build.$$"
     git -C "$REPO" worktree remove --force "$BUILD_DIR" >/dev/null 2>&1 || true
     rm -rf "$BUILD_DIR" 2>/dev/null || true
     say ">> creating build worktree at $BUILD_DIR (detached @ ${MASTER_SHA:0:7})"
@@ -172,15 +180,20 @@ fi
 
 # ---- 4. confirm ----
 if [ "$ASSUME_YES" -ne 1 ]; then
+    if [ ! -t 0 ]; then
+        die "non-interactive stdin and no --yes given: re-run with --yes to deploy"
+    fi
     printf 'Proceed with deploy? [y/N] '
-    read -r ans
+    read -r ans || ans=""
     case "$ans" in y|Y|yes|YES) ;; *) say "aborted."; exit 0 ;; esac
 fi
 
 # ---- 5. backup current, then deploy ----
 if [ -f "$REAL_PATH" ]; then
     ts="$(date +%Y%m%dT%H%M%S)"
-    tag="${MASTER_SHA:0:7}"; [ -n "$USE_BINARY" ] && tag="usebin"
+    # NB: ${MASTER_SHA:0:7} must not be expanded on the --use-binary path, where
+    # MASTER_SHA is unset and `set -u` would abort here (before the backup+deploy).
+    if [ -n "$USE_BINARY" ]; then tag="usebin"; else tag="${MASTER_SHA:0:7}"; fi
     bak="$REAL_PATH.bak-deploy-$tag-$ts"
     cp "$REAL_PATH" "$bak"
     say ">> backed up current binary -> $bak"
@@ -219,4 +232,8 @@ if [ "$stale" -gt 0 ]; then
     say "      ($fresh already on the new one) — each is a CC/Codex/Cursor session that"
     say "      needs its own /mcp reconnect to pick up this deploy."
 fi
-[ -n "${bak:-}" ] && say "      rollback: cp '$bak' '$REAL_PATH' && /mcp reconnect"
+if [ -n "${bak:-}" ]; then say "      rollback: cp '$bak' '$REAL_PATH' && /mcp reconnect"; fi
+# Explicit success: the final command above must not leave a nonzero status (a
+# bare `[ -n "" ] && …` on a first install returns 1 and, as the last command
+# under `set -e`, would falsely report deploy failure to callers checking $?).
+exit 0

@@ -67,6 +67,11 @@ const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
 /// lesson_mcp_server_wedge_sequential_loop_no_timeout.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
+/// Layer 1 bounded launch/connect (the zombie-chrome wedge), but once a live
+/// browser exists `new_page` + `wait_for_navigation` were still unbounded: a URL
+/// that never fires its navigation lifecycle event hangs the call (the original
+/// 732s browser_navigate wedge's other sub-path). Bound the navigation itself.
+const NAVIGATE_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Clone)]
 pub struct ChromiumCdpBackend {
@@ -341,12 +346,23 @@ impl BrowserBackend for ChromiumCdpBackend {
 
     async fn navigate(&self, url: &str) -> Result<PageId> {
         let browser = self.ensure_browser().await?;
-        let page = browser
-            .new_page(url)
+        let page = tokio::time::timeout(NAVIGATE_TIMEOUT, browser.new_page(url))
             .await
+            .map_err(|_| {
+                Error::Backend(format!(
+                    "new_page {url} timed out after {}s (chrome alive but page never opened)",
+                    NAVIGATE_TIMEOUT.as_secs()
+                ))
+            })?
             .map_err(|e| Error::Backend(format!("new_page {url}: {e}")))?;
-        page.wait_for_navigation()
+        tokio::time::timeout(NAVIGATE_TIMEOUT, page.wait_for_navigation())
             .await
+            .map_err(|_| {
+                Error::Backend(format!(
+                    "wait_for_navigation timed out after {}s (page never settled)",
+                    NAVIGATE_TIMEOUT.as_secs()
+                ))
+            })?
             .map_err(|e| Error::Backend(format!("wait_for_navigation: {e}")))?;
         let pid = PageId::new();
         debug!(page = %pid, url, "page tracked");
