@@ -49,7 +49,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::Deserialize;
+use serde::{de, Deserialize};
 use serde_json::{json, Value};
 use std::collections::{HashSet, VecDeque};
 use std::fs;
@@ -173,7 +173,23 @@ async fn healthz() -> impl IntoResponse {
 struct GraphQuery {
     /// `?all=1` includes `kind=skill` records (indexed third-party skills).
     #[serde(default)]
+    #[serde(deserialize_with = "deserialize_boolish")]
     all: bool,
+}
+
+fn deserialize_boolish<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    let Some(raw) = raw else {
+        return Ok(false);
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "" | "1" | "true" | "yes" | "y" | "on" => Ok(true),
+        "0" | "false" | "no" | "n" | "off" => Ok(false),
+        other => Err(de::Error::custom(format!("invalid boolish value `{other}`"))),
+    }
 }
 
 // ── Markdown source ──────────────────────────────────────────────────────
@@ -1951,6 +1967,18 @@ mod tests {
         let content = "see 42.md or 999.md";
         let links = extract_links(content);
         assert!(links.is_empty());
+    }
+
+    #[test]
+    fn graph_query_accepts_boolish_all_values() {
+        let q: GraphQuery = serde_json::from_value(json!({"all": "1"})).unwrap();
+        assert!(q.all);
+        let q: GraphQuery = serde_json::from_value(json!({"all": "true"})).unwrap();
+        assert!(q.all);
+        let q: GraphQuery = serde_json::from_value(json!({"all": "0"})).unwrap();
+        assert!(!q.all);
+        let q: GraphQuery = serde_json::from_value(json!({})).unwrap();
+        assert!(!q.all);
     }
 
     #[test]
