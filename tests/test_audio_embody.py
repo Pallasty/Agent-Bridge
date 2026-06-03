@@ -388,6 +388,33 @@ def test_voice_grounding_rejects_hangul_filler_invisibles():
                            evidence_ids=["中"])["speak"] is True
 
 
+# --- mic channel = the ACOUSTIC rung; honest boundary (acoustic != the human ear) -
+# Empirically (aio2/AG06 headphones): playing to in-ear output -> the room mic hears
+# ambient but NOT the tone -> classify_audio_embody returns `mismatch`, and
+# honest_attestation then reports verified_to=None — the boundary refuses to claim
+# acoustic verification of private in-ear audio. The strings below pin the contract.
+
+def test_mic_channel_boundary_is_acoustic_not_eardrum():
+    _, _, vt, nvt = ae.resolve_targets("test-sink", "mic")
+    assert "acoustic" in vt and "air" in vt                     # mic verifies sound in the air
+    assert "eardrum" in nvt and ("in-ear" in nvt or "headphone" in nvt)   # NOT the human ear
+    # the default sink_monitor channel verifies only the bus, never the transducer.
+    sink, src, vt2, nvt2 = ae.resolve_targets("test-sink", "sink_monitor")
+    assert "output bus" in vt2 and "transducer" in nvt2 and src.endswith(".monitor")
+
+
+def test_mic_acoustic_mismatch_claims_nothing():
+    # a mic that hears ambient but not the played tone (the headphone case) classifies
+    # as mismatch; honest_attestation must then claim no acoustic verified_to.
+    bus_vt = "acoustic output (a microphone heard the signal in the air)"
+    bus_nvt = "the specific listener's eardrum ..."
+    for fail in ("mismatch", "silent", "no_capture"):
+        vt, nvt = ae.honest_attestation(fail, bus_vt, bus_nvt)
+        assert vt is None and "NOT confirmed" in nvt, fail
+    # only a real acoustic 'emitted' (mic actually heard it) claims the acoustic target
+    assert ae.honest_attestation("emitted", bus_vt, bus_nvt) == (bus_vt, bus_nvt)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

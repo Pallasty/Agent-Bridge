@@ -452,8 +452,15 @@ def resolve_targets(sink_arg, capture_channel):
     sink = sink_arg or _sh("pactl get-default-sink").stdout.strip()
     if capture_channel == "mic":
         src = _sh("pactl get-default-source").stdout.strip()
-        verified_to = "acoustic capture (mic input)"
-        not_verified = "headphone-private audio (mic cannot hear in-ear output)"
+        # mic = the ACOUSTIC rung, one step beyond the software bus: a microphone
+        # hearing the signal proves the sound left a speaker INTO THE AIR. It still
+        # does NOT prove the specific listener heard it (a mic at one position is not
+        # their eardrum), and a room mic cannot hear private in-ear/headphone output
+        # at all — empirically that yields `mismatch`, which is the honest result
+        # (the boundary refuses to claim acoustic verification of in-ear audio).
+        verified_to = "acoustic output (a microphone heard the signal in the air)"
+        not_verified = ("the specific listener's eardrum (a mic position is not their ear); "
+                        "and private in-ear/headphone output a room mic cannot hear")
     else:  # sink_monitor
         src = sink + ".monitor"
         verified_to = "output bus (PipeWire sink monitor / loopback)"
