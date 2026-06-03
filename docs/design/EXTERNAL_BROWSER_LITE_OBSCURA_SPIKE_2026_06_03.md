@@ -202,6 +202,16 @@ Implement a read-only probe before any routed execution:
 - returns tool count and safety flags;
 - never starts persistent service unless explicitly requested.
 
+Implemented slice:
+
+- `agent-bridge browser-lite probe obscura --json`
+- `agent-bridge browser-lite probe obscura --bin /path/to/obscura --json`
+- binary resolution order: `--bin`, `AGENT_BRIDGE_OBSCURA_BIN`, then `PATH`.
+- probes `--help` and MCP `tools/list` by default.
+- supports `--no-mcp-tools` for a help-only check.
+- reports `missing`, `partial`, or `available` without mutating
+  Agent-Bridge state or starting `obscura serve`.
+
 ### Phase 3: Optional Routing
 
 Only after the probe exists, route narrowly:

@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
+mod browser_lite;
 mod doctor;
 mod setup;
 mod shadow_cortex;
@@ -107,6 +108,15 @@ enum Cmd {
     Skills {
         #[command(subcommand)]
         op: SkillsOp,
+    },
+    /// Probe optional lightweight browser backends without changing routing.
+    ///
+    /// This is a read-only discovery surface for external browser-lite
+    /// candidates such as Obscura. It never starts a persistent service and
+    /// does not alter the default Chrome-backed browser tools.
+    BrowserLite {
+        #[command(subcommand)]
+        op: BrowserLiteOp,
     },
     /// Read-only avatar/presence surfaces for terminal dashboards.
     Avatar {
@@ -237,6 +247,36 @@ enum ShellKind {
     Bash,
     Zsh,
     Fish,
+}
+
+#[derive(Subcommand, Debug)]
+enum BrowserLiteOp {
+    /// Probe an optional browser-lite backend and print a capability report.
+    Probe {
+        /// Backend to probe. Defaults to obscura.
+        #[arg(value_enum, default_value = "obscura")]
+        backend: BrowserLiteBackend,
+        /// Override backend binary path. Otherwise uses AGENT_BRIDGE_OBSCURA_BIN, then PATH.
+        #[arg(long)]
+        bin: Option<PathBuf>,
+        /// Probe MCP tools/list in addition to `--help`.
+        ///
+        /// Enabled by default because tool count is part of the provenance
+        /// evidence for external browser-lite routing decisions.
+        #[arg(long = "no-mcp-tools", default_value_t = false)]
+        no_mcp_tools: bool,
+        /// Per-probe timeout for backend commands.
+        #[arg(long, default_value_t = 5_000)]
+        timeout_ms: u64,
+        /// Emit raw JSON payload instead of a command line summary.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum BrowserLiteBackend {
+    Obscura,
 }
 
 #[derive(Subcommand, Debug)]
@@ -2841,6 +2881,24 @@ async fn main() -> Result<()> {
         };
     }
 
+    // Browser-lite probes: short-lived; no Hub and no persistent backend service.
+    if let Cmd::BrowserLite { op } = &cmd {
+        return match op {
+            BrowserLiteOp::Probe {
+                backend: BrowserLiteBackend::Obscura,
+                bin,
+                no_mcp_tools,
+                timeout_ms,
+                json,
+            } => browser_lite::run_obscura_probe(browser_lite::ObscuraProbeOptions {
+                bin: bin.clone(),
+                timeout_ms: *timeout_ms,
+                probe_mcp_tools: !*no_mcp_tools,
+                json: *json,
+            }),
+        };
+    }
+
     // Avatar subcommand: short-lived read-only terminal surface over presence rows.
     if let Cmd::Avatar { op } = &cmd {
         return match op {
@@ -4367,6 +4425,7 @@ async fn main() -> Result<()> {
         Cmd::Setup { .. }
         | Cmd::Sync { .. }
         | Cmd::Skills { .. }
+        | Cmd::BrowserLite { .. }
         | Cmd::Avatar { .. }
         | Cmd::Dream { .. }
         | Cmd::Substrate { .. }
