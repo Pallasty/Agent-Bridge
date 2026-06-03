@@ -79,11 +79,18 @@ die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # ("superset" of nothing) — deploying completely unguarded. Fail closed instead.
 command -v strings >/dev/null 2>&1 || die "strings (binutils) is required for the regression gate; install binutils"
 
-# pipe-free ELF check (avoids `head | grep -q` SIGPIPE-under-pipefail flake)
-is_elf() {
+# pipe-free native-executable check — ELF on Linux, Mach-O on macOS.
+# (avoids `head | grep -q` SIGPIPE-under-pipefail flake). The byte magics below
+# contain no NUL/newline, so they survive `$(...)` capture + `[ = ]` byte compare.
+is_native_exe() {
     local magic
     magic="$(head -c4 "$1" 2>/dev/null)" || return 1
-    [ "$magic" = $'\x7fELF' ]
+    [ "$magic" = $'\x7fELF' ]           && return 0   # ELF (Linux)
+    [ "$magic" = $'\xcf\xfa\xed\xfe' ]  && return 0   # Mach-O 64-bit thin (macOS arm64/x86_64)
+    [ "$magic" = $'\xce\xfa\xed\xfe' ]  && return 0   # Mach-O 32-bit thin
+    [ "$magic" = $'\xca\xfe\xba\xbe' ]  && return 0   # Mach-O universal (fat, big-endian)
+    [ "$magic" = $'\xbe\xba\xfe\xca' ]  && return 0   # Mach-O universal (fat, little-endian)
+    return 1
 }
 
 # markers present in a binary (intersection with SENTINELS), one per line.
@@ -110,7 +117,7 @@ NEW_BIN=""
 PROVENANCE=""
 if [ -n "$USE_BINARY" ]; then
     [ -f "$USE_BINARY" ] || die "--use-binary path not found: $USE_BINARY"
-    is_elf "$USE_BINARY" || die "--use-binary is not an ELF binary: $USE_BINARY"
+    is_native_exe "$USE_BINARY" || die "--use-binary is not a native executable (ELF/Mach-O): $USE_BINARY"
     NEW_BIN="$USE_BINARY"
     PROVENANCE="--use-binary $USE_BINARY (provenance NOT verified)"
     say "WARNING: --use-binary skips the build-from-master guarantee."
@@ -152,7 +159,7 @@ else
     [ -x "$NEW_BIN" ] || die "build produced no binary at $NEW_BIN"
 fi
 
-is_elf "$NEW_BIN" || die "new binary is not ELF: $NEW_BIN"
+is_native_exe "$NEW_BIN" || die "new binary is not a native executable (ELF/Mach-O): $NEW_BIN"
 
 # ---- 2. anti-regression gate vs the currently-deployed binary ----
 say
