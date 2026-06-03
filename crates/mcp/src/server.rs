@@ -252,6 +252,8 @@ async fn run_dispatch_loop(
                 }
             });
             let abort = work.abort_handle();
+            let st_sup = store.clone();
+            let tool_name_sup = tool_name;
 
             // supervisor: await the work task so a PANIC inside tool.execute() still
             // yields an error response instead of a silent never-returns hang (which
@@ -266,6 +268,14 @@ async fn run_dispatch_loop(
                             request_id = %sup_key,
                             "tools/call task panicked — returning an error response"
                         );
+                        // Record the panic into the failure ring so a repeatedly-panicking
+                        // tool surfaces via mcp_recent_errors, not only stderr warn! logs.
+                        record_mcp_tool_failure(
+                            st_sup.as_deref(),
+                            &tool_name_sup,
+                            "tool panicked during execution",
+                        )
+                        .await;
                         Some(McpResponse::error(
                             req_id_panic,
                             INTERNAL_ERROR,

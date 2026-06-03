@@ -45,7 +45,7 @@ use dashmap::DashMap;
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use tracing::{info, warn};
 
@@ -466,14 +466,19 @@ pub fn parse_run_status(stdout: &str) -> OzRunOutput {
 
 /// Shell out to `oz run get <run_id> --output-format json` and parse result.
 pub async fn fetch_run_status(binary: &str, run_id: &str) -> Option<OzRunOutput> {
-    let output = Command::new(binary)
-        .args(["run", "get", run_id, "--output-format", "json"])
+    let mut cmd = Command::new(binary);
+    cmd.args(["run", "get", run_id, "--output-format", "json"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .output()
+        .kill_on_drop(true);
+    // `oz run get` is a Warp-cloud network call; under CGNAT/relay-only networking it
+    // can hang, which would freeze the agent_session_wait poll loop (it only re-checks
+    // its own deadline between calls). Bound the subprocess + reap it on drop.
+    let output = tokio::time::timeout(Duration::from_secs(15), cmd.output())
         .await
-        .ok()?;
+        .ok()? // outer timeout → no status this poll
+        .ok()?; // spawn / IO error
     if !output.status.success() {
         return None;
     }
