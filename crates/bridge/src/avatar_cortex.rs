@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 const STATUS_EVENT_LIMIT: usize = 500;
@@ -337,6 +338,262 @@ pub(crate) fn xiao_shu_action_request_action_command(
         command.push_str(flag);
     }
     command
+}
+
+fn lcc_voice_adapter_voice() -> String {
+    std::env::var("AB_LCC_VOICE_ADAPTER_VOICE")
+        .ok()
+        .map(|voice| voice.trim().to_string())
+        .filter(|voice| !voice.is_empty())
+        .unwrap_or_else(|| "af_sarah".to_string())
+}
+
+fn lcc_voice_adapter_python() -> String {
+    std::env::var("AB_LCC_VOICE_ADAPTER_PYTHON")
+        .ok()
+        .map(|python| python.trim().to_string())
+        .filter(|python| !python.is_empty())
+        .unwrap_or_else(|| "python3".to_string())
+}
+
+fn lcc_voice_adapter_script_path() -> PathBuf {
+    if let Ok(path) = std::env::var("AB_LCC_VOICE_ADAPTER_BIN") {
+        let path = path.trim();
+        if !path.is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        let deployed = home
+            .join(".local")
+            .join("share")
+            .join("ab-tts")
+            .join("audio_embody.py");
+        if deployed.exists() {
+            return deployed;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/audio_embody.py")
+}
+
+fn lcc_voice_lifecycle_mode(confirm: &Value) -> &'static str {
+    let selected_token = vstr(confirm.get("selected_token")).unwrap_or("");
+    let cue_id = vstr(confirm.get("cue_id")).unwrap_or("");
+    let mode = vstr(confirm.get("mode")).unwrap_or("");
+    if matches!(mode, "failed" | "verified" | "waiting_for_user" | "handoff") {
+        return match mode {
+            "failed" => "failed",
+            "verified" => "verified",
+            "handoff" => "handoff",
+            _ => "waiting_for_user",
+        };
+    }
+    if selected_token.contains("alert")
+        || selected_token.contains("attention")
+        || cue_id.contains("attention")
+    {
+        return "waiting_for_user";
+    }
+    "waiting_for_user"
+}
+
+fn lcc_voice_evidence_ids(confirm: &Value) -> Vec<String> {
+    let mut ids = Vec::new();
+    for key in [
+        "evidence_ids",
+        "evidence_event_ids",
+        "verification_outcome_ids",
+    ] {
+        if let Some(values) = confirm.get(key).and_then(Value::as_array) {
+            for value in values.iter().filter_map(Value::as_str) {
+                let value = value.trim();
+                if !value.is_empty() && !ids.iter().any(|id| id == value) {
+                    ids.push(value.to_string());
+                }
+            }
+        }
+    }
+    for key in ["verified_outcome_id", "verification_outcome_id"] {
+        if let Some(value) = vstr(confirm.get(key)).map(str::trim) {
+            if !value.is_empty() && !ids.iter().any(|id| id == value) {
+                ids.push(value.to_string());
+            }
+        }
+    }
+    ids
+}
+
+fn lcc_voice_adapter_invocation(
+    confirm: &Value,
+    project: &str,
+    actual_invoked: bool,
+    cooldown_secs: Option<i64>,
+    last_spoken_ts: Option<i64>,
+    voice_override: Option<&str>,
+) -> Value {
+    let line = vstr(confirm.get("line")).unwrap_or("").trim();
+    let lifecycle_mode = lcc_voice_lifecycle_mode(confirm);
+    let evidence_ids = lcc_voice_evidence_ids(confirm);
+    let agent_id = format!("{project}:xiao-shu");
+    let voice = voice_override
+        .map(str::trim)
+        .filter(|voice| !voice.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(lcc_voice_adapter_voice);
+    let mut args = vec![
+        "--mode".to_string(),
+        "voice".to_string(),
+        "--lifecycle-mode".to_string(),
+        lifecycle_mode.to_string(),
+        "--agent-id".to_string(),
+        agent_id.clone(),
+        "--voice".to_string(),
+        voice.clone(),
+        "--json".to_string(),
+    ];
+    if !line.is_empty() {
+        args.push("--voice-line".to_string());
+        args.push(line.to_string());
+    }
+    for evidence_id in &evidence_ids {
+        args.push("--evidence-id".to_string());
+        args.push(evidence_id.clone());
+    }
+    if let Some(cooldown_secs) = cooldown_secs.filter(|value| *value > 0) {
+        args.push("--cooldown-secs".to_string());
+        args.push(cooldown_secs.to_string());
+    }
+    if let Some(last_spoken_ts) = last_spoken_ts.filter(|value| *value > 0) {
+        args.push("--last-spoken-ts".to_string());
+        args.push(last_spoken_ts.to_string());
+    }
+    let mut preview_parts = vec![
+        "audio_embody.py".to_string(),
+        "--mode".to_string(),
+        "voice".to_string(),
+        "--lifecycle-mode".to_string(),
+        shell_quote_cli_arg(lifecycle_mode),
+        "--agent-id".to_string(),
+        shell_quote_cli_arg(&agent_id),
+        "--voice".to_string(),
+        shell_quote_cli_arg(&voice),
+        "--json".to_string(),
+    ];
+    if !line.is_empty() {
+        preview_parts.push("--voice-line".to_string());
+        preview_parts.push(shell_quote_cli_arg(line));
+    }
+    for evidence_id in &evidence_ids {
+        preview_parts.push("--evidence-id".to_string());
+        preview_parts.push(shell_quote_cli_arg(evidence_id));
+    }
+    if let Some(cooldown_secs) = cooldown_secs.filter(|value| *value > 0) {
+        preview_parts.push("--cooldown-secs".to_string());
+        preview_parts.push(cooldown_secs.to_string());
+    }
+    if let Some(last_spoken_ts) = last_spoken_ts.filter(|value| *value > 0) {
+        preview_parts.push("--last-spoken-ts".to_string());
+        preview_parts.push(last_spoken_ts.to_string());
+    }
+    let python = lcc_voice_adapter_python();
+    let script_path = lcc_voice_adapter_script_path();
+    json!({
+        "schema": 1,
+        "adapter": "audio_embody.py",
+        "adapter_mode": "voice",
+        "python": python,
+        "script_path": script_path.to_string_lossy(),
+        "lifecycle_mode": lifecycle_mode,
+        "agent_id": agent_id,
+        "voice": voice,
+        "voice_line": if line.is_empty() { Value::Null } else { json!(line) },
+        "evidence_ids": evidence_ids,
+        "args": args,
+        "command_preview": preview_parts.join(" "),
+        "actual_invoked": actual_invoked,
+        "emits_audio": false,
+        "emits_notification": false,
+        "recommended_execution": "local_cli_async_spawn",
+        "receipt_source": "audio_embody.py --mode voice --json",
+    })
+}
+
+fn short_process_text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).chars().take(2000).collect()
+}
+
+fn lcc_voice_adapter_process(invocation: &Value) -> Value {
+    let python = vstr(invocation.get("python"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("python3");
+    let script_path = vstr(invocation.get("script_path"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(lcc_voice_adapter_script_path);
+    let mut command = Command::new(python);
+    command.arg(&script_path);
+    if let Some(args) = invocation.get("args").and_then(Value::as_array) {
+        for arg in args.iter().filter_map(Value::as_str) {
+            command.arg(arg);
+        }
+    }
+    match command.output() {
+        Ok(output) => {
+            let stdout = short_process_text(&output.stdout);
+            let stderr = short_process_text(&output.stderr);
+            let mut receipt = stdout
+                .trim()
+                .split('\n')
+                .last()
+                .filter(|line| !line.trim().is_empty())
+                .and_then(|line| serde_json::from_str::<Value>(line).ok())
+                .unwrap_or_else(|| {
+                    json!({
+                        "mode": "voice",
+                        "status": "error",
+                        "verify_status": "error",
+                        "decision": "adapter_stdout_not_json",
+                        "detail": "audio_embody.py did not return a JSON receipt",
+                    })
+                });
+            if let Some(obj) = receipt.as_object_mut() {
+                obj.insert("process_exit_code".to_string(), json!(output.status.code()));
+                obj.insert(
+                    "process_success".to_string(),
+                    json!(output.status.success()),
+                );
+                if !stdout.trim().is_empty() {
+                    obj.insert("stdout_preview".to_string(), json!(stdout));
+                }
+                if !stderr.trim().is_empty() {
+                    obj.insert("stderr_preview".to_string(), json!(stderr));
+                }
+            }
+            receipt
+        }
+        Err(err) => json!({
+            "mode": "voice",
+            "status": "error",
+            "verify_status": "error",
+            "decision": "adapter_spawn_failed",
+            "detail": err.to_string(),
+            "process_success": false,
+            "process_exit_code": Value::Null,
+        }),
+    }
+}
+
+fn lcc_voice_adapter_would_emit(receipt: &Value) -> bool {
+    vstr(receipt.get("decision")) == Some("speak")
+}
+
+fn lcc_voice_adapter_emitted(receipt: &Value) -> bool {
+    matches!(
+        vstr(receipt.get("status")),
+        Some("emitted" | "played_unverified")
+    )
 }
 
 fn read_json(path: &Path) -> Value {
@@ -5876,6 +6133,94 @@ pub fn avatar_cortex_voice_emit(opts: &AvatarCortexVoiceEmitOptions<'_>) -> Resu
     }))
 }
 
+fn avatar_cortex_voice_adapter_emit(
+    confirm: &Value,
+    project: &str,
+    opts: &AvatarCortexVoiceActionOptions<'_>,
+) -> Result<Value> {
+    let heartbeat_label = crate::avatar_health::heartbeat_label(opts.heartbeat_label, project);
+    let (state_path, events_path) = avatar_cortex_voice_paths(project, &heartbeat_label)?;
+    let state = read_json(&state_path);
+    let last_spoken_ts = if opts.force {
+        None
+    } else {
+        vi64(state.get("last_emit_at"))
+    };
+    let invocation = lcc_voice_adapter_invocation(
+        confirm,
+        project,
+        true,
+        Some(opts.cooldown_secs),
+        last_spoken_ts,
+        opts.tts_voice,
+    );
+    let receipt = lcc_voice_adapter_process(&invocation);
+    let now = now_secs();
+    let would_emit = lcc_voice_adapter_would_emit(&receipt);
+    let emitted = lcc_voice_adapter_emitted(&receipt);
+    let receipt_record = json!({
+        "schema": 1,
+        "surface": "avatar_cortex_voice_adapter_receipt",
+        "project": project,
+        "heartbeat_label": heartbeat_label,
+        "line": vstr(confirm.get("line")).unwrap_or(""),
+        "reason": opts.reason.map(str::trim).filter(|s| !s.is_empty()),
+        "force": opts.force,
+        "last_emit_at": now,
+        "cooldown_secs": opts.cooldown_secs,
+        "dedup_key": receipt.get("dedup_key").cloned().unwrap_or(Value::Null),
+        "tier": receipt.get("tier").cloned().unwrap_or(Value::Null),
+        "verify_status": receipt.get("verify_status").cloned().unwrap_or(Value::Null),
+        "verified_to": receipt.get("verified_to").cloned().unwrap_or(Value::Null),
+        "adapter_receipt": receipt,
+        "source": "audio_embody.py --mode voice --json",
+    });
+    if emitted {
+        write_json(&state_path, &receipt_record)?;
+    }
+
+    let event = json!({
+        "surface": "avatar_cortex_voice_adapter_emit",
+        "schema": 1,
+        "generated_at": now,
+        "project": project,
+        "heartbeat_label": heartbeat_label,
+        "line": vstr(confirm.get("line")).unwrap_or(""),
+        "requested": true,
+        "would_emit": would_emit,
+        "emitted": emitted,
+        "emits_audio": emitted,
+        "emits_notification": false,
+        "reason": opts.reason.map(str::trim).filter(|s| !s.is_empty()),
+        "state_path": state_path.to_string_lossy(),
+        "events_path": events_path.to_string_lossy(),
+        "voice_adapter_invocation": invocation,
+        "voice_adapter_receipt": receipt_record.get("adapter_receipt").cloned().unwrap_or(Value::Null),
+    });
+    append_jsonl(&events_path, &event)?;
+
+    Ok(json!({
+        "surface": "avatar_cortex_voice_adapter_emit",
+        "schema": 1,
+        "generated_at": now,
+        "cli_only": true,
+        "http_available": false,
+        "dry_run": false,
+        "read_only": false,
+        "mutates_global_substrate": false,
+        "writes_cooldown_state": emitted,
+        "would_emit": would_emit,
+        "emitted": emitted,
+        "emits_audio": emitted,
+        "emits_notification": false,
+        "state_path": state_path.to_string_lossy(),
+        "events_path": events_path.to_string_lossy(),
+        "voice_adapter_invocation": event.get("voice_adapter_invocation").cloned().unwrap_or(Value::Null),
+        "voice_adapter_receipt": event.get("voice_adapter_receipt").cloned().unwrap_or(Value::Null),
+        "event": event,
+    }))
+}
+
 fn avatar_cortex_voice_action_from_confirm_payload(
     confirm_payload: Value,
     opts: &AvatarCortexVoiceActionOptions<'_>,
@@ -5931,28 +6276,29 @@ fn avatar_cortex_voice_action_from_confirm_payload(
         blocked_reasons.push("missing_line");
     }
     let actual_emit_invoked = blocked_reasons.is_empty();
-    let emit_payload = if actual_emit_invoked {
-        let emit_opts = AvatarCortexVoiceEmitOptions {
-            label: opts.label,
-            heartbeat_label: opts.heartbeat_label,
-            project: Some(project),
-            output: opts.output,
-            preview_text: Some(line.as_str()),
-            enabled: true,
-            force: opts.force,
-            cooldown_secs: opts.cooldown_secs,
-            reason: opts.reason,
-            allow_policy_override: true,
-            tts_voice,
-            tts_rate,
-        };
-        avatar_cortex_voice_emit(&emit_opts)?
+    let voice_adapter_payload = if actual_emit_invoked {
+        avatar_cortex_voice_adapter_emit(confirm, project, opts)?
     } else {
         Value::Null
     };
-    let emitted = vbool(emit_payload.get("emitted")).unwrap_or(false);
-    let would_emit = vbool(emit_payload.get("would_emit")).unwrap_or(false);
-    let emits_audio = vbool(emit_payload.get("emits_audio")).unwrap_or(false);
+    let voice_adapter_invocation = if actual_emit_invoked {
+        voice_adapter_payload
+            .get("voice_adapter_invocation")
+            .cloned()
+            .unwrap_or(Value::Null)
+    } else {
+        lcc_voice_adapter_invocation(
+            confirm,
+            project,
+            false,
+            Some(opts.cooldown_secs),
+            None,
+            opts.tts_voice,
+        )
+    };
+    let emitted = vbool(voice_adapter_payload.get("emitted")).unwrap_or(false);
+    let would_emit = vbool(voice_adapter_payload.get("would_emit")).unwrap_or(false);
+    let emits_audio = vbool(voice_adapter_payload.get("emits_audio")).unwrap_or(false);
     let command_preview = confirm
         .get("action_command_preview")
         .filter(|value| !value.is_null())
@@ -6014,11 +6360,13 @@ fn avatar_cortex_voice_action_from_confirm_payload(
             "force": opts.force,
             "tts_voice": tts_voice,
             "tts_rate": tts_rate,
+            "voice_adapter_invocation": voice_adapter_invocation,
             "command_args": command_args,
             "command_preview": command_preview,
         },
         "source_voice_confirm": confirm_payload,
-        "source_voice_emit": emit_payload,
+        "source_voice_adapter": voice_adapter_payload.clone(),
+        "source_voice_emit": if actual_emit_invoked { voice_adapter_payload } else { Value::Null },
     }))
 }
 
@@ -6151,6 +6499,14 @@ fn avatar_cortex_voice_action_preview_from_confirm_payload(
                 .cloned()
         })
         .unwrap_or(Value::Null);
+    let voice_adapter_invocation = lcc_voice_adapter_invocation(
+        confirm,
+        project,
+        false,
+        Some(opts.cooldown_secs),
+        last_emit_at,
+        opts.tts_voice,
+    );
 
     json!({
         "surface": "avatar_cortex_voice_action_preview",
@@ -6189,6 +6545,7 @@ fn avatar_cortex_voice_action_preview_from_confirm_payload(
             "allow_policy_override": true,
             "tts_voice": tts_voice,
             "tts_rate": tts_rate,
+            "voice_adapter_invocation": voice_adapter_invocation,
             "state_path": state_path.map(|path| path.to_string_lossy().to_string()),
             "events_path": events_path.map(|path| path.to_string_lossy().to_string()),
             "command_args": command_args,
@@ -8572,21 +8929,23 @@ mod tests {
             "小舒发现一点需要你看一下。"
         );
         assert_eq!(
-            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["voice_script"]["script_id"],
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["voice_script"]
+                ["script_id"],
             "xiao_shu_alert_peek_sparse_voice_v1"
         );
         assert_eq!(
-            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["voice_script"]["llm_message_policy"]
-                ["message_can_replace_utterance"],
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["voice_script"]
+                ["llm_message_policy"]["message_can_replace_utterance"],
             false
         );
         assert_eq!(
-            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["voice_script"]["trigger_policy"]
-                ["manual_cli_only"],
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["voice_script"]
+                ["trigger_policy"]["manual_cli_only"],
             true
         );
         assert_eq!(
-            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["gate"]["real_emit_surface"],
+            alert_peek["semantic_variant_review"]["voice_linkage_preview"]["gate"]
+                ["real_emit_surface"],
             "agent-bridge avatar cortex-voice-emit"
         );
         assert!(
@@ -9513,6 +9872,62 @@ mod tests {
     }
 
     #[test]
+    fn avatar_cortex_voice_action_preview_exposes_lcc_voice_adapter_contract() {
+        let registry = avatar_cortex_renderer_registry_payload(None);
+        let plan = avatar_cortex_binding_plan_from_registry(registry);
+        let fixture = avatar_cortex_binding_fixture_from_plan(plan);
+        let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
+        let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
+        let policy = avatar_cortex_voice_policy_from_renderer_view_payload(view);
+        let request = avatar_cortex_voice_request_from_policy_payload(
+            policy,
+            Some("xiao_shu::alert_peek::medium"),
+            Some("agent-bridge"),
+            Some("manual confirmation"),
+        );
+        let confirm = avatar_cortex_voice_confirm_from_request_payload(request, true);
+        let opts = AvatarCortexVoiceActionPreviewOptions {
+            label: None,
+            heartbeat_label: Some("com.agentbridge.avatar-heartbeat.agent-bridge"),
+            project: Some("agent-bridge"),
+            output: None,
+            requested_track: Some("xiao_shu::alert_peek::medium"),
+            reason: Some("manual confirmation"),
+            confirm: true,
+            force: true,
+            cooldown_secs: 300,
+            tts_voice: None,
+            tts_rate: None,
+        };
+        let preview = avatar_cortex_voice_action_preview_from_confirm_payload(
+            confirm, &opts, None, None, None, 1_100,
+        );
+        let invocation = &preview["action_preview"]["voice_adapter_invocation"];
+        let args = invocation["args"].as_array().unwrap();
+
+        assert_eq!(invocation["adapter"], "audio_embody.py");
+        assert_eq!(invocation["adapter_mode"], "voice");
+        assert_eq!(invocation["lifecycle_mode"], "waiting_for_user");
+        assert_eq!(invocation["agent_id"], "agent-bridge:xiao-shu");
+        assert_eq!(invocation["voice"], "af_sarah");
+        assert_eq!(invocation["voice_line"], "小舒发现一点需要你看一下。");
+        assert_eq!(invocation["actual_invoked"], false);
+        assert_eq!(invocation["emits_audio"], false);
+        assert_eq!(invocation["recommended_execution"], "local_cli_async_spawn");
+        assert!(args.iter().any(|arg| arg == "--mode"));
+        assert!(args.iter().any(|arg| arg == "voice"));
+        assert!(args.iter().any(|arg| arg == "--lifecycle-mode"));
+        assert!(args.iter().any(|arg| arg == "waiting_for_user"));
+        assert!(args.iter().any(|arg| arg == "--voice-line"));
+        assert!(args.iter().any(|arg| arg == "小舒发现一点需要你看一下。"));
+        assert!(args.iter().any(|arg| arg == "--json"));
+        assert!(invocation["command_preview"]
+            .as_str()
+            .unwrap()
+            .contains("audio_embody.py --mode voice"));
+    }
+
+    #[test]
     fn shell_quote_cli_arg_quotes_unsafe_values() {
         assert_eq!(shell_quote_cli_arg("agent-bridge"), "agent-bridge");
         assert_eq!(
@@ -9638,25 +10053,19 @@ mod tests {
             true
         );
         assert_eq!(request["action_request"]["ready_for_local_cli_emit"], false);
-        assert!(
-            request["action_request"]["blocked_reasons"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|reason| reason == "human_confirmation_required")
-        );
-        assert!(
-            request["action_request"]["confirm_request_command"]
-                .as_str()
-                .unwrap()
-                .contains("--confirm")
-        );
-        assert!(
-            request["action_request"]["enqueue_command"]
-                .as_str()
-                .unwrap()
-                .contains("--enqueue")
-        );
+        assert!(request["action_request"]["blocked_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason == "human_confirmation_required"));
+        assert!(request["action_request"]["confirm_request_command"]
+            .as_str()
+            .unwrap()
+            .contains("--confirm"));
+        assert!(request["action_request"]["enqueue_command"]
+            .as_str()
+            .unwrap()
+            .contains("--enqueue"));
         assert_eq!(
             request["action_request"]["operator_console"]["mode"],
             "copy_local_cli_command"
@@ -9665,12 +10074,10 @@ mod tests {
             request["action_request"]["operator_console"]["safety"]["local_cli_emit_only"],
             true
         );
-        assert!(
-            request["action_request"]["emit_command"]
-                .as_str()
-                .unwrap()
-                .contains("cortex-voice-action")
-        );
+        assert!(request["action_request"]["emit_command"]
+            .as_str()
+            .unwrap()
+            .contains("cortex-voice-action"));
 
         let unsupported = xiao_shu_action_request_from_preview(
             request["downstream_action_preview"].clone(),
@@ -9753,8 +10160,7 @@ mod tests {
                 ]
             }
         });
-        let downstream_reasons =
-            xiao_shu_action_request_enqueue_block_reasons(&downstream_blocked);
+        let downstream_reasons = xiao_shu_action_request_enqueue_block_reasons(&downstream_blocked);
         assert_eq!(
             downstream_reasons,
             vec!["downstream_blocked:downstream_preview_unavailable"]
@@ -9843,10 +10249,7 @@ mod tests {
         assert_eq!(record["action_request"]["actor"], "codex");
         assert_eq!(record["line"], "小舒发现一点需要你看一下。");
         assert_eq!(record["cue_id"], "soft_attention_needed");
-        assert_eq!(
-            record["operator_console"]["mode"],
-            "copy_local_cli_command"
-        );
+        assert_eq!(record["operator_console"]["mode"], "copy_local_cli_command");
         assert_eq!(
             record["source_request"]["action_request"]["request_state"],
             "requires_human_confirmation"
