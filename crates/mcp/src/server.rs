@@ -12,17 +12,20 @@ use crate::protocol::{
 use crate::{ContentBlock, ToolContext, ToolRegistry, ToolResult};
 use ab_store::{prioritize_session_handoff, MemoryListSort, StateStore};
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
 use tracing::{debug, info, warn};
 
-/// Per-call backstop deadline for tool execution in the stdio loop. The loop is
-/// sequential (one `handle().await` at a time), so a single hung tool would
-/// otherwise block EVERY subsequent call on this server forever — the wedge that
-/// makes "all CC using AB" hang until the client SIGINTs. The default is generous
-/// (600s) so only a genuinely hung backend is ever hit, never a legit long call;
-/// tune via AGENT_BRIDGE_MCP_CALL_DEADLINE_SECS (0/invalid → default).
+/// Per-call backstop deadline for a spawned `tools/call` task. Layer 3 runs each
+/// tools/call concurrently, so a hung tool no longer blocks other calls — but an
+/// unbounded-lived hung task would still leak threads/handles, so every call is
+/// also time-bounded. The default is generous (600s) so only a genuinely hung
+/// backend is ever hit, never a legit long call; tune via
+/// AGENT_BRIDGE_MCP_CALL_DEADLINE_SECS (0/invalid → default).
 fn mcp_call_deadline() -> Duration {
     std::env::var("AGENT_BRIDGE_MCP_CALL_DEADLINE_SECS")
         .ok()
@@ -44,11 +47,73 @@ pub async fn serve_stdio(
     tool_backend_id: Option<Value>,
 ) {
     info!(server = server_name, "MCP stdio server starting");
-    let mut stdin = BufReader::new(tokio::io::stdin()).lines();
-    let mut stdout = tokio::io::stdout();
-    let mut telemetry = ConnectionTelemetry::from_env();
 
-    while let Ok(Some(line)) = stdin.next_line().await {
+    // Three tasks share the protocol stream so one hung tool can't wedge the whole
+    // server (Layer 3): a reader pumps stdin lines into `line_rx`; a writer owns
+    // stdout and drains `resp_rx` (serializing every response so concurrent tasks
+    // never interleave); and the dispatch loop in between runs each tools/call
+    // concurrently. stdin/stdout sit behind channels so the loop is unit-testable.
+    let (line_tx, line_rx) = mpsc::unbounded_channel::<String>();
+    let (resp_tx, mut resp_rx) = mpsc::unbounded_channel::<McpResponse>();
+
+    tokio::spawn(async move {
+        let mut stdin = BufReader::new(tokio::io::stdin()).lines();
+        while let Ok(Some(line)) = stdin.next_line().await {
+            if line_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    let writer = tokio::spawn(async move {
+        let mut stdout = tokio::io::stdout();
+        while let Some(resp) = resp_rx.recv().await {
+            write_response(&mut stdout, &resp).await;
+        }
+    });
+
+    run_dispatch_loop(
+        line_rx,
+        resp_tx,
+        registry,
+        store,
+        server_name.to_string(),
+        version.to_string(),
+        tool_backend_id,
+    )
+    .await;
+
+    // Give the writer a brief grace to flush any just-completed responses, but do
+    // NOT block on it indefinitely: a still-running (e.g. hung) tools/call task
+    // holds a sender clone, so an unbounded `writer.await` would keep this process
+    // alive until that task's deadline (up to 600s) after the client already left.
+    let _ = tokio::time::timeout(Duration::from_secs(5), writer).await;
+    info!("MCP stdio server stopped (stdin closed)");
+}
+
+/// The concurrent dispatch loop, isolated from stdin/stdout (driven by channels)
+/// so it can be unit-tested. Fast methods (initialize/ping/tools/list/resources)
+/// run inline to keep telemetry mutation sequential; `tools/call` — the only
+/// method that can hang — is spawned so the loop keeps reading (other calls
+/// proceed, `notifications/cancelled` is honoured, a hung tool never wedges the
+/// server). Each spawned call is also backstop-bounded by `mcp_call_deadline`.
+async fn run_dispatch_loop(
+    mut line_rx: mpsc::UnboundedReceiver<String>,
+    resp_tx: mpsc::UnboundedSender<McpResponse>,
+    registry: ToolRegistry,
+    store: Option<Arc<dyn StateStore>>,
+    server_name: String,
+    version: String,
+    tool_backend_id: Option<Value>,
+) {
+    let mut telemetry = ConnectionTelemetry::from_env();
+    let registry = Arc::new(registry);
+    // request-id (as JSON string) -> AbortHandle of the in-flight tools/call task,
+    // so a notifications/cancelled can abort it. Pruned of finished entries on each
+    // insert so a fast call that completes before we record it can't leak.
+    let inflight: Arc<Mutex<HashMap<String, AbortHandle>>> = Arc::new(Mutex::new(HashMap::new()));
+
+    while let Some(line) = line_rx.recv().await {
         if line.trim().is_empty() {
             continue;
         }
@@ -56,70 +121,103 @@ pub async fn serve_stdio(
         let req = match serde_json::from_str::<McpRequest>(&line) {
             Ok(r) => r,
             Err(e) => {
-                let resp =
-                    McpResponse::error(Value::Null, PARSE_ERROR, format!("invalid json-rpc: {e}"));
-                write_response(&mut stdout, &resp).await;
+                let _ = resp_tx.send(McpResponse::error(
+                    Value::Null,
+                    PARSE_ERROR,
+                    format!("invalid json-rpc: {e}"),
+                ));
                 continue;
             }
         };
 
         if req.jsonrpc != "2.0" {
             if let Some(id) = req.id.clone() {
-                let resp = McpResponse::error(id, INVALID_REQUEST, "jsonrpc must be '2.0'");
-                write_response(&mut stdout, &resp).await;
+                let _ =
+                    resp_tx.send(McpResponse::error(id, INVALID_REQUEST, "jsonrpc must be '2.0'"));
             }
             continue;
         }
 
-        // Notifications (no id) → handle silently, never respond.
+        // Notifications (no id) → never respond. Honour cancellation: abort the
+        // in-flight tools/call task whose requestId matches.
         if req.id.is_none() {
-            debug!(method = %req.method, "received notification");
+            if req.method == "notifications/cancelled" {
+                if let Some(rid) = req.params.as_ref().and_then(|p| p.get("requestId")) {
+                    let key = rid.to_string();
+                    let handle = inflight.lock().unwrap().remove(&key);
+                    if let Some(h) = handle {
+                        warn!(request_id = %key, "client cancelled in-flight tool call — aborting");
+                        h.abort();
+                    }
+                }
+            } else {
+                debug!(method = %req.method, "received notification");
+            }
             continue;
         }
 
-        // Backstop: bound every call so one hung tool.execute() can't wedge the
-        // whole (sequential) loop. On deadline the handle() future is dropped —
-        // which cancels the in-flight await (e.g. a wedged CDP connection) — and
-        // the loop reads the next request instead of hanging until SIGINT.
-        let req_id = req.id.clone().unwrap_or(Value::Null);
-        let deadline = mcp_call_deadline();
-        let resp = match tokio::time::timeout(
-            deadline,
-            handle(
+        // tools/call is the only method that can hang (it runs tool.execute). Run it
+        // in its own task + backstop deadline so the loop keeps reading the next
+        // request. Everything else is fast → handle inline.
+        if req.method == "tools/call" {
+            let req_id = req.id.clone().unwrap_or(Value::Null);
+            let id_key = req_id.to_string();
+            let map_key = req_id.to_string();
+            let reg = registry.clone();
+            let st = store.clone();
+            let mut tel = telemetry.clone();
+            let sn = server_name.clone();
+            let ver = version.clone();
+            let tbid = tool_backend_id.clone();
+            let out = resp_tx.clone();
+            let inflight2 = inflight.clone();
+            let deadline = mcp_call_deadline();
+            let task = tokio::spawn(async move {
+                let resp = match tokio::time::timeout(
+                    deadline,
+                    handle(&reg, st.as_deref(), req, &sn, &ver, tbid.as_ref(), &mut tel),
+                )
+                .await
+                {
+                    Ok(r) => r,
+                    Err(_) => {
+                        warn!(
+                            deadline_secs = deadline.as_secs(),
+                            "tool call exceeded server deadline — cancelled; server stayed responsive"
+                        );
+                        McpResponse::error(
+                            req_id,
+                            INTERNAL_ERROR,
+                            format!(
+                                "tool call exceeded the server deadline ({}s) and was cancelled; \
+                                 the backend likely hung (e.g. a wedged browser/CDP connection). \
+                                 The MCP server stayed responsive — retry, or raise \
+                                 AGENT_BRIDGE_MCP_CALL_DEADLINE_SECS for genuinely long calls.",
+                                deadline.as_secs()
+                            ),
+                        )
+                    }
+                };
+                inflight2.lock().unwrap().remove(&id_key);
+                let _ = out.send(resp);
+            });
+            let mut map = inflight.lock().unwrap();
+            map.retain(|_, h| !h.is_finished());
+            map.insert(map_key, task.abort_handle());
+        } else {
+            let resp = handle(
                 &registry,
                 store.as_deref(),
                 req,
-                server_name,
-                version,
+                &server_name,
+                &version,
                 tool_backend_id.as_ref(),
                 &mut telemetry,
-            ),
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(_) => {
-                warn!(
-                    deadline_secs = deadline.as_secs(),
-                    "tool call exceeded server deadline — cancelled; server stayed responsive"
-                );
-                McpResponse::error(
-                    req_id,
-                    INTERNAL_ERROR,
-                    format!(
-                        "tool call exceeded the server deadline ({}s) and was cancelled; \
-                         the backend likely hung (e.g. a wedged browser/CDP connection). \
-                         The MCP server stayed responsive — retry, or raise \
-                         AGENT_BRIDGE_MCP_CALL_DEADLINE_SECS for genuinely long calls.",
-                        deadline.as_secs()
-                    ),
-                )
-            }
-        };
-        write_response(&mut stdout, &resp).await;
+            )
+            .await;
+            let _ = resp_tx.send(resp);
+        }
     }
-
-    info!("MCP stdio server stopped (stdin closed)");
 }
 
 fn tool_result_error_summary(result: &ToolResult) -> String {
@@ -763,6 +861,110 @@ async fn write_response(stdout: &mut tokio::io::Stdout, resp: &McpResponse) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{McpTool, ToolSchema};
+    use async_trait::async_trait;
+
+    // --- Layer 3 concurrency: a slow/hung tools/call must not block a later one,
+    // and notifications/cancelled must abort an in-flight call. ---
+    struct SleepTool {
+        name: &'static str,
+        delay_ms: u64,
+    }
+
+    #[async_trait]
+    impl McpTool for SleepTool {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn schema(&self) -> ToolSchema {
+            ToolSchema {
+                name: self.name.into(),
+                description: "test sleeper".into(),
+                input_schema: json!({ "type": "object" }),
+            }
+        }
+        async fn execute(&self, _args: Value, _ctx: &ToolContext) -> ab_core::Result<ToolResult> {
+            tokio::time::sleep(Duration::from_millis(self.delay_ms)).await;
+            Ok(ToolResult::text(self.name))
+        }
+    }
+
+    fn call_line(id: u64, tool: &str) -> String {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/call",
+            "params": { "name": tool, "arguments": {} }
+        })
+        .to_string()
+    }
+
+    /// Drive the dispatch loop over fixed input lines and collect every response.
+    /// The loop returns when input closes; the response channel then drains as the
+    /// spawned tasks (which hold cloned senders) complete, so recv() yields all of
+    /// them and ends when the last task drops its sender.
+    async fn drive(reg: ToolRegistry, lines: Vec<String>) -> Vec<McpResponse> {
+        let (ltx, lrx) = mpsc::unbounded_channel::<String>();
+        let (rtx, mut rrx) = mpsc::unbounded_channel::<McpResponse>();
+        for l in lines {
+            ltx.send(l).unwrap();
+        }
+        drop(ltx); // close input → loop ends after draining
+        run_dispatch_loop(lrx, rtx, reg, None, "test".into(), "0".into(), None).await;
+        let mut out = Vec::new();
+        while let Some(r) = rrx.recv().await {
+            out.push(r);
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn slow_tools_call_does_not_block_a_later_fast_one() {
+        let mut reg = ToolRegistry::default();
+        reg.register(Arc::new(SleepTool {
+            name: "slow",
+            delay_ms: 300,
+        }));
+        reg.register(Arc::new(SleepTool {
+            name: "fast",
+            delay_ms: 0,
+        }));
+        // slow is sent FIRST; the old sequential loop would block fast behind it.
+        let resps = drive(reg, vec![call_line(1, "slow"), call_line(2, "fast")]).await;
+        assert_eq!(resps.len(), 2, "both calls must respond");
+        assert_eq!(
+            resps[0].id,
+            json!(2),
+            "fast call must return before the slow one (concurrent, no head-of-line block)"
+        );
+        assert_eq!(resps[1].id, json!(1));
+    }
+
+    #[tokio::test]
+    async fn notifications_cancelled_aborts_in_flight_call() {
+        let mut reg = ToolRegistry::default();
+        // would otherwise run 5s; the cancellation must abort it near-instantly.
+        reg.register(Arc::new(SleepTool {
+            name: "slow",
+            delay_ms: 5_000,
+        }));
+        let cancel = json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": { "requestId": 1 }
+        })
+        .to_string();
+        let resps = tokio::time::timeout(
+            Duration::from_millis(800),
+            drive(reg, vec![call_line(1, "slow"), cancel]),
+        )
+        .await
+        .expect("must finish well under the 5s tool sleep because the call was aborted");
+        assert!(
+            resps.is_empty(),
+            "an aborted in-flight call must not emit a response"
+        );
+    }
 
     #[test]
     fn mcp_source_classifier_identifies_common_clients() {
