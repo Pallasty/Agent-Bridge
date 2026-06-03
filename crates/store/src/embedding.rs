@@ -183,11 +183,24 @@ pub fn set_default_backend(b: Arc<dyn EmbeddingBackend>) -> Result<(), &'static 
 fn select_default() -> Arc<dyn EmbeddingBackend> {
     let from_env = std::env::var("AGENT_BRIDGE_EMBED_BACKEND").ok();
     let pick = from_env.as_deref().unwrap_or({
-        #[cfg(feature = "onnx-embed")]
+        // Under `cfg(test)` the compile-time default is ALWAYS hash, regardless of
+        // the `onnx-embed` feature. `cargo test --workspace` unifies features, so an
+        // unrelated crate enabling `ab-store/onnx-embed` would otherwise make this
+        // process-global `OnceLock` resolve to ONNX on whichever test touches
+        // `default_backend()` first — making backend-sensitive tests (e.g. reindex)
+        // flaky by scheduling order, which previously required a manual
+        // `AGENT_BRIDGE_EMBED_BACKEND=hash` to suppress. Pinning hash here removes the
+        // order dependence at the source; an explicit env var still overrides, so an
+        // onnx-specific test can opt back in.
+        #[cfg(test)]
+        {
+            "hash"
+        }
+        #[cfg(all(not(test), feature = "onnx-embed"))]
         {
             "onnx"
         }
-        #[cfg(not(feature = "onnx-embed"))]
+        #[cfg(all(not(test), not(feature = "onnx-embed")))]
         {
             "hash"
         }
