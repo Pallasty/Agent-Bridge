@@ -355,15 +355,26 @@ impl BrowserBackend for ChromiumCdpBackend {
                 ))
             })?
             .map_err(|e| Error::Backend(format!("new_page {url}: {e}")))?;
-        tokio::time::timeout(NAVIGATE_TIMEOUT, page.wait_for_navigation())
-            .await
-            .map_err(|_| {
-                Error::Backend(format!(
+        // new_page() returns once the target (tab) exists; the load wait is here, so
+        // this is where a never-settling page hangs. On timeout/error close the tab we
+        // already opened — chromiumoxide's Page has no Drop, and it was never inserted
+        // into self.pages, so just returning Err would orphan the tab in the long-lived
+        // shared browser (accumulating tabs → memory + headed-Chrome crash → SingletonLock
+        // wedge). page.wait_for_navigation borrows &self, so `page` is still ours to close.
+        match tokio::time::timeout(NAVIGATE_TIMEOUT, page.wait_for_navigation()).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => {
+                let _ = page.close().await;
+                return Err(Error::Backend(format!("wait_for_navigation: {e}")));
+            }
+            Err(_) => {
+                let _ = page.close().await;
+                return Err(Error::Backend(format!(
                     "wait_for_navigation timed out after {}s (page never settled)",
                     NAVIGATE_TIMEOUT.as_secs()
-                ))
-            })?
-            .map_err(|e| Error::Backend(format!("wait_for_navigation: {e}")))?;
+                )));
+            }
+        }
         let pid = PageId::new();
         debug!(page = %pid, url, "page tracked");
         self.pages.insert(pid.as_str().to_string(), Arc::new(page));

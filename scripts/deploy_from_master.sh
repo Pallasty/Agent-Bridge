@@ -123,6 +123,19 @@ else
     # Build in a worktree placed as a SIBLING of the repo so the cross-repo path
     # dep (crates/seed-bridge -> ../../../AiOT/rust/seed_neuron) resolves natively
     # without symlinks. AiOT is always a sibling of the repo on every node.
+    # Reclaim staging worktrees leaked by a PRIOR run that was hard-killed (OOM /
+    # SIGKILL mid-build, before its EXIT trap could fire). PID-unique names mean the
+    # next run no longer collides with a stale dir, but also no longer reclaims it —
+    # so sweep dead-PID siblings here (skip any whose PID is still alive to stay
+    # concurrency-safe), then prune stale worktree registrations.
+    for d in "$(dirname "$REPO")"/.ab-deploy-build.*; do
+        [ -e "$d" ] || continue
+        pid="${d##*.}"
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then continue; fi
+        git -C "$REPO" worktree remove --force "$d" >/dev/null 2>&1 || true
+        rm -rf "$d" 2>/dev/null || true
+    done
+    git -C "$REPO" worktree prune >/dev/null 2>&1 || true
     # Unique per-run (PID-suffixed) so two concurrent deploys don't rm -rf / build
     # into the SAME staging worktree and corrupt each other — the build dir must
     # stay a sibling of the repo (and thus of AiOT) for ../AiOT to resolve.
