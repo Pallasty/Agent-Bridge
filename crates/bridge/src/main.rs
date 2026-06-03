@@ -12100,11 +12100,11 @@ const GAPS_AS_OF_2026_05_16: &[GapEntry] = &[
     GapEntry {
         id: "D2",
         layer: "L8",
-        status: GapStatus::Partial,
+        status: GapStatus::Closed,
         text: "Decisions made by one session don't propagate without explicit forum post",
         last_touch: "484e376 316193e",
         gate_opens: None,
-        notes: "D2-G1 VIOLATED — cross-machine forum sync 17-post gap; peer-query workaround",
+        notes: "D2-G1 closed — durable cross-machine forum+memory git-sync wired into `agent-bridge sync` (sync.rs forum_export/forum_import + memory export/import); verified live 2026-06-03: mac + aio2 sync.logs converge (forum ~2259 posts, conflict_copies=0). The old `17-post gap; peer-query workaround` note predated forum sync landing in durable sync (2026-05-16 f5400b2); peer-query now only serves real-time reads before the next 15-min sync.",
     },
     GapEntry {
         id: "D3",
