@@ -20,7 +20,7 @@ Pluggable capture channel:
 This is the Python half (analysis + decision) wrapped by the thin Rust MCP tool
 `present_voice`, matching the desktop_verify / vision_grounding_ocr pattern.
 """
-import argparse, array, json, math, os, re, subprocess, sys, tempfile, time, wave
+import argparse, array, hashlib, json, math, os, re, subprocess, sys, tempfile, time, unicodedata, wave
 
 # --- pure decision (unit-tested; no audio needed) -------------------------------
 
@@ -72,14 +72,28 @@ def verify_status_for(status):
     }.get(status, "error")
 
 
+def emit_claim_fields(play_ok):
+    """Pure honesty invariant of the FAST-EMIT tier (`--mode emit`).
+
+    Emit mode plays synthesized speech WITHOUT reading the bus back, so it makes
+    NO verification claim: `verify_status` is NEVER the gate-passing `rendered_ok`
+    and `verified_to` is ALWAYS None. This is the low-truth-claim companion-chatter
+    path; the verified tier is `--mode speech` (bus envelope/STT falsifier).
+    Returns (status, verify_status, verified_to).
+    """
+    if play_ok:
+        return "played_unverified", "unverified", None
+    return "error", "error", None
+
+
 def honest_attestation(status, channel_verified_to, channel_not_verified):
     """Pure: what a run may CLAIM it verified, given its outcome. The channel target
     (e.g. the output bus) counts as `verified_to` ONLY when that channel actually
     confirmed the signal (status=='emitted'); on every other status the run proved
     nothing there, so the channel target moves into `not_verified` and verified_to is
     None. Prevents a failed/mismatched run from reporting a verified_to it never
-    earned (e.g. a busy/decorrelated bus that classifies as `mismatch` must not still
-    claim verified_to=output bus). Returns (verified_to, not_verified)."""
+    earned (adversarial findings INV-RECEIPT-NOFAB / INV-CONTRACT).
+    Returns (verified_to, not_verified)."""
     if status == "emitted":
         return channel_verified_to, channel_not_verified
     return None, f"{channel_verified_to} — NOT confirmed on this run; plus {channel_not_verified}"
@@ -155,6 +169,153 @@ def classify_intelligibility(overlap_ratio, n_ref_words, threshold=INTELLIGIBLE_
     if n_ref_words <= 0:
         return "no_words"
     return "intelligible" if overlap_ratio >= threshold else "garbled"
+
+
+# --- voice-policy v0 decision (LCC-V1, the companion voice adapter) --------------
+# Contract: forum #98 #2207 (voice_policy v0) + #2215 (wiring/receipt). The
+# companion is silent by default and only speaks on a few gated lifecycle modes;
+# a `verified` line is a TRUTH-CLAIM and must point at real verification evidence
+# (never inferred from a mode flip alone); milestone (verified) lines route to the
+# VERIFIED tier (`--mode speech`, bus-falsified) while ambient/status lines route
+# to the FAST tier (`--mode emit`, unverified). This is a PURE decision so the
+# whole policy is a truth table, not a live assertion.
+
+VOICE_ALLOWED_MODES = ("failed", "verified", "waiting_for_user", "handoff")
+VOICE_COOLDOWN_SECS = 300          # default per #2207; same (agent,mode,evidence) not repeated
+VOICE_LINE_MAX_CHARS = 240         # v0 noise budget — companion lines stay short
+VOICE_VERIFIED_TIER_MODES = ("verified",)   # modes that route to the bus-VERIFIED tier
+# v0 text source is a template ENUM, not arbitrary LLM text (#2207). A raw
+# `voice_line` is still accepted but length/mode/evidence/cooldown gated.
+VOICE_LINE_TEMPLATES = {
+    "verified.generic": "Verified.",
+    "failed.generic": "A check failed.",
+    "waiting_for_user.generic": "Waiting for you.",
+    "handoff.generic": "Handing off.",
+}
+
+
+# Codepoint categories that carry NO standalone visible glyph, so an id made only
+# of them is not real proof: format (zero-width U+200B/200C/200D/2060/FEFF…),
+# control, the three space separators, unassigned, the no-base mark categories
+# (Mn nonspacing / Me enclosing — bare combining accents, variation selectors), and
+# surrogates (Cs — also unencodable). A real id needs >=1 char OUTSIDE this set.
+_INVISIBLE_CATEGORIES = ("Cf", "Cc", "Zs", "Zl", "Zp", "Cn", "Mn", "Me", "Cs")
+# Default_Ignorable_Code_Points that fall in an otherwise-VISIBLE general category
+# (so the category test alone misses them) yet render as nothing: the Hangul fillers
+# (category Lo). U+3164 is the canonical web "invisible character". Every OTHER
+# Default_Ignorable codepoint already lives in a rejected category above.
+_INVISIBLE_CODEPOINTS = frozenset("\u115f\u1160\u3164\uffa0")  # Hangul fillers (Lo, Default_Ignorable)
+
+
+def _is_visible(ch):
+    """A char carries a real visible glyph iff its category is not in the no-glyph
+    set AND it is not a known zero-glyph Default_Ignorable codepoint."""
+    return unicodedata.category(ch) not in _INVISIBLE_CATEGORIES and ch not in _INVISIBLE_CODEPOINTS
+
+
+def _meaningful_id(e):
+    """Return the stripped string id iff it carries >=1 real VISIBLE character, else
+    None. Rejecting non-strings is load-bearing (str(None)=='None' would be phantom
+    evidence); rejecting all-invisible strings is too — str.strip() removes only
+    Unicode WHITESPACE, so zero-width format chars (U+200B…), bare combining marks,
+    and zero-glyph Hangul fillers (U+3164…) would otherwise pose as evidence and let
+    a 'verified' line speak with no proof (adversarial INV-GROUND, rounds 2-4)."""
+    if not isinstance(e, str):
+        return None
+    s = e.strip()
+    if not s or not any(_is_visible(ch) for ch in s):
+        return None
+    return s
+
+
+def _clean_evidence(evidence_ids):
+    """Keep only real, non-empty, VISIBLE string evidence ids (see _meaningful_id)."""
+    return [m for m in (_meaningful_id(e) for e in (evidence_ids or [])) if m]
+
+
+def voice_evidence_hash(evidence_ids):
+    """Stable, order-insensitive short hash of the (cleaned) evidence id set. Empty →
+    the fixed token 'none' (so ambient lines dedup by (agent, mode) alone)."""
+    ids = sorted(set(_clean_evidence(evidence_ids)))
+    if not ids:
+        return "none"
+    # errors='replace': a stray surrogate in an id must not crash the hash (DoS).
+    return hashlib.sha256("|".join(ids).encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def _esc_key_field(s):
+    """Backslash-escape the dedup-key delimiter so an agent_id/mode containing '|'
+    cannot collide two distinct (agent,mode,evidence) tuples into one key
+    (adversarial finding INV-COOLDOWN)."""
+    return str(s).replace("\\", "\\\\").replace("|", "\\|")
+
+
+def voice_dedup_key(agent_id, mode, evidence_ids):
+    """The cooldown/dedup key per #2207: (agent_id, mode, evidence_hash), with the
+    free-text fields escaped so the join is injective. Returned to the caller so its
+    cooldown map can key on the same evidence."""
+    return f"{_esc_key_field(agent_id or '?')}|{_esc_key_field(mode)}|{voice_evidence_hash(evidence_ids)}"
+
+
+def text_hash(text):
+    """Short content hash for the receipt (we record WHAT was said without storing
+    the full line in every downstream record)."""
+    return hashlib.sha256((text or "").encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def decide_voice(mode, evidence_ids=None, voice_line_id=None, voice_line=None,
+                 agent_id=None, allowed_modes=VOICE_ALLOWED_MODES,
+                 last_spoken_ts=None, now=None, cooldown_secs=VOICE_COOLDOWN_SECS,
+                 line_max_chars=VOICE_LINE_MAX_CHARS, templates=VOICE_LINE_TEMPLATES):
+    """Pure voice-policy v0 decision. Returns a dict with:
+      speak (bool), tier (silent|emit|speech), reason, text, voice_line_id,
+      dedup_key, evidence_ids.
+
+    Rules (in order):
+      1. default_silent: mode not in allowed_modes -> silent/mode_not_allowed.
+      2. verified requires evidence: mode=='verified' with no evidence_ids ->
+         silent/verified_requires_evidence (never speak a 'verified' claim that is
+         only a mode flip).
+      3. text source v0: a known voice_line_id (template) is preferred; a raw
+         voice_line is accepted only if non-empty and <= line_max_chars; an unknown
+         line id, an over-long line, or no text at all -> silent with that reason.
+      4. cooldown: if last_spoken_ts and now are given and now-last_spoken_ts <
+         cooldown_secs -> silent/cooldown (same (agent,mode,evidence) not repeated).
+      5. tier routing: verified -> speech (bus-verified emission, evidence already
+         required in rule 2); every other allowed mode -> emit (fast/unverified).
+    The dedup_key is always computed and returned, even on silence, so the caller's
+    cooldown map can record it on a real utterance.
+    """
+    evidence_ids = _clean_evidence(evidence_ids)
+    dedup_key = voice_dedup_key(agent_id, mode, evidence_ids)
+    base = {"speak": False, "tier": "silent", "mode": mode, "text": None,
+            "voice_line_id": voice_line_id, "dedup_key": dedup_key,
+            "evidence_ids": evidence_ids}
+
+    if mode not in allowed_modes:
+        return {**base, "reason": "mode_not_allowed"}
+    if mode == "verified" and not evidence_ids:
+        return {**base, "reason": "verified_requires_evidence"}
+
+    # text resolution (v0: template enum preferred, raw line validated)
+    if voice_line_id:
+        text = templates.get(voice_line_id)
+        if text is None:
+            return {**base, "reason": "unknown_line_id"}
+    elif isinstance(voice_line, str) and voice_line.strip():
+        text = voice_line.strip()
+        if len(text) > line_max_chars:
+            return {**base, "reason": "line_too_long", "text": None}
+    else:
+        return {**base, "reason": "no_text"}
+
+    if last_spoken_ts is not None and now is not None and (now - last_spoken_ts) < cooldown_secs:
+        return {**base, "reason": "cooldown", "text": text}
+
+    tier = "speech" if mode in VOICE_VERIFIED_TIER_MODES else "emit"
+    return {"speak": True, "tier": tier, "reason": "speak", "mode": mode,
+            "text": text, "voice_line_id": voice_line_id,
+            "dedup_key": dedup_key, "evidence_ids": evidence_ids}
 
 
 # --- audio analysis (pure over samples) -----------------------------------------
@@ -488,10 +649,123 @@ def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
     return out
 
 
+def run_emit(text, voice, speed, sink_arg, synth_bin):
+    """FAST-EMIT tier: synthesize `text` and play it to the sink WITHOUT reading the
+    bus back. The low-truth-claim companion-chatter path (status lines), distinct
+    from `--mode speech` which verifies on the bus. It makes NO verification claim
+    (see `emit_claim_fields`): it played the audio but did NOT confirm it reached
+    the bus, so the honest boundary is WIDER than speech mode — both the output bus
+    AND the physical transducer are unverified. Fast because it skips capture +
+    envelope/STT analysis entirely (no `.monitor` readback)."""
+    sink = sink_arg or _sh("pactl get-default-sink").stdout.strip()
+    out = {
+        "mode": "emit", "text": text, "voice": voice, "speed": speed, "sink": sink,
+        # emit never reads back → it asserts nothing about the bus:
+        "verified_to": None,
+        "not_verified": "output bus AND physical transducer "
+                        "(emit mode plays without bus readback — use --mode speech to verify)",
+    }
+    wav, info = synth_speech(text, voice, speed, synth_bin)
+    if wav is None:
+        status, verify_status, _ = emit_claim_fields(False)
+        out.update(status=status, verify_status=verify_status, detail=info.get("detail", "synth failed"))
+        return out
+    played = _read_wav_mono_s16(wav)
+    played_dur = (played["frames"] / (played["sr"] or 24000)) if played else 0.0
+    out["played_dur_s"] = round(played_dur, 3)
+    try:
+        play = _sh(f"paplay --device={sink} {wav}")  # blocks ~played_dur (no capture)
+        play_ok = play.returncode == 0
+    except Exception as e:  # noqa
+        status, verify_status, _ = emit_claim_fields(False)
+        out.update(status=status, verify_status=verify_status, detail=f"playback: {e}")
+        return out
+    status, verify_status, _ = emit_claim_fields(play_ok)
+    out.update(
+        status=status, verify_status=verify_status, play_ok=play_ok,
+        detail=f"played {round(played_dur, 2)}s to {sink} (emit: no bus readback, unverified)",
+    )
+    return out
+
+
+# --- voice adapter orchestration (LCC-V1: decide -> route -> receipt) ------------
+
+# Fields the chosen tier (emit | speech) produces that we copy verbatim into the
+# voice receipt, so the receipt carries exactly what that tier actually PROVED —
+# never more. emit contributes played_unverified + a null verified_to; speech
+# contributes the bus falsifier (env_corr/STT) + verified_to=output bus.
+_VOICE_TIER_PASSTHROUGH = (
+    "status", "verify_status", "verified_to", "not_verified", "play_ok",
+    "played_dur_s", "sink", "env_corr", "voiced_secs", "capture_rms",
+    "intelligibility", "word_overlap", "stt_transcript",
+)
+
+
+def run_voice(mode, voice, sink_arg, synth_bin, evidence_ids=None,
+              voice_line_id=None, voice_line=None, agent_id=None,
+              allowed_modes=VOICE_ALLOWED_MODES, last_spoken_ts=None, now=None,
+              cooldown_secs=VOICE_COOLDOWN_SECS, speed=1.0,
+              stt_bin=None, stt_model=None):
+    """LCC-V1 companion voice adapter. Applies the PURE voice-policy v0 decision
+    (`decide_voice`), then — only if it says speak — routes to the FAST tier
+    (`run_emit`) or the VERIFIED tier (`run_speech`) and folds the tier's own
+    honest proof into a voice receipt (#2215 shape).
+
+    Honest by construction: the receipt's `verify_status`/`verified_to` are
+    whatever the chosen tier actually established at the bus, NOT what the policy
+    *wanted*. So a `verified` line whose bus readback fails is recorded as a
+    mismatch, never as rendered_ok — the evidence requirement (policy) and the bus
+    verification (tier) are two independent gates that must BOTH hold for a true
+    verified claim.
+    """
+    d = decide_voice(mode, evidence_ids=evidence_ids, voice_line_id=voice_line_id,
+                     voice_line=voice_line, agent_id=agent_id, allowed_modes=allowed_modes,
+                     last_spoken_ts=last_spoken_ts, now=now, cooldown_secs=cooldown_secs)
+    receipt = {
+        "mode": "voice", "lifecycle_mode": mode, "decision": d["reason"],
+        "tier": d["tier"], "dedup_key": d["dedup_key"], "evidence_ids": d["evidence_ids"],
+        "voice_line_id": voice_line_id, "voice": voice,
+    }
+    if not d["speak"]:
+        # silent is a first-class, honest outcome — it never claims verification.
+        receipt.update(status="silent", verify_status="skipped",
+                       verified_to=None, not_verified=None, play_ok=False,
+                       text_hash=None, detail=f"voice-policy: {d['reason']}")
+        return receipt
+
+    text = d["text"]
+    receipt["text_hash"] = text_hash(text)
+    if d["tier"] == "speech":
+        want_stt = bool(stt_bin or os.environ.get("AB_TTS_STT_BIN", "").strip())
+        em = run_speech(text, voice, speed, sink_arg, "sink_monitor", synth_bin,
+                        check_intelligibility=want_stt, stt_bin=stt_bin, stt_model=stt_model)
+    else:
+        em = run_emit(text, voice, speed, sink_arg, synth_bin)
+    for k in _VOICE_TIER_PASSTHROUGH:
+        if k in em:
+            receipt[k] = em[k]
+    receipt["detail"] = f"tier={d['tier']} -> {em.get('detail', '')}"
+    return receipt
+
+
 def main():
     ap = argparse.ArgumentParser(description="present_voice audio-embodiment falsifier")
-    ap.add_argument("--mode", choices=["tone", "speech"], default="tone",
-                    help="tone = fixed-freq Goertzel peak (default); speech = TTS envelope-correlation falsifier")
+    ap.add_argument("--mode", choices=["tone", "speech", "emit", "voice"], default="tone",
+                    help="tone = fixed-freq Goertzel peak (default); speech = TTS envelope-correlation "
+                         "falsifier (verified); emit = TTS synth+play, NO bus readback (fast, unverified); "
+                         "voice = LCC-V1 companion voice adapter (voice-policy v0 gate -> emit/speech tier)")
+    # voice-adapter args (LCC-V1)
+    ap.add_argument("--lifecycle-mode", default=None,
+                    help="voice mode: companion lifecycle mode (failed|verified|waiting_for_user|handoff|...)")
+    ap.add_argument("--voice-line-id", default=None, help="voice mode: template line id (e.g. verified.generic)")
+    ap.add_argument("--voice-line", default=None, help="voice mode: raw line text (length/policy gated)")
+    ap.add_argument("--evidence-id", action="append", default=None,
+                    help="voice mode: verification_outcome_id / evidence_event_id (repeatable); required for verified")
+    ap.add_argument("--agent-id", default=None, help="voice mode: agent id for the (agent,mode,evidence) dedup key")
+    ap.add_argument("--allowed-modes", default=None, help="voice mode: comma list overriding the default 4 gates")
+    ap.add_argument("--last-spoken-ts", type=float, default=None, help="voice mode: ts of the last utterance for this dedup key")
+    ap.add_argument("--now", type=float, default=None, help="voice mode: current ts (cooldown eval); default time.time()")
+    ap.add_argument("--cooldown-secs", type=float, default=VOICE_COOLDOWN_SECS, help="voice mode: cooldown window")
     ap.add_argument("--freq", type=float, default=440.0)
     ap.add_argument("--duration-ms", type=int, default=1500)
     ap.add_argument("--amplitude", type=float, default=0.25)
@@ -509,6 +783,40 @@ def main():
     ap.add_argument("--stt-model", default=None, help="whisper ggml model path (or env AB_TTS_STT_MODEL)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.mode == "voice":
+        lm = (a.lifecycle_mode or "").strip()
+        if not lm:
+            res = {"mode": "voice", "status": "error", "verify_status": "error",
+                   "detail": "voice mode requires --lifecycle-mode"}
+        else:
+            allowed = (tuple(m.strip() for m in a.allowed_modes.split(",") if m.strip())
+                       if a.allowed_modes else VOICE_ALLOWED_MODES)
+            now = a.now if a.now is not None else (time.time() if a.last_spoken_ts is not None else None)
+            res = run_voice(lm, a.voice, a.sink, resolve_synth_bin(a.synth_bin),
+                            evidence_ids=a.evidence_id, voice_line_id=a.voice_line_id,
+                            voice_line=a.voice_line, agent_id=a.agent_id, allowed_modes=allowed,
+                            last_spoken_ts=a.last_spoken_ts, now=now,
+                            cooldown_secs=a.cooldown_secs, speed=max(0.5, min(a.speed, 2.0)),
+                            stt_bin=a.stt_bin, stt_model=a.stt_model)
+        if a.json:
+            print(json.dumps(res))
+        else:
+            for k, v in res.items():
+                print(f"{k}: {v}")
+        return
+    if a.mode == "emit":
+        if not a.text or not a.text.strip():
+            res = {"mode": "emit", "status": "error", "verify_status": "error",
+                   "detail": "emit mode requires --text"}
+        else:
+            res = run_emit(a.text, a.voice, max(0.5, min(a.speed, 2.0)), a.sink,
+                           resolve_synth_bin(a.synth_bin))
+        if a.json:
+            print(json.dumps(res))
+        else:
+            for k, v in res.items():
+                print(f"{k}: {v}")
+        return
     if a.mode == "speech":
         if not a.text or not a.text.strip():
             res = {"mode": "speech", "status": "error", "verify_status": "error",

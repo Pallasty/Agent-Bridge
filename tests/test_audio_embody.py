@@ -188,6 +188,32 @@ def test_intelligibility_garbled_when_transcript_unrelated():
     assert ae.classify_intelligibility(ratio, nref) == "garbled"
 
 
+# --- fast-emit tier honesty invariant (--mode emit) -----------------------------
+# emit synthesizes + plays WITHOUT reading the bus back, so it must never claim a
+# verification it didn't earn. These pin that invariant as a truth table.
+
+def test_emit_played_never_claims_bus_verification():
+    status, verify_status, verified_to = ae.emit_claim_fields(True)
+    assert (status, verify_status, verified_to) == (
+        "played_unverified",
+        "unverified",
+        None,
+    )
+    assert verify_status != "rendered_ok"
+    assert verified_to is None
+
+
+def test_emit_failed_play_is_honest_error():
+    status, verify_status, verified_to = ae.emit_claim_fields(False)
+    assert (status, verify_status, verified_to) == ("error", "error", None)
+    assert verified_to is None
+
+
+def test_emit_status_not_gate_passing_via_verify_status_map():
+    assert ae.verify_status_for("played_unverified") != "rendered_ok"
+    assert ae.verify_status_for("unverified") != "rendered_ok"
+
+
 # --- honest attestation: verified_to is claimed ONLY on a real bus confirmation ---
 # Fixes a latent leak: run()/run_speech() previously set verified_to=output bus
 # unconditionally, so a busy/decorrelated bus that classifies as mismatch (or any
@@ -201,6 +227,165 @@ def test_honest_attestation_claims_bus_only_on_emitted():
         vt, nvt = ae.honest_attestation(fail, bus, trans)
         assert vt is None, fail                          # no verified_to claimed on failure
         assert "output bus" in nvt and "NOT confirmed" in nvt, fail   # bus folded into not_verified
+
+
+# --- LCC-V1 voice-policy v0 decision truth table (decide_voice) ------------------
+# Contract: forum #98 #2207/#2215 — silent by default; only 4 allowed modes;
+# `verified` is a truth-claim requiring real evidence (never a bare mode flip);
+# template/length-gated text; cooldown dedup by (agent,mode,evidence);
+# verified -> speech (bus-verified) tier, ambient modes -> emit (fast) tier.
+
+def test_voice_default_silent_outside_allowed_modes():
+    d = ae.decide_voice("working", voice_line="busy", agent_id="a")
+    assert d["speak"] is False and d["tier"] == "silent" and d["reason"] == "mode_not_allowed"
+
+
+def test_voice_verified_requires_evidence():
+    # load-bearing grounding rule: 'verified' with no evidence -> silent.
+    d = ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a", evidence_ids=[])
+    assert d["speak"] is False and d["reason"] == "verified_requires_evidence"
+    # with evidence -> speaks, and routes to the VERIFIED (speech) tier.
+    d2 = ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a",
+                         evidence_ids=["voice_kokoro_123"])
+    assert d2["speak"] is True and d2["tier"] == "speech" and d2["text"] == "Verified."
+
+
+def test_voice_ambient_modes_route_to_emit_tier():
+    for m, lid in [("failed", "failed.generic"),
+                   ("waiting_for_user", "waiting_for_user.generic"),
+                   ("handoff", "handoff.generic")]:
+        d = ae.decide_voice(m, voice_line_id=lid, agent_id="a")
+        assert d["speak"] is True and d["tier"] == "emit", (m, d)
+
+
+def test_voice_text_source_template_and_raw_line():
+    assert ae.decide_voice("handoff", voice_line_id="handoff.generic", agent_id="a")["text"] == "Handing off."
+    d2 = ae.decide_voice("handoff", voice_line_id="handoff.bogus", agent_id="a")
+    assert d2["speak"] is False and d2["reason"] == "unknown_line_id"
+    d3 = ae.decide_voice("handoff", voice_line="Passing the baton.", agent_id="a")
+    assert d3["speak"] is True and d3["text"] == "Passing the baton."
+    d4 = ae.decide_voice("handoff", voice_line="x" * 999, agent_id="a")
+    assert d4["speak"] is False and d4["reason"] == "line_too_long"
+    d5 = ae.decide_voice("handoff", agent_id="a")
+    assert d5["speak"] is False and d5["reason"] == "no_text"
+
+
+def test_voice_cooldown_dedups_same_evidence():
+    ev = ["outcome_42"]
+    d = ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a",
+                        evidence_ids=ev, last_spoken_ts=1000.0, now=1100.0, cooldown_secs=300)
+    assert d["speak"] is False and d["reason"] == "cooldown"
+    d2 = ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a",
+                         evidence_ids=ev, last_spoken_ts=1000.0, now=1400.0, cooldown_secs=300)
+    assert d2["speak"] is True
+
+
+def test_voice_dedup_key_is_agent_mode_evidence():
+    k1 = ae.voice_dedup_key("a", "verified", ["o1", "o2"])
+    assert k1 == ae.voice_dedup_key("a", "verified", ["o2", "o1"])   # order-insensitive
+    assert ae.voice_dedup_key("a", "verified", ["o3"]) != k1         # diff evidence -> diff key
+    assert ae.voice_dedup_key("b", "verified", ["o1", "o2"]) != k1   # diff agent -> diff key
+    assert ae.voice_evidence_hash([]) == "none"
+    assert ae.voice_dedup_key("a", "handoff", []).endswith("|handoff|none")
+
+
+def test_voice_receipt_silent_path_never_claims_verification():
+    # silent path needs no audio: disallowed mode -> receipt claims no verification.
+    r = ae.run_voice("working", "af_sarah", None, None, voice_line="busy", agent_id="a")
+    assert r["status"] == "silent" and r["verify_status"] == "skipped"
+    assert r["verify_status"] != "rendered_ok" and r["verified_to"] is None
+    assert r["tier"] == "silent" and r["decision"] == "mode_not_allowed"
+    # verified-without-evidence is silent too — no emission attempted, no claim.
+    r2 = ae.run_voice("verified", "af_sarah", None, None, voice_line_id="verified.generic", agent_id="a")
+    assert r2["status"] == "silent" and r2["decision"] == "verified_requires_evidence"
+    assert r2["verify_status"] != "rendered_ok"
+
+
+# --- adversarial-found regressions (workflow lcc-v1-voice-adversarial-verify) ----
+
+def test_voice_grounding_rejects_non_string_evidence_placeholders():
+    # INV-GROUND (high): str(None)=='None' must NOT count as evidence. A null/0/False
+    # placeholder can never let a 'verified' truth-claim speak.
+    for bad in ([None], [False], [0], [0.0], [[]], [{}], ["   "], ["\t", "\n"], [""]):
+        d = ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a", evidence_ids=bad)
+        assert d["speak"] is False and d["reason"] == "verified_requires_evidence", bad
+    assert ae.voice_evidence_hash([None]) == "none"
+    assert ae.voice_evidence_hash([0, False, "  "]) == "none"
+    # a real string evidence among placeholders survives, and only the real one.
+    d2 = ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a",
+                         evidence_ids=[None, "real-evt", ""])
+    assert d2["speak"] is True and d2["evidence_ids"] == ["real-evt"]
+
+
+def test_honest_attestation_claims_bus_only_on_emitted():
+    # INV-RECEIPT-NOFAB / INV-CONTRACT: verified_to is non-null ONLY on a real bus
+    # confirmation; every failure moves the bus into not_verified.
+    bus, trans = "output bus", "physical transducer"
+    assert ae.honest_attestation("emitted", bus, trans) == (bus, trans)
+    for fail in ("silent", "mismatch", "no_capture", "error", "skipped"):
+        vt, nvt = ae.honest_attestation(fail, bus, trans)
+        assert vt is None, fail
+        assert "output bus" in nvt and "NOT confirmed" in nvt, fail
+
+
+def test_voice_dedup_key_injection_safe():
+    # INV-COOLDOWN: a '|' in agent_id/mode cannot collide two distinct tuples.
+    assert ae.voice_dedup_key("svc", "x|y", []) != ae.voice_dedup_key("svc|x", "y", [])
+    assert ae.voice_dedup_key("a|b", "verified", ["e"]) != ae.voice_dedup_key("a", "b|verified", ["e"])
+
+
+# --- 2nd-round adversarial regressions (reverify workflow found deeper holes) ----
+
+def test_voice_grounding_rejects_zero_width_evidence():
+    # INV-GROUND zero-width bypass: invisible format chars are NOT real evidence —
+    # str.strip() leaves them, so they must be rejected by category.
+    for zw in ["​", "﻿", "‌", "‍", "⁠", "᠎", "​﻿‍", "  "]:
+        d = ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a", evidence_ids=[zw])
+        assert d["speak"] is False and d["reason"] == "verified_requires_evidence", repr(zw)
+    assert ae.voice_evidence_hash(["​", "﻿"]) == "none"
+    # an id that carries a real visible token still counts (incidental zero-width ok)
+    d2 = ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a", evidence_ids=["​evt-9"])
+    assert d2["speak"] is True
+
+
+def test_voice_verified_tier_synth_failure_names_bus_in_not_verified():
+    # INV-CONTRACT early-return: a verified line whose synth fails (no synth bin) is
+    # routed to the speech tier, fails early, and must STILL name the bus as
+    # not_verified (it was never confirmed there) — and never claim verified_to.
+    r = ae.run_voice("verified", "af_sarah", None, "/nonexistent/ab-tts-synth",
+                     evidence_ids=["evt-1"], voice_line_id="verified.generic", agent_id="a")
+    assert r["tier"] == "speech" and r["status"] == "error"
+    assert r["verify_status"] != "rendered_ok" and r["verified_to"] is None
+    assert "output bus" in (r.get("not_verified") or "")
+
+
+def test_voice_grounding_rejects_combining_marks_and_surrogates():
+    # round-3 INV-GROUND: bare combining marks (Mn), enclosing marks (Me), variation
+    # selectors (Mn) and surrogates (Cs) carry no standalone glyph — not real evidence.
+    for bad in ["́", "️", "︀", "⃝", "́̂", "\udc80"]:
+        d = ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a", evidence_ids=[bad])
+        assert d["speak"] is False and d["reason"] == "verified_requires_evidence", repr(bad)
+    # a surrogate must not crash the hash (DoS guard), even mixed with a real id
+    assert ae.voice_evidence_hash(["evt\udc80-1"])   # no UnicodeEncodeError
+    assert ae.text_hash("say\udc80")                  # no UnicodeEncodeError
+    # a real visible id still speaks
+    assert ae.decide_voice("verified", voice_line_id="verified.generic",
+                           agent_id="a", evidence_ids=["e1"])["speak"] is True
+
+
+def test_voice_grounding_rejects_hangul_filler_invisibles():
+    # round-4 INV-GROUND: Hangul fillers are category Lo (letters) yet render as
+    # nothing (Default_Ignorable); U+3164 is the canonical web "invisible character".
+    for filler in ["\u115f", "\u1160", "\u3164", "\uffa0", "\u3164\u3164"]:
+        d = ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a", evidence_ids=[filler])
+        assert d["speak"] is False and d["reason"] == "verified_requires_evidence", hex(ord(filler[0]))
+    assert ae.voice_evidence_hash(["\u3164"]) == "none"
+    # a filler mixed with a real visible token still counts
+    assert ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a",
+                           evidence_ids=["\u3164evt-1"])["speak"] is True
+    # a genuine CJK letter id (also category Lo) is NOT rejected — it renders a glyph
+    assert ae.decide_voice("verified", voice_line_id="verified.generic", agent_id="a",
+                           evidence_ids=["中"])["speak"] is True
 
 
 if __name__ == "__main__":
