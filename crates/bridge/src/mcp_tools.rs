@@ -5184,6 +5184,106 @@ impl McpTool for TerminalReadBlocksTool {
 }
 
 // ===========================================================================
+//                           browser-lite probes
+// ===========================================================================
+
+pub struct BrowserLiteProbeTool;
+impl BrowserLiteProbeTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for BrowserLiteProbeTool {
+    fn name(&self) -> &'static str {
+        "browser_lite_probe"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only probe for optional external browser-lite backends. \
+                 Currently supports Obscura: detects the binary, checks --help, optionally \
+                 runs a short-lived MCP tools/list probe, and returns capability/safety \
+                 evidence. It never starts a persistent service, changes browser routing, \
+                 enables stealth, or mutates Agent-Bridge state."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "backend": {
+                        "type": "string",
+                        "enum": ["obscura"],
+                        "default": "obscura",
+                        "description": "External browser-lite backend to probe."
+                    },
+                    "bin": {
+                        "type": "string",
+                        "description": "Optional backend binary path. Otherwise uses AGENT_BRIDGE_OBSCURA_BIN, then PATH."
+                    },
+                    "probe_mcp_tools": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, run a short-lived MCP tools/list probe in addition to --help."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 250,
+                        "maximum": 60000,
+                        "default": 5000,
+                        "description": "Per-probe timeout for backend commands."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let backend = args
+            .get("backend")
+            .and_then(Value::as_str)
+            .unwrap_or("obscura");
+        if backend != "obscura" {
+            return Ok(ToolResult::error(format!(
+                "unsupported browser-lite backend: {backend}"
+            )));
+        }
+
+        let bin = args
+            .get("bin")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let probe_mcp_tools = args
+            .get("probe_mcp_tools")
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| {
+                !args
+                    .get("no_mcp_tools")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            });
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(5_000);
+        let options = crate::browser_lite::ObscuraProbeOptions {
+            bin,
+            timeout_ms,
+            probe_mcp_tools,
+            json: true,
+        };
+
+        let report =
+            tokio::task::spawn_blocking(move || crate::browser_lite::probe_obscura(&options))
+                .await
+                .map_err(|e| ab_core::Error::Backend(format!("browser_lite_probe task: {e}")))?;
+        let payload = serde_json::to_value(report).unwrap_or_else(|_| json!({}));
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //                              browser tools
 // ===========================================================================
 
@@ -27175,6 +27275,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // the act loop). Never clicks/types; completes the read-only triad with
     // desktop_snapshot + vision_grounding_ocr. Mutating act tools stay out.
     "desktop_verify",
+    // External browser-lite discovery: read-only probe only. This is not the
+    // mutating browser_* automation surface and does not change browser routing.
+    "browser_lite_probe",
     // Remote session steering: a Codex orchestrator (which already carries
     // agent_spawn + agent_session_*) can launch/drive/observe long-lived agents
     // in named tmux sessions and roll up a worker blackboard.
@@ -29665,6 +29768,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(SkillsFeedbackTool::new(hub.clone())),
+    );
+    // External browser-lite discovery. Standard/read-only: exposes the probe
+    // evidence path without registering the full browser_* automation surface.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BrowserLiteProbeTool::new()),
     );
 
     // ── NICHE (opt-in via AGENT_BRIDGE_TOOL_PROFILE=all) ───────────────
@@ -33817,6 +33928,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "mobile_ios_list_devices"));
         assert!(p.includes(Tier::Standard, "mobile_ios_apps"));
         assert!(p.includes(Tier::Standard, "mobile_ios_syslog_tail"));
+        assert!(p.includes(Tier::Standard, "browser_lite_probe"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
     }
@@ -33825,18 +33937,20 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 43 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 44 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(31: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(32: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
+        //      + browser_lite_probe
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
         //      + agent_orchestrate_scan, added by d4fd74d).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // +6 steering DIRECT extras (d4fd74d) brought DIRECT 24→30, total 36→42.
         // +desktop_verify (read-only postflight verifier) brought DIRECT 30→31, 42→43.
-        assert_eq!(extras.len(), 43);
+        // +browser_lite_probe brought DIRECT 31→32, total 43→44.
+        assert_eq!(extras.len(), 44);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -33869,6 +33983,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"desktop_snapshot"));
         assert!(extras.contains(&"vision_grounding_ocr"));
         assert!(extras.contains(&"desktop_verify"));
+        assert!(extras.contains(&"browser_lite_probe"));
         // Remote session steering (d4fd74d) — direct-exposed for Codex
         // orchestrators that already carry agent_spawn + agent_session_*.
         assert!(extras.contains(&"agent_steer_launch"));
@@ -34116,6 +34231,49 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool.input_schema["properties"]
             .get("activate_a11y")
             .is_none());
+    }
+
+    #[test]
+    fn registry_exposes_browser_lite_probe_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "browser_lite_probe"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "browser_lite_probe")
+            .expect("browser_lite_probe schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.input_schema["properties"].get("backend").is_some());
+        assert!(tool.input_schema["properties"].get("bin").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("probe_mcp_tools")
+            .is_some());
+        assert!(tool.input_schema["properties"].get("stealth").is_none());
+    }
+
+    #[tokio::test]
+    async fn browser_lite_probe_missing_binary_is_structured_not_tool_error() {
+        let tool = BrowserLiteProbeTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "backend": "obscura",
+                    "bin": "/definitely/missing/obscura",
+                    "probe_mcp_tools": true,
+                    "timeout_ms": 250
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["backend"], "obscura");
+        assert_eq!(payload["status"], "missing");
+        assert_eq!(payload["safety"]["persistent_service_started"], false);
+        assert_eq!(payload["safety"]["mutates_agent_bridge_state"], false);
     }
 
     #[tokio::test]

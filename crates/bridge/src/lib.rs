@@ -14,6 +14,7 @@ pub mod avatar_surface;
 pub mod bootstrap_bfs;
 pub mod bootstrap_transitions;
 pub mod brave_api;
+pub mod browser_lite;
 pub mod c3_self_check;
 pub mod cloudflare_api;
 pub mod context_budget;

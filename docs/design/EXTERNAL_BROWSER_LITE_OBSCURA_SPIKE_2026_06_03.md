@@ -206,9 +206,11 @@ Implemented slice:
 
 - `agent-bridge browser-lite probe obscura --json`
 - `agent-bridge browser-lite probe obscura --bin /path/to/obscura --json`
+- MCP read-only tool: `browser_lite_probe`
 - binary resolution order: `--bin`, `AGENT_BRIDGE_OBSCURA_BIN`, then `PATH`.
 - probes `--help` and MCP `tools/list` by default.
-- supports `--no-mcp-tools` for a help-only check.
+- supports `--no-mcp-tools` on CLI and `probe_mcp_tools=false` through MCP
+  for a help-only check.
 - reports `missing`, `partial`, or `available` without mutating
   Agent-Bridge state or starting `obscura serve`.
 
@@ -224,9 +226,11 @@ Only after the probe exists, route narrowly:
 ## Decision
 
 Obscura is worth borrowing from and tracking, but the immediate Agent-Bridge
-task is design/probe work, not integration into the default MCP tool surface.
+task is design/probe work, not integration into the default browser execution
+surface.
 
 The highest-value near-term implementation is a provenance-aware external
 browser-lite probe plus a compact design boundary. This aligns with the current
 Codex tool-profile direction: expose fewer default tools, but keep specialized
 external capabilities discoverable and verifiable when the task calls for them.
+The MCP exposure is intentionally only the probe, not Obscura routing.

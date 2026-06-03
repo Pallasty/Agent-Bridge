@@ -2,8 +2,8 @@ use ab_agent::{
     AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, CodexRuntime, GeminiRuntime,
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
-use ab_bridge::skills;
 use ab_bridge::warp_scheme;
+use ab_bridge::{browser_lite, skills};
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
@@ -16,7 +16,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
-mod browser_lite;
 mod doctor;
 mod setup;
 mod shadow_cortex;
