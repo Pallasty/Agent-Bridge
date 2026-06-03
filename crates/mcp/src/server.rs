@@ -35,6 +35,37 @@ fn mcp_call_deadline() -> Duration {
         .unwrap_or(Duration::from_secs(600))
 }
 
+/// Tools that legitimately BLOCK on a human (solving a CAPTCHA, approving a card)
+/// or on a long external wait advertise their own (generous, self-cleaning) inner
+/// timeout — e.g. browser_pause_for_human clamps to 30 min. The ordinary 600s
+/// backstop would truncate that window and report a false "backend hung", so these
+/// get a much larger backstop (default 2400s > the 30-min inner max) instead.
+fn is_human_blocking_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "browser_pause_for_human" | "present_await_decision" | "agent_session_wait"
+    )
+}
+
+fn mcp_human_deadline() -> Duration {
+    std::env::var("AGENT_BRIDGE_MCP_HUMAN_DEADLINE_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(2400))
+}
+
+/// Backstop deadline for a tools/call, picked by tool name: human-blocking tools
+/// get the larger window so their legit long wait is not truncated.
+fn call_deadline_for(tool_name: &str) -> Duration {
+    if is_human_blocking_tool(tool_name) {
+        mcp_human_deadline()
+    } else {
+        mcp_call_deadline()
+    }
+}
+
 /// Run the stdio MCP server until stdin closes.
 ///
 /// `store` is optional; when present, memory resources (`memory://…`) are
@@ -161,8 +192,20 @@ async fn run_dispatch_loop(
         // request. Everything else is fast → handle inline.
         if req.method == "tools/call" {
             let req_id = req.id.clone().unwrap_or(Value::Null);
-            let id_key = req_id.to_string();
             let map_key = req_id.to_string();
+            let sup_key = req_id.to_string();
+            let req_id_deadline = req_id.clone();
+            let req_id_panic = req_id;
+            // Pick the backstop by tool name so a human-in-the-loop wait (CAPTCHA /
+            // approval) is not truncated by the ordinary 600s deadline.
+            let tool_name = req
+                .params
+                .as_ref()
+                .and_then(|p| p.get("name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let deadline = call_deadline_for(&tool_name);
             let reg = registry.clone();
             let st = store.clone();
             let mut tel = telemetry.clone();
@@ -170,10 +213,19 @@ async fn run_dispatch_loop(
             let ver = version.clone();
             let tbid = tool_backend_id.clone();
             let out = resp_tx.clone();
-            let inflight2 = inflight.clone();
-            let deadline = mcp_call_deadline();
-            let task = tokio::spawn(async move {
-                let resp = match tokio::time::timeout(
+            let inflight_sup = inflight.clone();
+
+            // Hold the inflight lock across BOTH spawns and the insert so the supervisor
+            // (which removes the entry) cannot run its removal before we record the
+            // handle — closing the fast-call insert-vs-self-remove race, and ensuring a
+            // notifications/cancelled arriving in this window still finds the entry. No
+            // .await happens under the lock (tokio::spawn is synchronous).
+            let mut map = inflight.lock().unwrap();
+            map.retain(|_, h| !h.is_finished());
+
+            // work task: run the tool under the (per-tool) backstop deadline.
+            let work = tokio::spawn(async move {
+                match tokio::time::timeout(
                     deadline,
                     handle(&reg, st.as_deref(), req, &sn, &ver, tbid.as_ref(), &mut tel),
                 )
@@ -186,7 +238,7 @@ async fn run_dispatch_loop(
                             "tool call exceeded server deadline — cancelled; server stayed responsive"
                         );
                         McpResponse::error(
-                            req_id,
+                            req_id_deadline,
                             INTERNAL_ERROR,
                             format!(
                                 "tool call exceeded the server deadline ({}s) and was cancelled; \
@@ -197,13 +249,38 @@ async fn run_dispatch_loop(
                             ),
                         )
                     }
-                };
-                inflight2.lock().unwrap().remove(&id_key);
-                let _ = out.send(resp);
+                }
             });
-            let mut map = inflight.lock().unwrap();
-            map.retain(|_, h| !h.is_finished());
-            map.insert(map_key, task.abort_handle());
+            let abort = work.abort_handle();
+
+            // supervisor: await the work task so a PANIC inside tool.execute() still
+            // yields an error response instead of a silent never-returns hang (which
+            // would re-create the very wedge Layer 3 removes), and a cancellation
+            // (abort) stays silent. Always removes the inflight entry.
+            tokio::spawn(async move {
+                let resp = match work.await {
+                    Ok(r) => Some(r),
+                    Err(e) if e.is_cancelled() => None, // client cancelled → no response
+                    Err(_panicked) => {
+                        warn!(
+                            request_id = %sup_key,
+                            "tools/call task panicked — returning an error response"
+                        );
+                        Some(McpResponse::error(
+                            req_id_panic,
+                            INTERNAL_ERROR,
+                            "tool panicked during execution; the MCP server stayed responsive",
+                        ))
+                    }
+                };
+                inflight_sup.lock().unwrap().remove(&sup_key);
+                if let Some(r) = resp {
+                    let _ = out.send(r);
+                }
+            });
+
+            map.insert(map_key, abort);
+            drop(map);
         } else {
             let resp = handle(
                 &registry,
@@ -889,6 +966,25 @@ mod tests {
         }
     }
 
+    struct PanicTool;
+
+    #[async_trait]
+    impl McpTool for PanicTool {
+        fn name(&self) -> &'static str {
+            "boom"
+        }
+        fn schema(&self) -> ToolSchema {
+            ToolSchema {
+                name: "boom".into(),
+                description: "panics on execute".into(),
+                input_schema: json!({ "type": "object" }),
+            }
+        }
+        async fn execute(&self, _args: Value, _ctx: &ToolContext) -> ab_core::Result<ToolResult> {
+            panic!("boom inside tool.execute");
+        }
+    }
+
     fn call_line(id: u64, tool: &str) -> String {
         json!({
             "jsonrpc": "2.0",
@@ -963,6 +1059,27 @@ mod tests {
         assert!(
             resps.is_empty(),
             "an aborted in-flight call must not emit a response"
+        );
+    }
+
+    #[tokio::test]
+    async fn panicking_tools_call_yields_error_response_not_a_hang() {
+        let mut reg = ToolRegistry::default();
+        reg.register(Arc::new(PanicTool));
+        // A panic inside tool.execute() must NOT swallow the response (which would
+        // re-create the "AB call never returns" wedge); the supervisor must turn it
+        // into a JSON-RPC error response, promptly.
+        let resps = tokio::time::timeout(
+            Duration::from_millis(800),
+            drive(reg, vec![call_line(1, "boom")]),
+        )
+        .await
+        .expect("a panicking tool must return promptly, not hang the request");
+        assert_eq!(resps.len(), 1, "exactly one response for the panicking call");
+        assert_eq!(resps[0].id, json!(1));
+        assert!(
+            resps[0].error.is_some() && resps[0].result.is_none(),
+            "a panicking tool must yield a JSON-RPC error, not a success or silence"
         );
     }
 
