@@ -188,6 +188,21 @@ def test_intelligibility_garbled_when_transcript_unrelated():
     assert ae.classify_intelligibility(ratio, nref) == "garbled"
 
 
+# --- honest attestation: verified_to is claimed ONLY on a real bus confirmation ---
+# Fixes a latent leak: run()/run_speech() previously set verified_to=output bus
+# unconditionally, so a busy/decorrelated bus that classifies as mismatch (or any
+# early failure) still falsely reported verified_to=output bus. verify_status was
+# honest (never rendered_ok), but the verified_to field was fabricated.
+
+def test_honest_attestation_claims_bus_only_on_emitted():
+    bus, trans = "output bus", "physical transducer"
+    assert ae.honest_attestation("emitted", bus, trans) == (bus, trans)
+    for fail in ("silent", "mismatch", "no_capture", "error", "skipped"):
+        vt, nvt = ae.honest_attestation(fail, bus, trans)
+        assert vt is None, fail                          # no verified_to claimed on failure
+        assert "output bus" in nvt and "NOT confirmed" in nvt, fail   # bus folded into not_verified
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

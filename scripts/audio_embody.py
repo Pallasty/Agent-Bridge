@@ -72,6 +72,19 @@ def verify_status_for(status):
     }.get(status, "error")
 
 
+def honest_attestation(status, channel_verified_to, channel_not_verified):
+    """Pure: what a run may CLAIM it verified, given its outcome. The channel target
+    (e.g. the output bus) counts as `verified_to` ONLY when that channel actually
+    confirmed the signal (status=='emitted'); on every other status the run proved
+    nothing there, so the channel target moves into `not_verified` and verified_to is
+    None. Prevents a failed/mismatched run from reporting a verified_to it never
+    earned (e.g. a busy/decorrelated bus that classifies as `mismatch` must not still
+    claim verified_to=output bus). Returns (verified_to, not_verified)."""
+    if status == "emitted":
+        return channel_verified_to, channel_not_verified
+    return None, f"{channel_verified_to} — NOT confirmed on this run; plus {channel_not_verified}"
+
+
 # Speech-mode thresholds. A single-frequency Goertzel peak is the WRONG
 # discriminator for broadband speech (no isolated tone), so speech is verified by
 # ENERGY-ENVELOPE CROSS-CORRELATION: the bus capture must carry a signal whose
@@ -302,11 +315,14 @@ def capture_async(source, secs, path):
 
 
 def run(freq, dur_ms, amp, sink_arg, capture_channel, emit):
-    sink, src, verified_to, not_verified = resolve_targets(sink_arg, capture_channel)
+    sink, src, channel_verified_to, channel_not_verified = resolve_targets(sink_arg, capture_channel)
     out = {
         "freq": freq, "duration_ms": dur_ms, "sink": sink,
         "capture_channel": capture_channel, "capture_source": src,
-        "verified_to": verified_to, "not_verified": not_verified,
+        # claim nothing until the channel confirms it; not_verified already names the
+        # channel so EARLY-RETURN failures stay honest (see honest_attestation):
+        "verified_to": None,
+        "not_verified": honest_attestation(None, channel_verified_to, channel_not_verified)[1],
     }
     cap_path = os.path.join(tempfile.gettempdir(), "ab_voice_capture.wav")
     secs = dur_ms / 1000.0 + 1.0
@@ -335,8 +351,10 @@ def run(freq, dur_ms, amp, sink_arg, capture_channel, emit):
     floor = round(spectral_floor(samples, sr, freq), 2)
     status = classify_audio_embody(rv, gv, floor, parsed["frames"])
     ratio = round(gv / floor, 2) if floor > 0 else None
+    vt, nvt = honest_attestation(status, channel_verified_to, channel_not_verified)
     out.update(
         status=status, verify_status=verify_status_for(status),
+        verified_to=vt, not_verified=nvt,
         rms=rv, goertzel=gv, goertzel_floor=floor, peak_ratio=ratio,
         frames=parsed["frames"], sr=sr,
         detail=f"rms={rv} goertzel@{int(freq)}={gv} floor={floor} peak_ratio={ratio} frames={parsed['frames']}",
@@ -399,16 +417,19 @@ def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
     the bus → verify by energy-envelope correlation + voiced span (NOT a tone peak).
     Optionally also transcribe the bus capture (whisper.cpp) and check the requested
     words came back — a stronger, layered intelligibility falsifier."""
-    sink, src, verified_to, not_verified = resolve_targets(sink_arg, capture_channel)
+    sink, src, channel_verified_to, channel_not_verified = resolve_targets(sink_arg, capture_channel)
     out = {
         "mode": "speech", "text": text, "voice": voice, "speed": speed, "sink": sink,
         "capture_channel": capture_channel, "capture_source": src,
-        "verified_to": verified_to, "not_verified": not_verified,
+        # claim nothing until the bus confirms it; not_verified already names the bus
+        # so EARLY-RETURN failures stay honest (see honest_attestation):
+        "verified_to": None,
+        "not_verified": honest_attestation(None, channel_verified_to, channel_not_verified)[1],
     }
 
     wav, info = synth_speech(text, voice, speed, synth_bin)
     if wav is None:
-        out.update(status="error", verify_status="error", **info)
+        out.update(status="error", verify_status="error", detail=info.get("detail", "synth failed"))
         return out
     played = _read_wav_mono_s16(wav)
     if played is None or not len(played["samples"]):
@@ -440,8 +461,10 @@ def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
     env_corr = round(envelope_xcorr(played_env, captured_env), 3)
     voiced = round(voiced_seconds(cap_samples, cap_sr), 2)
     status = classify_speech_embody(capture_rms, env_corr, voiced, played_dur, parsed["frames"])
+    vt, nvt = honest_attestation(status, channel_verified_to, channel_not_verified)
     out.update(
         status=status, verify_status=verify_status_for(status),
+        verified_to=vt, not_verified=nvt,
         capture_rms=capture_rms, env_corr=env_corr, voiced_secs=voiced,
         frames=parsed["frames"], sr=cap_sr,
         detail=f"env_corr={env_corr} voiced_secs={voiced}/{round(played_dur,2)} capture_rms={capture_rms} frames={parsed['frames']}",
