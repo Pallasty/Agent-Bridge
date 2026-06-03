@@ -151,6 +151,15 @@ def classify_speech_embody(capture_rms, env_corr, voiced_secs, expected_secs, fr
 
 INTELLIGIBLE_MIN = 0.6   # fraction of requested words that must come back from the bus
 
+# synth_file channel (macOS / no-loopback) gates — TIGHTER than the noisy-bus floor.
+# The readback is the CLEAN synthesized file (no concurrent-audio masking), so synth+STT
+# should recover ~all words; the 0.6 bus floor over-claims here, and set-recall
+# word_overlap INFLATES on REPEATED reference words. A DURATION guard (actual synth_dur
+# vs expected = word_count/wpm) is the truncation falsifier the word gate alone misses.
+# (review #2300 MED-1, thread 92; defaults conservative pending macOS live calibration.)
+SYNTH_FILE_INTEL_MIN = 0.8   # word-recall floor for the clean synth-file channel
+SYNTH_FILE_DUR_FRAC = 0.5    # synth_dur must be >= this * expected(word_count/wpm) or it's truncated
+
 _WORD_RE = re.compile(r"[a-z0-9']+")
 
 
@@ -179,29 +188,55 @@ def classify_intelligibility(overlap_ratio, n_ref_words, threshold=INTELLIGIBLE_
 
 
 def classify_synth_file_embody(frames, rms_val, overlap_ratio, n_ref_words, stt_available,
-                               rms_floor=SPEECH_RMS_FLOOR, intel_min=INTELLIGIBLE_MIN):
+                               synth_dur_s=0.0, expected_dur_s=0.0,
+                               rms_floor=SPEECH_RMS_FLOOR, intel_min=SYNTH_FILE_INTEL_MIN,
+                               dur_frac=SYNTH_FILE_DUR_FRAC):
     """Pure: the `synth_file` channel (macOS / any host without a bus `.monitor`).
 
     The readback object is the SYNTHESIZED wav ITSELF, so an envelope-vs-itself
-    correlation is ~1.0 by construction and proves nothing — therefore the GATE is the
-    STT word_overlap: did the requested WORDS survive synthesis? (This is what caught
-    the macOS super-compact default voice silently truncating input — a duration/RMS
-    check passes on the broken clip, only STT exposes it.) Honest mapping:
-      frames<=0         -> no_capture  (nothing synthesized)
-      rms<floor         -> silent      (synth produced a silent file)
-      STT unavailable   -> no_capture  (cannot verify words -> NEVER claim emitted;
-                                        degraded capability, honest — never `mismatch`,
-                                        which would falsely assert the words were wrong)
-      overlap>=min      -> emitted     (the words came back from the synth file)
-      else              -> mismatch    (audio exists but the words did not survive)
-    Returns: emitted | silent | mismatch | no_capture — the same vocabulary the bus
-    channels use, so verify_status_for / honest_attestation handle it unchanged."""
+    correlation is ~1.0 by construction and proves nothing — therefore the GATE is two
+    falsifiers on the synth: (1) the STT word_overlap (did the requested WORDS survive?)
+    against the CLEAN-channel floor SYNTH_FILE_INTEL_MIN, and (2) a DURATION guard
+    (synth_dur vs expected = word_count/wpm) — set-recall word_overlap INFLATES on
+    repeated reference words, so a truncated-but-loud clip can pass the word gate while
+    most spoken words were dropped; a clip far shorter than the text implies is truncated
+    regardless. (This hardens the macOS-truncation defense — review #2300 MED-1.) Mapping:
+      frames<=0                       -> no_capture  (nothing synthesized)
+      rms<floor                       -> silent      (synth produced a silent file)
+      STT unavailable / no ref words  -> no_capture  (cannot verify words -> NEVER claim
+                                        emitted; degraded capability, honest — never
+                                        `mismatch`, which would falsely assert words wrong)
+      synth_dur < frac*expected       -> mismatch    (TRUNCATED — too short for the text)
+      words survived (length-aware)   -> emitted     (5+ words: >=intel_min; 3-4 words:
+                                        tolerate one STT miss; 1-2 words: all words back —
+                                        whisper-tiny is NOISY on short clips and the
+                                        duration guard already caught truncation)
+      1-2 words, not all recovered    -> no_capture  (STT too unreliable to assert anything)
+      else                            -> mismatch    (full-length but words did not survive)
+    expected_dur_s<=0 disables the duration guard (unknown timing). Returns: emitted |
+    silent | mismatch | no_capture — the same vocabulary the bus channels use, so
+    verify_status_for / honest_attestation handle it unchanged."""
     if frames <= 0:
         return "no_capture"
     if rms_val < rms_floor:
         return "silent"
     if not stt_available or n_ref_words <= 0:
         return "no_capture"
+    if expected_dur_s > 0 and synth_dur_s < dur_frac * expected_dur_s:
+        return "mismatch"            # TRUNCATED: clip too short for the requested text
+    # length-aware word gate. whisper-tiny is NOISY on SHORT clips (the companion voice
+    # templates are 1-3 words), so a flat high floor would falsely reject good short
+    # utterances. The DURATION guard above already catches truncation independent of STT,
+    # so the word gate can tolerate STT noise on short clips without letting truncation in:
+    hits = round(overlap_ratio * n_ref_words)
+    if n_ref_words <= 2:
+        # 1-2 words: STT too unreliable to assert garbling. all words back -> emitted;
+        # else CANNOT verify -> no_capture (honest — never a false 'mismatch'/garbled claim).
+        return "emitted" if hits >= n_ref_words else "no_capture"
+    if n_ref_words <= 4:
+        # 3-4 words: tolerate ONE STT miss (>= n-1 words back) -> emitted; else mismatch.
+        return "emitted" if hits >= n_ref_words - 1 else "mismatch"
+    # 5+ words: STT noise averages out -> require the clean-channel recall floor.
     return "emitted" if overlap_ratio >= intel_min else "mismatch"
 
 
@@ -798,9 +833,21 @@ def run_speech_synth_file(text, voice, speed):
     # check the requested words survived synthesis. STT unavailable -> no_capture (never
     # claim emitted without the word gate; degraded capability, not a content fault).
     transcript, stt_err = transcribe_synth_file(wav)
+    # An empty/whitespace transcript from a WORKING whisper (exit 0, no words) is NOT a
+    # content fault — whisper declined to transcribe (silence / non-speech / undecodable).
+    # Fold it into the honest no_capture path (NOT mismatch, which would falsely assert the
+    # words came out wrong) — symmetric with the (None, err) STT-unavailable case. (#2300 MED-2.)
+    if transcript is not None and not transcript.strip():
+        stt_err = "whisper returned an empty transcript (no words recovered — STT could not verify)"
+        transcript = None
     stt_available = transcript is not None
     ratio, nref = word_overlap(text, transcript or "")
-    status = classify_synth_file_embody(parsed["frames"], rms_val, ratio, nref, stt_available)
+    # expected duration from words/wpm feeds the truncation guard (see classify_synth_file_embody).
+    wpm = info.get("wpm", 0) or 0
+    expected_dur = (len(_norm_words(text)) / wpm * 60.0) if wpm > 0 else 0.0
+    out["expected_dur_s"] = round(expected_dur, 3)
+    status = classify_synth_file_embody(parsed["frames"], rms_val, ratio, nref, stt_available,
+                                        synth_dur_s=synth_dur, expected_dur_s=expected_dur)
     vt, nvt = honest_attestation(status, channel_verified_to, channel_not_verified)
     out.update(status=status, verify_status=verify_status_for(status),
                verified_to=vt, not_verified=nvt,
@@ -808,9 +855,12 @@ def run_speech_synth_file(text, voice, speed):
     if stt_available:
         out["stt_transcript"] = transcript
         out["word_overlap"] = round(ratio, 3)
-        out["intelligibility"] = classify_intelligibility(ratio, nref)
+        out["intelligibility"] = classify_intelligibility(ratio, nref, threshold=SYNTH_FILE_INTEL_MIN)
+        truncated = expected_dur > 0 and synth_dur < SYNTH_FILE_DUR_FRAC * expected_dur
+        dur_note = (f"; TRUNCATED (synth {synth_dur}s < {SYNTH_FILE_DUR_FRAC}x expected {round(expected_dur, 2)}s)"
+                    if truncated else "")
         out["detail"] = (f"say synth {synth_dur}s; stt '{transcript[:80]}' "
-                         f"overlap={round(ratio, 3)} -> {out['intelligibility']}")
+                         f"overlap={round(ratio, 3)} -> {out['intelligibility']}{dur_note}")
     else:
         out["intelligibility"] = "unavailable"
         out["stt_detail"] = stt_err
