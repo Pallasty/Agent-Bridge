@@ -67,7 +67,12 @@ def main() -> None:
         r2 = subprocess.run([TMUX, "send-keys", "-t", session, "Enter"],
                             capture_output=True, text=True, timeout=8)
         if r2.returncode != 0:
-            _emit(6, error=(r2.stderr or "Enter failed").strip(), code="submit_failed", session=session)
+            # The text already landed (r1 succeeded) but Enter failed, and the single-use
+            # token is already consumed → un-retriable via the gate. Surface the partial
+            # state so the caller knows the literal text is sitting in the target buffer
+            # unsubmitted (re-stage + re-approve needed, not a no-op retry).
+            _emit(6, error=(r2.stderr or "Enter failed").strip(), code="submit_failed",
+                  session=session, injected_without_submit=True, injected=text)
 
     _emit(0, detail="injected", kind="steer", session=session, injected=text, submit=submit)
 
