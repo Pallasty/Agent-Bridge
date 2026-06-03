@@ -11982,6 +11982,10 @@ async fn substrate_corr_weekly_one_liner(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
+// Status vocabulary for the gap table — variants stay defined even when no
+// current GapEntry uses them (e.g. Partial/Planned drained to Closed as gaps
+// ship), so the lifecycle stays expressible without churning the enum.
+#[allow(dead_code)]
 enum GapStatus {
     Closed,
     Shelved,
@@ -12073,20 +12077,20 @@ const GAPS_AS_OF_2026_05_16: &[GapEntry] = &[
     GapEntry {
         id: "C2",
         layer: "L6",
-        status: GapStatus::Planned,
+        status: GapStatus::Closed,
         text: "Which tool results did I actually attend to vs ignore?",
-        last_touch: "—",
+        last_touch: "6ad5959",
         gate_opens: None,
-        notes: "P2 tool_call_attention_report ~1d; indep of C1; defer #7a37d28e",
+        notes: "tool_call_attention_report MCP probe shipped (6ad5959 'L6 v0 fully closed'); observability-only per L6 charter (proposals never auto-applied)",
     },
     GapEntry {
         id: "C3",
         layer: "L6",
-        status: GapStatus::Planned,
+        status: GapStatus::Closed,
         text: "Fatigue / context-pressure tracking — am I saturated?",
-        last_touch: "—",
+        last_touch: "38517f1 2c6e76b",
         gate_opens: None,
-        notes: "P3 context_pressure_estimate ~0.3d; indep of C1; defer #7a37d28e",
+        notes: "context_pressure_estimate MCP probe shipped (38517f1; honest 1M-window override 2c6e76b); observability-only per L6 charter",
     },
     GapEntry {
         id: "D1",
