@@ -982,10 +982,21 @@ pub struct RetireDelta {
     pub is_approximate: bool,
 }
 
-/// M5 — fraction of active memories with ≥1 cofires/co_referenced edge.
+/// M5 — fraction of active **non-skill** memories with ≥1 *live*
+/// cofires/co_referenced edge (both endpoints active non-skill).
+///
+/// `active_total` excludes `kind='skill'`: the skill catalog floods the
+/// active pool with edge-less rows and would deflate the fraction to a
+/// measurement artifact (1272 skill rows seen 2026-05-29). The numerator
+/// likewise requires both edge endpoints to be active non-skill, so edges
+/// dangling to hard-deleted / tombstoned / skill nodes do not count as
+/// coverage — robust without an ON DELETE CASCADE (`memory_edges` is
+/// deliberately FK-free; soft pointers are the museum pattern).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EdgeCoverage {
+    /// Distinct active non-skill memories with ≥1 live cofires/co_referenced edge.
     pub active_with_l2_edge: u64,
+    /// Active memories excluding `kind='skill'` (the M5 denominator).
     pub active_total: u64,
     pub fraction: f64,
 }

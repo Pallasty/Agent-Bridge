@@ -7299,32 +7299,57 @@ impl StateStore for SqliteStore {
         };
 
         // ── M5 — edge coverage of active memories ──
+        // Both denominator and numerator exclude kind='skill': the skill
+        // catalog floods the active pool with edge-less rows (1272 seen
+        // 2026-05-29), deflating the fraction to a pure measurement artifact.
+        // The numerator further requires the OTHER endpoint to be active
+        // non-skill too, so an edge dangling to a hard-deleted / tombstoned /
+        // skill node does not count as live coverage — robust without an
+        // ON DELETE CASCADE (memory_edges is deliberately FK-free; soft
+        // pointers are the museum pattern, see SCHEMA_V22/V20).
+        // lesson_substrate_stock_metrics_confounded_by_skill_catalog_20260529
         let m5 = {
-            let active_with_edge: i64 = self
+            let (active_with_edge, active_non_skill_total): (i64, i64) = self
                 .conn
-                .call(|c| -> RusqliteResult<i64> {
-                    c.query_row(
-                        "SELECT COUNT(DISTINCT key) FROM (
-                           SELECT from_key AS key FROM memory_edges
-                             WHERE edge_type IN ('cofires','co_referenced')
-                           UNION
-                           SELECT to_key   AS key FROM memory_edges
-                             WHERE edge_type IN ('cofires','co_referenced')
-                         ) AS touched
-                         WHERE key IN (SELECT key FROM memories WHERE status='active')",
-                        [],
-                        |r| r.get(0),
-                    )
-                    .or(Ok(0))
+                .call(|c| -> RusqliteResult<(i64, i64)> {
+                    let total: i64 = c
+                        .query_row(
+                            "SELECT COUNT(*) FROM memories \
+                               WHERE status='active' AND kind != 'skill'",
+                            [],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    let with_edge: i64 = c
+                        .query_row(
+                            "SELECT COUNT(DISTINCT key) FROM (
+                               SELECT from_key AS key, to_key AS other FROM memory_edges
+                                 WHERE edge_type IN ('cofires','co_referenced')
+                               UNION
+                               SELECT to_key AS key, from_key AS other FROM memory_edges
+                                 WHERE edge_type IN ('cofires','co_referenced')
+                             ) AS touched
+                             WHERE key IN (
+                                     SELECT key FROM memories
+                                       WHERE status='active' AND kind != 'skill')
+                               AND other IN (
+                                     SELECT key FROM memories
+                                       WHERE status='active' AND kind != 'skill')",
+                            [],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    Ok((with_edge, total))
                 })
                 .await
                 .map_err(|e| Error::Backend(format!("substrate_audit M5 edge_coverage: {e}")))?;
             let active_with_edge = active_with_edge as u64;
+            let active_non_skill_total = active_non_skill_total as u64;
             crate::EdgeCoverage {
                 active_with_l2_edge: active_with_edge,
-                active_total,
-                fraction: if active_total > 0 {
-                    active_with_edge as f64 / active_total as f64
+                active_total: active_non_skill_total,
+                fraction: if active_non_skill_total > 0 {
+                    active_with_edge as f64 / active_non_skill_total as f64
                 } else {
                     0.0
                 },
@@ -14777,6 +14802,74 @@ mod tests {
         // M5: only cofires + co_referenced count; that touches {a,b,c,d} = 4.
         assert_eq!(r.m5_edge_coverage.active_with_l2_edge, 4);
         assert_eq!(r.m5_edge_coverage.active_total, 5);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn substrate_audit_m5_excludes_skill_and_dangling_edges() {
+        // M5 must ignore kind='skill' catalog rows (they flood the active pool
+        // with edge-less rows and deflate the fraction) and must not credit an
+        // edge whose OTHER endpoint is not an active non-skill memory (dangling
+        // to a deleted/tombstoned/skill node is not live coverage).
+        // lesson_substrate_stock_metrics_confounded_by_skill_catalog_20260529
+        let dir = std::env::temp_dir().join(format!(
+            "ab-substrate-audit-m5skill-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open store");
+        let rec = |key: &str, kind: &str| crate::MemoryRecord {
+            key: key.into(),
+            kind: kind.into(),
+            content: format!("content for {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        // 4 real (non-skill) active memories + 2 skill-catalog rows.
+        for (k, kind) in [
+            ("a", "lesson"),
+            ("b", "lesson"),
+            ("c", "lesson"),
+            ("d", "lesson"),
+            ("s1", "skill"),
+            ("s2", "skill"),
+        ] {
+            store.memory_save(&rec(k, kind)).await.expect("save");
+        }
+        // a–b: live edge between two active non-skill memories → both count.
+        store.memory_link("a", "b", "cofires", 0.8).await.expect("link");
+        // s1–s2: edge between two skill rows → excluded from num + denom.
+        store.memory_link("s1", "s2", "cofires", 0.8).await.expect("link");
+        // d–s1: d's only L2 edge points at a skill node → not live coverage.
+        store.memory_link("d", "s1", "cofires", 0.8).await.expect("link");
+        // c has no L2 edge at all.
+
+        let r = store
+            .memory_substrate_audit(86_400 * 7)
+            .await
+            .expect("audit");
+
+        // Denominator = active non-skill only: {a,b,c,d} = 4 (s1,s2 excluded).
+        assert_eq!(r.m5_edge_coverage.active_total, 4);
+        // Numerator = {a,b} via the live a–b edge. c has no edge; d only links
+        // to a skill node; s1,s2 are skill → none of them count.
+        assert_eq!(r.m5_edge_coverage.active_with_l2_edge, 2);
+        assert!((r.m5_edge_coverage.fraction - 0.5).abs() < 1e-9);
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
