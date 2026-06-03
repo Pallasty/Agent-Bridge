@@ -21,15 +21,17 @@ ndarray = { version = "0.16", optional = true }                # tensor I/O for 
 # MIT, no C toolchain, GPL-free. Trade-off: out-of-vocabulary words use misaki's
 # embedded lexicon + rules instead of an espeak fallback (acceptable for v0).
 misaki-rs = { version = "0.3", optional = true, default-features = false }
-espeak-ng = { version = "0.1", optional = true }               # Piper/general phonemes (pure Rust)
+serde_json = { version = "1", optional = true }                # parse piper_phonemize JSONL + voice .onnx.json
 hound = { version = "3", optional = true }                     # WAV encode for falsifier capture
 
 [features]
 default = []
 # Kokoro-82M (StyleTTS2, Apache-2.0, 24kHz): misaki-rs g2p + ort ONNX.
 kokoro = ["dep:ort", "dep:ndarray", "dep:misaki-rs", "dep:hound"]
-# Piper (VITS, MIT, 22.05kHz): espeak-ng phonemes + ort ONNX.
-piper = ["dep:ort", "dep:ndarray", "dep:espeak-ng", "dep:hound"]
+# Piper (VITS, MIT model / GPL-3.0 espeak-ng phonemes, 22.05kHz): phonemes via the
+# bundled `piper_phonemize` CLI (shelled to like whisper-cli/ffmpeg, so the crate
+# links no GPL C code and needs no bindgen) + the VITS `.onnx` forward via ort.
+piper = ["dep:ort", "dep:ndarray", "dep:serde_json", "dep:hound"]
 all-backends = ["kokoro", "piper"]
 
 # Production synthesis CLI (text → WAV), invoked by scripts/audio_embody.py in
@@ -39,3 +41,13 @@ all-backends = ["kokoro", "piper"]
 name = "ab-tts-synth"
 path = "src/bin/ab_tts_synth.rs"
 required-features = ["kokoro"]
+
+# Dogfood examples are each gated on their backend feature so a single-backend
+# build (e.g. `--features piper`) never tries to compile the other backend's example.
+[[example]]
+name = "kokoro_synth"
+required-features = ["kokoro"]
+
+[[example]]
+name = "piper_synth"
+required-features = ["piper"]

@@ -4,13 +4,16 @@
 //! lane, audio domain). Two backends, one trait:
 //!
 //! - **Kokoro-82M** (StyleTTS2, Apache-2.0, 24 kHz) — `misaki-rs` g2p + `ort` ONNX.
-//! - **Piper** (VITS, MIT, 22.05 kHz) — `espeak-ng` phonemes + `ort` ONNX.
+//! - **Piper** (VITS, 22.05 kHz) — the `piper_phonemize` CLI (espeak-ng, GPL-3.0)
+//!   + `ort` ONNX.
 //!
 //! Design decisions (forum #92):
 //! - **Inference via `ort`** (ONNX Runtime) — the compute-dense forward pass is
 //!   *run*, not rewritten.
-//! - **Grapheme→phoneme in pure Rust** (`misaki-rs` / `espeak-ng`) — no Python
-//!   (misaki) or C (espeak-ng) system dependency; the lane owns the tokenizer.
+//! - **Grapheme→phoneme without linked C / `bindgen`**: Kokoro uses `misaki-rs`
+//!   (pure Rust, MIT, GPL-free); Piper shells to the bundled `piper_phonemize` CLI
+//!   (which links espeak-ng, GPL-3.0) the same way the lane shells to `whisper-cli`
+//!   / `ffmpeg` — the GPL/C code stays in a subprocess, off the crate's link line.
 //! - **Feature-gated**: the heavy `ort` native dependency is pulled ONLY when a
 //!   backend feature (`kokoro` / `piper`) is enabled, so the core workspace and
 //!   the default `agent-bridge` binary never carry the ONNX Runtime.
