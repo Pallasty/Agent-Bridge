@@ -1303,6 +1303,47 @@ impl SqliteStore {
                 c.execute_batch(SCHEMA_V32)?;
                 let _ = c.execute("UPDATE schema_meta SET value='32' WHERE key='version'", []);
             }
+
+            // ── v33: memories.last_decayed_at — incremental decay anchor (F5).
+            // `memory_decay_importance` multiplied importance by 0.5^(age/hl)
+            // every call, anchoring `age` on updated_at (which it never
+            // advanced), so the decay COMPOUNDED per CALL rather than per unit
+            // time — frequent memory_compact / session_finalize runs sank a row
+            // on call count alone (thread 97 collateral root cause; the durable
+            // guard only stopped the archival symptom). Anchoring decay on
+            // last_decayed_at and advancing it each pass makes repeated calls
+            // idempotent while preserving correct wall-clock geometric decay.
+            // Node-local hygiene column (NOT exported in sync). Additive +
+            // idempotent; backfill existing rows to updated_at.
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "32".to_string());
+            if cur.as_str() == "32" {
+                let col_exists: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('memories') \
+                         WHERE name='last_decayed_at'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                if col_exists == 0 {
+                    c.execute(
+                        "ALTER TABLE memories ADD COLUMN last_decayed_at INTEGER",
+                        [],
+                    )?;
+                    c.execute(
+                        "UPDATE memories SET last_decayed_at = updated_at \
+                         WHERE last_decayed_at IS NULL",
+                        [],
+                    )?;
+                }
+                let _ = c.execute("UPDATE schema_meta SET value='33' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -2696,8 +2737,8 @@ impl StateStore for SqliteStore {
                        (key, kind, content, tags, related_keys, scope,
                         created_at, updated_at, last_accessed_at, access_count,
                         importance, status, trigger_pattern, embedding, dedupe_key,
-                        embedding_backend, version_vector)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                        embedding_backend, version_vector, last_decayed_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?7)
                      ON CONFLICT(key) DO UPDATE SET
                         kind          = excluded.kind,
                         content       = excluded.content,
@@ -2715,7 +2756,10 @@ impl StateStore for SqliteStore {
                         embedding     = excluded.embedding,
                         dedupe_key    = excluded.dedupe_key,
                         embedding_backend = COALESCE(excluded.embedding_backend, memories.embedding_backend),
-                        version_vector = excluded.version_vector",
+                        version_vector = excluded.version_vector,
+                        -- re-anchor decay: a re-saved row carries a fresh
+                        -- importance, so decay should restart from now (F5).
+                        last_decayed_at = excluded.updated_at",
                     params![
                         key,
                         kind_clone,
@@ -4498,11 +4542,13 @@ impl StateStore for SqliteStore {
                     }
                 }
 
-                // Fetch all active memories with their updated_at + current
-                // importance + related_keys (for the durable guard).
+                // Fetch all active memories with their decay anchor + current
+                // importance + related_keys (for the durable guard). The anchor
+                // is last_decayed_at (COALESCE updated_at for rows not yet
+                // decayed) — see the F5 fix below.
                 let mut stmt = c.prepare(
-                    "SELECT key, importance, updated_at, related_keys FROM memories
-                     WHERE status = 'active'",
+                    "SELECT key, importance, COALESCE(last_decayed_at, updated_at), related_keys
+                     FROM memories WHERE status = 'active'",
                 )?;
                 let candidates: Vec<(String, f64, i64, Option<String>)> = stmt
                     .query_map([], |row| {
@@ -4518,9 +4564,14 @@ impl StateStore for SqliteStore {
 
                 let tx = c.unchecked_transaction()?;
                 let mut archived_count = 0u64;
-                for (key, importance, updated_at, related_keys) in candidates {
-                    let age_days = ((now - updated_at).max(0) as f64) / 86_400.0;
-                    // importance × 0.5^(age_days / half_life_days)
+                for (key, importance, anchor, related_keys) in candidates {
+                    // age from last_decayed_at (COALESCE updated_at), and we
+                    // advance the anchor to `now` on write — so a second call
+                    // with no elapsed time sees age≈0 → factor≈1 → no further
+                    // decay. This kills the per-call compounding (F5) while
+                    // 0.5^(d1/hl)·0.5^(d2/hl) = 0.5^((d1+d2)/hl) keeps the
+                    // wall-clock geometric decay correct across passes.
+                    let age_days = ((now - anchor).max(0) as f64) / 86_400.0;
                     let new_importance = importance * (0.5f64).powf(age_days / half_life_days);
                     let has_related = related_keys
                         .as_deref()
@@ -4529,15 +4580,16 @@ impl StateStore for SqliteStore {
                     let durable = has_related || edge_keys.contains(&key);
                     if new_importance < archive_threshold && !durable {
                         tx.execute(
-                            "UPDATE memories SET importance = ?2, status = 'archived'
-                             WHERE key = ?1",
-                            params![key, new_importance],
+                            "UPDATE memories SET importance = ?2, status = 'archived',
+                             last_decayed_at = ?3 WHERE key = ?1",
+                            params![key, new_importance, now],
                         )?;
                         archived_count += 1;
                     } else {
                         tx.execute(
-                            "UPDATE memories SET importance = ?2 WHERE key = ?1",
-                            params![key, new_importance],
+                            "UPDATE memories SET importance = ?2, last_decayed_at = ?3
+                             WHERE key = ?1",
+                            params![key, new_importance, now],
                         )?;
                     }
                 }
@@ -12206,18 +12258,22 @@ mod tests {
             .await
             .expect("link");
 
-        // Backdate updated_at so decay drives importance below the threshold.
+        // Backdate the decay anchor so decay drives importance below the
+        // threshold. Decay now ages from last_decayed_at (COALESCE updated_at),
+        // so backdate BOTH (F5).
         let old = now - 365 * 86_400;
         let keys_all = vec!["isolated_low", "linked_low", "hub_a", "hub_b"];
         store
             .conn
             .call(move |c| -> RusqliteResult<usize> {
                 let q = format!(
-                    "UPDATE memories SET updated_at=? WHERE key IN ({})",
+                    "UPDATE memories SET updated_at=?, last_decayed_at=? WHERE key IN ({})",
                     keys_all.iter().map(|_| "?").collect::<Vec<_>>().join(",")
                 );
-                let mut p: Vec<rusqlite::types::Value> =
-                    vec![rusqlite::types::Value::Integer(old)];
+                let mut p: Vec<rusqlite::types::Value> = vec![
+                    rusqlite::types::Value::Integer(old),
+                    rusqlite::types::Value::Integer(old),
+                ];
                 p.extend(
                     keys_all
                         .into_iter()
@@ -12252,6 +12308,99 @@ mod tests {
         assert_eq!(get("linked_low"), Some("active"), "author-linked row spared");
         assert_eq!(get("hub_a"), Some("active"), "connected row spared");
         assert_eq!(get("hub_b"), Some("active"), "connected row spared");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_importance_does_not_compound_on_repeated_calls() {
+        // F5: the importance-decay pass must be idempotent under repeated calls
+        // with ~no elapsed time. Pre-fix it multiplied importance by
+        // 0.5^(age/hl) every call (age anchored on updated_at, never advanced)
+        // → geometric collapse on call count alone (thread 97 root cause).
+        // Anchoring + advancing last_decayed_at makes a second same-instant
+        // call a no-op.
+        use crate::MemoryRecord;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-decay-nocompound-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        // Isolated row (no edges / no related_keys → durable guard won't spare
+        // it), importance 0.8.
+        store
+            .memory_save(&MemoryRecord {
+                key: "decay_probe".into(),
+                kind: "lesson".into(),
+                content: "probe".into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.8,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save");
+        // Backdate the decay anchor ~60 days; hl=30 → factor 0.25 → 0.8→0.2,
+        // which stays above the 0.01 threshold (the row survives + stays active
+        // so it can be decayed a second time).
+        let old = now_secs() - 60 * 86_400;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET updated_at=?1, last_decayed_at=?1 \
+                     WHERE key='decay_probe'",
+                    params![old],
+                )
+            })
+            .await
+            .expect("backdate");
+
+        let read_imp = |store: SqliteStore| async move {
+            store
+                .conn
+                .call(|c| -> RusqliteResult<f64> {
+                    c.query_row(
+                        "SELECT importance FROM memories WHERE key='decay_probe'",
+                        [],
+                        |r| r.get(0),
+                    )
+                })
+                .await
+                .expect("read importance")
+        };
+
+        let archived1 = store
+            .memory_decay_importance(30.0, 0.01)
+            .await
+            .expect("decay 1");
+        assert_eq!(archived1, 0, "row survives the first decay (0.2 > 0.01)");
+        let imp1 = read_imp(store.clone()).await;
+        assert!((imp1 - 0.2).abs() < 1e-3, "one decay ≈ 0.8*0.25 = 0.2, got {imp1}");
+
+        // Second call, ~no elapsed wall-clock → must NOT decay again.
+        let _ = store
+            .memory_decay_importance(30.0, 0.01)
+            .await
+            .expect("decay 2");
+        let imp2 = read_imp(store.clone()).await;
+        assert!(
+            (imp2 - imp1).abs() < 1e-6,
+            "repeated decay must not compound: imp1={imp1} imp2={imp2}"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -14063,7 +14212,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "32");
+        assert_eq!(version, "33"); // v33 = last_decayed_at (F5); latest after all migrations
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -17640,7 +17789,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("32"),
+            Some("33"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
