@@ -189,6 +189,53 @@ Live2D and VRM remain optional renderers behind the same protocol. They are
 allowed to enrich expression and gaze, but they must not introduce a second
 semantic state model.
 
+### 6.5 Backend Selection And Transparency Portability (LCC-F1)
+
+Slice 6 proved the browser app-window path cannot produce real alpha on this
+host (opaque dark surface), and slice 7 proved native Wayland
+`wlr-layer-shell` ARGB8888 does. So **transparency is verified only on wlroots
+compositors.** On every other compositor there is no verified transparent
+backend — that is a real portability gap, and it must be *explicit*, not a
+silent blind spot.
+
+`agent-bridge avatar backend-probe [--json]` makes it explicit. It is env-only
+and read-only (no spawn, no compositor IPC, no desktop control): it reports the
+detected compositor and a backend recommendation **with an inspectable reason**.
+The pure core is `recommend_backend(detect_compositor())` in `avatar_floater.rs`
+(unit-tested).
+
+| Detected environment | Backend | Transparency |
+|---|---|---|
+| wlroots on Wayland (sway/hyprland/river/wayfire/labwc) | `native_transparent` | ✅ verified (slice 7) |
+| GNOME / Mutter (Wayland) | `browser_degraded` | ❌ no `wlr-layer-shell` |
+| KDE / KWin (Wayland) | `browser_degraded` | ❌ supports layer-shell but **unverified here** |
+| X11 / unknown / no Wayland display | `browser_degraded` | ❌ |
+
+The degraded path stays functional (a non-transparent floater); the probe just
+names *why* transparency is unavailable. Launch flows should consult the probe
+before claiming a transparent body. The matrix is conservative on purpose:
+KDE/KWin does implement `wlr-layer-shell`, but until this project verifies alpha
+there we never *claim* it — no unverified transparency assertions.
+
+### 6.6 Floater Liveness And Supervision
+
+The browser floater and the native surface are separate, CLI-launched
+processes. Per G4/G6 the renderer's death must not affect Agent-Bridge
+correctness — and it does not (fully decoupled). But for a *daily* companion,
+silent death means the body simply vanishes with no signal.
+
+Liveness contract (design):
+
+- A launch should be probe-able for aliveness — pair a PID-liveness check with a
+  *window-mapped* check, mirroring the dock's idempotent open ("if a window is
+  already mapped, focus it; else launch"). Process-alive alone is not health.
+- An optional supervisor may re-launch on death within a backoff, but it stays
+  **off by default**, never escalates privileges, and never re-acquires desktop
+  control beyond re-opening the same read-only renderer.
+- Liveness remains one-way: observability + optional restart, never a
+  correctness dependency. See `lesson_process_alive_vs_health_freshness`
+  (process-alive ≠ fresh: pair kill-0 with window-mapped + recent state poll).
+
 ---
 
 ## 7. State And Mapping Contract

@@ -268,6 +268,14 @@ enum AvatarOp {
         #[arg(long)]
         include_compat: bool,
     },
+    /// Probe the compositor and report which avatar body backend can satisfy
+    /// transparency here (native wlr-layer-shell vs degraded browser). Env-only,
+    /// read-only — spawns nothing and controls nothing (LCC-F1).
+    BackendProbe {
+        /// Emit raw JSON instead of a human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Open the Linux avatar renderer in a small browser app window.
     LinuxFloater {
         /// Base URL for a running daemon-http instance.
@@ -2858,6 +2866,7 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
+            AvatarOp::BackendProbe { json: as_json } => run_avatar_backend_probe(*as_json),
             AvatarOp::LinuxFloater {
                 base_url,
                 project,
@@ -4424,6 +4433,58 @@ async fn run_avatar_surface(
         );
     } else {
         println!("{report}");
+    }
+    Ok(())
+}
+
+/// LCC-F1: report which avatar body backend can satisfy transparency on this
+/// compositor. Read-only (env probe only); makes the non-wlroots transparency
+/// gap explicit instead of a silent blind spot. See DESIGN-v26 §6.
+fn run_avatar_backend_probe(as_json: bool) -> Result<()> {
+    let info = ab_bridge::avatar_floater::detect_compositor();
+    let rec = ab_bridge::avatar_floater::recommend_backend(&info);
+    if as_json {
+        let payload = serde_json::json!({
+            "surface": "linux_avatar_backend_probe",
+            "compositor": {
+                "session_type": info.session_type,
+                "current_desktop": info.current_desktop,
+                "has_wayland_display": info.has_wayland_display,
+                "wlroots_signal": info.wlroots_signal,
+            },
+            "recommendation": {
+                "backend": rec.backend.as_str(),
+                "transparency_available": rec.transparency_available,
+                "reason": rec.reason,
+            },
+            "read_only": true,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        println!("avatar backend probe (read-only)");
+        println!(
+            "  session_type    : {}",
+            info.session_type.as_deref().unwrap_or("?")
+        );
+        println!(
+            "  current_desktop : {}",
+            info.current_desktop.as_deref().unwrap_or("?")
+        );
+        println!("  wayland_display : {}", info.has_wayland_display);
+        println!(
+            "  wlroots_signal  : {}",
+            info.wlroots_signal.as_deref().unwrap_or("none")
+        );
+        println!("  => backend      : {}", rec.backend.as_str());
+        println!(
+            "     transparency : {}",
+            if rec.transparency_available {
+                "available"
+            } else {
+                "NOT available (degraded browser floater)"
+            }
+        );
+        println!("     reason       : {}", rec.reason);
     }
     Ok(())
 }
