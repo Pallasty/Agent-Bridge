@@ -5843,7 +5843,7 @@ impl McpTool for PresentVoiceTool {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "backend": {"type": "string", "enum": ["tone", "kokoro"], "default": "tone", "description": "tone = fixed-freq tone (default, no model); kokoro = synthesize + speak `text` via offline Rust TTS."},
+                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper"], "default": "tone", "description": "tone = fixed-freq tone (default, no model); kokoro = speak `text` via the offline Rust Kokoro TTS (24kHz); piper = speak `text` via the offline Rust Piper TTS (22.05kHz). kokoro/piper both bus-verify the speech."},
                     "text": {"type": "string", "description": "backend=kokoro: the text to speak (required for kokoro)."},
                     "voice": {"type": "string", "default": "af_sarah", "description": "backend=kokoro: TTS voice name (e.g. af_sarah, af_heart, bf_*)."},
                     "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0, "description": "backend=kokoro: speech speed."},
@@ -5898,11 +5898,13 @@ impl McpTool for PresentVoiceTool {
         );
         cmd.arg(&script).arg("--json");
         if is_speech {
-            // backend=kokoro: synthesize `text` and verify via envelope correlation.
+            // backend=kokoro|piper: synthesize `text` with that engine and verify via
+            // envelope correlation. `backend` is exactly the audio_embody synth engine.
             cmd.arg("--mode").arg("speech")
                 .arg("--text").arg(&text)
                 .arg("--voice").arg(&voice)
                 .arg("--speed").arg(format!("{speed}"))
+                .arg("--synth-backend").arg(&backend)
                 .arg("--capture-channel").arg(&capture_channel);
             push_optional_str_arg(&mut cmd, &args, "synth_bin", "--synth-bin");
             if verify_intelligibility {
