@@ -58,6 +58,15 @@ use tracing::{debug, info, warn};
 use crate::{A11yNode, BrowserBackend, CapturedResponse, PageInfo, PauseOutcome, WaitOutcome};
 
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
+/// Bound the two awaits that wait on a DevTools endpoint — `Browser::connect`
+/// (adopt an existing chrome) and `Browser::launch` (spawn a new one). The CDP
+/// protocol has no inherent RPC timeout, so a wedged endpoint (e.g. a `<defunct>`
+/// zombie chrome holding the profile) makes these hang FOREVER, which in turn
+/// wedges the whole sequential MCP loop. A bounded failure lets the caller fall
+/// through / return an error instead. See
+/// lesson_mcp_server_wedge_sequential_loop_no_timeout.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct ChromiumCdpBackend {
@@ -186,7 +195,23 @@ impl ChromiumCdpBackend {
         let raw = std::fs::read_to_string(&port_file).ok()?;
         let port: u16 = raw.lines().next()?.trim().parse().ok()?;
         let http_url = format!("http://127.0.0.1:{port}");
-        match Browser::connect(http_url.clone()).await {
+        let connect = match tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            Browser::connect(http_url.clone()),
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(_) => {
+                debug!(
+                    http_url,
+                    timeout_s = CONNECT_TIMEOUT.as_secs(),
+                    "adopt connect timed out → fall through to fresh launch"
+                );
+                return None;
+            }
+        };
+        match connect {
             Ok((browser, mut handler)) => {
                 tokio::spawn(async move {
                     while let Some(item) = handler.next().await {
@@ -275,9 +300,18 @@ impl ChromiumCdpBackend {
             .build()
             .map_err(|e| Error::Backend(format!("BrowserConfig build: {e}")))?;
 
-        let (browser, mut handler) = Browser::launch(cfg)
+        let (browser, mut handler) = match tokio::time::timeout(LAUNCH_TIMEOUT, Browser::launch(cfg))
             .await
-            .map_err(|e| Error::Backend(format!("chrome launch: {e}")))?;
+        {
+            Ok(r) => r.map_err(|e| Error::Backend(format!("chrome launch: {e}")))?,
+            Err(_) => {
+                return Err(Error::Backend(format!(
+                    "chrome launch timed out after {}s (no DevTools endpoint — likely a \
+                     wedged/zombie chrome holding the profile); refusing to hang the MCP loop",
+                    LAUNCH_TIMEOUT.as_secs()
+                )))
+            }
+        };
 
         tokio::spawn(async move {
             while let Some(item) = handler.next().await {

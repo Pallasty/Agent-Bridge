@@ -13,8 +13,24 @@ use crate::{ContentBlock, ToolContext, ToolRegistry, ToolResult};
 use ab_store::{prioritize_session_handoff, MemoryListSort, StateStore};
 use serde_json::{json, Value};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{debug, info, warn};
+
+/// Per-call backstop deadline for tool execution in the stdio loop. The loop is
+/// sequential (one `handle().await` at a time), so a single hung tool would
+/// otherwise block EVERY subsequent call on this server forever — the wedge that
+/// makes "all CC using AB" hang until the client SIGINTs. The default is generous
+/// (600s) so only a genuinely hung backend is ever hit, never a legit long call;
+/// tune via AGENT_BRIDGE_MCP_CALL_DEADLINE_SECS (0/invalid → default).
+fn mcp_call_deadline() -> Duration {
+    std::env::var("AGENT_BRIDGE_MCP_CALL_DEADLINE_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(600))
+}
 
 /// Run the stdio MCP server until stdin closes.
 ///
@@ -61,16 +77,45 @@ pub async fn serve_stdio(
             continue;
         }
 
-        let resp = handle(
-            &registry,
-            store.as_deref(),
-            req,
-            server_name,
-            version,
-            tool_backend_id.as_ref(),
-            &mut telemetry,
+        // Backstop: bound every call so one hung tool.execute() can't wedge the
+        // whole (sequential) loop. On deadline the handle() future is dropped —
+        // which cancels the in-flight await (e.g. a wedged CDP connection) — and
+        // the loop reads the next request instead of hanging until SIGINT.
+        let req_id = req.id.clone().unwrap_or(Value::Null);
+        let deadline = mcp_call_deadline();
+        let resp = match tokio::time::timeout(
+            deadline,
+            handle(
+                &registry,
+                store.as_deref(),
+                req,
+                server_name,
+                version,
+                tool_backend_id.as_ref(),
+                &mut telemetry,
+            ),
         )
-        .await;
+        .await
+        {
+            Ok(r) => r,
+            Err(_) => {
+                warn!(
+                    deadline_secs = deadline.as_secs(),
+                    "tool call exceeded server deadline — cancelled; server stayed responsive"
+                );
+                McpResponse::error(
+                    req_id,
+                    INTERNAL_ERROR,
+                    format!(
+                        "tool call exceeded the server deadline ({}s) and was cancelled; \
+                         the backend likely hung (e.g. a wedged browser/CDP connection). \
+                         The MCP server stayed responsive — retry, or raise \
+                         AGENT_BRIDGE_MCP_CALL_DEADLINE_SECS for genuinely long calls.",
+                        deadline.as_secs()
+                    ),
+                )
+            }
+        };
         write_response(&mut stdout, &resp).await;
     }
 
