@@ -22,6 +22,13 @@ This is the Python half (analysis + decision) wrapped by the thin Rust MCP tool
 """
 import argparse, array, hashlib, json, math, os, re, subprocess, sys, tempfile, time, unicodedata, wave
 
+# Platform routing: macOS has NO PipeWire sink `.monitor` loopback, so present_voice
+# verifies the SYNTHESIZED FILE (via STT) instead of a bus readback — a different,
+# honestly-narrower channel (verified_to = synth file, NOT the output bus). The Linux
+# bus path is unchanged; only `darwin` (or an explicit `synth_file` channel) reroutes.
+# See run_speech_synth_file / classify_synth_file_embody. (RFC #2275, thread 92.)
+_IS_MACOS = sys.platform == "darwin"
+
 # --- pure decision (unit-tested; no audio needed) -------------------------------
 
 # Tunable thresholds. The discriminator is a SPECTRAL PEAK at the target bin, NOT
@@ -169,6 +176,33 @@ def classify_intelligibility(overlap_ratio, n_ref_words, threshold=INTELLIGIBLE_
     if n_ref_words <= 0:
         return "no_words"
     return "intelligible" if overlap_ratio >= threshold else "garbled"
+
+
+def classify_synth_file_embody(frames, rms_val, overlap_ratio, n_ref_words, stt_available,
+                               rms_floor=SPEECH_RMS_FLOOR, intel_min=INTELLIGIBLE_MIN):
+    """Pure: the `synth_file` channel (macOS / any host without a bus `.monitor`).
+
+    The readback object is the SYNTHESIZED wav ITSELF, so an envelope-vs-itself
+    correlation is ~1.0 by construction and proves nothing — therefore the GATE is the
+    STT word_overlap: did the requested WORDS survive synthesis? (This is what caught
+    the macOS super-compact default voice silently truncating input — a duration/RMS
+    check passes on the broken clip, only STT exposes it.) Honest mapping:
+      frames<=0         -> no_capture  (nothing synthesized)
+      rms<floor         -> silent      (synth produced a silent file)
+      STT unavailable   -> no_capture  (cannot verify words -> NEVER claim emitted;
+                                        degraded capability, honest — never `mismatch`,
+                                        which would falsely assert the words were wrong)
+      overlap>=min      -> emitted     (the words came back from the synth file)
+      else              -> mismatch    (audio exists but the words did not survive)
+    Returns: emitted | silent | mismatch | no_capture — the same vocabulary the bus
+    channels use, so verify_status_for / honest_attestation handle it unchanged."""
+    if frames <= 0:
+        return "no_capture"
+    if rms_val < rms_floor:
+        return "silent"
+    if not stt_available or n_ref_words <= 0:
+        return "no_capture"
+    return "emitted" if overlap_ratio >= intel_min else "mismatch"
 
 
 # --- voice-policy v0 decision (LCC-V1, the companion voice adapter) --------------
@@ -581,6 +615,71 @@ def transcribe(wav_path, stt_bin, model):
     return p.stdout.strip(), None
 
 
+# --- macOS native path (`say` synth + STT-on-synth-file falsifier) ----------------
+# macOS has no PipeWire bus loopback, so the verified channel is the synthesized file
+# itself (intelligibility via STT), NOT the output bus. See run_speech_synth_file.
+
+# CRITICAL: the bare `say` default voice resolves to a super-compact alias that
+# SILENTLY TRUNCATES input — a duration/file check passes on the broken clip; only the
+# STT gate catches it (verified live on this host). So ALWAYS pass an explicit,
+# full-quality voice. Kokoro-style names (af_*/bf_*) don't exist on macOS -> fall back.
+_MACOS_DEFAULT_VOICE = "Samantha"
+
+
+def synth_say(text, voice, speed):
+    """macOS `say` -> 16 kHz mono LEI16 WAV (whisper-native rate). Returns (wav, info)
+    or (None, err). Bare `say -o x.wav` FAILS ('fmt?') without --data-format; LEI16@16000
+    is the verified working spec. NEVER relies on the truncating default voice."""
+    say_bin = "/usr/bin/say"
+    if not os.path.exists(say_bin):
+        return None, {"detail": "macOS `say` not found at /usr/bin/say"}
+    v = (voice if (voice and not voice.startswith(("af_", "bf_", "am_", "bm_")))
+         else _MACOS_DEFAULT_VOICE)
+    # speed (0.5-2.0) -> words/min around the ~175 baseline; floored to stay intelligible.
+    wpm = int(max(90, min(2.0, max(0.5, speed)) * 175))
+    wav = os.path.join(tempfile.gettempdir(), "ab_voice_say.wav")
+    try:
+        if os.path.exists(wav):
+            os.remove(wav)
+    except OSError:
+        pass
+    p = subprocess.run([say_bin, "-v", v, "-r", str(wpm), "-o", wav,
+                        "--data-format=LEI16@16000", text],
+                       capture_output=True, text=True)
+    if p.returncode != 0 or not os.path.exists(wav):
+        return None, {"detail": f"say rc={p.returncode}: {(p.stderr or '')[:200]}"}
+    return wav, {"ok": True, "backend": "say", "voice": v, "sample_rate": 16000, "wpm": wpm}
+
+
+def transcribe_synth_file(wav_path, model=None):
+    """OpenAI-whisper (Python CLI, NOT whisper.cpp) transcription of a synth WAV ->
+    (text, None) or (None, err). The macOS STT path: AB_TTS_STT_BIN points at a
+    whisper.cpp CLI with different flags, so the synth_file channel uses the `whisper`
+    CLI directly. bin: env AB_TTS_WHISPER_BIN -> stock brew paths. model: env
+    AB_TTS_WHISPER_MODEL or 'tiny' (fast, CPU; tiny was empirically sufficient)."""
+    whisper_bin = os.environ.get("AB_TTS_WHISPER_BIN", "").strip()
+    if not whisper_bin or not os.path.exists(whisper_bin):
+        whisper_bin = next((c for c in ("/opt/homebrew/bin/whisper", "/usr/local/bin/whisper")
+                            if os.path.exists(c)), None)
+    if not whisper_bin:
+        return None, "whisper CLI not found (brew install openai-whisper, or set AB_TTS_WHISPER_BIN)"
+    model = model or os.environ.get("AB_TTS_WHISPER_MODEL", "").strip() or "tiny"
+    outdir = tempfile.mkdtemp(prefix="ab_whisper_")
+    p = subprocess.run([whisper_bin, wav_path, "--model", model, "--language", "en",
+                        "--output_format", "txt", "--output_dir", outdir,
+                        "--fp16", "False", "--verbose", "False"],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        return None, f"whisper rc={p.returncode}: {(p.stderr or '')[:200]}"
+    txt_path = os.path.join(outdir, os.path.splitext(os.path.basename(wav_path))[0] + ".txt")
+    if not os.path.exists(txt_path):
+        return None, "whisper produced no transcript file"
+    try:
+        return open(txt_path, encoding="utf-8").read().strip(), None
+    except OSError as e:  # noqa
+        return None, f"read transcript failed: {e}"
+
+
 def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
                check_intelligibility=False, stt_bin=None, stt_model=None, synth_backend="kokoro"):
     """Speech-mode embodiment: synthesize `text` (via `synth_backend` = kokoro|piper)
@@ -658,6 +757,71 @@ def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
         else:
             out["intelligibility"] = "unavailable"
             out["stt_detail"] = stt_err
+    return out
+
+
+def run_speech_synth_file(text, voice, speed):
+    """macOS speech embodiment: `say` synth -> STT-on-the-synth-file falsifier. No bus
+    `.monitor` loopback exists on macOS, so this channel honestly verifies the
+    SYNTHESIZED FILE is intelligible, NOT that it played. The STT word_overlap is THE
+    gate (envelope-vs-itself is meaningless on a source-only readback). `afplay` is
+    best-effort audible playback and NEVER lifts verify_status (exit 0 != audible sound
+    — the macOS twin of the 'recompute-error must not self-fulfill' / 'timeout is never
+    approval' trap). Every early-return routes through honest_attestation so a failed
+    run never inherits a verified_to it did not earn."""
+    channel_verified_to = "synthesized audio file (STT-intelligible speech rendered to disk)"
+    channel_not_verified = ("output bus AND physical transducer — this run read the synth "
+                            "file, not any playback (no loopback / sink .monitor on macOS)")
+    out = {
+        "mode": "speech", "text": text, "voice": voice, "speed": speed,
+        "synth_backend": "say", "capture_channel": "synth_file",
+        # claim nothing until the channel confirms it; not_verified already names the
+        # channel so EARLY-RETURN failures stay honest (see honest_attestation):
+        "verified_to": None,
+        "not_verified": honest_attestation(None, channel_verified_to, channel_not_verified)[1],
+    }
+    wav, info = synth_say(text, voice, speed)
+    if wav is None:
+        out.update(status="error", verify_status="error", detail=info.get("detail", "say synth failed"))
+        return out
+    out["voice"] = info.get("voice", voice)
+    parsed = _read_wav_mono_s16(wav)
+    if parsed is None or not len(parsed["samples"]):
+        out.update(status="error", verify_status="error", detail="synthesized WAV unreadable/empty")
+        return out
+    samples, sr = parsed["samples"], parsed["sr"] or 16000
+    rms_val = round(rms_of(samples), 2)
+    synth_dur = round(parsed["frames"] / sr, 3)
+    out["synth_dur_s"] = synth_dur
+
+    # STT gate (THE falsifier for the synth_file channel): transcribe the synth WAV and
+    # check the requested words survived synthesis. STT unavailable -> no_capture (never
+    # claim emitted without the word gate; degraded capability, not a content fault).
+    transcript, stt_err = transcribe_synth_file(wav)
+    stt_available = transcript is not None
+    ratio, nref = word_overlap(text, transcript or "")
+    status = classify_synth_file_embody(parsed["frames"], rms_val, ratio, nref, stt_available)
+    vt, nvt = honest_attestation(status, channel_verified_to, channel_not_verified)
+    out.update(status=status, verify_status=verify_status_for(status),
+               verified_to=vt, not_verified=nvt,
+               synth_rms=rms_val, frames=parsed["frames"], sr=sr)
+    if stt_available:
+        out["stt_transcript"] = transcript
+        out["word_overlap"] = round(ratio, 3)
+        out["intelligibility"] = classify_intelligibility(ratio, nref)
+        out["detail"] = (f"say synth {synth_dur}s; stt '{transcript[:80]}' "
+                         f"overlap={round(ratio, 3)} -> {out['intelligibility']}")
+    else:
+        out["intelligibility"] = "unavailable"
+        out["stt_detail"] = stt_err
+        out["detail"] = f"say synth {synth_dur}s rms={rms_val}; STT unavailable -> words unverified ({stt_err})"
+
+    # best-effort audible playback; play_ok is DECOUPLED from verify_status (honesty:
+    # afplay exit 0 on a muted/headless device or a silent file is not audible sound).
+    if os.path.exists("/usr/bin/afplay"):
+        play = subprocess.run(["/usr/bin/afplay", wav], capture_output=True, text=True)
+        out["play_ok"] = (play.returncode == 0)
+        out["play_note"] = "afplay best-effort; play_ok does NOT affect verify_status (exit 0 != audible)"
     return out
 
 
@@ -782,15 +946,18 @@ def main():
     ap.add_argument("--duration-ms", type=int, default=1500)
     ap.add_argument("--amplitude", type=float, default=0.25)
     ap.add_argument("--sink", default=None)
-    ap.add_argument("--capture-channel", choices=["sink_monitor", "mic"], default="sink_monitor")
+    ap.add_argument("--capture-channel", choices=["sink_monitor", "mic", "synth_file"], default="sink_monitor",
+                    help="sink_monitor/mic = PipeWire bus (Linux); synth_file = verify the synth WAV via STT "
+                         "(macOS / no-loopback; auto-selected on darwin)")
     ap.add_argument("--no-emit", action="store_true", help="capture-only (silence/external check)")
     # speech-mode args
     ap.add_argument("--text", default=None, help="speech mode: text to synthesize + speak")
     ap.add_argument("--voice", default="af_sarah", help="speech mode: TTS voice name")
     ap.add_argument("--speed", type=float, default=1.0, help="speech mode: speech speed (0.5-2.0)")
     ap.add_argument("--synth-bin", default=None, help="speech mode: path to ab-tts-synth (or env AB_TTS_SYNTH_BIN)")
-    ap.add_argument("--synth-backend", choices=["kokoro", "piper"], default="kokoro",
-                    help="speech mode: TTS engine (kokoro 24kHz default | piper 22.05kHz)")
+    ap.add_argument("--synth-backend", choices=["kokoro", "piper", "say"], default="kokoro",
+                    help="speech mode: TTS engine (kokoro 24kHz | piper 22.05kHz | say = macOS native, "
+                         "auto-selected on darwin via the synth_file channel)")
     ap.add_argument("--check-intelligibility", action="store_true",
                     help="speech mode: also transcribe the bus capture (whisper.cpp) and check words came back")
     ap.add_argument("--stt-bin", default=None, help="whisper.cpp CLI path (or env AB_TTS_STT_BIN)")
@@ -835,6 +1002,12 @@ def main():
         if not a.text or not a.text.strip():
             res = {"mode": "speech", "status": "error", "verify_status": "error",
                    "detail": "speech mode requires --text"}
+        elif _IS_MACOS or a.capture_channel == "synth_file":
+            # macOS / no-loopback: present_voice verifies the synthesized FILE via STT
+            # (there is no PipeWire sink `.monitor` bus to read back). See
+            # run_speech_synth_file. SCOPED to the present_voice speech path only — the
+            # LCC voice adapter (`--mode voice` -> run_voice) is deliberately unchanged.
+            res = run_speech_synth_file(a.text, a.voice, max(0.5, min(a.speed, 2.0)))
         else:
             res = run_speech(a.text, a.voice, max(0.5, min(a.speed, 2.0)), a.sink,
                              a.capture_channel, resolve_synth_bin(a.synth_bin),

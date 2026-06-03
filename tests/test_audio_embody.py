@@ -415,6 +415,70 @@ def test_mic_acoustic_mismatch_claims_nothing():
     assert ae.honest_attestation("emitted", bus_vt, bus_nvt) == (bus_vt, bus_nvt)
 
 
+# --- synth_file channel (macOS / no-loopback): classify_synth_file_embody ---------
+# The readback object is the synth WAV ITSELF, so env-vs-itself is meaningless and the
+# GATE is the STT word_overlap. Same {emitted|silent|mismatch|no_capture} vocabulary.
+
+def test_synth_file_emitted_when_words_recovered():
+    # non-silent audio, STT available, overlap >= INTELLIGIBLE_MIN (0.6) -> emitted
+    assert ae.classify_synth_file_embody(64000, 1200.0, 0.9, 10, True) == "emitted"
+    assert ae.classify_synth_file_embody(64000, 1200.0, 0.6, 10, True) == "emitted"  # boundary
+
+
+def test_synth_file_mismatch_is_the_macos_truncation_case():
+    # The macOS super-compact default voice TRUNCATION case: a real non-silent clip
+    # (a duration/RMS-only check would PASS) whose words did NOT survive synthesis ->
+    # low overlap -> mismatch. This is exactly why the gate must read CONTENT, not the
+    # envelope: only the STT word_overlap exposes the broken clip.
+    assert ae.classify_synth_file_embody(13000, 800.0, 0.1, 10, True) == "mismatch"
+    assert ae.classify_synth_file_embody(64000, 1200.0, 0.59, 10, True) == "mismatch"  # just under
+
+
+def test_synth_file_no_capture_when_nothing_synthesized():
+    assert ae.classify_synth_file_embody(0, 0.0, 0.9, 10, True) == "no_capture"
+
+
+def test_synth_file_silent_when_below_rms_floor():
+    # frames present but no energy (synth produced a silent file) -> silent, not emitted
+    assert ae.classify_synth_file_embody(64000, 1.0, 0.9, 10, True) == "silent"
+
+
+def test_synth_file_stt_unavailable_is_no_capture_not_mismatch():
+    # degraded capability (no whisper) must NOT claim emitted AND must NOT assert the
+    # words were wrong (mismatch) — it honestly reports no_capture.
+    assert ae.classify_synth_file_embody(64000, 1200.0, 0.0, 10, False) == "no_capture"
+    # empty reference (no requested words) also cannot verify -> no_capture
+    assert ae.classify_synth_file_embody(64000, 1200.0, 0.0, 0, True) == "no_capture"
+
+
+def test_synth_file_only_emitted_maps_to_rendered_ok():
+    assert ae.verify_status_for("emitted") == "rendered_ok"
+    for s in ("silent", "mismatch", "no_capture", "error"):
+        assert ae.verify_status_for(s) != "rendered_ok", s
+
+
+def test_synth_file_honest_attestation_and_channel_label():
+    # the synth_file channel proves the FILE is intelligible — never the bus/transducer.
+    vt = "synthesized audio file (STT-intelligible speech rendered to disk)"
+    nvt = ("output bus AND physical transducer — this run read the synth file, "
+           "not any playback (no loopback / sink .monitor on macOS)")
+    # only emitted earns the verified_to
+    assert ae.honest_attestation("emitted", vt, nvt) == (vt, nvt)
+    # every failure folds the channel target into not_verified, verified_to=None
+    for fail in ("silent", "mismatch", "no_capture"):
+        v, n = ae.honest_attestation(fail, vt, nvt)
+        assert v is None and "NOT confirmed" in n, fail
+    # CHANNEL-MISLABEL guard: the synth_file not_verified MUST name the OUTPUT BUS (this
+    # channel never read it) — else a reader is misled into thinking playback was proven.
+    assert "output bus" in nvt and "physical transducer" in nvt
+
+
+def test_say_backend_never_uses_truncating_default_voice():
+    # the say backend must fall back to an explicit, full-quality voice (the bare
+    # default resolves to the truncating super-compact alias).
+    assert ae._MACOS_DEFAULT_VOICE and not ae._MACOS_DEFAULT_VOICE.startswith(("af_", "bf_"))
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
