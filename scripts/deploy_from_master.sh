@@ -221,6 +221,14 @@ fi
 
 cp -f "$NEW_BIN" "$REAL_PATH"
 say ">> deployed -> $REAL_PATH"
+copied_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
+[ "$copied_size" = "$new_size" ] || die "deployed size $copied_size != built $new_size (copy failed?)"
+if [ "$(uname -s)" = "Darwin" ]; then
+    command -v codesign >/dev/null 2>&1 || die "codesign is required on macOS after copying the Mach-O binary"
+    codesign --force --sign - "$REAL_PATH" >/dev/null
+    say ">> ad-hoc signed macOS binary -> $REAL_PATH"
+    new_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
+fi
 
 # ---- 6. post-deploy verification ----
 say
