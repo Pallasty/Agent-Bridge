@@ -194,8 +194,29 @@ say
 say "=== post-deploy verification ==="
 dep_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
 [ "$dep_size" = "$new_size" ] || die "deployed size $dep_size != built $new_size (copy failed?)"
-say "deployed markers:"; printf '  + %s\n' "$(markers_in "$REAL_PATH")"
+# unquoted on purpose: markers are one-per-line + whitespace-free, so word-splitting
+# gives one printf arg per marker (each gets its own "  + " prefix).
+# shellcheck disable=SC2046,SC2086
+say "deployed markers:"; printf '  + %s\n' $(markers_in "$REAL_PATH")
+
+# Reconnect surface: a deployed-over .real shows as "(deleted)" in /proc/PID/exe
+# for any MCP server still mapping the OLD inode. Report the count so the operator
+# knows which sessions still need /mcp reconnect. Read-only — never kills anything.
+stale=0; fresh=0
+for pid in $(pgrep -f 'agent-bridge.*mcp' 2>/dev/null || true); do
+    exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+    case "$exe" in
+        *"(deleted)") stale=$((stale + 1)) ;;
+        */agent-bridge.real) fresh=$((fresh + 1)) ;;
+    esac
+done
+
 say
 say "DONE. The running MCP server still holds the OLD binary —"
 say "      run /mcp reconnect (per CC session) to activate the new one."
+if [ "$stale" -gt 0 ]; then
+    say "      reconnect surface: $stale running MCP server(s) still on the OLD binary"
+    say "      ($fresh already on the new one) — each is a CC/Codex/Cursor session that"
+    say "      needs its own /mcp reconnect to pick up this deploy."
+fi
 [ -n "${bak:-}" ] && say "      rollback: cp '$bak' '$REAL_PATH' && /mcp reconnect"
