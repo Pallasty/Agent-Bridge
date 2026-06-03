@@ -154,6 +154,13 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
         .get("chain_head")
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty());
+    // Honest-boundary forward (thread 94): the verification scope the falsifier
+    // actually PROVED — e.g. an audio (present_voice) outcome verified AT the output
+    // bus, NOT the physical transducer. Carrying it into the durable training label
+    // keeps a `verified` row honest: it records verified-TO-WHERE + what it did NOT
+    // verify, never an unscoped claim. Null for a producer that records no boundary.
+    let verified_to = record.get("verified_to").and_then(Value::as_str).filter(|s| !s.is_empty());
+    let not_verified = record.get("not_verified").and_then(Value::as_str).filter(|s| !s.is_empty());
 
     // Content: a human line + an embedded machine-readable JSON body
     // (dual-encoding; carries artifact_id+ts so the row is self-describing).
@@ -171,6 +178,8 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
         "embody_status": embody_status,
         "decision": decision,
         "chain_head": chain_head,
+        "verified_to": verified_to,
+        "not_verified": not_verified,
     });
     let human = if intent.is_empty() {
         format!("verified outcome: {action_tool} {kind_label} → {verify_status} [{artifact_id}]")
@@ -353,6 +362,39 @@ mod tests {
         assert!(m2.content.contains("\"chain_head\": \"deadbeefcafe0000\""));
         assert!(m2.content.contains("\"embody_status\": \"not_applicable\""));
         assert!(m2.tags.contains(&"embody:not_applicable".to_string()));
+    }
+
+    #[test]
+    fn forwards_honest_boundary_for_audio_outcome() {
+        // thread 94: an audio (present_voice) verified outcome carries verified_to /
+        // not_verified — the HONEST verification scope. It must reach the durable
+        // training label so a "verified" row records verified-TO-WHERE (the bus, NOT
+        // the transducer), never an unscoped claim that overstates the verification.
+        let voice = json!({
+            "artifact_id": "voice440hz0001",
+            "ts": 1u64,
+            "action_tool": "present_voice",
+            "kind": "voice",
+            "verify_status": "rendered_ok",
+            "verify_method": "audio_bus_readback",
+            "embody_status": "not_applicable",
+            "verified_to": "output bus (PipeWire sink monitor / loopback)",
+            "not_verified": "physical transducer (headphone/speaker driver output)",
+        });
+        let m = build_outcome_memory(&voice, 0).unwrap();
+        assert!(m.content.contains("\"verified_to\": \"output bus"), "verified_to in body");
+        assert!(m.content.contains("\"not_verified\": \"physical transducer"), "not_verified in body");
+        // a producer with no boundary -> null, never fabricated
+        let plain = json!({
+            "artifact_id": "noboundary0001",
+            "action_tool": "present",
+            "kind": "table",
+            "verify_status": "rendered_ok",
+            "verify_method": "browser_eval",
+        });
+        let mp = build_outcome_memory(&plain, 0).unwrap();
+        assert!(mp.content.contains("\"verified_to\": null"), "null when the producer records no boundary");
+        assert!(mp.content.contains("\"not_verified\": null"));
     }
 
     #[test]
