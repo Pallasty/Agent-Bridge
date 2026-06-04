@@ -351,6 +351,8 @@ fn hash_file_str(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the Linux-gated happy-path test writes file content.
+    #[cfg(target_os = "linux")]
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -445,6 +447,12 @@ mod tests {
     /// Happy-path integration test against a hand-rolled temp tree that
     /// looks like `/proc/<pid>/fd`. We use a long-lived test process
     /// that opens three temp files and rescue from THAT pid's fd table.
+    ///
+    /// Linux-only: it asserts a *populated* `/proc/<pid>/fd` (≥3 state.db FDs).
+    /// `enum_state_db_fds` returns empty where `/proc` is absent (e.g. macOS),
+    /// so this happy-path assertion can only hold on Linux. The empty-result
+    /// sibling tests above stay cross-platform.
+    #[cfg(target_os = "linux")]
     #[test]
     fn rescue_snapshot_happy_path_copies_three_state_db_files() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
