@@ -241,6 +241,11 @@ fn aura_io_sidecar_validates_renderer_input_hashes() -> Result<(), Box<dyn Error
     assert_eq!(report["bin_bytes"], 1024);
     assert_eq!(report["uniform_file_sha256_matches"], true);
     assert_eq!(report["digest_file_sha256_matches"], true);
+    assert_eq!(report["uniform_sha256"], sha256_hex(&[7_u8; 1024]));
+    assert_eq!(
+        report["digest_sha256"],
+        sha256_hex(br#"{"items":[{"title":"working"}]}"#)
+    );
     assert_eq!(report["visible_signal_source"], "curated_digest_only");
     assert_eq!(
         report["shadow_signal_policy"],

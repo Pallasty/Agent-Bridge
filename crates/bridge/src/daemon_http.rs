@@ -5610,8 +5610,10 @@ fn avatar_surface_linux_renderer_html(
     header {{ display:flex; justify-content:space-between; gap:16px; align-items:flex-end; border-bottom:1px solid var(--line); padding-bottom:14px; }}
     h1 {{ margin:0; font-size:24px; line-height:1.1; letter-spacing:0; }}
     .meta,.safety {{ color:var(--muted); overflow-wrap:anywhere; }}
-    .stage {{ margin-top:18px; min-height:360px; border:1px solid var(--line); background:var(--stage); display:grid; place-items:center; overflow:hidden; }}
-    .sprite {{ width:192px; height:208px; background-image:url("{asset_route}"); background-size:1536px 1872px; background-repeat:no-repeat; image-rendering:auto; transform:scale(1.35); transform-origin:center bottom; }}
+    .stage {{ margin-top:18px; min-height:360px; border:1px solid var(--line); background:var(--stage); display:grid; place-items:center; overflow:hidden; position:relative; isolation:isolate; }}
+    .aura {{ --aura-hue:174; --aura-hue-2:218; position:absolute; width:min(330px,72%); aspect-ratio:1; border-radius:999px; opacity:.78; transform:translateY(18px); filter:blur(1px) saturate(1.2); background:radial-gradient(circle at 50% 45%, hsla(var(--aura-hue),78%,66%,.62) 0 18%, hsla(var(--aura-hue-2),68%,48%,.38) 34%, rgba(20,122,116,.08) 58%, transparent 72%), conic-gradient(from 18deg, hsla(var(--aura-hue),70%,55%,.16), hsla(var(--aura-hue-2),72%,52%,.28), hsla(var(--aura-hue),70%,55%,.16)); box-shadow:0 0 34px hsla(var(--aura-hue),70%,55%,.32); z-index:0; }}
+    .stage:not(.has-aura) .aura {{ display:none; }}
+    .sprite {{ width:192px; height:208px; background-image:url("{asset_route}"); background-size:1536px 1872px; background-repeat:no-repeat; image-rendering:auto; transform:scale(1.35); transform-origin:center bottom; position:relative; z-index:1; }}
     .panel {{ margin-top:14px; padding:12px; border:1px solid var(--line); background:var(--surface); }}
     dl {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:0; }}
     dt {{ color:var(--muted); font-size:11px; text-transform:uppercase; font-weight:700; }}
@@ -5631,6 +5633,7 @@ fn avatar_surface_linux_renderer_html(
       <div class="meta">read_only=true source={source}</div>
     </header>
     <section class="stage" data-track="{track}" data-token="{token}">
+      <div class="aura" aria-hidden="true"></div>
       <div class="sprite" role="img" aria-label="Xiao Shu {track}"></div>
     </section>
     <section class="panel debug-panel">
@@ -5638,6 +5641,7 @@ fn avatar_surface_linux_renderer_html(
         <div><dt>state</dt><dd data-field="state">mode={mode} activity={activity}</dd></div>
         <div><dt>plan</dt><dd data-field="plan">track={track} token={token}</dd></div>
         <div><dt>asset</dt><dd data-field="asset">{asset_route}</dd></div>
+        <div><dt>aura</dt><dd data-field="aura">none</dd></div>
         <div><dt>fallback</dt><dd data-field="fallback">selection={selection_fallback} plan={plan_fallback}</dd></div>
         <div><dt>safety</dt><dd data-field="safety">codex_pet_package_mutation={codex_pet_mutation} emits_audio={emits_audio} controls_desktop={controls_desktop}</dd></div>
         <div><dt>mutation</dt><dd data-field="mutation">writes_files={writes_files} mutates_renderer={mutates_renderer}</dd></div>
@@ -5650,6 +5654,7 @@ fn avatar_surface_linux_renderer_html(
     const fallbackAssetRoute = {route_json};
     const stateUrl = {state_url_json};
     const stage = document.querySelector(".stage");
+    const aura = document.querySelector(".aura");
     const sprite = document.querySelector(".sprite");
     const payloadJson = document.getElementById("payload-json");
     const field = (name) => document.querySelector(`[data-field="${{name}}"]`);
@@ -5661,6 +5666,29 @@ fn avatar_surface_linux_renderer_html(
       const node = field(name);
       if (node) node.textContent = text;
     }};
+    function hashHue(seed) {{
+      let acc = 0;
+      for (const ch of String(seed || "lcc-aura")) acc = (acc * 33 + ch.charCodeAt(0)) % 360;
+      return acc;
+    }}
+    function applyAuraLayer(auraIo) {{
+      const active = Boolean(auraIo && auraIo.surface === "lcc_aura_io_intake");
+      stage.classList.toggle("has-aura", active);
+      if (!aura) return;
+      if (!active) {{
+        aura.hidden = true;
+        setField("aura", "none");
+        return;
+      }}
+      const seed = value(auraIo, "uniform_sha256", value(auraIo, "uniform_path", "lcc-aura"));
+      const hue = hashHue(seed);
+      aura.hidden = false;
+      aura.dataset.schema = value(auraIo, "schema_version", "unknown");
+      aura.dataset.uniform = seed.slice(0, 16);
+      aura.style.setProperty("--aura-hue", String(hue));
+      aura.style.setProperty("--aura-hue-2", String((hue + 58) % 360));
+      setField("aura", `surface=${{value(auraIo, "surface", "unknown")}} kind=${{value(auraIo, "renderer_input_kind", "unknown")}} uniform=${{seed.slice(0, 12)}} source=${{value(auraIo, "visible_signal_source", "unknown")}}`);
+    }}
     function applyRendererPayload(nextPayload) {{
       const state = nextPayload.state || {{}};
       const plan = nextPayload.plan || {{}};
@@ -5673,6 +5701,7 @@ fn avatar_surface_linux_renderer_html(
       stage.dataset.token = token;
       sprite.setAttribute("aria-label", `Xiao Shu ${{track}}`);
       sprite.style.backgroundImage = `url("${{assetRoute}}")`;
+      applyAuraLayer(nextPayload.aura_io);
       setField("state", `mode=${{value(state, "mode", "idle")}} activity=${{value(state, "activity_state", value(state, "mode", "idle"))}}`);
       setField("plan", `track=${{track}} token=${{token}}`);
       setField("asset", assetRoute);
@@ -7342,6 +7371,17 @@ mod tests {
                 "codex_pet_package_mutation": false,
                 "emits_audio": false,
                 "controls_desktop": false
+            },
+            "aura_io": {
+                "surface": "lcc_aura_io_intake",
+                "schema_version": "lcc.aura_io.v1",
+                "renderer_input_kind": "tfe_uniform_f32x256",
+                "uniform_path": "/tmp/a2_working_uniform.bin",
+                "digest_path": "/tmp/a2_working_digest.json",
+                "visible_signal_source": "curated_digest_only",
+                "shadow_signal_policy": "shadow_only_until_falsified",
+                "uniform_file_sha256_matches": true,
+                "digest_file_sha256_matches": true
             }
         });
 
@@ -7362,6 +7402,11 @@ mod tests {
         assert!(html.contains("setInterval(refreshRendererState, 1000)"));
         assert!(html.contains("fetch(stateUrl"));
         assert!(html.contains("function applyRendererPayload(nextPayload)"));
+        assert!(html.contains("class=\"aura\""));
+        assert!(html.contains("data-field=\"aura\""));
+        assert!(html.contains("function applyAuraLayer(auraIo)"));
+        assert!(html.contains("lcc_aura_io_intake"));
+        assert!(html.contains("curated_digest_only"));
         assert!(html.contains("codex_pet_package_mutation=false"));
         assert!(html.contains("emits_audio=false"));
     }
