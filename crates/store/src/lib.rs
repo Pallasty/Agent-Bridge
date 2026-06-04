@@ -1405,6 +1405,47 @@ pub struct MemoryStats {
 /// update here and both surfaces pick it up automatically.
 pub const CATALOG_KINDS_C3: &[&str] = &["skill"];
 
+/// Memory kinds excluded from graph-*coverage* denominators (orphan_fraction,
+/// M5 edge-coverage, degree/hub topology, P4 evolved coverage). These are
+/// edge-less *by design*, so counting them in the denominator deflates the
+/// fraction into a pure measurement artifact — the same rationale the M5
+/// query comment gives for `skill`:
+///   - `skill`           — bulk-imported reference catalog (never graph citizens).
+///   - `present_outcome` — the output→memory audit cohort; `related_keys` is
+///     empty by anti-fabrication design, so it can only earn edges organically
+///     via dream-promote, never at write time (thread 6 #1983 ruling,
+///     2026-06-04: no live #6 owner → operator ruled "exclude denominator,
+///     defer recall-scope").
+///
+/// Deliberately DISTINCT from [`CATALOG_KINDS_C3`], which governs C3 drop-alert
+/// / `memory_stats` catalog accounting and stays `skill`-only. Coverage
+/// exclusion and catalog accounting are different concerns — do not merge them.
+pub const COVERAGE_EXCLUDED_KINDS: &[&str] = &["skill", "present_outcome"];
+
+/// SQL predicate fragment excluding [`COVERAGE_EXCLUDED_KINDS`] from a coverage
+/// denominator. `alias` is the table alias (`"m"` → `m.kind ...`) or `""` for an
+/// unqualified column. The kind list is a compile-time constant of SQL-safe
+/// identifiers, so the emitted fragment carries no caller-influenced text.
+///
+/// Single source of truth: every coverage denominator in `sqlite.rs`
+/// (`graph_topology`, substrate-audit M5) routes through this, and the in-memory
+/// mirror (`memory_graph_topology_record_visible` in the bridge crate) keys off
+/// the same [`COVERAGE_EXCLUDED_KINDS`] slice, so the SQL path and the MCP path
+/// stay symmetric.
+pub fn coverage_kind_exclusion_sql(alias: &str) -> String {
+    let col = if alias.is_empty() {
+        "kind".to_string()
+    } else {
+        format!("{alias}.kind")
+    };
+    let list = COVERAGE_EXCLUDED_KINDS
+        .iter()
+        .map(|k| format!("'{k}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{col} NOT IN ({list})")
+}
+
 /// Snapshot of the three counts feeding C3 §3.4 S2-S4 drop detection
 /// (`memories.count` active / `forum_threads.count` / `memory_edges.count`).
 /// Light-weight — three `SELECT COUNT(*)` calls, designed to be safe

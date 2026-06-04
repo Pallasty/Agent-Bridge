@@ -46,6 +46,13 @@ use serde_json::Value;
 /// The distinct memory `kind` for ingested verified outcomes. Used by NO other
 /// writer so the auto-supersede candidate scan (`WHERE kind=?1 AND scope IS ?2`)
 /// never pulls in unrelated kinds.
+///
+/// MIRRORED in `ab_store::COVERAGE_EXCLUDED_KINDS` (store can't depend on bridge,
+/// so the literal is duplicated there). present_outcome rows are edge-less by
+/// design and must stay excluded from graph-coverage denominators (thread 6
+/// #1983, 2026-06-04). The `outcome_kind_stays_in_coverage_excluded_kinds`
+/// test below fails loudly if this constant is renamed without updating the
+/// store mirror.
 pub const OUTCOME_MEMORY_KIND: &str = "present_outcome";
 
 /// Per-artifact scope for an outcome row: `outcome:<artifact_id>`.
@@ -258,6 +265,20 @@ mod tests {
         assert!(m.related_keys.is_empty(), "v0 is graph-orphan by design");
         assert_eq!(m.scope, Some("outcome:abc123def456".to_string()));
         assert_eq!(m.status, "active");
+    }
+
+    /// thread 6 #1983 (2026-06-04): present_outcome is excluded from graph-
+    /// coverage denominators via `ab_store::COVERAGE_EXCLUDED_KINDS`, which
+    /// duplicates this literal (store can't depend on bridge). Guard the
+    /// cross-crate coupling: a rename of `OUTCOME_MEMORY_KIND` here that is not
+    /// mirrored there would silently re-confound the orphan / M5 fraction.
+    #[test]
+    fn outcome_kind_stays_in_coverage_excluded_kinds() {
+        assert!(
+            ab_store::COVERAGE_EXCLUDED_KINDS.contains(&OUTCOME_MEMORY_KIND),
+            "OUTCOME_MEMORY_KIND ({OUTCOME_MEMORY_KIND:?}) must be mirrored in \
+             ab_store::COVERAGE_EXCLUDED_KINDS; a rename here must update the store mirror"
+        );
     }
 
     #[test]

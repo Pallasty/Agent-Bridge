@@ -21189,7 +21189,15 @@ fn memory_graph_topology_record_visible(
     skip_tags: &[String],
     skip_kinds: &[String],
 ) -> bool {
-    if rec.status != "active" || rec.kind.eq_ignore_ascii_case("skill") {
+    // Coverage-denominator exclusion, symmetric with the SQL path
+    // (store::graph_topology / M5). Edge-less-by-design cohorts (`skill`,
+    // `present_outcome`) are excluded so they don't deflate orphan/coverage
+    // fractions into a measurement artifact (thread 6 #1983 ruling 2026-06-04).
+    if rec.status != "active"
+        || ab_store::COVERAGE_EXCLUDED_KINDS
+            .iter()
+            .any(|k| rec.kind.eq_ignore_ascii_case(k))
+    {
         return false;
     }
     if memory_has_any_tag(rec, skip_tags) || memory_kind_is_any(rec, skip_kinds) {
@@ -32679,6 +32687,66 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             &skip_tags,
             &skip_kinds,
         ));
+    }
+
+    /// thread 6 #1983 ruling (2026-06-04): the in-memory mirror path must match
+    /// the SQL path — `present_outcome` (edge-less audit cohort) is excluded
+    /// from the coverage denominator exactly like `skill`, while ordinary
+    /// working kinds keep counting.
+    #[test]
+    fn memory_graph_topology_excludes_present_outcome_from_denominator() {
+        let lesson = mk_mem_scoped(
+            "l",
+            "lesson",
+            "alpha beta gamma delta",
+            &[],
+            Some("project:/repo/a"),
+        );
+        let decision = mk_mem_scoped(
+            "d",
+            "decision",
+            "alpha beta gamma delta",
+            &[],
+            Some("project:/repo/a"),
+        );
+        let outcome = mk_mem_scoped(
+            "o",
+            "present_outcome",
+            "alpha beta gamma delta",
+            &[],
+            Some("project:/repo/a"),
+        );
+        let skill = mk_mem_scoped(
+            "s",
+            "skill",
+            "alpha beta gamma delta",
+            &[],
+            Some("project:/repo/a"),
+        );
+
+        let vis = |r: &MemoryRecord| {
+            memory_graph_topology_record_visible(
+                r,
+                Some("project:/repo/a"),
+                MemorySearchScopeMode::LocalOnly,
+                &[],
+                &[],
+            )
+        };
+        // The single upstream gate excludes BOTH cohorts, keeps ordinary kinds.
+        assert!(vis(&lesson));
+        assert!(vis(&decision));
+        assert!(!vis(&outcome), "present_outcome must be excluded from coverage");
+        assert!(!vis(&skill), "skill stays excluded");
+
+        // End-to-end: gate -> from_records denominator counts only the 2
+        // working kinds, matching the SQL graph_topology path.
+        let records = vec![lesson, decision, outcome, skill];
+        let visible: Vec<MemoryRecord> = records.into_iter().filter(|r| vis(r)).collect();
+        let edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+        let topo = memory_graph_topology_from_records(&visible, &edges_by_key);
+        assert_eq!(topo.non_skill_active_total, 2);
+        assert_eq!(topo.orphan_count, 2);
     }
 
     #[test]

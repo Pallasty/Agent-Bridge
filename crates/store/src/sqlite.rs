@@ -4387,9 +4387,17 @@ impl StateStore for SqliteStore {
             .call(|c| -> RusqliteResult<GraphTopology> {
                 let tx = c.unchecked_transaction()?;
 
+                // Coverage-denominator exclusion (thread 6 #1983 ruling,
+                // 2026-06-04): edge-less-by-design cohorts (`skill`,
+                // `present_outcome`) must not deflate the fraction into a
+                // measurement artifact. Single source of truth =
+                // crate::coverage_kind_exclusion_sql / COVERAGE_EXCLUDED_KINDS.
+                let kx = crate::coverage_kind_exclusion_sql("");
+                let kx_m = crate::coverage_kind_exclusion_sql("m");
+
                 // 1. non-skill active total
                 let total: i64 = tx.query_row(
-                    "SELECT COUNT(*) FROM memories WHERE status='active' AND kind != 'skill'",
+                    &format!("SELECT COUNT(*) FROM memories WHERE status='active' AND {kx}"),
                     [],
                     |r| r.get(0),
                 )?;
@@ -4399,19 +4407,21 @@ impl StateStore for SqliteStore {
                 // composite (from_key, to_key) and SQLite optimizer picks the
                 // covering index for either side.
                 let orphans: i64 = tx.query_row(
-                    "SELECT COUNT(*) FROM memories m
-                       WHERE m.status='active' AND m.kind != 'skill'
+                    &format!(
+                        "SELECT COUNT(*) FROM memories m
+                       WHERE m.status='active' AND {kx_m}
                          AND NOT EXISTS (
                            SELECT 1 FROM memory_edges e
                             WHERE e.from_key = m.key OR e.to_key = m.key
-                         )",
+                         )"
+                    ),
                     [],
                     |r| r.get(0),
                 )?;
 
                 // 3. degree histogram over non-skill active nodes.
                 // Build via per-key degree count then bucket.
-                let mut stmt_deg = tx.prepare(
+                let mut stmt_deg = tx.prepare(&format!(
                     "WITH ext AS (
                        SELECT from_key AS k FROM memory_edges
                        UNION ALL
@@ -4431,11 +4441,11 @@ impl StateStore for SqliteStore {
                        SELECT m.key,
                               COALESCE((SELECT COUNT(*) FROM ext WHERE ext.k = m.key), 0) AS deg
                          FROM memories m
-                        WHERE m.status='active' AND m.kind != 'skill'
+                        WHERE m.status='active' AND {kx_m}
                      )
                      GROUP BY bucket
-                     ORDER BY MIN(deg)",
-                )?;
+                     ORDER BY MIN(deg)"
+                ))?;
                 let raw_buckets: Vec<(String, u64)> = stmt_deg
                     .query_map([], |r| {
                         Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
@@ -4457,7 +4467,7 @@ impl StateStore for SqliteStore {
                     .collect();
 
                 // 4. top-5 hubs — non-skill active only, by degree DESC.
-                let mut stmt_hubs = tx.prepare(
+                let mut stmt_hubs = tx.prepare(&format!(
                     "WITH ext AS (
                        SELECT from_key AS k FROM memory_edges
                        UNION ALL
@@ -4469,10 +4479,10 @@ impl StateStore for SqliteStore {
                      SELECT d.k, d.deg
                        FROM degrees d
                        JOIN memories m ON m.key = d.k
-                      WHERE m.status='active' AND m.kind != 'skill'
+                      WHERE m.status='active' AND {kx_m}
                       ORDER BY d.deg DESC, d.k ASC
-                      LIMIT 5",
-                )?;
+                      LIMIT 5"
+                ))?;
                 let top_5_hubs: Vec<(String, u64)> = stmt_hubs
                     .query_map([], |r| {
                         Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
@@ -4483,16 +4493,18 @@ impl StateStore for SqliteStore {
                 // 5. P4 evolved coverage — distinct non-skill active nodes
                 // appearing as either endpoint of any `evolved` edge.
                 let p4_coverage: i64 = tx.query_row(
-                    "SELECT COUNT(*) FROM (
+                    &format!(
+                        "SELECT COUNT(*) FROM (
                        SELECT m.key
                          FROM memories m
-                        WHERE m.status='active' AND m.kind != 'skill'
+                        WHERE m.status='active' AND {kx_m}
                           AND EXISTS (
                             SELECT 1 FROM memory_edges e
                              WHERE (e.from_key = m.key OR e.to_key = m.key)
                                AND e.edge_type = 'evolved'
                           )
-                     )",
+                     )"
+                    ),
                     [],
                     |r| r.get(0),
                 )?;
@@ -7351,9 +7363,11 @@ impl StateStore for SqliteStore {
         };
 
         // ── M5 — edge coverage of active memories ──
-        // Both denominator and numerator exclude kind='skill': the skill
-        // catalog floods the active pool with edge-less rows (1272 seen
-        // 2026-05-29), deflating the fraction to a pure measurement artifact.
+        // Both denominator and numerator exclude COVERAGE_EXCLUDED_KINDS
+        // (`skill`, `present_outcome`): these edge-less-by-design cohorts flood
+        // the active pool with edge-less rows (skill catalog: 1272 seen
+        // 2026-05-29; present_outcome: thread 6 #1983, 2026-06-04), deflating
+        // the fraction to a pure measurement artifact.
         // The numerator further requires the OTHER endpoint to be active
         // non-skill too, so an edge dangling to a hard-deleted / tombstoned /
         // skill node does not count as live coverage — robust without an
@@ -7364,17 +7378,24 @@ impl StateStore for SqliteStore {
             let (active_with_edge, active_non_skill_total): (i64, i64) = self
                 .conn
                 .call(|c| -> RusqliteResult<(i64, i64)> {
+                    // Coverage-denominator exclusion (thread 6 #1983, 2026-06-04):
+                    // edge-less-by-design cohorts (`skill`, `present_outcome`) must
+                    // not deflate the M5 fraction into a measurement artifact.
+                    let kx = crate::coverage_kind_exclusion_sql("");
                     let total: i64 = c
                         .query_row(
-                            "SELECT COUNT(*) FROM memories \
-                               WHERE status='active' AND kind != 'skill'",
+                            &format!(
+                                "SELECT COUNT(*) FROM memories \
+                               WHERE status='active' AND {kx}"
+                            ),
                             [],
                             |r| r.get(0),
                         )
                         .unwrap_or(0);
                     let with_edge: i64 = c
                         .query_row(
-                            "SELECT COUNT(DISTINCT key) FROM (
+                            &format!(
+                                "SELECT COUNT(DISTINCT key) FROM (
                                SELECT from_key AS key, to_key AS other FROM memory_edges
                                  WHERE edge_type IN ('cofires','co_referenced')
                                UNION
@@ -7383,10 +7404,11 @@ impl StateStore for SqliteStore {
                              ) AS touched
                              WHERE key IN (
                                      SELECT key FROM memories
-                                       WHERE status='active' AND kind != 'skill')
+                                       WHERE status='active' AND {kx})
                                AND other IN (
                                      SELECT key FROM memories
-                                       WHERE status='active' AND kind != 'skill')",
+                                       WHERE status='active' AND {kx})"
+                            ),
                             [],
                             |r| r.get(0),
                         )
@@ -10776,6 +10798,83 @@ mod tests {
         assert_eq!(
             res.edges_written, 0,
             "strict drops the edge to non-exported loose_b"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    /// thread 6 #1983 ruling (2026-06-04): lock the exact coverage-exclusion
+    /// SQL fragment so a future edit to COVERAGE_EXCLUDED_KINDS can't silently
+    /// drift the denominator predicate emitted into graph_topology / M5.
+    #[test]
+    fn coverage_kind_exclusion_sql_emits_locked_fragment() {
+        assert_eq!(
+            crate::coverage_kind_exclusion_sql(""),
+            "kind NOT IN ('skill', 'present_outcome')"
+        );
+        assert_eq!(
+            crate::coverage_kind_exclusion_sql("m"),
+            "m.kind NOT IN ('skill', 'present_outcome')"
+        );
+        assert!(crate::COVERAGE_EXCLUDED_KINDS.contains(&"skill"));
+        assert!(crate::COVERAGE_EXCLUDED_KINDS.contains(&"present_outcome"));
+    }
+
+    /// thread 6 #1983 ruling (2026-06-04): `present_outcome` is an
+    /// edge-less-by-design audit cohort and must be excluded from the
+    /// graph-coverage denominator exactly like `skill`, so it neither inflates
+    /// orphan_count nor deflates non_skill_active_total.
+    #[tokio::test]
+    async fn graph_topology_excludes_present_outcome_and_skill_from_denominator() {
+        use crate::MemoryRecord;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-topo-excl-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db).await.expect("open store");
+
+        let mk = |key: &str, kind: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: kind.to_string(),
+            content: format!("content {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000010,
+            updated_at: 1700000010,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&mk("a_lesson", "lesson")).await.expect("save lesson");
+        store.memory_save(&mk("b_decision", "decision")).await.expect("save decision");
+        store
+            .memory_save(&mk("c_outcome", "present_outcome"))
+            .await
+            .expect("save outcome");
+        store.memory_save(&mk("d_skill", "skill")).await.expect("save skill");
+
+        let topo = store.graph_topology().await.expect("topology");
+        // Only the two working kinds count toward the coverage denominator;
+        // present_outcome AND skill are excluded.
+        assert_eq!(
+            topo.non_skill_active_total, 2,
+            "denominator counts lesson+decision only (present_outcome & skill excluded)"
+        );
+        // Both counted rows are edge-less -> both orphans; the excluded cohorts
+        // must NOT leak into the orphan numerator either (ratio stays honest).
+        assert_eq!(
+            topo.orphan_count, 2,
+            "orphan numerator excludes the present_outcome & skill cohorts too"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
