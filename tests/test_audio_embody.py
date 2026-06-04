@@ -420,9 +420,11 @@ def test_mic_acoustic_mismatch_claims_nothing():
 # GATE is the STT word_overlap. Same {emitted|silent|mismatch|no_capture} vocabulary.
 
 def test_synth_file_emitted_when_words_recovered():
-    # non-silent audio, STT available, overlap >= INTELLIGIBLE_MIN (0.6) -> emitted
+    # non-silent audio, STT available, overlap >= SYNTH_FILE_INTEL_MIN (0.8 — TIGHTER than the
+    # 0.6 noisy-bus floor; the clean synth file should recover ~all words). duration guard
+    # disabled (expected_dur_s defaults 0) to isolate the word gate. (#2300 MED-1)
     assert ae.classify_synth_file_embody(64000, 1200.0, 0.9, 10, True) == "emitted"
-    assert ae.classify_synth_file_embody(64000, 1200.0, 0.6, 10, True) == "emitted"  # boundary
+    assert ae.classify_synth_file_embody(64000, 1200.0, 0.8, 10, True) == "emitted"  # boundary
 
 
 def test_synth_file_mismatch_is_the_macos_truncation_case():
@@ -432,6 +434,10 @@ def test_synth_file_mismatch_is_the_macos_truncation_case():
     # envelope: only the STT word_overlap exposes the broken clip.
     assert ae.classify_synth_file_embody(13000, 800.0, 0.1, 10, True) == "mismatch"
     assert ae.classify_synth_file_embody(64000, 1200.0, 0.59, 10, True) == "mismatch"  # just under
+    # #2300 MED-1: the 0.6-0.79 mild-truncation band — previously falsely 'emitted' on the
+    # 0.6 bus floor — is now 'mismatch' under the tighter clean-channel floor (0.8).
+    assert ae.classify_synth_file_embody(64000, 1200.0, 0.6, 10, True) == "mismatch"
+    assert ae.classify_synth_file_embody(64000, 1200.0, 0.79, 10, True) == "mismatch"
 
 
 def test_synth_file_no_capture_when_nothing_synthesized():
@@ -477,6 +483,150 @@ def test_say_backend_never_uses_truncating_default_voice():
     # the say backend must fall back to an explicit, full-quality voice (the bare
     # default resolves to the truncating super-compact alias).
     assert ae._MACOS_DEFAULT_VOICE and not ae._MACOS_DEFAULT_VOICE.startswith(("af_", "bf_"))
+
+
+# --- #2300 review fixes: duration guard (MED-1) + empty-transcript no_capture (MED-2) -----
+
+def _patch(**stubs):
+    """Save + set ae.<name> stubs; returns the saved originals for _restore."""
+    saved = {k: getattr(ae, k) for k in stubs}
+    for k, v in stubs.items():
+        setattr(ae, k, v)
+    return saved
+
+
+def _restore(saved):
+    for k, v in saved.items():
+        setattr(ae, k, v)
+
+
+def test_synth_file_duration_guard_catches_repeated_word_inflation():
+    # #2300 MED-1: set-recall word_overlap INFLATES on repeated reference words, so a truncated
+    # clip can pass the word gate. The DURATION guard (synth_dur < 0.5 * expected) catches it
+    # even at overlap 1.0.
+    assert ae.classify_synth_file_embody(5000, 900.0, 1.0, 5, True,
+                                         synth_dur_s=0.3, expected_dur_s=1.7) == "mismatch"
+    # full-length clip with good words -> emitted (guard does NOT false-reject legit synthesis)
+    assert ae.classify_synth_file_embody(50000, 900.0, 0.9, 10, True,
+                                         synth_dur_s=3.0, expected_dur_s=3.4) == "emitted"
+    # expected_dur_s<=0 disables the guard (unknown timing -> word gate alone, back-compat)
+    assert ae.classify_synth_file_embody(5000, 900.0, 0.9, 5, True,
+                                         synth_dur_s=0.1, expected_dur_s=0.0) == "emitted"
+
+
+def test_synth_file_caller_empty_transcript_is_no_capture_not_mismatch():
+    # #2300 MED-2: a WORKING whisper returning an empty transcript ("", None) must route to
+    # no_capture (degraded), NOT mismatch (false "words came out wrong"). Regression at the
+    # CALLER level — the bug was in run_speech_synth_file's `transcript is not None` wiring.
+    saved = _patch(
+        synth_say=lambda t, v, s: ("/tmp/ab_fake.wav",
+                                   {"ok": True, "backend": "say", "voice": "Samantha",
+                                    "sample_rate": 16000, "wpm": 175}),
+        _read_wav_mono_s16=lambda p: {"samples": [1000] * 48000, "sr": 16000, "frames": 48000},
+        transcribe_synth_file=lambda w, model=None: ("", None),  # working whisper, no words
+    )
+    try:
+        out = ae.run_speech_synth_file("hello world this is a real test", "Samantha", 1.0)
+        assert out["status"] == "no_capture", out["status"]
+        assert out["verify_status"] != "rendered_ok", out["verify_status"]
+        assert out["verified_to"] is None
+        assert "output bus" in out["not_verified"] and "physical transducer" in out["not_verified"]
+    finally:
+        _restore(saved)
+
+
+def test_synth_file_caller_duration_guard_rejects_truncated_clip():
+    # #2300 MED-1 at the CALLER: words recovered (overlap 1.0 via repeats) but the clip is far
+    # too short for the text -> the wired expected_dur (words/wpm) fires the truncation guard.
+    saved = _patch(
+        synth_say=lambda t, v, s: ("/tmp/ab_fake.wav",
+                                   {"ok": True, "backend": "say", "voice": "Samantha",
+                                    "sample_rate": 16000, "wpm": 175}),
+        _read_wav_mono_s16=lambda p: {"samples": [1000] * 6400, "sr": 16000, "frames": 6400},  # 0.4s
+        transcribe_synth_file=lambda w, model=None: ("go now here", None),  # all unique words back
+    )
+    try:
+        # 10 words (go x8 + now + here) -> expected ~3.43s; synth 0.4s << 0.5*expected -> truncated
+        out = ae.run_speech_synth_file("go go go go go go go go now here", "Samantha", 1.0)
+        assert out["word_overlap"] == 1.0, out["word_overlap"]   # word gate WOULD have passed
+        assert out["status"] == "mismatch", out["status"]        # but duration guard fires
+        assert out["verify_status"] != "rendered_ok", out["verify_status"]
+        assert out["verified_to"] is None
+        assert "TRUNCATED" in out["detail"], out["detail"]
+    finally:
+        _restore(saved)
+
+
+def test_synth_file_caller_full_clip_emitted_with_verified_to():
+    # positive control: a full-length, fully-transcribed clip -> emitted + verified_to set.
+    # proves the tightened gates do NOT reject legitimate synthesis (no false-low).
+    text = "one two three four five six seven eight nine ten"  # 10 words -> expected ~3.43s
+    saved = _patch(
+        synth_say=lambda t, v, s: ("/tmp/ab_fake.wav",
+                                   {"ok": True, "backend": "say", "voice": "Samantha",
+                                    "sample_rate": 16000, "wpm": 175}),
+        _read_wav_mono_s16=lambda p: {"samples": [1000] * 54880, "sr": 16000, "frames": 54880},  # 3.43s
+        transcribe_synth_file=lambda w, model=None: (text, None),
+    )
+    try:
+        out = ae.run_speech_synth_file(text, "Samantha", 1.0)
+        assert out["status"] == "emitted", out["status"]
+        assert out["verify_status"] == "rendered_ok", out["verify_status"]
+        assert out["verified_to"] == "synthesized audio file (STT-intelligible speech rendered to disk)"
+        assert out["word_overlap"] == 1.0, out["word_overlap"]
+    finally:
+        _restore(saved)
+
+
+def test_synth_file_word_gate_is_length_aware():
+    # #2300 MED-1 refinement (adversarial w795q6xei FALSE-LOW): whisper-tiny is NOISY on
+    # SHORT clips (voice templates are 1-3 words), so a flat 0.8 floor would falsely reject a
+    # good short line when STT drops one word. The DURATION guard (separate) catches
+    # truncation; the word gate is length-aware so short good clips are not false-rejected.
+    # All calls leave expected_dur_s=0 (guard disabled) to isolate the word gate.
+    # 1-2 words: all back -> emitted; any miss -> no_capture (NOT a false mismatch/garbled).
+    assert ae.classify_synth_file_embody(20000, 900.0, 1.0, 2, True) == "emitted"      # both back
+    assert ae.classify_synth_file_embody(20000, 900.0, 0.5, 2, True) == "no_capture"   # 1/2 -> can't verify
+    assert ae.classify_synth_file_embody(20000, 900.0, 1.0, 1, True) == "emitted"      # the word back
+    assert ae.classify_synth_file_embody(20000, 900.0, 0.0, 1, True) == "no_capture"   # missed -> can't verify
+    # 3-4 words: tolerate exactly ONE STT miss.
+    assert ae.classify_synth_file_embody(30000, 900.0, 0.667, 3, True) == "emitted"    # 2/3
+    assert ae.classify_synth_file_embody(30000, 900.0, 0.333, 3, True) == "mismatch"   # 1/3 -> garbled
+    assert ae.classify_synth_file_embody(40000, 900.0, 0.75, 4, True) == "emitted"     # 3/4
+    assert ae.classify_synth_file_embody(40000, 900.0, 0.5, 4, True) == "mismatch"     # 2/4 -> garbled
+    # 5+ words: clean-channel floor (SYNTH_FILE_INTEL_MIN = 0.8). With timing UNKNOWN
+    # (expected_dur=0 here) a sub-floor recall stays mismatch (truncation can't be ruled out);
+    # the duration-CONFIRMED degrade to no_capture is covered in the next two tests.
+    assert ae.classify_synth_file_embody(60000, 900.0, 0.8, 5, True) == "emitted"
+    assert ae.classify_synth_file_embody(60000, 900.0, 0.6, 5, True) == "mismatch"  # timing unknown
+
+
+def test_synth_file_5plus_degraded_is_no_capture_not_mismatch():
+    # 5+ words, FULL-LENGTH clip (duration CONFIRMS non-truncation) but recall below
+    # INTEL_MIN(0.8): low recall on a long line is STT DEGRADATION (tiny-whisper accumulates
+    # errors over many words), NOT a synth content fault. Degrade to no_capture (honest
+    # "couldn't verify"), NOT mismatch (false "words came out wrong") — the long-line twin of
+    # MED-2. Real aio2 cross-engine datum: 13-word line, synth 4.93s ~= expected 5.25s (FULL),
+    # piper+whisper.cpp overlap 0.615 (#2335).
+    full = dict(synth_dur_s=4.93, expected_dur_s=5.25)  # timing confirms full-length
+    assert ae.classify_synth_file_embody(200000, 900.0, 0.615, 13, True, **full) == "no_capture"
+    assert ae.classify_synth_file_embody(200000, 900.0, 0.5, 13, True, **full) == "no_capture"   # at floor
+    assert ae.classify_synth_file_embody(200000, 900.0, 0.49, 13, True, **full) == "mismatch"    # collapsed
+    assert ae.classify_synth_file_embody(200000, 900.0, 0.8, 13, True, **full) == "emitted"      # at intel_min
+
+
+def test_synth_file_5plus_degrade_is_gated_on_duration_confirmation():
+    # The no_capture degrade fires ONLY when timing confirms full-length. Otherwise mismatch —
+    # conservative: never relabel a possibly-truncated clip as a benign no_capture.
+    mid = 0.615  # in [degraded_floor, intel_min)
+    # timing UNKNOWN (expected_dur=0) -> can't rule out truncation -> mismatch
+    assert ae.classify_synth_file_embody(200000, 900.0, mid, 13, True) == "mismatch"
+    assert ae.classify_synth_file_embody(200000, 900.0, mid, 13, True,
+                                         synth_dur_s=4.93, expected_dur_s=0.0) == "mismatch"
+    # TRUNCATED (synth_dur < 0.5*expected) -> duration guard returns mismatch BEFORE the
+    # degrade path is reached -> never no_capture:
+    assert ae.classify_synth_file_embody(200000, 900.0, mid, 13, True,
+                                         synth_dur_s=1.0, expected_dur_s=5.25) == "mismatch"
 
 
 if __name__ == "__main__":
