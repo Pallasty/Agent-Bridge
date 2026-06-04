@@ -594,9 +594,39 @@ def test_synth_file_word_gate_is_length_aware():
     assert ae.classify_synth_file_embody(30000, 900.0, 0.333, 3, True) == "mismatch"   # 1/3 -> garbled
     assert ae.classify_synth_file_embody(40000, 900.0, 0.75, 4, True) == "emitted"     # 3/4
     assert ae.classify_synth_file_embody(40000, 900.0, 0.5, 4, True) == "mismatch"     # 2/4 -> garbled
-    # 5+ words: flat clean-channel floor (SYNTH_FILE_INTEL_MIN = 0.8).
+    # 5+ words: clean-channel floor (SYNTH_FILE_INTEL_MIN = 0.8). With timing UNKNOWN
+    # (expected_dur=0 here) a sub-floor recall stays mismatch (truncation can't be ruled out);
+    # the duration-CONFIRMED degrade to no_capture is covered in the next two tests.
     assert ae.classify_synth_file_embody(60000, 900.0, 0.8, 5, True) == "emitted"
-    assert ae.classify_synth_file_embody(60000, 900.0, 0.6, 5, True) == "mismatch"
+    assert ae.classify_synth_file_embody(60000, 900.0, 0.6, 5, True) == "mismatch"  # timing unknown
+
+
+def test_synth_file_5plus_degraded_is_no_capture_not_mismatch():
+    # 5+ words, FULL-LENGTH clip (duration CONFIRMS non-truncation) but recall below
+    # INTEL_MIN(0.8): low recall on a long line is STT DEGRADATION (tiny-whisper accumulates
+    # errors over many words), NOT a synth content fault. Degrade to no_capture (honest
+    # "couldn't verify"), NOT mismatch (false "words came out wrong") — the long-line twin of
+    # MED-2. Real aio2 cross-engine datum: 13-word line, synth 4.93s ~= expected 5.25s (FULL),
+    # piper+whisper.cpp overlap 0.615 (#2335).
+    full = dict(synth_dur_s=4.93, expected_dur_s=5.25)  # timing confirms full-length
+    assert ae.classify_synth_file_embody(200000, 900.0, 0.615, 13, True, **full) == "no_capture"
+    assert ae.classify_synth_file_embody(200000, 900.0, 0.5, 13, True, **full) == "no_capture"   # at floor
+    assert ae.classify_synth_file_embody(200000, 900.0, 0.49, 13, True, **full) == "mismatch"    # collapsed
+    assert ae.classify_synth_file_embody(200000, 900.0, 0.8, 13, True, **full) == "emitted"      # at intel_min
+
+
+def test_synth_file_5plus_degrade_is_gated_on_duration_confirmation():
+    # The no_capture degrade fires ONLY when timing confirms full-length. Otherwise mismatch —
+    # conservative: never relabel a possibly-truncated clip as a benign no_capture.
+    mid = 0.615  # in [degraded_floor, intel_min)
+    # timing UNKNOWN (expected_dur=0) -> can't rule out truncation -> mismatch
+    assert ae.classify_synth_file_embody(200000, 900.0, mid, 13, True) == "mismatch"
+    assert ae.classify_synth_file_embody(200000, 900.0, mid, 13, True,
+                                         synth_dur_s=4.93, expected_dur_s=0.0) == "mismatch"
+    # TRUNCATED (synth_dur < 0.5*expected) -> duration guard returns mismatch BEFORE the
+    # degrade path is reached -> never no_capture:
+    assert ae.classify_synth_file_embody(200000, 900.0, mid, 13, True,
+                                         synth_dur_s=1.0, expected_dur_s=5.25) == "mismatch"
 
 
 if __name__ == "__main__":

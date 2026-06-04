@@ -159,6 +159,11 @@ INTELLIGIBLE_MIN = 0.6   # fraction of requested words that must come back from 
 # (review #2300 MED-1, thread 92; defaults conservative pending macOS live calibration.)
 SYNTH_FILE_INTEL_MIN = 0.8   # word-recall floor for the clean synth-file channel
 SYNTH_FILE_DUR_FRAC = 0.5    # synth_dur must be >= this * expected(word_count/wpm) or it's truncated
+SYNTH_FILE_DEGRADED_FLOOR = 0.5  # 5+ words: a FULL-LENGTH clip with recall in [this, INTEL_MIN)
+                                 # is treated as STT DEGRADATION -> no_capture (honest "couldn't
+                                 # verify"), NOT a content fault -> mismatch. Below it recall has
+                                 # collapsed -> mismatch. (review #2300 follow-up / #2335 design Q;
+                                 # the long-line twin of MED-2 degraded!=fault; pending mac calibration.)
 
 _WORD_RE = re.compile(r"[a-z0-9']+")
 
@@ -190,7 +195,8 @@ def classify_intelligibility(overlap_ratio, n_ref_words, threshold=INTELLIGIBLE_
 def classify_synth_file_embody(frames, rms_val, overlap_ratio, n_ref_words, stt_available,
                                synth_dur_s=0.0, expected_dur_s=0.0,
                                rms_floor=SPEECH_RMS_FLOOR, intel_min=SYNTH_FILE_INTEL_MIN,
-                               dur_frac=SYNTH_FILE_DUR_FRAC):
+                               dur_frac=SYNTH_FILE_DUR_FRAC,
+                               degraded_floor=SYNTH_FILE_DEGRADED_FLOOR):
     """Pure: the `synth_file` channel (macOS / any host without a bus `.monitor`).
 
     The readback object is the SYNTHESIZED wav ITSELF, so an envelope-vs-itself
@@ -212,7 +218,13 @@ def classify_synth_file_embody(frames, rms_val, overlap_ratio, n_ref_words, stt_
                                         whisper-tiny is NOISY on short clips and the
                                         duration guard already caught truncation)
       1-2 words, not all recovered    -> no_capture  (STT too unreliable to assert anything)
-      else                            -> mismatch    (full-length but words did not survive)
+      5+ words, full-length,           -> no_capture  (STT DEGRADED on a long line, NOT a content
+        recall in [degraded_floor,                     fault — the long-line twin of the MED-2
+        intel_min)                                     degraded!=fault rule; degrade honestly
+                                                       instead of falsely asserting words wrong)
+      else (recall collapsed below     -> mismatch    (full-length but words did not survive, or
+        degraded_floor, or 3-4 words                   3-4 words missed >1, or timing unknown so
+        missed >1, or timing unknown)                  truncation cannot be ruled out)
     expected_dur_s<=0 disables the duration guard (unknown timing). Returns: emitted |
     silent | mismatch | no_capture — the same vocabulary the bus channels use, so
     verify_status_for / honest_attestation handle it unchanged."""
@@ -237,7 +249,20 @@ def classify_synth_file_embody(frames, rms_val, overlap_ratio, n_ref_words, stt_
         # 3-4 words: tolerate ONE STT miss (>= n-1 words back) -> emitted; else mismatch.
         return "emitted" if hits >= n_ref_words - 1 else "mismatch"
     # 5+ words: STT noise averages out -> require the clean-channel recall floor.
-    return "emitted" if overlap_ratio >= intel_min else "mismatch"
+    if overlap_ratio >= intel_min:
+        return "emitted"
+    # Below the floor. The duration guard above already rejected truncation WHEN TIMING IS
+    # KNOWN, so low recall on a confirmed full-length long line is far more likely STT
+    # DEGRADATION (tiny-whisper accumulates errors across many words) than a synth content
+    # fault. Asserting `mismatch` ("words came out wrong") there is the long-line twin of the
+    # MED-2 degraded!=fault error. Degrade to `no_capture` (honest "couldn't verify") only when
+    # (a) timing CONFIRMS a full-length render AND (b) recall is merely degraded, not collapsed.
+    # Otherwise `mismatch`: recall collapsed below degraded_floor (too low even for STT noise),
+    # or timing is unknown (cannot rule out truncation). (#2300 follow-up / #2335 design Q.)
+    duration_confirmed = expected_dur_s > 0 and synth_dur_s >= dur_frac * expected_dur_s
+    if duration_confirmed and overlap_ratio >= degraded_floor:
+        return "no_capture"
+    return "mismatch"
 
 
 # --- voice-policy v0 decision (LCC-V1, the companion voice adapter) --------------
