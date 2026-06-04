@@ -7,10 +7,12 @@
 //! Steady-state algorithm (idempotent):
 //!   1. `git pull --rebase --autostash`
 //!   2. `memory_import(VersionVectorMerge)` from `<repo>/memory.jsonl`
+//!      plus `<repo>/memory_edges.jsonl` when present
 //!      (Track MS-3 — conflict-aware; concurrent same-key edits become
 //!      non-destructive conflict copies instead of a silent last-write-wins
 //!      drop; falls back to NewerWins for rows without a version vector yet)
-//!   3. `memory_export` overwriting `<repo>/memory.jsonl`
+//!   3. `memory_export` overwriting `<repo>/memory.jsonl` and
+//!      `<repo>/memory_edges.jsonl`
 //!   4. `git add` then commit + push if anything changed
 //!
 //! `agent-bridge sync init` bootstraps a fresh machine via `gh` CLI:
@@ -19,16 +21,17 @@
 //! runs an initial sync.
 
 use ab_store::{
-    default_db_path, node_id_from_name, ImportConflictPolicy, MemoryExportFilter, MemoryRecord,
-    SqliteStore, StateStore,
+    ImportConflictPolicy, MemoryExportFilter, MemoryRecord, SqliteStore, StateStore,
+    default_db_path, node_id_from_name,
 };
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const DEFAULT_REPO_NAME: &str = "agent-bridge-memory";
 const MEMORY_FILE: &str = "memory.jsonl";
+const MEMORY_EDGES_FILE: &str = "memory_edges.jsonl";
 const FORUM_FILE: &str = "forum.jsonl";
 
 /// Resolve the cross-device memory repo path.
@@ -107,21 +110,31 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
     })?;
 
     let memory_file = repo.join(MEMORY_FILE);
+    let memory_edges_file = repo.join(MEMORY_EDGES_FILE);
     let store = open_store().await?;
 
     if memory_file.exists() {
         let report = store
-            .memory_import(&memory_file, ImportConflictPolicy::VersionVectorMerge, None)
+            .memory_import(
+                &memory_file,
+                ImportConflictPolicy::VersionVectorMerge,
+                memory_edges_file
+                    .exists()
+                    .then_some(memory_edges_file.as_path()),
+            )
             .await
             .context("memory_import")?;
         if verbose {
             eprintln!(
-                "[sync] memory import: inserted={} updated={} skipped={} malformed={} conflict_copies={}",
+                "[sync] memory import: inserted={} updated={} skipped={} malformed={} conflict_copies={} edges_upserted={} edges_malformed={} edges_skipped_dangling={}",
                 report.inserted,
                 report.updated,
                 report.skipped,
                 report.malformed,
-                report.conflict_copies
+                report.conflict_copies,
+                report.edges_upserted,
+                report.edges_malformed,
+                report.edges_skipped_dangling
             );
         }
         // Surface conflicts prominently even without -v (Track MS-3): a
@@ -132,7 +145,11 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
                 "[sync] ⚠ {} conflict cop{} created — concurrent same-key edit(s) preserved \
                  (`<key>#conflict-…`, status='conflict'); resolve via dream-replay or manually.",
                 report.conflict_copies,
-                if report.conflict_copies == 1 { "y" } else { "ies" }
+                if report.conflict_copies == 1 {
+                    "y"
+                } else {
+                    "ies"
+                }
             );
         }
     }
@@ -140,7 +157,10 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
     // Forum import — natural-key dedup, append-only. Subscriptions stay local.
     let forum_file = repo.join(FORUM_FILE);
     if forum_file.exists() {
-        let freport = store.forum_import(&forum_file).await.context("forum_import")?;
+        let freport = store
+            .forum_import(&forum_file)
+            .await
+            .context("forum_import")?;
         if verbose {
             eprintln!(
                 "[sync] forum import: threads_inserted={} threads_matched={} posts_inserted={} posts_skipped={} malformed={}",
@@ -153,15 +173,18 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
         }
     }
 
-    let filter = MemoryExportFilter::default();
+    let filter = MemoryExportFilter {
+        edges_out_path: Some(memory_edges_file.clone()),
+        ..MemoryExportFilter::default()
+    };
     let result = store
         .memory_export(&filter, &memory_file)
         .await
         .context("memory_export")?;
     if verbose {
         eprintln!(
-            "[sync] memory export: memories_written={}",
-            result.memories_written
+            "[sync] memory export: memories_written={} edges_written={}",
+            result.memories_written, result.edges_written
         );
     }
 
@@ -178,10 +201,11 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
     drop(store);
 
     // Stage first so brand-new files are noticed (git diff doesn't see untracked).
-    run_git(&repo, &["add", MEMORY_FILE, FORUM_FILE]).context("git add")?;
+    run_git(&repo, &["add", MEMORY_FILE, MEMORY_EDGES_FILE, FORUM_FILE]).context("git add")?;
     let memory_changed = git_index_changed(&repo, MEMORY_FILE)?;
+    let memory_edges_changed = git_index_changed(&repo, MEMORY_EDGES_FILE)?;
     let forum_changed = git_index_changed(&repo, FORUM_FILE)?;
-    if !memory_changed && !forum_changed {
+    if !memory_changed && !memory_edges_changed && !forum_changed {
         if verbose {
             eprintln!("[sync] no changes to push.");
         }
@@ -234,9 +258,7 @@ impl Provider {
 
     fn install_hint(self) -> &'static str {
         match self {
-            Provider::Github => {
-                "Install with: brew install gh   (or see https://cli.github.com)"
-            }
+            Provider::Github => "Install with: brew install gh   (or see https://cli.github.com)",
             Provider::Gitlab => {
                 "Install with: brew install glab   (or see https://gitlab.com/gitlab-org/cli)"
             }
@@ -307,7 +329,10 @@ pub async fn run_init(repo_arg: Option<String>, provider: Provider) -> Result<()
                 .with_context(|| format!("mkdir {}", parent.display()))?;
         }
         if !forge_repo_exists(provider, &full) {
-            eprintln!("[init] creating private repo {full} on {}", provider.forge());
+            eprintln!(
+                "[init] creating private repo {full} on {}",
+                provider.forge()
+            );
             run_forge(
                 provider,
                 &[
@@ -436,8 +461,7 @@ fn load_sync_state() -> SyncState {
 fn save_sync_state(state: &SyncState) -> Result<()> {
     let path = sync_state_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("mkdir {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
     let tmp = path.with_extension("tmp");
     let body = serde_json::to_string_pretty(state).context("serialize sync_state")?;
@@ -477,9 +501,9 @@ async fn record_sync_outcome(outcome: &Result<bool>, verbose: bool) -> Result<()
 
     state.consecutive_fails = state.consecutive_fails.saturating_add(1);
     let now_unix = now_unix_secs();
-    let cooldown_ok = state
-        .last_alert_at_unix
-        .map_or(true, |last| now_unix.saturating_sub(last) >= SYNC_ALERT_COOLDOWN_SECS);
+    let cooldown_ok = state.last_alert_at_unix.map_or(true, |last| {
+        now_unix.saturating_sub(last) >= SYNC_ALERT_COOLDOWN_SECS
+    });
 
     if verbose {
         eprintln!(
@@ -1014,8 +1038,14 @@ mod tests {
     #[test]
     fn provider_explicit_passes_through() {
         // Explicit choices are returned unchanged regardless of PATH.
-        assert!(matches!(resolve_provider(Provider::Github), Provider::Github));
-        assert!(matches!(resolve_provider(Provider::Gitlab), Provider::Gitlab));
+        assert!(matches!(
+            resolve_provider(Provider::Github),
+            Provider::Github
+        ));
+        assert!(matches!(
+            resolve_provider(Provider::Gitlab),
+            Provider::Gitlab
+        ));
     }
 
     #[test]
@@ -1062,8 +1092,14 @@ mod tests {
 
     #[test]
     fn aged_nonempty_index_lock_is_stale() {
-        assert_eq!(classify_index_lock(17, 120, 120), Some(StaleLock::Aged(120)));
-        assert_eq!(classify_index_lock(17, 9_999, 120), Some(StaleLock::Aged(9_999)));
+        assert_eq!(
+            classify_index_lock(17, 120, 120),
+            Some(StaleLock::Aged(120))
+        );
+        assert_eq!(
+            classify_index_lock(17, 9_999, 120),
+            Some(StaleLock::Aged(9_999))
+        );
     }
 
     #[test]
