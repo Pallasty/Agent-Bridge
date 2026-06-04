@@ -38,7 +38,7 @@ use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::{json, Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -21639,6 +21639,488 @@ fn memory_pair_scope_relation(source: &MemoryRecord, target: &MemoryRecord) -> &
     }
 }
 
+fn memory_related_key_excluded_reason(
+    rec: &MemoryRecord,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+) -> Option<&'static str> {
+    if rec.status != "active" && !rec.status.is_empty() {
+        return Some("target_not_active");
+    }
+    if ab_store::COVERAGE_EXCLUDED_KINDS
+        .iter()
+        .any(|kind| rec.kind.eq_ignore_ascii_case(kind))
+        || memory_kind_is_any(rec, skip_kinds)
+    {
+        return Some("target_excluded_kind");
+    }
+    if memory_has_any_tag(rec, skip_tags) {
+        return Some("target_excluded_tag");
+    }
+    if let Some(scope) = requested_scope {
+        if !memory_search_scope_mode_matches(rec, scope, scope_mode) {
+            return Some("target_scope_filtered");
+        }
+    }
+    None
+}
+
+fn memory_related_key_preview(rec: &MemoryRecord, preview_chars: usize) -> String {
+    let (preview, _, _) = truncate_chars(&rec.content, preview_chars);
+    preview.replace('\n', " ").replace('\r', " ")
+}
+
+fn memory_related_add_bucket(
+    pair_counts: &mut BTreeMap<String, u64>,
+    source_counts: &mut BTreeMap<String, HashSet<String>>,
+    bucket: &str,
+    source_key: &str,
+) {
+    *pair_counts.entry(bucket.to_string()).or_default() += 1;
+    source_counts
+        .entry(bucket.to_string())
+        .or_default()
+        .insert(source_key.to_string());
+}
+
+fn memory_related_counter_rows(
+    counts: &HashMap<String, u64>,
+    field_name: &str,
+    count_name: &str,
+    limit: usize,
+) -> Vec<Value> {
+    let mut rows: Vec<(&String, &u64)> = counts.iter().collect();
+    rows.sort_by(|(ka, ca), (kb, cb)| cb.cmp(ca).then_with(|| ka.cmp(kb)));
+    rows.truncate(limit);
+    rows.into_iter()
+        .map(|(key, count)| json!({ field_name: key, count_name: count }))
+        .collect()
+}
+
+fn memory_related_key_count_rows(
+    counts: &HashMap<String, u64>,
+    by_key: &HashMap<&str, &MemoryRecord>,
+    count_name: &str,
+    limit: usize,
+) -> Vec<Value> {
+    let mut rows: Vec<(&String, &u64)> = counts.iter().collect();
+    rows.sort_by(|(ka, ca), (kb, cb)| cb.cmp(ca).then_with(|| ka.cmp(kb)));
+    rows.truncate(limit);
+    rows.into_iter()
+        .map(|(key, count)| {
+            let rec = by_key.get(key.as_str()).copied();
+            json!({
+                "key": key,
+                "kind": rec.map(|r| r.kind.as_str()).unwrap_or(""),
+                "scope": rec.and_then(|r| r.scope.as_deref()),
+                count_name: count,
+            })
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn memory_related_keys_preflight_from_records(
+    all: &[MemoryRecord],
+    edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    require_scope_compatible: bool,
+    dedupe_undirected_pairs: bool,
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+    max_pairs: usize,
+    preview_chars: usize,
+) -> Value {
+    let by_key: HashMap<&str, &MemoryRecord> =
+        all.iter().map(|rec| (rec.key.as_str(), rec)).collect();
+    let visible_records: Vec<&MemoryRecord> = all
+        .iter()
+        .filter(|rec| {
+            memory_graph_topology_record_visible(
+                rec,
+                requested_scope,
+                scope_mode,
+                skip_tags,
+                skip_kinds,
+            )
+        })
+        .collect();
+    let visible_keys: HashSet<String> = visible_records.iter().map(|rec| rec.key.clone()).collect();
+
+    let mut existing_pairs: HashSet<(String, String)> = HashSet::new();
+    let mut keys_with_edges: HashSet<String> = HashSet::new();
+    for rec in &visible_records {
+        let Some(edges) = edges_by_key.get(&rec.key) else {
+            continue;
+        };
+        for edge in edges {
+            let other = if edge.from_key == rec.key {
+                &edge.to_key
+            } else if edge.to_key == rec.key {
+                &edge.from_key
+            } else {
+                continue;
+            };
+            if !visible_keys.contains(other) {
+                continue;
+            }
+            existing_pairs.insert(undirected_memory_pair_key(&rec.key, other));
+            keys_with_edges.insert(rec.key.clone());
+            keys_with_edges.insert(other.clone());
+        }
+    }
+
+    let current_orphans: HashSet<String> = visible_keys
+        .iter()
+        .filter(|key| !keys_with_edges.contains(*key))
+        .cloned()
+        .collect();
+    let mut bucket_pair_counts: BTreeMap<String, u64> = BTreeMap::new();
+    let mut bucket_source_counts: BTreeMap<String, HashSet<String>> = BTreeMap::new();
+    let mut candidate_pairs_seen: HashSet<(String, String)> = HashSet::new();
+    let mut candidate_sources: HashSet<String> = HashSet::new();
+    let mut candidate_targets: HashSet<String> = HashSet::new();
+    let mut candidate_touched_orphans: HashSet<String> = HashSet::new();
+    let mut source_counts: HashMap<String, u64> = HashMap::new();
+    let mut target_counts: HashMap<String, u64> = HashMap::new();
+    let mut kind_pair_counts: HashMap<String, u64> = HashMap::new();
+    let mut scope_pair_counts: HashMap<String, u64> = HashMap::new();
+    let mut samples: Vec<Value> = Vec::new();
+
+    for source in &visible_records {
+        for raw_target in &source.related_keys {
+            let target_key = raw_target.trim();
+            if target_key.is_empty() {
+                continue;
+            }
+            let Some(target) = by_key.get(target_key).copied() else {
+                memory_related_add_bucket(
+                    &mut bucket_pair_counts,
+                    &mut bucket_source_counts,
+                    "target_missing",
+                    &source.key,
+                );
+                continue;
+            };
+            if let Some(reason) = memory_related_key_excluded_reason(
+                target,
+                skip_tags,
+                skip_kinds,
+                requested_scope,
+                scope_mode,
+            ) {
+                memory_related_add_bucket(
+                    &mut bucket_pair_counts,
+                    &mut bucket_source_counts,
+                    reason,
+                    &source.key,
+                );
+                continue;
+            }
+            if !memory_scopes_compatible(source, target, require_scope_compatible) {
+                memory_related_add_bucket(
+                    &mut bucket_pair_counts,
+                    &mut bucket_source_counts,
+                    "cross_scope",
+                    &source.key,
+                );
+                continue;
+            }
+            let undirected_pair = undirected_memory_pair_key(&source.key, &target.key);
+            if existing_pairs.contains(&undirected_pair) {
+                memory_related_add_bucket(
+                    &mut bucket_pair_counts,
+                    &mut bucket_source_counts,
+                    "already_has_edge",
+                    &source.key,
+                );
+                continue;
+            }
+            let candidate_pair = if dedupe_undirected_pairs {
+                undirected_pair
+            } else {
+                (source.key.clone(), target.key.clone())
+            };
+            if !candidate_pairs_seen.insert(candidate_pair) {
+                memory_related_add_bucket(
+                    &mut bucket_pair_counts,
+                    &mut bucket_source_counts,
+                    "duplicate_candidate",
+                    &source.key,
+                );
+                continue;
+            }
+
+            memory_related_add_bucket(
+                &mut bucket_pair_counts,
+                &mut bucket_source_counts,
+                "safe_candidate",
+                &source.key,
+            );
+            candidate_sources.insert(source.key.clone());
+            candidate_targets.insert(target.key.clone());
+            if current_orphans.contains(&source.key) {
+                candidate_touched_orphans.insert(source.key.clone());
+            }
+            if current_orphans.contains(&target.key) {
+                candidate_touched_orphans.insert(target.key.clone());
+            }
+            *source_counts.entry(source.key.clone()).or_default() += 1;
+            *target_counts.entry(target.key.clone()).or_default() += 1;
+            *kind_pair_counts
+                .entry(format!("{} -> {}", source.kind, target.kind))
+                .or_default() += 1;
+            let from_scope = memory_scope_value(source).unwrap_or("<global>");
+            let to_scope = memory_scope_value(target).unwrap_or("<global>");
+            *scope_pair_counts
+                .entry(format!("{from_scope} -> {to_scope}"))
+                .or_default() += 1;
+
+            if samples.len() < max_pairs {
+                samples.push(json!({
+                    "from_key": source.key,
+                    "to_key": target.key,
+                    "kind_pair": format!("{} -> {}", source.kind, target.kind),
+                    "scope_relation": memory_pair_scope_relation(source, target),
+                    "from_scope": source.scope,
+                    "to_scope": target.scope,
+                    "from_preview": memory_related_key_preview(source, preview_chars),
+                    "to_preview": memory_related_key_preview(target, preview_chars),
+                }));
+            }
+        }
+    }
+
+    let current_orphan_count = current_orphans.len() as u64;
+    let projected_orphans =
+        current_orphan_count.saturating_sub(candidate_touched_orphans.len() as u64);
+    let bucket_counts: Vec<Value> = bucket_pair_counts
+        .iter()
+        .map(|(bucket, pairs)| {
+            json!({
+                "bucket": bucket,
+                "pairs": pairs,
+                "sources": bucket_source_counts
+                    .get(bucket)
+                    .map(|sources| sources.len())
+                    .unwrap_or(0),
+            })
+        })
+        .collect();
+
+    json!({
+        "read_only": true,
+        "filters": {
+            "skip_tags": skip_tags,
+            "skip_kinds": skip_kinds,
+            "require_scope_compatible": require_scope_compatible,
+            "dedupe_undirected_pairs": dedupe_undirected_pairs,
+            "scope": requested_scope,
+            "scope_mode": scope_mode.label(),
+        },
+        "visible_total": visible_keys.len(),
+        "current_edge_pairs": existing_pairs.len(),
+        "current_orphans": current_orphan_count,
+        "candidate_pairs": bucket_pair_counts.get("safe_candidate").copied().unwrap_or(0),
+        "candidate_sources": candidate_sources.len(),
+        "candidate_targets": candidate_targets.len(),
+        "orphan_candidate_nodes": candidate_touched_orphans.len(),
+        "projected_orphans_after_candidates": projected_orphans,
+        "orphans_reduced": current_orphan_count.saturating_sub(projected_orphans),
+        "bucket_counts": bucket_counts,
+        "top_sources": memory_related_key_count_rows(&source_counts, &by_key, "outbound_candidates", 12),
+        "top_targets": memory_related_key_count_rows(&target_counts, &by_key, "inbound_candidates", 12),
+        "kind_pairs": memory_related_counter_rows(&kind_pair_counts, "kind_pair", "pairs", 12),
+        "scope_pairs": memory_related_counter_rows(&scope_pair_counts, "scope_pair", "pairs", 12),
+        "sample_pairs": samples,
+        "next_step": "Review bucket_counts and sample_pairs. If quality is acceptable, add a separate write-capable materialization path with dry_run=true by default and capped batch size; do not write edges from this preflight tool.",
+    })
+}
+
+// ===========================================================================
+//          memory_related_keys_preflight (read-only explicit-link projection)
+// ===========================================================================
+
+/// Read-only projection of explicit `related_keys` into graph hygiene metrics.
+///
+/// This intentionally does not infer relationships from content and does not
+/// write `memory_edges`. It answers whether the author-supplied hyperlink field
+/// can safely repair graph sparsity before a separate, capped materializer is
+/// considered.
+pub struct MemoryRelatedKeysPreflightTool {
+    hub: Hub,
+}
+impl MemoryRelatedKeysPreflightTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryRelatedKeysPreflightTool {
+    fn name(&self) -> &'static str {
+        "memory_related_keys_preflight"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only preflight for materializing explicit memory `related_keys` \
+                into graph edges. Reports safe candidate pairs, filtered buckets, orphan \
+                reduction, top source/target counts, and samples. Does not write memory_edges. \
+                Use before any related_keys backfill or PageRank-like centrality experiment."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "skip_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["auto_curated", "alert", "ttl:7d"],
+                        "description": "Source and target rows with these tags are excluded from safe candidates."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["alert", "work_memory", "session_handoff", "snapshot"],
+                        "description": "Source and target rows with these memory kinds are excluded. Coverage-excluded kinds such as skill and present_outcome are always omitted from the durable graph denominator."
+                    },
+                    "require_scope_compatible": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, concrete non-global scopes must match. Global/unscoped rows remain compatible."
+                    },
+                    "dedupe_undirected_pairs": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, A->B and B->A related_keys count as one candidate pair for relates-style graph hygiene."
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional memory scope, e.g. project:/abs/path or domain:rust."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only",
+                        "description": "When scope is set: local_only keeps matching rows; local_plus_global also includes global/unscoped rows; exploratory scans all rows."
+                    },
+                    "max_records": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 50000,
+                        "default": 10000,
+                        "description": "Maximum memory records loaded for analysis."
+                    },
+                    "max_pairs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "default": 12,
+                        "description": "Maximum safe candidate sample pairs returned."
+                    },
+                    "preview_chars": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000,
+                        "default": 160,
+                        "description": "Content preview length for sampled pairs."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let skip_tags =
+            memory_string_array_arg(&args, "skip_tags", &["auto_curated", "alert", "ttl:7d"]);
+        let skip_kinds = memory_string_array_arg(
+            &args,
+            "skip_kinds",
+            &["alert", "work_memory", "session_handoff", "snapshot"],
+        );
+        let require_scope_compatible = args
+            .get("require_scope_compatible")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let dedupe_undirected_pairs = args
+            .get("dedupe_undirected_pairs")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let requested_scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            false,
+        );
+        let max_records = args
+            .get("max_records")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10_000)
+            .clamp(100, 50_000) as usize;
+        let max_pairs = args
+            .get("max_pairs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(12)
+            .min(100) as usize;
+        let preview_chars = args
+            .get("preview_chars")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(160)
+            .min(1000) as usize;
+
+        let all = store
+            .list_memories(None, MemoryListSort::Recent, max_records as u32)
+            .await
+            .unwrap_or_default();
+        let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+        for rec in &all {
+            if !memory_graph_topology_record_visible(
+                rec,
+                requested_scope,
+                scope_mode,
+                &skip_tags,
+                &skip_kinds,
+            ) {
+                continue;
+            }
+            if let Ok(edges) = store.memory_neighbors(&rec.key).await {
+                edges_by_key.insert(rec.key.clone(), edges);
+            }
+        }
+
+        let mut result = memory_related_keys_preflight_from_records(
+            &all,
+            &edges_by_key,
+            &skip_tags,
+            &skip_kinds,
+            require_scope_compatible,
+            dedupe_undirected_pairs,
+            requested_scope,
+            scope_mode,
+            max_pairs,
+            preview_chars,
+        );
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("loaded_records".into(), json!(all.len()));
+            obj.insert("max_records".into(), json!(max_records));
+            obj.insert("max_pairs".into(), json!(max_pairs));
+            obj.insert("preview_chars".into(), json!(preview_chars));
+        }
+        Ok(ToolResult::json_text(&result))
+    }
+}
+
 // ===========================================================================
 //          memory_orphan_candidates (read-only graph hygiene preflight)
 // ===========================================================================
@@ -27269,6 +27751,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Search-ranking diagnostics: read-only graph topology preflight for
     // PageRank-like centrality experiments.
     "memory_graph_topology",
+    // Explicit-link diagnostics: read-only projection of related_keys into
+    // candidate graph edges before any write-capable backfill is considered.
+    "memory_related_keys_preflight",
     // Graph-hygiene diagnostics: read-only orphan candidate preview. The
     // write-capable memory_link_orphans tool stays out of codex-essential.
     "memory_orphan_candidates",
@@ -29461,6 +29946,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MemorySuggestTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryRelatedKeysPreflightTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -32351,6 +32842,142 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         }
     }
 
+    fn bucket_pairs(got: &Value, bucket: &str) -> u64 {
+        got["bucket_counts"]
+            .as_array()
+            .and_then(|rows| {
+                rows.iter()
+                    .find(|row| row["bucket"].as_str() == Some(bucket))
+            })
+            .and_then(|row| row["pairs"].as_u64())
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn memory_related_keys_preflight_classifies_explicit_links() {
+        let mut source = mk_mem_scoped(
+            "source",
+            "decision",
+            "source content with enough detail",
+            &[],
+            Some("project:/repo"),
+        );
+        source.related_keys = vec![
+            "safe".into(),
+            "excluded_kind".into(),
+            "missing".into(),
+            "cross_scope".into(),
+            "already_linked".into(),
+            "inactive".into(),
+        ];
+        let safe = mk_mem_scoped(
+            "safe",
+            "lesson",
+            "safe content with enough detail",
+            &[],
+            Some("project:/repo"),
+        );
+        let excluded_kind = mk_mem_scoped(
+            "excluded_kind",
+            "work_memory",
+            "scratch content",
+            &[],
+            Some("project:/repo"),
+        );
+        let cross_scope = mk_mem_scoped(
+            "cross_scope",
+            "decision",
+            "other project content",
+            &[],
+            Some("project:/other"),
+        );
+        let already_linked = mk_mem_scoped(
+            "already_linked",
+            "decision",
+            "already linked content",
+            &[],
+            Some("project:/repo"),
+        );
+        let mut inactive = mk_mem_scoped(
+            "inactive",
+            "decision",
+            "inactive content",
+            &[],
+            Some("project:/repo"),
+        );
+        inactive.status = "archived".into();
+        let isolated = mk_mem_scoped(
+            "isolated",
+            "decision",
+            "isolated content",
+            &[],
+            Some("project:/repo"),
+        );
+        let all = vec![
+            source,
+            safe,
+            excluded_kind,
+            cross_scope,
+            already_linked,
+            inactive,
+            isolated,
+        ];
+        let mut edges_by_key = HashMap::new();
+        edges_by_key.insert(
+            "source".to_string(),
+            vec![mk_edge("source", "already_linked", "relates")],
+        );
+        let got = memory_related_keys_preflight_from_records(
+            &all,
+            &edges_by_key,
+            &[],
+            &["work_memory".to_string()],
+            true,
+            true,
+            None,
+            MemorySearchScopeMode::LocalOnly,
+            10,
+            80,
+        );
+
+        assert_eq!(got["visible_total"].as_u64(), Some(5));
+        assert_eq!(got["current_orphans"].as_u64(), Some(3));
+        assert_eq!(got["candidate_pairs"].as_u64(), Some(1));
+        assert_eq!(got["projected_orphans_after_candidates"].as_u64(), Some(2));
+        assert_eq!(bucket_pairs(&got, "safe_candidate"), 1);
+        assert_eq!(bucket_pairs(&got, "target_excluded_kind"), 1);
+        assert_eq!(bucket_pairs(&got, "target_missing"), 1);
+        assert_eq!(bucket_pairs(&got, "cross_scope"), 1);
+        assert_eq!(bucket_pairs(&got, "already_has_edge"), 1);
+        assert_eq!(bucket_pairs(&got, "target_not_active"), 1);
+    }
+
+    #[test]
+    fn memory_related_keys_preflight_dedupes_reverse_candidates_by_default() {
+        let mut a = mk_mem("a", "decision", "a content with detail", &[]);
+        a.related_keys = vec!["b".into()];
+        let mut b = mk_mem("b", "decision", "b content with detail", &[]);
+        b.related_keys = vec!["a".into()];
+        let all = vec![a, b];
+        let edges_by_key = HashMap::new();
+        let got = memory_related_keys_preflight_from_records(
+            &all,
+            &edges_by_key,
+            &[],
+            &[],
+            true,
+            true,
+            None,
+            MemorySearchScopeMode::LocalOnly,
+            10,
+            80,
+        );
+
+        assert_eq!(got["candidate_pairs"].as_u64(), Some(1));
+        assert_eq!(bucket_pairs(&got, "duplicate_candidate"), 1);
+        assert_eq!(got["projected_orphans_after_candidates"].as_u64(), Some(0));
+    }
+
     #[test]
     fn memory_search_scope_filter_is_strict_by_default() {
         let scoped = mk_mem_scoped(
@@ -34005,11 +34632,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 44 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 45 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(32: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(33: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
-        //      + memory_graph_topology + memory_orphan_candidates + memory_orphan_inventory
+        //      + memory_graph_topology + memory_related_keys_preflight
+        //      + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
         //      + browser_lite_probe
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
@@ -34018,7 +34646,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // +6 steering DIRECT extras (d4fd74d) brought DIRECT 24→30, total 36→42.
         // +desktop_verify (read-only postflight verifier) brought DIRECT 30→31, 42→43.
         // +browser_lite_probe brought DIRECT 31→32, total 43→44.
-        assert_eq!(extras.len(), 44);
+        // +memory_related_keys_preflight brought DIRECT 32→33, total 44→45.
+        assert_eq!(extras.len(), 45);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -34046,6 +34675,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"mobile_ios_apps"));
         assert!(extras.contains(&"mobile_ios_syslog_tail"));
         assert!(extras.contains(&"memory_graph_topology"));
+        assert!(extras.contains(&"memory_related_keys_preflight"));
         assert!(extras.contains(&"memory_orphan_candidates"));
         assert!(extras.contains(&"memory_orphan_inventory"));
         assert!(extras.contains(&"desktop_snapshot"));
