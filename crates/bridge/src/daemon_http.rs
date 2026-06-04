@@ -572,6 +572,7 @@ async fn presence_list(
 struct AvatarSurfaceQuery {
     project: Option<String>,
     role: Option<String>,
+    aura_io: Option<std::path::PathBuf>,
     #[serde(default = "default_max_idle")]
     max_idle_secs: i64,
     #[serde(default)]
@@ -1225,14 +1226,25 @@ async fn avatar_linux_renderer_payload(
         .and_then(|value| str_value(value, "cwd"))
         .or_else(|| raw_ref.and_then(|value| str_value(value, "cwd")));
     let scope = crate::avatar_renderer::RendererScope { project, cwd };
-    let mut payload =
-        crate::avatar_renderer::renderer_payload_from_sources(&scope, projected, raw_ref);
+    let mut payload = crate::avatar_renderer::renderer_payload_from_sources_with_aura_io_path(
+        &scope,
+        projected,
+        raw_ref,
+        q.aura_io.as_deref(),
+    )
+    .map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("invalid aura_io sidecar: {e}"),
+        )
+    })?;
     payload["input"] = json!({
         "presence_avatar_count": avatars.len(),
         "pet_id": pet_id,
         "raw_pet_state_available": raw_ref.is_some(),
         "presence_project": q.project,
         "presence_role": q.role,
+        "aura_io": q.aura_io.as_ref().map(|path| path.display().to_string()),
         "max_idle_secs": q.effective_max_idle_secs(),
     });
     Ok(payload)
@@ -1278,6 +1290,14 @@ fn avatar_linux_renderer_state_href(q: &AvatarSurfaceQuery) -> String {
     }
     if let Some(role) = q.role.as_deref() {
         append_query_param(&mut href, &mut sep, "role", role);
+    }
+    if let Some(aura_io) = q.aura_io.as_ref() {
+        append_query_param(
+            &mut href,
+            &mut sep,
+            "aura_io",
+            &aura_io.display().to_string(),
+        );
     }
     if q.include_stale {
         append_query_param(&mut href, &mut sep, "include_stale", "true");
@@ -7498,6 +7518,7 @@ mod tests {
         let q = AvatarSurfaceQuery {
             project: Some("agent-bridge".into()),
             role: None,
+            aura_io: None,
             max_idle_secs: 300,
             include_stale: true,
             limit: 999,
@@ -7519,10 +7540,37 @@ mod tests {
     }
 
     #[test]
+    fn avatar_linux_renderer_state_href_preserves_aura_io_sidecar_path() {
+        let q = AvatarSurfaceQuery {
+            project: Some("agent-bridge".into()),
+            role: Some("main".into()),
+            aura_io: Some("/tmp/a2_working_aura_io.json".into()),
+            max_idle_secs: 300,
+            include_stale: true,
+            limit: 5,
+            refresh_secs: 10,
+            stale_secs: 300,
+            include_raw_presence: false,
+            include_compat: false,
+            transparent: true,
+        };
+
+        let href = avatar_linux_renderer_state_href(&q);
+
+        assert!(href.starts_with("/avatar-surface/linux-renderer-state?"));
+        assert!(href.contains("project=agent-bridge"));
+        assert!(href.contains("role=main"));
+        assert!(href.contains("aura_io=%2Ftmp%2Fa2_working_aura_io.json"));
+        assert!(href.contains("include_stale=true"));
+        assert!(href.contains("transparent=true"));
+    }
+
+    #[test]
     fn avatar_surface_http_payload_matches_protocol_shape() {
         let q = AvatarSurfaceQuery {
             project: Some("agent-bridge".into()),
             role: Some("main".into()),
+            aura_io: None,
             max_idle_secs: 300,
             include_stale: false,
             limit: 5,
@@ -7560,6 +7608,7 @@ mod tests {
         let q = AvatarSurfaceQuery {
             project: Some("agent-bridge".into()),
             role: None,
+            aura_io: None,
             max_idle_secs: 0,
             include_stale: true,
             limit: 5,

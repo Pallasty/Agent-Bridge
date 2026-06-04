@@ -1,6 +1,7 @@
 use ab_bridge::avatar_renderer::{
-    renderer_payload_from_sources, renderer_plan_from_state, select_renderer_state,
-    validate_aura_io_manifest, validate_aura_io_sidecar_path, RendererScope, RendererSource,
+    renderer_payload_from_sources, renderer_payload_from_sources_with_aura_io_path,
+    renderer_plan_from_state, select_renderer_state, validate_aura_io_manifest,
+    validate_aura_io_sidecar_path, RendererScope, RendererSource,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -185,6 +186,45 @@ fn renderer_payload_combines_selected_state_and_plan() {
     );
     assert_eq!(payload["safety"]["codex_pet_package_mutation"], false);
     assert_eq!(payload["safety"]["emits_audio"], false);
+}
+
+#[test]
+fn renderer_payload_validates_aura_io_sidecar_when_path_is_supplied() -> Result<(), Box<dyn Error>>
+{
+    let dir = unique_temp_dir("payload-aura-io")?;
+    let aura_io_path = write_valid_aura_io_fixture(&dir)?;
+    let projected = json!({
+        "agent_avatar_protocol": 1,
+        "project": "agent-bridge",
+        "cwd": "/Data/CascadeProjects/agent-bridge",
+        "mode": "working",
+        "avatar_id": "xiao-shu-v2"
+    });
+
+    let payload = renderer_payload_from_sources_with_aura_io_path(
+        &scope(),
+        Some(&projected),
+        None,
+        Some(&aura_io_path),
+    )?;
+
+    assert_eq!(payload["aura_io"]["surface"], "lcc_aura_io_intake");
+    assert_eq!(payload["aura_io"]["ok"], true);
+    assert_eq!(payload["aura_io"]["schema_version"], "lcc.aura_io.v1");
+    assert_eq!(
+        payload["aura_io"]["renderer_input_kind"],
+        "tfe_uniform_f32x256"
+    );
+    assert_eq!(
+        payload["aura_io"]["sidecar_path"],
+        aura_io_path.display().to_string()
+    );
+    assert_eq!(payload["aura_io"]["uniform_file_sha256_matches"], true);
+    assert_eq!(payload["aura_io"]["digest_file_sha256_matches"], true);
+    assert_eq!(payload["aura_io"]["safety"]["shadow_visible_state"], false);
+
+    fs::remove_dir_all(dir)?;
+    Ok(())
 }
 
 #[test]

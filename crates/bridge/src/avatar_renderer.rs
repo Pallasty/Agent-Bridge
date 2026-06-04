@@ -370,6 +370,15 @@ pub fn renderer_payload_from_sources(
     projected_avatar: Option<&Value>,
     raw_pet: Option<&Value>,
 ) -> Value {
+    renderer_payload_from_sources_with_aura_io_report(scope, projected_avatar, raw_pet, None)
+}
+
+fn renderer_payload_from_sources_with_aura_io_report(
+    scope: &RendererScope,
+    projected_avatar: Option<&Value>,
+    raw_pet: Option<&Value>,
+    aura_io_report: Option<Value>,
+) -> Value {
     let selection = select_renderer_state(scope, projected_avatar, raw_pet);
     let plan = renderer_plan_from_state(&selection.state);
 
@@ -390,6 +399,7 @@ pub fn renderer_payload_from_sources(
             "asset_route": plan.asset_route,
             "fallback_reason": plan.fallback_reason,
         },
+        "aura_io": aura_io_report,
         "safety": {
             "sidecar_only": true,
             "writes_files": false,
@@ -400,4 +410,21 @@ pub fn renderer_payload_from_sources(
             "controls_desktop": false,
         }
     })
+}
+
+pub fn renderer_payload_from_sources_with_aura_io_path(
+    scope: &RendererScope,
+    projected_avatar: Option<&Value>,
+    raw_pet: Option<&Value>,
+    aura_io_sidecar_path: Option<&Path>,
+) -> Result<Value> {
+    let aura_io_report = aura_io_sidecar_path
+        .map(|path| validate_aura_io_sidecar_path(path, true))
+        .transpose()?;
+    Ok(renderer_payload_from_sources_with_aura_io_report(
+        scope,
+        projected_avatar,
+        raw_pet,
+        aura_io_report,
+    ))
 }
