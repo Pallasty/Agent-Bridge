@@ -3,6 +3,9 @@
 > 来源:对照 8 大设计支柱,并行扫描 57 活跃记忆 + ~50 设计文档 + forum 开放线程 + 代码 deferred 标记,99 条原始 finding → 去重 + 对 HEAD 逐条代码核验 → 归并 **51 条**。
 > 生成方式:multi-agent workflow(`tech-debt-ledger`)抽取 + 综合官裁决 + 人工亲验高优先级载荷声明。
 > **核验勘误(重要)**:本账本初稿的 #1 优先级"MCP wedge 修复未合 master"在亲验后**已作废**——见文末「核验修正」。
+>
+> **🔄 2026-06-03 晚刷新(部署 + 达成度审计后)**:owner 命「同步并重新编译部署」→ live 已推到 `03da6a6`(BuildID `180dae51`,state.db schema v33,daemon trio fresh)。随后 17-agent 达成度审计(对 live 实跑 git/strings/cargo test/sqlite 核验)。据此**本账本已对 live 刷新**:F5/M5 从真债区移入「已治本」、TD-02 残留收窄(Layer3 已部署)、D2-G1 关闭。这是消除本项目 #1 复发误判「源对 live 错」的刷新——**真债活跃数 27 → 24**(F5/M5/D2-G1 闭)。
+> **🔄 2026-06-04 续(aio2 #e43c4cc0,B+D+C 落地后对账)**:DEBT-06(`fc11815`)+ AB-DEBT-04 COORDINATION 入库(`20b0a95`)闭、C1 `CLAUDE-SIBLING.md`(GATE-3)落地 + 全部部署 live `20b0a95` → **真债 24 → 22**、已治本 9 → 11。本次提交同时救起一个并发 aio2 session 21:07 留下的未提交达成度审计刷新(孤儿 11h)。
 
 ---
 
@@ -25,38 +28,38 @@
 
 | 桶 | 计数 |
 |---|---|
-| **真债务**(is_true_debt=true) | **27** |
+| **真债务**(is_true_debt=true) | **22 活跃**(原 27;F5/M5/D2-G1/DEBT-06/AB-DEBT-04 已闭) |
 | 非债务 · 勿翻案(P6 null-path / 外部约束) | 15 |
 | 非债务 · PARKED 等触发 | 9 |
 | ⏰ 时间敏感 gate(活跃) | 4 |
-| ✅ 已治本 · 勿重开 | 6 |
+| ✅ 已治本 · 勿重开 | **11**(原 6,+F5/M5/D2-G1/DEBT-06/AB-DEBT-04) |
 
 ### 🔝 最该先动(亲验后修订)
 
 1. ~~合 MCP wedge 修复入 master~~ → **已作废:修复 `4eae961` 早已在 `origin/master`(551bb8d),live binary(01:52)已含 `AGENT_BRIDGE_MCP_CALL_DEADLINE`,运行中 server 已激活。本条 SHIPPED+DEPLOYED,非债务。**(workflow 拿陈旧本地 HEAD 比对的假象)
-2. **[high] AB stuck-task 不随 client-cancel 取消 + 线程无界累积(83→242 全 futex)** — Layer3(每 call spawn 独立 task + per-id cancel-token + blocking 池限额)有意 defer;Layer1+2 backstop 只压永久 wedge 不解线程泄漏根因。需核心循环重写。(TD-02)
+2. **[high·残留收窄] AB blocking 线程池无结构性封顶** — **Layer3(每 call spawn 独立 task + stdout 序列化 + per-id cancel-token + `notifications/cancelled` 中止)已 ship+部署**(`4284f16`/`a9f7dbe` 经 `merge-base --is-ancestor 03da6a6`=YES,在 live BuildID 180dae51)→ head-of-line 阻塞消除 + 即时 cancel 已生效。**残留真债**=`#[tokio::main]`(`main.rs:2774`)无 `max_blocking_threads` cap,实测陈旧进程仍累积到 242 线程(新鲜基线 83);Layer1+2 限时回收只压永久 wedge 不根治泄漏。修=核心 spawn_blocking 池加上限 + 高并发 stress wet-test。**最高 ROI 真债**。(TD-02)
 3. **[med·逾期] GATE-2 sibling-activation 14d gate**(deadline 06-02)— **AiOT `#e6fe8c44` owns**,depth_ratio_ema 是 AiOT 指标非 AB;AB 侧 cross-reference(P-α Day-14)已 05-29 闭合 clean。binding verdict 待 owner。
 4. ~~[med] F6 C3 s2-drop 误报族 5 个 open 线程~~ → **✅ 已闭(2026-06-03)**:6 线程(36/39/93/95/97 + thread 35 ISO)全 resolved + **aio2 daemon trio 重启到含 `119faca` 的当前 binary**(新 PID 1701482-4,c3-self-check 用守恒逻辑),告警源已断。
-5. **[med] memory-sync 真跨网两节点 wet-test 从未跑** — VersionVectorMerge stamping 靠 env 兜底,未 stamp 行回退 NewerWins(LWW data-loss 形状);唯一消除该窗口的验证未跑。
+5. **[med] memory-sync 真跨网两节点 wet-test 从未跑(达成度审计确认为最弱承重柱,87%)** — VersionVectorMerge stamping 靠 env 兜底,未 stamp 行回退 NewerWins(LWW data-loss 形状)。**审计 live 实证**:state.db 仅 2125/4910(43%)行带 version_vector stamp,57% 因默认进程 `node_id=0`(`sqlite.rs:2684` 仅 node_id!=0 才 stamp)退化 LWW;sync.log 797 行全 `inserted=0` 平凡收敛,真合并/冲突副本路径从未被 exercise。唯一消除该窗口的验证未跑。
 
 ---
 
 ## A. 真债务(按设计支柱分组,组内 severity 降序)
 
 ### 🧩 MCP 工具面 / Agent 编排 — 并发健壮性
-- **[high] stuck-task 不随 `notifications/cancelled` 取消 + blocking 线程无界累积(全 futex)** — 顺序循环卡死时连 cancel 都读不到=cancel 结构性失效。实现 Layer3=每 tools/call spawn 独立 task + stdout Mutex + req-id→cancel-token + blocking 池限额/超时回收。依赖核心循环重写。`lesson_browser_navigate_hang_dangling_singletonlock_20260602` (TD-02)
+- **[high·残留收窄] blocking 线程池无结构性封顶** — **Layer3 已 ship+部署到 live 03da6a6**(每 tools/call spawn 独立 task + stdout Mutex + req-id→cancel-token + `notifications/cancelled` 中止;`4284f16`/`a9f7dbe` 是 03da6a6 祖先)→ 顺序循环 head-of-line 阻塞 + cancel 结构性失效**已解**。**残留真债**=`main.rs:2774` `#[tokio::main]` 无 `max_blocking_threads` cap,陈旧进程仍累积(实测 242 线程 vs 83 基线);Layer1+2 限时回收只压永久 wedge。修=spawn_blocking 池加上限 + 高并发 stress wet-test。`lesson_browser_navigate_hang_dangling_singletonlock_20260602` (TD-02)
 - **[med] 部署 binary 是否含 SingletonLock 清理待验** — 代码 `chromium_cdp.rs:265` 已无条件 `remove_file`(已治本),仅"部署 binary 含此修"待体检 + 可选 `AGENT_BRIDGE_HEADLESS=1` 默认。(TD-04)
 - **[资讯] MCP wedge Layer1+2(deadline + browser launch/connect timeout)** — **已 ship `4eae961` + 已 deployed**。非债务,记录闭环。
 
 ### 🔄 跨节点同步
 - **[med] memory-sync 真跨网两节点 wet-test 从未跑** — 仅单机模拟绿。Mac 先 install.sh+重建 .real,跑 Runbook Test A(异 key 干净合并)+ Test B(并发同 key 必留双版本+恰 1 冲突副本+零丢失)。`project_memory_sync_version_vector_track_2026_05_24` (MS-1)
 - **[med] VersionVectorMerge stamping 靠 `AB_SYNC_NODE` env 兜底,未 stamp 行回退 NewerWins(LWW data-loss 形状)** — 确认所有写路径经 node_id stamp;wet-test 后把 stamping 改成 store 内在不变量。(MS-2)
-- **[med] D2-G1 跨机 forum 同步 17-post 缺口,仅 peer-query 在线兜底** — `main.rs:12049` status=VIOLATED。修 forum store-and-forward 收敛,或确认 Track MS 覆盖 forum 表后关 G1。(DEBT-01)
+- **[✅ DEBT-01 已闭(2026-06-03)] D2-G1 跨机 forum 同步缺口** — `03da6a6` `docs(gap-audit): D2-G1 closed — cross-machine forum sync is durable, not a gap`:forum 表走与 memory 同一 SQLite-record-truth + JSONL-transport + 双 forge 同步管线,非缺口。原 `main.rs:12049` VIOLATED 是陈旧 peer-query-only 视角的产物。**非债务**,记录闭环。(DEBT-01 RESOLVED)
 - **[low]** memory_import 不 stamp embedding_backend → M6 stale~60% 永报(标签产物,语义搜索不受影响)(TD-05) / 冲突副本合并回 canonical 无自动化(MS-4) / Phase 2 MS-4 index-diff、MS-5 staggered 未实现(MS-3) / forge Mac Pro 待切 multi-push + github fallback 待移除(06-08 review)(FORGE-1)
 
 ### 🧠 记忆/substrate
-- **[med] memory_decay_importance 复合衰减把耐久记忆压到阈下,importance 虚低污染排序** — `sqlite.rs:4484-4487` 注释自承 thread 97 collateral root cause(每次调用重乘 0.5^(age/hl) 且不 bump updated_at)。改为基于原始 importance + 绝对 age 单次计算。(F5)
-- **[med] M5 edge-coverage 须排除 kind=skill(catalog 污染分母)+ memory_edges 无 ON DELETE CASCADE 致悬空边** — M5 暴跌 0.0346→0.006 是测量假象。修 M5 定义 + 加 CASCADE。`lesson_substrate_stock_metrics_confounded_by_skill_catalog_20260529` (TD-06)
+- **[✅ F5 已治本+部署(2026-06-03)] memory_decay_importance 复合衰减** — 修法=加节点本地列 `last_decayed_at`(**schema v33** migration,不进 sync),decay 锚 `COALESCE(last_decayed_at,updated_at)` 每 pass 推进到 now → 同瞬间二次调用 no-op,墙钟几何衰减仍正确;**刻意不 bump updated_at**(避污染 ζ-19/M5/M7/sync recency)。合 master `9b55388` → 部署 live `03da6a6`(BuildID 180dae51,`last_decayed_at` 哨兵×5,state.db v33、4910/4910 行回填)。新测 `decay_importance_does_not_compound_on_repeated_calls`,322 测全绿。**非债务,见「已治本」。**(F5 RESOLVED)
+- **[✅ TD-06/M5 已治本+部署(2026-06-03)] M5 edge-coverage skill 污染 + 悬空边** — 修法=纯 query 层:分母分子排 `kind='skill'` + 分子要求边两端 active-non-skill(live edge)。**刻意不加 ON DELETE CASCADE**:memory_edges 是 FK-free 的有意 soft-pointer/museum 设计(`sqlite.rs:7360` 注释),悬空边走 query-time 排除;CASCADE 实加在 memory_coactivation(:544)。合 master `a2d2300` → 部署 live `03da6a6`。新测 `substrate_audit_m5_excludes_skill_and_dangling_edges`。**非债务,见「已治本」。**(TD-06 RESOLVED)
 - **[low]** P4b.2 源记忆 tag/content 重写推迟(`mcp_tools.rs:12046`)(DEBT-02) / M7 age-gate 未 ship(已自愈,nice-to-have)(TD-07) / theme_cos 后续 prompt 再注入 backlog 未建(AB-DEBT-09)
 
 ### 🤖 Agent 编排与具身
@@ -70,7 +73,7 @@
 - **[low]** vision_grounding_ocr 硬化已 ship 但 MCP 新参未 live 验证(VIS-1) / 确定性 OCR cage 测试难做(VIS-2) / Qt a11y 路径整体 untested(AB-DEBT-12)
 
 ### 📊 可观测性与自演化
-- **[low] gap 表 C2/C3 注释陈旧:标 `defer #7a37d28e` 但 `context_pressure_estimate`/`tool_call_attention_report` 已是注册工具** — `main.rs:12022/12031` 规约-实现漂移,会误导"还没建"。改 status=Closed/Shipped 防 narrative-shopping。(DEBT-06)
+- **[✅ DEBT-06 已闭+部署 2026-06-04 `fc11815`] gap 表 C2/C3 注释陈旧** — `main.rs:12080/12089`(初稿误记 12022/12031)的 C2/C3 GapEntry 标 `defer #7a37d28e` 但 `context_pressure_estimate`(`38517f1`)/`tool_call_attention_report`(`6ad5959` "L6 v0 fully closed")早是注册工具 → `Planned→Closed` + observability-only note,GapStatus 加 `#[allow(dead_code)]`。已进 live `20b0a95`。**见「已治本」。**(DEBT-06 RESOLVED)
 - **[low]** Replay `--seed` 形参保留但无效(等上游 AiOT seeded 接线)(DEBT-05) / A1/B1/B3 recall-timing v0 待 sibling cross-check(AB-DEBT-10) / Avatar 协议长会话非-Codex dogfood pending(AB-DEBT-08) / event-spine 10 轨只 ship 2 轨(AB-DEBT-05) / avatar 透明仅 wlroots 验证,GNOME/KDE/X11 alpha 未验(owner 用 sway 不阻塞)(DEBT-10)
 
 ### 🏗️ 协作协议 / 基础设施脆弱性
@@ -78,7 +81,7 @@
 - **[med] /Data /Programs /Media 在 ntfs-3g fuseblk,重 CPU 负载下 D-state wedge** — state.db 在 /home ext4 不受影响。治本=热路径迁原生 ext4/xfs。`lesson_data_partition_ntfs3g_fuseblk_dstate_under_load_20260602` (TD-15)
 - **[med] aio2 kernel vmap lock 争用 soft-hang** — 主源 AiOT daemon 已 P6 停用,26.04+内核7.0 是治本赌注(需累积 uptime 复核)。`lesson_kernel_vmap_softhang_2026_05_19` (TD-16)
 - **[med] deploy 后跑的 binary 非 deploy 的那个(wrapper 被 ELF 覆盖→.real 孤儿+SVD env 丢)** — 部署后必 `file ~/.local/bin/agent-bridge` 确认是 shell script。`lesson_wrapper_clobbered_orphans_real_deploys_2026_05_23` (TD-11)
-- **[med] `COORDINATION_STATE_MACHINE_LAYER.md` untracked(owner 选不提交)** — 知识仅活在 untracked 文件+MEMORY.md,节点重装有丢失风险。确认 owner 意图:保留则 `git add`,有意不提交则显式标"不入库"。(AB-DEBT-04)
+- **[✅ AB-DEBT-04 已闭 2026-06-04 `20b0a95`] `COORDINATION_STATE_MACHINE_LAYER.md` 已提交入库** — 此前只在 aio2 untracked,经核 **Mac 树 0 命中=一次重装即丢的损失风险实锤** → owner 授权后 `git add` 提交(PARKED 头不变,仅保全)。**见「已治本」。**(AB-DEBT-04 RESOLVED)
 - **[low]** cargo incremental 漏更(部署前验特征串,HC-3) / stash pop 静默部分还原(改用独立 worktree clean-build,TD-12) / 升级前 fstab nofail + DM fallback(已沉淀硬规则,TD-18)
 
 ---
@@ -108,7 +111,7 @@
 | **06-02**(逾期1天) | sibling-activation 14d observability | **AiOT `#e6fe8c44`** | binding verdict 待 owner;**AB cross-reference(P-α Day-14)已 05-29 闭 clean** | depth_ratio_ema 是 AiOT 指标非 AB;AB 不越权裁决,verdict 去 AiOT 侧确认 (GATE-2) |
 | **06-08** | forge migration 30d review | AB/Mac Pro | OPEN | 确认 Mac Pro 已切 multi-push;稳定则移除 github fallback (FORGE-1) |
 | **06-10** | P-ε Day-28 P1..3 复审 | AB | OPEN(prep 已做) | fresh substrate_audit,M5 必排除 kind=skill;P3 预标 CONFOUNDED(0.022 仍<<0.20) (PE-1) |
-| **06-11** | Collab Protocol v0(C1/C2/C3) | AB | OPEN | C2/C3 已 ship;**C1 `CLAUDE-SIBLING.md` 未落地**(~ 与 repo 根均无)→ 反算 baseline 出裁决 (GATE-3) |
+| **06-11** | Collab Protocol v0(C1/C2/C3) | AB | **C1 已落地,待复审** | C2/C3 已 ship;**C1 `CLAUDE-SIBLING.md` 已落地 `20b0a95`**(repo 根 + `~`symlink 跨 repo SSOT,forum thread 10 #2308)→ GATE-3「C1 未落地」满足,06-11 复审 P1/P2/P3 (GATE-3) |
 | **06-15** | §7 strategic decoupling park-deadline | AB | OPEN | 验 `dream weekly` 是否 autonomous 跑出;看 AiOT 是否给 L2-readiness 信号 (GATE-4) |
 
 > **已闭勿误当 open**:GATE-5 Day-14 P-α(CLOSED 05-29,3/4 HELD)/ GATE-6 #1787 决策窗(RESOLVED 05-29 回落 A1+PARK)。
@@ -123,6 +126,13 @@
 - sync fallback 不修 branch divergence → `sync.rs` 已加 `reset --hard origin` + alert + reaper
 - chrome 悬空 SingletonLock `exists()` 失效 → `chromium_cdp.rs:265` 无条件 `remove_file`
 - **MCP wedge(deadline + browser timeout)→ `4eae961` 已合 origin/master(551bb8d)+ live binary 已部署(01:52)+ 运行中 server 已激活**(本账本初稿误标"未合",亲验勘误)
+- **MCP Layer3 并发调度 + cancel → `4284f16`/`a9f7dbe` 已合 master + 部署 live `03da6a6`**(head-of-line 阻塞消除 + per-id `notifications/cancelled` 中止;残留=blocking 池无 cap,见 TD-02)
+- **F5 decay 复合衰减 → `9b55388`(schema v33 `last_decayed_at` 增量锚)已合 master + 部署 live `03da6a6`**(state.db v33、4910/4910 行回填,322 测绿;2026-06-03 晚)
+- **TD-06/M5 edge-coverage skill 污染 → `a2d2300`(query 层排 kind=skill + live-edge)已合 master + 部署 live `03da6a6`**(刻意不加 CASCADE,守 FK-free museum 设计)
+- **D2-G1 跨机 forum 同步 → `03da6a6` gap-audit 关闭**:forum 走与 memory 同一 SQLite-truth+JSONL+双 forge 管线,durable-not-gap
+- **DEBT-06 gap 表 C2/C3 陈旧注释 → `fc11815` `Planned→Closed`**(probes 早 ship `6ad5959`/`38517f1`,GapStatus `#[allow(dead_code)]`)已合 master + 部署 live `20b0a95`(2026-06-04)
+- **AB-DEBT-04 COORDINATION_STATE_MACHINE_LAYER.md → `20b0a95` 提交入库**(防 untracked 重装丢失,PARKED 头不变;2026-06-04)
+- **C1 `CLAUDE-SIBLING.md`(Collab Protocol v0)→ `20b0a95` 落地**(跨 repo SSOT,repo 根 + `~`symlink;GATE-3 满足待 06-11 复审;forum thread 10 #2308;2026-06-04)
 
 ---
 
@@ -131,6 +141,6 @@
 - **#1 优先级作废**:workflow 综合官标"MCP wedge 修复未合 master(HEAD 9fff602 无 mcp_call_deadline)"。亲验:`origin/master=551bb8d`,`merge-base --is-ancestor 4eae961 origin/master`=YES,live binary 含 `AGENT_BRIDGE_MCP_CALL_DEADLINE ×2`,运行中 server(PID 1125005,02:00 启动)执行非-`(deleted)` 新 binary。**根因=综合官拿陈旧本地 HEAD(落后 origin/master 4 commit)比对**。教训:跨多 lane 高速 ship 期,"未合"判断必须对 `origin/master` 而非本地 checkout。
 - **GATE-2 归属修正**:rollback 目标 `dd40fd3/2d4e5b6/c3b28a2` 在 agent-bridge 仓全 MISSING(是 AiOT 仓 commit);depth_ratio_ema 是 AiOT 认知 daemon 指标。**agent-bridge 是 cross-reference 观测方,不是裁决方**,不得单方面 `git revert` 或判 VALIDATE/OBSERVE/ROLLBACK。
 - TD-04 SingletonLock 清理代码已修(`chromium_cdp.rs:265` 无条件 `remove_file`),非 `exists()`。
-- DEBT-06(gap 表 C2/C3 陈旧注释)确证为真。
-- AB-DEBT-04(COORDINATION_STATE_MACHINE_LAYER.md untracked)确证为真。
+- DEBT-06(gap 表 C2/C3 陈旧注释)确证为真 → **2026-06-04 已闭+部署 `fc11815`**(L6 v0 probes 早 ship)。
+- AB-DEBT-04(COORDINATION_STATE_MACHINE_LAYER.md untracked)确证为真 → **2026-06-04 已提交入库 `20b0a95`**(Mac 树 0 命中证实损失风险)。
 - F5(decay 复合衰减)代码注释 `sqlite.rs:4484-4487` 自承,确证为真。
