@@ -8,6 +8,33 @@
 
 ---
 
+## 0 · Reconciliation refresh — 2026-06-04
+
+> **The v0 audit below was point-in-time for 2026-05-16. The live gap ledger
+> (`current_gap_baseline()` in `crates/bridge/src/main.rs`) has since been
+> reconciled-to-live and now records 9 closed. The original 2026-05-16 findings
+> are preserved unchanged below for history.**
+
+**Reconciled tally (live, 2026-06-04)** — 13 gaps:
+
+- ✅ **closed: 9** — A3, B2, **C2, C3**, D1, **D2**, D3, E1, E2
+- 🛑 shelved: 1 — C1 (3/3 FALSIFIED; §6.5 rule 3 shelve → raw observability)
+- ⚪ untouched: 3 — A1, B1, B3 (def working; no ship attempted)
+- ⚠ partial: 0 · ⏳ planned: 0
+
+**Transitions since the 2026-05-16 tally** (4 → 6 → 9 closed):
+
+- **C2 Planned→Closed** — `tool_call_attention_report` MCP probe shipped (`6ad5959`, "L6 v0 fully closed"); observability-only per L6 charter (proposals never auto-applied).
+- **C3 Planned→Closed** — `context_pressure_estimate` MCP probe shipped (`38517f1`; honest 1M-window override `2c6e76b`); observability-only.
+- **D2 Partial→Closed** — durable cross-machine forum+memory git-sync wired into `agent-bridge sync` (`fc11815` / `03da6a6` / `7862049` reconcile-to-live `20b0a95`); verified live 2026-06-03 (mac + aio2 sync logs converge, `conflict_copies=0`). The old "17-post sync gap / peer-query workaround" (§TL;DR + §5 below) is closed; peer-query now only serves real-time reads between 15-min syncs.
+- **D1, D3 implicit→Closed** — closed via the L8 Collab-Protocol C3 self-check set (audit-layer mapping); these were the "revised tally" promotions that first moved closed 4→6.
+
+C1 stays **shelved** (not closed): the Option E reframe noted in §1/§TL;DR was also falsified (3/3 total), shipped as raw observability per §6.5 rule 3.
+
+This refresh is pinned by `gap_audit_2026_05_16_snapshot_matches_audit_doc` (`main.rs`), which now asserts the reconciled **9 / 1 / 0 / 0 / 3** distribution — so a future silent edit to the constants re-breaks the test until the next audit refresh records it (the guard's intent).
+
+---
+
 ## TL;DR
 
 - **3 v0 milestones closed during my 20h autonomous window** (sibling-shipped): C3 v0 + L5 v0 + L7 v0.

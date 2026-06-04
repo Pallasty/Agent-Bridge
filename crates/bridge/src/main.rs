@@ -13922,19 +13922,30 @@ mod tests {
 
     #[test]
     fn gap_audit_2026_05_16_snapshot_matches_audit_doc() {
-        // Pin the snapshot constants against the published monthly audit
-        // (commit 1b62e0d) so a future edit to the constants doesn't
-        // silently drift from the doc without a corresponding audit refresh.
+        // Pin the snapshot constants against the published monthly audit so a
+        // future edit to the constants doesn't silently drift from the doc
+        // without a corresponding audit refresh.
+        //
+        // Reconciled to live 2026-06-04 (see the "2026-06-04 reconciliation
+        // refresh" section appended to MONTHLY-GAP-COVERAGE-AUDIT-2026-05-16.md).
+        // The 2026-05-16 audit pinned 6 closed; since then C2/C3 closed via L6
+        // observability probes (6ad5959 / 38517f1·2c6e76b) and D2 closed via
+        // durable cross-machine sync (fc11815 / 03da6a6 / 7862049 reconcile-to-
+        // live, verified converged 2026-06-03), moving Partial(D2)→Closed and
+        // Planned(C2,C3)→Closed. New tally: 9 closed / 0 partial / 0 planned.
         let (_, entries) = super::current_gap_baseline();
         let c = super::GapStatusCounts::from_entries(entries);
         assert_eq!(
-            c.closed, 6,
-            "audit memo §revised tally: 6 closed (A3 B2 D1 D3 E1 E2)"
+            c.closed, 9,
+            "reconciled tally: 9 closed (A3 B2 C2 C3 D1 D2 D3 E1 E2)"
         );
-        assert_eq!(c.shelved, 1, "1 shelved (C1)");
-        assert_eq!(c.partial, 1, "1 partial (D2 — sync gap)");
-        assert_eq!(c.planned, 2, "2 planned (C2 C3)");
-        assert_eq!(c.untouched, 3, "3 untouched (A1 B1 B3)");
+        assert_eq!(c.shelved, 1, "1 shelved (C1 — 3/3 FALSIFIED)");
+        assert_eq!(c.partial, 0, "0 partial (D2 promoted Partial→Closed)");
+        assert_eq!(c.planned, 0, "0 planned (C2 C3 promoted Planned→Closed)");
+        assert_eq!(
+            c.untouched, 3,
+            "3 untouched (A1 B1 B3 — def working, no ship attempted)"
+        );
     }
 
     #[test]
