@@ -9123,7 +9123,7 @@ mod tests {
         );
         assert_eq!(
             alert["review_packet"]["latest_human_feedback"]["outcome"],
-            "accept_visual_motion_candidate"
+            "accept_grounded_ai_motion_candidate"
         );
         assert_eq!(alert["review_packet"]["voice_linkage"]["requested"], true);
         assert_eq!(
