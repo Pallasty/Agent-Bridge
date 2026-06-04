@@ -1375,7 +1375,8 @@ impl SqliteStore {
                                 THEN CAST(strftime('%s', created_at) AS INTEGER)
                                 ELSE created_at
                             END AS created_at
-                     FROM memory_edges",
+                     FROM memory_edges
+                     ORDER BY from_key, to_key, edge_type",
                 )?;
                 let rows = stmt
                     .query_map([], |row| {
@@ -10356,6 +10357,96 @@ mod tests {
                 .any(|e| e.to_key == "edge_rt_b" && e.edge_type == "relates"),
             "expected relates edge; got {n:?}"
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    /// Edge export must be deterministically ordered by (from_key, to_key,
+    /// edge_type), independent of insertion/rowid order. Without a stable
+    /// ORDER BY, two consecutive exports of an unchanged edge set serialize
+    /// the same rows in different orders, so the cross-node sync (sync.rs)
+    /// rewrites + commits + pushes `memory_edges.jsonl` every cycle as pure
+    /// reorder noise even when nothing changed. This pins byte-stability.
+    #[tokio::test]
+    async fn memory_export_edges_are_deterministically_sorted() {
+        use crate::{MemoryEdgeExport, MemoryExportFilter, MemoryRecord};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-edge-sort-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let mk = |k: &str| MemoryRecord {
+            key: k.to_string(),
+            kind: "fact".to_string(),
+            content: format!("content {k}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000002,
+            updated_at: 1700000002,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        for k in ["m_a", "m_b", "m_c"] {
+            store.memory_save(&mk(k)).await.expect("save");
+        }
+        // Link in deliberately scrambled order so rowid order != sorted order.
+        for (f, t, ty) in [
+            ("m_c", "m_a", "relates"),
+            ("m_a", "m_b", "supersedes"),
+            ("m_b", "m_a", "relates"),
+            ("m_a", "m_b", "relates"),
+        ] {
+            store.memory_link(f, t, ty, 1.0).await.expect("link");
+        }
+
+        let export_edges = |suffix: &str| {
+            let edges_out = temp_dir.join(format!("edges-{suffix}.jsonl"));
+            let mem_out = temp_dir.join(format!("mem-{suffix}.jsonl"));
+            let filter = MemoryExportFilter {
+                edges_out_path: Some(edges_out.clone()),
+                ..Default::default()
+            };
+            (filter, mem_out, edges_out)
+        };
+
+        let (f1, m1, e1) = export_edges("1");
+        store.memory_export(&f1, &m1).await.expect("export 1");
+        let first = tokio::fs::read_to_string(&e1).await.expect("read edges 1");
+
+        let (f2, m2, e2) = export_edges("2");
+        store.memory_export(&f2, &m2).await.expect("export 2");
+        let second = tokio::fs::read_to_string(&e2).await.expect("read edges 2");
+
+        // (1) Two exports of an unchanged edge set are byte-identical.
+        assert_eq!(first, second, "edge export must be byte-stable across runs");
+
+        // (2) Rows are sorted by (from_key, to_key, edge_type).
+        let parsed: Vec<MemoryEdgeExport> = first
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("parse edge"))
+            .collect();
+        assert_eq!(parsed.len(), 4, "expected 4 edges, got {parsed:?}");
+        let mut keyed: Vec<(String, String, String)> = parsed
+            .iter()
+            .map(|e| (e.from_key.clone(), e.to_key.clone(), e.edge_type.clone()))
+            .collect();
+        let observed = keyed.clone();
+        keyed.sort();
+        assert_eq!(observed, keyed, "edges must be exported in sorted order");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
