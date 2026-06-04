@@ -21940,6 +21940,307 @@ fn memory_related_keys_preflight_from_records(
     })
 }
 
+#[derive(Debug, Clone)]
+struct MemoryRelatedKeyEdgePlan {
+    from_key: String,
+    to_key: String,
+    from_kind: String,
+    to_kind: String,
+    from_scope: Option<String>,
+    to_scope: Option<String>,
+    from_preview: String,
+    to_preview: String,
+}
+
+impl MemoryRelatedKeyEdgePlan {
+    fn value(&self) -> Value {
+        json!({
+            "from_key": self.from_key,
+            "to_key": self.to_key,
+            "kind_pair": format!("{} -> {}", self.from_kind, self.to_kind),
+            "from_scope": self.from_scope,
+            "to_scope": self.to_scope,
+            "from_preview": self.from_preview,
+            "to_preview": self.to_preview,
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+struct MemoryRelatedKeysMaterializePlan {
+    visible_total: usize,
+    current_edge_pairs: usize,
+    current_orphans: usize,
+    safe_candidate_pairs_before_caps: u64,
+    selected_edges: Vec<MemoryRelatedKeyEdgePlan>,
+    selected_touched_orphans: HashSet<String>,
+    bucket_pair_counts: BTreeMap<String, u64>,
+    bucket_source_counts: BTreeMap<String, HashSet<String>>,
+    selected_source_counts: HashMap<String, u64>,
+    selected_target_counts: HashMap<String, u64>,
+}
+
+impl MemoryRelatedKeysMaterializePlan {
+    fn bucket_rows(&self) -> Vec<Value> {
+        self.bucket_pair_counts
+            .iter()
+            .map(|(bucket, pairs)| {
+                json!({
+                    "bucket": bucket,
+                    "pairs": pairs,
+                    "sources": self.bucket_source_counts
+                        .get(bucket)
+                        .map(|sources| sources.len())
+                        .unwrap_or(0),
+                })
+            })
+            .collect()
+    }
+
+    fn projected_orphans_after_selected(&self) -> u64 {
+        (self.current_orphans as u64).saturating_sub(self.selected_touched_orphans.len() as u64)
+    }
+
+    fn value(
+        &self,
+        by_key: &HashMap<&str, &MemoryRecord>,
+        max_edges: usize,
+        max_outbound_per_source: u32,
+        max_inbound_per_target: u32,
+    ) -> Value {
+        let projected_orphans = self.projected_orphans_after_selected();
+        json!({
+            "visible_total": self.visible_total,
+            "current_edge_pairs": self.current_edge_pairs,
+            "current_orphans": self.current_orphans,
+            "safe_candidate_pairs_before_caps": self.safe_candidate_pairs_before_caps,
+            "selected_edges_count": self.selected_edges.len(),
+            "max_edges": max_edges,
+            "max_outbound_per_source": max_outbound_per_source,
+            "max_inbound_per_target": max_inbound_per_target,
+            "orphan_candidate_nodes_selected": self.selected_touched_orphans.len(),
+            "projected_orphans_after_selected": projected_orphans,
+            "orphans_reduced_by_selected": (self.current_orphans as u64).saturating_sub(projected_orphans),
+            "bucket_counts": self.bucket_rows(),
+            "top_selected_sources": memory_related_key_count_rows(
+                &self.selected_source_counts,
+                by_key,
+                "outbound_selected",
+                12,
+            ),
+            "top_selected_targets": memory_related_key_count_rows(
+                &self.selected_target_counts,
+                by_key,
+                "inbound_selected",
+                12,
+            ),
+            "selected_edges": self.selected_edges.iter().map(MemoryRelatedKeyEdgePlan::value).collect::<Vec<_>>(),
+        })
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn memory_related_keys_materialize_plan_from_records(
+    all: &[MemoryRecord],
+    edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    require_scope_compatible: bool,
+    dedupe_undirected_pairs: bool,
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+    max_edges: usize,
+    max_outbound_per_source: u32,
+    max_inbound_per_target: u32,
+    preview_chars: usize,
+) -> MemoryRelatedKeysMaterializePlan {
+    let by_key: HashMap<&str, &MemoryRecord> =
+        all.iter().map(|rec| (rec.key.as_str(), rec)).collect();
+    let visible_records: Vec<&MemoryRecord> = all
+        .iter()
+        .filter(|rec| {
+            memory_graph_topology_record_visible(
+                rec,
+                requested_scope,
+                scope_mode,
+                skip_tags,
+                skip_kinds,
+            )
+        })
+        .collect();
+    let visible_keys: HashSet<String> = visible_records.iter().map(|rec| rec.key.clone()).collect();
+
+    let mut existing_pairs: HashSet<(String, String)> = HashSet::new();
+    let mut keys_with_edges: HashSet<String> = HashSet::new();
+    for rec in &visible_records {
+        let Some(edges) = edges_by_key.get(&rec.key) else {
+            continue;
+        };
+        for edge in edges {
+            let other = if edge.from_key == rec.key {
+                &edge.to_key
+            } else if edge.to_key == rec.key {
+                &edge.from_key
+            } else {
+                continue;
+            };
+            if !visible_keys.contains(other) {
+                continue;
+            }
+            existing_pairs.insert(undirected_memory_pair_key(&rec.key, other));
+            keys_with_edges.insert(rec.key.clone());
+            keys_with_edges.insert(other.clone());
+        }
+    }
+
+    let current_orphans: HashSet<String> = visible_keys
+        .iter()
+        .filter(|key| !keys_with_edges.contains(*key))
+        .cloned()
+        .collect();
+    let mut plan = MemoryRelatedKeysMaterializePlan {
+        visible_total: visible_keys.len(),
+        current_edge_pairs: existing_pairs.len(),
+        current_orphans: current_orphans.len(),
+        ..Default::default()
+    };
+    let mut candidate_pairs_seen: HashSet<(String, String)> = HashSet::new();
+    let mut selected_outbound: HashMap<String, u32> = HashMap::new();
+    let mut selected_inbound: HashMap<String, u32> = HashMap::new();
+
+    for source in &visible_records {
+        for raw_target in &source.related_keys {
+            let target_key = raw_target.trim();
+            if target_key.is_empty() {
+                continue;
+            }
+            let Some(target) = by_key.get(target_key).copied() else {
+                memory_related_add_bucket(
+                    &mut plan.bucket_pair_counts,
+                    &mut plan.bucket_source_counts,
+                    "target_missing",
+                    &source.key,
+                );
+                continue;
+            };
+            if let Some(reason) = memory_related_key_excluded_reason(
+                target,
+                skip_tags,
+                skip_kinds,
+                requested_scope,
+                scope_mode,
+            ) {
+                memory_related_add_bucket(
+                    &mut plan.bucket_pair_counts,
+                    &mut plan.bucket_source_counts,
+                    reason,
+                    &source.key,
+                );
+                continue;
+            }
+            if !memory_scopes_compatible(source, target, require_scope_compatible) {
+                memory_related_add_bucket(
+                    &mut plan.bucket_pair_counts,
+                    &mut plan.bucket_source_counts,
+                    "cross_scope",
+                    &source.key,
+                );
+                continue;
+            }
+            let undirected_pair = undirected_memory_pair_key(&source.key, &target.key);
+            if existing_pairs.contains(&undirected_pair) {
+                memory_related_add_bucket(
+                    &mut plan.bucket_pair_counts,
+                    &mut plan.bucket_source_counts,
+                    "already_has_edge",
+                    &source.key,
+                );
+                continue;
+            }
+            let candidate_pair = if dedupe_undirected_pairs {
+                undirected_pair
+            } else {
+                (source.key.clone(), target.key.clone())
+            };
+            if !candidate_pairs_seen.insert(candidate_pair) {
+                memory_related_add_bucket(
+                    &mut plan.bucket_pair_counts,
+                    &mut plan.bucket_source_counts,
+                    "duplicate_candidate",
+                    &source.key,
+                );
+                continue;
+            }
+
+            plan.safe_candidate_pairs_before_caps += 1;
+            if plan.selected_edges.len() >= max_edges {
+                memory_related_add_bucket(
+                    &mut plan.bucket_pair_counts,
+                    &mut plan.bucket_source_counts,
+                    "skipped_max_edges",
+                    &source.key,
+                );
+                continue;
+            }
+            let outbound = selected_outbound.get(&source.key).copied().unwrap_or(0);
+            if outbound >= max_outbound_per_source {
+                memory_related_add_bucket(
+                    &mut plan.bucket_pair_counts,
+                    &mut plan.bucket_source_counts,
+                    "skipped_outbound_cap",
+                    &source.key,
+                );
+                continue;
+            }
+            let inbound = selected_inbound.get(&target.key).copied().unwrap_or(0);
+            if inbound >= max_inbound_per_target {
+                memory_related_add_bucket(
+                    &mut plan.bucket_pair_counts,
+                    &mut plan.bucket_source_counts,
+                    "skipped_inbound_cap",
+                    &source.key,
+                );
+                continue;
+            }
+
+            memory_related_add_bucket(
+                &mut plan.bucket_pair_counts,
+                &mut plan.bucket_source_counts,
+                "selected",
+                &source.key,
+            );
+            *selected_outbound.entry(source.key.clone()).or_default() += 1;
+            *selected_inbound.entry(target.key.clone()).or_default() += 1;
+            *plan
+                .selected_source_counts
+                .entry(source.key.clone())
+                .or_default() += 1;
+            *plan
+                .selected_target_counts
+                .entry(target.key.clone())
+                .or_default() += 1;
+            if current_orphans.contains(&source.key) {
+                plan.selected_touched_orphans.insert(source.key.clone());
+            }
+            if current_orphans.contains(&target.key) {
+                plan.selected_touched_orphans.insert(target.key.clone());
+            }
+            plan.selected_edges.push(MemoryRelatedKeyEdgePlan {
+                from_key: source.key.clone(),
+                to_key: target.key.clone(),
+                from_kind: source.kind.clone(),
+                to_kind: target.kind.clone(),
+                from_scope: source.scope.clone(),
+                to_scope: target.scope.clone(),
+                from_preview: memory_related_key_preview(source, preview_chars),
+                to_preview: memory_related_key_preview(target, preview_chars),
+            });
+        }
+    }
+
+    plan
+}
+
 // ===========================================================================
 //          memory_related_keys_preflight (read-only explicit-link projection)
 // ===========================================================================
@@ -22116,6 +22417,313 @@ impl McpTool for MemoryRelatedKeysPreflightTool {
             obj.insert("max_records".into(), json!(max_records));
             obj.insert("max_pairs".into(), json!(max_pairs));
             obj.insert("preview_chars".into(), json!(preview_chars));
+        }
+        Ok(ToolResult::json_text(&result))
+    }
+}
+
+// ===========================================================================
+//          memory_related_keys_materialize (guarded explicit-link writer)
+// ===========================================================================
+
+/// Guarded writer for explicit `related_keys` graph materialization.
+///
+/// Unlike `memory_link_orphans`, this never invents a relationship from content.
+/// It only writes already-authored `related_keys` as capped `memory_edges` rows.
+pub struct MemoryRelatedKeysMaterializeTool {
+    hub: Hub,
+}
+impl MemoryRelatedKeysMaterializeTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryRelatedKeysMaterializeTool {
+    fn name(&self) -> &'static str {
+        "memory_related_keys_materialize"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Guarded materializer for explicit memory `related_keys` into \
+                `memory_edges` rows. dry_run=true by default. Writes require \
+                apply_confirmation='materialize_related_keys'. Uses the same durable-row, \
+                scope, and volatile-row filters as memory_related_keys_preflight plus \
+                max_edges / inbound / outbound caps. Keep out of compact Codex profiles."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Preview the selected edges without writing. Defaults true."
+                    },
+                    "apply_confirmation": {
+                        "type": "string",
+                        "description": "Required exact value 'materialize_related_keys' when dry_run=false."
+                    },
+                    "edge_type": {
+                        "type": "string",
+                        "enum": ["relates"],
+                        "default": "relates",
+                        "description": "Edge type to write. Currently restricted to relates."
+                    },
+                    "weight": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 1.0,
+                        "description": "Weight for written memory_edges rows."
+                    },
+                    "skip_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["auto_curated", "alert", "ttl:7d"],
+                        "description": "Source and target rows with these tags are excluded."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["alert", "work_memory", "session_handoff", "snapshot"],
+                        "description": "Source and target rows with these kinds are excluded. Coverage-excluded kinds such as skill and present_outcome are always omitted."
+                    },
+                    "require_scope_compatible": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, concrete non-global scopes must match. Global/unscoped rows remain compatible."
+                    },
+                    "dedupe_undirected_pairs": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, A->B and B->A related_keys count as one relates-style candidate."
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional memory scope, e.g. project:/abs/path or domain:rust."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only",
+                        "description": "When scope is set: local_only keeps matching rows; local_plus_global also includes global/unscoped rows; exploratory scans all rows."
+                    },
+                    "max_records": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 50000,
+                        "default": 10000,
+                        "description": "Maximum memory records loaded for analysis."
+                    },
+                    "max_edges": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000,
+                        "default": 50,
+                        "description": "Maximum edges selected for this run. Use a small batch first."
+                    },
+                    "max_outbound_per_source": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 10,
+                        "description": "Per-run cap on selected outbound edges per source memory."
+                    },
+                    "max_inbound_per_target": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 10,
+                        "description": "Per-run cap on selected inbound edges per target memory."
+                    },
+                    "preview_chars": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000,
+                        "default": 160,
+                        "description": "Content preview length for selected edge samples."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let apply_confirmation = args
+            .get("apply_confirmation")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .unwrap_or("");
+        let edge_type = args
+            .get("edge_type")
+            .and_then(|v| v.as_str())
+            .filter(|s| *s == "relates")
+            .unwrap_or("relates");
+        let weight = args
+            .get("weight")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0);
+        let skip_tags =
+            memory_string_array_arg(&args, "skip_tags", &["auto_curated", "alert", "ttl:7d"]);
+        let skip_kinds = memory_string_array_arg(
+            &args,
+            "skip_kinds",
+            &["alert", "work_memory", "session_handoff", "snapshot"],
+        );
+        let require_scope_compatible = args
+            .get("require_scope_compatible")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let dedupe_undirected_pairs = args
+            .get("dedupe_undirected_pairs")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let requested_scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            false,
+        );
+        let max_records = args
+            .get("max_records")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10_000)
+            .clamp(100, 50_000) as usize;
+        let max_edges = args
+            .get("max_edges")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .min(1000) as usize;
+        let max_outbound_per_source = args
+            .get("max_outbound_per_source")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10)
+            .clamp(1, 50) as u32;
+        let max_inbound_per_target = args
+            .get("max_inbound_per_target")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10)
+            .clamp(1, 50) as u32;
+        let preview_chars = args
+            .get("preview_chars")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(160)
+            .min(1000) as usize;
+
+        let all = store
+            .list_memories(None, MemoryListSort::Recent, max_records as u32)
+            .await
+            .unwrap_or_default();
+        let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+        for rec in &all {
+            if !memory_graph_topology_record_visible(
+                rec,
+                requested_scope,
+                scope_mode,
+                &skip_tags,
+                &skip_kinds,
+            ) {
+                continue;
+            }
+            if let Ok(edges) = store.memory_neighbors(&rec.key).await {
+                edges_by_key.insert(rec.key.clone(), edges);
+            }
+        }
+        let by_key: HashMap<&str, &MemoryRecord> =
+            all.iter().map(|rec| (rec.key.as_str(), rec)).collect();
+        let plan = memory_related_keys_materialize_plan_from_records(
+            &all,
+            &edges_by_key,
+            &skip_tags,
+            &skip_kinds,
+            require_scope_compatible,
+            dedupe_undirected_pairs,
+            requested_scope,
+            scope_mode,
+            max_edges,
+            max_outbound_per_source,
+            max_inbound_per_target,
+            preview_chars,
+        );
+
+        let mut result = plan.value(
+            &by_key,
+            max_edges,
+            max_outbound_per_source,
+            max_inbound_per_target,
+        );
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("dry_run".into(), json!(dry_run));
+            obj.insert("edge_type".into(), json!(edge_type));
+            obj.insert("weight".into(), json!(weight));
+            obj.insert("loaded_records".into(), json!(all.len()));
+            obj.insert("max_records".into(), json!(max_records));
+            obj.insert("preview_chars".into(), json!(preview_chars));
+            obj.insert(
+                "filters".into(),
+                json!({
+                    "skip_tags": skip_tags,
+                    "skip_kinds": skip_kinds,
+                    "require_scope_compatible": require_scope_compatible,
+                    "dedupe_undirected_pairs": dedupe_undirected_pairs,
+                    "scope": requested_scope,
+                    "scope_mode": scope_mode.label(),
+                }),
+            );
+        }
+
+        if !dry_run && apply_confirmation != "materialize_related_keys" {
+            if let Some(obj) = result.as_object_mut() {
+                obj.insert("blocked".into(), json!(true));
+                obj.insert(
+                    "error".into(),
+                    json!("dry_run=false requires apply_confirmation='materialize_related_keys'"),
+                );
+            }
+            return Ok(ToolResult::json_text(&result));
+        }
+
+        let mut linked = 0_u64;
+        let mut write_errors = Vec::new();
+        if !dry_run {
+            for edge in &plan.selected_edges {
+                match store
+                    .memory_link(&edge.from_key, &edge.to_key, edge_type, weight)
+                    .await
+                {
+                    Ok(()) => linked += 1,
+                    Err(e) => write_errors.push(json!({
+                        "from_key": edge.from_key,
+                        "to_key": edge.to_key,
+                        "error": e.to_string(),
+                    })),
+                }
+            }
+        }
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("blocked".into(), json!(false));
+            obj.insert("linked".into(), json!(linked));
+            obj.insert("write_errors".into(), json!(write_errors));
+            obj.insert(
+                "next_step".into(),
+                json!("Run dry_run first and inspect selected_edges. For live writes, use a small max_edges batch with apply_confirmation='materialize_related_keys', then rerun memory_related_keys_preflight to verify orphan reduction."),
+            );
         }
         Ok(ToolResult::json_text(&result))
     }
@@ -29957,6 +30565,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Standard,
+        Arc::new(MemoryRelatedKeysMaterializeTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
         Arc::new(MemoryOrphanCandidatesTool::new(hub.clone())),
     );
     reg_if(
@@ -32979,6 +33593,73 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn memory_related_keys_materialize_plan_respects_max_edges_cap() {
+        let mut source = mk_mem("source", "decision", "source content with detail", &[]);
+        source.related_keys = vec!["target_a".into(), "target_b".into()];
+        let target_a = mk_mem("target_a", "lesson", "target a content", &[]);
+        let target_b = mk_mem("target_b", "lesson", "target b content", &[]);
+        let all = vec![source, target_a, target_b];
+        let edges_by_key = HashMap::new();
+        let plan = memory_related_keys_materialize_plan_from_records(
+            &all,
+            &edges_by_key,
+            &[],
+            &[],
+            true,
+            true,
+            None,
+            MemorySearchScopeMode::LocalOnly,
+            1,
+            10,
+            10,
+            80,
+        );
+
+        assert_eq!(plan.safe_candidate_pairs_before_caps, 2);
+        assert_eq!(plan.selected_edges.len(), 1);
+        assert_eq!(plan.bucket_pair_counts.get("selected").copied(), Some(1));
+        assert_eq!(
+            plan.bucket_pair_counts.get("skipped_max_edges").copied(),
+            Some(1)
+        );
+        assert_eq!(plan.projected_orphans_after_selected(), 1);
+    }
+
+    #[test]
+    fn memory_related_keys_materialize_plan_respects_inbound_cap() {
+        let mut source_a = mk_mem("source_a", "decision", "source a content", &[]);
+        source_a.related_keys = vec!["hub".into()];
+        let mut source_b = mk_mem("source_b", "decision", "source b content", &[]);
+        source_b.related_keys = vec!["hub".into()];
+        let hub = mk_mem("hub", "lesson", "hub content", &[]);
+        let all = vec![source_a, source_b, hub];
+        let edges_by_key = HashMap::new();
+        let plan = memory_related_keys_materialize_plan_from_records(
+            &all,
+            &edges_by_key,
+            &[],
+            &[],
+            true,
+            true,
+            None,
+            MemorySearchScopeMode::LocalOnly,
+            10,
+            10,
+            1,
+            80,
+        );
+
+        assert_eq!(plan.safe_candidate_pairs_before_caps, 2);
+        assert_eq!(plan.selected_edges.len(), 1);
+        assert_eq!(plan.bucket_pair_counts.get("selected").copied(), Some(1));
+        assert_eq!(
+            plan.bucket_pair_counts.get("skipped_inbound_cap").copied(),
+            Some(1)
+        );
+        assert_eq!(plan.projected_orphans_after_selected(), 1);
+    }
+
+    #[test]
     fn memory_search_scope_filter_is_strict_by_default() {
         let scoped = mk_mem_scoped(
             "scoped",
@@ -34676,6 +35357,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"mobile_ios_syslog_tail"));
         assert!(extras.contains(&"memory_graph_topology"));
         assert!(extras.contains(&"memory_related_keys_preflight"));
+        assert!(!extras.contains(&"memory_related_keys_materialize"));
         assert!(extras.contains(&"memory_orphan_candidates"));
         assert!(extras.contains(&"memory_orphan_inventory"));
         assert!(extras.contains(&"desktop_snapshot"));
