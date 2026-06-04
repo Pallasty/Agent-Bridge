@@ -1,4 +1,18 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+
+pub const LCC_AURA_IO_SCHEMA_VERSION: &str = "lcc.aura_io.v1";
+pub const LCC_AURA_RENDERER_INPUT_KIND: &str = "tfe_uniform_f32x256";
+pub const LCC_AURA_UNIFORM_CONTRACT_VERSION: u64 = 1;
+pub const LCC_AURA_UNIFORM_LEN: u64 = 256;
+pub const LCC_AURA_UNIFORM_BYTES: u64 = 1024;
+pub const LCC_AURA_UNIFORM_ENCODING: &str = "little_endian_f32";
+pub const LCC_AURA_VISIBLE_SIGNAL_SOURCE: &str = "curated_digest_only";
+pub const LCC_AURA_SHADOW_SIGNAL_POLICY: &str = "shadow_only_until_falsified";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RendererSource {
@@ -44,6 +58,201 @@ fn non_empty_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|s| !s.is_empty())
+}
+
+fn object_field<'a>(value: &'a Value, key: &str) -> Result<&'a Value> {
+    let field = value
+        .get(key)
+        .with_context(|| format!("{key} is required"))?;
+    if !field.is_object() {
+        bail!("{key} must be an object");
+    }
+    Ok(field)
+}
+
+fn required_str<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .with_context(|| format!("{key} must be a non-empty string"))
+}
+
+fn required_u64(value: &Value, key: &str) -> Result<u64> {
+    value
+        .get(key)
+        .and_then(Value::as_u64)
+        .with_context(|| format!("{key} must be an unsigned integer"))
+}
+
+fn expect_str(value: &Value, key: &str, expected: &str) -> Result<()> {
+    let actual = required_str(value, key)?;
+    if actual != expected {
+        bail!("{key} must be {expected}, got {actual}");
+    }
+    Ok(())
+}
+
+fn expect_u64(value: &Value, key: &str, expected: u64) -> Result<()> {
+    let actual = required_u64(value, key)?;
+    if actual != expected {
+        bail!("{key} must be {expected}, got {actual}");
+    }
+    Ok(())
+}
+
+fn strip_sha256_prefix(value: &str) -> &str {
+    value.strip_prefix("sha256:").unwrap_or(value)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+fn resolve_manifest_path(path: &str, base_dir: Option<&Path>) -> PathBuf {
+    let path = PathBuf::from(path);
+    if path.is_relative() {
+        if let Some(base) = base_dir {
+            return base.join(path);
+        }
+    }
+    path
+}
+
+fn shadow_visible_key(value: &Value) -> Option<String> {
+    let obj = value.as_object()?;
+    obj.keys().find_map(|key| {
+        let lowered = key.to_ascii_lowercase();
+        let is_shadow = lowered.contains("biocortex")
+            || lowered.contains("cortex")
+            || lowered.contains("dream")
+            || matches!(
+                lowered.as_str(),
+                "affect" | "affect_state" | "emotion" | "emotion_state"
+            );
+        is_shadow.then(|| key.to_string())
+    })
+}
+
+fn validate_aura_io_manifest_inner(
+    manifest: &Value,
+    check_files: bool,
+    base_dir: Option<&Path>,
+) -> Result<Value> {
+    if !manifest.is_object() {
+        bail!("aura_io manifest root must be an object");
+    }
+    expect_str(manifest, "schema_version", LCC_AURA_IO_SCHEMA_VERSION)?;
+
+    let renderer_input = object_field(manifest, "renderer_input")?;
+    expect_str(renderer_input, "kind", LCC_AURA_RENDERER_INPUT_KIND)?;
+    expect_u64(
+        renderer_input,
+        "contract_version",
+        LCC_AURA_UNIFORM_CONTRACT_VERSION,
+    )?;
+    expect_u64(renderer_input, "uniform_len", LCC_AURA_UNIFORM_LEN)?;
+    expect_u64(renderer_input, "bin_bytes", LCC_AURA_UNIFORM_BYTES)?;
+    expect_str(renderer_input, "encoding", LCC_AURA_UNIFORM_ENCODING)?;
+
+    let source_digest = object_field(manifest, "source_digest")?;
+    expect_str(
+        manifest,
+        "visible_signal_source",
+        LCC_AURA_VISIBLE_SIGNAL_SOURCE,
+    )?;
+    expect_str(
+        manifest,
+        "shadow_signal_policy",
+        LCC_AURA_SHADOW_SIGNAL_POLICY,
+    )?;
+
+    let source_state = object_field(manifest, "source_state")?;
+    if let Some(key) = shadow_visible_key(source_state) {
+        bail!("source_state contains shadow-only visible key: {key}");
+    }
+
+    let uniform_path_text = required_str(renderer_input, "path")?;
+    let digest_path_text = required_str(source_digest, "json_path")?;
+    let uniform_sha = required_str(renderer_input, "sha256")?;
+    let digest_sha = required_str(source_digest, "json_sha256")?;
+    let item_count = required_u64(source_digest, "item_count")?;
+
+    let mut uniform_file_match = Value::Null;
+    let mut digest_file_match = Value::Null;
+    if check_files {
+        let uniform_path = resolve_manifest_path(uniform_path_text, base_dir);
+        let digest_path = resolve_manifest_path(digest_path_text, base_dir);
+        let uniform_bytes = fs::read(&uniform_path)
+            .with_context(|| format!("read uniform {}", uniform_path.display()))?;
+        if uniform_bytes.len() != LCC_AURA_UNIFORM_BYTES as usize {
+            bail!(
+                "uniform file must be {} bytes, got {}",
+                LCC_AURA_UNIFORM_BYTES,
+                uniform_bytes.len()
+            );
+        }
+        let digest_bytes = fs::read(&digest_path)
+            .with_context(|| format!("read digest {}", digest_path.display()))?;
+        let uniform_ok = sha256_hex(&uniform_bytes) == strip_sha256_prefix(uniform_sha);
+        let digest_ok = sha256_hex(&digest_bytes) == strip_sha256_prefix(digest_sha);
+        if !uniform_ok {
+            bail!("uniform file sha256 does not match aura_io");
+        }
+        if !digest_ok {
+            bail!("digest file sha256 does not match aura_io");
+        }
+        uniform_file_match = Value::Bool(true);
+        digest_file_match = Value::Bool(true);
+    }
+
+    Ok(json!({
+        "surface": "lcc_aura_io_intake",
+        "schema": 1,
+        "ok": true,
+        "schema_version": LCC_AURA_IO_SCHEMA_VERSION,
+        "renderer_input_kind": LCC_AURA_RENDERER_INPUT_KIND,
+        "uniform_contract_version": LCC_AURA_UNIFORM_CONTRACT_VERSION,
+        "uniform_len": LCC_AURA_UNIFORM_LEN,
+        "bin_bytes": LCC_AURA_UNIFORM_BYTES,
+        "uniform_path": uniform_path_text,
+        "digest_path": digest_path_text,
+        "digest_item_count": item_count,
+        "visible_signal_source": LCC_AURA_VISIBLE_SIGNAL_SOURCE,
+        "shadow_signal_policy": LCC_AURA_SHADOW_SIGNAL_POLICY,
+        "uniform_file_sha256_matches": uniform_file_match,
+        "digest_file_sha256_matches": digest_file_match,
+        "safety": {
+            "read_only": true,
+            "writes_files": false,
+            "mutates_renderer": false,
+            "emits_audio": false,
+            "controls_desktop": false,
+            "shadow_visible_state": false,
+        }
+    }))
+}
+
+pub fn validate_aura_io_manifest(manifest: &Value, check_files: bool) -> Result<Value> {
+    validate_aura_io_manifest_inner(manifest, check_files, None)
+}
+
+pub fn validate_aura_io_sidecar_path(path: &Path, check_files: bool) -> Result<Value> {
+    let bytes =
+        fs::read(path).with_context(|| format!("read aura_io sidecar {}", path.display()))?;
+    let manifest: Value = serde_json::from_slice(&bytes)
+        .with_context(|| format!("parse aura_io sidecar {}", path.display()))?;
+    let mut report = validate_aura_io_manifest_inner(&manifest, check_files, path.parent())?;
+    if let Some(obj) = report.as_object_mut() {
+        obj.insert(
+            "sidecar_path".to_string(),
+            Value::String(path.display().to_string()),
+        );
+    }
+    Ok(report)
 }
 
 fn raw_pet_matches_scope(scope: &RendererScope, raw_pet: &Value) -> bool {
