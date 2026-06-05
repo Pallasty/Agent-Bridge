@@ -318,12 +318,25 @@ fn host_reason(host_response: &Value) -> Value {
         &["world.visibility.query", "after", "reason"][..],
     ] {
         if let Some(v) = get_path(host_response, path) {
-            if !v.is_null() {
+            if is_meaningful_reason(v) {
                 return v.clone();
             }
         }
     }
+    for entity_reason_key in ["reason", "pixel_coverage.reason"] {
+        if let Some(v) = first_entity_reason(host_response, entity_reason_key) {
+            return v.clone();
+        }
+    }
     Value::Null
+}
+
+fn is_meaningful_reason(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(s) => !s.trim().is_empty(),
+        _ => true,
+    }
 }
 
 fn get_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
@@ -332,6 +345,19 @@ fn get_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
         cur = cur.get(*key)?;
     }
     Some(cur)
+}
+
+fn first_entity_reason<'a>(host_response: &'a Value, key: &str) -> Option<&'a Value> {
+    let entities = get_path(
+        host_response,
+        &["world.visibility.query", "after", "entities"],
+    )?
+    .as_array()?;
+    let key_path: Vec<&str> = key.split('.').collect();
+    entities
+        .iter()
+        .filter_map(|entity| get_path(entity, &key_path))
+        .find(|reason| is_meaningful_reason(reason))
 }
 
 fn first_key_recursive<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
@@ -762,6 +788,65 @@ mod tests {
         assert_eq!(good["verify"]["verified_to"], VERIFIED_TO);
         let bad = wrap_host_response(&ep, &req, json!({"ok": true, "verified": false}));
         assert!(bad["verify"]["verified_to"].is_null());
+    }
+
+    #[test]
+    fn nested_entity_reason_lifts_into_envelope_without_raw_host_response() {
+        let ep = WorldEndpoint {
+            host: DEFAULT_HOST.to_string(),
+            port: DEFAULT_PORT,
+            timeout_ms: DEFAULT_TIMEOUT_MS,
+        };
+        let req = json!({"request_id":"nested-reason"});
+        let mut result = wrap_host_response(
+            &ep,
+            &req,
+            json!({
+                "ok": true,
+                "verified": false,
+                "render": {"source": "live_root_viewport_texture"},
+                "world.visibility.query": {
+                    "after": {
+                        "entities": [{
+                            "entity": "bath",
+                            "reason": "pixel_coverage_zero",
+                            "screen_area": 0.0,
+                            "bounds_screen_area": 0.0186
+                        }]
+                    }
+                }
+            }),
+        );
+        assert_eq!(result["reason"], "pixel_coverage_zero");
+        assert_eq!(
+            result["verify"]["evidence"]["host_reason"],
+            "pixel_coverage_zero"
+        );
+        result.as_object_mut().unwrap().remove("host_response");
+        assert_eq!(result["reason"], "pixel_coverage_zero");
+        assert_eq!(
+            result["verify"]["evidence"]["host_reason"],
+            "pixel_coverage_zero"
+        );
+
+        let nested_pixel_reason = wrap_host_response(
+            &ep,
+            &req,
+            json!({
+                "ok": true,
+                "verified": false,
+                "world.visibility.query": {
+                    "after": {
+                        "entities": [{
+                            "entity": "bath",
+                            "reason": "",
+                            "pixel_coverage": {"reason": "pixel_coverage_zero"}
+                        }]
+                    }
+                }
+            }),
+        );
+        assert_eq!(nested_pixel_reason["reason"], "pixel_coverage_zero");
     }
 
     #[tokio::test]
