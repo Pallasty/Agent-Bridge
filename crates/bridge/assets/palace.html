@@ -42,6 +42,10 @@
       pointer-events: none;
     }
     #topbar > * { pointer-events: auto; }
+    body.workbench-open #topbar { right: 452px; }
+    body.workbench-open #view-presets,
+    body.workbench-open #stale-btn,
+    body.workbench-open #filter-btn { display: none; }
     #title {
       color: #5a5a68;
       font-size: 10px;
@@ -80,6 +84,57 @@
     }
     #filter-btn:hover { color: #e4e4e8; border-color: #4a4a60; }
     #filter-btn.active { color: #e4e4e8; border-color: #5a5a72; background: #1c1c26; }
+    #breadcrumb {
+      min-width: 150px;
+      max-width: 280px;
+      color: #6a6a78;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex-shrink: 1;
+    }
+    #breadcrumb .crumb-hot { color: #5cc8c8; }
+    #breadcrumb button {
+      background: transparent;
+      border: none;
+      color: #8a8a9c;
+      padding: 0;
+      cursor: pointer;
+      font: inherit;
+      letter-spacing: inherit;
+      text-transform: inherit;
+    }
+    #breadcrumb button:hover { color: #e4e4e8; }
+    #view-presets {
+      display: flex;
+      gap: 3px;
+      padding: 2px;
+      background: rgba(12, 12, 18, 0.75);
+      border: 1px solid #1f1f2a;
+      border-radius: 5px;
+      backdrop-filter: blur(6px);
+      flex-shrink: 0;
+    }
+    #view-presets button {
+      background: transparent;
+      border: none;
+      color: #7a7a88;
+      padding: 5px 8px;
+      border-radius: 3px;
+      font-size: 10px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      font-family: inherit;
+      transition: color 120ms, background 120ms;
+    }
+    #view-presets button:hover { color: #d8d8e2; background: #161620; }
+    #view-presets button.active {
+      color: #0a0a10;
+      background: #5cc8c8;
+    }
     /* ── Stale review button (C8) ────────────────────────────
        Mirrors #filter-btn but lights up gray-cyan when there's
        work to do (stale count > 0). Disabled state keeps the
@@ -320,12 +375,146 @@
       letter-spacing: 0.05em;
     }
     #filter-panel .actions button:hover { color: #e4e4e8; border-color: #4a4a60; }
+    /* ── Atlas panel ─────────────────────────────────────── */
+    #atlas-panel {
+      position: absolute;
+      top: 68px;
+      left: 22px;
+      width: 286px;
+      max-height: calc(100vh - 118px);
+      z-index: 18;
+      background: rgba(12, 12, 18, 0.88);
+      border: 1px solid #252532;
+      border-radius: 6px;
+      backdrop-filter: blur(10px);
+      overflow: hidden;
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
+    }
+    #atlas-panel .atlas-head {
+      padding: 13px 14px 10px;
+      border-bottom: 1px solid #1f1f2a;
+    }
+    #atlas-panel .atlas-kicker {
+      color: #5cc8c8;
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+    #atlas-panel .atlas-title {
+      color: #e8e8ee;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    #atlas-panel .atlas-help {
+      margin-top: 5px;
+      color: #666674;
+      font-size: 10px;
+      line-height: 1.45;
+    }
+    #atlas-panel .atlas-list {
+      max-height: calc(100vh - 210px);
+      overflow-x: hidden;
+      overflow-y: auto;
+      padding: 8px;
+      scrollbar-color: #4a4a55 #101018;
+    }
+    #atlas-panel .atlas-region {
+      width: 100%;
+      text-align: left;
+      display: grid;
+      grid-template-columns: 7px 1fr auto;
+      gap: 8px;
+      align-items: start;
+      background: transparent;
+      border: 1px solid transparent;
+      color: #b8b8c2;
+      padding: 8px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 120ms, border-color 120ms, color 120ms;
+    }
+    #atlas-panel .atlas-region:hover {
+      background: rgba(28, 28, 38, 0.74);
+      border-color: #2a2a35;
+      color: #e4e4e8;
+    }
+    #atlas-panel .atlas-region.active {
+      background: #132329;
+      border-color: #4a8b9c;
+      color: #ffffff;
+    }
+    #atlas-panel .region-swatch {
+      width: 7px;
+      height: 34px;
+      border-radius: 3px;
+      margin-top: 2px;
+      background: var(--region-color, #7a7d8a);
+    }
+    #atlas-panel .region-main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    #atlas-panel .region-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #atlas-panel .region-meta {
+      display: block;
+      color: #666674;
+      font-size: 10px;
+      line-height: 1.35;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #atlas-panel .region-count {
+      color: #8a8a9c;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      padding-top: 1px;
+    }
+    #atlas-panel .region-flags {
+      grid-column: 2 / 4;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 2px;
+    }
+    #atlas-panel .region-flag {
+      color: #7a7a88;
+      background: #15151e;
+      border: 1px solid #252532;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-size: 9px;
+      letter-spacing: 0.03em;
+    }
+    #atlas-panel .region-flag.fresh { color: #5cc8c8; border-color: #23464c; }
+    #atlas-panel .region-flag.stale { color: #c8a96a; border-color: #4a3e25; }
+    #atlas-panel .region-flag.hub { color: #ffe070; border-color: #5a4a30; }
+    #atlas-panel .region-flag.orphan { color: #8a8a9c; }
+    #atlas-panel .atlas-empty {
+      color: #4a4a55;
+      font-size: 11px;
+      padding: 16px 14px;
+      text-align: center;
+      font-style: italic;
+    }
     /* ── Sidebar ──────────────────────────────────────────── */
     #panel {
-      flex: 0 0 380px;
+      flex: 0 0 430px;
       background: #131319;
       border-left: 1px solid #2a2a35;
-      padding: 20px 22px;
+      padding: 0;
       overflow-y: auto;
       max-height: 100vh;
     }
@@ -390,6 +579,97 @@
       margin-top: 50%;
       text-align: center;
       letter-spacing: 0.05em;
+    }
+    #panel .workbench-shell {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    #panel .workbench-header {
+      padding: 18px 22px 14px;
+      border-bottom: 1px solid #1f1f2a;
+      background: #111119;
+    }
+    #panel .workbench-kicker {
+      color: #5cc8c8;
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 7px;
+    }
+    #panel .workbench-toolbar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+      padding: 12px 22px;
+      border-bottom: 1px solid #1f1f2a;
+      background: #0f0f16;
+    }
+    #panel .workbench-toolbar button {
+      background: transparent;
+      border: 1px solid #2a2a35;
+      color: #b8b8c2;
+      padding: 7px 10px;
+      font-size: 11px;
+      border-radius: 4px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    #panel .workbench-toolbar button:hover { color: #ffffff; border-color: #5a5a72; }
+    #panel .workbench-toolbar .canvas-expand-btn {
+      color: #5cc8c8;
+      border-color: #4a8b9c;
+      margin: 0;
+      width: auto;
+    }
+    #panel .workbench-toolbar .tombstone-btn {
+      color: #d88080;
+      border-color: #4a2a32;
+    }
+    #panel .workbench-body {
+      padding: 16px 22px 24px;
+    }
+    #panel .workbench-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin: 0 0 14px;
+    }
+    #panel .metric {
+      background: #0f0f16;
+      border: 1px solid #1f1f2a;
+      border-radius: 5px;
+      padding: 8px 9px;
+      min-width: 0;
+    }
+    #panel .metric .label {
+      color: #5a5a68;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    #panel .metric .value {
+      color: #e8e8ee;
+      font-size: 13px;
+      margin-top: 4px;
+      font-variant-numeric: tabular-nums;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .workbench-section {
+      margin-top: 15px;
+      padding-top: 13px;
+      border-top: 1px solid #1f1f2a;
+    }
+    #panel .workbench-section-title {
+      color: #6a6a78;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
     }
     #panel .annotate-section {
       margin-top: 18px;
@@ -1299,6 +1579,15 @@
   <div id="topbar">
     <div id="title">Palace · <span class="count" id="stats">loading…</span></div>
     <input id="search" type="text" placeholder="search key / kind / tag …" autocomplete="off">
+    <div id="breadcrumb">Atlas / all regions</div>
+    <div id="view-presets" aria-label="view presets">
+      <button type="button" data-view-preset="overview" class="active" title="show the whole selected region">Atlas</button>
+      <button type="button" data-view-preset="fresh" title="recently touched memories">Fresh</button>
+      <button type="button" data-view-preset="stale" title="memories untouched for more than seven days">Stale</button>
+      <button type="button" data-view-preset="hubs" title="high-degree structural anchors">Hubs</button>
+      <button type="button" data-view-preset="orphans" title="nodes with no explicit graph edges">Orphans</button>
+      <button type="button" data-view-preset="coactivation" title="nodes linked by co-activation edges">Cofire</button>
+    </div>
     <button id="stale-btn" type="button" class="empty"
             title="review memories untouched for >7 days (C8)">🧊 review</button>
     <button id="filter-btn" type="button">filter</button>
@@ -1311,6 +1600,16 @@
   </div>
   <div id="filter-panel" class="hidden"></div>
   <div id="stale-panel" class="hidden"></div>
+  <div id="atlas-panel">
+    <div class="atlas-head">
+      <div class="atlas-kicker">Atlas · semantic districts</div>
+      <div class="atlas-title">Memory regions</div>
+      <div class="atlas-help">Click a district to enter its Observatory; node clicks open the Workbench.</div>
+    </div>
+    <div class="atlas-list" id="atlas-list">
+      <div class="atlas-empty">loading regions…</div>
+    </div>
+  </div>
   <div id="cy"></div>
   <div id="panel" class="hidden">
     <div class="placeholder">click a node to read</div>
@@ -1559,11 +1858,230 @@ function computeDegrees(data) {
   return { degreeMap, hubThreshold, enableHubs, hubCount, orphanCount };
 }
 
+const ATLAS_TAG_STOPWORDS = new Set([
+  "palace", "auto_curated", "implicit", "session-handoff", "session_handoff",
+  "handoff", "superseded", "verified", "deployed", "shipped",
+]);
+
+function atlasSlug(raw) {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+function isUsefulAtlasTag(tag) {
+  const s = atlasSlug(tag);
+  if (!s || s.length < 3) return false;
+  if (ATLAS_TAG_STOPWORDS.has(s)) return false;
+  if (/^20\d{2}/.test(s)) return false;
+  if (/^summarized-at/.test(s) || /^ttl-/.test(s)) return false;
+  return true;
+}
+
+function atlasLabel(id) {
+  const specials = {
+    "agent-bridge": "agent-bridge",
+    "biocortex": "biocortex",
+    "onsen-hd": "onsen-hd",
+    "output-lane": "output lane",
+    "xiao-shu": "Xiao Shu",
+    "session-handoffs": "session handoffs",
+  };
+  return specials[id] || id.replaceAll("-", " ");
+}
+
+function atlasRegionForNode(n) {
+  const tags = Array.isArray(n.tags) ? n.tags : [];
+  const tag = tags.find(isUsefulAtlasTag);
+  if (tag) return atlasSlug(tag);
+
+  const key = String(n.id || "").toLowerCase();
+  const kind = String(n.kind || "").toLowerCase();
+  if (kind === "session_handoff" || key.includes("handoff")) return "session-handoffs";
+  const patterns = [
+    ["biocortex", "biocortex"],
+    ["onsen", "onsen-hd"],
+    ["agent-bridge", "agent-bridge"],
+    ["output-lane", "output-lane"],
+    ["present", "present"],
+    ["voice", "voice"],
+    ["memory", "memory"],
+    ["palace", "palace"],
+    ["xiao", "xiao-shu"],
+    ["warp", "warp"],
+    ["desktop", "desktop"],
+    ["nexus", "nexus"],
+    ["skill", "skills"],
+  ];
+  const hit = patterns.find(([needle]) => key.includes(needle) || kind.includes(needle));
+  if (hit) return hit[1];
+  return atlasSlug(kind || "uncategorized") || "uncategorized";
+}
+
+function computeAtlasRegions(data) {
+  const nowSecs = data.now || Math.floor(Date.now() / 1000);
+  const degInfo = state.degrees || computeDegrees(data);
+  const byNode = new Map();
+  const regions = new Map();
+
+  for (const n of data.nodes) {
+    const id = atlasRegionForNode(n);
+    byNode.set(n.id, id);
+    if (!regions.has(id)) {
+      regions.set(id, {
+        id,
+        label: atlasLabel(id),
+        count: 0,
+        edgeCount: 0,
+        coactivationCount: 0,
+        fresh: 0,
+        stale: 0,
+        hubs: 0,
+        orphans: 0,
+        kinds: new Map(),
+        color: colorForKind(n.kind),
+      });
+    }
+    const r = regions.get(id);
+    r.count += 1;
+    r.kinds.set(n.kind, (r.kinds.get(n.kind) || 0) + 1);
+    const lastAccessed = n.last_accessed || 0;
+    const ageSecs = lastAccessed > 0 ? (nowSecs - lastAccessed) : Number.MAX_SAFE_INTEGER;
+    if (ageSecs < FRESH_WINDOW_SECS) r.fresh += 1;
+    if (lastAccessed > 0 && ageSecs > STALE_WINDOW_SECS) r.stale += 1;
+    const degree = degInfo.degreeMap[n.id] || 0;
+    if (degree === 0) r.orphans += 1;
+    else if (degInfo.enableHubs && degree >= degInfo.hubThreshold) r.hubs += 1;
+  }
+
+  for (const e of data.edges) {
+    const a = byNode.get(e.source);
+    const b = byNode.get(e.target);
+    if (!a || !b || a !== b) continue;
+    const r = regions.get(a);
+    if (!r) continue;
+    r.edgeCount += 1;
+    if (e.type === "coactivation") r.coactivationCount += 1;
+  }
+
+  return Array.from(regions.values())
+    .map(r => {
+      const topKinds = Array.from(r.kinds.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 3)
+        .map(([kind, count]) => `${kind}:${count}`);
+      return { ...r, topKinds };
+    })
+    .sort((a, b) =>
+      b.count - a.count ||
+      b.fresh - a.fresh ||
+      a.label.localeCompare(b.label)
+    )
+    .slice(0, 18);
+}
+
+function renderBreadcrumb() {
+  const el = document.getElementById("breadcrumb");
+  if (!el) return;
+  const region = state.atlasRegions.find(r => r.id === state.activeRegion);
+  const preset = state.viewPreset === "overview" ? "Observatory" : state.viewPreset;
+  if (!region) {
+    el.innerHTML = `Atlas / <span class="crumb-hot">${escapeHTML(preset)}</span>`;
+    return;
+  }
+  el.innerHTML =
+    `<button type="button" data-clear-region="1">Atlas</button> / ` +
+    `<span class="crumb-hot">${escapeHTML(region.label)}</span> / ${escapeHTML(preset)}`;
+}
+
+function syncViewPresetButtons() {
+  document.querySelectorAll("#view-presets [data-view-preset]").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.viewPreset === state.viewPreset);
+  });
+}
+
+function renderAtlasPanel() {
+  const list = document.getElementById("atlas-list");
+  if (!list) return;
+  const regions = state.atlasRegions || [];
+  if (regions.length === 0) {
+    list.innerHTML = `<div class="atlas-empty">no regions yet</div>`;
+    renderBreadcrumb();
+    return;
+  }
+  list.innerHTML = regions.map(r => {
+    const flags = [
+      r.fresh ? `<span class="region-flag fresh">${r.fresh} fresh</span>` : "",
+      r.stale ? `<span class="region-flag stale">${r.stale} stale</span>` : "",
+      r.hubs ? `<span class="region-flag hub">${r.hubs} hubs</span>` : "",
+      r.orphans ? `<span class="region-flag orphan">${r.orphans} orphan</span>` : "",
+    ].filter(Boolean).join("");
+    return `<button type="button" class="atlas-region${r.id === state.activeRegion ? " active" : ""}" ` +
+      `data-region-id="${escapeHTML(r.id)}" style="--region-color:${escapeHTML(r.color)}">` +
+      `<span class="region-swatch"></span>` +
+      `<span class="region-main">` +
+        `<span class="region-label">${escapeHTML(r.label)}</span>` +
+        `<span class="region-meta">${escapeHTML(r.topKinds.join(" · "))}</span>` +
+      `</span>` +
+      `<span class="region-count">${r.count}</span>` +
+      `<span class="region-flags">${flags}</span>` +
+    `</button>`;
+  }).join("");
+  renderBreadcrumb();
+}
+
+function selectAtlasRegion(regionId) {
+  state.activeRegion = regionId;
+  state.focused = null;
+  document.body.classList.remove("workbench-open");
+  document.getElementById("panel").classList.add("hidden");
+  renderAtlasPanel();
+  renderBreadcrumb();
+  applyVisualState();
+  if (!state.cy) return;
+  const nodes = state.cy.nodes().filter(n => n.data("region") === regionId);
+  if (nodes.length > 0) {
+    state.cy.animate({ fit: { eles: nodes, padding: 86 }, duration: 420, easing: "ease-out" });
+  }
+}
+
+function clearAtlasRegion() {
+  state.activeRegion = null;
+  renderAtlasPanel();
+  renderBreadcrumb();
+  applyVisualState();
+  if (state.cy) {
+    state.cy.animate({ fit: { eles: state.cy.nodes().not(".faded"), padding: 54 }, duration: 360, easing: "ease-out" });
+  }
+}
+
+function setViewPreset(preset) {
+  state.viewPreset = preset;
+  state.focused = null;
+  document.body.classList.remove("workbench-open");
+  document.getElementById("panel").classList.add("hidden");
+  syncViewPresetButtons();
+  renderBreadcrumb();
+  applyVisualState();
+  if (state.cy) {
+    const visible = state.cy.nodes().not(".faded");
+    if (visible.length > 0) {
+      state.cy.animate({ fit: { eles: visible, padding: 70 }, duration: 360, easing: "ease-out" });
+    }
+  }
+}
+
 // ── Global state ────────────────────────────────────────────────
 const state = {
   cy: null,
   data: null,
   search: "",
+  viewPreset: "overview",
+  activeRegion: null,
+  atlasRegions: [],
   enabledSources: new Set(["sqlite", "markdown"]),
   enabledKinds: new Set(),
   enabledEdgeTypes: new Set(),  // empty == not yet populated; set on first load
@@ -1690,6 +2208,10 @@ async function loadGraph() {
   // tail. After ζ-12/ζ-14 hygiene the hub line is real-lesson dense
   // (deg ~15) instead of noise-stub dense (deg ~84 pre-ζ-12).
   state.degrees = computeDegrees(data);
+  state.atlasRegions = computeAtlasRegions(data);
+  if (state.activeRegion && !state.atlasRegions.some(r => r.id === state.activeRegion)) {
+    state.activeRegion = null;
+  }
   const hubBadge = state.degrees.hubCount > 0
     ? ` · <span style="color:#c8a96a" title="degree ≥ ${state.degrees.hubThreshold} (P95)">${state.degrees.hubCount} hubs</span>`
     : "";
@@ -1737,6 +2259,8 @@ async function loadGraph() {
   }
 
   renderFilterPanel(kindCounts, edgeTypeCounts);
+  renderAtlasPanel();
+  syncViewPresetButtons();
 
   buildCy(data);
 }
@@ -1785,6 +2309,8 @@ function buildCy(data) {
           haloPad: haloPad(access),
           haloOp: haloOp(access),
           source: n.source || "sqlite",
+          tags: n.tags || [],
+          region: atlasRegionForNode(n),
           fresh,
           stale,
           orphan,
@@ -1975,6 +2501,7 @@ function buildCy(data) {
   state.cy.on("tap", (evt) => {
     if (evt.target === state.cy) {
       clearFocus();
+      document.body.classList.remove("workbench-open");
       document.getElementById("panel").classList.add("hidden");
       // Reclaim the space — cy fills the viewport again.
       state.cy.resize();
@@ -2081,8 +2608,23 @@ function renderFilterPanel(kindCounts, edgeTypeCounts) {
   });
 }
 
+function nodePassesViewPreset(n) {
+  const d = n.data();
+  switch (state.viewPreset) {
+    case "fresh": return d.fresh === 1;
+    case "stale": return d.stale === 1;
+    case "hubs": return d.hub === 1;
+    case "orphans": return d.orphan === 1;
+    case "coactivation":
+      return n.connectedEdges().some(e => e.data("type") === "coactivation");
+    case "overview":
+    default:
+      return true;
+  }
+}
+
 // ── Visual state machine ────────────────────────────────────────
-// Combines: source filter + kind filter + search highlight + focus highlight.
+// Combines: atlas region + preset + source/kind + search + focus highlight.
 // Order matters: filters hide nodes (faded), search marks (match), focus
 // overrides (focus-center / focus-neighbor / focus-edge / faded).
 function applyVisualState() {
@@ -2098,7 +2640,9 @@ function applyVisualState() {
     const d = n.data();
     const sourceOk = state.enabledSources.has(d.source);
     const kindOk = state.enabledKinds.has(d.kind);
-    if (!sourceOk || !kindOk) n.addClass("faded");
+    const regionOk = !state.activeRegion || d.region === state.activeRegion;
+    const presetOk = nodePassesViewPreset(n);
+    if (!sourceOk || !kindOk || !regionOk || !presetOk) n.addClass("faded");
   });
 
   // Edge-fade: edges whose either endpoint is faded → faded. Also fade
@@ -2167,6 +2711,7 @@ function clearFocus() {
 // ── Side panel ──────────────────────────────────────────────────
 async function showSidePanel(id) {
   const panel = document.getElementById("panel");
+  document.body.classList.add("workbench-open");
   panel.classList.remove("hidden");
   // cytoscape's canvases were sized for the pre-panel viewport. Tell it
   // to re-measure so the new (narrower) cy area fits properly.
@@ -2210,39 +2755,115 @@ async function showSidePanel(id) {
           ${updated && updated !== created ? ` · updated ${updated}` : ""}
         </div>`
       : "";
+    const graphNode = state.cy ? state.cy.getElementById(m.key) : null;
+    const graphData = graphNode && graphNode.length > 0 ? graphNode.data() : {};
+    const region = state.atlasRegions.find(r => r.id === graphData.region);
+    const degree = graphData.degree || 0;
+    const age = graphData.ageSecs === 0
+      ? "fresh"
+      : graphData.ageSecs
+        ? relTime(Math.floor(Date.now() / 1000) - graphData.ageSecs)
+        : "n/a";
     panel.innerHTML = `
-      <h2>${escapeHTML(m.key)}</h2>
-      <div class="meta">
-        ${escapeHTML(m.kind)} · ${sourceLabel} · importance ${(m.importance || 0).toFixed(2)} · access ${m.access_count || 0}
-      </div>
-      ${timeBlock}
-      ${descBlock}
-      <div class="tags">
-        ${(m.tags || []).map(t => `<span class="tag">${escapeHTML(t)}</span>`).join("")}
-      </div>
-      <div class="content">${escapeHTML(m.content || "")}</div>
-      <div class="reports-section" id="reports-section" style="display:none">
-        <div class="reports-title">related reports</div>
-        <div class="reports-list" id="reports-list"></div>
-      </div>
-      <div class="annotate-section">
-        <button class="annotate-toggle" type="button">✍ annotate this node</button>
-        <button class="canvas-expand-btn" type="button">📐 expand canvas</button>
-        <div class="annotate-form">
-          <textarea placeholder="your thought… (cmd/ctrl+enter to save)"></textarea>
-          <div class="row">
-            <span class="hint">→ writes a new sqlite memory linked here</span>
-            <button class="cancel" type="button">cancel</button>
-            <button class="save" type="button">save</button>
+      <div class="workbench-shell">
+        <div class="workbench-header">
+          <div class="workbench-kicker">Workbench · selected memory</div>
+          <h2>${escapeHTML(m.key)}</h2>
+          <div class="meta">
+            ${escapeHTML(m.kind)} · ${sourceLabel} · ${escapeHTML(region ? region.label : "unmapped")}
+          </div>
+          ${timeBlock}
+        </div>
+        <div class="workbench-toolbar">
+          <button class="annotate-toggle" type="button">✍ annotate</button>
+          <button class="canvas-expand-btn" type="button">📐 canvas</button>
+          <button class="copy-key-btn" type="button">⧉ copy key</button>
+          <button class="tombstone-btn" type="button">🪦 tombstone</button>
+        </div>
+        <div class="workbench-body">
+          <div class="workbench-grid">
+            <div class="metric"><div class="label">importance</div><div class="value">${(m.importance || 0).toFixed(2)}</div></div>
+            <div class="metric"><div class="label">access</div><div class="value">${m.access_count || 0}</div></div>
+            <div class="metric"><div class="label">degree</div><div class="value">${degree}</div></div>
+            <div class="metric"><div class="label">state</div><div class="value">${graphData.hub ? "hub" : graphData.orphan ? "orphan" : graphData.stale ? "stale" : graphData.fresh ? "fresh" : "normal"}</div></div>
+            <div class="metric"><div class="label">last touch</div><div class="value">${escapeHTML(age)}</div></div>
+            <div class="metric"><div class="label">source</div><div class="value">${sourceLabel}</div></div>
+          </div>
+          ${descBlock}
+          <div class="workbench-section">
+            <div class="workbench-section-title">Tags</div>
+            <div class="tags">
+              ${(m.tags || []).map(t => `<span class="tag">${escapeHTML(t)}</span>`).join("") || `<span class="tag">none</span>`}
+            </div>
+          </div>
+          <div class="workbench-section">
+            <div class="workbench-section-title">Content</div>
+            <div class="content">${escapeHTML(m.content || "")}</div>
+          </div>
+          <div class="reports-section" id="reports-section" style="display:none">
+            <div class="reports-title">related reports</div>
+            <div class="reports-list" id="reports-list"></div>
+          </div>
+          <div class="annotate-section">
+            <div class="annotate-form">
+              <textarea placeholder="your thought… (cmd/ctrl+enter to save)"></textarea>
+              <div class="row">
+                <span class="hint">→ writes a new sqlite memory linked here</span>
+                <button class="cancel" type="button">cancel</button>
+                <button class="save" type="button">save</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     `;
     bindAnnotate(panel, m.key);
     bindCanvasExpand(panel, m);
+    bindWorkbenchActions(panel, m);
     loadRelatedReports(m.key);
   } catch (e) {
     panel.innerHTML = `<div class="placeholder">error: ${escapeHTML(String(e))}</div>`;
+  }
+}
+
+function bindWorkbenchActions(panel, memory) {
+  const copyBtn = panel.querySelector(".copy-key-btn");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(memory.key);
+        copyBtn.textContent = "✓ copied";
+        setTimeout(() => { copyBtn.textContent = "⧉ copy key"; }, 1400);
+      } catch (e) {
+        copyBtn.textContent = "copy failed";
+        setTimeout(() => { copyBtn.textContent = "⧉ copy key"; }, 1600);
+      }
+    });
+  }
+  const tombstoneBtn = panel.querySelector(".tombstone-btn");
+  if (tombstoneBtn) {
+    tombstoneBtn.addEventListener("click", async () => {
+      if (!confirm(`Tombstone "${memory.key}"?\n\nIt becomes invisible to memory_search/get but remains recoverable until purge.`)) {
+        return;
+      }
+      tombstoneBtn.disabled = true;
+      tombstoneBtn.textContent = "tombstoning…";
+      try {
+        const r = await fetch(`/api/memory/${encodeURIComponent(memory.key)}/tombstone`, {
+          method: "POST",
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const node = state.cy ? state.cy.$id(memory.key) : null;
+        if (node && node.length > 0) state.cy.remove(node);
+        document.body.classList.remove("workbench-open");
+        panel.classList.add("hidden");
+        await loadGraph();
+      } catch (e) {
+        tombstoneBtn.disabled = false;
+        tombstoneBtn.textContent = "tombstone failed";
+        setTimeout(() => { tombstoneBtn.textContent = "🪦 tombstone"; }, 1800);
+      }
+    });
   }
 }
 
@@ -2324,6 +2945,25 @@ function bindAnnotate(panel, targetKey) {
 }
 
 // ── Top-bar bindings ────────────────────────────────────────────
+document.getElementById("view-presets").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-view-preset]");
+  if (!btn) return;
+  setViewPreset(btn.dataset.viewPreset || "overview");
+});
+
+document.getElementById("atlas-panel").addEventListener("click", (e) => {
+  const region = e.target.closest("[data-region-id]");
+  if (!region) return;
+  const id = region.dataset.regionId;
+  if (!id) return;
+  if (state.activeRegion === id) clearAtlasRegion();
+  else selectAtlasRegion(id);
+});
+
+document.getElementById("breadcrumb").addEventListener("click", (e) => {
+  if (e.target.closest("[data-clear-region]")) clearAtlasRegion();
+});
+
 document.getElementById("search").addEventListener("input", (e) => {
   state.search = e.target.value;
   applyVisualState();
