@@ -18754,6 +18754,370 @@ impl McpTool for CapabilitiesTool {
 }
 
 // ===========================================================================
+//                           readiness_audit
+// ===========================================================================
+
+pub struct ReadinessAuditTool {
+    hub: Hub,
+}
+impl ReadinessAuditTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for ReadinessAuditTool {
+    fn name(&self) -> &'static str {
+        "readiness_audit"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Agent-Bridge readiness snapshot inspired by ECC-style \
+                 harness/readiness audits. Summarizes setup/tool profiles, hook source \
+                 coverage, skill routing surfaces, audit tools, and ECC-derived non-goals \
+                 without changing installed client configuration."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "repo_root": {
+                        "type": "string",
+                        "description": "Optional Agent-Bridge checkout root. Defaults to auto-detection from the compiled crate path."
+                    },
+                    "include_local_install": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Also check ~/.local/bin hook scripts and the hook run log. This is read-only but local-environment-specific."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(&readiness_audit_payload(
+            &args, &self.hub,
+        )))
+    }
+}
+
+fn readiness_audit_payload(args: &Value, hub: &Hub) -> Value {
+    let repo_root = resolve_readiness_repo_root(args.get("repo_root").and_then(|v| v.as_str()));
+    let include_local_install = args
+        .get("include_local_install")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let profile_rows = readiness_profile_rows(hub);
+    let tool_rows = readiness_tool_surface_rows(hub);
+    let hook_rows = readiness_hook_rows(repo_root.as_deref(), include_local_install);
+    let source_rows = readiness_source_rows(repo_root.as_deref());
+    let collab_drift = collab_group_divergence();
+
+    let missing_sources = source_rows
+        .iter()
+        .filter(|row| row.get("exists").and_then(|v| v.as_bool()).unwrap_or(false) == false)
+        .count();
+    let missing_hook_sources = hook_rows
+        .iter()
+        .filter(|row| {
+            row.get("source_exists")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                == false
+        })
+        .count();
+    let tool_gaps = tool_rows
+        .iter()
+        .filter(|row| {
+            row.get("present_all")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                == false
+        })
+        .count();
+    let drift_ok = collab_drift
+        .get("ok")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let repo_found = repo_root.is_some();
+    let warnings = missing_sources
+        + missing_hook_sources
+        + tool_gaps
+        + usize::from(!drift_ok)
+        + usize::from(!repo_found);
+    let status = if warnings == 0 { "ready" } else { "partial" };
+
+    let mut recommendations = Vec::new();
+    if !repo_found {
+        recommendations
+            .push("Provide repo_root to enable source/docs/test coverage checks.".to_string());
+    }
+    if missing_sources > 0 {
+        recommendations.push(format!(
+            "Repair or update {missing_sources} missing source/doc/test readiness asset(s)."
+        ));
+    }
+    if missing_hook_sources > 0 {
+        recommendations.push(format!(
+            "Repair or document {missing_hook_sources} hook source coverage gap(s)."
+        ));
+    }
+    if tool_gaps > 0 {
+        recommendations.push(format!(
+            "Investigate {tool_gaps} readiness tool(s) missing from the all-dev registry."
+        ));
+    }
+    if !drift_ok {
+        recommendations
+            .push("Fix partial collab-group coverage before widening named toolsets.".to_string());
+    }
+    if !include_local_install {
+        recommendations.push(
+            "Run with include_local_install=true when diagnosing a specific machine.".to_string(),
+        );
+    }
+    if recommendations.is_empty() {
+        recommendations
+            .push("Readiness source coverage and tool registry checks passed.".to_string());
+    }
+
+    json!({
+        "kind": "agent_bridge_readiness_audit.v0",
+        "status": status,
+        "summary": {
+            "repo_root": repo_root.as_ref().map(|p| p.display().to_string()),
+            "source_assets_checked": source_rows.len(),
+            "missing_source_assets": missing_sources,
+            "hooks_checked": hook_rows.len(),
+            "missing_hook_sources": missing_hook_sources,
+            "readiness_tools_checked": tool_rows.len(),
+            "missing_readiness_tools": tool_gaps,
+            "collab_group_drift_ok": drift_ok,
+            "local_install_checked": include_local_install,
+            "warnings": warnings
+        },
+        "tool_profiles": profile_rows,
+        "tool_surfaces": tool_rows,
+        "hooks": hook_rows,
+        "source_assets": source_rows,
+        "tool_profile_divergence": collab_drift,
+        "closed_ecc_paths": [
+            {
+                "id": "ecc_hook_profile",
+                "status": "deferred",
+                "evidence": "docs/HOOKS-ENV.md",
+                "reason": "AB already has richer per-hook env gates; profile aliases are convenience only."
+            },
+            {
+                "id": "ecc_error_resolution_miner",
+                "status": "closed_no_signal",
+                "evidence": "docs/design/ECC_INSTINCT_MINING_PROBE_2026_05_24.md",
+                "reason": "Claude Code PostToolUse does not fire on tool-error; observer remains observability-only."
+            }
+        ],
+        "recommendations": recommendations
+    })
+}
+
+fn readiness_profile_rows(hub: &Hub) -> Vec<Value> {
+    [
+        ("profile-standard", None, None, Some("standard")),
+        ("profile-all", None, None, Some("all")),
+        ("codex-essential", Some("codex-essential"), None, None),
+        ("codex-lean", Some("codex-lean"), None, None),
+        ("claude-standard", Some("claude-standard"), None, None),
+        ("gemini-lean", Some("gemini-lean"), None, None),
+        ("hook-lifecycle", Some("hook-lifecycle"), None, None),
+    ]
+    .into_iter()
+    .map(|(label, toolset, client, profile)| {
+        let policy = ToolPolicy::from_values(toolset, client, None, profile);
+        let tool_count = build_registry_with_policy(hub.clone(), policy).list().len();
+        json!({
+            "label": label,
+            "toolset": policy.label(),
+            "profile": policy.profile().label(),
+            "tool_count": tool_count,
+            "extras": policy.extras(),
+        })
+    })
+    .collect()
+}
+
+fn readiness_tool_surface_rows(hub: &Hub) -> Vec<Value> {
+    let all = readiness_registry_names(
+        hub,
+        ToolPolicy::from_values(Some("all-dev"), None, None, None),
+    );
+    let standard = readiness_registry_names(
+        hub,
+        ToolPolicy::from_values(None, None, None, Some("standard")),
+    );
+    let codex_lean = readiness_registry_names(
+        hub,
+        ToolPolicy::from_values(Some("codex-lean"), None, None, None),
+    );
+    let gemini_lean = readiness_registry_names(
+        hub,
+        ToolPolicy::from_values(Some("gemini-lean"), None, None, None),
+    );
+    [
+        ("capabilities", "environment capability summary"),
+        ("readiness_audit", "consolidated readiness snapshot"),
+        ("mcp_config_audit", "client config and stdio audit"),
+        ("mcp_dispatch_audit", "tool traffic audit"),
+        (
+            "tool_atlas_snapshot",
+            "tool registry and failure-mode atlas",
+        ),
+        ("hook_status", "installed hook health"),
+        ("skills_recommend", "skill index retrieval"),
+        ("skills_route", "skill routing metadata"),
+        ("skills_feedback", "skill outcome feedback"),
+    ]
+    .into_iter()
+    .map(|(tool, purpose)| {
+        json!({
+            "tool": tool,
+            "purpose": purpose,
+            "present_all": all.contains(tool),
+            "present_standard": standard.contains(tool),
+            "present_codex_lean": codex_lean.contains(tool),
+            "present_gemini_lean": gemini_lean.contains(tool),
+        })
+    })
+    .collect()
+}
+
+fn readiness_registry_names(hub: &Hub, policy: ToolPolicy) -> HashSet<String> {
+    build_registry_with_policy(hub.clone(), policy)
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect()
+}
+
+fn readiness_hook_rows(
+    repo_root: Option<&std::path::Path>,
+    include_local_install: bool,
+) -> Vec<Value> {
+    let source_names = hook_source_paths();
+    let hooks_dir = repo_root.map(|root| root.join("crates/bridge/src/hooks"));
+    let bin_dir = dirs_home().join(".local").join("bin");
+    let log_path = hook_run_log_path();
+    known_hooks()
+        .into_iter()
+        .map(|(event, script_basename)| {
+            let source_name = source_names.get(event).copied().unwrap_or("");
+            let source_path = hooks_dir.as_ref().map(|dir| dir.join(source_name));
+            let installed_path = bin_dir.join(script_basename);
+            let last_run = if include_local_install {
+                last_hook_run(event, &log_path)
+            } else {
+                None
+            };
+            json!({
+                "event": event,
+                "script": script_basename,
+                "source_path": source_path.as_ref().map(|p| p.display().to_string()),
+                "source_exists": source_path.as_ref().map(|p| p.exists()).unwrap_or(false),
+                "installed_path": if include_local_install {
+                    Value::String(installed_path.display().to_string())
+                } else {
+                    Value::Null
+                },
+                "installed_exists": if include_local_install {
+                    Value::Bool(installed_path.exists())
+                } else {
+                    Value::Null
+                },
+                "last_run_ts": last_run
+                    .as_ref()
+                    .and_then(|v| v.get("ts"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "last_exit_code": last_run
+                    .as_ref()
+                    .and_then(|v| v.get("exit_code"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            })
+        })
+        .collect()
+}
+
+fn readiness_source_rows(repo_root: Option<&std::path::Path>) -> Vec<Value> {
+    [
+        ("README.md", "operator-facing tool surface"),
+        ("docs/HOOKS-ENV.md", "closed ECC hook-profile delta"),
+        (
+            "docs/design/ECC_INSTINCT_MINING_PROBE_2026_05_24.md",
+            "closed ECC instinct-mining null path",
+        ),
+        (
+            "docs/design/ECC_VALUE_ADAPTATION_2026_06_05.md",
+            "current ECC value/adaptation memo",
+        ),
+        ("crates/bridge/src/setup.rs", "setup profiles and frontends"),
+        (
+            "crates/bridge/src/skills.rs",
+            "skill intake, lint, and routing",
+        ),
+        (
+            "crates/bridge/src/mcp_tools.rs",
+            "MCP registry and audit surfaces",
+        ),
+        (
+            "crates/bridge/tests/tool_atlas.rs",
+            "tool atlas regression tests",
+        ),
+    ]
+    .into_iter()
+    .map(|(rel, purpose)| {
+        let path = repo_root.map(|root| root.join(rel));
+        json!({
+            "path": rel,
+            "purpose": purpose,
+            "exists": path.as_ref().map(|p| p.exists()).unwrap_or(false),
+        })
+    })
+    .collect()
+}
+
+fn resolve_readiness_repo_root(candidate: Option<&str>) -> Option<PathBuf> {
+    if let Some(raw) = candidate {
+        if let Some(root) = find_readiness_repo_root(&PathBuf::from(raw)) {
+            return Some(root);
+        }
+    }
+    find_readiness_repo_root(&PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
+fn find_readiness_repo_root(start: &std::path::Path) -> Option<PathBuf> {
+    let mut current = if start.is_file() {
+        start.parent()?.to_path_buf()
+    } else {
+        start.to_path_buf()
+    };
+    loop {
+        if current.join("crates/bridge/src/mcp_tools.rs").exists() {
+            return Some(current);
+        }
+        if current.join("src/mcp_tools.rs").exists()
+            && current.file_name().and_then(|n| n.to_str()) == Some("bridge")
+        {
+            return current.parent()?.parent().map(|p| p.to_path_buf());
+        }
+        if !current.pop() {
+            break;
+        }
+    }
+    None
+}
+
+// ===========================================================================
 //                           mcp_config_audit
 // ===========================================================================
 
@@ -28411,6 +28775,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
         tool_name,
         "capabilities"
             | "mcp_dispatch_audit"
+            | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
             | "memory_search"
@@ -28458,6 +28823,7 @@ fn gemini_lean_tool(tool_name: &str) -> bool {
             | "project_detect"
             | "changes_digest"
             | "mcp_dispatch_audit"
+            | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
             | "session_bootstrap"
@@ -28470,6 +28836,7 @@ fn hook_lifecycle_tool(tool_name: &str) -> bool {
         tool_name,
         "capabilities"
             | "mcp_dispatch_audit"
+            | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
             | "memory_compact"
@@ -30185,6 +30552,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(ToolAtlasSnapshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(ReadinessAuditTool::new(hub.clone())),
     );
     // IDE bridge stays Niche by default, but Codex Essential allowlists it so
     // IDE-aware Codex sessions can opt into editor context without widening to
@@ -35265,6 +35638,46 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(connected);
     }
 
+    #[test]
+    fn readiness_audit_reports_profiles_tools_and_closed_ecc_paths() {
+        let payload = readiness_audit_payload(
+            &json!({ "repo_root": env!("CARGO_MANIFEST_DIR") }),
+            &Hub::builder().build(),
+        );
+
+        assert_eq!(payload["kind"], "agent_bridge_readiness_audit.v0");
+        assert_eq!(payload["summary"]["missing_source_assets"], json!(0));
+        assert_eq!(payload["summary"]["missing_hook_sources"], json!(0));
+
+        let profile_rows = payload["tool_profiles"].as_array().expect("profiles");
+        assert!(profile_rows
+            .iter()
+            .any(|row| row["label"] == "codex-lean" && row["tool_count"].as_u64().unwrap() > 0));
+        assert!(profile_rows
+            .iter()
+            .any(|row| row["label"] == "gemini-lean" && row["tool_count"].as_u64().unwrap() > 0));
+
+        let tool_rows = payload["tool_surfaces"].as_array().expect("tools");
+        assert!(tool_rows.iter().any(|row| {
+            row["tool"] == "readiness_audit"
+                && row["present_all"].as_bool().unwrap_or(false)
+                && row["present_codex_lean"].as_bool().unwrap_or(false)
+        }));
+        assert!(tool_rows.iter().any(|row| {
+            row["tool"] == "mcp_config_audit" && row["present_all"].as_bool().unwrap_or(false)
+        }));
+
+        let closed = payload["closed_ecc_paths"]
+            .as_array()
+            .expect("closed ecc paths");
+        assert!(closed
+            .iter()
+            .any(|row| row["id"] == "ecc_hook_profile" && row["status"] == "deferred"));
+        assert!(closed.iter().any(|row| {
+            row["id"] == "ecc_error_resolution_miner" && row["status"] == "closed_no_signal"
+        }));
+    }
+
     // ── tool profile tier filter ──────────────────────────────────────────
 
     #[test]
@@ -35304,6 +35717,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(p.label(), "codex-essential");
         assert_eq!(p.profile().label(), "compact");
         assert!(p.includes(Tier::Essential, "pet_state_get"));
+        assert!(p.includes(Tier::Essential, "readiness_audit"));
         assert!(p.includes(Tier::Niche, "ide_snapshot"));
         assert!(p.includes(Tier::Niche, "ide_command"));
         // Forum + presence collab tools — allowlisted into codex-essential so
@@ -35457,6 +35871,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
         for t in [
             "event_spine_snapshot",
+            "readiness_audit",
             "tool_atlas_snapshot",
             "memory_search",
             "memory_save",
@@ -35522,6 +35937,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(p.profile().label(), "essential");
         assert!(p.includes(Tier::Essential, "memory_search"));
         assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
+        assert!(p.includes(Tier::Essential, "readiness_audit"));
         assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "skills_route"));
@@ -35553,6 +35969,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(p.label(), "hook-lifecycle");
         assert_eq!(p.profile().label(), "standard");
         assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
+        assert!(p.includes(Tier::Essential, "readiness_audit"));
         assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
         assert!(p.includes(Tier::Standard, "memory_compact"));
         assert!(p.includes(Tier::Essential, "pet_state_ritual"));
@@ -35569,6 +35986,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(p.profile().label(), "essential");
         assert!(p.includes(Tier::Essential, "memory_search"));
         assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
+        assert!(p.includes(Tier::Essential, "readiness_audit"));
         assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "skills_route"));
@@ -35613,6 +36031,28 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .collect();
 
         assert!(names.iter().any(|n| n == "tool_atlas_snapshot"));
+    }
+
+    #[test]
+    fn registry_exposes_readiness_audit_tool() {
+        for label in [
+            "codex-essential",
+            "codex-lean",
+            "gemini-lean",
+            "hook-lifecycle",
+        ] {
+            let p = ToolPolicy::from_values(Some(label), None, None, None);
+            let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), p)
+                .list()
+                .into_iter()
+                .map(|s| s.name)
+                .collect();
+
+            assert!(
+                names.iter().any(|n| n == "readiness_audit"),
+                "readiness_audit missing from {label}"
+            );
+        }
     }
 
     #[test]

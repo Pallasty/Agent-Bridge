@@ -666,6 +666,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `session_handoff` | Structured JSON brief: todos + `session_handoff` memories + git snapshot (W3) |
 | | `session_lifecycle_step` | Dispatch `bootstrap` / `precompact` (curate+finalize) / `finalize` in one call |
 | meta | `capabilities` | Report what agent-bridge can do in this environment |
+| | `readiness_audit` | Read-only readiness snapshot over setup/tool profiles, hooks, skills, audit surfaces, and ECC-derived non-goals |
 | | `mcp_config_audit` | Audit Codex / Gemini CLI / Claude Code MCP config and direct stdio connectivity |
 | | `mcp_dispatch_audit` | Audit MCP tool traffic by source, client, profile, model, and reasoning effort |
 | | `context_budget` | Offline token estimate vs approximate model limit + compaction recommendation (W5) |
