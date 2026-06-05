@@ -175,6 +175,7 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
 
     let filter = MemoryExportFilter {
         edges_out_path: Some(memory_edges_file.clone()),
+        stable_sync_metadata: true,
         ..MemoryExportFilter::default()
     };
     let result = store

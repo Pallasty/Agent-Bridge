@@ -1917,6 +1917,23 @@ struct SyncEnvelope {
     version_vector: String,
 }
 
+/// Sync transport should not churn on per-node retrieval/maintenance state.
+///
+/// These fields are useful inside a local SQLite store, but they are not a
+/// durable memory edit:
+/// - `last_accessed_at` / `access_count` are updated by reads.
+/// - `importance` is decayed/reinforced by local maintenance.
+/// - `archived` from decay is a local ranking/visibility hint; durable removal
+///   still flows through `tombstoned` / `superseded` rows that bump `updated_at`.
+fn stabilise_sync_metadata(record: &mut MemoryRecord) {
+    record.last_accessed_at = 0;
+    record.access_count = 0;
+    record.importance = importance_for_kind(&record.kind);
+    if record.status == "archived" {
+        record.status = "active".to_string();
+    }
+}
+
 /// Action selected for one row during a [`SqliteStore::memory_import`] preflight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ImportAction {
@@ -4896,6 +4913,7 @@ impl StateStore for SqliteStore {
         let kind = filter.kind.clone();
         let tags = filter.tags_any.clone();
         let since = filter.since_ts;
+        let stable_sync_metadata = filter.stable_sync_metadata;
 
         let rows: Vec<SyncEnvelope> = self
             .conn
@@ -4937,7 +4955,7 @@ impl StateStore for SqliteStore {
                     .query_map(params![kind, since], |row| {
                         let tags_s: String = row.get(3)?;
                         let related_s: String = row.get(4)?;
-                        let record = MemoryRecord {
+                        let mut record = MemoryRecord {
                             key: row.get(0)?,
                             kind: row.get(1)?,
                             content: row.get(2)?,
@@ -4957,6 +4975,9 @@ impl StateStore for SqliteStore {
                         };
                         let version_vector: String =
                             row.get::<_, Option<String>>(14)?.unwrap_or_default();
+                        if stable_sync_metadata {
+                            stabilise_sync_metadata(&mut record);
+                        }
                         Ok(SyncEnvelope {
                             record,
                             version_vector,
@@ -9634,6 +9655,7 @@ mod tests {
             since_ts: None,
             edges_out_path: None,
             loose_edges: false,
+            stable_sync_metadata: false,
         }
     }
 
@@ -10447,6 +10469,111 @@ mod tests {
         let observed = keyed.clone();
         keyed.sort();
         assert_eq!(observed, keyed, "edges must be exported in sorted order");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_export_stable_sync_metadata_ignores_local_maintenance_churn() {
+        use crate::{MemoryExportFilter, MemoryRecord};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-memory-stable-sync-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store_a = SqliteStore::open(&temp_dir.join("a.db"))
+            .await
+            .expect("open a");
+        let store_b = SqliteStore::open(&temp_dir.join("b.db"))
+            .await
+            .expect("open b");
+
+        let rec = MemoryRecord {
+            key: "stable_sync_meta".to_string(),
+            kind: "lesson".to_string(),
+            content: "same durable content".to_string(),
+            tags: vec!["sync".to_string()],
+            related_keys: vec![],
+            scope: Some("project:/tmp/agent-bridge".to_string()),
+            created_at: 1_780_000_000,
+            updated_at: 1_780_000_100,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.7,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store_a.memory_save(&rec).await.expect("save a");
+        store_b.memory_save(&rec).await.expect("save b");
+
+        store_b
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories
+                        SET last_accessed_at = ?2,
+                            access_count = ?3,
+                            importance = ?4,
+                            status = 'archived'
+                      WHERE key = ?1",
+                    params!["stable_sync_meta", 1_780_123_456_i64, 42_i64, 0.03_f64],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("local maintenance update");
+
+        let raw_a = temp_dir.join("raw-a.jsonl");
+        let raw_b = temp_dir.join("raw-b.jsonl");
+        store_a
+            .memory_export(&MemoryExportFilter::default(), &raw_a)
+            .await
+            .expect("raw export a");
+        store_b
+            .memory_export(&MemoryExportFilter::default(), &raw_b)
+            .await
+            .expect("raw export b");
+        let raw_a_s = tokio::fs::read_to_string(&raw_a).await.expect("raw a");
+        let raw_b_s = tokio::fs::read_to_string(&raw_b).await.expect("raw b");
+        assert_ne!(raw_a_s, raw_b_s, "raw exports should expose local churn");
+
+        let stable_filter = MemoryExportFilter {
+            stable_sync_metadata: true,
+            ..Default::default()
+        };
+        let stable_a = temp_dir.join("stable-a.jsonl");
+        let stable_b = temp_dir.join("stable-b.jsonl");
+        store_a
+            .memory_export(&stable_filter, &stable_a)
+            .await
+            .expect("stable export a");
+        store_b
+            .memory_export(&stable_filter, &stable_b)
+            .await
+            .expect("stable export b");
+        let stable_a_s = tokio::fs::read_to_string(&stable_a)
+            .await
+            .expect("stable a");
+        let stable_b_s = tokio::fs::read_to_string(&stable_b)
+            .await
+            .expect("stable b");
+        assert_eq!(
+            stable_a_s, stable_b_s,
+            "sync-stable exports should ignore local maintenance metadata"
+        );
+
+        let exported: serde_json::Value =
+            serde_json::from_str(stable_a_s.lines().next().expect("one row"))
+                .expect("parse stable row");
+        assert_eq!(exported["last_accessed_at"], 0);
+        assert_eq!(exported["access_count"], 0);
+        assert_eq!(exported["importance"], 0.7);
+        assert_eq!(exported["status"], "active");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
