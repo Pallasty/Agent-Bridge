@@ -407,8 +407,19 @@ agent-bridge setup --frontend codex --dry-run --json
 
 The JSON form emits `agent_bridge_setup_plan.v0`: the binary target, frontend,
 toolset, planned file writes, best-effort client CLI registrations, and a
-plan-only install-state note. It is intentionally read-only; persisted
-install-state is a later gated hardening step.
+plan-only install-state note. It is intentionally read-only and does not write
+`setup-state.json`.
+
+After a successful non-dry-run setup, Agent-Bridge writes
+`agent_bridge_setup_state.v0` to the Agent-Bridge data directory:
+
+- Linux: `$XDG_DATA_HOME/agent-bridge/setup-state.json`, or
+  `~/.local/share/agent-bridge/setup-state.json`
+- macOS: `~/Library/Application Support/agent-bridge/setup-state.json`
+
+The state file records the applied frontend, toolset, MCP command, binary
+target, operation list, and applied timestamp. Best-effort client CLI
+registrations are still worth manually verifying in the target client.
 
 Claude Code profile (`--frontend claude-code`):
 

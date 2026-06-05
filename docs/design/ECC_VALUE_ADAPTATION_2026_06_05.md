@@ -113,6 +113,15 @@ Only after P2, compare AB setup plan/state with ECC's `install-plan` and
 `install-state` behavior. Add plan-state detail only if the validator shows the
 current setup flow is too opaque for operators.
 
+Status:
+
+- `agent-bridge setup --dry-run --json` now emits
+  `agent_bridge_setup_plan.v0` without writing config.
+- Successful non-dry-run setup now writes `agent_bridge_setup_state.v0` to the
+  Agent-Bridge data directory as `setup-state.json`.
+- Dry-run remains the review gate; persisted setup-state is written only after
+  the selected setup profile returns successfully.
+
 ### P4 - AiOT dogfood
 
 Use AiOT as the first downstream consumer once AB has a stable readiness

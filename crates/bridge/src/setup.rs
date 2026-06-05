@@ -37,6 +37,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // Hook scripts embedded at compile time from the hooks/ directory.
 const HOOK_MEMORY: &str = include_str!("hooks/ab-memory-hook.sh");
@@ -121,6 +122,7 @@ fn setup_plan(
     let bin_dir = home.join(".local/bin");
     let mcp_command = bin_dir.join("agent-bridge");
     let install_dst = binary_install_destination(&mcp_command);
+    let state_path = setup_state_path(home);
     let mut operations = vec![plan_op(
         "binary.install",
         "copy_executable_atomically",
@@ -267,6 +269,7 @@ fn setup_plan(
         "operations": operations,
         "state": {
             "install_state_written": false,
+            "path": state_path.display().to_string(),
             "note": "This slice is plan-only. Persisted install-state is a later gated step."
         }
     })
@@ -367,7 +370,7 @@ pub fn run(frontend: Frontend, codex_toolset: CodexToolset) -> Result<()> {
         println!("  ·  binary      already at {}", install_dst.display());
     }
 
-    match frontend {
+    let profile_result = match frontend {
         Frontend::ClaudeCode => install_claude_code(&home, &bin_dir, &mcp_command),
         Frontend::Warp => install_warp(&mcp_command),
         Frontend::Auggie => install_auggie(&mcp_command),
@@ -387,7 +390,16 @@ pub fn run(frontend: Frontend, codex_toolset: CodexToolset) -> Result<()> {
         Frontend::GeminiCli => install_gemini_cli(&home, &mcp_command),
         Frontend::Cursor => install_cursor(&home, &mcp_command),
         Frontend::LocalCli => install_local_cli(&home, &mcp_command, codex_toolset),
-    }
+    };
+    profile_result?;
+
+    let plan = setup_plan(frontend, codex_toolset, &home, &bin_src);
+    let state_path = setup_state_path(&home);
+    let state = setup_state(&plan, &state_path, now_unix_secs()?);
+    write_setup_state(&state_path, &state)?;
+    println!("  ✓  install-state → {}", state_path.display());
+
+    Ok(())
 }
 
 /// When `~/.local/bin/agent-bridge` is the env-injection wrapper, install the
@@ -881,6 +893,79 @@ fn claude_mcp_get_agent_bridge() -> bool {
 
 fn home_dir() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(PathBuf::from)
+}
+
+fn agent_bridge_data_dir(home: &Path) -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+            return PathBuf::from(xdg).join("agent-bridge");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        return home.join("Library/Application Support/agent-bridge");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        home.join(".local/share/agent-bridge")
+    }
+}
+
+fn setup_state_path(home: &Path) -> PathBuf {
+    agent_bridge_data_dir(home).join("setup-state.json")
+}
+
+fn now_unix_secs() -> Result<u64> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before unix epoch")?
+        .as_secs())
+}
+
+fn setup_state(plan: &Value, state_path: &Path, applied_at_unix: u64) -> Value {
+    json!({
+        "schema": "agent_bridge_setup_state.v0",
+        "source_plan_schema": plan.get("schema").cloned().unwrap_or(Value::Null),
+        "status": "applied",
+        "applied_at_unix": applied_at_unix,
+        "frontend": plan.get("frontend").cloned().unwrap_or(Value::Null),
+        "codex_toolset": plan.get("codex_toolset").cloned().unwrap_or(Value::Null),
+        "codex_tool_profile": plan.get("codex_tool_profile").cloned().unwrap_or(Value::Null),
+        "home": plan.get("home").cloned().unwrap_or(Value::Null),
+        "binary_source": plan.get("binary_source").cloned().unwrap_or(Value::Null),
+        "mcp_command": plan.get("mcp_command").cloned().unwrap_or(Value::Null),
+        "install_destination": plan.get("install_destination").cloned().unwrap_or(Value::Null),
+        "operation_count": plan.get("operation_count").cloned().unwrap_or(Value::Null),
+        "operations": plan.get("operations").cloned().unwrap_or_else(|| json!([])),
+        "state_path": state_path.display().to_string(),
+        "note": "Written only after non-dry-run setup returns successfully; best-effort CLI registrations may still require manual verification."
+    })
+}
+
+fn write_setup_state(path: &Path, state: &Value) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create setup-state dir {}", parent.display()))?;
+    }
+
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let body = format!(
+        "{}\n",
+        serde_json::to_string_pretty(state).context("serialize setup-state")?
+    );
+    let write_result = (|| -> Result<()> {
+        fs::write(&tmp, body).with_context(|| format!("write {}", tmp.display()))?;
+        fs::rename(&tmp, path)
+            .with_context(|| format!("install setup-state {}", path.display()))?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    write_result
 }
 
 fn write_script(path: &Path, content: &str) -> Result<()> {
@@ -1550,8 +1635,8 @@ fn script_name_for_event(event: &str) -> &'static str {
 mod tests {
     use super::{
         ensure_toml_bool, merge_codex_config, merge_codex_hooks, merge_cursor_settings,
-        merge_gemini_settings, remove_toml_key, replace_toml_table, setup_plan, CodexHost,
-        CodexToolset, Frontend, HOOK_PRECOMPACT, HOOK_SESSION_END,
+        merge_gemini_settings, remove_toml_key, replace_toml_table, setup_plan, setup_state,
+        write_setup_state, CodexHost, CodexToolset, Frontend, HOOK_PRECOMPACT, HOOK_SESSION_END,
     };
     use serde_json::{json, Value};
     use std::fs;
@@ -1611,6 +1696,50 @@ mod tests {
             !ids.iter().any(|id| id.starts_with("hook.")),
             "local-cli profile must stay hook-free"
         );
+    }
+
+    #[test]
+    fn setup_state_records_applied_metadata_and_plan_operations() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agent-bridge-setup-state-record-{}",
+            std::process::id()
+        ));
+        let bin_src = tmp.join("target/debug/agent-bridge");
+        let state_path = tmp.join(".local/share/agent-bridge/setup-state.json");
+        let plan = setup_plan(Frontend::Codex, CodexToolset::Lean, &tmp, &bin_src);
+
+        let state = setup_state(&plan, &state_path, 1_780_691_900);
+
+        assert_eq!(state["schema"], "agent_bridge_setup_state.v0");
+        assert_eq!(state["source_plan_schema"], "agent_bridge_setup_plan.v0");
+        assert_eq!(state["status"], "applied");
+        assert_eq!(state["applied_at_unix"], 1_780_691_900);
+        assert_eq!(state["frontend"], "codex");
+        assert_eq!(state["codex_toolset"], "codex-lean");
+        assert_eq!(state["state_path"], state_path.display().to_string());
+        assert_eq!(state["operation_count"], plan["operation_count"]);
+        assert_eq!(state["operations"][0]["id"], "binary.install");
+    }
+
+    #[test]
+    fn write_setup_state_creates_parent_and_writes_json() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agent-bridge-setup-state-write-{}",
+            std::process::id()
+        ));
+        let state_path = tmp.join("nested/setup-state.json");
+        let state = json!({
+            "schema": "agent_bridge_setup_state.v0",
+            "status": "applied",
+        });
+
+        write_setup_state(&state_path, &state).unwrap();
+
+        let raw = fs::read_to_string(&state_path).unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["schema"], "agent_bridge_setup_state.v0");
+        assert_eq!(parsed["status"], "applied");
+        assert!(!state_path.with_extension("tmp").exists());
     }
 
     #[test]
