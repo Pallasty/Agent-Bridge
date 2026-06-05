@@ -47,6 +47,39 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("function selectAtlasRegion(regionId)", html)
         self.assertIn("function clearAtlasRegion()", html)
 
+    def test_region_navigation_has_zoom_and_layered_breadcrumbs(self):
+        html = palace_html()
+
+        self.assertIn("function zoomToAtlasRegion(regionId)", html)
+        self.assertIn("function zoomToVisibleGraph()", html)
+        self.assertIn("zoomToAtlasRegion(regionId);", html)
+        self.assertIn("zoomToVisibleGraph();", html)
+        self.assertIn("data-clear-region", html)
+        self.assertIn("data-focus-region", html)
+        self.assertIn("Region", html)
+        self.assertIn("Node", html)
+
+    def test_view_state_persists_to_url_and_local_storage(self):
+        html = palace_html()
+
+        self.assertIn("const PALACE_VIEW_STATE_KEY", html)
+        self.assertIn("function saveViewState()", html)
+        self.assertIn("function restoreViewStateFromUrlOrStorage()", html)
+        self.assertIn("function syncUrlState()", html)
+        self.assertIn("localStorage.setItem(PALACE_VIEW_STATE_KEY", html)
+        self.assertIn("new URLSearchParams(window.location.search)", html)
+        self.assertIn("history.replaceState", html)
+
+    def test_workbench_surfaces_neighbors_and_source_stack(self):
+        html = palace_html()
+
+        self.assertIn('id="workbench-neighbors"', html)
+        self.assertIn('id="workbench-sources"', html)
+        self.assertIn("function renderWorkbenchNeighbors(memory, graphNode)", html)
+        self.assertIn("function renderWorkbenchSourceStack(memory, graphData, region)", html)
+        self.assertIn("neighbor-link", html)
+        self.assertIn("source-stack", html)
+
 
 if __name__ == "__main__":
     unittest.main()
