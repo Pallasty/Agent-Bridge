@@ -65,6 +65,22 @@ pub enum Frontend {
     LocalCli,
 }
 
+impl Frontend {
+    fn label(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude-code",
+            Self::Warp => "warp",
+            Self::Auggie => "auggie",
+            Self::Codex => "codex",
+            Self::CodexCli => "codex-cli",
+            Self::CodexIde => "codex-ide",
+            Self::GeminiCli => "gemini-cli",
+            Self::Cursor => "cursor",
+            Self::LocalCli => "local-cli",
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum CodexToolset {
     Essential,
@@ -82,6 +98,249 @@ impl CodexToolset {
     fn profile_label(self) -> &'static str {
         "essential"
     }
+}
+
+pub fn dry_run(frontend: Frontend, codex_toolset: CodexToolset, as_json: bool) -> Result<()> {
+    let home = home_dir().context("cannot determine $HOME")?;
+    let bin_src = std::env::current_exe().context("current_exe")?;
+    let plan = setup_plan(frontend, codex_toolset, &home, &bin_src);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+    } else {
+        print_setup_plan(&plan);
+    }
+    Ok(())
+}
+
+fn setup_plan(
+    frontend: Frontend,
+    codex_toolset: CodexToolset,
+    home: &Path,
+    bin_src: &Path,
+) -> Value {
+    let bin_dir = home.join(".local/bin");
+    let mcp_command = bin_dir.join("agent-bridge");
+    let install_dst = binary_install_destination(&mcp_command);
+    let mut operations = vec![plan_op(
+        "binary.install",
+        "copy_executable_atomically",
+        &install_dst,
+        true,
+        Some(bin_src),
+        "Install the current agent-bridge executable; preserves env wrapper by targeting agent-bridge.real when present.",
+    )];
+
+    match frontend {
+        Frontend::ClaudeCode => {
+            add_hook_script_plan(&mut operations, &bin_dir, false);
+            operations.push(plan_op(
+                "claude.settings",
+                "merge_claude_settings",
+                &home.join(".claude/settings.json"),
+                true,
+                None,
+                "Merge UserPromptSubmit, Stop, and PreCompact hook entries without removing existing entries.",
+            ));
+            operations.push(plan_op(
+                "claude.mcp_cli",
+                "claude mcp add",
+                &mcp_command,
+                true,
+                None,
+                "Best-effort Claude Code MCP registration; falls back to printed manual command.",
+            ));
+        }
+        Frontend::Warp => operations.push(plan_op(
+            "warp.guidance",
+            "print_manual_registration",
+            &mcp_command,
+            false,
+            None,
+            "Warp has no lifecycle hook slots; setup prints Settings -> MCP servers guidance.",
+        )),
+        Frontend::Auggie => operations.push(plan_op(
+            "auggie.mcp_cli",
+            "auggie mcp add",
+            &mcp_command,
+            true,
+            None,
+            "Best-effort Auggie MCP registration; falls back to printed manual command.",
+        )),
+        Frontend::Codex => {
+            add_hook_script_plan(&mut operations, &bin_dir, true);
+            operations.push(plan_op(
+                "codex.config",
+                "merge_codex_config",
+                &codex_home(home).join("config.toml"),
+                true,
+                None,
+                "Merge MCP server config, enable hooks, and set Codex desktop tool environment.",
+            ));
+            operations.push(plan_op(
+                "codex.hooks",
+                "merge_codex_hooks",
+                &codex_home(home).join("hooks.json"),
+                true,
+                None,
+                "Merge Agent-Bridge lifecycle and observer hooks into Codex hooks.json.",
+            ));
+        }
+        Frontend::CodexCli => operations.push(plan_op(
+            "codex.config",
+            "merge_codex_config",
+            &codex_home(home).join("config.toml"),
+            true,
+            None,
+            "Merge MCP server config with AGENT_BRIDGE_CODEX_HOST=cli; lifecycle hooks skipped.",
+        )),
+        Frontend::CodexIde => operations.push(plan_op(
+            "codex.config",
+            "merge_codex_config",
+            &codex_home(home).join("config.toml"),
+            true,
+            None,
+            "Merge MCP server config with AGENT_BRIDGE_CODEX_HOST=ide; lifecycle hooks skipped.",
+        )),
+        Frontend::GeminiCli => operations.push(plan_op(
+            "gemini.settings",
+            "merge_gemini_settings",
+            &home.join(".gemini/settings.json"),
+            true,
+            None,
+            "Merge mcpServers.agent-bridge with AGENT_BRIDGE_TOOLSET=gemini-lean.",
+        )),
+        Frontend::Cursor => operations.push(plan_op(
+            "cursor.settings",
+            "merge_cursor_settings",
+            &home.join(".cursor/mcp.json"),
+            true,
+            None,
+            "Merge mcpServers.agent-bridge with AGENT_BRIDGE_TOOLSET=claude-standard.",
+        )),
+        Frontend::LocalCli => {
+            operations.push(plan_op(
+                "codex.config",
+                "merge_codex_config",
+                &codex_home(home).join("config.toml"),
+                true,
+                None,
+                "Merge Codex CLI MCP config; lifecycle hooks skipped.",
+            ));
+            operations.push(plan_op(
+                "gemini.settings",
+                "merge_gemini_settings",
+                &home.join(".gemini/settings.json"),
+                true,
+                None,
+                "Merge Gemini CLI MCP config.",
+            ));
+            operations.push(plan_op(
+                "cursor.settings",
+                "merge_cursor_settings",
+                &home.join(".cursor/mcp.json"),
+                true,
+                None,
+                "Merge Cursor MCP config.",
+            ));
+            operations.push(plan_op(
+                "claude.mcp_cli",
+                "claude mcp add",
+                &mcp_command,
+                true,
+                None,
+                "Best-effort Claude Code MCP registration for local CLI profile.",
+            ));
+        }
+    }
+
+    json!({
+        "schema": "agent_bridge_setup_plan.v0",
+        "mode": "dry_run",
+        "frontend": frontend.label(),
+        "codex_toolset": codex_toolset.label(),
+        "codex_tool_profile": codex_toolset.profile_label(),
+        "home": home.display().to_string(),
+        "binary_source": bin_src.display().to_string(),
+        "mcp_command": mcp_command.display().to_string(),
+        "install_destination": install_dst.display().to_string(),
+        "operation_count": operations.len(),
+        "operations": operations,
+        "state": {
+            "install_state_written": false,
+            "note": "This slice is plan-only. Persisted install-state is a later gated step."
+        }
+    })
+}
+
+fn add_hook_script_plan(operations: &mut Vec<Value>, bin_dir: &Path, include_observer: bool) {
+    for script in [
+        "ab-memory-hook",
+        "ab-precompact-hook",
+        "ab-session-end-hook",
+    ] {
+        operations.push(plan_op(
+            &format!("hook.{script}"),
+            "write_script",
+            &bin_dir.join(script),
+            true,
+            None,
+            "Write executable Agent-Bridge hook script.",
+        ));
+    }
+    if include_observer {
+        operations.push(plan_op(
+            "hook.ab-instinct-observer-hook",
+            "write_script",
+            &bin_dir.join("ab-instinct-observer-hook"),
+            true,
+            None,
+            "Write observability-only instinct observer hook script.",
+        ));
+    }
+}
+
+fn plan_op(
+    id: &str,
+    action: &str,
+    target: &Path,
+    mutates: bool,
+    source: Option<&Path>,
+    note: &str,
+) -> Value {
+    json!({
+        "id": id,
+        "action": action,
+        "target": target.display().to_string(),
+        "source": source.map(|p| p.display().to_string()),
+        "mutates": mutates,
+        "note": note,
+    })
+}
+
+fn print_setup_plan(plan: &Value) {
+    println!(
+        "Setup dry-run plan ({})",
+        plan.get("frontend")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+    );
+    println!("No files will be written and no client CLIs will be invoked.");
+    println!();
+    if let Some(ops) = plan.get("operations").and_then(Value::as_array) {
+        for op in ops {
+            let id = op.get("id").and_then(Value::as_str).unwrap_or("operation");
+            let action = op.get("action").and_then(Value::as_str).unwrap_or("?");
+            let target = op.get("target").and_then(Value::as_str).unwrap_or("?");
+            let marker = if op.get("mutates").and_then(Value::as_bool).unwrap_or(false) {
+                "would write"
+            } else {
+                "would report"
+            };
+            println!("  - {id}: {marker} via {action} -> {target}");
+        }
+    }
+    println!();
+    println!("Run again without --dry-run to apply. Use --json for machine-readable output.");
 }
 
 pub fn run(frontend: Frontend, codex_toolset: CodexToolset) -> Result<()> {
@@ -1291,11 +1550,68 @@ fn script_name_for_event(event: &str) -> &'static str {
 mod tests {
     use super::{
         ensure_toml_bool, merge_codex_config, merge_codex_hooks, merge_cursor_settings,
-        merge_gemini_settings, remove_toml_key, replace_toml_table, CodexHost, CodexToolset,
-        HOOK_PRECOMPACT, HOOK_SESSION_END,
+        merge_gemini_settings, remove_toml_key, replace_toml_table, setup_plan, CodexHost,
+        CodexToolset, Frontend, HOOK_PRECOMPACT, HOOK_SESSION_END,
     };
     use serde_json::{json, Value};
     use std::fs;
+
+    #[test]
+    fn setup_plan_codex_desktop_reports_config_and_hooks_without_state_write() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agent-bridge-setup-plan-codex-{}",
+            std::process::id()
+        ));
+        let bin_src = tmp.join("target/debug/agent-bridge");
+
+        let plan = setup_plan(Frontend::Codex, CodexToolset::Lean, &tmp, &bin_src);
+
+        assert_eq!(plan["schema"], "agent_bridge_setup_plan.v0");
+        assert_eq!(plan["mode"], "dry_run");
+        assert_eq!(plan["frontend"], "codex");
+        assert_eq!(plan["codex_toolset"], "codex-lean");
+        assert_eq!(plan["state"]["install_state_written"], false);
+
+        let ids: Vec<&str> = plan["operations"]
+            .as_array()
+            .expect("operations")
+            .iter()
+            .filter_map(|op| op["id"].as_str())
+            .collect();
+        assert!(ids.contains(&"binary.install"));
+        assert!(ids.contains(&"hook.ab-memory-hook"));
+        assert!(ids.contains(&"hook.ab-instinct-observer-hook"));
+        assert!(ids.contains(&"codex.config"));
+        assert!(ids.contains(&"codex.hooks"));
+    }
+
+    #[test]
+    fn setup_plan_local_cli_reports_all_client_configs_and_no_hooks() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agent-bridge-setup-plan-local-{}",
+            std::process::id()
+        ));
+        let bin_src = tmp.join("target/debug/agent-bridge");
+
+        let plan = setup_plan(Frontend::LocalCli, CodexToolset::Essential, &tmp, &bin_src);
+
+        assert_eq!(plan["frontend"], "local-cli");
+        let ids: Vec<&str> = plan["operations"]
+            .as_array()
+            .expect("operations")
+            .iter()
+            .filter_map(|op| op["id"].as_str())
+            .collect();
+        assert!(ids.contains(&"binary.install"));
+        assert!(ids.contains(&"codex.config"));
+        assert!(ids.contains(&"gemini.settings"));
+        assert!(ids.contains(&"cursor.settings"));
+        assert!(ids.contains(&"claude.mcp_cli"));
+        assert!(
+            !ids.iter().any(|id| id.starts_with("hook.")),
+            "local-cli profile must stay hook-free"
+        );
+    }
 
     #[test]
     fn appends_codex_mcp_table_when_missing() {

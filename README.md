@@ -398,6 +398,18 @@ The `--frontend` flag selects the install profile (default: `auto`,
 which detects Warp, Codex, Gemini CLI, then Auggie before falling back
 to claude-code).
 
+Preview setup without touching local config:
+
+```bash
+agent-bridge setup --frontend codex --dry-run
+agent-bridge setup --frontend codex --dry-run --json
+```
+
+The JSON form emits `agent_bridge_setup_plan.v0`: the binary target, frontend,
+toolset, planned file writes, best-effort client CLI registrations, and a
+plan-only install-state note. It is intentionally read-only; persisted
+install-state is a later gated hardening step.
+
 Claude Code profile (`--frontend claude-code`):
 
 | Step | What happens |
