@@ -35,6 +35,7 @@ pub mod notion_api;
 pub mod openai_api;
 pub mod palace_viewer;
 pub mod peer_client;
+pub mod pet_ground;
 pub mod pet_presence;
 pub mod pet_state;
 pub mod present;
