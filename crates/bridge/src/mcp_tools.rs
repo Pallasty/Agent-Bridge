@@ -14587,6 +14587,7 @@ impl McpTool for MemoryExportTool {
                 .get("loose_edges")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            stable_sync_metadata: false,
         };
         match store.memory_export(&filter, &path).await {
             Ok(res) => Ok(ToolResult::json_text(&json!({

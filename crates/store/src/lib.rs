@@ -1494,6 +1494,11 @@ pub struct MemoryExportFilter {
     /// Loose mode unblocks narrow-filter exports (e.g. `kind=chat_session`)
     /// that have edges to nodes living under other filters.
     pub loose_edges: bool,
+    /// Normalize per-node retrieval/maintenance metadata when writing a
+    /// shared sync transport file. Access counters and decay-derived ranking
+    /// are local signals; serializing them verbatim makes otherwise unchanged
+    /// peers rewrite `memory.jsonl` every sync cycle.
+    pub stable_sync_metadata: bool,
 }
 
 /// Result of [`StateStore::memory_export`].
