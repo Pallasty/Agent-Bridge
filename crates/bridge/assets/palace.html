@@ -516,6 +516,7 @@
       border-left: 1px solid #2a2a35;
       padding: 0;
       overflow-y: auto;
+      overflow-x: hidden;
       max-height: 100vh;
     }
     #panel.hidden { display: none; }
@@ -584,6 +585,7 @@
       min-height: 100vh;
       display: flex;
       flex-direction: column;
+      min-width: 0;
     }
     #panel .workbench-header {
       padding: 18px 22px 14px;
@@ -670,6 +672,79 @@
       letter-spacing: 0.12em;
       text-transform: uppercase;
       margin-bottom: 8px;
+    }
+    #panel .neighbor-list,
+    #panel .source-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    #panel .neighbor-link {
+      width: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 9px;
+      background: #0f0f16;
+      border: 1px solid #252532;
+      border-left: 2px solid #5cc8c8;
+      border-radius: 4px;
+      color: #d8d8e2;
+      text-align: left;
+      cursor: pointer;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    #panel .neighbor-link:hover {
+      color: #ffffff;
+      border-color: #5cc8c8;
+      background: #13131d;
+    }
+    #panel .neighbor-main { min-width: 0; }
+    #panel .neighbor-label {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+    }
+    #panel .neighbor-meta,
+    #panel .neighbor-empty {
+      display: block;
+      margin-top: 3px;
+      color: #6a6a78;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+    }
+    #panel .neighbor-weight {
+      color: #5cc8c8;
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    #panel .source-row {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr);
+      gap: 10px;
+      padding: 7px 9px;
+      background: #0f0f16;
+      border: 1px solid #1f1f2a;
+      border-radius: 4px;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    #panel .source-row .label {
+      color: #5a5a68;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-size: 9px;
+    }
+    #panel .source-row .value {
+      min-width: 0;
+      color: #c8c8d2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     #panel .annotate-section {
       margin-top: 18px;
@@ -1988,13 +2063,33 @@ function renderBreadcrumb() {
   if (!el) return;
   const region = state.atlasRegions.find(r => r.id === state.activeRegion);
   const preset = state.viewPreset === "overview" ? "Observatory" : state.viewPreset;
-  if (!region) {
+  let focusedLabel = state.focused || "";
+  if (state.cy && state.focused) {
+    const focusedNode = state.cy.getElementById(state.focused);
+    if (focusedNode && focusedNode.length > 0) {
+      focusedLabel = focusedNode.data("label") || state.focused;
+    }
+  }
+  if (!region && !state.focused) {
     el.innerHTML = `Atlas / <span class="crumb-hot">${escapeHTML(preset)}</span>`;
     return;
   }
-  el.innerHTML =
-    `<button type="button" data-clear-region="1">Atlas</button> / ` +
-    `<span class="crumb-hot">${escapeHTML(region.label)}</span> / ${escapeHTML(preset)}`;
+  const parts = [
+    `<button type="button" data-clear-region="1">Atlas</button>`,
+    "Observatory",
+  ];
+  if (region) {
+    parts.push(
+      `<button type="button" data-focus-region="${escapeHTML(region.id)}">Region</button>`,
+      `<span class="crumb-hot">${escapeHTML(region.label)}</span>`
+    );
+  }
+  if (state.focused) {
+    parts.push("Node", `<span class="crumb-hot">${escapeHTML(focusedLabel)}</span>`);
+  } else {
+    parts.push(`<span class="crumb-hot">${escapeHTML(preset)}</span>`);
+  }
+  el.innerHTML = parts.join(" / ");
 }
 
 function syncViewPresetButtons() {
@@ -2033,6 +2128,24 @@ function renderAtlasPanel() {
   renderBreadcrumb();
 }
 
+function zoomToAtlasRegion(regionId) {
+  if (!state.cy) return;
+  const regionNodes = state.cy.nodes().filter(n => n.data("region") === regionId);
+  const visibleRegionNodes = regionNodes.not(".faded");
+  const target = visibleRegionNodes.length > 0 ? visibleRegionNodes : regionNodes;
+  if (target.length > 0) {
+    state.cy.animate({ fit: { eles: target, padding: 86 }, duration: 420, easing: "ease-out" });
+  }
+}
+
+function zoomToVisibleGraph() {
+  if (!state.cy) return;
+  const visible = state.cy.nodes().not(".faded");
+  if (visible.length > 0) {
+    state.cy.animate({ fit: { eles: visible, padding: 70 }, duration: 360, easing: "ease-out" });
+  }
+}
+
 function selectAtlasRegion(regionId) {
   state.activeRegion = regionId;
   state.focused = null;
@@ -2041,11 +2154,8 @@ function selectAtlasRegion(regionId) {
   renderAtlasPanel();
   renderBreadcrumb();
   applyVisualState();
-  if (!state.cy) return;
-  const nodes = state.cy.nodes().filter(n => n.data("region") === regionId);
-  if (nodes.length > 0) {
-    state.cy.animate({ fit: { eles: nodes, padding: 86 }, duration: 420, easing: "ease-out" });
-  }
+  zoomToAtlasRegion(regionId);
+  saveViewState();
 }
 
 function clearAtlasRegion() {
@@ -2053,28 +2163,25 @@ function clearAtlasRegion() {
   renderAtlasPanel();
   renderBreadcrumb();
   applyVisualState();
-  if (state.cy) {
-    state.cy.animate({ fit: { eles: state.cy.nodes().not(".faded"), padding: 54 }, duration: 360, easing: "ease-out" });
-  }
+  zoomToVisibleGraph();
+  saveViewState();
 }
 
 function setViewPreset(preset) {
-  state.viewPreset = preset;
+  state.viewPreset = VALID_VIEW_PRESETS.has(preset) ? preset : "overview";
   state.focused = null;
   document.body.classList.remove("workbench-open");
   document.getElementById("panel").classList.add("hidden");
   syncViewPresetButtons();
   renderBreadcrumb();
   applyVisualState();
-  if (state.cy) {
-    const visible = state.cy.nodes().not(".faded");
-    if (visible.length > 0) {
-      state.cy.animate({ fit: { eles: visible, padding: 70 }, duration: 360, easing: "ease-out" });
-    }
-  }
+  zoomToVisibleGraph();
+  saveViewState();
 }
 
 // ── Global state ────────────────────────────────────────────────
+const PALACE_VIEW_STATE_KEY = "palace:view:v2";
+const VALID_VIEW_PRESETS = new Set(["overview", "fresh", "stale", "hubs", "orphans", "coactivation"]);
 const state = {
   cy: null,
   data: null,
@@ -2085,6 +2192,8 @@ const state = {
   enabledSources: new Set(["sqlite", "markdown"]),
   enabledKinds: new Set(),
   enabledEdgeTypes: new Set(),  // empty == not yet populated; set on first load
+  restoredKindFilter: false,
+  restoredEdgeFilter: false,
   includeSkills: false,
   focused: null,        // currently-focused node id (or null)
   staleKindFilter: null, // C10: null = show all kinds, string = restrict stale panel rows
@@ -2093,6 +2202,86 @@ const state = {
   // (rather than recomputed twice) so the two surfaces can't drift.
   degrees: null,
 };
+
+function serializeViewState() {
+  return {
+    viewPreset: state.viewPreset,
+    activeRegion: state.activeRegion,
+    search: state.search,
+    includeSkills: state.includeSkills,
+    focused: state.focused,
+    sources: Array.from(state.enabledSources),
+    kinds: Array.from(state.enabledKinds),
+    edgeTypes: Array.from(state.enabledEdgeTypes),
+  };
+}
+
+function syncUrlState() {
+  const params = new URLSearchParams(window.location.search);
+  if (state.viewPreset && state.viewPreset !== "overview") params.set("preset", state.viewPreset);
+  else params.delete("preset");
+  if (state.activeRegion) params.set("region", state.activeRegion);
+  else params.delete("region");
+  if (state.search) params.set("q", state.search);
+  else params.delete("q");
+  if (state.focused) params.set("focus", state.focused);
+  else params.delete("focus");
+  if (state.includeSkills) params.set("skills", "1");
+  else params.delete("skills");
+  const query = params.toString();
+  const nextUrl = `${window.location.pathname}${query ? "?" + query : ""}${window.location.hash || ""}`;
+  history.replaceState(null, "", nextUrl);
+}
+
+function saveViewState() {
+  try {
+    localStorage.setItem(PALACE_VIEW_STATE_KEY, JSON.stringify(serializeViewState()));
+  } catch (e) {
+    // Private windows or strict browser policies can disable localStorage.
+  }
+  syncUrlState();
+}
+
+function restoreSet(targetSet, values) {
+  if (!Array.isArray(values)) return false;
+  targetSet.clear();
+  values.filter(v => typeof v === "string" && v.length > 0).forEach(v => targetSet.add(v));
+  return true;
+}
+
+function restoreViewStateFromUrlOrStorage() {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(PALACE_VIEW_STATE_KEY) || "{}") || {};
+  } catch (e) {
+    saved = {};
+  }
+  const params = new URLSearchParams(window.location.search);
+  const restored = { ...saved };
+  if (params.has("preset")) restored.viewPreset = params.get("preset");
+  if (params.has("region")) restored.activeRegion = params.get("region");
+  if (params.has("q")) restored.search = params.get("q");
+  if (params.has("focus")) restored.focused = params.get("focus");
+  if (params.has("skills")) restored.includeSkills = params.get("skills") === "1";
+
+  if (VALID_VIEW_PRESETS.has(restored.viewPreset)) state.viewPreset = restored.viewPreset;
+  if (typeof restored.activeRegion === "string") state.activeRegion = restored.activeRegion || null;
+  if (typeof restored.search === "string") {
+    state.search = restored.search;
+    const search = document.getElementById("search");
+    if (search) search.value = state.search;
+  }
+  if (typeof restored.includeSkills === "boolean") state.includeSkills = restored.includeSkills;
+  if (restoreSet(state.enabledSources, restored.sources)) {
+    if (state.enabledSources.size === 0) {
+      state.enabledSources.add("sqlite");
+      state.enabledSources.add("markdown");
+    }
+  }
+  state.restoredKindFilter = restoreSet(state.enabledKinds, restored.kinds);
+  state.restoredEdgeFilter = restoreSet(state.enabledEdgeTypes, restored.edgeTypes);
+  return typeof restored.focused === "string" && restored.focused.length > 0 ? restored.focused : null;
+}
 
 // ── Load graph from server ──────────────────────────────────────
 // P12 — fetch embedding_backend breakdown + render footer pill. Called
@@ -2243,7 +2432,7 @@ async function loadGraph() {
   const kindCounts = {};
   data.nodes.forEach(n => { kindCounts[n.kind] = (kindCounts[n.kind] || 0) + 1; });
   const kinds = Object.keys(kindCounts).sort();
-  if (state.enabledKinds.size === 0) {
+  if (state.enabledKinds.size === 0 && !state.restoredKindFilter) {
     // First load — enable all.
     kinds.forEach(k => state.enabledKinds.add(k));
   }
@@ -2254,7 +2443,7 @@ async function loadGraph() {
     edgeTypeCounts[t] = (edgeTypeCounts[t] || 0) + 1;
   });
   const edgeTypes = Object.keys(edgeTypeCounts).sort();
-  if (state.enabledEdgeTypes.size === 0) {
+  if (state.enabledEdgeTypes.size === 0 && !state.restoredEdgeFilter) {
     edgeTypes.forEach(t => state.enabledEdgeTypes.add(t));
   }
 
@@ -2497,6 +2686,7 @@ function buildCy(data) {
     const id = evt.target.id();
     focusOnNode(id);
     showSidePanel(id);
+    saveViewState();
   });
   state.cy.on("tap", (evt) => {
     if (evt.target === state.cy) {
@@ -2505,6 +2695,7 @@ function buildCy(data) {
       document.getElementById("panel").classList.add("hidden");
       // Reclaim the space — cy fills the viewport again.
       state.cy.resize();
+      saveViewState();
     }
   });
 
@@ -2566,6 +2757,7 @@ function renderFilterPanel(kindCounts, edgeTypeCounts) {
       if (el.checked) state.enabledSources.add(el.dataset.source);
       else state.enabledSources.delete(el.dataset.source);
       applyVisualState();
+      saveViewState();
     });
   });
   panel.querySelectorAll("input[data-kind]").forEach(el => {
@@ -2573,37 +2765,44 @@ function renderFilterPanel(kindCounts, edgeTypeCounts) {
       if (el.checked) state.enabledKinds.add(el.dataset.kind);
       else state.enabledKinds.delete(el.dataset.kind);
       applyVisualState();
+      saveViewState();
     });
   });
   panel.querySelector("#kind-all").addEventListener("click", () => {
     kinds.forEach(k => state.enabledKinds.add(k));
     panel.querySelectorAll("input[data-kind]").forEach(el => el.checked = true);
     applyVisualState();
+    saveViewState();
   });
   panel.querySelector("#kind-none").addEventListener("click", () => {
     state.enabledKinds.clear();
     panel.querySelectorAll("input[data-kind]").forEach(el => el.checked = false);
     applyVisualState();
+    saveViewState();
   });
   panel.querySelectorAll("input[data-edge-type]").forEach(el => {
     el.addEventListener("change", () => {
       if (el.checked) state.enabledEdgeTypes.add(el.dataset.edgeType);
       else state.enabledEdgeTypes.delete(el.dataset.edgeType);
       applyVisualState();
+      saveViewState();
     });
   });
   panel.querySelector("#edge-all").addEventListener("click", () => {
     edgeTypes.forEach(t => state.enabledEdgeTypes.add(t));
     panel.querySelectorAll("input[data-edge-type]").forEach(el => el.checked = true);
     applyVisualState();
+    saveViewState();
   });
   panel.querySelector("#edge-none").addEventListener("click", () => {
     state.enabledEdgeTypes.clear();
     panel.querySelectorAll("input[data-edge-type]").forEach(el => el.checked = false);
     applyVisualState();
+    saveViewState();
   });
   panel.querySelector("#include-skills").addEventListener("change", (e) => {
     state.includeSkills = e.target.checked;
+    saveViewState();
     loadGraph();  // re-fetch (server returns different node set)
   });
 }
@@ -2695,17 +2894,90 @@ function focusOnNode(id) {
   document.getElementById("focus-hint").textContent =
     "focus: " + id + " · click background to release";
   applyVisualState();
+  renderBreadcrumb();
   // Smooth pan to the node.
   const n = state.cy.getElementById(id);
   if (n && n.length > 0) {
     state.cy.animate({ center: { eles: n }, duration: 300, easing: "ease-out" });
   }
+  saveViewState();
 }
 
 function clearFocus() {
   state.focused = null;
   document.getElementById("focus-hint").textContent = "";
   applyVisualState();
+  renderBreadcrumb();
+  saveViewState();
+}
+
+function renderWorkbenchNeighbors(memory, graphNode) {
+  const empty = `<div id="workbench-neighbors" class="neighbor-list">
+    <span class="neighbor-empty">no graph neighbors for ${escapeHTML(memory.key)}</span>
+  </div>`;
+  if (!state.cy || !graphNode || graphNode.length === 0) return empty;
+
+  const byKey = new Map();
+  graphNode.connectedEdges().forEach(edge => {
+    const other = edge.source().id() === graphNode.id() ? edge.target() : edge.source();
+    if (!other || other.length === 0) return;
+    const key = other.id();
+    const existing = byKey.get(key) || {
+      key,
+      label: other.data("label") || key,
+      kind: other.data("kind") || "unknown",
+      weight: 0,
+      types: new Set(),
+    };
+    existing.weight = Math.max(existing.weight, edge.data("weight") || 0);
+    existing.types.add(edge.data("type") || "edge");
+    byKey.set(key, existing);
+  });
+
+  const rows = Array.from(byKey.values())
+    .sort((a, b) => b.weight - a.weight || a.label.localeCompare(b.label))
+    .slice(0, 8);
+  if (rows.length === 0) return empty;
+
+  return `<div id="workbench-neighbors" class="neighbor-list">` + rows.map(row => {
+    const typeList = Array.from(row.types).sort().join(", ");
+    const weight = row.weight > 0 ? row.weight.toFixed(2) : "link";
+    return `<button type="button" class="neighbor-link" data-neighbor-key="${escapeHTML(row.key)}">
+      <span class="neighbor-main">
+        <span class="neighbor-label" title="${escapeHTML(row.key)}">${escapeHTML(row.label)}</span>
+        <span class="neighbor-meta">${escapeHTML(row.kind)} · ${escapeHTML(typeList)}</span>
+      </span>
+      <span class="neighbor-weight">${escapeHTML(weight)}</span>
+    </button>`;
+  }).join("") + `</div>`;
+}
+
+function renderWorkbenchSourceStack(memory, graphData, region) {
+  const sourceLabel = memory.source === "markdown" ? "markdown file" : "sqlite memory";
+  const role = graphData.hub
+    ? "hub"
+    : graphData.orphan
+      ? "orphan"
+      : graphData.stale
+        ? "stale"
+        : graphData.fresh
+          ? "fresh"
+          : "normal";
+  const rows = [
+    ["origin", sourceLabel],
+    ["key", memory.key],
+    ["kind", memory.kind || graphData.kind || "unknown"],
+    ["region", region ? region.label : "unmapped"],
+    ["role", role],
+    ["created", relTime(memory.created_at) || "n/a"],
+    ["updated", relTime(memory.updated_at) || "n/a"],
+  ];
+  return `<div id="workbench-sources" class="source-stack">` + rows.map(([label, value]) =>
+    `<div class="source-row">
+      <span class="label">${escapeHTML(label)}</span>
+      <span class="value" title="${escapeHTML(value)}">${escapeHTML(value)}</span>
+    </div>`
+  ).join("") + `</div>`;
 }
 
 // ── Side panel ──────────────────────────────────────────────────
@@ -2791,6 +3063,14 @@ async function showSidePanel(id) {
           </div>
           ${descBlock}
           <div class="workbench-section">
+            <div class="workbench-section-title">Neighbors</div>
+            ${renderWorkbenchNeighbors(m, graphNode)}
+          </div>
+          <div class="workbench-section">
+            <div class="workbench-section-title">Source stack</div>
+            ${renderWorkbenchSourceStack(m, graphData, region)}
+          </div>
+          <div class="workbench-section">
             <div class="workbench-section-title">Tags</div>
             <div class="tags">
               ${(m.tags || []).map(t => `<span class="tag">${escapeHTML(t)}</span>`).join("") || `<span class="tag">none</span>`}
@@ -2827,6 +3107,15 @@ async function showSidePanel(id) {
 }
 
 function bindWorkbenchActions(panel, memory) {
+  panel.querySelectorAll(".neighbor-link").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.neighborKey;
+      if (!key) return;
+      focusOnNode(key);
+      showSidePanel(key);
+      saveViewState();
+    });
+  });
   const copyBtn = panel.querySelector(".copy-key-btn");
   if (copyBtn) {
     copyBtn.addEventListener("click", async () => {
@@ -2962,11 +3251,14 @@ document.getElementById("atlas-panel").addEventListener("click", (e) => {
 
 document.getElementById("breadcrumb").addEventListener("click", (e) => {
   if (e.target.closest("[data-clear-region]")) clearAtlasRegion();
+  const region = e.target.closest("[data-focus-region]");
+  if (region && region.dataset.focusRegion) zoomToAtlasRegion(region.dataset.focusRegion);
 });
 
 document.getElementById("search").addEventListener("input", (e) => {
   state.search = e.target.value;
   applyVisualState();
+  saveViewState();
 });
 
 document.getElementById("filter-btn").addEventListener("click", () => {
@@ -3231,6 +3523,7 @@ document.addEventListener("keydown", (e) => {
     document.getElementById("search").value = "";
     state.search = "";
     clearFocus();
+    saveViewState();
   }
 });
 
@@ -4855,11 +5148,15 @@ function bindCanvasGlobals() {
 // overview. Keys that aren't in the current graph still get a side
 // panel via /api/memory — the focus highlight is best-effort.
 (async () => {
+  const focus = restoreViewStateFromUrlOrStorage();
   await loadGraph();
   loadEmbeddingStats();  // P12 footer pill — fire-and-forget, not awaited
   bindCanvasGlobals();
-  const focus = new URLSearchParams(location.search).get("focus");
-  if (!focus) return;
+  if (state.activeRegion) zoomToAtlasRegion(state.activeRegion);
+  if (!focus) {
+    saveViewState();
+    return;
+  }
   if (state.cy && state.cy.getElementById(focus).length > 0) {
     focusOnNode(focus);
   }
