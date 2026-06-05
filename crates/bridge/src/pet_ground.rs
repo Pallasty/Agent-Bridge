@@ -80,7 +80,7 @@ pub fn activity_for_event(event: &str) -> &'static str {
     match event {
         "UserPromptSubmit" => "orienting",
         "PostToolUse" | "PreToolUse" => "working",
-        "Stop" | "SubagentStop" => "idle",
+        "Stop" => "idle",
         "Notification" => "waiting_for_user",
         _ => "working",
     }
@@ -115,7 +115,12 @@ pub fn ground_patch(tel: &ToolTelemetry, now_rfc3339: &str) -> Map<String, Value
     patch.insert("mode".into(), json!(activity));
     patch.insert("last_event".into(), json!(tel.event));
 
-    if let Some(tool) = &tel.tool_name {
+    if activity == "idle" {
+        // Idle is the definitive "done, not attending" signal — clear focus so
+        // the projection does not keep claiming a stale file as live attention.
+        patch.insert("focus".into(), Value::Null);
+        patch.insert("focus_source".into(), Value::Null);
+    } else if let Some(tool) = &tel.tool_name {
         if let Some(focus) = derive_focus_from_tool(tool, &tel.tool_input) {
             patch.insert("focus".into(), json!(focus));
             patch.insert("focus_source".into(), json!(format!("tool:{tool}")));
@@ -270,6 +275,9 @@ mod tests {
         assert_eq!(activity_for_event("UserPromptSubmit"), "orienting");
         assert_eq!(activity_for_event("PostToolUse"), "working");
         assert_eq!(activity_for_event("Stop"), "idle");
+        assert_eq!(activity_for_event("Notification"), "waiting_for_user");
+        // SubagentStop is NOT idle — the main agent is still working the result.
+        assert_eq!(activity_for_event("SubagentStop"), "working");
     }
 
     #[test]
@@ -281,6 +289,17 @@ mod tests {
         assert_eq!(patch["focus"], json!("src/pet_ground.rs"));
         assert_eq!(patch["focus_source"], json!("tool:Edit"));
         assert_eq!(patch["source"], json!("ab-pet-ground"));
+    }
+
+    #[test]
+    fn ground_patch_idle_clears_focus() {
+        // Stop -> idle must clear focus + provenance so the projection does not
+        // keep claiming a stale file as live attention after the turn ends.
+        let tel = ToolTelemetry::new("Stop");
+        let patch = ground_patch(&tel, "2026-06-05T12:30:00Z");
+        assert_eq!(patch["activity_state"], json!("idle"));
+        assert_eq!(patch["focus"], Value::Null);
+        assert_eq!(patch["focus_source"], Value::Null);
     }
 
     #[test]
@@ -456,5 +475,83 @@ mod tests {
             !sidecar(off.path()).exists(),
             "gated-off hook must not write the sidecar"
         );
+    }
+
+    /// End-to-end: a Stop event must clear focus through the real shell hook, so
+    /// the live projection stops claiming a stale file once the turn ends.
+    #[cfg(unix)]
+    #[test]
+    fn ground_hook_clears_focus_on_idle() {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/hooks/ab-pet-ground-hook.sh"
+        );
+        if Command::new("bash").arg("--version").output().is_err() {
+            eprintln!("skip ground_hook idle test: bash unavailable");
+            return;
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fire = |payload: &str| {
+            let mut child = Command::new("bash")
+                .arg(script)
+                .env("AB_PET_GROUND_TOOLS", "1")
+                .env("XDG_DATA_HOME", dir.path())
+                .env("AB_PET_ID", "xiao-shu-test")
+                .env_remove("AB_MEMORY_CURATOR")
+                .env_remove("AB_PET_STATE_DISABLE")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn hook");
+            child
+                .stdin
+                .take()
+                .expect("stdin")
+                .write_all(payload.as_bytes())
+                .expect("write payload");
+            assert!(child.wait().expect("wait hook").success());
+        };
+
+        let sidecar = dir
+            .path()
+            .join("agent-bridge")
+            .join("pet_state")
+            .join("xiao-shu-test.json");
+
+        // Work: focus gets set from the tool target.
+        fire(
+            &json!({
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "src/x.rs"},
+                "cwd": dir.path().to_string_lossy(),
+            })
+            .to_string(),
+        );
+        let working: Value =
+            serde_json::from_str(&std::fs::read_to_string(&sidecar).unwrap()).unwrap();
+        assert_eq!(working["focus"], json!("src/x.rs"));
+        assert_eq!(working["activity_state"], json!("working"));
+
+        // Stop: idle clears focus + provenance (no longer attending).
+        fire(
+            &json!({
+                "hook_event_name": "Stop",
+                "cwd": dir.path().to_string_lossy(),
+            })
+            .to_string(),
+        );
+        let idle: Value =
+            serde_json::from_str(&std::fs::read_to_string(&sidecar).unwrap()).unwrap();
+        assert_eq!(idle["activity_state"], json!("idle"));
+        assert_eq!(idle["focus"], Value::Null);
+        assert_eq!(idle["focus_source"], Value::Null);
+        // Idle with null focus stays audit-clean.
+        assert!(audit_grounding(&idle, None, None).is_empty());
     }
 }

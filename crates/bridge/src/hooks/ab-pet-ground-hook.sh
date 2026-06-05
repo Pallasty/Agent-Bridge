@@ -92,7 +92,6 @@ activity = {
     "PostToolUse": "working",
     "PreToolUse": "working",
     "Stop": "idle",
-    "SubagentStop": "idle",
     "Notification": "waiting_for_user",
 }.get(event, "working")
 
@@ -125,7 +124,11 @@ state["cwd"] = cwd
 state["mode"] = activity
 state["activity_state"] = activity
 state["last_event"] = event
-if focus:
+if activity == "idle":
+    # Idle clears focus — mirror pet_ground::ground_patch (not attending).
+    state["focus"] = None
+    state["focus_source"] = None
+elif focus:
     state["focus"] = focus
     state["focus_source"] = f"tool:{tool_name}"
 if session_id:
