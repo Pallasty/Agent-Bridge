@@ -83,6 +83,12 @@ enum Cmd {
         frontend: SetupFrontend,
         #[arg(long, value_enum, default_value_t = SetupCodexToolset::Essential)]
         codex_toolset: SetupCodexToolset,
+        /// Print the setup plan without writing files or invoking client CLIs.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit the setup dry-run plan as JSON. Implies --dry-run.
+        #[arg(long)]
+        json: bool,
     },
     /// Cross-device memory sync via a private GitHub repo.
     ///
@@ -2798,9 +2804,16 @@ async fn main() -> Result<()> {
     if let Cmd::Setup {
         frontend,
         codex_toolset,
+        dry_run,
+        json,
     } = &cmd
     {
-        return setup::run(frontend.resolve(), (*codex_toolset).into());
+        let frontend = frontend.resolve();
+        let codex_toolset = (*codex_toolset).into();
+        if *dry_run || *json {
+            return setup::dry_run(frontend, codex_toolset, *json);
+        }
+        return setup::run(frontend, codex_toolset);
     }
 
     // Sync subcommand: short-lived; no daemon hub needed.
