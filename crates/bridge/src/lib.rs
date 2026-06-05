@@ -54,6 +54,7 @@ pub mod tailscale_api;
 pub mod tool_atlas;
 pub mod warp_actions;
 pub mod warp_scheme;
+pub mod world_tools;
 
 pub use hub::Hub;
 pub use mcp_tools::build_registry;

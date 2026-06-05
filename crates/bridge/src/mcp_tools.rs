@@ -30950,6 +30950,27 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(PresentOutcomesIngestTool::new(hub.clone())),
     );
+    // Live Semantic World Runtime Step C: thin client surface for the onsen
+    // dev-only live viewport host. Niche only; with no live host it returns a
+    // structured verified=false envelope rather than pretending success.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(crate::world_tools::WorldQueryTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(crate::world_tools::WorldPatchTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(crate::world_tools::WorldVisibilityQueryTool::new()),
+    );
     // Audio embodiment: emit a known tone + read it back off the system bus (sink
     // .monitor loopback) via a spectral-peak falsifier; writes a verified-outcome
     // sidecar that flows into present_outcomes. Honest boundary: verifies the bus,
@@ -35875,6 +35896,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         // Audio embodiment present_voice is the same Niche opt-in shape.
         assert!(all.includes(Tier::Niche, "present_voice"));
         assert!(!std_p.includes(Tier::Niche, "present_voice"));
+        // Live semantic world tools are Step C Niche opt-ins; absent from
+        // standard/default profile surfaces until explicitly requested.
+        for t in ["world_query", "world_patch", "world_visibility_query"] {
+            assert!(all.includes(Tier::Niche, t), "{t} must be available under all");
+            assert!(!std_p.includes(Tier::Niche, t), "{t} must stay out of standard");
+        }
         let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
         assert!(
             schemas.iter().any(|s| s.name == "present"),
@@ -35896,6 +35923,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             schemas.iter().any(|s| s.name == "present_voice"),
             "present_voice must register under the all profile"
         );
+        for t in ["world_query", "world_patch", "world_visibility_query"] {
+            assert!(
+                schemas.iter().any(|s| s.name == t),
+                "{t} must register under the all profile"
+            );
+        }
     }
 
     // Live dogfood (opt-in) — drives the real navigate->eval->classify->screenshot
