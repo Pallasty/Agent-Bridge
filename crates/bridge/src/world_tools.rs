@@ -15,6 +15,9 @@ use tokio::net::TcpStream;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 37691;
+const HOST_ADDR_ENV: &str = "ONSEN_LSWR_HOST_ADDR";
+const HOST_PORT_ENV: &str = "ONSEN_LSWR_HOST_PORT";
+const ONSEN_HOST_PORT_ENV: &str = "ONSEN_LSWR_PORT";
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 const MIN_TIMEOUT_MS: u64 = 250;
 const MAX_TIMEOUT_MS: u64 = 30_000;
@@ -30,7 +33,7 @@ struct WorldEndpoint {
 
 impl WorldEndpoint {
     fn from_args(args: &Value) -> std::result::Result<Self, String> {
-        let env_addr = std::env::var("ONSEN_LSWR_HOST_ADDR").ok();
+        let env_addr = std::env::var(HOST_ADDR_ENV).ok();
         let (env_host, env_addr_port) = env_addr
             .as_deref()
             .and_then(split_host_port)
@@ -70,7 +73,12 @@ impl WorldEndpoint {
             .or(arg_host_port)
             .or(env_addr_port)
             .or_else(|| {
-                std::env::var("ONSEN_LSWR_HOST_PORT")
+                std::env::var(HOST_PORT_ENV)
+                    .ok()
+                    .and_then(|p| p.parse::<u16>().ok())
+            })
+            .or_else(|| {
+                std::env::var(ONSEN_HOST_PORT_ENV)
                     .ok()
                     .and_then(|p| p.parse::<u16>().ok())
             })
@@ -460,7 +468,7 @@ async fn execute_with_endpoint(args: Value, request: Value) -> Result<ToolResult
 fn endpoint_schema_props() -> Value {
     json!({
         "host": { "type": "string", "description": "Loopback host for the onsen LSWR dev host. Non-loopback values are rejected in Step C." },
-        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Onsen LSWR dev host port. Param wins over ONSEN_LSWR_HOST_PORT and ONSEN_LSWR_HOST_ADDR port." },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Onsen LSWR dev host port. Param wins over ONSEN_LSWR_HOST_PORT, ONSEN_LSWR_PORT, and ONSEN_LSWR_HOST_ADDR port." },
         "timeout_ms": { "type": "integer", "minimum": 250, "maximum": 30000, "default": 5000 },
         "include_raw": { "type": "boolean", "default": true, "description": "Include exact host_response for parity checks." }
     })
@@ -664,10 +672,21 @@ mod tests {
     use super::*;
     use tokio::net::TcpListener;
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn clear_endpoint_env() {
+        std::env::remove_var(HOST_ADDR_ENV);
+        std::env::remove_var(HOST_PORT_ENV);
+        std::env::remove_var(ONSEN_HOST_PORT_ENV);
+    }
+
     #[test]
     fn endpoint_resolution_prefers_params_and_rejects_non_loopback() {
-        std::env::set_var("ONSEN_LSWR_HOST_ADDR", "127.0.0.1:4000");
-        std::env::set_var("ONSEN_LSWR_HOST_PORT", "4001");
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_endpoint_env();
+        std::env::set_var(HOST_ADDR_ENV, "127.0.0.1:4000");
+        std::env::set_var(HOST_PORT_ENV, "4001");
+        std::env::set_var(ONSEN_HOST_PORT_ENV, "4004");
         let ep = WorldEndpoint::from_args(&json!({
             "host": "localhost:4002",
             "port": 4003,
@@ -681,8 +700,22 @@ mod tests {
             WorldEndpoint::from_args(&json!({"host": "192.168.1.5"})).unwrap_err(),
             "world_host_non_loopback_rejected"
         );
-        std::env::remove_var("ONSEN_LSWR_HOST_ADDR");
-        std::env::remove_var("ONSEN_LSWR_HOST_PORT");
+        clear_endpoint_env();
+    }
+
+    #[test]
+    fn endpoint_resolution_accepts_onsen_host_port_alias() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_endpoint_env();
+        std::env::set_var(ONSEN_HOST_PORT_ENV, "4100");
+        let alias = WorldEndpoint::from_args(&json!({})).expect("endpoint");
+        assert_eq!(alias.host, DEFAULT_HOST);
+        assert_eq!(alias.port, 4100);
+
+        std::env::set_var(HOST_PORT_ENV, "4101");
+        let explicit = WorldEndpoint::from_args(&json!({})).expect("endpoint");
+        assert_eq!(explicit.port, 4101);
+        clear_endpoint_env();
     }
 
     #[test]
