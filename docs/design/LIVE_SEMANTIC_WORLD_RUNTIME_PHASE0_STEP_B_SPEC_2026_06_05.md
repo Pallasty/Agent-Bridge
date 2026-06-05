@@ -69,3 +69,17 @@ I re-run every check **independently, refute-first, reading the real render — 
 - Reuse Step A's proven mechanisms (hide-entity diff, geometric occlusion, save isolation slot 99); change only what B1–B3 require.
 - No AB MCP surface, no `present()` wire, no nexus, no push to onsen `main` unless owner asks (Step C concerns).
 - Implementation = Codex; design + G-gate acceptance = Claude. Independence preserved.
+
+## 7. SB1.5 addendum — frame-state-machine live capture (ruling #2438, 2026-06-05)
+
+During SB1–SB4, Codex hit a real blocker (#2437): reading the **live root viewport** framebuffer requires syncing with `RenderingServer.frame_post_draw`, but `await frame_post_draw` **inside the TCP request coroutine** is timing-sensitive — direct await yields correct pixels but intermittently **hangs** the host; time-boxed waits avoid the hang but read a **stale** texture (pixel coverage falls to 0 = false negative). The core thesis was already shown feasible in that session: viewport scale 1.25 changed `screen_area` 0.005565 → 0.00871 (the G1 live-viewport-grounded signal a fixed-camera probe cannot produce), live move changed source nodes + nonzero coverage (G2), alpha-zero/non-operating/headless → `verified=false` (G3).
+
+**Ruling: APPROVED.** Move live-visibility capture into a **frame-state machine owned by the autoload `_process` loop**: a TCP request **enqueues** a capture job; the state machine executes hide → capture → restore across **known render frames** (so each capture lands after a real `frame_post_draw`), then signals completion back to the request. This is the canonical Godot multi-frame pattern; it is **not scope creep** — it is the correct implementation of SB2/SB3. It also makes `flicker_frames` deterministic (the machine counts the hidden frames), strengthening B3(c).
+
+Mandatory robustness constraints (acceptance will check):
+1. **Fail path stays no-green-but-inert** — the request awaits completion with a **timeout**; on timeout → `verified=false`, `reason=capture_timeout`. Never fake green, never hang. (Extension of G3.)
+2. **Non-blocking `_process`** — the machine advances one step per frame (no busy-wait). Canonical sequence: frame N enqueue → N+1 baseline (after post-draw) → hide → N+2 hidden (after post-draw) → restore → diff; `flicker_frames` = the true count of frames the target was hidden, reported honestly.
+3. **Logical→physical scaling is a correctness requirement** — stage logical bounds (1280×800) must be scaled into the live root framebuffer (1600×1000) **before** the pixel diff, or `screen_area` is distorted. G-gate verifies this explicitly.
+
+Also: the dev enter-shift path must **deterministically** dismiss the MainMenu overlay (not rely on timing), since the overlay legitimately drives pixel coverage to 0 while present.
+
