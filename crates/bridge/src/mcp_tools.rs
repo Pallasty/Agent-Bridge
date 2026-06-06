@@ -50,7 +50,7 @@ use crate::context_budget::{
 };
 use crate::hub::Hub;
 use crate::ide::{queue_ide_command, read_ide_snapshot, IdeCommandOptions, IdeSnapshotOptions};
-use crate::project::{changes_digest, detect_project, resolve_cwd};
+use crate::project::{changes_digest, detect_project, git_topology_preflight, resolve_cwd};
 use crate::security::Cap;
 use crate::session_handoff::build_handoff_brief;
 use crate::warp_actions::warp_status_snapshot;
@@ -24996,6 +24996,90 @@ impl McpTool for ChangesDigestTool {
     }
 }
 
+pub struct GitTopologyPreflightTool {
+    #[allow(dead_code)]
+    hub: Hub,
+}
+
+impl GitTopologyPreflightTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for GitTopologyPreflightTool {
+    fn name(&self) -> &'static str {
+        "git_topology_preflight"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Read-only Git topology preflight before creating a PR/MR review artifact. \
+                 Verifies source/target have a merge-base and summarizes the merge-base..source \
+                 diff so agents can catch unrelated default branches or huge whole-tree diffs."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Git repo directory (default: process cwd)."
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Required target branch/ref for the intended PR/MR, e.g. origin/master or review-base/foo."
+                    },
+                    "source": {
+                        "type": "string",
+                        "default": "HEAD",
+                        "description": "Source branch/ref to review. Defaults to HEAD."
+                    },
+                    "max_files": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000,
+                        "default": 500,
+                        "description": "Warn when files_changed exceeds this threshold."
+                    }
+                },
+                "required": ["target"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let cwd = match resolve_cwd(args.get("cwd").and_then(|v| v.as_str())) {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolResult::error(e.to_string())),
+        };
+        let target = args
+            .get("target")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let source = args
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("HEAD")
+            .to_string();
+        let max_files = args
+            .get("max_files")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(500)
+            .clamp(1, 10_000) as usize;
+        let res = tokio::task::spawn_blocking(move || {
+            git_topology_preflight(&cwd, &target, &source, max_files)
+        })
+        .await
+        .map_err(|e| ab_core::Error::Backend(format!("git_topology_preflight task: {e}")))?;
+        match res {
+            Ok(v) => Ok(ToolResult::json_text(&v)),
+            Err(e) => Ok(ToolResult::error(e.to_string())),
+        }
+    }
+}
+
 // ===========================================================================
 //                    session_handoff (W3 structured brief)
 // ===========================================================================
@@ -29281,6 +29365,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "xiao_shu_action_request"
             | "project_detect"
             | "changes_digest"
+            | "git_topology_preflight"
             | "plan_save"
             | "plan_load"
             | "plan_update"
@@ -29300,6 +29385,7 @@ fn gemini_lean_tool(tool_name: &str) -> bool {
             | "skills_feedback"
             | "project_detect"
             | "changes_digest"
+            | "git_topology_preflight"
             | "mcp_dispatch_audit"
             | "readiness_audit"
             | "event_spine_snapshot"
@@ -31130,6 +31216,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(ChangesDigestTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(GitTopologyPreflightTool::new(hub.clone())),
     );
     // Plans + worktrees + codebase search.
     reg_if(
@@ -36599,6 +36691,23 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             assert!(
                 names.iter().any(|n| n == "readiness_audit"),
                 "readiness_audit missing from {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn registry_exposes_git_topology_preflight_tool() {
+        for label in ["codex-essential", "codex-lean", "gemini-lean"] {
+            let p = ToolPolicy::from_values(Some(label), None, None, None);
+            let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), p)
+                .list()
+                .into_iter()
+                .map(|s| s.name)
+                .collect();
+
+            assert!(
+                names.iter().any(|n| n == "git_topology_preflight"),
+                "git_topology_preflight missing from {label}"
             );
         }
     }

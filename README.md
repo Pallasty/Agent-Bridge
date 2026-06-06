@@ -699,6 +699,7 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `ide_command` | Queue IDE actions for an extension to execute: open/reveal file, run task, write snapshot |
 | perceive | `project_detect` | Detect languages / build hints / Rust workspace members / git snapshot from manifests (W2) |
 | | `changes_digest` | Structured git diff summary (`working_tree` / `staged` / `last_commit` / `branch_vs_main`) |
+| | `git_topology_preflight` | Read-only PR/MR target/source merge-base and diffstat preflight |
 | warp-oz | `oz_run_get` | Fetch status of a Warp cloud agent run by `run_id` or `session_id` |
 | | `oz_run_list` | List recent Warp cloud agent runs (optional state filter) |
 | | `oz_run_cancel` | Cancel an in-progress Warp cloud agent run |
