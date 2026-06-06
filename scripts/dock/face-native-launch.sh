@@ -26,6 +26,7 @@ export AB_FACE_MB="${AB_FACE_MARGIN_BOTTOM:-96}"
 export AB_FACE_W="${AB_FACE_WIDTH:-360}"
 export AB_FACE_H="${AB_FACE_HEIGHT:-520}"
 export AB_FACE_SEG="${AB_FACE_SEGMENT_MS:-86400000}"   # 24h per probe segment; loop re-spawns
+export AB_FACE_OUTPUT="${AB_FACE_OUTPUT:-}"            # Wayland output name (e.g. DP-1); empty = compositor default
 
 # already running? (the supervise loop or a probe)
 if pgrep -f "linux-native-transparent" >/dev/null 2>&1; then
@@ -47,7 +48,8 @@ setsid bash -c '
     "$AB_FACE_BIN" avatar linux-native-transparent \
       --mode "$AB_FACE_MODE" --pet-id "$AB_FACE_PET_ID" --state-url "$AB_FACE_STATE_URL" \
       --anchor "$AB_FACE_ANCHOR" --margin-right "$AB_FACE_MR" --margin-bottom "$AB_FACE_MB" \
-      --width "$AB_FACE_W" --height "$AB_FACE_H" --duration-ms "$AB_FACE_SEG" >/dev/null 2>&1 || true
+      --width "$AB_FACE_W" --height "$AB_FACE_H" --duration-ms "$AB_FACE_SEG" \
+      ${AB_FACE_OUTPUT:+--output "$AB_FACE_OUTPUT"} >/dev/null 2>&1 || true
     sleep 1
   done
 ' </dev/null >/dev/null 2>&1 &

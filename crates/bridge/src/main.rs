@@ -451,6 +451,10 @@ enum AvatarOp {
         /// Milliseconds between native sprite frames.
         #[arg(long, default_value_t = ab_bridge::avatar_native::DEFAULT_NATIVE_FRAME_INTERVAL_MS)]
         frame_interval_ms: u64,
+        /// Wayland output to place the face on, by name (e.g. DP-1). Omit for the
+        /// compositor's default output.
+        #[arg(long)]
+        output: Option<String>,
         /// Print the launch plan without opening the native surface.
         #[arg(long)]
         dry_run: bool,
@@ -3012,6 +3016,7 @@ async fn main() -> Result<()> {
                 sprite_scale_percent,
                 frame_count,
                 frame_interval_ms,
+                output,
                 dry_run,
                 json: as_json,
             } => {
@@ -3038,6 +3043,7 @@ async fn main() -> Result<()> {
                     *sprite_scale_percent,
                     *frame_count,
                     *frame_interval_ms,
+                    output.clone(),
                     *dry_run,
                     *as_json,
                 )
@@ -4774,6 +4780,7 @@ async fn run_avatar_linux_native_transparent(
     sprite_scale_percent: u32,
     frame_count: u32,
     frame_interval_ms: u64,
+    output: Option<String>,
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
@@ -4819,6 +4826,7 @@ async fn run_avatar_linux_native_transparent(
         state_url,
         state_poll_ms,
         state_http_timeout_ms,
+        output,
         ..ab_bridge::avatar_native::NativeTransparentOptions::default()
     };
     if let Some(pet_id) = state_pet_id.as_deref() {
