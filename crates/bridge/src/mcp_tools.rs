@@ -31822,6 +31822,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(crate::world_tools::WorldVisibilityQueryTool::new()),
     );
+    // Live Semantic World Runtime Step D: convert world_* result envelopes into
+    // human-presentable review packets + dual-encoded HTML. Niche only; this is
+    // the expression wrapper for the Step C world tools, not a default surface.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(crate::world_tools::WorldPresentTool::new()),
+    );
     // Audio embodiment: emit a known tone + read it back off the system bus (sink
     // .monitor loopback) via a spectral-peak falsifier; writes a verified-outcome
     // sidecar that flows into present_outcomes. Honest boundary: verifies the bus,
@@ -36877,7 +36886,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(!std_p.includes(Tier::Niche, "present_voice"));
         // Live semantic world tools are Step C Niche opt-ins; absent from
         // standard/default profile surfaces until explicitly requested.
-        for t in ["world_query", "world_patch", "world_visibility_query"] {
+        for t in [
+            "world_query",
+            "world_patch",
+            "world_visibility_query",
+            "world_present",
+        ] {
             assert!(all.includes(Tier::Niche, t), "{t} must be available under all");
             assert!(!std_p.includes(Tier::Niche, t), "{t} must stay out of standard");
         }
@@ -36902,7 +36916,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             schemas.iter().any(|s| s.name == "present_voice"),
             "present_voice must register under the all profile"
         );
-        for t in ["world_query", "world_patch", "world_visibility_query"] {
+        for t in [
+            "world_query",
+            "world_patch",
+            "world_visibility_query",
+            "world_present",
+        ] {
             assert!(
                 schemas.iter().any(|s| s.name == t),
                 "{t} must register under the all profile"

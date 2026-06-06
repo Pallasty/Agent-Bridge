@@ -9,10 +9,12 @@ use ab_mcp::{McpTool, ToolContext, ToolResult, ToolSchema};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
+const WORLD_PRESENT_SCHEMA: &str = "agent_bridge.world_present.v0";
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 37691;
 const HOST_ADDR_ENV: &str = "ONSEN_LSWR_HOST_ADDR";
@@ -500,6 +502,135 @@ fn endpoint_schema_props() -> Value {
     })
 }
 
+fn infer_world_tool(args: &Value, envelope: &Value) -> String {
+    if let Some(tool) = args
+        .get("world_tool")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return tool.to_string();
+    }
+    let request = envelope.get("request").unwrap_or(&Value::Null);
+    if request.get("world.patch").is_some()
+        || get_path(envelope, &["host_response", "world.patch"]).is_some()
+        || get_path(envelope, &["host_response", "world", "patch"]).is_some()
+        || envelope.get("world.patch").is_some()
+    {
+        return "world_patch".to_string();
+    }
+    if request.get("world.visibility.query").is_some()
+        || get_path(envelope, &["host_response", "world.visibility.query"]).is_some()
+    {
+        return "world_visibility_query".to_string();
+    }
+    "world_query".to_string()
+}
+
+fn static_render_status(html: &str) -> &'static str {
+    if crate::present::render_region(html)
+        .map(str::trim)
+        .unwrap_or_default()
+        .is_empty()
+    {
+        "blank_static"
+    } else {
+        "rendered_static"
+    }
+}
+
+fn inline_present_artifact(packet: &Value) -> Value {
+    let html = crate::lswr_present::present_packet_review_html(packet);
+    let id = crate::lswr_present::present_packet_review_id(packet);
+    json!({
+        "kind": "html",
+        "id": id,
+        "html": html,
+        "bytes": html.len(),
+        "static_render_status": static_render_status(&html),
+    })
+}
+
+fn file_present_artifact(packet: &Value, dir: PathBuf) -> std::io::Result<Value> {
+    let file = crate::lswr_present::write_present_packet_review_file(packet, &dir)?;
+    Ok(json!({
+        "kind": "file",
+        "id": file.id,
+        "path": file.artifact_path.display().to_string(),
+        "bytes": file.bytes,
+        "static_render_status": file.static_render_status,
+    }))
+}
+
+fn world_present_payload(args: &Value) -> std::result::Result<Value, String> {
+    let envelope = args
+        .get("envelope")
+        .filter(|v| v.is_object())
+        .ok_or_else(|| "envelope object is required".to_string())?;
+    if envelope.get("schema").and_then(Value::as_str)
+        != Some(crate::lswr_present::WORLD_TOOL_SCHEMA)
+    {
+        return Err("envelope.schema must be agent_bridge.world_tool.v0".to_string());
+    }
+    let include_raw = args
+        .get("include_raw")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let generated_at = args
+        .get("generated_at")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("unix:{}", crate::present::now_unix()));
+    let mut options = crate::lswr_present::PresentPacketOptions::new(&generated_at);
+    if let Some(commit) = args.get("commit").and_then(Value::as_str) {
+        options = options.with_commit(commit);
+    }
+    let world_tool = infer_world_tool(args, envelope);
+    let packet =
+        crate::lswr_present::world_envelope_to_present_packet(&world_tool, envelope, options);
+    let artifact = match args
+        .get("out_dir")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(out_dir) => file_present_artifact(&packet, PathBuf::from(out_dir))
+            .map_err(|e| format!("world_present: write failed: {e}"))?,
+        None => inline_present_artifact(&packet),
+    };
+    let html_for_dual = match artifact.get("kind").and_then(Value::as_str) {
+        Some("file") => artifact
+            .get("path")
+            .and_then(Value::as_str)
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .unwrap_or_default(),
+        _ => artifact
+            .get("html")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    };
+    let dual_encoding = crate::present::extract_ab_payload(&html_for_dual).is_some();
+    let verdict = packet.get("verdict").cloned().unwrap_or(Value::Null);
+    let reason = packet.get("reason").cloned().unwrap_or(Value::Null);
+    let mut result = json!({
+        "schema": WORLD_PRESENT_SCHEMA,
+        "world_tool": world_tool,
+        "source_schema": envelope.get("schema").cloned().unwrap_or(Value::Null),
+        "packet": packet,
+        "artifact": artifact,
+        "dual_encoding": dual_encoding,
+        "verdict": verdict,
+        "reason": reason,
+    });
+    if include_raw {
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("source_envelope".to_string(), envelope.clone());
+        }
+    }
+    Ok(result)
+}
+
 fn debug_schema_props() -> Value {
     json!({
         "debug_session": {
@@ -527,6 +658,74 @@ fn merge_props(
         }
     }
     base
+}
+
+pub struct WorldPresentTool;
+
+impl WorldPresentTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for WorldPresentTool {
+    fn name(&self) -> &'static str {
+        "world_present"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "LSWR Step D expression wrapper. Converts a verified=false/true \
+                 `agent_bridge.world_tool.v0` envelope from world_query/world_patch/\
+                 world_visibility_query into an `agent_bridge.lswr.present_packet.v0` \
+                 review packet and a self-describing HTML artifact. Preserves lower-layer \
+                 verification semantics: not_verified/blocked are never laundered into \
+                 success, `verified_to` is emitted only for verified packets, and ingestion \
+                 is always blocked in this Step D gate."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "envelope": {
+                        "type": "object",
+                        "description": "A `agent_bridge.world_tool.v0` envelope returned by a world_* tool."
+                    },
+                    "world_tool": {
+                        "type": "string",
+                        "enum": ["world_query", "world_patch", "world_visibility_query"],
+                        "description": "Optional explicit source tool. If omitted, inferred from envelope.request."
+                    },
+                    "out_dir": {
+                        "type": "string",
+                        "description": "Optional directory for writing the HTML artifact. If omitted, returns inline HTML in artifact.html."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, include the original source envelope in the result."
+                    },
+                    "generated_at": {
+                        "type": "string",
+                        "description": "Optional generated-at label for packet provenance."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional source commit label for packet provenance."
+                    }
+                },
+                "required": ["envelope"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        match world_present_payload(&args) {
+            Ok(payload) => Ok(ToolResult::json_text(&payload)),
+            Err(e) => Ok(ToolResult::error(e)),
+        }
+    }
 }
 
 pub struct WorldQueryTool;
@@ -696,14 +895,230 @@ impl McpTool for WorldPatchTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ab_mcp::ContentBlock;
     use tokio::net::TcpListener;
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn result_text_as_json(r: &ToolResult) -> Value {
+        let text = match r.content.first().expect("content") {
+            ContentBlock::Text { text } => text,
+            _ => panic!("expected text block"),
+        };
+        serde_json::from_str(text).expect("json payload")
+    }
+
+    fn verified_visibility_envelope() -> Value {
+        json!({
+            "schema": crate::lswr_present::WORLD_TOOL_SCHEMA,
+            "ok": true,
+            "verified": true,
+            "reason": null,
+            "request": {
+                "request_id": "fixture-verified-visibility",
+                "world.visibility.query": {"entities": ["bath"]}
+            },
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": "onsen_live_root_viewport",
+                "evidence": {"host_reason": null, "screen_area": 0.1, "bounds_screen_area": 0.2}
+            },
+            "host_response": {
+                "verified": true,
+                "world.visibility.query": {
+                    "after": {
+                        "entities": [{"id": "bath", "screen_area": 0.1, "bounds_screen_area": 0.2, "occluded": false}]
+                    }
+                }
+            }
+        })
+    }
+
+    fn alpha_zero_envelope() -> Value {
+        json!({
+            "schema": crate::lswr_present::WORLD_TOOL_SCHEMA,
+            "ok": true,
+            "verified": false,
+            "reason": "pixel_coverage_zero",
+            "request": {
+                "request_id": "fixture-alpha-zero",
+                "world.visibility.query": {"entities": ["bath"]}
+            },
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": null,
+                "evidence": {"host_reason": "pixel_coverage_zero", "screen_area": 0.0, "bounds_screen_area": 0.2}
+            }
+        })
+    }
+
+    fn host_unreachable_envelope() -> Value {
+        json!({
+            "schema": crate::lswr_present::WORLD_TOOL_SCHEMA,
+            "ok": false,
+            "verified": false,
+            "reason": "world_host_unreachable",
+            "detail": "Connection refused",
+            "request": {"request_id": "fixture-host-unreachable"},
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": null,
+                "evidence": {"host_reason": "world_host_unreachable"}
+            },
+            "host_response": null
+        })
+    }
+
+    fn blocked_envelope() -> Value {
+        json!({
+            "schema": crate::lswr_present::WORLD_TOOL_SCHEMA,
+            "ok": false,
+            "verified": false,
+            "reason": "world_host_non_loopback_rejected",
+            "request": {
+                "request_id": "fixture-blocked",
+                "world.visibility.query": {"entities": ["bath"]}
+            },
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": null,
+                "evidence": {"host_reason": "world_host_non_loopback_rejected"}
+            },
+            "host_response": null
+        })
+    }
 
     fn clear_endpoint_env() {
         std::env::remove_var(HOST_ADDR_ENV);
         std::env::remove_var(HOST_PORT_ENV);
         std::env::remove_var(ONSEN_HOST_PORT_ENV);
+    }
+
+    #[tokio::test]
+    async fn world_present_canonical_envelopes_preserve_verdicts() {
+        let cases = [
+            (
+                verified_visibility_envelope(),
+                "world_visibility_query",
+                "verified",
+                Value::Null,
+                "Verified",
+            ),
+            (
+                alpha_zero_envelope(),
+                "world_visibility_query",
+                "not_verified",
+                json!("pixel_coverage_zero"),
+                "Unconfirmed",
+            ),
+            (
+                host_unreachable_envelope(),
+                "world_query",
+                "not_verified",
+                json!("world_host_unreachable"),
+                "Unconfirmed",
+            ),
+            (
+                blocked_envelope(),
+                "world_visibility_query",
+                "blocked",
+                json!("world_host_non_loopback_rejected"),
+                "Blocked",
+            ),
+        ];
+        let tool = WorldPresentTool::new();
+        for (envelope, expected_tool, expected_verdict, expected_reason, card_label) in cases {
+            let out = tool
+                .execute(
+                    json!({
+                        "envelope": envelope,
+                        "generated_at": "2026-06-06T00:00:00Z",
+                        "commit": "test-commit"
+                    }),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("execute");
+            assert!(!out.is_error);
+            let payload = result_text_as_json(&out);
+            assert_eq!(payload["schema"], WORLD_PRESENT_SCHEMA);
+            assert_eq!(payload["world_tool"], expected_tool);
+            assert_eq!(payload["verdict"], expected_verdict);
+            assert_eq!(payload["reason"], expected_reason);
+            assert_eq!(
+                payload["packet"]["schema"],
+                crate::lswr_present::LSWR_PRESENT_PACKET_SCHEMA
+            );
+            assert_eq!(payload["packet"]["ingestion"]["allowed"], false);
+            assert_eq!(payload["artifact"]["kind"], "html");
+            assert_eq!(
+                payload["artifact"]["static_render_status"],
+                "rendered_static"
+            );
+            assert_eq!(payload["dual_encoding"], true);
+            assert!(payload.get("source_envelope").is_none());
+
+            let html = payload["artifact"]["html"].as_str().expect("html");
+            assert!(html.contains(card_label), "missing label {card_label}");
+            assert!(html.contains("Ingestion blocked"));
+            if expected_verdict == "verified" {
+                assert_eq!(
+                    payload["packet"]["provenance"]["verified_to"],
+                    "onsen_live_root_viewport"
+                );
+                assert_eq!(
+                    payload["packet"]["human_readable"]["visible"],
+                    json!(["bath"])
+                );
+            } else {
+                assert!(payload["packet"]["provenance"]["verified_to"].is_null());
+                assert_eq!(payload["packet"]["human_readable"]["visible"], json!([]));
+                assert!(!html.contains("verified successfully"));
+                assert!(!html.contains("World visibility verified"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn world_present_writes_file_when_out_dir_is_provided() {
+        let out_dir = std::env::temp_dir().join(format!(
+            "ab-world-present-test-{}-{}",
+            std::process::id(),
+            crate::present::now_unix()
+        ));
+        let tool = WorldPresentTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "envelope": verified_visibility_envelope(),
+                    "out_dir": out_dir.display().to_string(),
+                    "include_raw": true,
+                    "generated_at": "2026-06-06T00:00:00Z"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["artifact"]["kind"], "file");
+        assert_eq!(
+            payload["artifact"]["static_render_status"],
+            "rendered_static"
+        );
+        assert_eq!(payload["dual_encoding"], true);
+        assert_eq!(
+            payload["source_envelope"]["schema"],
+            crate::lswr_present::WORLD_TOOL_SCHEMA
+        );
+        let path = payload["artifact"]["path"].as_str().expect("path");
+        let html = std::fs::read_to_string(path).expect("artifact file");
+        let recovered = crate::present::extract_ab_payload(&html).expect("payload");
+        assert_eq!(
+            recovered["schema"],
+            crate::lswr_present::LSWR_PRESENT_PACKET_SCHEMA
+        );
+        let _ = std::fs::remove_dir_all(&out_dir);
     }
 
     #[test]

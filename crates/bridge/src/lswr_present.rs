@@ -60,9 +60,13 @@ pub fn world_envelope_to_present_packet(
     let verdict = verdict_for(verified, reason.as_deref());
     let verify = envelope.get("verify").cloned().unwrap_or_else(|| json!({}));
     let verify_method = string_value(get_path(&verify, &["method"]));
-    let verified_to = get_path(&verify, &["verified_to"])
-        .cloned()
-        .unwrap_or(Value::Null);
+    let verified_to = if verified {
+        get_path(&verify, &["verified_to"])
+            .cloned()
+            .unwrap_or(Value::Null)
+    } else {
+        Value::Null
+    };
     let request = envelope
         .get("request")
         .cloned()
@@ -688,6 +692,24 @@ mod tests {
         assert!(!title.contains("verified successfully"));
         assert!(!title.contains("not verified"));
         assert!(!title.ends_with(" verified"));
+    }
+
+    #[test]
+    fn lower_layer_not_verified_drops_verified_to_even_if_present() {
+        let envelope = json!({
+            "schema": WORLD_TOOL_SCHEMA,
+            "ok": true,
+            "verified": false,
+            "reason": "pixel_coverage_zero",
+            "request": {"world.visibility.query": {"entities": ["bath"]}},
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": "onsen_live_root_viewport",
+                "evidence": {"host_reason": "pixel_coverage_zero"}
+            }
+        });
+        let packet = world_envelope_to_present_packet("world_visibility_query", &envelope, opts());
+        assert!(packet["provenance"]["verified_to"].is_null());
     }
 
     #[test]
