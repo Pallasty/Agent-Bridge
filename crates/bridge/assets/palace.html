@@ -673,7 +673,8 @@
       text-transform: uppercase;
       margin-bottom: 8px;
     }
-    #panel .region-node-controls {
+    #panel .region-node-controls,
+    #panel .neighbor-lens-controls {
       display: flex;
       flex-direction: column;
       gap: 7px;
@@ -683,25 +684,29 @@
       border: 1px solid #1f1f2a;
       border-radius: 5px;
     }
-    #panel .region-control-row {
+    #panel .region-control-row,
+    #panel .neighbor-control-row {
       display: grid;
       grid-template-columns: 42px minmax(0, 1fr);
       gap: 8px;
       align-items: center;
     }
-    #panel .region-control-label {
+    #panel .region-control-label,
+    #panel .neighbor-control-label {
       color: #5a5a68;
       font-size: 9px;
       letter-spacing: 0.12em;
       text-transform: uppercase;
     }
-    #panel .region-control-buttons {
+    #panel .region-control-buttons,
+    #panel .neighbor-control-buttons {
       display: flex;
       flex-wrap: wrap;
       gap: 4px;
       min-width: 0;
     }
-    #panel .region-control-buttons button {
+    #panel .region-control-buttons button,
+    #panel .neighbor-control-buttons button {
       background: transparent;
       border: 1px solid #252532;
       color: #8a8a9c;
@@ -714,14 +719,20 @@
       cursor: pointer;
       transition: color 120ms, border-color 120ms, background 120ms;
     }
-    #panel .region-control-buttons button:hover {
+    #panel .region-control-buttons button:hover,
+    #panel .neighbor-control-buttons button:hover {
       color: #e8e8ee;
       border-color: #5a5a72;
     }
-    #panel .region-control-buttons button.active {
+    #panel .region-control-buttons button.active,
+    #panel .neighbor-control-buttons button.active {
       color: #ffffff;
       border-color: #a87cff;
       background: #191321;
+    }
+    #panel .neighbor-control-buttons button.active {
+      border-color: #5cc8c8;
+      background: #101b1d;
     }
     #panel .neighbor-list,
     #panel .region-node-list,
@@ -2253,6 +2264,8 @@ const PALACE_VIEW_STATE_KEY = "palace:view:v2";
 const VALID_VIEW_PRESETS = new Set(["overview", "fresh", "stale", "hubs", "orphans", "coactivation"]);
 const VALID_REGION_NODE_FILTERS = new Set(["all", "fresh", "stale", "hubs", "orphans"]);
 const VALID_REGION_NODE_SORTS = new Set(["rank", "degree", "recent", "key"]);
+const VALID_NEIGHBOR_FILTERS = new Set(["all", "structural", "coactivation"]);
+const VALID_NEIGHBOR_SORTS = new Set(["weight", "type", "key"]);
 const state = {
   cy: null,
   data: null,
@@ -2270,6 +2283,8 @@ const state = {
   staleKindFilter: null, // C10: null = show all kinds, string = restrict stale panel rows
   regionNodeFilter: "all",
   regionNodeSort: "rank",
+  neighborFilter: "all",
+  neighborSort: "weight",
   // ζ-13: degree info computed once per loadGraph, consumed by both the
   // footer badge and buildCy's per-node hub/orphan marker. Stashed here
   // (rather than recomputed twice) so the two surfaces can't drift.
@@ -2285,6 +2300,8 @@ function serializeViewState() {
     focused: state.focused,
     regionNodeFilter: state.regionNodeFilter,
     regionNodeSort: state.regionNodeSort,
+    neighborFilter: state.neighborFilter,
+    neighborSort: state.neighborSort,
     sources: Array.from(state.enabledSources),
     kinds: Array.from(state.enabledKinds),
     edgeTypes: Array.from(state.enabledEdgeTypes),
@@ -2349,6 +2366,8 @@ function restoreViewStateFromUrlOrStorage() {
   if (typeof restored.includeSkills === "boolean") state.includeSkills = restored.includeSkills;
   if (VALID_REGION_NODE_FILTERS.has(restored.regionNodeFilter)) state.regionNodeFilter = restored.regionNodeFilter;
   if (VALID_REGION_NODE_SORTS.has(restored.regionNodeSort)) state.regionNodeSort = restored.regionNodeSort;
+  if (VALID_NEIGHBOR_FILTERS.has(restored.neighborFilter)) state.neighborFilter = restored.neighborFilter;
+  if (VALID_NEIGHBOR_SORTS.has(restored.neighborSort)) state.neighborSort = restored.neighborSort;
   if (restoreSet(state.enabledSources, restored.sources)) {
     if (state.enabledSources.size === 0) {
       state.enabledSources.add("sqlite");
@@ -3002,11 +3021,8 @@ function clearFocus() {
   saveViewState();
 }
 
-function renderWorkbenchNeighbors(memory, graphNode) {
-  const empty = `<div id="workbench-neighbors" class="neighbor-list">
-    <span class="neighbor-empty">no graph neighbors for ${escapeHTML(memory.key)}</span>
-  </div>`;
-  if (!state.cy || !graphNode || graphNode.length === 0) return empty;
+function workbenchNeighborRows(memory, graphNode) {
+  if (!state.cy || !graphNode || graphNode.length === 0) return [];
 
   const byKey = new Map();
   graphNode.connectedEdges().forEach(edge => {
@@ -3025,9 +3041,75 @@ function renderWorkbenchNeighbors(memory, graphNode) {
     byKey.set(key, existing);
   });
 
-  const rows = Array.from(byKey.values())
-    .sort((a, b) => b.weight - a.weight || a.label.localeCompare(b.label))
-    .slice(0, 8);
+  return Array.from(byKey.values());
+}
+
+function filteredWorkbenchNeighbors(memory, graphNode) {
+  const filter = VALID_NEIGHBOR_FILTERS.has(state.neighborFilter)
+    ? state.neighborFilter
+    : "all";
+  const rows = workbenchNeighborRows(memory, graphNode).filter(row => {
+    if (filter === "all") return true;
+    if (filter === "coactivation") return row.types.has("coactivation");
+    if (filter === "structural") return Array.from(row.types).some(t => t !== "coactivation");
+    return true;
+  });
+  return sortWorkbenchNeighbors(rows).slice(0, 8);
+}
+
+function sortWorkbenchNeighbors(rows) {
+  const sort = VALID_NEIGHBOR_SORTS.has(state.neighborSort)
+    ? state.neighborSort
+    : "weight";
+  return rows.slice().sort((a, b) => {
+    if (sort === "type") {
+      const aType = Array.from(a.types).sort().join(", ");
+      const bType = Array.from(b.types).sort().join(", ");
+      return aType.localeCompare(bType) ||
+        b.weight - a.weight ||
+        a.label.localeCompare(b.label);
+    }
+    if (sort === "key") {
+      return a.key.localeCompare(b.key);
+    }
+    return b.weight - a.weight || a.label.localeCompare(b.label);
+  });
+}
+
+function renderWorkbenchNeighborControls() {
+  const filters = [
+    ["all", "all"],
+    ["structural", "structural"],
+    ["coactivation", "coactivation"],
+  ];
+  const sorts = [
+    ["weight", "weight"],
+    ["type", "type"],
+    ["key", "key"],
+  ];
+  const filterButtons = filters.map(([value, label]) =>
+    `<button type="button" data-neighbor-filter="${value}" class="${state.neighborFilter === value ? "active" : ""}">${label}</button>`
+  ).join("");
+  const sortButtons = sorts.map(([value, label]) =>
+    `<button type="button" data-neighbor-sort="${value}" class="${state.neighborSort === value ? "active" : ""}">${label}</button>`
+  ).join("");
+  return `<div id="neighbor-lens-controls" class="neighbor-lens-controls">
+    <div class="neighbor-control-row">
+      <span class="neighbor-control-label">filter</span>
+      <span class="neighbor-control-buttons">${filterButtons}</span>
+    </div>
+    <div class="neighbor-control-row">
+      <span class="neighbor-control-label">sort</span>
+      <span class="neighbor-control-buttons">${sortButtons}</span>
+    </div>
+  </div>`;
+}
+
+function renderWorkbenchNeighbors(memory, graphNode) {
+  const empty = `<div id="workbench-neighbors" class="neighbor-list">
+    <span class="neighbor-empty">no graph neighbors for ${escapeHTML(memory.key)}</span>
+  </div>`;
+  const rows = filteredWorkbenchNeighbors(memory, graphNode);
   if (rows.length === 0) return empty;
 
   return `<div id="workbench-neighbors" class="neighbor-list">` + rows.map(row => {
@@ -3041,6 +3123,22 @@ function renderWorkbenchNeighbors(memory, graphNode) {
       <span class="neighbor-weight">${escapeHTML(weight)}</span>
     </button>`;
   }).join("") + `</div>`;
+}
+
+function renderWorkbenchNeighborSection(memory, graphNode) {
+  return `<div class="workbench-section" id="workbench-neighbor-section">
+    <div class="workbench-section-title">Neighbors</div>
+    ${renderWorkbenchNeighborControls()}
+    ${renderWorkbenchNeighbors(memory, graphNode)}
+  </div>`;
+}
+
+function refreshWorkbenchNeighborSection(panel, memory) {
+  const section = panel.querySelector("#workbench-neighbor-section");
+  if (!section) return;
+  const graphNode = state.cy ? state.cy.getElementById(memory.key) : null;
+  section.outerHTML = renderWorkbenchNeighborSection(memory, graphNode);
+  bindWorkbenchNeighborActions(panel, memory);
 }
 
 function renderWorkbenchSourceStack(memory, graphData, region) {
@@ -3312,10 +3410,7 @@ async function showSidePanel(id) {
             <div class="metric"><div class="label">source</div><div class="value">${sourceLabel}</div></div>
           </div>
           ${descBlock}
-          <div class="workbench-section">
-            <div class="workbench-section-title">Neighbors</div>
-            ${renderWorkbenchNeighbors(m, graphNode)}
-          </div>
+          ${renderWorkbenchNeighborSection(m, graphNode)}
           <div class="workbench-section">
             <div class="workbench-section-title">Source stack</div>
             ${renderWorkbenchSourceStack(m, graphData, region)}
@@ -3407,13 +3502,35 @@ function bindRegionWorkbenchActions(panel, regionId) {
   }
 }
 
-function bindWorkbenchActions(panel, memory) {
+function bindWorkbenchNeighborActions(panel, memory) {
+  panel.querySelectorAll("[data-neighbor-filter]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const filter = btn.dataset.neighborFilter;
+      if (!VALID_NEIGHBOR_FILTERS.has(filter)) return;
+      state.neighborFilter = filter;
+      refreshWorkbenchNeighborSection(panel, memory);
+      saveViewState();
+    });
+  });
+  panel.querySelectorAll("[data-neighbor-sort]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const sort = btn.dataset.neighborSort;
+      if (!VALID_NEIGHBOR_SORTS.has(sort)) return;
+      state.neighborSort = sort;
+      refreshWorkbenchNeighborSection(panel, memory);
+      saveViewState();
+    });
+  });
   panel.querySelectorAll(".neighbor-link").forEach(btn => {
     btn.addEventListener("click", () => {
       const key = btn.dataset.neighborKey;
       jumpToWorkbenchNeighbor(key);
     });
   });
+}
+
+function bindWorkbenchActions(panel, memory) {
+  bindWorkbenchNeighborActions(panel, memory);
   const copyBtn = panel.querySelector(".copy-key-btn");
   if (copyBtn) {
     copyBtn.addEventListener("click", async () => {
