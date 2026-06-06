@@ -3120,14 +3120,18 @@ async function showSidePanel(id) {
   }
 }
 
+function jumpToWorkbenchNeighbor(key) {
+  if (!key) return;
+  focusOnNode(key);
+  showSidePanel(key);
+  saveViewState();
+}
+
 function bindWorkbenchActions(panel, memory) {
   panel.querySelectorAll(".neighbor-link").forEach(btn => {
     btn.addEventListener("click", () => {
       const key = btn.dataset.neighborKey;
-      if (!key) return;
-      focusOnNode(key);
-      showSidePanel(key);
-      saveViewState();
+      jumpToWorkbenchNeighbor(key);
     });
   });
   const copyBtn = panel.querySelector(".copy-key-btn");
