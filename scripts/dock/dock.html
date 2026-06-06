@@ -145,7 +145,7 @@
 const MOOD = {
   happy:'#2ea043', calm:'#39c5cf', content:'#39c5cf',
   thinking:'#4493f8', orienting:'#4493f8', working:'#4493f8', focused:'#4493f8',
-  alert:'#d29922', concerned:'#d29922', tired:'#8b949e', idle:'#6e7681',
+  alert:'#d29922', concerned:'#d29922', waiting_for_user:'#d29922', tired:'#8b949e', idle:'#6e7681',
   error:'#f85149', sad:'#f85149',
 };
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g, c =>
@@ -161,8 +161,12 @@ function sectionEmpty(t){ return `<div class="empty">${t}</div>`; }
 
 function render(d){
   // face
-  const mood = (d.face && d.face.mood) || 'idle';
-  document.documentElement.style.setProperty('--mood', MOOD[mood] || MOOD.idle);
+  // orb colour: prefer the grounded activity (mode) over the decorative sidecar
+  // mood, so the colour tracks real work (working→blue, idle→grey, waiting→amber)
+  // instead of a constant. Falls back to mood, then idle.
+  const face = d.face || {};
+  const colourKey = (MOOD[face.mode] && face.mode) || face.mood || 'idle';
+  document.documentElement.style.setProperty('--mood', MOOD[colourKey] || MOOD.idle);
   document.getElementById('self').textContent = '· ' + (d.node_self || '?');
   const reasonTxt = (d.face && (d.face.reason || d.face.last_event)) || '静默';
   // provenance: surface where the grounded focus came from (tool:X) so the dock
@@ -172,11 +176,20 @@ function render(d){
     esc(reasonTxt) + (src ? ` <span class="src">${esc(src)}</span>` : '');
   document.getElementById('mode').textContent = (d.face && (d.face.mode || d.face.mood)) || '—';
 
-  // cortex motion → orb expression (breath speed / amplitude / glow) + gesture line
+  // cortex motion → orb expression (breath speed / amplitude / glow) + gesture line.
+  // cortex is the primary source, but on Linux its daemon (launchd) is
+  // unavailable → it returns a stale 'low' constant, freezing the orb. When
+  // cortex is stale/absent, derive intensity from the grounded activity so the
+  // orb's breath/glow reflect real work instead of a dead default.
   const cx = (d.face && d.face.cortex) || {};
+  let intensity = cx.intensity;
+  if (!intensity || cx.state === 'stale') {
+    intensity = { working:'medium', orienting:'medium', reviewing:'medium',
+                  waiting_for_user:'low', idle:'low' }[face.mode] || 'low';
+  }
   const INTENS = { low:['4.8s','1.06','10px'], medium:['3.4s','1.11','16px'],
                    med:['3.4s','1.11','16px'], high:['2.1s','1.18','22px'] };
-  const [bdur,bamp,glow] = INTENS[cx.intensity] || ['3.6s','1.12','14px'];
+  const [bdur,bamp,glow] = INTENS[intensity] || ['3.6s','1.12','14px'];
   const rs = document.documentElement.style;
   rs.setProperty('--breath-dur', bdur);
   rs.setProperty('--breath-amp', bamp);
