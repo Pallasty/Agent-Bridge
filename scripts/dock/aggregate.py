@@ -206,6 +206,11 @@ snapshot = {
         "mode": pet.get("mode"),
         "mood": pet.get("mood"),
         "reason": pet.get("reason"),
+        # focus = what the agent is attending to, grounded from the live tool
+        # target by ab-pet-ground-hook; focus_source carries its provenance so
+        # the dock can show the grounded focus instead of dropping it.
+        "focus": pet.get("focus"),
+        "focus_source": pet.get("focus_source"),
         "last_event": pet.get("last_event"),
         "project": pet.get("project"),
         "updated_at": pet.get("updated_at"),

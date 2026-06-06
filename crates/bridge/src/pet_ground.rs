@@ -106,6 +106,23 @@ pub fn derive_focus_from_tool(tool_name: &str, tool_input: &Value) -> Option<Str
     }
 }
 
+/// Derive a human-legible `reason` (why the avatar is in this state) from the
+/// grounded activity and focus. Honest by construction: it only restates what we
+/// already know — the activity and its target — and never invents a motive.
+/// Writing it here is what stops a stale constant from another hook (e.g. a
+/// leftover "session stop hook launched memory compact/sync") from lingering.
+pub fn derive_reason(activity: &str, focus: Option<&str>) -> String {
+    match activity {
+        "orienting" => "orienting to the new prompt".to_string(),
+        "idle" => "idle — last task complete, awaiting next".to_string(),
+        "waiting_for_user" => "waiting for user input".to_string(),
+        _ => match focus {
+            Some(f) => format!("{activity}: {f}"),
+            None => activity.to_string(),
+        },
+    }
+}
+
 /// Build the grounded patch to merge into the sidecar state for a given event.
 /// Every truth-claim field is written together with its `*_source` provenance.
 pub fn ground_patch(tel: &ToolTelemetry, now_rfc3339: &str) -> Map<String, Value> {
@@ -115,17 +132,29 @@ pub fn ground_patch(tel: &ToolTelemetry, now_rfc3339: &str) -> Map<String, Value
     patch.insert("mode".into(), json!(activity));
     patch.insert("last_event".into(), json!(tel.event));
 
+    // Compute focus first so `reason` can faithfully restate it.
+    let mut focus: Option<String> = None;
     if activity == "idle" {
         // Idle is the definitive "done, not attending" signal — clear focus so
         // the projection does not keep claiming a stale file as live attention.
         patch.insert("focus".into(), Value::Null);
         patch.insert("focus_source".into(), Value::Null);
     } else if let Some(tool) = &tel.tool_name {
-        if let Some(focus) = derive_focus_from_tool(tool, &tel.tool_input) {
-            patch.insert("focus".into(), json!(focus));
+        if let Some(f) = derive_focus_from_tool(tool, &tel.tool_input) {
+            patch.insert("focus".into(), json!(f));
             patch.insert("focus_source".into(), json!(format!("tool:{tool}")));
+            focus = Some(f);
         }
     }
+
+    // `reason` is a truth-claim too: ground it in activity+focus and stamp its
+    // provenance, so it can never linger as a stale constant from another hook.
+    patch.insert(
+        "reason".into(),
+        json!(derive_reason(activity, focus.as_deref())),
+    );
+    patch.insert("reason_source".into(), json!("ab-pet-ground"));
+
     patch.insert("source".into(), json!("ab-pet-ground"));
     patch.insert("updated_at".into(), json!(now_rfc3339));
     patch
@@ -172,6 +201,18 @@ pub fn audit_grounding(
                 "mood",
                 GroundingIssue::Decorative,
                 format!("mood=\"{mood}\" has no mood_source — decorative constant"),
+            ));
+        }
+    }
+
+    // 1b. `reason` is a truth-claim: a non-null value requires a `reason_source`.
+    // This is what catches a stale reason left behind by another hook.
+    if let Some(reason) = nonnull_str(state, "reason") {
+        if nonnull_str(state, "reason_source").is_none() {
+            violations.push(GroundingViolation::new(
+                "reason",
+                GroundingIssue::Decorative,
+                format!("reason=\"{reason}\" has no reason_source — decorative constant"),
             ));
         }
     }
@@ -289,6 +330,9 @@ mod tests {
         assert_eq!(patch["focus"], json!("src/pet_ground.rs"));
         assert_eq!(patch["focus_source"], json!("tool:Edit"));
         assert_eq!(patch["source"], json!("ab-pet-ground"));
+        // reason restates the grounded activity+focus, with its own provenance.
+        assert_eq!(patch["reason"], json!("working: src/pet_ground.rs"));
+        assert_eq!(patch["reason_source"], json!("ab-pet-ground"));
     }
 
     #[test]
@@ -300,6 +344,12 @@ mod tests {
         assert_eq!(patch["activity_state"], json!("idle"));
         assert_eq!(patch["focus"], Value::Null);
         assert_eq!(patch["focus_source"], Value::Null);
+        // reason follows the idle activity — not a leftover working/stop constant.
+        assert_eq!(
+            patch["reason"],
+            json!("idle — last task complete, awaiting next")
+        );
+        assert_eq!(patch["reason_source"], json!("ab-pet-ground"));
     }
 
     #[test]
@@ -320,6 +370,39 @@ mod tests {
             .iter()
             .any(|x| x.field == "mood" && x.issue == GroundingIssue::Decorative));
         assert!(!violations.iter().any(|x| x.field == "focus"));
+    }
+
+    #[test]
+    fn audit_flags_decorative_reason() {
+        // The real stale-reason leak seen on the dock: a reason left by another
+        // hook with no provenance, while the agent has already moved on to work.
+        let state = json!({
+            "activity_state": "working",
+            "focus": "src/x.rs",
+            "focus_source": "tool:Edit",
+            "reason": "session stop hook launched memory compact/sync",
+            "updated_at": "2026-06-06T11:18:16Z"
+        });
+        let violations = audit_grounding(&state, None, None);
+        assert!(violations
+            .iter()
+            .any(|x| x.field == "reason" && x.issue == GroundingIssue::Decorative));
+    }
+
+    #[test]
+    fn ground_patch_grounds_reason_with_provenance() {
+        // reason restates activity+focus and carries its own source; a grounded
+        // patch applied to a fresh state must be reason-audit-clean.
+        let tel = ToolTelemetry::new("PostToolUse")
+            .with_tool("Bash", json!({"description": "run cargo test"}));
+        let patch = ground_patch(&tel, "2026-06-06T12:00:00Z");
+        assert_eq!(patch["reason"], json!("working: run cargo test"));
+        assert_eq!(patch["reason_source"], json!("ab-pet-ground"));
+        let mut state = json!({});
+        apply_patch(&mut state, patch);
+        assert!(!audit_grounding(&state, None, None)
+            .iter()
+            .any(|x| x.field == "reason"));
     }
 
     #[test]
