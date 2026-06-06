@@ -58,6 +58,9 @@ pub struct NativeTransparentOptions {
     pub state_url: Option<String>,
     pub state_poll_ms: u64,
     pub state_http_timeout_ms: u64,
+    /// Wayland output to place the layer surface on, by name (e.g. "DP-1").
+    /// None = the compositor's default output.
+    pub output: Option<String>,
 }
 
 impl Default for NativeTransparentOptions {
@@ -85,6 +88,7 @@ impl Default for NativeTransparentOptions {
             state_url: None,
             state_poll_ms: DEFAULT_NATIVE_STATE_POLL_MS,
             state_http_timeout_ms: DEFAULT_NATIVE_STATE_HTTP_TIMEOUT_MS,
+            output: None,
         }
     }
 }
@@ -543,6 +547,7 @@ pub fn native_transparent_plan_json(opts: &NativeTransparentOptions, spawned: bo
             "left": opts.margin_left,
         },
         "duration_ms": opts.duration_ms,
+        "output": opts.output,
         "pixel_format": "wl_shm::Argb8888",
         "sprite": {
             "asset": opts.sprite_asset,
@@ -668,26 +673,6 @@ mod wayland_probe {
         )?;
         let shm = Shm::bind(&globals, &qh).context("bind wl_shm global")?;
 
-        let surface = compositor.create_surface(&qh);
-        let layer = layer_shell.create_layer_surface(
-            &qh,
-            surface,
-            to_sctk_layer(opts.layer),
-            Some("agent-bridge-avatar"),
-            None,
-        );
-        layer.set_anchor(to_sctk_anchor(opts.anchor));
-        layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-        layer.set_margin(
-            opts.margin_top,
-            opts.margin_right,
-            opts.margin_bottom,
-            opts.margin_left,
-        );
-        layer.set_exclusive_zone(0);
-        layer.set_size(opts.width, opts.height);
-        layer.commit();
-
         let sprite_animation = sprite_animation_from_options(&opts)
             .context("load native transparent sprite animation")?;
 
@@ -713,8 +698,57 @@ mod wayland_probe {
             state_http_timeout: Duration::from_millis(opts.state_http_timeout_ms.max(50)),
             state_poll_interval: Duration::from_millis(opts.state_poll_ms.max(50)),
             next_state_poll_at: Instant::now() + Duration::from_millis(opts.state_poll_ms.max(50)),
-            layer,
+            layer: None,
         };
+
+        // Enumerate outputs BEFORE binding the layer surface: a layer-shell
+        // surface's output is fixed at creation time (it can't be moved later),
+        // so we roundtrip to populate OutputState, then resolve --output by name.
+        // A few roundtrips let wl_output name events arrive. Falls back to the
+        // compositor's default output when unset or not found.
+        for _ in 0..3 {
+            event_queue
+                .roundtrip(&mut app)
+                .context("enumerate Wayland outputs")?;
+            if app.output_state.outputs().next().is_some() {
+                break;
+            }
+        }
+        let target_output = match opts.output.as_deref() {
+            Some(want) => {
+                let found = app.output_state.outputs().find(|o| {
+                    app.output_state.info(o).and_then(|i| i.name).as_deref() == Some(want)
+                });
+                if found.is_none() {
+                    eprintln!(
+                        "agent-bridge native transparent: output {want:?} not found; using compositor default"
+                    );
+                }
+                found
+            }
+            None => None,
+        };
+
+        let surface = compositor.create_surface(&qh);
+        let layer = layer_shell.create_layer_surface(
+            &qh,
+            surface,
+            to_sctk_layer(opts.layer),
+            Some("agent-bridge-avatar"),
+            target_output.as_ref(),
+        );
+        layer.set_anchor(to_sctk_anchor(opts.anchor));
+        layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+        layer.set_margin(
+            opts.margin_top,
+            opts.margin_right,
+            opts.margin_bottom,
+            opts.margin_left,
+        );
+        layer.set_exclusive_zone(0);
+        layer.set_size(opts.width, opts.height);
+        layer.commit();
+        app.layer = Some(layer);
 
         while !app.configured && !app.exit {
             event_queue
@@ -760,7 +794,7 @@ mod wayland_probe {
         state_http_timeout: Duration,
         state_poll_interval: Duration,
         next_state_poll_at: Instant,
-        layer: LayerSurface,
+        layer: Option<LayerSurface>,
     }
 
     struct SpriteAnimation {
@@ -1042,13 +1076,17 @@ mod wayland_probe {
             } else {
                 paint_transparent_probe_frame(canvas, width, height);
             }
-            self.layer
+            let layer = self
+                .layer
+                .as_ref()
+                .expect("layer surface initialized before draw");
+            layer
                 .wl_surface()
                 .damage_buffer(0, 0, width as i32, height as i32);
             buffer
-                .attach_to(self.layer.wl_surface())
+                .attach_to(layer.wl_surface())
                 .context("attach ARGB8888 buffer")?;
-            self.layer.commit();
+            layer.commit();
             Ok(())
         }
     }
