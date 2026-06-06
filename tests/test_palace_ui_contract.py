@@ -80,6 +80,15 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("neighbor-link", html)
         self.assertIn("source-stack", html)
 
+    def test_focused_nodes_sync_their_region_context(self):
+        html = palace_html()
+
+        self.assertIn("function syncRegionToFocusedNode(id)", html)
+        self.assertIn("syncRegionToFocusedNode(id);", html)
+        self.assertIn("const graphRegion = node.data(\"region\");", html)
+        self.assertIn("state.activeRegion = graphRegion;", html)
+        self.assertIn("renderAtlasPanel();", html)
+
 
 if __name__ == "__main__":
     unittest.main()
