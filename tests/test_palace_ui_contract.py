@@ -98,6 +98,19 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("showSidePanel(key);", html)
         self.assertIn("saveViewState();", html)
 
+    def test_region_selection_opens_a_workbench_drilldown(self):
+        html = palace_html()
+
+        self.assertIn("function showRegionWorkbench(regionId)", html)
+        self.assertIn("function renderRegionNodeList(regionId)", html)
+        self.assertIn('id="workbench-region-nodes"', html)
+        self.assertIn("region-node-link", html)
+        self.assertIn("showRegionWorkbench(regionId);", html)
+        self.assertIn("jumpToRegionNode(key);", html)
+        self.assertIn("focusOnNode(key);", html)
+        self.assertIn("showSidePanel(key);", html)
+        self.assertIn("saveViewState();", html)
+
 
 if __name__ == "__main__":
     unittest.main()
