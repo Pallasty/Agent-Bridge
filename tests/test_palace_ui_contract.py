@@ -125,6 +125,20 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.regionNodeFilter = filter;", html)
         self.assertIn("state.regionNodeSort = sort;", html)
 
+    def test_node_workbench_filters_and_sorts_neighbors(self):
+        html = palace_html()
+
+        self.assertIn("neighborFilter: \"all\"", html)
+        self.assertIn("neighborSort: \"weight\"", html)
+        self.assertIn("function filteredWorkbenchNeighbors(memory, graphNode)", html)
+        self.assertIn("function sortWorkbenchNeighbors(rows)", html)
+        self.assertIn("function renderWorkbenchNeighborControls()", html)
+        self.assertIn('id="neighbor-lens-controls"', html)
+        self.assertIn("data-neighbor-filter", html)
+        self.assertIn("data-neighbor-sort", html)
+        self.assertIn("state.neighborFilter = filter;", html)
+        self.assertIn("state.neighborSort = sort;", html)
+
 
 if __name__ == "__main__":
     unittest.main()
