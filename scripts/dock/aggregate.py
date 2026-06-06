@@ -211,6 +211,9 @@ snapshot = {
         # the dock can show the grounded focus instead of dropping it.
         "focus": pet.get("focus"),
         "focus_source": pet.get("focus_source"),
+        # reason_source = provenance for the grounded reason (ab-pet-ground vs a
+        # stale constant from another hook) — kept in the snapshot for audit.
+        "reason_source": pet.get("reason_source"),
         "last_event": pet.get("last_event"),
         "project": pet.get("project"),
         "updated_at": pet.get("updated_at"),
