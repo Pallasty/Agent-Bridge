@@ -18813,6 +18813,7 @@ fn readiness_audit_payload(args: &Value, hub: &Hub) -> Value {
     let tool_rows = readiness_tool_surface_rows(hub);
     let hook_rows = readiness_hook_rows(repo_root.as_deref(), include_local_install);
     let source_rows = readiness_source_rows(repo_root.as_deref());
+    let setup_state = readiness_setup_state_row(include_local_install);
     let collab_drift = collab_group_divergence();
 
     let missing_sources = source_rows
@@ -18841,11 +18842,14 @@ fn readiness_audit_payload(args: &Value, hub: &Hub) -> Value {
         .get("ok")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let setup_state_ready = setup_state.get("ready").and_then(|v| v.as_bool());
+    let setup_state_gap = include_local_install && setup_state_ready != Some(true);
     let repo_found = repo_root.is_some();
     let warnings = missing_sources
         + missing_hook_sources
         + tool_gaps
         + usize::from(!drift_ok)
+        + usize::from(setup_state_gap)
         + usize::from(!repo_found);
     let status = if warnings == 0 { "ready" } else { "partial" };
 
@@ -18877,6 +18881,10 @@ fn readiness_audit_payload(args: &Value, hub: &Hub) -> Value {
         recommendations.push(
             "Run with include_local_install=true when diagnosing a specific machine.".to_string(),
         );
+    } else if setup_state_gap {
+        recommendations.push(
+            "Run agent-bridge setup --dry-run --json, review the plan, then run setup to write setup-state.".to_string(),
+        );
     }
     if recommendations.is_empty() {
         recommendations
@@ -18896,11 +18904,14 @@ fn readiness_audit_payload(args: &Value, hub: &Hub) -> Value {
             "missing_readiness_tools": tool_gaps,
             "collab_group_drift_ok": drift_ok,
             "local_install_checked": include_local_install,
+            "setup_state_checked": include_local_install,
+            "setup_state_ready": setup_state_ready,
             "warnings": warnings
         },
         "tool_profiles": profile_rows,
         "tool_surfaces": tool_rows,
         "hooks": hook_rows,
+        "setup_state": setup_state,
         "source_assets": source_rows,
         "tool_profile_divergence": collab_drift,
         "closed_ecc_paths": [
@@ -18918,6 +18929,124 @@ fn readiness_audit_payload(args: &Value, hub: &Hub) -> Value {
             }
         ],
         "recommendations": recommendations
+    })
+}
+
+fn readiness_setup_state_row(include_local_install: bool) -> Value {
+    if !include_local_install {
+        return json!({
+            "checked": false,
+            "path": Value::Null,
+            "exists": Value::Null,
+            "readable": Value::Null,
+            "valid_json": Value::Null,
+            "ready": Value::Null,
+            "schema": Value::Null,
+            "status": Value::Null,
+            "frontend": Value::Null,
+            "codex_toolset": Value::Null,
+            "codex_tool_profile": Value::Null,
+            "operation_count": Value::Null,
+            "applied_at_unix": Value::Null,
+            "state_path_matches": Value::Null,
+        });
+    }
+
+    let path = agent_bridge_state_dir().join("setup-state.json");
+    readiness_setup_state_file_row(&path)
+}
+
+fn readiness_setup_state_file_row(path: &std::path::Path) -> Value {
+    let path_string = path.display().to_string();
+    if !path.exists() {
+        return json!({
+            "checked": true,
+            "path": path_string,
+            "exists": false,
+            "readable": Value::Null,
+            "valid_json": Value::Null,
+            "ready": false,
+            "schema": Value::Null,
+            "status": Value::Null,
+            "frontend": Value::Null,
+            "codex_toolset": Value::Null,
+            "codex_tool_profile": Value::Null,
+            "operation_count": Value::Null,
+            "applied_at_unix": Value::Null,
+            "state_path_matches": Value::Null,
+        });
+    }
+
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            return json!({
+                "checked": true,
+                "path": path_string,
+                "exists": true,
+                "readable": false,
+                "read_error": err.to_string(),
+                "valid_json": Value::Null,
+                "ready": false,
+                "schema": Value::Null,
+                "status": Value::Null,
+                "frontend": Value::Null,
+                "codex_toolset": Value::Null,
+                "codex_tool_profile": Value::Null,
+                "operation_count": Value::Null,
+                "applied_at_unix": Value::Null,
+                "state_path_matches": Value::Null,
+            });
+        }
+    };
+
+    let parsed: Value = match serde_json::from_str(&raw) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            return json!({
+                "checked": true,
+                "path": path_string,
+                "exists": true,
+                "readable": true,
+                "valid_json": false,
+                "parse_error": err.to_string(),
+                "ready": false,
+                "schema": Value::Null,
+                "status": Value::Null,
+                "frontend": Value::Null,
+                "codex_toolset": Value::Null,
+                "codex_tool_profile": Value::Null,
+                "operation_count": Value::Null,
+                "applied_at_unix": Value::Null,
+                "state_path_matches": Value::Null,
+            });
+        }
+    };
+
+    let schema = parsed.get("schema").cloned().unwrap_or(Value::Null);
+    let status = parsed.get("status").cloned().unwrap_or(Value::Null);
+    let state_path_matches = parsed
+        .get("state_path")
+        .and_then(|v| v.as_str())
+        .map(|state_path| state_path == path_string);
+    let ready = schema.as_str() == Some("agent_bridge_setup_state.v0")
+        && status.as_str() == Some("applied");
+
+    json!({
+        "checked": true,
+        "path": path_string,
+        "exists": true,
+        "readable": true,
+        "valid_json": true,
+        "ready": ready,
+        "schema": schema,
+        "status": status,
+        "frontend": parsed.get("frontend").cloned().unwrap_or(Value::Null),
+        "codex_toolset": parsed.get("codex_toolset").cloned().unwrap_or(Value::Null),
+        "codex_tool_profile": parsed.get("codex_tool_profile").cloned().unwrap_or(Value::Null),
+        "operation_count": parsed.get("operation_count").cloned().unwrap_or(Value::Null),
+        "applied_at_unix": parsed.get("applied_at_unix").cloned().unwrap_or(Value::Null),
+        "state_path_matches": state_path_matches,
     })
 }
 
@@ -35676,6 +35805,67 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(closed.iter().any(|row| {
             row["id"] == "ecc_error_resolution_miner" && row["status"] == "closed_no_signal"
         }));
+    }
+
+    #[test]
+    fn readiness_audit_reports_setup_state_projection_gate() {
+        let payload = readiness_audit_payload(
+            &json!({ "repo_root": env!("CARGO_MANIFEST_DIR") }),
+            &Hub::builder().build(),
+        );
+
+        assert_eq!(payload["setup_state"]["checked"], json!(false));
+        assert_eq!(payload["setup_state"]["path"], Value::Null);
+        assert_eq!(payload["setup_state"]["exists"], Value::Null);
+        assert_eq!(payload["summary"]["setup_state_checked"], json!(false));
+        assert_eq!(payload["summary"]["setup_state_ready"], Value::Null);
+    }
+
+    #[test]
+    fn readiness_setup_state_file_row_reports_applied_state() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "agent-bridge-readiness-setup-state-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let path = dir.join("setup-state.json");
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&json!({
+                "schema": "agent_bridge_setup_state.v0",
+                "status": "applied",
+                "applied_at_unix": 1_780_000_001_u64,
+                "frontend": "codex",
+                "codex_toolset": "codex-lean",
+                "codex_tool_profile": "essential",
+                "operation_count": 7,
+                "state_path": path.display().to_string(),
+            }))
+            .expect("json"),
+        )
+        .expect("write state");
+
+        let row = readiness_setup_state_file_row(&path);
+
+        assert_eq!(row["checked"], json!(true));
+        assert_eq!(row["exists"], json!(true));
+        assert_eq!(row["readable"], json!(true));
+        assert_eq!(row["valid_json"], json!(true));
+        assert_eq!(row["ready"], json!(true));
+        assert_eq!(row["schema"], "agent_bridge_setup_state.v0");
+        assert_eq!(row["status"], "applied");
+        assert_eq!(row["frontend"], "codex");
+        assert_eq!(row["codex_toolset"], "codex-lean");
+        assert_eq!(row["codex_tool_profile"], "essential");
+        assert_eq!(row["operation_count"], json!(7));
+        assert_eq!(row["applied_at_unix"], json!(1_780_000_001_u64));
+        assert_eq!(row["state_path_matches"], json!(true));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     // ── tool profile tier filter ──────────────────────────────────────────
