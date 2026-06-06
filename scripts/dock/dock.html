@@ -32,6 +32,9 @@
   .who .name .node { color: var(--dim); font-weight: 400; }
   .who .reason { color: var(--dim); font-size: 11px; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
+  /* provenance chip: makes the grounded source (tool:X) visible — proof the
+     state is grounded, not decorative. Faintest tier so it never dominates. */
+  .who .reason .src { color: var(--faint); font-weight: 400; margin-left: 5px; }
   .who .cortex { color: var(--faint); font-size: 10px; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; letter-spacing: .2px; }
   .mode-badge { font-size: 10px; color: var(--faint); border: 1px solid var(--line);
@@ -161,8 +164,12 @@ function render(d){
   const mood = (d.face && d.face.mood) || 'idle';
   document.documentElement.style.setProperty('--mood', MOOD[mood] || MOOD.idle);
   document.getElementById('self').textContent = '· ' + (d.node_self || '?');
-  document.getElementById('reason').textContent =
-    (d.face && (d.face.reason || d.face.last_event)) || '静默';
+  const reasonTxt = (d.face && (d.face.reason || d.face.last_event)) || '静默';
+  // provenance: surface where the grounded focus came from (tool:X) so the dock
+  // makes "this state is grounded, not decorative" visible. Only when present.
+  const src = d.face && d.face.focus_source;
+  document.getElementById('reason').innerHTML =
+    esc(reasonTxt) + (src ? ` <span class="src">${esc(src)}</span>` : '');
   document.getElementById('mode').textContent = (d.face && (d.face.mode || d.face.mood)) || '—';
 
   // cortex motion → orb expression (breath speed / amplitude / glow) + gesture line
