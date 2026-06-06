@@ -133,6 +133,20 @@ elif focus:
     state["focus_source"] = f"tool:{tool_name}"
 if session_id:
     state["session_id"] = session_id
+# Mirror pet_ground::derive_reason — restate activity+focus; never invent motive.
+# Grounding reason here stops a stale constant from another hook from lingering.
+if activity == "orienting":
+    reason = "orienting to the new prompt"
+elif activity == "idle":
+    reason = "idle — last task complete, awaiting next"
+elif activity == "waiting_for_user":
+    reason = "waiting for user input"
+elif focus:
+    reason = f"{activity}: {focus}"
+else:
+    reason = activity
+state["reason"] = reason
+state["reason_source"] = "ab-pet-ground"
 state["source"] = "ab-pet-ground"
 state["updated_at"] = now
 
