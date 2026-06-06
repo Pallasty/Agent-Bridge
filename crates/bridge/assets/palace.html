@@ -673,6 +673,56 @@
       text-transform: uppercase;
       margin-bottom: 8px;
     }
+    #panel .region-node-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      margin-bottom: 10px;
+      padding: 8px;
+      background: #0f0f16;
+      border: 1px solid #1f1f2a;
+      border-radius: 5px;
+    }
+    #panel .region-control-row {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+    }
+    #panel .region-control-label {
+      color: #5a5a68;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    #panel .region-control-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      min-width: 0;
+    }
+    #panel .region-control-buttons button {
+      background: transparent;
+      border: 1px solid #252532;
+      color: #8a8a9c;
+      border-radius: 3px;
+      padding: 3px 7px;
+      font-size: 10px;
+      line-height: 1.2;
+      letter-spacing: 0.04em;
+      font-family: inherit;
+      cursor: pointer;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    #panel .region-control-buttons button:hover {
+      color: #e8e8ee;
+      border-color: #5a5a72;
+    }
+    #panel .region-control-buttons button.active {
+      color: #ffffff;
+      border-color: #a87cff;
+      background: #191321;
+    }
     #panel .neighbor-list,
     #panel .region-node-list,
     #panel .source-stack {
@@ -2201,6 +2251,8 @@ function setViewPreset(preset) {
 // ── Global state ────────────────────────────────────────────────
 const PALACE_VIEW_STATE_KEY = "palace:view:v2";
 const VALID_VIEW_PRESETS = new Set(["overview", "fresh", "stale", "hubs", "orphans", "coactivation"]);
+const VALID_REGION_NODE_FILTERS = new Set(["all", "fresh", "stale", "hubs", "orphans"]);
+const VALID_REGION_NODE_SORTS = new Set(["rank", "degree", "recent", "key"]);
 const state = {
   cy: null,
   data: null,
@@ -2216,6 +2268,8 @@ const state = {
   includeSkills: false,
   focused: null,        // currently-focused node id (or null)
   staleKindFilter: null, // C10: null = show all kinds, string = restrict stale panel rows
+  regionNodeFilter: "all",
+  regionNodeSort: "rank",
   // ζ-13: degree info computed once per loadGraph, consumed by both the
   // footer badge and buildCy's per-node hub/orphan marker. Stashed here
   // (rather than recomputed twice) so the two surfaces can't drift.
@@ -2229,6 +2283,8 @@ function serializeViewState() {
     search: state.search,
     includeSkills: state.includeSkills,
     focused: state.focused,
+    regionNodeFilter: state.regionNodeFilter,
+    regionNodeSort: state.regionNodeSort,
     sources: Array.from(state.enabledSources),
     kinds: Array.from(state.enabledKinds),
     edgeTypes: Array.from(state.enabledEdgeTypes),
@@ -2291,6 +2347,8 @@ function restoreViewStateFromUrlOrStorage() {
     if (search) search.value = state.search;
   }
   if (typeof restored.includeSkills === "boolean") state.includeSkills = restored.includeSkills;
+  if (VALID_REGION_NODE_FILTERS.has(restored.regionNodeFilter)) state.regionNodeFilter = restored.regionNodeFilter;
+  if (VALID_REGION_NODE_SORTS.has(restored.regionNodeSort)) state.regionNodeSort = restored.regionNodeSort;
   if (restoreSet(state.enabledSources, restored.sources)) {
     if (state.enabledSources.size === 0) {
       state.enabledSources.add("sqlite");
@@ -3019,17 +3077,90 @@ function regionNodesFor(regionId) {
   state.cy.nodes().forEach(node => {
     if (node.data("region") === regionId) rows.push(node);
   });
-  return rows.sort((a, b) => {
+  return rows;
+}
+
+function regionNodeRole(d) {
+  return d.hub ? "hub" : d.orphan ? "orphan" : d.stale ? "stale" : d.fresh ? "fresh" : "normal";
+}
+
+function regionNodeRank(d) {
+  return (d.hub ? 1000 : 0) + (d.fresh ? 100 : 0) + (d.degree || 0);
+}
+
+function filteredRegionNodesFor(regionId) {
+  const filter = VALID_REGION_NODE_FILTERS.has(state.regionNodeFilter)
+    ? state.regionNodeFilter
+    : "all";
+  const nodes = regionNodesFor(regionId).filter(node => {
+    const d = node.data();
+    if (filter === "all") return true;
+    if (filter === "fresh") return !!d.fresh;
+    if (filter === "stale") return !!d.stale;
+    if (filter === "hubs") return !!d.hub;
+    if (filter === "orphans") return !!d.orphan;
+    return true;
+  });
+  return sortRegionNodes(nodes);
+}
+
+function sortRegionNodes(nodes) {
+  const sort = VALID_REGION_NODE_SORTS.has(state.regionNodeSort)
+    ? state.regionNodeSort
+    : "rank";
+  return nodes.slice().sort((a, b) => {
     const ad = a.data();
     const bd = b.data();
-    const aRank = (ad.hub ? 1000 : 0) + (ad.fresh ? 100 : 0) + (ad.degree || 0);
-    const bRank = (bd.hub ? 1000 : 0) + (bd.fresh ? 100 : 0) + (bd.degree || 0);
-    return bRank - aRank || String(ad.label || ad.id).localeCompare(String(bd.label || bd.id));
+    if (sort === "degree") {
+      return (bd.degree || 0) - (ad.degree || 0) ||
+        String(ad.label || ad.id).localeCompare(String(bd.label || bd.id));
+    }
+    if (sort === "recent") {
+      return (bd.last_accessed || 0) - (ad.last_accessed || 0) ||
+        String(ad.label || ad.id).localeCompare(String(bd.label || bd.id));
+    }
+    if (sort === "key") {
+      return String(a.id()).localeCompare(String(b.id()));
+    }
+    return regionNodeRank(bd) - regionNodeRank(ad) ||
+      String(ad.label || ad.id).localeCompare(String(bd.label || bd.id));
   });
 }
 
+function renderRegionNodeControls() {
+  const filters = [
+    ["all", "all"],
+    ["fresh", "fresh"],
+    ["stale", "stale"],
+    ["hubs", "hubs"],
+    ["orphans", "orphans"],
+  ];
+  const sorts = [
+    ["rank", "rank"],
+    ["degree", "degree"],
+    ["recent", "recent"],
+    ["key", "key"],
+  ];
+  const filterButtons = filters.map(([value, label]) =>
+    `<button type="button" data-region-node-filter="${value}" class="${state.regionNodeFilter === value ? "active" : ""}">${label}</button>`
+  ).join("");
+  const sortButtons = sorts.map(([value, label]) =>
+    `<button type="button" data-region-node-sort="${value}" class="${state.regionNodeSort === value ? "active" : ""}">${label}</button>`
+  ).join("");
+  return `<div id="region-node-controls" class="region-node-controls">
+    <div class="region-control-row">
+      <span class="region-control-label">filter</span>
+      <span class="region-control-buttons">${filterButtons}</span>
+    </div>
+    <div class="region-control-row">
+      <span class="region-control-label">sort</span>
+      <span class="region-control-buttons">${sortButtons}</span>
+    </div>
+  </div>`;
+}
+
 function renderRegionNodeList(regionId) {
-  const nodes = regionNodesFor(regionId).slice(0, 24);
+  const nodes = filteredRegionNodesFor(regionId).slice(0, 24);
   const empty = `<div id="workbench-region-nodes" class="region-node-list">
     <span class="neighbor-empty">no visible nodes in this region</span>
   </div>`;
@@ -3038,7 +3169,7 @@ function renderRegionNodeList(regionId) {
     const d = node.data();
     const key = node.id();
     const label = d.label || key;
-    const role = d.hub ? "hub" : d.orphan ? "orphan" : d.stale ? "stale" : d.fresh ? "fresh" : "normal";
+    const role = regionNodeRole(d);
     const degree = d.degree || 0;
     return `<button type="button" class="region-node-link" data-region-node-key="${escapeHTML(key)}">
       <span class="region-node-main">
@@ -3082,6 +3213,7 @@ function showRegionWorkbench(regionId) {
         </div>
         <div class="workbench-section">
           <div class="workbench-section-title">Region nodes</div>
+          ${renderRegionNodeControls()}
           ${renderRegionNodeList(regionId)}
         </div>
         <div class="workbench-section">
@@ -3239,6 +3371,24 @@ function jumpToRegionNode(key) {
 }
 
 function bindRegionWorkbenchActions(panel, regionId) {
+  panel.querySelectorAll("[data-region-node-filter]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const filter = btn.dataset.regionNodeFilter;
+      if (!VALID_REGION_NODE_FILTERS.has(filter)) return;
+      state.regionNodeFilter = filter;
+      showRegionWorkbench(regionId);
+      saveViewState();
+    });
+  });
+  panel.querySelectorAll("[data-region-node-sort]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const sort = btn.dataset.regionNodeSort;
+      if (!VALID_REGION_NODE_SORTS.has(sort)) return;
+      state.regionNodeSort = sort;
+      showRegionWorkbench(regionId);
+      saveViewState();
+    });
+  });
   panel.querySelectorAll(".region-node-link").forEach(btn => {
     btn.addEventListener("click", () => {
       const key = btn.dataset.regionNodeKey;

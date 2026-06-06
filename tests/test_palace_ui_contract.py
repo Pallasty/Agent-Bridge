@@ -111,6 +111,20 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("showSidePanel(key);", html)
         self.assertIn("saveViewState();", html)
 
+    def test_region_workbench_filters_and_sorts_nodes(self):
+        html = palace_html()
+
+        self.assertIn("regionNodeFilter: \"all\"", html)
+        self.assertIn("regionNodeSort: \"rank\"", html)
+        self.assertIn("function filteredRegionNodesFor(regionId)", html)
+        self.assertIn("function sortRegionNodes(nodes)", html)
+        self.assertIn("function renderRegionNodeControls()", html)
+        self.assertIn('id="region-node-controls"', html)
+        self.assertIn("data-region-node-filter", html)
+        self.assertIn("data-region-node-sort", html)
+        self.assertIn("state.regionNodeFilter = filter;", html)
+        self.assertIn("state.regionNodeSort = sort;", html)
+
 
 if __name__ == "__main__":
     unittest.main()
