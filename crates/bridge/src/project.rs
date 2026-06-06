@@ -384,6 +384,120 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
     }))
 }
 
+/// Read-only preflight before creating a PR/MR review artifact.
+///
+/// Checks whether `source` and `target` have a usable merge-base and summarizes
+/// the review range as `merge-base..source`. This catches the dangerous case
+/// where a default target branch is unrelated and would show a whole-tree diff.
+pub fn git_topology_preflight(
+    cwd: &Path,
+    target: &str,
+    source: &str,
+    max_files: usize,
+) -> Result<Value> {
+    let inside = git_output(cwd, &["rev-parse", "--is-inside-work-tree"])
+        .map(|s| s.trim() == "true")
+        .unwrap_or(false);
+    if !inside {
+        return Err(Error::Backend(format!(
+            "not a git repository: {}",
+            cwd.display()
+        )));
+    }
+
+    let target = target.trim();
+    let source = source.trim();
+    if target.is_empty() {
+        return Err(Error::InvalidArgument("target must not be empty".into()));
+    }
+    if source.is_empty() {
+        return Err(Error::InvalidArgument("source must not be empty".into()));
+    }
+
+    let target_sha = git_output(cwd, &["rev-parse", target]).map(|s| s.trim().to_string());
+    let source_sha = git_output(cwd, &["rev-parse", source]).map(|s| s.trim().to_string());
+    let merge_base = git_output(cwd, &["merge-base", target, source])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let mut warnings: Vec<String> = Vec::new();
+    if merge_base.is_none() {
+        warnings.push(format!(
+            "no merge-base between target '{target}' and source '{source}'; review diff may be a whole-tree comparison"
+        ));
+        return Ok(json!({
+            "kind": "agent_bridge_git_topology_preflight.v0",
+            "status": "blocked",
+            "cwd": cwd.display().to_string(),
+            "target": target,
+            "source": source,
+            "target_sha": target_sha,
+            "source_sha": source_sha,
+            "merge_base_found": false,
+            "merge_base": Value::Null,
+            "files_changed": Value::Null,
+            "insertions": Value::Null,
+            "deletions": Value::Null,
+            "summary": [],
+            "name_status": [],
+            "warnings": warnings,
+        }));
+    }
+
+    let merge_base = merge_base.unwrap();
+    let range = format!("{merge_base}..{source}");
+    let numstat = git_output_joined(cwd, &["diff", "--numstat"], &[&range])?;
+    let name_stat = git_output_joined(cwd, &["diff", "--name-status"], &[&range])?;
+    let files = parse_numstat(&numstat);
+    let total_ins: u64 = files.iter().map(|f| u64::from(f.insertions)).sum();
+    let total_del: u64 = files.iter().map(|f| u64::from(f.deletions)).sum();
+    let name_status = parse_name_status(&name_stat);
+
+    let max_files = max_files.max(1);
+    if files.len() > max_files {
+        warnings.push(format!(
+            "files_changed={} exceeds max_files={max_files}; inspect target/source before opening review artifact",
+            files.len()
+        ));
+    }
+
+    let summary: Vec<Value> = files
+        .iter()
+        .map(|f| {
+            json!({
+                "file": f.path,
+                "insertions": f.insertions,
+                "deletions": f.deletions,
+                "change": format!("+{} -{}", f.insertions, f.deletions),
+            })
+        })
+        .collect();
+    let status = if warnings.is_empty() {
+        "ready"
+    } else {
+        "warning"
+    };
+
+    Ok(json!({
+        "kind": "agent_bridge_git_topology_preflight.v0",
+        "status": status,
+        "cwd": cwd.display().to_string(),
+        "target": target,
+        "source": source,
+        "target_sha": target_sha,
+        "source_sha": source_sha,
+        "merge_base_found": true,
+        "merge_base": merge_base,
+        "range": range,
+        "files_changed": files.len(),
+        "insertions": total_ins,
+        "deletions": total_del,
+        "summary": summary,
+        "name_status": name_status,
+        "warnings": warnings,
+    }))
+}
+
 fn git_output_joined(cwd: &Path, base: &[&str], extra: &[&str]) -> Result<String> {
     let out = Command::new("git")
         .current_dir(cwd)
@@ -538,5 +652,78 @@ mod tests {
         let v = changes_digest(&repo_root, "last_commit").expect("digest");
         assert_eq!(v["scope"], "last_commit");
         assert!(v["files_changed"].as_u64().is_some());
+    }
+
+    #[test]
+    fn git_topology_preflight_blocks_unrelated_target() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        init_git_repo(tmp.path());
+        write_file(tmp.path().join("README.md"), "base\n");
+        git_ok(tmp.path(), &["add", "README.md"]);
+        git_ok(tmp.path(), &["commit", "-m", "base"]);
+        git_ok(tmp.path(), &["branch", "target"]);
+        git_ok(tmp.path(), &["checkout", "--orphan", "source"]);
+        write_file(tmp.path().join("README.md"), "source\n");
+        git_ok(tmp.path(), &["add", "README.md"]);
+        git_ok(tmp.path(), &["commit", "-m", "source"]);
+
+        let v = git_topology_preflight(tmp.path(), "target", "source", 100).expect("preflight");
+
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["merge_base_found"], false);
+        assert!(v["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("no merge-base")));
+    }
+
+    #[test]
+    fn git_topology_preflight_reports_ready_small_range() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        init_git_repo(tmp.path());
+        write_file(tmp.path().join("README.md"), "base\n");
+        git_ok(tmp.path(), &["add", "README.md"]);
+        git_ok(tmp.path(), &["commit", "-m", "base"]);
+        git_ok(tmp.path(), &["branch", "target"]);
+        git_ok(tmp.path(), &["checkout", "-b", "source"]);
+        write_file(tmp.path().join("feature.txt"), "new\n");
+        git_ok(tmp.path(), &["add", "feature.txt"]);
+        git_ok(tmp.path(), &["commit", "-m", "feature"]);
+
+        let v = git_topology_preflight(tmp.path(), "target", "source", 100).expect("preflight");
+
+        assert_eq!(v["status"], "ready");
+        assert_eq!(v["merge_base_found"], true);
+        assert_eq!(v["files_changed"], 1);
+        assert_eq!(v["insertions"], 1);
+        assert_eq!(v["deletions"], 0);
+    }
+
+    fn init_git_repo(path: &Path) {
+        git_ok(path, &["init", "-q"]);
+        git_ok(
+            path,
+            &["config", "user.email", "agent-bridge@example.invalid"],
+        );
+        git_ok(path, &["config", "user.name", "Agent Bridge Test"]);
+    }
+
+    fn write_file(path: PathBuf, body: &str) {
+        std::fs::write(path, body).expect("write");
+    }
+
+    fn git_ok(cwd: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 }
