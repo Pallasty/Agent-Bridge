@@ -661,6 +661,54 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    #panel .relation-summary {
+      margin: 10px 0 12px;
+      padding: 10px;
+      background: #0f0f16;
+      border: 1px solid #252532;
+      border-left: 2px solid #5cc8c8;
+      border-radius: 4px;
+    }
+    #panel .relation-lede {
+      color: #d8d8e2;
+      font-size: 11px;
+      line-height: 1.45;
+      margin-bottom: 8px;
+    }
+    #panel .relation-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+    }
+    #panel .relation-chip {
+      min-width: 0;
+      padding: 7px 8px;
+      border: 1px solid #252532;
+      border-radius: 4px;
+      background: #12121a;
+    }
+    #panel .relation-chip .label {
+      display: block;
+      color: #5a5a68;
+      font-size: 8px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+    #panel .relation-chip .value {
+      display: block;
+      min-width: 0;
+      color: #e8e8ee;
+      font-size: 11px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .relation-chip.structural .value { color: #c8c8d2; }
+    #panel .relation-chip.coactivation .value { color: #5cc8c8; }
+    #panel .relation-chip.strongest .value { color: #a87cff; }
     #panel .workbench-section {
       margin-top: 15px;
       padding-top: 13px;
@@ -3044,6 +3092,56 @@ function workbenchNeighborRows(memory, graphNode) {
   return Array.from(byKey.values());
 }
 
+function summarizeWorkbenchRelations(memory, graphNode) {
+  const rows = workbenchNeighborRows(memory, graphNode);
+  const structuralCount = rows.filter(row =>
+    Array.from(row.types).some(t => t !== "coactivation")
+  ).length;
+  const coactivationCount = rows.filter(row => row.types.has("coactivation")).length;
+  const strongest = rows
+    .slice()
+    .sort((a, b) => b.weight - a.weight || a.label.localeCompare(b.label))[0] || null;
+  const role = graphNode && graphNode.length > 0
+    ? (graphNode.data("hub") ? "hub" : graphNode.data("orphan") ? "orphan" : graphNode.data("stale") ? "stale" : graphNode.data("fresh") ? "fresh" : "normal")
+    : "unmapped";
+  let lede = "This memory has no visible graph context yet.";
+  if (rows.length > 0) {
+    const mix = [
+      structuralCount ? `${structuralCount} structural` : null,
+      coactivationCount ? `${coactivationCount} coactivation` : null,
+    ].filter(Boolean).join(" + ");
+    lede = `${memory.kind || "memory"} reads as a ${role} node with ${mix || `${rows.length} linked`} relation${rows.length === 1 ? "" : "s"}.`;
+  }
+  return { rows, structuralCount, coactivationCount, strongest, role, lede };
+}
+
+function renderWorkbenchRelationSummary(memory, graphNode) {
+  const summary = summarizeWorkbenchRelations(memory, graphNode);
+  const strongestLabel = summary.strongest
+    ? (summary.strongest.label || summary.strongest.key)
+    : "none";
+  const strongestTitle = summary.strongest
+    ? `${summary.strongest.key} · weight ${summary.strongest.weight > 0 ? summary.strongest.weight.toFixed(2) : "link"}`
+    : "no strongest neighbor";
+  return `<div id="workbench-relation-summary" class="relation-summary">
+    <div class="relation-lede">${escapeHTML(summary.lede)}</div>
+    <div class="relation-summary-grid">
+      <div class="relation-chip structural">
+        <span class="label">structural</span>
+        <span class="value">${summary.structuralCount}</span>
+      </div>
+      <div class="relation-chip coactivation">
+        <span class="label">coactivation</span>
+        <span class="value">${summary.coactivationCount}</span>
+      </div>
+      <div class="relation-chip strongest">
+        <span class="label">strongest neighbor</span>
+        <span class="value" title="${escapeHTML(strongestTitle)}">${escapeHTML(strongestLabel)}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
 function filteredWorkbenchNeighbors(memory, graphNode) {
   const filter = VALID_NEIGHBOR_FILTERS.has(state.neighborFilter)
     ? state.neighborFilter
@@ -3409,6 +3507,7 @@ async function showSidePanel(id) {
             <div class="metric"><div class="label">last touch</div><div class="value">${escapeHTML(age)}</div></div>
             <div class="metric"><div class="label">source</div><div class="value">${sourceLabel}</div></div>
           </div>
+          ${renderWorkbenchRelationSummary(m, graphNode)}
           ${descBlock}
           ${renderWorkbenchNeighborSection(m, graphNode)}
           <div class="workbench-section">

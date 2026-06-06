@@ -139,6 +139,19 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.neighborFilter = filter;", html)
         self.assertIn("state.neighborSort = sort;", html)
 
+    def test_node_workbench_summarizes_relation_context(self):
+        html = palace_html()
+
+        self.assertIn("function summarizeWorkbenchRelations(memory, graphNode)", html)
+        self.assertIn("function renderWorkbenchRelationSummary(memory, graphNode)", html)
+        self.assertIn('id="workbench-relation-summary"', html)
+        self.assertIn("relation-summary", html)
+        self.assertIn("relation-lede", html)
+        self.assertIn("relation-chip structural", html)
+        self.assertIn("relation-chip coactivation", html)
+        self.assertIn("strongest neighbor", html)
+        self.assertIn("renderWorkbenchRelationSummary(m, graphNode)", html)
+
 
 if __name__ == "__main__":
     unittest.main()
