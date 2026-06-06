@@ -152,6 +152,62 @@ pub fn observer_status_json() -> Value {
     })
 }
 
+pub fn rotate_observer_log(dry_run: bool) -> std::io::Result<Value> {
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    rotate_observer_log_for_path(&default_observer_log_path(), now_unix, dry_run)
+}
+
+pub fn rotate_observer_log_for_path(
+    log_path: &Path,
+    now_unix: u64,
+    dry_run: bool,
+) -> std::io::Result<Value> {
+    let meta = std::fs::metadata(log_path).ok();
+    let log_exists = meta.as_ref().is_some_and(|m| m.is_file());
+    let log_bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+    let archive_path = observer_log_archive_path(log_path, now_unix);
+    let action = if log_exists { "rotate_log" } else { "noop" };
+    let mut status = if log_exists {
+        if dry_run {
+            "would_rotate"
+        } else {
+            "rotated"
+        }
+    } else {
+        "no_log"
+    };
+
+    if log_exists && !dry_run {
+        std::fs::rename(log_path, &archive_path)?;
+    } else if !log_exists && !dry_run {
+        status = "no_log";
+    }
+
+    Ok(json!({
+        "schema": "agent_bridge_instinct_observer_log_rotation.v0",
+        "dry_run": dry_run,
+        "action": action,
+        "status": status,
+        "log_path": log_path.display().to_string(),
+        "archive_path": archive_path.display().to_string(),
+        "log_exists": log_exists,
+        "log_bytes": log_bytes,
+        "max_bytes": OBSERVER_MAX_BYTES,
+        "rotation_recommended": log_bytes >= OBSERVER_MAX_BYTES,
+    }))
+}
+
+fn observer_log_archive_path(log_path: &Path, now_unix: u64) -> PathBuf {
+    let file_name = log_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("observations.jsonl");
+    log_path.with_file_name(format!("{file_name}.rotated-{now_unix}"))
+}
+
 pub fn observer_status_for_paths(
     installed_path: PathBuf,
     log_path: PathBuf,
@@ -620,5 +676,50 @@ mod tests {
         assert_eq!(status.mean_clean_mineable_per_session, 1.0);
         assert_eq!(status.verdict, "DENSITY_OK_PROCEED_PHASE1");
         assert_eq!(status.recommendation, "review_before_phase1_miner");
+    }
+
+    #[test]
+    fn observer_log_rotation_dry_run_preserves_log() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("observations.jsonl");
+        write_jsonl(
+            &log,
+            &[json!({"ts": 1.0, "sid": "s", "ev": "UserPromptSubmit", "prompt": "hello"})],
+        );
+
+        let plan = rotate_observer_log_for_path(&log, 1_780_747_000, true).unwrap();
+
+        assert_eq!(plan["schema"], "agent_bridge_instinct_observer_log_rotation.v0");
+        assert_eq!(plan["dry_run"], json!(true));
+        assert_eq!(plan["action"], "rotate_log");
+        assert_eq!(plan["status"], "would_rotate");
+        assert_eq!(plan["log_exists"], json!(true));
+        assert_eq!(plan["log_bytes"].as_u64().unwrap() > 0, true);
+        assert!(log.exists(), "dry-run must not move the live log");
+        let archive = PathBuf::from(plan["archive_path"].as_str().unwrap());
+        assert!(!archive.exists(), "dry-run must not create archive");
+    }
+
+    #[test]
+    fn observer_log_rotation_moves_log_to_timestamped_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("observations.jsonl");
+        write_jsonl(
+            &log,
+            &[json!({"ts": 1.0, "sid": "s", "ev": "UserPromptSubmit", "prompt": "hello"})],
+        );
+        let original = std::fs::read_to_string(&log).unwrap();
+
+        let plan = rotate_observer_log_for_path(&log, 1_780_747_001, false).unwrap();
+
+        assert_eq!(plan["schema"], "agent_bridge_instinct_observer_log_rotation.v0");
+        assert_eq!(plan["dry_run"], json!(false));
+        assert_eq!(plan["action"], "rotate_log");
+        assert_eq!(plan["status"], "rotated");
+        assert_eq!(plan["log_exists"], json!(true));
+        assert!(!log.exists(), "rotation leaves hook to recreate live log");
+        let archive = PathBuf::from(plan["archive_path"].as_str().unwrap());
+        assert!(archive.exists(), "archive must be created by rename");
+        assert_eq!(std::fs::read_to_string(archive).unwrap(), original);
     }
 }

@@ -3,7 +3,7 @@ use ab_agent::{
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
 use ab_bridge::warp_scheme;
-use ab_bridge::{browser_lite, skills};
+use ab_bridge::{browser_lite, instinct, skills};
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
@@ -46,6 +46,11 @@ enum Cmd {
         /// Emit a Markdown operator snapshot (paste into forum/commit/handoff).
         #[arg(long)]
         markdown: bool,
+    },
+    /// Inspect or rotate the local instinct observer sidecar log.
+    Instinct {
+        #[command(subcommand)]
+        op: InstinctOp,
     },
     /// Install agent-bridge for the chosen frontend.
     ///
@@ -252,6 +257,21 @@ enum ShellKind {
     Bash,
     Zsh,
     Fish,
+}
+
+#[derive(Subcommand, Debug)]
+enum InstinctOp {
+    /// Rotate the local instinct observer JSONL log by renaming it to a
+    /// timestamped archive path. The hook recreates a fresh log on its next
+    /// event.
+    RotateLog {
+        /// Print the rotation plan without moving the log.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit raw JSON payload instead of a command line summary.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -4130,6 +4150,27 @@ async fn main() -> Result<()> {
         return doctor::run_doctor(*json, *markdown).await;
     }
 
+    // Instinct observer maintenance — pure local sidecar file operation.
+    if let Cmd::Instinct { op } = &cmd {
+        return match op {
+            InstinctOp::RotateLog { dry_run, json } => {
+                let plan = instinct::rotate_observer_log(*dry_run)
+                    .context("rotate instinct observer log")?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&plan)?);
+                } else {
+                    println!(
+                        "instinct observer log: {} {} -> {}",
+                        plan.get("status").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                        plan.get("log_path").and_then(|v| v.as_str()).unwrap_or(""),
+                        plan.get("archive_path").and_then(|v| v.as_str()).unwrap_or("")
+                    );
+                }
+                Ok(())
+            }
+        };
+    }
+
     // ε-5: worktree-session subcommand. Doesn't need a Hub — pure git
     // CLI wrapping, runs to completion.
     if let Cmd::WorktreeSession { op } = &cmd {
@@ -4445,7 +4486,8 @@ async fn main() -> Result<()> {
         | Cmd::ShellInit { .. }
         | Cmd::WorktreeSession { .. }
         | Cmd::RescueSnapshot { .. }
-        | Cmd::Doctor { .. } => unreachable!(),
+        | Cmd::Doctor { .. }
+        | Cmd::Instinct { .. } => unreachable!(),
     }
 }
 
