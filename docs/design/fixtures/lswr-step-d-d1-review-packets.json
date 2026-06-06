@@ -1,0 +1,373 @@
+{
+  "schema": "agent_bridge.lswr.step_d.d1_fixtures.v0",
+  "generated_at": "2026-06-06T00:00:00Z",
+  "purpose": "Canonical Step D D1 fixtures for preserving Step C world verification semantics in human-presentable packets.",
+  "cases": [
+    {
+      "id": "verified_visibility",
+      "world_tool": "world_visibility_query",
+      "source_envelope": {
+        "schema": "agent_bridge.world_tool.v0",
+        "ok": true,
+        "verified": true,
+        "reason": null,
+        "endpoint": {
+          "host": "127.0.0.1",
+          "port": 37691,
+          "timeout_ms": 5000
+        },
+        "request": {
+          "request_id": "fixture-verified-visibility",
+          "world.visibility.query": {
+            "entities": [
+              "bath"
+            ]
+          }
+        },
+        "verify": {
+          "method": "live_viewport_pixel_coverage",
+          "verified_to": "onsen_live_root_viewport",
+          "evidence": {
+            "screen_area": 0.005815625,
+            "bounds_screen_area": 0.0186224985122681,
+            "flicker_frames": 2,
+            "render_source": "live_root_viewport_texture",
+            "render_path": "running_game/live_root_viewport",
+            "host_reason": null
+          }
+        },
+        "host_response": {
+          "verified": true,
+          "world.visibility.query": {
+            "after": {
+              "entities": [
+                {
+                  "id": "bath",
+                  "screen_area": 0.005815625,
+                  "bounds_screen_area": 0.0186224985122681,
+                  "occluded": false,
+                  "source_nodes": [
+                    "FacilityTile_bath_8,0",
+                    "FacilityTile_bath_9,0"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected_packet": {
+        "schema": "agent_bridge.lswr.present_packet.v0",
+        "source_schema": "agent_bridge.world_tool.v0",
+        "world_tool": "world_visibility_query",
+        "verdict": "verified",
+        "reason": null,
+        "title": "World visibility verified",
+        "summary": "The bath was verified in the live Onsen root viewport using live viewport pixel coverage.",
+        "human_readable": {
+          "changed": [],
+          "visible": [
+            "bath"
+          ],
+          "warnings": [],
+          "reason": null
+        },
+        "machine_payload": {
+          "request": {
+            "request_id": "fixture-verified-visibility",
+            "world.visibility.query": {
+              "entities": [
+                "bath"
+              ]
+            }
+          },
+          "verify": {
+            "method": "live_viewport_pixel_coverage",
+            "verified_to": "onsen_live_root_viewport",
+            "evidence": {
+              "screen_area": 0.005815625,
+              "bounds_screen_area": 0.0186224985122681,
+              "host_reason": null
+            }
+          },
+          "selected_entities": [
+            {
+              "id": "bath",
+              "screen_area": 0.005815625,
+              "bounds_screen_area": 0.0186224985122681,
+              "occluded": false
+            }
+          ],
+          "patch_result": null,
+          "source_reason": null,
+          "raw_host_response_present": true
+        },
+        "provenance": {
+          "commit": "5037e01",
+          "adapter": "onsen",
+          "verified_to": "onsen_live_root_viewport",
+          "verify_method": "live_viewport_pixel_coverage",
+          "generated_at": "2026-06-06T00:00:00Z"
+        },
+        "ingestion": {
+          "allowed": false,
+          "reason": "step_d_expression_gate_not_accepted"
+        }
+      }
+    },
+    {
+      "id": "alpha_zero_not_verified",
+      "world_tool": "world_visibility_query",
+      "source_envelope": {
+        "schema": "agent_bridge.world_tool.v0",
+        "ok": true,
+        "verified": false,
+        "reason": "pixel_coverage_zero",
+        "endpoint": {
+          "host": "127.0.0.1",
+          "port": 37691,
+          "timeout_ms": 5000
+        },
+        "request": {
+          "request_id": "fixture-alpha-zero",
+          "world.visibility.query": {
+            "entities": [
+              "bath"
+            ]
+          }
+        },
+        "verify": {
+          "method": "live_viewport_pixel_coverage",
+          "verified_to": null,
+          "evidence": {
+            "screen_area": 0.0,
+            "bounds_screen_area": 0.0186224985122681,
+            "flicker_frames": 2,
+            "render_source": "live_root_viewport_texture",
+            "render_path": "running_game/live_root_viewport",
+            "host_reason": "pixel_coverage_zero"
+          }
+        }
+      },
+      "expected_packet": {
+        "schema": "agent_bridge.lswr.present_packet.v0",
+        "source_schema": "agent_bridge.world_tool.v0",
+        "world_tool": "world_visibility_query",
+        "verdict": "not_verified",
+        "reason": "pixel_coverage_zero",
+        "title": "World visibility not verified",
+        "summary": "The runtime could not verify bath visibility because pixel coverage was zero.",
+        "human_readable": {
+          "changed": [],
+          "visible": [],
+          "warnings": [
+            "pixel_coverage_zero"
+          ],
+          "reason": "pixel_coverage_zero"
+        },
+        "machine_payload": {
+          "request": {
+            "request_id": "fixture-alpha-zero",
+            "world.visibility.query": {
+              "entities": [
+                "bath"
+              ]
+            }
+          },
+          "verify": {
+            "method": "live_viewport_pixel_coverage",
+            "verified_to": null,
+            "evidence": {
+              "screen_area": 0.0,
+              "bounds_screen_area": 0.0186224985122681,
+              "host_reason": "pixel_coverage_zero"
+            }
+          },
+          "selected_entities": [
+            {
+              "id": "bath",
+              "screen_area": 0.0,
+              "bounds_screen_area": 0.0186224985122681,
+              "occluded": null
+            }
+          ],
+          "patch_result": null,
+          "source_reason": "pixel_coverage_zero",
+          "raw_host_response_present": false
+        },
+        "provenance": {
+          "commit": "5037e01",
+          "adapter": "onsen",
+          "verified_to": null,
+          "verify_method": "live_viewport_pixel_coverage",
+          "generated_at": "2026-06-06T00:00:00Z"
+        },
+        "ingestion": {
+          "allowed": false,
+          "reason": "step_d_expression_gate_not_accepted"
+        }
+      }
+    },
+    {
+      "id": "host_unreachable",
+      "world_tool": "world_query",
+      "source_envelope": {
+        "schema": "agent_bridge.world_tool.v0",
+        "ok": false,
+        "verified": false,
+        "reason": "world_host_unreachable",
+        "detail": "Connection refused",
+        "endpoint": {
+          "host": "127.0.0.1",
+          "port": 37691,
+          "timeout_ms": 5000
+        },
+        "request": {
+          "request_id": "fixture-host-unreachable",
+          "world.visibility.query": {
+            "entities": [
+              "bath"
+            ]
+          }
+        },
+        "verify": {
+          "method": "live_viewport_pixel_coverage",
+          "verified_to": null,
+          "evidence": {
+            "host_reason": "world_host_unreachable"
+          }
+        },
+        "host_response": null
+      },
+      "expected_packet": {
+        "schema": "agent_bridge.lswr.present_packet.v0",
+        "source_schema": "agent_bridge.world_tool.v0",
+        "world_tool": "world_query",
+        "verdict": "not_verified",
+        "reason": "world_host_unreachable",
+        "title": "World query not verified",
+        "summary": "The world adapter was unreachable, so the runtime could not verify the requested world state.",
+        "human_readable": {
+          "changed": [],
+          "visible": [],
+          "warnings": [
+            "world_host_unreachable"
+          ],
+          "reason": "world_host_unreachable"
+        },
+        "machine_payload": {
+          "request": {
+            "request_id": "fixture-host-unreachable",
+            "world.visibility.query": {
+              "entities": [
+                "bath"
+              ]
+            }
+          },
+          "verify": {
+            "method": "live_viewport_pixel_coverage",
+            "verified_to": null,
+            "evidence": {
+              "host_reason": "world_host_unreachable"
+            }
+          },
+          "selected_entities": [],
+          "patch_result": null,
+          "source_reason": "world_host_unreachable",
+          "raw_host_response_present": false
+        },
+        "provenance": {
+          "commit": "5037e01",
+          "adapter": "onsen",
+          "verified_to": null,
+          "verify_method": "live_viewport_pixel_coverage",
+          "generated_at": "2026-06-06T00:00:00Z"
+        },
+        "ingestion": {
+          "allowed": false,
+          "reason": "step_d_expression_gate_not_accepted"
+        }
+      }
+    },
+    {
+      "id": "blocked_non_loopback",
+      "world_tool": "world_visibility_query",
+      "source_envelope": {
+        "schema": "agent_bridge.world_tool.v0",
+        "ok": false,
+        "verified": false,
+        "reason": "world_host_non_loopback_rejected",
+        "detail": null,
+        "endpoint": {
+          "host": "192.0.2.10",
+          "port": 37691,
+          "timeout_ms": 5000
+        },
+        "request": {
+          "request_id": "fixture-blocked-non-loopback",
+          "world.visibility.query": {
+            "entities": [
+              "bath"
+            ]
+          }
+        },
+        "verify": {
+          "method": "live_viewport_pixel_coverage",
+          "verified_to": null,
+          "evidence": {
+            "host_reason": "world_host_non_loopback_rejected"
+          }
+        }
+      },
+      "expected_packet": {
+        "schema": "agent_bridge.lswr.present_packet.v0",
+        "source_schema": "agent_bridge.world_tool.v0",
+        "world_tool": "world_visibility_query",
+        "verdict": "blocked",
+        "reason": "world_host_non_loopback_rejected",
+        "title": "World operation blocked",
+        "summary": "The runtime blocked the request because the configured world host was not loopback.",
+        "human_readable": {
+          "changed": [],
+          "visible": [],
+          "warnings": [
+            "world_host_non_loopback_rejected"
+          ],
+          "reason": "world_host_non_loopback_rejected"
+        },
+        "machine_payload": {
+          "request": {
+            "request_id": "fixture-blocked-non-loopback",
+            "world.visibility.query": {
+              "entities": [
+                "bath"
+              ]
+            }
+          },
+          "verify": {
+            "method": "live_viewport_pixel_coverage",
+            "verified_to": null,
+            "evidence": {
+              "host_reason": "world_host_non_loopback_rejected"
+            }
+          },
+          "selected_entities": [],
+          "patch_result": null,
+          "source_reason": "world_host_non_loopback_rejected",
+          "raw_host_response_present": false
+        },
+        "provenance": {
+          "commit": "5037e01",
+          "adapter": "onsen",
+          "verified_to": null,
+          "verify_method": "live_viewport_pixel_coverage",
+          "generated_at": "2026-06-06T00:00:00Z"
+        },
+        "ingestion": {
+          "allowed": false,
+          "reason": "step_d_expression_gate_not_accepted"
+        }
+      }
+    }
+  ]
+}
