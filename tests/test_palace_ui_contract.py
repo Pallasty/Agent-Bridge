@@ -89,6 +89,15 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.activeRegion = graphRegion;", html)
         self.assertIn("renderAtlasPanel();", html)
 
+    def test_neighbor_jump_uses_the_full_workbench_focus_flow(self):
+        html = palace_html()
+
+        self.assertIn("function jumpToWorkbenchNeighbor(key)", html)
+        self.assertIn("jumpToWorkbenchNeighbor(key);", html)
+        self.assertIn("focusOnNode(key);", html)
+        self.assertIn("showSidePanel(key);", html)
+        self.assertIn("saveViewState();", html)
+
 
 if __name__ == "__main__":
     unittest.main()
