@@ -2889,8 +2889,22 @@ function applyVisualState() {
   }
 }
 
+function syncRegionToFocusedNode(id) {
+  if (!state.cy) return null;
+  const node = state.cy.getElementById(id);
+  if (!node || node.length === 0) return null;
+  const graphRegion = node.data("region");
+  if (!graphRegion) return null;
+  if (state.activeRegion !== graphRegion) {
+    state.activeRegion = graphRegion;
+    renderAtlasPanel();
+  }
+  return graphRegion;
+}
+
 function focusOnNode(id) {
   state.focused = id;
+  syncRegionToFocusedNode(id);
   document.getElementById("focus-hint").textContent =
     "focus: " + id + " · click background to release";
   applyVisualState();
