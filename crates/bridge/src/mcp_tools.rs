@@ -39,7 +39,7 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
@@ -9766,11 +9766,338 @@ fn resolve_identity(
 /// Within this window of last_heartbeat_at, we consider the canonical id
 /// taken; older rows are presumed crashed/idle and the id is reusable.
 const PRESENCE_FRESH_SECS: i64 = 60;
+const IDENTITY_REGISTRY_SCHEMA: &str = "agent_bridge_session_identity_registry.v0";
+const IDENTITY_REGISTRY_TTL_SECS: i64 = 24 * 60 * 60;
+const IDENTITY_REGISTRY_LOCK_STALE_SECS: i64 = 30;
 
 /// Render the bottom 16 bits of a u32 pid as 4 lowercase hex chars,
 /// matching the convention documented in DESIGN-v19 (e.g. `7f3a`).
 fn pid_tag_short(pid: u32) -> String {
     format!("{:04x}", pid & 0xffff)
+}
+
+fn agent_bridge_data_dir_for_identity() -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok().map(PathBuf::from)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+            return Some(PathBuf::from(xdg).join("agent-bridge"));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Some(home.join("Library/Application Support/agent-bridge"))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Some(home.join(".local/share/agent-bridge"))
+    }
+}
+
+fn identity_registry_path() -> Option<PathBuf> {
+    std::env::var("AGENT_BRIDGE_IDENTITY_REGISTRY")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            agent_bridge_data_dir_for_identity()
+                .map(|dir| dir.join("session-identity-registry.json"))
+        })
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+struct IdentityRegistry {
+    schema: String,
+    entries: Vec<IdentityRegistryEntry>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+struct IdentityRegistryEntry {
+    bare_id: String,
+    owner_key: String,
+    tag: Option<String>,
+    pid: Option<i64>,
+    created_at_unix: i64,
+    last_seen_unix: i64,
+    cwd: Option<String>,
+}
+
+impl Default for IdentityRegistry {
+    fn default() -> Self {
+        Self {
+            schema: IDENTITY_REGISTRY_SCHEMA.to_string(),
+            entries: Vec::new(),
+        }
+    }
+}
+
+fn now_unix_i64() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn session_identity_owner_key(ctx: &ToolContext) -> String {
+    if let Some(session_id) = &ctx.session_id {
+        return format!("mcp:{}", session_id.as_str());
+    }
+
+    static OWNER_KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    OWNER_KEY
+        .get_or_init(|| {
+            let pid = std::process::id();
+            let stamp = now_unix_i64();
+            format!("process:{pid}:{stamp}")
+        })
+        .clone()
+}
+
+fn identity_registry_entry_fresh(entry: &IdentityRegistryEntry, now: i64) -> bool {
+    now - entry.last_seen_unix <= IDENTITY_REGISTRY_TTL_SECS
+}
+
+fn identity_registry_entry_alive_for_other_owner(entry: &IdentityRegistryEntry, now: i64) -> bool {
+    if !identity_registry_entry_fresh(entry, now) {
+        return false;
+    }
+
+    if let Some(pid) = entry.pid {
+        if pid > 0 && !pid_is_alive(pid) {
+            return false;
+        }
+    }
+
+    true
+}
+
+#[cfg(unix)]
+fn pid_is_alive(pid: i64) -> bool {
+    if pid <= 0 || pid > i32::MAX as i64 {
+        return false;
+    }
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn pid_is_alive(_pid: i64) -> bool {
+    true
+}
+
+fn read_identity_registry(path: &Path) -> IdentityRegistry {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<IdentityRegistry>(&s).ok())
+        .filter(|r| r.schema == IDENTITY_REGISTRY_SCHEMA)
+        .unwrap_or_default()
+}
+
+struct IdentityRegistryLock {
+    path: PathBuf,
+}
+
+impl Drop for IdentityRegistryLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn identity_registry_lock_path(path: &Path) -> PathBuf {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return path.with_extension("lock");
+    };
+    path.with_file_name(format!("{name}.lock"))
+}
+
+fn identity_registry_lock_stale(path: &Path, now: i64) -> bool {
+    if let Ok(raw) = std::fs::read_to_string(path) {
+        if let Ok(pid) = raw.trim().parse::<i64>() {
+            if pid > 0 && !pid_is_alive(pid) {
+                return true;
+            }
+        }
+    }
+
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| now - d.as_secs() as i64 > IDENTITY_REGISTRY_LOCK_STALE_SECS)
+        .unwrap_or(false)
+}
+
+fn acquire_identity_registry_lock(path: &Path, now: i64) -> Option<IdentityRegistryLock> {
+    let lock_path = identity_registry_lock_path(path);
+    if let Some(parent) = lock_path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return None;
+        }
+    }
+
+    for _ in 0..50 {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(mut file) => {
+                use std::io::Write as _;
+                let _ = writeln!(file, "{}", std::process::id());
+                return Some(IdentityRegistryLock { path: lock_path });
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                if identity_registry_lock_stale(&lock_path, now) {
+                    let _ = std::fs::remove_file(&lock_path);
+                    continue;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => return None,
+        }
+    }
+
+    None
+}
+
+fn write_identity_registry(path: &Path, registry: &IdentityRegistry) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let body = serde_json::to_vec_pretty(registry)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let write_result = (|| -> std::io::Result<()> {
+        std::fs::write(&tmp, body)?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    write_result
+}
+
+fn allocate_identity_registry_tag(base_tag: &str, entries: &[IdentityRegistryEntry]) -> String {
+    if !entries
+        .iter()
+        .any(|entry| entry.tag.as_deref() == Some(base_tag))
+    {
+        return base_tag.to_string();
+    }
+
+    for suffix in 1..=255 {
+        let candidate = format!("{base_tag}{suffix:x}");
+        if !entries
+            .iter()
+            .any(|entry| entry.tag.as_deref() == Some(candidate.as_str()))
+        {
+            return candidate;
+        }
+    }
+
+    format!("{base_tag}{}", now_unix_i64() & 0xfff)
+}
+
+async fn fresh_presence_collision(
+    store: Option<&Arc<dyn StateStore>>,
+    session_id: &str,
+    now: i64,
+) -> bool {
+    let Some(store) = store else {
+        return false;
+    };
+    match store.agent_presence_get(session_id).await {
+        Ok(Some(existing)) => {
+            let my_pid = std::process::id();
+            let is_fresh = now - existing.last_heartbeat_at <= PRESENCE_FRESH_SECS;
+            let other_owner = existing.pid != Some(i64::from(my_pid));
+            is_fresh && other_owner
+        }
+        _ => false,
+    }
+}
+
+fn presence_collision_identity(
+    node: &str,
+    project: &str,
+    role: &str,
+) -> (Option<String>, String, bool) {
+    let auto = pid_tag_short(std::process::id());
+    let new_id = format!("{node}:{project}:{role}:{auto}");
+    (Some(auto), new_id, true)
+}
+
+fn resolve_identity_from_registry(
+    path: &Path,
+    bare_id: &str,
+    owner_key: &str,
+    node: &str,
+    project: &str,
+    role: &str,
+    cwd: Option<&str>,
+    now: i64,
+    occupied_by_presence: bool,
+) -> Option<(Option<String>, String, bool)> {
+    let _lock = acquire_identity_registry_lock(path, now)?;
+    let mut registry = read_identity_registry(path);
+    registry.entries.retain(|entry| {
+        if entry.owner_key == owner_key {
+            identity_registry_entry_fresh(entry, now)
+        } else {
+            identity_registry_entry_alive_for_other_owner(entry, now)
+        }
+    });
+
+    if let Some(existing_idx) = registry
+        .entries
+        .iter()
+        .position(|entry| entry.bare_id == bare_id && entry.owner_key == owner_key)
+    {
+        let entry = &mut registry.entries[existing_idx];
+        entry.last_seen_unix = now;
+        entry.pid = Some(i64::from(std::process::id()));
+        entry.cwd = cwd.map(|s| s.to_string());
+        let tag = entry.tag.clone();
+        let session_id = tag
+            .as_ref()
+            .map(|t| format!("{node}:{project}:{role}:{t}"))
+            .unwrap_or_else(|| bare_id.to_string());
+        let _ = write_identity_registry(path, &registry);
+        return Some((tag, session_id, false));
+    }
+
+    let collides = occupied_by_presence
+        || registry
+            .entries
+            .iter()
+            .any(|entry| entry.bare_id == bare_id);
+    let tag = if collides {
+        Some(allocate_identity_registry_tag(
+            &pid_tag_short(std::process::id()),
+            &registry.entries,
+        ))
+    } else {
+        None
+    };
+    let session_id = tag
+        .as_ref()
+        .map(|t| format!("{node}:{project}:{role}:{t}"))
+        .unwrap_or_else(|| bare_id.to_string());
+
+    registry.entries.push(IdentityRegistryEntry {
+        bare_id: bare_id.to_string(),
+        owner_key: owner_key.to_string(),
+        tag: tag.clone(),
+        pid: Some(i64::from(std::process::id())),
+        created_at_unix: now,
+        last_seen_unix: now,
+        cwd: cwd.map(|s| s.to_string()),
+    });
+    let _ = write_identity_registry(path, &registry);
+    Some((tag, session_id, collides))
 }
 
 pub struct SessionIdentityTool {
@@ -9791,9 +10118,10 @@ impl McpTool for SessionIdentityTool {
             name: self.name().into(),
             description: "Compute the canonical session id `node:project:role[:tag]` from the \
                  caller's environment + args. Auto-disambiguates by appending a \
-                 short pid-derived tag when an existing fresh-heartbeat (≤ 60 s) \
-                 presence row already holds the proposed id from a different \
-                 process — the multi-CC sibling case. \
+                 short pid-derived tag when the same local bare id is already held \
+                 in the active-session registry, or when a fresh-heartbeat (≤ 60 s) \
+                 presence row already holds the proposed id from a different process \
+                 — the multi-session sibling case. \
                  Use the result as `session_id` / `author` in agent_message, agent_inbox, \
                  forum_post, agent_presence_announce, etc. Conventions:\n\
                  • `node`     → arg | $AGENT_BRIDGE_NODE | /etc/hostname | `hostname`\n\
@@ -9816,7 +10144,7 @@ impl McpTool for SessionIdentityTool {
             }),
         }
     }
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let role_arg = args.get("role").and_then(|v| v.as_str());
         let explicit_tag = args.get("tag").and_then(|v| v.as_str());
         let node_arg = args.get("node").and_then(|v| v.as_str());
@@ -9830,32 +10158,52 @@ impl McpTool for SessionIdentityTool {
         let (node, project, role, tag, session_id) =
             resolve_identity(role_arg, explicit_tag, node_arg, project_arg, cwd_arg);
 
+        let mut identity_registry = json!({
+            "checked": false,
+            "path": Value::Null,
+            "owner_key": Value::Null,
+            "matched": false
+        });
+
         // Auto-tag only when (a) caller did not pass an explicit tag,
-        // (b) caller did not opt out, and (c) a fresh presence row already
-        // holds this id from a different process.
+        // and (b) caller did not opt out. The local registry is checked before
+        // presence so interactive sessions that never heartbeat can still
+        // disambiguate reliably.
         let (final_tag, final_session_id, auto_tagged) =
             if explicit_tag.is_some() || !auto_tag_enabled {
                 (tag, session_id, false)
-            } else if let Some(store) = self.hub.store.as_ref() {
-                match store.agent_presence_get(&session_id).await {
-                    Ok(Some(existing)) => {
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs() as i64)
-                            .unwrap_or(0);
-                        let my_pid = std::process::id();
-                        let is_fresh = now - existing.last_heartbeat_at <= PRESENCE_FRESH_SECS;
-                        let other_owner = existing.pid != Some(i64::from(my_pid));
-                        if is_fresh && other_owner {
-                            let auto = pid_tag_short(my_pid);
-                            let new_id = format!("{node}:{project}:{role}:{auto}");
-                            (Some(auto), new_id, true)
-                        } else {
-                            (tag, session_id, false)
-                        }
+            } else if let Some(path) = identity_registry_path() {
+                let owner_key = session_identity_owner_key(ctx);
+                let now = now_unix_i64();
+                let occupied_by_presence =
+                    fresh_presence_collision(self.hub.store.as_ref(), &session_id, now).await;
+                match resolve_identity_from_registry(
+                    &path,
+                    &session_id,
+                    &owner_key,
+                    &node,
+                    &project,
+                    &role,
+                    cwd_arg,
+                    now,
+                    occupied_by_presence,
+                ) {
+                    Some((resolved_tag, resolved_id, tagged)) => {
+                        identity_registry = json!({
+                            "checked": true,
+                            "path": path.display().to_string(),
+                            "owner_key": owner_key,
+                            "matched": true
+                        });
+                        (resolved_tag, resolved_id, tagged)
                     }
-                    Ok(None) => (tag, session_id, false),
-                    Err(_) => (tag, session_id, false),
+                    None => (tag, session_id, false),
+                }
+            } else if let Some(store) = self.hub.store.as_ref() {
+                if fresh_presence_collision(Some(store), &session_id, now_unix_i64()).await {
+                    presence_collision_identity(&node, &project, &role)
+                } else {
+                    (tag, session_id, false)
                 }
             } else {
                 (tag, session_id, false)
@@ -9867,7 +10215,8 @@ impl McpTool for SessionIdentityTool {
             "project": project,
             "role": role,
             "tag": final_tag,
-            "auto_tagged": auto_tagged
+            "auto_tagged": auto_tagged,
+            "identity_registry": identity_registry
         })))
     }
 }
@@ -37440,10 +37789,56 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         }
     }
 
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let prev = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prev {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    fn context_with_session(raw: &str) -> ToolContext {
+        ToolContext {
+            session_id: Some(SessionId::from_raw(raw.to_string())),
+            extras: HashMap::new(),
+        }
+    }
+
+    static SESSION_IDENTITY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_session_identity_env() -> std::sync::MutexGuard<'static, ()> {
+        SESSION_IDENTITY_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
     #[tokio::test]
     async fn session_identity_no_collision_returns_bare_id() {
+        let _lock = lock_session_identity_env();
         // Empty DB → resolve_identity stays bare even with auto_tag enabled.
         let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let _guard = EnvVarGuard::set(
+            "AGENT_BRIDGE_IDENTITY_REGISTRY",
+            &temp_dir.join("identity.json"),
+        );
         let tool = SessionIdentityTool::new(hub);
         let out = tool
             .execute(
@@ -37459,10 +37854,215 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     }
 
     #[tokio::test]
+    async fn session_identity_registry_tags_second_owner_without_presence() {
+        let _lock = lock_session_identity_env();
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let registry = temp_dir.join("identity-registry.json");
+        let _guard = EnvVarGuard::set("AGENT_BRIDGE_IDENTITY_REGISTRY", &registry);
+        let tool = SessionIdentityTool::new(hub);
+
+        let first = tool
+            .execute(
+                json!({"role":"main", "node":"testnode", "project":"proj"}),
+                &context_with_session("owner-a"),
+            )
+            .await
+            .expect("first execute");
+        let first_payload = result_text_as_json(&first);
+        assert_eq!(first_payload["session_id"], "testnode:proj:main");
+        assert_eq!(first_payload["auto_tagged"], false);
+
+        let second = tool
+            .execute(
+                json!({"role":"main", "node":"testnode", "project":"proj"}),
+                &context_with_session("owner-b"),
+            )
+            .await
+            .expect("second execute");
+        let second_payload = result_text_as_json(&second);
+        let expected_tag = pid_tag_short(std::process::id());
+        assert_eq!(
+            second_payload["session_id"],
+            format!("testnode:proj:main:{expected_tag}")
+        );
+        assert_eq!(second_payload["tag"], expected_tag);
+        assert_eq!(second_payload["auto_tagged"], true);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn session_identity_registry_keeps_same_owner_stable() {
+        let _lock = lock_session_identity_env();
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let registry = temp_dir.join("identity-registry.json");
+        let _guard = EnvVarGuard::set("AGENT_BRIDGE_IDENTITY_REGISTRY", &registry);
+        let tool = SessionIdentityTool::new(hub);
+        let ctx = context_with_session("stable-owner");
+
+        let first = tool
+            .execute(
+                json!({"role":"main", "node":"testnode", "project":"proj"}),
+                &ctx,
+            )
+            .await
+            .expect("first execute");
+        let first_payload = result_text_as_json(&first);
+
+        let second = tool
+            .execute(
+                json!({"role":"main", "node":"testnode", "project":"proj"}),
+                &ctx,
+            )
+            .await
+            .expect("second execute");
+        let second_payload = result_text_as_json(&second);
+        assert_eq!(second_payload["session_id"], first_payload["session_id"]);
+        assert_eq!(second_payload["tag"], first_payload["tag"]);
+        assert_eq!(second_payload["auto_tagged"], false);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn session_identity_registry_keeps_same_session_stable_across_process_pid() {
+        let _lock = lock_session_identity_env();
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let registry = temp_dir.join("identity-registry.json");
+        let now = now_unix_i64();
+        let prior_process = IdentityRegistry {
+            schema: IDENTITY_REGISTRY_SCHEMA.to_string(),
+            entries: vec![IdentityRegistryEntry {
+                bare_id: "testnode:proj:main".to_string(),
+                owner_key: "mcp:shared-session".to_string(),
+                tag: None,
+                pid: Some(2_000_000_000),
+                created_at_unix: now - 60,
+                last_seen_unix: now - 60,
+                cwd: Some("/tmp/old-hook-process".to_string()),
+            }],
+        };
+        write_identity_registry(&registry, &prior_process).expect("seed registry");
+        let _guard = EnvVarGuard::set("AGENT_BRIDGE_IDENTITY_REGISTRY", &registry);
+        let tool = SessionIdentityTool::new(hub);
+
+        let out = tool
+            .execute(
+                json!({"role":"main", "node":"testnode", "project":"proj"}),
+                &context_with_session("shared-session"),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["session_id"], "testnode:proj:main");
+        assert_eq!(payload["tag"], Value::Null);
+        assert_eq!(payload["auto_tagged"], false);
+
+        let refreshed = read_identity_registry(&registry);
+        let entry = refreshed
+            .entries
+            .iter()
+            .find(|entry| entry.owner_key == "mcp:shared-session")
+            .expect("same owner retained");
+        assert_eq!(entry.pid, Some(i64::from(std::process::id())));
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn session_identity_registry_claim_is_atomic_for_simultaneous_owners() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let registry = dir.path().join("identity-registry.json");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(6));
+        let mut handles = Vec::new();
+
+        for owner in 0..6 {
+            let barrier = barrier.clone();
+            let registry = registry.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                resolve_identity_from_registry(
+                    &registry,
+                    "testnode:proj:main",
+                    &format!("mcp:owner-{owner}"),
+                    "testnode",
+                    "proj",
+                    "main",
+                    Some("/tmp/concurrent-claim"),
+                    now_unix_i64(),
+                    false,
+                )
+                .expect("registry resolution")
+            }));
+        }
+
+        let mut session_ids = Vec::new();
+        let mut auto_tagged_count = 0;
+        for handle in handles {
+            let (_tag, session_id, auto_tagged) = handle.join().expect("thread");
+            if auto_tagged {
+                auto_tagged_count += 1;
+            }
+            session_ids.push(session_id);
+        }
+
+        let bare_count = session_ids
+            .iter()
+            .filter(|id| id.as_str() == "testnode:proj:main")
+            .count();
+        let unique_ids = session_ids
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(bare_count, 1, "exactly one owner may claim the bare id");
+        assert_eq!(
+            auto_tagged_count, 5,
+            "all non-bare concurrent owners must be tagged"
+        );
+        assert_eq!(unique_ids.len(), 6, "tag allocation must avoid duplicates");
+    }
+
+    #[tokio::test]
+    async fn session_identity_registry_gc_allows_stale_bare_reuse() {
+        let _lock = lock_session_identity_env();
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let registry = temp_dir.join("identity-registry.json");
+        let stale_at = now_unix_i64() - IDENTITY_REGISTRY_TTL_SECS - 60;
+        let stale = IdentityRegistry {
+            schema: IDENTITY_REGISTRY_SCHEMA.to_string(),
+            entries: vec![IdentityRegistryEntry {
+                bare_id: "testnode:proj:main".to_string(),
+                owner_key: "mcp:old-owner".to_string(),
+                tag: None,
+                pid: None,
+                created_at_unix: stale_at,
+                last_seen_unix: stale_at,
+                cwd: None,
+            }],
+        };
+        write_identity_registry(&registry, &stale).expect("seed stale registry");
+        let _guard = EnvVarGuard::set("AGENT_BRIDGE_IDENTITY_REGISTRY", &registry);
+        let tool = SessionIdentityTool::new(hub);
+
+        let out = tool
+            .execute(
+                json!({"role":"main", "node":"testnode", "project":"proj"}),
+                &context_with_session("new-owner"),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["session_id"], "testnode:proj:main");
+        assert_eq!(payload["auto_tagged"], false);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
     async fn session_identity_auto_tags_on_fresh_sibling_collision() {
+        let _lock = lock_session_identity_env();
         // Pre-populate a presence row with a foreign pid + fresh heartbeat.
         // session_identity must auto-append a 4-hex pid suffix.
         let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let _guard = EnvVarGuard::set(
+            "AGENT_BRIDGE_IDENTITY_REGISTRY",
+            &temp_dir.join("identity.json"),
+        );
         let store = hub.store.as_ref().expect("store").clone();
         let foreign_pid = 0xfeed_face_u32 as i64; // not us
         store
@@ -37492,7 +38092,12 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
 
     #[tokio::test]
     async fn session_identity_skips_auto_tag_when_explicit_tag_passed() {
+        let _lock = lock_session_identity_env();
         let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let _guard = EnvVarGuard::set(
+            "AGENT_BRIDGE_IDENTITY_REGISTRY",
+            &temp_dir.join("identity.json"),
+        );
         let store = hub.store.as_ref().expect("store").clone();
         store
             .agent_presence_announce(
@@ -37519,7 +38124,12 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
 
     #[tokio::test]
     async fn session_identity_skips_auto_tag_when_disabled() {
+        let _lock = lock_session_identity_env();
         let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let _guard = EnvVarGuard::set(
+            "AGENT_BRIDGE_IDENTITY_REGISTRY",
+            &temp_dir.join("identity.json"),
+        );
         let store = hub.store.as_ref().expect("store").clone();
         store
             .agent_presence_announce(
@@ -37545,9 +38155,14 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
 
     #[tokio::test]
     async fn session_identity_does_not_auto_tag_when_pid_matches_self() {
+        let _lock = lock_session_identity_env();
         // Existing row owned by US (same pid) — re-derive the same id, no tag.
         // This protects the normal case where a single CC re-asks identity.
         let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let _guard = EnvVarGuard::set(
+            "AGENT_BRIDGE_IDENTITY_REGISTRY",
+            &temp_dir.join("identity.json"),
+        );
         let store = hub.store.as_ref().expect("store").clone();
         let my_pid = i64::from(std::process::id());
         store

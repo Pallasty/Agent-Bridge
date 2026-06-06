@@ -10,6 +10,7 @@ use crate::protocol::{
     PARSE_ERROR, PROTOCOL_VERSION,
 };
 use crate::{ContentBlock, ToolContext, ToolRegistry, ToolResult};
+use ab_core::SessionId;
 use ab_store::{prioritize_session_handoff, MemoryListSort, StateStore};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -63,6 +64,54 @@ fn call_deadline_for(tool_name: &str) -> Duration {
         mcp_human_deadline()
     } else {
         mcp_call_deadline()
+    }
+}
+
+fn nonempty_json_str(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn session_id_from_object(value: Option<&Value>) -> Option<String> {
+    let object = value?;
+    nonempty_json_str(object.get("session_id"))
+        .or_else(|| nonempty_json_str(object.get("sessionId")))
+}
+
+fn session_id_from_env() -> Option<String> {
+    [
+        "AGENT_BRIDGE_SESSION_ID",
+        "CLAUDE_SESSION_ID",
+        "CODEX_SESSION_ID",
+        "MCP_SESSION_ID",
+    ]
+    .into_iter()
+    .find_map(|key| {
+        std::env::var(key)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    })
+}
+
+fn tool_context_from_call(params: &Value, args: &Value) -> ToolContext {
+    let meta = params.get("_meta").or_else(|| args.get("_meta"));
+    let raw_session_id = session_id_from_object(meta)
+        .or_else(|| session_id_from_object(Some(args)))
+        .or_else(|| session_id_from_object(Some(params)))
+        .or_else(session_id_from_env);
+
+    let mut extras = HashMap::new();
+    if let Some(meta) = meta.cloned() {
+        extras.insert("_meta".to_string(), meta);
+    }
+
+    ToolContext {
+        session_id: raw_session_id.map(SessionId::from_raw),
+        extras,
     }
 }
 
@@ -635,7 +684,7 @@ async fn handle(
                 }
             };
 
-            let ctx = ToolContext::default();
+            let ctx = tool_context_from_call(&params, &args);
             match tool.execute(args, &ctx).await {
                 Ok(mut result) => {
                     let ok = !result.is_error;
@@ -1090,6 +1139,48 @@ mod tests {
         assert!(
             resps[0].error.is_some() && resps[0].result.is_none(),
             "a panicking tool must yield a JSON-RPC error, not a success or silence"
+        );
+    }
+
+    #[test]
+    fn tool_context_from_call_reads_session_id_from_meta() {
+        let params = json!({
+            "_meta": {
+                "session_id": "session-from-meta",
+                "client": "codex"
+            },
+            "name": "any_tool",
+            "arguments": {}
+        });
+        let args = json!({});
+
+        let ctx = tool_context_from_call(&params, &args);
+
+        assert_eq!(
+            ctx.session_id.as_ref().map(|s| s.as_str()),
+            Some("session-from-meta")
+        );
+        assert_eq!(
+            ctx.extras.get("_meta").and_then(|v| v.get("client")),
+            Some(&json!("codex"))
+        );
+    }
+
+    #[test]
+    fn tool_context_from_call_reads_session_id_from_arguments() {
+        let params = json!({
+            "name": "any_tool",
+            "arguments": {
+                "sessionId": "session-from-args"
+            }
+        });
+        let args = params.get("arguments").cloned().unwrap();
+
+        let ctx = tool_context_from_call(&params, &args);
+
+        assert_eq!(
+            ctx.session_id.as_ref().map(|s| s.as_str()),
+            Some("session-from-args")
         );
     }
 
