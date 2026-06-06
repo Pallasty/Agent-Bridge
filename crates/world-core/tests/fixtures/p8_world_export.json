@@ -1,0 +1,1890 @@
+{
+  "world": {
+    "world_id": "lswr_web_proto_01",
+    "branch_id": "main",
+    "tick": 8,
+    "bounds": {
+      "x": [
+        -6,
+        6
+      ],
+      "y": [
+        0,
+        4
+      ],
+      "z": [
+        -6,
+        6
+      ]
+    },
+    "authority_mode": "coedit"
+  },
+  "entities": [
+    {
+      "entity_id": "platform",
+      "kind": "surface",
+      "label": "Platform",
+      "transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          8,
+          0.2,
+          8
+        ]
+      },
+      "geometry": {
+        "type": "box"
+      },
+      "material": {
+        "color": "#6f7d8c",
+        "opacity": 1
+      },
+      "state": {
+        "selectable": false,
+        "locked": true,
+        "verification": "verified",
+        "selected": false
+      },
+      "tags": [
+        "ground"
+      ]
+    },
+    {
+      "entity_id": "cube_01",
+      "kind": "object",
+      "label": "Cube 01",
+      "transform": {
+        "position": [
+          -2.1,
+          1,
+          1.2
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "geometry": {
+        "type": "box"
+      },
+      "material": {
+        "color": "#2f80ed",
+        "opacity": 1
+      },
+      "state": {
+        "selectable": true,
+        "selected": true,
+        "verification": "verified",
+        "verification_reason": null
+      },
+      "tags": [
+        "demo",
+        "movable"
+      ]
+    },
+    {
+      "entity_id": "cube_002",
+      "kind": "object",
+      "label": "Cube 002",
+      "transform": {
+        "position": [
+          2,
+          1,
+          1
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "geometry": {
+        "type": "box"
+      },
+      "material": {
+        "color": "#f2994a",
+        "opacity": 1
+      },
+      "state": {
+        "selectable": true,
+        "selected": false,
+        "projection_disabled": false,
+        "verification": "verified",
+        "verification_reason": null
+      },
+      "tags": [
+        "demo",
+        "movable"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0001",
+      "event_type": "runtime.action_attempted",
+      "source": {
+        "participant_id": "runtime:lswr-web-prototype",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_add_entity_001"
+        ],
+        "entities": [
+          "cube_002"
+        ]
+      },
+      "payload": {
+        "action": {
+          "schema": "agent_bridge.lswr.action.v0",
+          "source": {
+            "participant_id": "ai:codex",
+            "authority_mode": "coedit"
+          },
+          "rollback_group": "rb_001",
+          "expected_effect": {
+            "entity_present": "cube_002",
+            "human_visible": true,
+            "hit_testable": true
+          },
+          "action_id": "act_add_entity_001",
+          "action_type": "add_entity",
+          "payload": {
+            "entity": {
+              "entity_id": "cube_002",
+              "kind": "object",
+              "label": "Cube 002",
+              "transform": {
+                "position": [
+                  2,
+                  1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#f2994a",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "projection_disabled": false,
+                "verification": "pending"
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            }
+          }
+        }
+      },
+      "at": "2026-06-06T00:00:01.000Z"
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0002",
+      "event_type": "runtime.action_result",
+      "source": {
+        "participant_id": "runtime:lswr-web-prototype",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_add_entity_001"
+        ],
+        "entities": [
+          "cube_002"
+        ]
+      },
+      "payload": {
+        "action_type": "add_entity"
+      },
+      "at": "2026-06-06T00:00:02.000Z",
+      "verification": {
+        "schema": "agent_bridge.lswr.verification.v0",
+        "action_id": "act_add_entity_001",
+        "verdict": "verified",
+        "reason": null,
+        "method": "web_scene_projection_check",
+        "verified_to": "entity:cube_002",
+        "evidence": {
+          "adapter_kind": "threejs_web",
+          "entity_id": "cube_002",
+          "projected": true,
+          "bounds_nonzero": true,
+          "hit_testable": true,
+          "inside_bounds": true,
+          "position": [
+            2,
+            1,
+            1
+          ],
+          "material_opacity": 1
+        }
+      }
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0003",
+      "event_type": "runtime.action_attempted",
+      "source": {
+        "participant_id": "runtime:lswr-web-prototype",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_move_entity_002"
+        ],
+        "entities": [
+          "cube_01"
+        ]
+      },
+      "payload": {
+        "action": {
+          "schema": "agent_bridge.lswr.action.v0",
+          "source": {
+            "participant_id": "ai:codex",
+            "authority_mode": "coedit"
+          },
+          "rollback_group": "rb_002",
+          "expected_effect": {
+            "entity_present": "cube_01",
+            "position": [
+              -2.1,
+              1,
+              1.2
+            ],
+            "human_visible": true
+          },
+          "action_id": "act_move_entity_002",
+          "action_type": "move_entity",
+          "payload": {
+            "entity_id": "cube_01",
+            "position": [
+              -2.1,
+              1,
+              1.2
+            ]
+          }
+        }
+      },
+      "at": "2026-06-06T00:00:03.000Z"
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0004",
+      "event_type": "runtime.action_result",
+      "source": {
+        "participant_id": "runtime:lswr-web-prototype",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_move_entity_002"
+        ],
+        "entities": [
+          "cube_01"
+        ]
+      },
+      "payload": {
+        "action_type": "move_entity"
+      },
+      "at": "2026-06-06T00:00:04.000Z",
+      "verification": {
+        "schema": "agent_bridge.lswr.verification.v0",
+        "action_id": "act_move_entity_002",
+        "verdict": "verified",
+        "reason": null,
+        "method": "web_scene_projection_check",
+        "verified_to": "entity:cube_01",
+        "evidence": {
+          "adapter_kind": "threejs_web",
+          "entity_id": "cube_01",
+          "projected": true,
+          "bounds_nonzero": true,
+          "hit_testable": true,
+          "inside_bounds": true,
+          "position": [
+            -2.1,
+            1,
+            1.2
+          ],
+          "material_opacity": 1
+        }
+      }
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0005",
+      "event_type": "human.select",
+      "source": {
+        "participant_id": "human:owner",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "entities": [
+          "cube_01"
+        ],
+        "viewport": "main_canvas"
+      },
+      "payload": {
+        "selection_state": "selected",
+        "screen_position": [
+          251,
+          394
+        ]
+      },
+      "at": "2026-06-06T00:00:05.000Z"
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0006",
+      "event_type": "human.drag_move",
+      "source": {
+        "participant_id": "human:owner",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "entities": [
+          "cube_01"
+        ],
+        "viewport": "main_canvas"
+      },
+      "payload": {
+        "from": [
+          -2.1,
+          1,
+          1.2
+        ],
+        "to": [
+          -2.1,
+          1,
+          1.2
+        ],
+        "input": "mouse"
+      },
+      "at": "2026-06-06T00:00:06.000Z"
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0007",
+      "event_type": "runtime.action_attempted",
+      "source": {
+        "participant_id": "runtime:lswr-web-prototype",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_human_move_003"
+        ],
+        "entities": [
+          "cube_01"
+        ]
+      },
+      "payload": {
+        "action": {
+          "schema": "agent_bridge.lswr.action.v0",
+          "source": {
+            "participant_id": "human:owner",
+            "surface": "web_scene"
+          },
+          "rollback_group": "rb_003",
+          "expected_effect": {
+            "entity_present": "cube_01",
+            "position": [
+              -2.1,
+              1,
+              1.2
+            ],
+            "human_visible": true
+          },
+          "action_id": "act_human_move_003",
+          "action_type": "move_entity",
+          "payload": {
+            "entity_id": "cube_01",
+            "position": [
+              -2.1,
+              1,
+              1.2
+            ]
+          }
+        }
+      },
+      "at": "2026-06-06T00:00:07.000Z"
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0008",
+      "event_type": "runtime.action_result",
+      "source": {
+        "participant_id": "runtime:lswr-web-prototype",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_human_move_003"
+        ],
+        "entities": [
+          "cube_01"
+        ]
+      },
+      "payload": {
+        "action_type": "move_entity"
+      },
+      "at": "2026-06-06T00:00:08.000Z",
+      "verification": {
+        "schema": "agent_bridge.lswr.verification.v0",
+        "action_id": "act_human_move_003",
+        "verdict": "verified",
+        "reason": null,
+        "method": "web_scene_projection_check",
+        "verified_to": "entity:cube_01",
+        "evidence": {
+          "adapter_kind": "threejs_web",
+          "entity_id": "cube_01",
+          "projected": true,
+          "bounds_nonzero": true,
+          "hit_testable": true,
+          "inside_bounds": true,
+          "position": [
+            -2.1,
+            1,
+            1.2
+          ],
+          "material_opacity": 1
+        }
+      }
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0009",
+      "event_type": "human.reject",
+      "source": {
+        "participant_id": "human:owner",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_human_move_003"
+        ],
+        "entities": [
+          "cube_01"
+        ]
+      },
+      "payload": {
+        "decision": "reject",
+        "reason_hint": "human_rejects_latest_action",
+        "does_not_change_verification": true
+      },
+      "at": "2026-06-06T00:00:09.000Z"
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0010",
+      "event_type": "runtime.action_attempted",
+      "source": {
+        "participant_id": "runtime:lswr-web-prototype",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_add_entity_004"
+        ],
+        "entities": [
+          "cube_003"
+        ]
+      },
+      "payload": {
+        "action": {
+          "schema": "agent_bridge.lswr.action.v0",
+          "source": {
+            "participant_id": "ai:codex",
+            "authority_mode": "coedit"
+          },
+          "rollback_group": "rb_004",
+          "expected_effect": {
+            "entity_present": "cube_003",
+            "human_visible": true,
+            "hit_testable": true
+          },
+          "action_id": "act_add_entity_004",
+          "action_type": "add_entity",
+          "payload": {
+            "entity": {
+              "entity_id": "cube_003",
+              "kind": "object",
+              "label": "Cube 003",
+              "transform": {
+                "position": [
+                  2,
+                  1,
+                  -1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#f2c94c",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "projection_disabled": true,
+                "verification": "pending"
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            }
+          }
+        }
+      },
+      "at": "2026-06-06T00:00:10.000Z"
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0011",
+      "event_type": "runtime.action_result",
+      "source": {
+        "participant_id": "runtime:lswr-web-prototype",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_add_entity_004"
+        ],
+        "entities": [
+          "cube_003"
+        ]
+      },
+      "payload": {
+        "action_type": "add_entity"
+      },
+      "at": "2026-06-06T00:00:11.000Z",
+      "verification": {
+        "schema": "agent_bridge.lswr.verification.v0",
+        "action_id": "act_add_entity_004",
+        "verdict": "not_verified",
+        "reason": "projection_object_absent",
+        "method": "web_scene_projection_check",
+        "verified_to": "entity:cube_003",
+        "evidence": {
+          "adapter_kind": "threejs_web",
+          "entity_id": "cube_003",
+          "projected": false,
+          "bounds_nonzero": false,
+          "hit_testable": false,
+          "inside_bounds": true
+        }
+      }
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0012",
+      "event_type": "runtime.action_attempted",
+      "source": {
+        "participant_id": "runtime:lswr-web-prototype",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_move_entity_005"
+        ],
+        "entities": [
+          "platform"
+        ]
+      },
+      "payload": {
+        "action": {
+          "schema": "agent_bridge.lswr.action.v0",
+          "source": {
+            "participant_id": "ai:codex",
+            "authority_mode": "coedit"
+          },
+          "rollback_group": "rb_005",
+          "expected_effect": {
+            "entity_present": "platform",
+            "position": [
+              0,
+              1,
+              0
+            ],
+            "human_visible": true
+          },
+          "action_id": "act_move_entity_005",
+          "action_type": "move_entity",
+          "payload": {
+            "entity_id": "platform",
+            "position": [
+              0,
+              1,
+              0
+            ]
+          }
+        }
+      },
+      "at": "2026-06-06T00:00:12.000Z"
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0013",
+      "event_type": "runtime.action_result",
+      "source": {
+        "participant_id": "runtime:lswr-web-prototype",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_move_entity_005"
+        ],
+        "entities": [
+          "platform"
+        ]
+      },
+      "payload": {
+        "action_type": "move_entity"
+      },
+      "at": "2026-06-06T00:00:13.000Z",
+      "verification": {
+        "schema": "agent_bridge.lswr.verification.v0",
+        "action_id": "act_move_entity_005",
+        "verdict": "blocked",
+        "reason": "locked_entity",
+        "method": "web_scene_policy_check",
+        "verified_to": null,
+        "evidence": {
+          "adapter_kind": "threejs_web",
+          "policy_checked": true,
+          "entity_id": "platform"
+        }
+      }
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "evt_0014",
+      "event_type": "runtime.rollback_applied",
+      "source": {
+        "participant_id": "runtime:lswr-web-prototype",
+        "surface": "web_scene"
+      },
+      "refs": {
+        "actions": [
+          "act_rollback_006"
+        ],
+        "rollback_groups": [
+          "rb_004"
+        ]
+      },
+      "payload": {
+        "rollback_group": "rb_004"
+      },
+      "at": "2026-06-06T00:00:14.000Z",
+      "verification": {
+        "schema": "agent_bridge.lswr.verification.v0",
+        "action_id": "act_rollback_006",
+        "verdict": "verified",
+        "reason": null,
+        "method": "web_scene_rollback_check",
+        "verified_to": "rollback:rb_004",
+        "evidence": {
+          "adapter_kind": "threejs_web",
+          "rollback_group": "rb_004",
+          "semantic_state_restored": true,
+          "projected_selectable_entities": true
+        }
+      }
+    }
+  ],
+  "verification": [
+    {
+      "schema": "agent_bridge.lswr.verification.v0",
+      "action_id": "act_add_entity_001",
+      "verdict": "verified",
+      "reason": null,
+      "method": "web_scene_projection_check",
+      "verified_to": "entity:cube_002",
+      "evidence": {
+        "adapter_kind": "threejs_web",
+        "entity_id": "cube_002",
+        "projected": true,
+        "bounds_nonzero": true,
+        "hit_testable": true,
+        "inside_bounds": true,
+        "position": [
+          2,
+          1,
+          1
+        ],
+        "material_opacity": 1
+      }
+    },
+    {
+      "schema": "agent_bridge.lswr.verification.v0",
+      "action_id": "act_move_entity_002",
+      "verdict": "verified",
+      "reason": null,
+      "method": "web_scene_projection_check",
+      "verified_to": "entity:cube_01",
+      "evidence": {
+        "adapter_kind": "threejs_web",
+        "entity_id": "cube_01",
+        "projected": true,
+        "bounds_nonzero": true,
+        "hit_testable": true,
+        "inside_bounds": true,
+        "position": [
+          -2.1,
+          1,
+          1.2
+        ],
+        "material_opacity": 1
+      }
+    },
+    {
+      "schema": "agent_bridge.lswr.verification.v0",
+      "action_id": "act_human_move_003",
+      "verdict": "verified",
+      "reason": null,
+      "method": "web_scene_projection_check",
+      "verified_to": "entity:cube_01",
+      "evidence": {
+        "adapter_kind": "threejs_web",
+        "entity_id": "cube_01",
+        "projected": true,
+        "bounds_nonzero": true,
+        "hit_testable": true,
+        "inside_bounds": true,
+        "position": [
+          -2.1,
+          1,
+          1.2
+        ],
+        "material_opacity": 1
+      }
+    },
+    {
+      "schema": "agent_bridge.lswr.verification.v0",
+      "action_id": "act_add_entity_004",
+      "verdict": "not_verified",
+      "reason": "projection_object_absent",
+      "method": "web_scene_projection_check",
+      "verified_to": "entity:cube_003",
+      "evidence": {
+        "adapter_kind": "threejs_web",
+        "entity_id": "cube_003",
+        "projected": false,
+        "bounds_nonzero": false,
+        "hit_testable": false,
+        "inside_bounds": true
+      }
+    },
+    {
+      "schema": "agent_bridge.lswr.verification.v0",
+      "action_id": "act_move_entity_005",
+      "verdict": "blocked",
+      "reason": "locked_entity",
+      "method": "web_scene_policy_check",
+      "verified_to": null,
+      "evidence": {
+        "adapter_kind": "threejs_web",
+        "policy_checked": true,
+        "entity_id": "platform"
+      }
+    },
+    {
+      "schema": "agent_bridge.lswr.verification.v0",
+      "action_id": "act_rollback_006",
+      "verdict": "verified",
+      "reason": null,
+      "method": "web_scene_rollback_check",
+      "verified_to": "rollback:rb_004",
+      "evidence": {
+        "adapter_kind": "threejs_web",
+        "rollback_group": "rb_004",
+        "semantic_state_restored": true,
+        "projected_selectable_entities": true
+      }
+    }
+  ],
+  "rollback": {
+    "next_group_id": "rb_006",
+    "available_groups": [
+      {
+        "rollback_group": "rb_001",
+        "before": {
+          "entities": [
+            {
+              "entity_id": "platform",
+              "kind": "surface",
+              "label": "Platform",
+              "transform": {
+                "position": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  8,
+                  0.2,
+                  8
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#6f7d8c",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": false,
+                "locked": true,
+                "verification": "verified"
+              },
+              "tags": [
+                "ground"
+              ]
+            },
+            {
+              "entity_id": "cube_01",
+              "kind": "object",
+              "label": "Cube 01",
+              "transform": {
+                "position": [
+                  0,
+                  1,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#2f80ed",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "verification": "verified"
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            }
+          ]
+        },
+        "after": {
+          "entities": [
+            {
+              "entity_id": "platform",
+              "kind": "surface",
+              "label": "Platform",
+              "transform": {
+                "position": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  8,
+                  0.2,
+                  8
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#6f7d8c",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": false,
+                "locked": true,
+                "verification": "verified"
+              },
+              "tags": [
+                "ground"
+              ]
+            },
+            {
+              "entity_id": "cube_01",
+              "kind": "object",
+              "label": "Cube 01",
+              "transform": {
+                "position": [
+                  0,
+                  1,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#2f80ed",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "verification": "verified"
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            },
+            {
+              "entity_id": "cube_002",
+              "kind": "object",
+              "label": "Cube 002",
+              "transform": {
+                "position": [
+                  2,
+                  1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#f2994a",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "projection_disabled": false,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            }
+          ]
+        },
+        "actions": [
+          "act_add_entity_001"
+        ],
+        "verification_event_id": "evt_0002"
+      },
+      {
+        "rollback_group": "rb_002",
+        "before": {
+          "entities": [
+            {
+              "entity_id": "platform",
+              "kind": "surface",
+              "label": "Platform",
+              "transform": {
+                "position": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  8,
+                  0.2,
+                  8
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#6f7d8c",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": false,
+                "locked": true,
+                "verification": "verified"
+              },
+              "tags": [
+                "ground"
+              ]
+            },
+            {
+              "entity_id": "cube_01",
+              "kind": "object",
+              "label": "Cube 01",
+              "transform": {
+                "position": [
+                  0,
+                  1,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#2f80ed",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "verification": "verified"
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            },
+            {
+              "entity_id": "cube_002",
+              "kind": "object",
+              "label": "Cube 002",
+              "transform": {
+                "position": [
+                  2,
+                  1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#f2994a",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "projection_disabled": false,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            }
+          ]
+        },
+        "after": {
+          "entities": [
+            {
+              "entity_id": "platform",
+              "kind": "surface",
+              "label": "Platform",
+              "transform": {
+                "position": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  8,
+                  0.2,
+                  8
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#6f7d8c",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": false,
+                "locked": true,
+                "verification": "verified"
+              },
+              "tags": [
+                "ground"
+              ]
+            },
+            {
+              "entity_id": "cube_01",
+              "kind": "object",
+              "label": "Cube 01",
+              "transform": {
+                "position": [
+                  -2.1,
+                  1,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#2f80ed",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            },
+            {
+              "entity_id": "cube_002",
+              "kind": "object",
+              "label": "Cube 002",
+              "transform": {
+                "position": [
+                  2,
+                  1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#f2994a",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "projection_disabled": false,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            }
+          ]
+        },
+        "actions": [
+          "act_move_entity_002"
+        ],
+        "verification_event_id": "evt_0004"
+      },
+      {
+        "rollback_group": "rb_003",
+        "before": {
+          "entities": [
+            {
+              "entity_id": "platform",
+              "kind": "surface",
+              "label": "Platform",
+              "transform": {
+                "position": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  8,
+                  0.2,
+                  8
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#6f7d8c",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": false,
+                "locked": true,
+                "verification": "verified",
+                "selected": false
+              },
+              "tags": [
+                "ground"
+              ]
+            },
+            {
+              "entity_id": "cube_01",
+              "kind": "object",
+              "label": "Cube 01",
+              "transform": {
+                "position": [
+                  -2.1,
+                  1,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#2f80ed",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": true,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            },
+            {
+              "entity_id": "cube_002",
+              "kind": "object",
+              "label": "Cube 002",
+              "transform": {
+                "position": [
+                  2,
+                  1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#f2994a",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "projection_disabled": false,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            }
+          ]
+        },
+        "after": {
+          "entities": [
+            {
+              "entity_id": "platform",
+              "kind": "surface",
+              "label": "Platform",
+              "transform": {
+                "position": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  8,
+                  0.2,
+                  8
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#6f7d8c",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": false,
+                "locked": true,
+                "verification": "verified",
+                "selected": false
+              },
+              "tags": [
+                "ground"
+              ]
+            },
+            {
+              "entity_id": "cube_01",
+              "kind": "object",
+              "label": "Cube 01",
+              "transform": {
+                "position": [
+                  -2.1,
+                  1,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#2f80ed",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": true,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            },
+            {
+              "entity_id": "cube_002",
+              "kind": "object",
+              "label": "Cube 002",
+              "transform": {
+                "position": [
+                  2,
+                  1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#f2994a",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "projection_disabled": false,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            }
+          ]
+        },
+        "actions": [
+          "act_human_move_003"
+        ],
+        "verification_event_id": "evt_0008"
+      },
+      {
+        "rollback_group": "rb_004",
+        "before": {
+          "entities": [
+            {
+              "entity_id": "platform",
+              "kind": "surface",
+              "label": "Platform",
+              "transform": {
+                "position": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  8,
+                  0.2,
+                  8
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#6f7d8c",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": false,
+                "locked": true,
+                "verification": "verified",
+                "selected": false
+              },
+              "tags": [
+                "ground"
+              ]
+            },
+            {
+              "entity_id": "cube_01",
+              "kind": "object",
+              "label": "Cube 01",
+              "transform": {
+                "position": [
+                  -2.1,
+                  1,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#2f80ed",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": true,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            },
+            {
+              "entity_id": "cube_002",
+              "kind": "object",
+              "label": "Cube 002",
+              "transform": {
+                "position": [
+                  2,
+                  1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#f2994a",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "projection_disabled": false,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            }
+          ]
+        },
+        "after": {
+          "entities": [
+            {
+              "entity_id": "platform",
+              "kind": "surface",
+              "label": "Platform",
+              "transform": {
+                "position": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  8,
+                  0.2,
+                  8
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#6f7d8c",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": false,
+                "locked": true,
+                "verification": "verified",
+                "selected": false
+              },
+              "tags": [
+                "ground"
+              ]
+            },
+            {
+              "entity_id": "cube_01",
+              "kind": "object",
+              "label": "Cube 01",
+              "transform": {
+                "position": [
+                  -2.1,
+                  1,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#2f80ed",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": true,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            },
+            {
+              "entity_id": "cube_002",
+              "kind": "object",
+              "label": "Cube 002",
+              "transform": {
+                "position": [
+                  2,
+                  1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#f2994a",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "projection_disabled": false,
+                "verification": "verified",
+                "verification_reason": null
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            },
+            {
+              "entity_id": "cube_003",
+              "kind": "object",
+              "label": "Cube 003",
+              "transform": {
+                "position": [
+                  2,
+                  1,
+                  -1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ]
+              },
+              "geometry": {
+                "type": "box"
+              },
+              "material": {
+                "color": "#f2c94c",
+                "opacity": 1
+              },
+              "state": {
+                "selectable": true,
+                "selected": false,
+                "projection_disabled": true,
+                "verification": "not_verified",
+                "verification_reason": "projection_object_absent"
+              },
+              "tags": [
+                "demo",
+                "movable"
+              ]
+            }
+          ]
+        },
+        "actions": [
+          "act_add_entity_004"
+        ],
+        "verification_event_id": "evt_0011"
+      }
+    ]
+  },
+  "projection": {
+    "adapter": "threejs_web",
+    "projected_entities": [
+      {
+        "entity_id": "platform",
+        "bounds_nonzero": true,
+        "hit_testable": false,
+        "material_opacity": 1,
+        "position": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "entity_id": "cube_01",
+        "bounds_nonzero": true,
+        "hit_testable": true,
+        "material_opacity": 1,
+        "position": [
+          -2.1,
+          1,
+          1.2
+        ]
+      },
+      {
+        "entity_id": "cube_002",
+        "bounds_nonzero": true,
+        "hit_testable": true,
+        "material_opacity": 1,
+        "position": [
+          2,
+          1,
+          1
+        ]
+      }
+    ],
+    "unprojected_entities": []
+  }
+}
