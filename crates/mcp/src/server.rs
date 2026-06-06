@@ -79,6 +79,13 @@ fn session_id_from_object(value: Option<&Value>) -> Option<String> {
     let object = value?;
     nonempty_json_str(object.get("session_id"))
         .or_else(|| nonempty_json_str(object.get("sessionId")))
+        .or_else(|| {
+            object
+                .get("x-codex-turn-metadata")
+                .and_then(|v| session_id_from_object(Some(v)))
+        })
+        .or_else(|| nonempty_json_str(object.get("thread_id")))
+        .or_else(|| nonempty_json_str(object.get("threadId")))
 }
 
 fn session_id_from_env() -> Option<String> {
@@ -1183,6 +1190,50 @@ mod tests {
         assert_eq!(
             ctx.session_id.as_ref().map(|s| s.as_str()),
             Some("session-from-args")
+        );
+    }
+
+    #[test]
+    fn tool_context_from_call_reads_session_id_from_codex_turn_metadata() {
+        let params = json!({
+            "_meta": {
+                "threadId": "thread-fallback",
+                "x-codex-turn-metadata": {
+                    "model": "gpt-5.5",
+                    "reasoning_effort": "xhigh",
+                    "session_id": "session-from-codex-turn-metadata",
+                    "thread_id": "thread-from-codex-turn-metadata"
+                }
+            },
+            "name": "any_tool",
+            "arguments": {}
+        });
+        let args = json!({});
+
+        let ctx = tool_context_from_call(&params, &args);
+
+        assert_eq!(
+            ctx.session_id.as_ref().map(|s| s.as_str()),
+            Some("session-from-codex-turn-metadata")
+        );
+    }
+
+    #[test]
+    fn tool_context_from_call_falls_back_to_meta_thread_id() {
+        let params = json!({
+            "_meta": {
+                "threadId": "thread-id-fallback"
+            },
+            "name": "any_tool",
+            "arguments": {}
+        });
+        let args = json!({});
+
+        let ctx = tool_context_from_call(&params, &args);
+
+        assert_eq!(
+            ctx.session_id.as_ref().map(|s| s.as_str()),
+            Some("thread-id-fallback")
         );
     }
 
