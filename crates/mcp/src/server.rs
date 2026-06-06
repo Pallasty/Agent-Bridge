@@ -84,7 +84,9 @@ fn session_id_from_object(value: Option<&Value>) -> Option<String> {
 fn session_id_from_env() -> Option<String> {
     [
         "AGENT_BRIDGE_SESSION_ID",
+        "CLAUDE_CODE_SESSION_ID",
         "CLAUDE_SESSION_ID",
+        "CODEX_COMPANION_SESSION_ID",
         "CODEX_SESSION_ID",
         "MCP_SESSION_ID",
     ]
@@ -1181,6 +1183,99 @@ mod tests {
         assert_eq!(
             ctx.session_id.as_ref().map(|s| s.as_str()),
             Some("session-from-args")
+        );
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn unset(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, prev }
+        }
+
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prev {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    static TOOL_CONTEXT_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn clear_session_env_vars_except(key_to_set: &'static str, value: &str) -> Vec<EnvVarGuard> {
+        let mut guards = vec![
+            EnvVarGuard::unset("AGENT_BRIDGE_SESSION_ID"),
+            EnvVarGuard::unset("CLAUDE_CODE_SESSION_ID"),
+            EnvVarGuard::unset("CLAUDE_SESSION_ID"),
+            EnvVarGuard::unset("CODEX_COMPANION_SESSION_ID"),
+            EnvVarGuard::unset("CODEX_SESSION_ID"),
+            EnvVarGuard::unset("MCP_SESSION_ID"),
+        ];
+        guards.push(EnvVarGuard::set(key_to_set, value));
+        guards
+    }
+
+    #[test]
+    fn tool_context_from_call_reads_session_id_from_claude_code_env() {
+        let _lock = TOOL_CONTEXT_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _guards =
+            clear_session_env_vars_except("CLAUDE_CODE_SESSION_ID", "session-from-claude-code");
+        let params = json!({
+            "name": "any_tool",
+            "arguments": {}
+        });
+        let args = params.get("arguments").cloned().unwrap();
+
+        let ctx = tool_context_from_call(&params, &args);
+
+        assert_eq!(
+            ctx.session_id.as_ref().map(|s| s.as_str()),
+            Some("session-from-claude-code")
+        );
+    }
+
+    #[test]
+    fn tool_context_from_call_reads_session_id_from_codex_companion_env() {
+        let _lock = TOOL_CONTEXT_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _guards = clear_session_env_vars_except(
+            "CODEX_COMPANION_SESSION_ID",
+            "session-from-codex-companion",
+        );
+        let params = json!({
+            "name": "any_tool",
+            "arguments": {}
+        });
+        let args = params.get("arguments").cloned().unwrap();
+
+        let ctx = tool_context_from_call(&params, &args);
+
+        assert_eq!(
+            ctx.session_id.as_ref().map(|s| s.as_str()),
+            Some("session-from-codex-companion")
         );
     }
 
