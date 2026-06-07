@@ -255,6 +255,18 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn('"width": "data(displaySize)"', html)
         self.assertIn('"height": "data(displaySize)"', html)
 
+    def test_zoom_declutters_labels_until_the_user_moves_closer(self):
+        html = palace_html()
+
+        self.assertIn("const LABEL_SHOW_ANCHOR_ZOOM", html)
+        self.assertIn("const LABEL_SHOW_ALL_ZOOM", html)
+        self.assertIn("function labelForZoom(node, zoom)", html)
+        self.assertIn("displayLabel", html)
+        self.assertIn("labelOpacity", html)
+        self.assertIn('"label": "data(displayLabel)"', html)
+        self.assertIn('"text-opacity": "data(labelOpacity)"', html)
+        self.assertIn('"label": "data(label)"', html)
+
 
 if __name__ == "__main__":
     unittest.main()
