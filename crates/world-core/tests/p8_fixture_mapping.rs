@@ -2,9 +2,10 @@ use ab_world_core::{
     ActionId, AdapterEvidence, AuthorityMode, BranchId, Event, EventId, EventProvenance,
     EventQuery, EventQueryFilters, EventQueryId, EventRefs, EvidenceQuery, EvidenceQueryFilters,
     EvidenceQueryId, Feedback, FeedbackQuery, FeedbackQueryFilters, FeedbackQueryId, Participant,
-    ParticipantId, ParticipantKind, RollbackGroupId, RollbackRecord, TargetRef, Verdict,
-    Verification, WorldId, WorldLedger, SCHEMA_EVENT, SCHEMA_EVENT_QUERY, SCHEMA_EVIDENCE_QUERY,
-    SCHEMA_FEEDBACK_QUERY,
+    ParticipantId, ParticipantKind, RollbackGroupId, RollbackQuery, RollbackQueryFilters,
+    RollbackQueryId, RollbackRecord, TargetRef, Verdict, Verification, WorldId, WorldLedger,
+    SCHEMA_EVENT, SCHEMA_EVENT_QUERY, SCHEMA_EVIDENCE_QUERY, SCHEMA_FEEDBACK_QUERY,
+    SCHEMA_ROLLBACK_QUERY,
 };
 use serde_json::{json, Value};
 
@@ -128,6 +129,36 @@ fn p8_world_export_maps_into_world_core_without_laundering_truth() {
         .rollback_group(&rollback_id)
         .expect("rollback rb_004");
     assert_eq!(rollback.actions[0].as_str(), "act_add_entity_004");
+
+    let rollback_query = RollbackQuery::with_id(
+        RollbackQueryId::from_raw("query:p8:rb_004"),
+        RollbackQueryFilters {
+            rollback_group: Some(rollback_id.clone()),
+            action_id: Some(ActionId::from_raw("act_add_entity_004")),
+            verification_event_id: Some(EventId::from_raw("evt_0011")),
+            has_verification_event: Some(true),
+        },
+    );
+    let rollback_response = ledger.query_rollbacks(&rollback_query);
+    assert_eq!(rollback_response.schema, SCHEMA_ROLLBACK_QUERY);
+    assert_eq!(rollback_response.rollback_records.len(), 1);
+    assert_eq!(
+        rollback_response.rollback_records[0].rollback_group,
+        rollback_id
+    );
+    assert_eq!(
+        rollback_response.rollback_records[0]
+            .verification_event_id
+            .as_ref()
+            .expect("rollback verification event")
+            .as_str(),
+        "evt_0011"
+    );
+    assert_eq!(rollback_response.summary.rollback_count, 1);
+    assert_eq!(rollback_response.summary.action_ref_count, 1);
+    assert_eq!(rollback_response.summary.before_payload_count, 1);
+    assert_eq!(rollback_response.summary.after_payload_count, 1);
+    assert_eq!(rollback_response.summary.verification_event_count, 1);
 
     let reject = ledger
         .events()

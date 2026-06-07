@@ -9,6 +9,7 @@ pub mod feedback_query;
 pub mod ids;
 pub mod ledger;
 pub mod model;
+pub mod rollback_query;
 pub mod schema;
 pub mod verification;
 
@@ -18,6 +19,7 @@ pub use feedback_query::*;
 pub use ids::*;
 pub use ledger::*;
 pub use model::*;
+pub use rollback_query::*;
 pub use schema::*;
 pub use verification::*;
 

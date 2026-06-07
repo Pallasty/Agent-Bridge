@@ -3,6 +3,7 @@ use crate::evidence_query::{EvidenceQuery, EvidenceQueryResponse};
 use crate::feedback_query::{FeedbackQuery, FeedbackQueryResponse};
 use crate::ids::{ActionId, EntityId, EventId, ParticipantId, RollbackGroupId};
 use crate::model::{Event, Feedback, RollbackRecord};
+use crate::rollback_query::{RollbackQuery, RollbackQueryResponse};
 use crate::verification::{validate_verification, Result, Verdict, Verification, WorldCoreError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -175,6 +176,16 @@ impl WorldLedger {
             .values()
             .filter(|record| record.actions.iter().any(|id| id == action_id))
             .collect()
+    }
+
+    pub fn query_rollbacks(&self, query: &RollbackQuery) -> RollbackQueryResponse {
+        let rollback_records = self
+            .rollback_groups
+            .values()
+            .filter(|record| query.filters.matches_rollback(record))
+            .cloned()
+            .collect();
+        RollbackQueryResponse::new(query, rollback_records)
     }
 
     pub fn query_evidence(&self, query: &EvidenceQuery) -> EvidenceQueryResponse {

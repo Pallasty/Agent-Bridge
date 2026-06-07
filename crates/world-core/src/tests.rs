@@ -240,6 +240,75 @@ fn rollback_group_registration_and_query_are_ledger_visible() {
 }
 
 #[test]
+fn rollback_query_envelope_filters_and_summarizes_rollback_records() {
+    let action_id = ActionId::from_raw("act_move_cube_rollback");
+    let verified_group_id = RollbackGroupId::from_raw("rb_verified");
+    let unverified_group_id = RollbackGroupId::from_raw("rb_unverified");
+    let verification_event_id = EventId::from_raw("evt_rollback_verified");
+
+    let mut verified_record = RollbackRecord::new(
+        verified_group_id.clone(),
+        json!({"entities": [{"entity_id": "cube_rollback", "position": [0, 1, 0]}]}),
+        json!({"entities": [{"entity_id": "cube_rollback", "position": [2, 1, 0]}]}),
+    );
+    verified_record.actions.push(action_id.clone());
+    verified_record.verification_event_id = Some(verification_event_id.clone());
+
+    let unverified_record = RollbackRecord::new(
+        unverified_group_id.clone(),
+        Value::Null,
+        json!({"restored": true}),
+    );
+
+    let mut ledger = WorldLedger::new();
+    ledger.register_rollback(verified_record).unwrap();
+    ledger.register_rollback(unverified_record).unwrap();
+
+    let action_query = RollbackQuery::with_id(
+        RollbackQueryId::from_raw("query:rollback:action"),
+        RollbackQueryFilters {
+            action_id: Some(action_id.clone()),
+            has_verification_event: Some(true),
+            ..RollbackQueryFilters::default()
+        },
+    );
+    let action_response = ledger.query_rollbacks(&action_query);
+    assert_eq!(action_response.schema, SCHEMA_ROLLBACK_QUERY);
+    assert_eq!(action_response.rollback_records.len(), 1);
+    assert_eq!(
+        action_response.rollback_records[0].rollback_group,
+        verified_group_id
+    );
+    assert_eq!(action_response.summary.rollback_count, 1);
+    assert_eq!(action_response.summary.action_ref_count, 1);
+    assert_eq!(action_response.summary.before_payload_count, 1);
+    assert_eq!(action_response.summary.after_payload_count, 1);
+    assert_eq!(action_response.summary.verification_event_count, 1);
+
+    let group_response = ledger.query_rollbacks(&RollbackQuery::new(
+        RollbackQueryFilters::by_group(unverified_group_id.clone()),
+    ));
+    assert_eq!(group_response.rollback_records.len(), 1);
+    assert_eq!(
+        group_response.rollback_records[0].rollback_group,
+        unverified_group_id
+    );
+    assert_eq!(group_response.summary.before_payload_count, 0);
+    assert_eq!(group_response.summary.after_payload_count, 1);
+    assert_eq!(group_response.summary.verification_event_count, 0);
+
+    let verification_response = ledger.query_rollbacks(&RollbackQuery::new(RollbackQueryFilters {
+        verification_event_id: Some(verification_event_id),
+        ..RollbackQueryFilters::default()
+    }));
+    assert_eq!(verification_response.rollback_records.len(), 1);
+    assert_eq!(
+        verification_response.rollback_records[0].actions[0],
+        action_id
+    );
+}
+
+#[test]
 fn ledger_queries_read_back_events_evidence_feedback_and_rollbacks() {
     let action_id = ActionId::from_raw("act_move_cube_02");
     let entity_id = EntityId::from_raw("cube_02");
