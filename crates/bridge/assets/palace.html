@@ -2166,6 +2166,14 @@
       color: #3a3a45;
       margin: 0 4px;
     }
+    #footer .view-health {
+      color: #4a4a55;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      white-space: nowrap;
+    }
+    #footer .view-health.good { color: #5cc89a; }
+    #footer .view-health.warn { color: #c8a96a; }
+    #footer .view-health.slow { color: #d88080; }
   </style>
 </head>
 <body>
@@ -2312,6 +2320,7 @@
   <div id="footer">
     <span>circles = sqlite · rounded squares = markdown · cyan dotted = co-activation</span>
     <span class="embedding-stats" id="embedding-stats" title="embedding backend distribution across active memories"></span>
+    <span id="view-health" class="view-health" title="visible graph state and last visual refresh cost"></span>
     <span class="hint" id="focus-hint"></span>
   </div>
 
@@ -2766,6 +2775,7 @@ const state = {
   neighborSort: "weight",
   relationDetailKey: null,
   contentReaderMode: "scan",
+  lastVisualPassMs: 0,
   // ζ-13: degree info computed once per loadGraph, consumed by both the
   // footer badge and buildCy's per-node hub/orphan marker. Stashed here
   // (rather than recomputed twice) so the two surfaces can't drift.
@@ -3401,12 +3411,49 @@ function nodePassesViewPreset(n) {
   }
 }
 
+function graphViewportStats() {
+  const base = {
+    totalCount: 0,
+    visibleCount: 0,
+    edgeVisibleCount: 0,
+    matchCount: 0,
+    visualMs: state.lastVisualPassMs,
+  };
+  if (!state.cy) return base;
+  const nodes = state.cy.nodes();
+  const edges = state.cy.edges();
+  return {
+    totalCount: nodes.length,
+    visibleCount: nodes.filter(n => !n.hasClass("faded")).length,
+    edgeVisibleCount: edges.filter(e => !e.hasClass("faded")).length,
+    matchCount: nodes.filter(n => n.hasClass("match") && !n.hasClass("faded")).length,
+    visualMs: state.lastVisualPassMs,
+  };
+}
+
+function renderViewHealth(stats) {
+  const el = document.getElementById("view-health");
+  if (!el) return;
+  const s = stats || graphViewportStats();
+  const visualMs = Number.isFinite(s.visualMs) ? s.visualMs : 0;
+  const msLabel = visualMs < 10 ? visualMs.toFixed(1) : Math.round(visualMs).toString();
+  const tier = visualMs > 32 ? "slow" : visualMs > 16 ? "warn" : "good";
+  const matchText = s.matchCount > 0 ? ` · match:${s.matchCount}` : "";
+  el.textContent = `view:${s.visibleCount}/${s.totalCount}${matchText} · ${msLabel}ms`;
+  el.title = `${s.visibleCount} visible nodes · ${s.edgeVisibleCount} visible edges · ${s.matchCount} search matches · ${msLabel}ms visual pass`;
+  el.className = `view-health ${tier}`;
+}
+
 // ── Visual state machine ────────────────────────────────────────
 // Combines: atlas region + preset + source/kind + search + focus highlight.
 // Order matters: filters hide nodes (faded), search marks (match), focus
 // overrides (focus-center / focus-neighbor / focus-edge / faded).
 function applyVisualState() {
-  if (!state.cy) return;
+  if (!state.cy) {
+    renderViewHealth(graphViewportStats());
+    return;
+  }
+  const visualStartedAt = performance.now();
   const cy = state.cy;
   const term = state.search.trim().toLowerCase();
 
@@ -3466,6 +3513,8 @@ function applyVisualState() {
       ego.edges().addClass("focus-edge");
     }
   }
+  state.lastVisualPassMs = Math.max(0, performance.now() - visualStartedAt);
+  renderViewHealth(graphViewportStats());
   renderSearchNavigator();
 }
 

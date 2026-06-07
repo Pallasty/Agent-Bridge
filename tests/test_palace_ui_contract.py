@@ -212,6 +212,17 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.searchCursor = nextCursor;", html)
         self.assertIn("jumpToSearchResult(row.key);", html)
 
+    def test_visual_performance_health_is_observable(self):
+        html = palace_html()
+
+        self.assertIn('id="view-health"', html)
+        self.assertIn("lastVisualPassMs: 0", html)
+        self.assertIn("function graphViewportStats()", html)
+        self.assertIn("function renderViewHealth(stats)", html)
+        self.assertIn("performance.now()", html)
+        self.assertIn("visibleCount", html)
+        self.assertIn("matchCount", html)
+
 
 if __name__ == "__main__":
     unittest.main()
