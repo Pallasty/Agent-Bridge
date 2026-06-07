@@ -1,0 +1,55 @@
+{
+  "schema": "agent_bridge.lswr.readonly_bridge_acceptance_matrix.v0",
+  "packet_schema": "agent_bridge.lswr.readonly_bridge_report_packet.v0",
+  "snapshot_sha256": "sha256:5ff171f505327b9d93f01a1dfc44a6159a00f48e6085a5e7a63e5eded6629495",
+  "overall_verdict": "accepted",
+  "gates": [
+    {
+      "gate": "schema_chain",
+      "verdict": "passed",
+      "required_for_wrapper": true,
+      "evidence": "packet=agent_bridge.lswr.readonly_bridge_report_packet.v0, summary=agent_bridge.lswr.readonly_bridge_consumer_summary.v0, report=agent_bridge.lswr.readonly_bridge_report.v0, projection_match=true, snapshot_hash_match=true"
+    },
+    {
+      "gate": "packet_summary_consistency",
+      "verdict": "passed",
+      "required_for_wrapper": true,
+      "evidence": "readback_mode=detailed_snapshot, top_level_matches_summary=true"
+    },
+    {
+      "gate": "read_only_safety",
+      "verdict": "passed",
+      "required_for_wrapper": true,
+      "evidence": "read_only=true, mutation_surface=none, mcp_tool_registration=false, affordances=snapshot:true,query:true,patch:false,action:false,invoke:false"
+    },
+    {
+      "gate": "query_surface_contract",
+      "verdict": "passed",
+      "required_for_wrapper": true,
+      "evidence": "missing=none, mutation_like_surfaces=none"
+    },
+    {
+      "gate": "report_markdown_consistency",
+      "verdict": "passed",
+      "required_for_wrapper": true,
+      "evidence": "rerender_match=true, bytes=1972"
+    },
+    {
+      "gate": "detailed_readback",
+      "verdict": "passed",
+      "required_for_wrapper": false,
+      "evidence": "mode=detailed_snapshot, verified=1, not_verified=0, blocked=0, feedback_changes_world_verdict=0"
+    },
+    {
+      "gate": "feedback_verdict_separation",
+      "verdict": "passed",
+      "required_for_wrapper": true,
+      "evidence": "feedback_items=1, changes_world_verdict=0, count_field=0"
+    }
+  ],
+  "guidance": [
+    "Packet is ready for read-only UI or agent wrapper consumption.",
+    "MCP exposure still requires a separate profile-gated wrapper change.",
+    "Keep Step D, #92 present wiring, and #94 ingestion out of this acceptance packet."
+  ]
+}

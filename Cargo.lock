@@ -29,6 +29,7 @@ dependencies = [
  "ab-seed-bridge",
  "ab-store",
  "ab-terminal",
+ "ab-world-core",
  "anyhow",
  "async-trait",
  "axum",
@@ -175,6 +176,16 @@ dependencies = [
  "ort",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "ab-world-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "uuid",
 ]
 
 [[package]]

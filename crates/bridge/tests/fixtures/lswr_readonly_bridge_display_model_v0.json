@@ -1,0 +1,227 @@
+{
+  "schema": "agent_bridge.lswr.readonly_bridge_display_model.v0",
+  "packet_schema": "agent_bridge.lswr.readonly_bridge_report_packet.v0",
+  "acceptance_schema": "agent_bridge.lswr.readonly_bridge_acceptance_matrix.v0",
+  "snapshot_sha256": "sha256:5ff171f505327b9d93f01a1dfc44a6159a00f48e6085a5e7a63e5eded6629495",
+  "title": "LSWR Read-Only Bridge",
+  "status": {
+    "label": "Ready for read-only display",
+    "tone": "success",
+    "detail": "All wrapper-required gates passed."
+  },
+  "safety": {
+    "wrapper_ready": true,
+    "matrix_consistent_with_packet": true,
+    "read_only": true,
+    "mutation_surface": "none",
+    "mcp_tool_registration": false,
+    "affordances": [
+      {
+        "label": "snapshot",
+        "value": "true",
+        "tone": "success"
+      },
+      {
+        "label": "query",
+        "value": "true",
+        "tone": "success"
+      },
+      {
+        "label": "patch",
+        "value": "false",
+        "tone": "success"
+      },
+      {
+        "label": "action",
+        "value": "false",
+        "tone": "success"
+      },
+      {
+        "label": "invoke",
+        "value": "false",
+        "tone": "success"
+      }
+    ]
+  },
+  "badges": [
+    {
+      "label": "overall",
+      "value": "accepted",
+      "tone": "success"
+    },
+    {
+      "label": "wrapper_ready",
+      "value": "true",
+      "tone": "success"
+    },
+    {
+      "label": "matrix_match",
+      "value": "true",
+      "tone": "success"
+    },
+    {
+      "label": "readback",
+      "value": "detailed_snapshot",
+      "tone": "success"
+    },
+    {
+      "label": "read_only",
+      "value": "true",
+      "tone": "success"
+    },
+    {
+      "label": "gates",
+      "value": "7/7",
+      "tone": "success"
+    }
+  ],
+  "metrics": [
+    {
+      "label": "actions",
+      "value": "1",
+      "detail": "ledger actions"
+    },
+    {
+      "label": "events",
+      "value": "2",
+      "detail": "ledger events"
+    },
+    {
+      "label": "verifications",
+      "value": "1",
+      "detail": "verification records"
+    },
+    {
+      "label": "feedback",
+      "value": "1",
+      "detail": "human feedback records"
+    },
+    {
+      "label": "rollback_records",
+      "value": "1",
+      "detail": "rollback records"
+    },
+    {
+      "label": "verified",
+      "value": "1",
+      "detail": "verified outcomes"
+    },
+    {
+      "label": "not_verified",
+      "value": "0",
+      "detail": "not-verified outcomes"
+    },
+    {
+      "label": "blocked",
+      "value": "0",
+      "detail": "blocked outcomes"
+    }
+  ],
+  "gate_rows": [
+    {
+      "label": "schema_chain",
+      "verdict": "passed",
+      "tone": "success",
+      "required_for_wrapper": true,
+      "evidence": "packet=agent_bridge.lswr.readonly_bridge_report_packet.v0, summary=agent_bridge.lswr.readonly_bridge_consumer_summary.v0, report=agent_bridge.lswr.readonly_bridge_report.v0, projection_match=true, snapshot_hash_match=true"
+    },
+    {
+      "label": "packet_summary_consistency",
+      "verdict": "passed",
+      "tone": "success",
+      "required_for_wrapper": true,
+      "evidence": "readback_mode=detailed_snapshot, top_level_matches_summary=true"
+    },
+    {
+      "label": "read_only_safety",
+      "verdict": "passed",
+      "tone": "success",
+      "required_for_wrapper": true,
+      "evidence": "read_only=true, mutation_surface=none, mcp_tool_registration=false, affordances=snapshot:true,query:true,patch:false,action:false,invoke:false"
+    },
+    {
+      "label": "query_surface_contract",
+      "verdict": "passed",
+      "tone": "success",
+      "required_for_wrapper": true,
+      "evidence": "missing=none, mutation_like_surfaces=none"
+    },
+    {
+      "label": "report_markdown_consistency",
+      "verdict": "passed",
+      "tone": "success",
+      "required_for_wrapper": true,
+      "evidence": "rerender_match=true, bytes=1972"
+    },
+    {
+      "label": "detailed_readback",
+      "verdict": "passed",
+      "tone": "success",
+      "required_for_wrapper": false,
+      "evidence": "mode=detailed_snapshot, verified=1, not_verified=0, blocked=0, feedback_changes_world_verdict=0"
+    },
+    {
+      "label": "feedback_verdict_separation",
+      "verdict": "passed",
+      "tone": "success",
+      "required_for_wrapper": true,
+      "evidence": "feedback_items=1, changes_world_verdict=0, count_field=0"
+    }
+  ],
+  "readback_groups": [
+    {
+      "label": "verified",
+      "count": 1,
+      "tone": "success",
+      "items": [
+        {
+          "label": "action:move_cube_readonly_fixture",
+          "detail": "verified via semantic_scene/semantic_state_query: semantic state reports the expected transform",
+          "tone": "success"
+        }
+      ]
+    },
+    {
+      "label": "not_verified",
+      "count": 0,
+      "tone": "warning",
+      "items": []
+    },
+    {
+      "label": "blocked",
+      "count": 0,
+      "tone": "danger",
+      "items": []
+    },
+    {
+      "label": "feedback",
+      "count": 1,
+      "tone": "neutral",
+      "items": [
+        {
+          "label": "feedback:readonly_bridge_fixture_accept",
+          "detail": "decision=accept, changes_world_verdict=false",
+          "tone": "neutral"
+        }
+      ]
+    },
+    {
+      "label": "rollbacks",
+      "count": 1,
+      "tone": "neutral",
+      "items": [
+        {
+          "label": "rollback:move_cube_readonly_fixture",
+          "detail": "actions=action:move_cube_readonly_fixture, verification_event_id=event:move_cube_readonly_fixture_result",
+          "tone": "neutral"
+        }
+      ]
+    }
+  ],
+  "guidance": [
+    "Packet is ready for read-only UI or agent wrapper consumption.",
+    "MCP exposure still requires a separate profile-gated wrapper change.",
+    "Keep Step D, #92 present wiring, and #94 ingestion out of this acceptance packet."
+  ],
+  "report_markdown": "# LSWR Read-Only Bridge Report\n\nreport_schema: agent_bridge.lswr.readonly_bridge_report.v0\nsummary_schema: agent_bridge.lswr.readonly_bridge_consumer_summary.v0\nprojection_schema: agent_bridge.lswr.readonly_bridge_snapshot.v0\nsnapshot_sha256: sha256:5ff171f505327b9d93f01a1dfc44a6159a00f48e6085a5e7a63e5eded6629495\nreadback_mode: detailed_snapshot\nread_only_confirmed: true\n\n## Safety\n- read_only: true\n- mutation_surface: none\n- mcp_tool_registration: false\n- affordances: snapshot=true, query=true, patch=false, action=false, invoke=false\n\n## Counts\n- actions: 1\n- events: 2\n- verifications: 1\n- feedback: 1\n- rollback_records: 1\n\n## Query Surfaces\n- world.actions.query\n- world.events.query\n- world.evidence.query\n- world.feedback.query\n- world.rollbacks.query\n\n## Verification Outcomes\n- verified: 1\n- not_verified: 0\n- blocked: 0\n- feedback_changes_world_verdict: 0\n\n## Verified\n- action: action:move_cube_readonly_fixture; verdict: verified; method: semantic_state_query; target: entity=entity:cube_readonly_fixture; raw_available: true\n- evidence: semantic_scene/semantic_state_query - semantic state reports the expected transform\n\n## Not Verified\n- none\n\n## Blocked\n- none\n\n## Feedback\n- feedback: feedback:readonly_bridge_fixture_accept; source_event: event:move_cube_readonly_fixture_accept; decision: accept; changes_world_verdict: false\n- targets: entities=entity:cube_readonly_fixture, actions=action:move_cube_readonly_fixture, events=event:move_cube_readonly_fixture_result, rollback_groups=rollback:move_cube_readonly_fixture\n\n## Rollbacks\n- rollback_group: rollback:move_cube_readonly_fixture; actions: action:move_cube_readonly_fixture; verification_event_id: event:move_cube_readonly_fixture_result\n\n## Guidance\n- Verified items come from adapter or runtime evidence only.\n- Human feedback remains feedback and must not alter verification verdicts.\n- Rollback records describe reversible before and after state; this summary does not execute rollback.\n"
+}

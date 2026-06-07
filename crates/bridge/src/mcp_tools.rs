@@ -29483,6 +29483,454 @@ fn reg_if(reg: &mut ToolRegistry, policy: ToolPolicy, tier: Tier, tool: Arc<dyn 
     }
 }
 
+// ===========================================================================
+//                 LSWR read-only bridge display wrapper (P34)
+// ===========================================================================
+
+pub struct LswrReadonlyBridgeDisplayTool;
+
+impl LswrReadonlyBridgeDisplayTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for LswrReadonlyBridgeDisplayTool {
+    fn name(&self) -> &'static str {
+        "lswr_readonly_bridge_display"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only LSWR display wrapper. Consumes an explicit \
+                 agent_bridge.lswr.readonly_bridge_report_packet.v0 JSON object and \
+                 returns the derived agent_bridge.lswr.readonly_bridge_display_model.v0. \
+                 It never accepts host paths, live runtime URLs, GUI captures, patch/action \
+                 requests, or any filesystem source."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "report_packet": {
+                        "type": "object",
+                        "description": "Explicit agent_bridge.lswr.readonly_bridge_report_packet.v0 payload. Pass the JSON object itself, not a path, URL, live runtime handle, or GUI capture."
+                    }
+                },
+                "required": ["report_packet"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        match lswr_readonly_bridge_display_payload(args) {
+            Ok(payload) => Ok(ToolResult::json_text(&payload)),
+            Err(error) => Ok(lswr_readonly_bridge_display_error(error)),
+        }
+    }
+}
+
+const LSWR_READONLY_BRIDGE_DISPLAY_FORBIDDEN_INPUT_KEYS: &[&str] = &[
+    "path",
+    "packet_path",
+    "snapshot_path",
+    "host_path",
+    "file",
+    "file_path",
+    "runtime",
+    "runtime_url",
+    "live_runtime",
+    "gui_capture",
+    "screenshot",
+    "image",
+    "patch",
+    "action",
+    "invoke",
+];
+
+fn lswr_readonly_bridge_display_payload(
+    args: Value,
+) -> std::result::Result<Value, serde_json::Value> {
+    let Some(args_obj) = args.as_object() else {
+        return Err(json!({
+            "code": "invalid_arguments",
+            "message": "arguments must be a JSON object with an explicit report_packet field"
+        }));
+    };
+
+    let forbidden = LSWR_READONLY_BRIDGE_DISPLAY_FORBIDDEN_INPUT_KEYS
+        .iter()
+        .copied()
+        .filter(|key| args_obj.contains_key(*key))
+        .collect::<Vec<_>>();
+    if !forbidden.is_empty() {
+        return Err(json!({
+            "code": "indirect_source_not_exposed",
+            "message": "lswr_readonly_bridge_display accepts only an explicit report_packet payload",
+            "forbidden_keys": forbidden,
+            "allowed_keys": ["report_packet"],
+            "safety_boundary": {
+                "host_path": false,
+                "live_runtime": false,
+                "gui_capture": false,
+                "patch": false,
+                "action": false,
+                "invoke": false
+            }
+        }));
+    }
+
+    let unknown = args_obj
+        .keys()
+        .filter(|key| key.as_str() != "report_packet")
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unknown.is_empty() {
+        return Err(json!({
+            "code": "unknown_arguments",
+            "message": "only report_packet is accepted",
+            "unknown_keys": unknown,
+            "allowed_keys": ["report_packet"]
+        }));
+    }
+
+    let Some(packet_value) = args_obj.get("report_packet") else {
+        return Err(json!({
+            "code": "missing_report_packet",
+            "message": "report_packet is required",
+            "required_schema": crate::lswr_snapshot_report_packet::LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA
+        }));
+    };
+    if !packet_value.is_object() {
+        return Err(json!({
+            "code": "invalid_report_packet",
+            "message": "report_packet must be a JSON object",
+            "required_schema": crate::lswr_snapshot_report_packet::LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA
+        }));
+    }
+
+    let packet: crate::lswr_snapshot_report_packet::ReadOnlyBridgeReportPacket =
+        serde_json::from_value(packet_value.clone()).map_err(|err| {
+            json!({
+                "code": "invalid_report_packet",
+                "message": err.to_string(),
+                "required_schema": crate::lswr_snapshot_report_packet::LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA
+            })
+        })?;
+
+    if packet.schema != crate::lswr_snapshot_report_packet::LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA {
+        return Err(json!({
+            "code": "schema_mismatch",
+            "message": "report_packet schema does not match the LSWR read-only bridge packet contract",
+            "received_schema": packet.schema,
+            "required_schema": crate::lswr_snapshot_report_packet::LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA
+        }));
+    }
+
+    let display =
+        crate::lswr_snapshot_display::build_readonly_bridge_display_model_from_packet(&packet);
+    serde_json::to_value(display).map_err(|err| {
+        json!({
+            "code": "display_model_serialization_failed",
+            "message": err.to_string(),
+            "output_schema": crate::lswr_snapshot_display::LSWR_READONLY_BRIDGE_DISPLAY_MODEL_SCHEMA
+        })
+    })
+}
+
+fn lswr_readonly_bridge_display_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "agent_bridge.lswr.readonly_bridge_display_mcp_error.v0",
+        "status": "error",
+        "tool": "lswr_readonly_bridge_display",
+        "error": error,
+        "boundary": {
+            "read_only": true,
+            "input_mode": "explicit_report_packet_payload",
+            "host_path": false,
+            "live_runtime": false,
+            "gui_capture": false,
+            "mutation_surface": "none"
+        }
+    }));
+    result.is_error = true;
+    result
+}
+
+pub const LSWR_READONLY_BRIDGE_DISPLAY_MCP_SURFACE_REPORT_SCHEMA: &str =
+    "agent_bridge.lswr.readonly_bridge_display_mcp_surface_report.v0";
+
+pub fn lswr_readonly_bridge_display_mcp_surface_report() -> Value {
+    const TOOL: &str = "lswr_readonly_bridge_display";
+    let profile_rows = lswr_readonly_bridge_display_surface_profile_rows();
+    let all_schema = lswr_readonly_bridge_display_schema_for_policy(ToolPolicy::from_values(
+        None,
+        None,
+        None,
+        Some("all"),
+    ));
+    let schema_facts = lswr_readonly_bridge_display_schema_facts(all_schema.as_ref());
+    let checks = lswr_readonly_bridge_display_surface_checks(&profile_rows, &schema_facts);
+    let verdict = if checks.iter().all(|row| row["verdict"] == "passed") {
+        "passed"
+    } else {
+        "failed"
+    };
+    let visible_in = profile_rows
+        .iter()
+        .filter(|row| row["registered"].as_bool().unwrap_or(false))
+        .filter_map(|row| row["label"].as_str().map(|s| s.to_string()))
+        .collect::<Vec<_>>();
+    let report_markdown =
+        render_lswr_readonly_bridge_display_mcp_surface_report(verdict, &profile_rows, &checks);
+
+    json!({
+        "schema": LSWR_READONLY_BRIDGE_DISPLAY_MCP_SURFACE_REPORT_SCHEMA,
+        "tool": TOOL,
+        "verdict": verdict,
+        "visible_in": visible_in,
+        "profile_rows": profile_rows,
+        "tool_schema": schema_facts,
+        "checks": checks,
+        "safety_boundary": {
+            "read_only": true,
+            "input_mode": "explicit_report_packet_payload",
+            "host_path": false,
+            "live_runtime": false,
+            "gui_capture": false,
+            "mutation_surface": "none",
+            "mcp_surface_change": "registered_niche_tool_only",
+            "adds_additional_mcp_tool": false
+        },
+        "guidance": [
+            "Use this report as post-registry evidence for profile exposure; live MCP clients still need redeploy/reconnect before their tool list changes.",
+            "The wrapper remains all-profile/all-dev only; do not add it to codex-essential extras without a separate acceptance slice.",
+            "Use the P34 tool with an explicit report_packet object, not host paths or live runtime handles."
+        ],
+        "report_markdown": report_markdown
+    })
+}
+
+fn lswr_readonly_bridge_display_surface_profile_rows() -> Vec<Value> {
+    [
+        ("profile-standard", None, None, Some("standard"), false),
+        ("profile-all", None, None, Some("all"), true),
+        ("codex-essential", Some("codex-essential"), None, None, false),
+        ("codex-lean", Some("codex-lean"), None, None, false),
+        ("claude-standard", Some("claude-standard"), None, None, false),
+        ("gemini-lean", Some("gemini-lean"), None, None, false),
+        ("hook-lifecycle", Some("hook-lifecycle"), None, None, false),
+        ("all-dev", Some("all-dev"), None, None, true),
+    ]
+    .into_iter()
+    .map(|(label, toolset, client, profile, expected_registered)| {
+        let policy = ToolPolicy::from_values(toolset, client, None, profile);
+        let registered =
+            lswr_readonly_bridge_display_schema_for_policy(policy).is_some();
+        json!({
+            "label": label,
+            "toolset": policy.label(),
+            "profile": policy.profile().label(),
+            "registered": registered,
+            "expected_registered": expected_registered,
+            "matches_expected": registered == expected_registered,
+        })
+    })
+    .collect()
+}
+
+fn lswr_readonly_bridge_display_schema_for_policy(policy: ToolPolicy) -> Option<ToolSchema> {
+    build_registry_with_policy(Hub::builder().build(), policy)
+        .list()
+        .into_iter()
+        .find(|schema| schema.name == "lswr_readonly_bridge_display")
+}
+
+fn lswr_readonly_bridge_display_schema_facts(schema: Option<&ToolSchema>) -> Value {
+    let Some(schema) = schema else {
+        return json!({
+            "present": false,
+            "name": Value::Null,
+            "input_keys": [],
+            "required": [],
+            "additional_properties": Value::Null,
+            "forbidden_input_keys_absent": false,
+            "description_mentions_read_only": false,
+            "description_mentions_explicit": false,
+            "input_schema": Value::Null,
+        });
+    };
+    let input_keys = schema
+        .input_schema
+        .get("properties")
+        .and_then(|v| v.as_object())
+        .map(|properties| {
+            let mut keys = properties.keys().cloned().collect::<Vec<_>>();
+            keys.sort();
+            keys
+        })
+        .unwrap_or_default();
+    let required = schema
+        .input_schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let additional_properties = schema
+        .input_schema
+        .get("additionalProperties")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let forbidden_input_keys_absent = LSWR_READONLY_BRIDGE_DISPLAY_FORBIDDEN_INPUT_KEYS
+        .iter()
+        .all(|key| !input_keys.iter().any(|input| input == key));
+
+    json!({
+        "present": true,
+        "name": schema.name.clone(),
+        "input_keys": input_keys,
+        "required": required,
+        "additional_properties": additional_properties,
+        "forbidden_input_keys_absent": forbidden_input_keys_absent,
+        "description_mentions_read_only": schema.description.contains("Read-only"),
+        "description_mentions_explicit": schema.description.contains("explicit"),
+        "input_schema": schema.input_schema.clone(),
+    })
+}
+
+fn lswr_readonly_bridge_display_surface_checks(
+    profile_rows: &[Value],
+    schema_facts: &Value,
+) -> Vec<Value> {
+    let profile_matrix_ok = profile_rows
+        .iter()
+        .all(|row| row["matches_expected"].as_bool().unwrap_or(false));
+    let all_visible = profile_registered(profile_rows, "profile-all");
+    let all_dev_visible = profile_registered(profile_rows, "all-dev");
+    let standard_hidden = !profile_registered(profile_rows, "profile-standard");
+    let codex_essential_hidden = !profile_registered(profile_rows, "codex-essential");
+    let schema_present = schema_facts["present"].as_bool().unwrap_or(false);
+    let explicit_packet_only = schema_facts["input_keys"]
+        .as_array()
+        .map(|keys| keys.len() == 1 && keys.iter().any(|key| key == "report_packet"))
+        .unwrap_or(false);
+    let required_packet = schema_facts["required"]
+        .as_array()
+        .map(|keys| keys.len() == 1 && keys.iter().any(|key| key == "report_packet"))
+        .unwrap_or(false);
+    let no_additional_properties =
+        schema_facts["additional_properties"] == Value::Bool(false);
+    let forbidden_absent = schema_facts["forbidden_input_keys_absent"]
+        .as_bool()
+        .unwrap_or(false);
+
+    vec![
+        surface_check(
+            "profile_matrix",
+            profile_matrix_ok,
+            true,
+            "registered profiles match expected all-profile/all-dev exposure only",
+        ),
+        surface_check(
+            "all_profile_visible",
+            all_visible,
+            true,
+            "profile=all exposes lswr_readonly_bridge_display",
+        ),
+        surface_check(
+            "all_dev_visible",
+            all_dev_visible,
+            true,
+            "toolset=all-dev exposes lswr_readonly_bridge_display through all profile",
+        ),
+        surface_check(
+            "standard_hidden",
+            standard_hidden,
+            true,
+            "standard/default profile hides lswr_readonly_bridge_display",
+        ),
+        surface_check(
+            "codex_essential_hidden",
+            codex_essential_hidden,
+            true,
+            "codex-essential hides lswr_readonly_bridge_display",
+        ),
+        surface_check(
+            "schema_present",
+            schema_present,
+            true,
+            "all-profile registry includes a schema for the tool",
+        ),
+        surface_check(
+            "explicit_packet_only",
+            explicit_packet_only && required_packet && no_additional_properties,
+            true,
+            "schema exposes only required report_packet and denies additional properties",
+        ),
+        surface_check(
+            "forbidden_inputs_absent",
+            forbidden_absent,
+            true,
+            "path/live-runtime/gui-capture/mutation inputs are absent from the schema",
+        ),
+    ]
+}
+
+fn profile_registered(profile_rows: &[Value], label: &str) -> bool {
+    profile_rows
+        .iter()
+        .find(|row| row["label"] == label)
+        .and_then(|row| row["registered"].as_bool())
+        .unwrap_or(false)
+}
+
+fn surface_check(label: &str, passed: bool, required: bool, evidence: &str) -> Value {
+    json!({
+        "label": label,
+        "verdict": if passed { "passed" } else { "failed" },
+        "required": required,
+        "tone": if passed { "success" } else { "danger" },
+        "evidence": evidence,
+    })
+}
+
+fn render_lswr_readonly_bridge_display_mcp_surface_report(
+    verdict: &str,
+    profile_rows: &[Value],
+    checks: &[Value],
+) -> String {
+    let mut report = String::new();
+    report.push_str("# LSWR Read-Only Bridge MCP Surface\n\n");
+    report.push_str(&format!("Verdict: `{verdict}`\n\n"));
+    report.push_str("## Profiles\n\n");
+    for row in profile_rows {
+        report.push_str(&format!(
+            "- `{}`: registered=`{}` expected=`{}`\n",
+            row["label"].as_str().unwrap_or("?"),
+            row["registered"].as_bool().unwrap_or(false),
+            row["expected_registered"].as_bool().unwrap_or(false),
+        ));
+    }
+    report.push_str("\n## Checks\n\n");
+    for check in checks {
+        report.push_str(&format!(
+            "- `{}`: `{}` ({}) - {}\n",
+            check["label"].as_str().unwrap_or("?"),
+            check["verdict"].as_str().unwrap_or("?"),
+            check["tone"].as_str().unwrap_or("?"),
+            check["evidence"].as_str().unwrap_or("")
+        ));
+    }
+    report
+}
+
 pub struct SkillsRecommendTool {
     hub: Hub,
 }
@@ -31922,6 +32370,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Niche,
         Arc::new(crate::world_tools::WorldPresentTool::new()),
+    );
+    // LSWR P34: real but gated read-only display wrapper over an explicit P28
+    // report packet. Niche/all only; no host path, live runtime, GUI capture,
+    // patch/action/invoke, or filesystem source is accepted.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(LswrReadonlyBridgeDisplayTool::new()),
     );
     // Audio embodiment: emit a known tone + read it back off the system bus (sink
     // .monitor loopback) via a spectral-peak falsifier; writes a verified-outcome
@@ -37004,6 +37461,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             assert!(all.includes(Tier::Niche, t), "{t} must be available under all");
             assert!(!std_p.includes(Tier::Niche, t), "{t} must stay out of standard");
         }
+        // P34 read-only bridge display wrapper follows the same all-profile opt-in
+        // shape as the LSWR world tools, but stays read-only and packet-backed.
+        assert!(all.includes(Tier::Niche, "lswr_readonly_bridge_display"));
+        assert!(!std_p.includes(Tier::Niche, "lswr_readonly_bridge_display"));
+        let codex_essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(!codex_essential.includes(Tier::Niche, "lswr_readonly_bridge_display"));
         let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
         assert!(
             schemas.iter().any(|s| s.name == "present"),
@@ -37036,6 +37499,193 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 "{t} must register under the all profile"
             );
         }
+        assert!(
+            schemas
+                .iter()
+                .any(|s| s.name == "lswr_readonly_bridge_display"),
+            "lswr_readonly_bridge_display must register under the all profile"
+        );
+        let standard_schemas =
+            build_registry_with_policy(Hub::builder().build(), std_p).list();
+        assert!(
+            !standard_schemas
+                .iter()
+                .any(|s| s.name == "lswr_readonly_bridge_display"),
+            "lswr_readonly_bridge_display must stay out of standard"
+        );
+    }
+
+    #[test]
+    fn lswr_readonly_bridge_display_schema_is_explicit_packet_only() {
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "lswr_readonly_bridge_display")
+            .expect("lswr_readonly_bridge_display schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("explicit"));
+        assert!(tool.input_schema["properties"].get("report_packet").is_some());
+        assert_eq!(
+            tool.input_schema["additionalProperties"],
+            serde_json::Value::Bool(false)
+        );
+        for forbidden in [
+            "path",
+            "packet_path",
+            "host_path",
+            "runtime_url",
+            "live_runtime",
+            "gui_capture",
+            "screenshot",
+            "patch",
+            "action",
+            "invoke",
+        ] {
+            assert!(
+                tool.input_schema["properties"].get(forbidden).is_none(),
+                "{forbidden} must not be exposed as an input property"
+            );
+        }
+    }
+
+    #[test]
+    fn lswr_readonly_bridge_display_registers_under_all_only() {
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let standard = ToolPolicy::from_values(None, None, None, Some("standard"));
+        let codex_essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+
+        assert!(all.includes(Tier::Niche, "lswr_readonly_bridge_display"));
+        assert!(!standard.includes(Tier::Niche, "lswr_readonly_bridge_display"));
+        assert!(!codex_essential.includes(Tier::Niche, "lswr_readonly_bridge_display"));
+
+        let all_names = build_registry_with_policy(Hub::builder().build(), all)
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect::<Vec<_>>();
+        let standard_names = build_registry_with_policy(Hub::builder().build(), standard)
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect::<Vec<_>>();
+        let codex_names = build_registry_with_policy(Hub::builder().build(), codex_essential)
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect::<Vec<_>>();
+
+        assert!(all_names.iter().any(|name| name == "lswr_readonly_bridge_display"));
+        assert!(!standard_names.iter().any(|name| name == "lswr_readonly_bridge_display"));
+        assert!(!codex_names.iter().any(|name| name == "lswr_readonly_bridge_display"));
+    }
+
+    fn lswr_readonly_bridge_report_packet_fixture() -> Value {
+        serde_json::from_str(include_str!(
+            "../tests/fixtures/lswr_readonly_bridge_report_packet_v0.json"
+        ))
+        .expect("report packet fixture")
+    }
+
+    #[tokio::test]
+    async fn lswr_readonly_bridge_display_tool_returns_p30_display_model() {
+        let tool = LswrReadonlyBridgeDisplayTool::new();
+        let out = tool
+            .execute(
+                json!({"report_packet": lswr_readonly_bridge_report_packet_fixture()}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(
+            payload["schema"],
+            crate::lswr_snapshot_display::LSWR_READONLY_BRIDGE_DISPLAY_MODEL_SCHEMA
+        );
+        assert_eq!(
+            payload["packet_schema"],
+            crate::lswr_snapshot_report_packet::LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA
+        );
+        assert_eq!(payload["status"]["tone"], "success");
+        assert_eq!(payload["safety"]["wrapper_ready"], true);
+        assert_eq!(payload["safety"]["mcp_tool_registration"], false);
+    }
+
+    #[tokio::test]
+    async fn lswr_readonly_bridge_display_tool_refuses_indirect_sources() {
+        let tool = LswrReadonlyBridgeDisplayTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "packet_path": "/tmp/report-packet.json",
+                    "live_runtime": "http://127.0.0.1:9000"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+
+        assert!(out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["status"], "error");
+        assert_eq!(payload["error"]["code"], "indirect_source_not_exposed");
+        let forbidden = payload["error"]["forbidden_keys"]
+            .as_array()
+            .expect("forbidden keys");
+        assert!(forbidden.iter().any(|v| v == "packet_path"));
+        assert!(forbidden.iter().any(|v| v == "live_runtime"));
+        assert_eq!(payload["boundary"]["host_path"], false);
+        assert_eq!(payload["boundary"]["live_runtime"], false);
+        assert_eq!(payload["boundary"]["gui_capture"], false);
+    }
+
+    #[tokio::test]
+    async fn lswr_readonly_bridge_display_tool_rejects_wrong_packet_schema() {
+        let mut packet = lswr_readonly_bridge_report_packet_fixture();
+        packet["schema"] = json!("agent_bridge.lswr.wrong_packet.v0");
+
+        let tool = LswrReadonlyBridgeDisplayTool::new();
+        let out = tool
+            .execute(json!({"report_packet": packet}), &ToolContext::default())
+            .await
+            .expect("execute");
+
+        assert!(out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["error"]["code"], "schema_mismatch");
+        assert_eq!(
+            payload["error"]["required_schema"],
+            crate::lswr_snapshot_report_packet::LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA
+        );
+    }
+
+    #[tokio::test]
+    async fn lswr_readonly_bridge_display_tool_preserves_unsafe_packet_verdict() {
+        let mut packet = lswr_readonly_bridge_report_packet_fixture();
+        packet["safety"]["action"] = json!(true);
+        packet["summary"]["safety"]["action"] = json!(true);
+
+        let tool = LswrReadonlyBridgeDisplayTool::new();
+        let out = tool
+            .execute(json!({"report_packet": packet}), &ToolContext::default())
+            .await
+            .expect("execute");
+
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["status"]["tone"], "danger");
+        assert_eq!(payload["safety"]["wrapper_ready"], false);
+        let action_badge = payload["safety"]["affordances"]
+            .as_array()
+            .expect("affordances")
+            .iter()
+            .find(|badge| badge["label"] == "action")
+            .expect("action badge");
+        assert_eq!(action_badge["value"], "true");
+        assert_eq!(action_badge["tone"], "danger");
     }
 
     // Live dogfood (opt-in) — drives the real navigate->eval->classify->screenshot

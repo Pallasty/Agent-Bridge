@@ -1,0 +1,687 @@
+use crate::*;
+use serde_json::{json, Value};
+
+fn world_id() -> WorldId {
+    WorldId::from_raw("lswr_web_proto_01")
+}
+
+fn ai() -> Participant {
+    Participant::ai(ParticipantId::from_raw("ai:codex"), AuthorityMode::Coedit)
+}
+
+fn human() -> Participant {
+    Participant::human(ParticipantId::from_raw("human:owner"), "web_scene")
+}
+
+fn runtime() -> Participant {
+    Participant::runtime(ParticipantId::from_raw("runtime:web"), "web_scene")
+}
+
+fn provenance() -> EventProvenance {
+    EventProvenance {
+        adapter: Some("threejs_web".to_string()),
+        source_schema: Some(SCHEMA_EVENT.to_string()),
+        raw_available: true,
+    }
+}
+
+fn evidence(method: &str, payload: Value) -> AdapterEvidence {
+    AdapterEvidence::new("threejs_web", method, "fixture evidence", true, payload)
+}
+
+#[test]
+fn serde_round_trip_for_core_records() {
+    let action = Action {
+        schema: SCHEMA_ACTION.to_string(),
+        action_id: ActionId::from_raw("act_add_cube_02"),
+        action_type: "add_entity".to_string(),
+        source: ai(),
+        target_refs: vec![TargetRef::entity(&EntityId::from_raw("cube_02"))],
+        expected_effect: json!({"entity_present": "cube_02", "human_visible": true}),
+        rollback_group: Some(RollbackGroupId::from_raw("rb_001")),
+    };
+    let verification = Verification::new(
+        Some(action.action_id.clone()),
+        Verdict::Verified,
+        None,
+        "web_scene_projection_check",
+        Some(TargetRef::entity(&EntityId::from_raw("cube_02"))),
+        evidence(
+            "web_scene_projection_check",
+            json!({"projected": true, "bounds_nonzero": true}),
+        ),
+    )
+    .unwrap();
+    let mut event = Event::new("runtime.action_result", world_id(), ai(), provenance());
+    event.refs.actions.push(action.action_id.clone());
+    event.verification = Some(verification.clone());
+    let rollback = RollbackRecord::new(
+        RollbackGroupId::from_raw("rb_001"),
+        json!({"entities": []}),
+        json!({"entities": [{"entity_id": "cube_02"}]}),
+    );
+
+    let encoded = serde_json::to_string(&(action, event, verification, rollback)).unwrap();
+    let decoded: (Action, Event, Verification, RollbackRecord) =
+        serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(decoded.0.action_type, "add_entity");
+    assert_eq!(decoded.1.event_type, "runtime.action_result");
+    assert_eq!(decoded.2.verdict, Verdict::Verified);
+    assert_eq!(decoded.3.rollback_group.as_str(), "rb_001");
+}
+
+#[test]
+fn not_verified_and_blocked_require_reasons() {
+    let not_verified = Verification::new(
+        None,
+        Verdict::NotVerified,
+        None,
+        "web_scene_projection_check",
+        None,
+        evidence("web_scene_projection_check", json!({})),
+    );
+    assert_eq!(
+        not_verified.unwrap_err(),
+        WorldCoreError::MissingReason {
+            verdict: Verdict::NotVerified
+        }
+    );
+
+    let blocked = Verification::new(
+        None,
+        Verdict::Blocked,
+        Some("".to_string()),
+        "world_policy_check",
+        None,
+        evidence("world_policy_check", json!({})),
+    );
+    assert_eq!(
+        blocked.unwrap_err(),
+        WorldCoreError::MissingReason {
+            verdict: Verdict::Blocked
+        }
+    );
+}
+
+#[test]
+fn verified_to_is_only_allowed_for_verified() {
+    let target = TargetRef::entity(&EntityId::from_raw("cube_01"));
+    let missing_target = Verification::new(
+        None,
+        Verdict::Verified,
+        None,
+        "web_scene_projection_check",
+        None,
+        evidence("web_scene_projection_check", json!({})),
+    );
+    assert_eq!(
+        missing_target.unwrap_err(),
+        WorldCoreError::MissingVerifiedTo
+    );
+
+    let not_verified_with_target = Verification::new(
+        None,
+        Verdict::NotVerified,
+        Some("projection_object_absent".to_string()),
+        "web_scene_projection_check",
+        Some(target),
+        evidence("web_scene_projection_check", json!({})),
+    );
+    assert_eq!(
+        not_verified_with_target.unwrap_err(),
+        WorldCoreError::VerifiedToNotAllowed {
+            verdict: Verdict::NotVerified
+        }
+    );
+}
+
+#[test]
+fn human_decision_does_not_mutate_prior_verification() {
+    let action_id = ActionId::from_raw("act_material_cube_01");
+    let verification = Verification::new(
+        Some(action_id.clone()),
+        Verdict::NotVerified,
+        Some("projection_object_absent".to_string()),
+        "web_scene_projection_check",
+        None,
+        evidence(
+            "web_scene_projection_check",
+            json!({"projected": false, "unprojected_entities": ["cube_01"]}),
+        ),
+    )
+    .unwrap();
+
+    let mut ledger = WorldLedger::new();
+    ledger.append_verification(verification.clone()).unwrap();
+
+    let mut reject = Event::new("human.reject", world_id(), human(), provenance());
+    reject.refs.actions.push(action_id.clone());
+    reject.payload = json!({
+        "decision": "reject",
+        "does_not_change_verification": true
+    });
+    ledger.append_event(reject).unwrap();
+
+    let evidence = ledger.query_evidence_by_action(&action_id);
+    assert_eq!(evidence.len(), 1);
+    assert_eq!(evidence[0].verdict, Verdict::NotVerified);
+    assert_eq!(
+        evidence[0].reason.as_deref(),
+        Some("projection_object_absent")
+    );
+
+    let mut invalid_accept = Event::new("human.accept", world_id(), human(), provenance());
+    invalid_accept.payload = json!({
+        "decision": "accept",
+        "changes_world_verdict": true
+    });
+    assert_eq!(
+        ledger.append_event(invalid_accept).unwrap_err(),
+        WorldCoreError::HumanDecisionChangesVerification
+    );
+}
+
+#[test]
+fn adapter_evidence_can_hold_web_and_nexus_payloads_without_core_fields() {
+    let web = evidence(
+        "web_scene_projection_check",
+        json!({
+            "projected": false,
+            "reason": "projection_object_absent",
+            "unprojected_entities": ["cube_02"]
+        }),
+    );
+    let nexus = AdapterEvidence::new(
+        "nexus",
+        "nexus_event_causal_verification",
+        "expected causal edge present",
+        true,
+        json!({
+            "event_id": "evt_food_warning",
+            "hash_chain_valid": true,
+            "expected_causal_edge": {
+                "cause_id": "evt_tax_change",
+                "consequence_id": "evt_food_warning",
+                "edge_type": "direct",
+                "present": true
+            }
+        }),
+    );
+
+    assert_eq!(web.payload["unprojected_entities"][0], "cube_02");
+    assert_eq!(nexus.payload["expected_causal_edge"]["edge_type"], "direct");
+    assert_eq!(web.adapter_kind, "threejs_web");
+    assert_eq!(nexus.adapter_kind, "nexus");
+}
+
+#[test]
+fn rollback_group_registration_and_query_are_ledger_visible() {
+    let action_id = ActionId::from_raw("act_move_cube_01");
+    let group_id = RollbackGroupId::from_raw("rb_002");
+    let mut record = RollbackRecord::new(
+        group_id.clone(),
+        json!({"entities": [{"entity_id": "cube_01", "position": [0, 1, 0]}]}),
+        json!({"entities": [{"entity_id": "cube_01", "position": [-2, 1, 0]}]}),
+    );
+    record.actions.push(action_id);
+
+    let mut ledger = WorldLedger::new();
+    ledger.register_rollback(record).unwrap();
+    let fetched = ledger.rollback_group(&group_id).unwrap();
+    assert_eq!(fetched.rollback_group, group_id);
+    assert_eq!(fetched.actions.len(), 1);
+
+    let duplicate = RollbackRecord::new(group_id.clone(), json!({}), json!({}));
+    assert_eq!(
+        ledger.register_rollback(duplicate).unwrap_err(),
+        WorldCoreError::DuplicateRollbackGroup(group_id.to_string())
+    );
+}
+
+#[test]
+fn action_query_envelope_filters_and_summarizes_core_actions() {
+    let ai_id = ParticipantId::from_raw("ai:codex");
+    let human_id = ParticipantId::from_raw("human:owner");
+    let entity_id = EntityId::from_raw("cube_action");
+    let group_id = RollbackGroupId::from_raw("rb_action");
+
+    let mut ai_action = Action::new(
+        "entity.move",
+        Participant::ai(ai_id.clone(), AuthorityMode::Autonomous),
+    );
+    ai_action.action_id = ActionId::from_raw("act_move_cube_action");
+    ai_action.target_refs.push(TargetRef::entity(&entity_id));
+    ai_action.expected_effect = json!({"position": [1, 1, 0], "human_visible": true});
+    ai_action.rollback_group = Some(group_id.clone());
+
+    let mut human_action = Action::new(
+        "entity.select",
+        Participant::human(human_id.clone(), "web_scene"),
+    );
+    human_action.action_id = ActionId::from_raw("act_select_cube_action");
+    human_action.target_refs.push(TargetRef::entity(&entity_id));
+
+    let mut ledger = WorldLedger::new();
+    ledger.append_action(ai_action.clone()).unwrap();
+    ledger.append_action(human_action).unwrap();
+
+    assert_eq!(ledger.actions().len(), 2);
+    assert_eq!(
+        ledger
+            .action_by_id(&ai_action.action_id)
+            .unwrap()
+            .action_type,
+        "entity.move"
+    );
+    assert_eq!(ledger.query_actions_by_type("entity.select").len(), 1);
+    assert_eq!(
+        ledger.append_action(ai_action.clone()).unwrap_err(),
+        WorldCoreError::DuplicateAction(ai_action.action_id.to_string())
+    );
+
+    let query = ActionQuery::with_id(
+        ActionQueryId::from_raw("query:actions:move_cube"),
+        ActionQueryFilters {
+            action_type: Some("entity.move".to_string()),
+            source_participant_id: Some(ai_id),
+            participant_kind: Some(ParticipantKind::Ai),
+            authority_mode: Some(AuthorityMode::Autonomous),
+            target_ref_kind: Some("entity".to_string()),
+            target_ref_id: Some(entity_id.to_string()),
+            rollback_group: Some(group_id),
+            has_expected_effect: Some(true),
+            ..ActionQueryFilters::default()
+        },
+    );
+    let response = ledger.query_actions(&query);
+    assert_eq!(response.schema, SCHEMA_ACTION_QUERY);
+    assert_eq!(response.actions.len(), 1);
+    assert_eq!(response.actions[0].action_id, ai_action.action_id);
+    assert_eq!(response.summary.action_count, 1);
+    assert_eq!(response.summary.target_ref_count, 1);
+    assert_eq!(response.summary.rollback_linked_action_count, 1);
+    assert_eq!(response.summary.expected_effect_payload_count, 1);
+    assert_eq!(response.summary.action_type_counts["entity.move"], 1);
+    assert_eq!(response.summary.participant_kind_counts["ai"], 1);
+    assert_eq!(response.summary.authority_mode_counts["autonomous"], 1);
+
+    let no_effect_response = ledger.query_actions(&ActionQuery::new(ActionQueryFilters::by_type(
+        "entity.select",
+    )));
+    assert_eq!(no_effect_response.actions.len(), 1);
+    assert_eq!(no_effect_response.summary.expected_effect_payload_count, 0);
+    assert_eq!(
+        no_effect_response.summary.participant_kind_counts["human"],
+        1
+    );
+}
+
+#[test]
+fn rollback_query_envelope_filters_and_summarizes_rollback_records() {
+    let action_id = ActionId::from_raw("act_move_cube_rollback");
+    let verified_group_id = RollbackGroupId::from_raw("rb_verified");
+    let unverified_group_id = RollbackGroupId::from_raw("rb_unverified");
+    let verification_event_id = EventId::from_raw("evt_rollback_verified");
+
+    let mut verified_record = RollbackRecord::new(
+        verified_group_id.clone(),
+        json!({"entities": [{"entity_id": "cube_rollback", "position": [0, 1, 0]}]}),
+        json!({"entities": [{"entity_id": "cube_rollback", "position": [2, 1, 0]}]}),
+    );
+    verified_record.actions.push(action_id.clone());
+    verified_record.verification_event_id = Some(verification_event_id.clone());
+
+    let unverified_record = RollbackRecord::new(
+        unverified_group_id.clone(),
+        Value::Null,
+        json!({"restored": true}),
+    );
+
+    let mut ledger = WorldLedger::new();
+    ledger.register_rollback(verified_record).unwrap();
+    ledger.register_rollback(unverified_record).unwrap();
+
+    let action_query = RollbackQuery::with_id(
+        RollbackQueryId::from_raw("query:rollback:action"),
+        RollbackQueryFilters {
+            action_id: Some(action_id.clone()),
+            has_verification_event: Some(true),
+            ..RollbackQueryFilters::default()
+        },
+    );
+    let action_response = ledger.query_rollbacks(&action_query);
+    assert_eq!(action_response.schema, SCHEMA_ROLLBACK_QUERY);
+    assert_eq!(action_response.rollback_records.len(), 1);
+    assert_eq!(
+        action_response.rollback_records[0].rollback_group,
+        verified_group_id
+    );
+    assert_eq!(action_response.summary.rollback_count, 1);
+    assert_eq!(action_response.summary.action_ref_count, 1);
+    assert_eq!(action_response.summary.before_payload_count, 1);
+    assert_eq!(action_response.summary.after_payload_count, 1);
+    assert_eq!(action_response.summary.verification_event_count, 1);
+
+    let group_response = ledger.query_rollbacks(&RollbackQuery::new(
+        RollbackQueryFilters::by_group(unverified_group_id.clone()),
+    ));
+    assert_eq!(group_response.rollback_records.len(), 1);
+    assert_eq!(
+        group_response.rollback_records[0].rollback_group,
+        unverified_group_id
+    );
+    assert_eq!(group_response.summary.before_payload_count, 0);
+    assert_eq!(group_response.summary.after_payload_count, 1);
+    assert_eq!(group_response.summary.verification_event_count, 0);
+
+    let verification_response = ledger.query_rollbacks(&RollbackQuery::new(RollbackQueryFilters {
+        verification_event_id: Some(verification_event_id),
+        ..RollbackQueryFilters::default()
+    }));
+    assert_eq!(verification_response.rollback_records.len(), 1);
+    assert_eq!(
+        verification_response.rollback_records[0].actions[0],
+        action_id
+    );
+}
+
+#[test]
+fn ledger_queries_read_back_events_evidence_feedback_and_rollbacks() {
+    let action_id = ActionId::from_raw("act_move_cube_02");
+    let entity_id = EntityId::from_raw("cube_02");
+    let runtime_id = ParticipantId::from_raw("runtime:web");
+    let group_id = RollbackGroupId::from_raw("rb_003");
+
+    let verification = Verification::new(
+        Some(action_id.clone()),
+        Verdict::Verified,
+        None,
+        "web_scene_projection_check",
+        Some(TargetRef::entity(&entity_id)),
+        evidence(
+            "web_scene_projection_check",
+            json!({"projected": true, "hit_testable": true}),
+        ),
+    )
+    .unwrap();
+
+    let mut runtime_event =
+        Event::new("runtime.action_result", world_id(), runtime(), provenance());
+    runtime_event.event_id = EventId::from_raw("evt_move_cube_02");
+    runtime_event.refs.entities.push(entity_id.clone());
+    runtime_event.refs.actions.push(action_id.clone());
+    runtime_event.refs.rollback_groups.push(group_id.clone());
+    runtime_event.verification = Some(verification);
+
+    let mut human_event = Event::new("human.accept", world_id(), human(), provenance());
+    human_event.event_id = EventId::from_raw("evt_accept_move_cube_02");
+    human_event.refs.events.push(runtime_event.event_id.clone());
+    human_event.refs.actions.push(action_id.clone());
+    human_event.payload = json!({
+        "decision": "accept",
+        "does_not_change_verification": true
+    });
+
+    let mut feedback = Feedback::new(human_event.event_id.clone());
+    feedback.target.actions.push(action_id.clone());
+    feedback.normalized = json!({"decision": "accept"});
+
+    let mut rollback = RollbackRecord::new(
+        group_id.clone(),
+        json!({"entities": [{"entity_id": "cube_02", "position": [0, 1, 0]}]}),
+        json!({"entities": [{"entity_id": "cube_02", "position": [2, 1, 0]}]}),
+    );
+    rollback.actions.push(action_id.clone());
+    rollback.verification_event_id = Some(runtime_event.event_id.clone());
+
+    let mut ledger = WorldLedger::new();
+    ledger.register_rollback(rollback).unwrap();
+    ledger.append_event(runtime_event).unwrap();
+    ledger.append_event(human_event.clone()).unwrap();
+    ledger.append_feedback(feedback).unwrap();
+
+    assert_eq!(
+        ledger
+            .event_by_id(&EventId::from_raw("evt_move_cube_02"))
+            .unwrap()
+            .event_type,
+        "runtime.action_result"
+    );
+    assert!(ledger
+        .event_by_id(&EventId::from_raw("evt_missing"))
+        .is_none());
+    assert_eq!(ledger.query_events_by_entity(&entity_id).len(), 1);
+    assert_eq!(ledger.query_events_by_action(&action_id).len(), 2);
+    assert_eq!(ledger.query_events_by_rollback_group(&group_id).len(), 1);
+    assert_eq!(
+        ledger.query_events_by_participant(&runtime_id)[0].event_type,
+        "runtime.action_result"
+    );
+    assert_eq!(
+        ledger.query_verifications_by_verdict(Verdict::Verified)[0]
+            .verified_to
+            .as_ref()
+            .unwrap(),
+        &TargetRef::entity(&entity_id)
+    );
+    assert_eq!(
+        ledger.query_feedback_by_source_event(&human_event.event_id)[0].normalized["decision"],
+        "accept"
+    );
+    assert_eq!(ledger.query_feedback_by_action(&action_id).len(), 1);
+    assert_eq!(
+        ledger.query_rollbacks_by_action(&action_id)[0].rollback_group,
+        group_id
+    );
+}
+
+#[test]
+fn event_query_envelope_filters_and_summarizes_core_events() {
+    let action_id = ActionId::from_raw("act_move_cube_03");
+    let entity_id = EntityId::from_raw("cube_03");
+    let branch_id = BranchId::from_raw("branch:coedit");
+
+    let mut runtime_event =
+        Event::new("runtime.action_result", world_id(), runtime(), provenance());
+    runtime_event.event_id = EventId::from_raw("evt_move_cube_03");
+    runtime_event.branch_id = Some(branch_id.clone());
+    runtime_event.refs.entities.push(entity_id.clone());
+    runtime_event.refs.actions.push(action_id.clone());
+    runtime_event.verification = Some(
+        Verification::new(
+            Some(action_id.clone()),
+            Verdict::Verified,
+            None,
+            "web_scene_projection_check",
+            Some(TargetRef::entity(&entity_id)),
+            evidence(
+                "web_scene_projection_check",
+                json!({"projected": true, "pixel_coverage": 0.1}),
+            ),
+        )
+        .unwrap(),
+    );
+
+    let mut human_event = Event::new("human.accept", world_id(), human(), provenance());
+    human_event.event_id = EventId::from_raw("evt_accept_move_cube_03");
+    human_event.branch_id = Some(branch_id.clone());
+    human_event.refs.events.push(runtime_event.event_id.clone());
+    human_event.refs.actions.push(action_id.clone());
+    human_event.payload = json!({
+        "decision": "accept",
+        "does_not_change_verification": true
+    });
+
+    let mut ledger = WorldLedger::new();
+    ledger.append_event(runtime_event).unwrap();
+    ledger.append_event(human_event).unwrap();
+
+    let action_query = EventQuery::with_id(
+        EventQueryId::from_raw("query:events:move_cube_03"),
+        EventQueryFilters {
+            world_id: Some(world_id()),
+            branch_id: Some(branch_id),
+            action_id: Some(action_id.clone()),
+            adapter: Some("threejs_web".to_string()),
+            ..EventQueryFilters::default()
+        },
+    );
+    let action_response = ledger.query_events(&action_query);
+
+    assert_eq!(action_response.schema, SCHEMA_EVENT_QUERY);
+    assert_eq!(
+        action_response.query_id.as_str(),
+        "query:events:move_cube_03"
+    );
+    assert_eq!(action_response.events.len(), 2);
+    assert_eq!(action_response.summary.event_count, 2);
+    assert_eq!(
+        action_response.summary.event_type_counts["runtime.action_result"],
+        1
+    );
+    assert_eq!(action_response.summary.event_type_counts["human.accept"], 1);
+    assert_eq!(
+        action_response.summary.participant_kind_counts["runtime"],
+        1
+    );
+    assert_eq!(action_response.summary.participant_kind_counts["human"], 1);
+    assert_eq!(action_response.summary.adapter_counts["threejs_web"], 2);
+    assert_eq!(
+        action_response.summary.embedded_verdict_counts["verified"],
+        1
+    );
+
+    let verified_result_query = EventQuery::new(EventQueryFilters {
+        action_id: Some(action_id),
+        event_type: Some("runtime.action_result".to_string()),
+        verdict: Some(Verdict::Verified),
+        ..EventQueryFilters::default()
+    });
+    let verified_result_response = ledger.query_events(&verified_result_query);
+    assert_eq!(verified_result_response.events.len(), 1);
+    assert_eq!(
+        verified_result_response.events[0]
+            .verification
+            .as_ref()
+            .unwrap()
+            .verified_to
+            .as_ref()
+            .unwrap(),
+        &TargetRef::entity(&entity_id)
+    );
+}
+
+#[test]
+fn feedback_query_envelope_filters_and_summarizes_core_feedback() {
+    let action_id = ActionId::from_raw("act_move_cube_04");
+    let entity_id = EntityId::from_raw("cube_04");
+    let source_event_id = EventId::from_raw("evt_reject_move_cube_04");
+    let target_event_id = EventId::from_raw("evt_move_cube_04");
+
+    let mut feedback = Feedback::new(source_event_id.clone());
+    feedback.feedback_id = FeedbackId::from_raw("fb_reject_move_cube_04");
+    feedback.target.events.push(target_event_id.clone());
+    feedback.target.actions.push(action_id.clone());
+    feedback.target.entities.push(entity_id.clone());
+    feedback.target.adapter = Some("threejs_web".to_string());
+    feedback.raw = json!({"decision": "reject", "note": "movement felt wrong"});
+    feedback.normalized = json!({"decision": "reject"});
+
+    let mut ledger = WorldLedger::new();
+    ledger.append_feedback(feedback).unwrap();
+
+    let query = FeedbackQuery::with_id(
+        FeedbackQueryId::from_raw("query:feedback:move_cube_04"),
+        FeedbackQueryFilters {
+            source_event_id: Some(source_event_id),
+            target_event_id: Some(target_event_id),
+            action_id: Some(action_id.clone()),
+            entity_id: Some(entity_id),
+            adapter: Some("threejs_web".to_string()),
+            changes_world_verdict: Some(false),
+            ..FeedbackQueryFilters::default()
+        },
+    );
+    let response = ledger.query_feedback(&query);
+
+    assert_eq!(response.schema, SCHEMA_FEEDBACK_QUERY);
+    assert_eq!(response.query_id.as_str(), "query:feedback:move_cube_04");
+    assert_eq!(response.feedback.len(), 1);
+    assert_eq!(
+        response.feedback[0].feedback_id.as_str(),
+        "fb_reject_move_cube_04"
+    );
+    assert_eq!(response.feedback[0].normalized["decision"], "reject");
+    assert_eq!(response.summary.feedback_count, 1);
+    assert_eq!(response.summary.world_verdict_mutation_attempt_count, 0);
+    assert_eq!(response.summary.target_event_count, 1);
+    assert_eq!(response.summary.target_action_count, 1);
+    assert_eq!(response.summary.target_entity_count, 1);
+    assert_eq!(response.summary.adapter_counts["threejs_web"], 1);
+
+    let action_response = ledger.query_feedback(&FeedbackQuery::new(
+        FeedbackQueryFilters::by_action(action_id),
+    ));
+    assert_eq!(action_response.feedback.len(), 1);
+
+    let mut invalid_feedback = Feedback::new(EventId::from_raw("evt_accept_invalid"));
+    invalid_feedback.changes_world_verdict = true;
+    assert_eq!(
+        ledger.append_feedback(invalid_feedback).unwrap_err(),
+        WorldCoreError::HumanDecisionChangesVerification
+    );
+}
+
+#[test]
+fn evidence_query_envelope_filters_and_summarizes_core_evidence() {
+    let action_id = ActionId::from_raw("act_move_cube_03");
+    let entity_id = EntityId::from_raw("cube_03");
+    let mut runtime_event =
+        Event::new("runtime.action_result", world_id(), runtime(), provenance());
+    runtime_event.event_id = EventId::from_raw("evt_move_cube_03");
+    runtime_event.refs.entities.push(entity_id.clone());
+    runtime_event.refs.actions.push(action_id.clone());
+    runtime_event.verification = Some(
+        Verification::new(
+            Some(action_id.clone()),
+            Verdict::Verified,
+            None,
+            "web_scene_projection_check",
+            Some(TargetRef::entity(&entity_id)),
+            evidence(
+                "web_scene_projection_check",
+                json!({"projected": true, "pixel_coverage": 0.1}),
+            ),
+        )
+        .unwrap(),
+    );
+
+    let mut ledger = WorldLedger::new();
+    ledger.append_event(runtime_event).unwrap();
+
+    let query = EvidenceQuery::with_id(
+        EvidenceQueryId::from_raw("query:web:move_cube_03"),
+        EvidenceQueryFilters {
+            action_id: Some(action_id),
+            verdict: Some(Verdict::Verified),
+            method: Some("web_scene_projection_check".to_string()),
+            adapter_kind: Some("threejs_web".to_string()),
+            ..EvidenceQueryFilters::default()
+        },
+    );
+    let response = ledger.query_evidence(&query);
+
+    assert_eq!(response.schema, SCHEMA_EVIDENCE_QUERY);
+    assert_eq!(response.query_id.as_str(), "query:web:move_cube_03");
+    assert_eq!(response.events.len(), 1);
+    assert_eq!(response.verifications.len(), 1);
+    assert_eq!(response.summary.event_count, 1);
+    assert_eq!(response.summary.verification_count, 1);
+    assert_eq!(response.summary.verdict_counts["verified"], 1);
+    assert_eq!(response.summary.adapter_counts["threejs_web"], 1);
+    assert_eq!(
+        response.verifications[0].verified_to.as_ref().unwrap(),
+        &TargetRef::entity(&entity_id)
+    );
+}

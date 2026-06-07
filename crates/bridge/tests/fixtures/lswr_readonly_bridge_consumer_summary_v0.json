@@ -1,0 +1,87 @@
+{
+  "schema": "agent_bridge.lswr.readonly_bridge_consumer_summary.v0",
+  "projection_schema": "agent_bridge.lswr.readonly_bridge_snapshot.v0",
+  "snapshot_sha256": "sha256:5ff171f505327b9d93f01a1dfc44a6159a00f48e6085a5e7a63e5eded6629495",
+  "readback_mode": "detailed_snapshot",
+  "read_only_confirmed": true,
+  "safety": {
+    "read_only": true,
+    "mutation_surface": "none",
+    "mcp_tool_registration": false,
+    "snapshot": true,
+    "query": true,
+    "patch": false,
+    "action": false,
+    "invoke": false
+  },
+  "counts": {
+    "actions": 1,
+    "events": 2,
+    "verifications": 1,
+    "feedback": 1,
+    "rollback_records": 1
+  },
+  "outcome_counts": {
+    "verified": 1,
+    "not_verified": 0,
+    "blocked": 0,
+    "feedback_changes_world_verdict": 0
+  },
+  "query_surfaces": [
+    "world.actions.query",
+    "world.events.query",
+    "world.evidence.query",
+    "world.feedback.query",
+    "world.rollbacks.query"
+  ],
+  "verified": [
+    {
+      "action_id": "action:move_cube_readonly_fixture",
+      "verdict": "verified",
+      "method": "semantic_state_query",
+      "reason": null,
+      "target_kind": "entity",
+      "target_id": "entity:cube_readonly_fixture",
+      "evidence_adapter": "semantic_scene",
+      "evidence_method": "semantic_state_query",
+      "evidence_summary": "semantic state reports the expected transform",
+      "raw_available": true
+    }
+  ],
+  "not_verified": [],
+  "blocked": [],
+  "feedback": [
+    {
+      "feedback_id": "feedback:readonly_bridge_fixture_accept",
+      "source_event_id": "event:move_cube_readonly_fixture_accept",
+      "decision": "accept",
+      "changes_world_verdict": false,
+      "target_entities": [
+        "entity:cube_readonly_fixture"
+      ],
+      "target_actions": [
+        "action:move_cube_readonly_fixture"
+      ],
+      "target_events": [
+        "event:move_cube_readonly_fixture_result"
+      ],
+      "target_rollback_groups": [
+        "rollback:move_cube_readonly_fixture"
+      ]
+    }
+  ],
+  "rollbacks": [
+    {
+      "rollback_group": "rollback:move_cube_readonly_fixture",
+      "actions": [
+        "action:move_cube_readonly_fixture"
+      ],
+      "verification_event_id": "event:move_cube_readonly_fixture_result"
+    }
+  ],
+  "guidance": [
+    "Verified items come from adapter or runtime evidence only.",
+    "Human feedback remains feedback and must not alter verification verdicts.",
+    "Rollback records describe reversible before and after state; this summary does not execute rollback."
+  ]
+}
