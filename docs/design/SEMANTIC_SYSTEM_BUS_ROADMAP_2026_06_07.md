@@ -17,6 +17,7 @@ Related documents:
 - [Cross-Platform Adapter Conformance](SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_CONFORMANCE_2026_06_07.md)
 - [macOS AX Probe](SEMANTIC_SYSTEM_BUS_MACOS_AX_PROBE_2026_06_07.md)
 - [macOS AX Verify](SEMANTIC_SYSTEM_BUS_MACOS_AX_VERIFY_2026_06_07.md)
+- [Adapter Report](SEMANTIC_SYSTEM_BUS_ADAPTER_REPORT_2026_06_07.md)
 
 ## 0. Decision
 
@@ -505,6 +506,55 @@ Initial landing:
 - extended the semantic bus fixture validator to enforce read-only posture,
   platform `source_adapter` prefixes, OCR fallback, shared recover vocabulary,
   canonical verify-target objects, and gated mutating affordance metadata.
+
+### SSB-9 - macOS AX runtime probe
+
+Deliverable:
+
+- read-only macOS AX/System Events feasibility probe;
+- semantic wrapper for bounded frontmost-app/window state;
+- no permission prompt and no host mutation.
+
+Initial landing:
+
+- [Semantic System Bus macOS AX Probe](SEMANTIC_SYSTEM_BUS_MACOS_AX_PROBE_2026_06_07.md);
+- `macos_ax_probe` reports platform support, AX trust state, frontmost app
+  metadata, and bounded window summaries;
+- `semantic_bus=true` returns
+  `agent_bridge.semantic_bus.macos_ax_probe.v0`.
+
+### SSB-10 - macOS AX runtime verifier
+
+Deliverable:
+
+- read-only macOS AX verifier over the same bounded observation surface;
+- predicate-level postcondition checks for AX trust, frontmost app, and window
+  state;
+- retry/replan/proceed recovery semantics.
+
+Initial landing:
+
+- [Semantic System Bus macOS AX Verify](SEMANTIC_SYSTEM_BUS_MACOS_AX_VERIFY_2026_06_07.md);
+- `macos_ax_verify` checks one predicate without activating apps, focusing
+  windows, clicking, typing, moving, or resizing;
+- `semantic_bus=true` returns
+  `agent_bridge.semantic_bus.macos_ax_verify.v0`.
+
+### SSB-11 - Adapter evidence report
+
+Deliverable:
+
+- read-only MCP report for adapter evidence levels;
+- source/fixture/doc asset checks;
+- gap output for fixture-only or design-only adapter states.
+
+Initial landing:
+
+- [Semantic System Bus Adapter Report](SEMANTIC_SYSTEM_BUS_ADAPTER_REPORT_2026_06_07.md);
+- `semantic_bus_adapter_report` classifies adapters as `runtime_backed`,
+  `fixture_backed`, or `design_only`;
+- the report does not execute live probes, restart services, capture
+  screenshots, or mutate host state.
 
 ## 7. Non-goals
 

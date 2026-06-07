@@ -3043,6 +3043,492 @@ fn macos_ax_verify_error(error: Value) -> ToolResult {
 }
 
 // ===========================================================================
+//                       semantic_bus_adapter_report
+// ===========================================================================
+
+const SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA: &str =
+    "agent_bridge.semantic_bus.adapter_report.v0";
+
+pub struct SemanticBusAdapterReportTool {
+    _hub: Hub,
+}
+
+impl SemanticBusAdapterReportTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SemanticBusAdapterReportTool {
+    fn name(&self) -> &'static str {
+        "semantic_bus_adapter_report"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Semantic System Bus adapter conformance report. \
+                 It inspects local repo scripts, docs, and fixtures to classify adapters \
+                 as runtime-backed, fixture-backed, or design-only; it never runs probes, \
+                 restarts services, captures screenshots, or mutates host state."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Agent-Bridge repo root to inspect. Defaults to current dir when it looks like the repo, then the build-time repo root."
+                    },
+                    "include_details": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include per-row asset checks and fixture contract status."
+                    },
+                    "include_design_only": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Include planned/no-runtime rows."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(&semantic_bus_adapter_report_payload(&args)))
+    }
+}
+
+struct SemanticBusAdapterSpec {
+    adapter_id: &'static str,
+    platform: &'static str,
+    adapter_family: &'static str,
+    tool: Option<&'static str>,
+    semantic_schema: &'static str,
+    source_schema: &'static str,
+    evidence_level: &'static str,
+    status: &'static str,
+    channels: &'static [&'static str],
+    fallback_order: &'static [&'static str],
+    runtime_assets: &'static [&'static str],
+    fixture_assets: &'static [&'static str],
+    doc_assets: &'static [&'static str],
+    notes: &'static [&'static str],
+}
+
+fn semantic_bus_adapter_report_payload(args: &Value) -> Value {
+    let include_details = args
+        .get("include_details")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let include_design_only = args
+        .get("include_design_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let repo_root = semantic_bus_adapter_report_repo_root(args);
+    let adapters: Vec<Value> = semantic_bus_adapter_specs(include_design_only)
+        .into_iter()
+        .map(|spec| semantic_bus_adapter_row(&repo_root, include_details, spec))
+        .collect();
+    let summary = semantic_bus_adapter_report_summary(&adapters);
+    let gaps = semantic_bus_adapter_report_gaps(&adapters);
+
+    json!({
+        "schema": SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA,
+        "generated_at_unix": SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        "read_only": true,
+        "live_checks_executed": false,
+        "repo_root": repo_root.display().to_string(),
+        "summary": summary,
+        "adapters": adapters,
+        "gaps": gaps,
+        "next_recommended_slice": {
+            "id": "ssb-12-runtime-health-adapter",
+            "reason": "daemon_http and Palace are fixture-described but not yet backed by a compact live read-only SSB report surface"
+        }
+    })
+}
+
+fn semantic_bus_adapter_specs(include_design_only: bool) -> Vec<SemanticBusAdapterSpec> {
+    let mut specs = vec![
+        SemanticBusAdapterSpec {
+            adapter_id: "linux_desktop_snapshot",
+            platform: "linux",
+            adapter_family: "linux_desktop",
+            tool: Some("desktop_snapshot"),
+            semantic_schema: "agent_bridge.semantic_bus.desktop_snapshot.v0",
+            source_schema: "desktop_snapshot/v0.5",
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["sway_tree", "atspi", "screenshot_optional"],
+            fallback_order: &["desktop_snapshot", "vision_grounding_ocr"],
+            runtime_assets: &["scripts/desktop_snapshot.py"],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/linux_desktop_snapshot_state.json"],
+            doc_assets: &[
+                "docs/design/SEMANTIC_SYSTEM_BUS_DESKTOP_SNAPSHOT_RUNTIME_2026_06_07.md",
+                "docs/design/SEMANTIC_SYSTEM_BUS_LINUX_ADAPTER_CONFORMANCE_2026_06_07.md",
+            ],
+            notes: &["Linux runtime-backed read path; screenshots remain opt-in."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "linux_desktop_verify",
+            platform: "linux",
+            adapter_family: "linux_desktop",
+            tool: Some("desktop_verify"),
+            semantic_schema: "agent_bridge.semantic_bus.desktop_verify.v0",
+            source_schema: "desktop_verify/v0",
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["sway_tree", "atspi"],
+            fallback_order: &["desktop_verify", "desktop_snapshot", "vision_grounding_ocr"],
+            runtime_assets: &["scripts/desktop_verify.py"],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/linux_desktop_verify_postcondition.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_DESKTOP_VERIFY_RUNTIME_2026_06_07.md"],
+            notes: &["Read-only postflight verifier; recover hints map to retry/replan/proceed."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "linux_vision_grounding_ocr",
+            platform: "linux",
+            adapter_family: "vision_fallback",
+            tool: Some("vision_grounding_ocr"),
+            semantic_schema: "vision_grounding_result.v0",
+            source_schema: "vision_grounding_result.v0",
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["caller_provided_image", "ocr"],
+            fallback_order: &["vision_grounding_ocr"],
+            runtime_assets: &["scripts/vision_grounding_ocr.py"],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/linux_vision_grounding_ocr_fallback.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_CONFORMANCE_2026_06_07.md"],
+            notes: &["Fallback grounding only; it does not capture screenshots by itself."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "macos_ax_probe",
+            platform: "macos",
+            adapter_family: "macos_ax",
+            tool: Some("macos_ax_probe"),
+            semantic_schema: MACOS_AX_PROBE_SEMANTIC_SCHEMA,
+            source_schema: MACOS_AX_PROBE_SOURCE_SCHEMA,
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["ax_trust", "system_events", "frontmost_app_windows"],
+            fallback_order: &["macos_ax_probe", "vision_grounding_ocr"],
+            runtime_assets: &["scripts/macos_ax_probe.py"],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/macos_ax_snapshot_state.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_MACOS_AX_PROBE_2026_06_07.md"],
+            notes: &["No permission prompt; bounded to existing Accessibility trust and frontmost-app state."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "macos_ax_verify",
+            platform: "macos",
+            adapter_family: "macos_ax",
+            tool: Some("macos_ax_verify"),
+            semantic_schema: MACOS_AX_VERIFY_SEMANTIC_SCHEMA,
+            source_schema: MACOS_AX_VERIFY_SOURCE_SCHEMA,
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["ax_trust", "system_events", "frontmost_app_windows"],
+            fallback_order: &["macos_ax_verify", "macos_ax_probe", "vision_grounding_ocr"],
+            runtime_assets: &["scripts/macos_ax_verify.py"],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/macos_ax_verify_postcondition.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_MACOS_AX_VERIFY_2026_06_07.md"],
+            notes: &["Read-only predicate verifier over the same bounded macOS AX surface."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "windows_uia_snapshot_fixture",
+            platform: "windows",
+            adapter_family: "windows_uia",
+            tool: None,
+            semantic_schema: "agent_bridge.semantic_bus.desktop_snapshot.v0",
+            source_schema: "windows.uia.snapshot.fixture",
+            evidence_level: "fixture_backed",
+            status: "fixture_backed_no_runtime_tool",
+            channels: &["uia_tree"],
+            fallback_order: &["windows_uia", "vision_grounding_ocr"],
+            runtime_assets: &[],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/windows_uia_snapshot_state.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_MAPPING_2026_06_07.md"],
+            notes: &["Pinned fixture/mapping only; no Windows runtime adapter is registered yet."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "windows_uia_verify_fixture",
+            platform: "windows",
+            adapter_family: "windows_uia",
+            tool: None,
+            semantic_schema: "agent_bridge.semantic_bus.desktop_verify.v0",
+            source_schema: "windows.uia.verify.fixture",
+            evidence_level: "fixture_backed",
+            status: "fixture_backed_no_runtime_tool",
+            channels: &["uia_tree"],
+            fallback_order: &["windows_uia", "vision_grounding_ocr"],
+            runtime_assets: &[],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/windows_uia_verify_postcondition.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_MAPPING_2026_06_07.md"],
+            notes: &["Pinned verify fixture only; runtime checker still needs a Windows host implementation."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "daemon_http_service_fixture",
+            platform: "local",
+            adapter_family: "process_daemon",
+            tool: Some("daemon_http"),
+            semantic_schema: "agent_bridge.semantic_bus.service_state.v0",
+            source_schema: "daemon_http.fixture",
+            evidence_level: "fixture_backed",
+            status: "fixture_contract_backed_live_not_checked",
+            channels: &["http_health", "process_state"],
+            fallback_order: &["http_health", "process_state"],
+            runtime_assets: &[],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/daemon_http_service.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_CONFORMANCE_2026_06_07.md"],
+            notes: &["Fixture carries adapter_contract; this report does not call or restart daemon-http."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "palace_memory_region_fixture",
+            platform: "local",
+            adapter_family: "palace_memory_graph",
+            tool: None,
+            semantic_schema: "agent_bridge.semantic_bus.memory_region.v0",
+            source_schema: "palace.memory_graph.fixture",
+            evidence_level: "fixture_backed",
+            status: "fixture_static_example",
+            channels: &["memory_region", "memory_graph"],
+            fallback_order: &["palace_region", "memory_graph_topology"],
+            runtime_assets: &[],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/palace_memory_region.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_PALACE_DIFF_PILOT_2026_06_07.md"],
+            notes: &["Static illustrative fixture; report flags the missing adapter_contract gap."],
+        },
+    ];
+    if include_design_only {
+        specs.push(SemanticBusAdapterSpec {
+            adapter_id: "windows_uia_runtime_adapter",
+            platform: "windows",
+            adapter_family: "windows_uia",
+            tool: None,
+            semantic_schema: "agent_bridge.semantic_bus.desktop_snapshot.v0",
+            source_schema: "windows.uia.runtime.planned",
+            evidence_level: "design_only",
+            status: "planned_no_runtime_assets",
+            channels: &["uia_tree"],
+            fallback_order: &["windows_uia", "vision_grounding_ocr"],
+            runtime_assets: &[],
+            fixture_assets: &[],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_MAPPING_2026_06_07.md"],
+            notes: &["Design target only; fixture coverage exists separately, but no Windows runtime script/tool is present."],
+        });
+    }
+    specs
+}
+
+fn semantic_bus_adapter_report_repo_root(args: &Value) -> PathBuf {
+    if let Some(cwd) = args.get("cwd").and_then(Value::as_str) {
+        return PathBuf::from(cwd);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        if cwd.join("crates/bridge/fixtures/semantic_bus").exists() {
+            return cwd;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn semantic_bus_adapter_row(
+    repo_root: &Path,
+    include_details: bool,
+    spec: SemanticBusAdapterSpec,
+) -> Value {
+    let runtime_assets = semantic_bus_asset_list(repo_root, spec.runtime_assets);
+    let fixture_assets = semantic_bus_fixture_asset_list(repo_root, spec.fixture_assets);
+    let doc_assets = semantic_bus_asset_list(repo_root, spec.doc_assets);
+    let all_runtime_present = runtime_assets.iter().all(semantic_bus_asset_present);
+    let any_fixture_present = fixture_assets.iter().any(semantic_bus_asset_present);
+    let any_doc_present = doc_assets.iter().any(semantic_bus_asset_present);
+    let ready_for_runtime = spec.evidence_level == "runtime_backed"
+        && all_runtime_present
+        && any_doc_present;
+    let fixture_adapter_contract_present = fixture_assets.iter().any(|asset| {
+        asset
+            .get("has_adapter_contract")
+            .and_then(Value::as_bool)
+            == Some(true)
+    });
+    let fixture_without_adapter_contract = fixture_assets.iter().any(|asset| {
+        semantic_bus_asset_present(asset)
+            && asset
+                .get("has_adapter_contract")
+                .and_then(Value::as_bool)
+                == Some(false)
+    });
+
+    let mut row = json!({
+        "adapter_id": spec.adapter_id,
+        "platform": spec.platform,
+        "adapter_family": spec.adapter_family,
+        "tool": spec.tool,
+        "semantic_schema": spec.semantic_schema,
+        "source_schema": spec.source_schema,
+        "evidence_level": spec.evidence_level,
+        "status": spec.status,
+        "read_only": true,
+        "broad_host_mutation": false,
+        "channels": spec.channels,
+        "fallback_order": spec.fallback_order,
+        "runtime_assets": spec.runtime_assets,
+        "fixture_assets": spec.fixture_assets,
+        "doc_assets": spec.doc_assets,
+        "notes": spec.notes,
+        "ready_for_runtime": ready_for_runtime,
+        "asset_summary": {
+            "runtime_assets_present": all_runtime_present,
+            "fixture_assets_present": any_fixture_present,
+            "doc_assets_present": any_doc_present,
+            "fixture_adapter_contract_present": fixture_adapter_contract_present,
+            "fixture_without_adapter_contract": fixture_without_adapter_contract
+        }
+    });
+    if include_details {
+        if let Some(obj) = row.as_object_mut() {
+            obj.insert(
+                "assets".to_string(),
+                json!({
+                    "runtime": runtime_assets,
+                    "fixtures": fixture_assets,
+                    "docs": doc_assets
+                }),
+            );
+        }
+    }
+    row
+}
+
+fn semantic_bus_asset_list(repo_root: &Path, rels: &[&str]) -> Vec<Value> {
+    rels.iter().map(|rel| semantic_bus_asset(repo_root, rel)).collect()
+}
+
+fn semantic_bus_fixture_asset_list(repo_root: &Path, rels: &[&str]) -> Vec<Value> {
+    rels.iter()
+        .map(|rel| semantic_bus_fixture_asset(repo_root, rel))
+        .collect()
+}
+
+fn semantic_bus_asset(repo_root: &Path, rel: &str) -> Value {
+    json!({
+        "path": rel,
+        "exists": repo_root.join(rel).exists()
+    })
+}
+
+fn semantic_bus_fixture_asset(repo_root: &Path, rel: &str) -> Value {
+    let path = repo_root.join(rel);
+    let has_adapter_contract = if path.exists() {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|v| v.get("adapter_contract").cloned())
+            .is_some()
+    } else {
+        false
+    };
+    json!({
+        "path": rel,
+        "exists": path.exists(),
+        "has_adapter_contract": has_adapter_contract
+    })
+}
+
+fn semantic_bus_asset_present(asset: &Value) -> bool {
+    asset.get("exists").and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn semantic_bus_adapter_report_summary(adapters: &[Value]) -> Value {
+    let mut by_evidence = Map::new();
+    let mut by_platform = Map::new();
+    let mut ready_for_runtime = 0u64;
+    for row in adapters {
+        semantic_bus_increment_count(
+            &mut by_evidence,
+            row.get("evidence_level")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown"),
+        );
+        semantic_bus_increment_count(
+            &mut by_platform,
+            row.get("platform")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown"),
+        );
+        if row
+            .get("ready_for_runtime")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            ready_for_runtime += 1;
+        }
+    }
+    json!({
+        "adapter_count": adapters.len(),
+        "by_evidence_level": by_evidence,
+        "by_platform": by_platform,
+        "ready_for_runtime_count": ready_for_runtime
+    })
+}
+
+fn semantic_bus_increment_count(counts: &mut Map<String, Value>, key: &str) {
+    let count = counts.get(key).and_then(Value::as_u64).unwrap_or(0) + 1;
+    counts.insert(key.to_string(), json!(count));
+}
+
+fn semantic_bus_adapter_report_gaps(adapters: &[Value]) -> Vec<Value> {
+    let mut gaps = Vec::new();
+    for row in adapters {
+        let adapter_id = row
+            .get("adapter_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let evidence_level = row
+            .get("evidence_level")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let assets = row.get("asset_summary").unwrap_or(&Value::Null);
+        if evidence_level == "design_only" {
+            gaps.push(json!({
+                "adapter_id": adapter_id,
+                "gap": "design_only_no_runtime_or_fixture_contract",
+                "recommendation": "add a bounded read-only runtime adapter or downgrade expectations in planning"
+            }));
+        }
+        if assets
+            .get("fixture_without_adapter_contract")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            gaps.push(json!({
+                "adapter_id": adapter_id,
+                "gap": "fixture_missing_adapter_contract",
+                "recommendation": "add adapter_contract metadata before treating the fixture as an adapter contract"
+            }));
+        }
+        if evidence_level == "runtime_backed"
+            && !row
+                .get("ready_for_runtime")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
+            gaps.push(json!({
+                "adapter_id": adapter_id,
+                "gap": "runtime_assets_or_docs_missing",
+                "recommendation": "restore expected script/doc assets before advertising runtime-backed status"
+            }));
+        }
+    }
+    gaps
+}
+
+// ===========================================================================
 //                            vision_grounding_ocr
 // ===========================================================================
 
@@ -30915,6 +31401,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // macOS adapter verifier: read-only predicate check over the same bounded
     // AX/System Events observation surface as macos_ax_probe.
     "macos_ax_verify",
+    // SSB conformance inventory: read-only source/fixture/doc classification.
+    // It does not execute live probes or mutate desktop/service state.
+    "semantic_bus_adapter_report",
     // External browser-lite discovery: read-only probe only. This is not the
     // mutating browser_* automation surface and does not change browser routing.
     "browser_lite_probe",
@@ -32780,6 +33269,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MacosAxVerifyTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SemanticBusAdapterReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -38009,6 +38504,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "mobile_ios_syslog_tail"));
         assert!(p.includes(Tier::Standard, "macos_ax_probe"));
         assert!(p.includes(Tier::Standard, "macos_ax_verify"));
+        assert!(p.includes(Tier::Standard, "semantic_bus_adapter_report"));
         assert!(p.includes(Tier::Standard, "browser_lite_probe"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
@@ -38018,14 +38514,15 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 47 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 48 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(35: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(36: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_related_keys_preflight
         //      + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
-        //      + macos_ax_probe + macos_ax_verify + browser_lite_probe
+        //      + macos_ax_probe + macos_ax_verify + semantic_bus_adapter_report
+        //      + browser_lite_probe
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
         //      + agent_orchestrate_scan, added by d4fd74d).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
@@ -38035,7 +38532,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // +memory_related_keys_preflight brought DIRECT 32→33, total 44→45.
         // +macos_ax_probe brought DIRECT 33→34, total 45→46.
         // +macos_ax_verify brought DIRECT 34→35, total 46→47.
-        assert_eq!(extras.len(), 47);
+        // +semantic_bus_adapter_report brought DIRECT 35→36, total 47→48.
+        assert_eq!(extras.len(), 48);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -38072,6 +38570,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"desktop_verify"));
         assert!(extras.contains(&"macos_ax_probe"));
         assert!(extras.contains(&"macos_ax_verify"));
+        assert!(extras.contains(&"semantic_bus_adapter_report"));
         assert!(extras.contains(&"browser_lite_probe"));
         // Remote session steering (d4fd74d) — direct-exposed for Codex
         // orchestrators that already carry agent_spawn + agent_session_*.
@@ -38455,6 +38954,96 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .get("semantic_include_raw")
             .is_some());
         assert!(tool.input_schema["properties"].get("click").is_none());
+    }
+
+    #[test]
+    fn registry_exposes_semantic_bus_adapter_report_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "semantic_bus_adapter_report"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "semantic_bus_adapter_report")
+            .expect("semantic_bus_adapter_report schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("never runs probes"));
+        assert!(tool.input_schema["properties"].get("cwd").is_some());
+        assert!(tool.input_schema["properties"].get("include_details").is_some());
+        assert!(tool.input_schema["properties"].get("include_design_only").is_some());
+        assert!(tool.input_schema["properties"].get("run_live").is_none());
+    }
+
+    #[test]
+    fn semantic_bus_adapter_report_classifies_adapter_evidence() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let payload = semantic_bus_adapter_report_payload(&json!({
+            "cwd": repo_root.display().to_string(),
+            "include_details": true
+        }));
+
+        assert_eq!(
+            payload["schema"].as_str().unwrap(),
+            SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA
+        );
+        assert_eq!(payload["read_only"].as_bool(), Some(true));
+        assert_eq!(payload["live_checks_executed"].as_bool(), Some(false));
+
+        let adapters = payload["adapters"].as_array().expect("adapters array");
+        let find = |id: &str| {
+            adapters
+                .iter()
+                .find(|row| row["adapter_id"].as_str() == Some(id))
+                .unwrap_or_else(|| panic!("missing adapter row {id}"))
+        };
+
+        let macos_verify = find("macos_ax_verify");
+        assert_eq!(
+            macos_verify["evidence_level"].as_str(),
+            Some("runtime_backed")
+        );
+        assert_eq!(macos_verify["ready_for_runtime"].as_bool(), Some(true));
+
+        let daemon = find("daemon_http_service_fixture");
+        assert_eq!(daemon["evidence_level"].as_str(), Some("fixture_backed"));
+        assert_eq!(
+            daemon["asset_summary"]["fixture_adapter_contract_present"].as_bool(),
+            Some(true)
+        );
+
+        let palace = find("palace_memory_region_fixture");
+        assert_eq!(palace["evidence_level"].as_str(), Some("fixture_backed"));
+        assert_eq!(
+            palace["asset_summary"]["fixture_without_adapter_contract"].as_bool(),
+            Some(true)
+        );
+
+        let windows_runtime = find("windows_uia_runtime_adapter");
+        assert_eq!(
+            windows_runtime["evidence_level"].as_str(),
+            Some("design_only")
+        );
+
+        let summary = &payload["summary"];
+        assert!(summary["by_evidence_level"]["runtime_backed"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 5);
+        assert!(summary["by_evidence_level"]["fixture_backed"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 4);
+        assert!(summary["by_evidence_level"]["design_only"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1);
+
+        let gaps = payload["gaps"].as_array().expect("gaps array");
+        assert!(gaps.iter().any(|gap| {
+            gap["adapter_id"].as_str() == Some("palace_memory_region_fixture")
+                && gap["gap"].as_str() == Some("fixture_missing_adapter_contract")
+        }));
     }
 
     #[tokio::test]

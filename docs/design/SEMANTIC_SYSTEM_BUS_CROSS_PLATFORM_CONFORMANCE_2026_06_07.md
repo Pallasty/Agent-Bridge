@@ -163,13 +163,14 @@ This slice intentionally does not:
 
 ## 7. Next Slice
 
-The next useful implementation step is one of:
+The next useful implementation steps were:
 
 1. a read-only macOS feasibility probe that reports AX permission and a bounded
-   frontmost-app/window snapshot; or
-2. a read-only adapter-contract fixture report that makes Palace/daemon-http
-   show adapter conformance status.
+   frontmost-app/window snapshot;
+2. a read-only macOS verifier over the same bounded observation surface;
+3. a read-only adapter evidence report that keeps Palace/daemon-http and
+   Windows UIA fixture/design status explicit.
 
-The macOS probe is the stronger implementation proof if the next lane remains
-local to this Mac. The Palace/daemon report is better if the next lane stays
-purely product-visible and cross-platform.
+SSB-9, SSB-10, and SSB-11 landed those slices. The next useful step is a live
+but still read-only service-state adapter for daemon-http and Palace, so
+product-visible local runtime state can join the same conformance vocabulary.
