@@ -247,22 +247,28 @@ class PalaceUiContractTests(unittest.TestCase):
     def test_zoom_keeps_node_glyphs_screen_sized(self):
         html = palace_html()
 
+        self.assertIn("screenGlyphSize", html)
+        self.assertIn("screenHaloPad", html)
         self.assertIn("displaySize", html)
         self.assertIn("displayHaloPad", html)
+        self.assertIn("function nodeGlyphScreenSize(node)", html)
+        self.assertIn("function nodeHaloScreenPad(node)", html)
         self.assertIn("function updateZoomScaledNodeMetrics()", html)
         self.assertIn("function scheduleZoomScaledNodeMetrics()", html)
         self.assertIn('state.cy.on("zoom"', html)
+        self.assertIn("screenGlyphSize / zoom", html)
+        self.assertIn("screenHaloPad / zoom", html)
         self.assertIn('"width": "data(displaySize)"', html)
         self.assertIn('"height": "data(displaySize)"', html)
 
-    def test_overview_zoom_keeps_node_glyphs_small_until_user_moves_in(self):
+    def test_overview_and_close_zoom_use_the_same_screen_glyph_size(self):
         html = palace_html()
 
-        self.assertIn("const NODE_GLYPH_LOCK_ZOOM", html)
-        self.assertIn("function glyphMetricZoom(zoom)", html)
-        self.assertIn("Math.max(zoom, NODE_GLYPH_LOCK_ZOOM)", html)
-        self.assertIn("const metricZoom = glyphMetricZoom(zoom);", html)
-        self.assertIn("baseSize / metricZoom", html)
+        self.assertIn("const NODE_GLYPH_SCREEN_SCALE", html)
+        self.assertIn("const NODE_GLYPH_SCREEN_MIN", html)
+        self.assertIn("const NODE_GLYPH_SCREEN_MAX", html)
+        self.assertNotIn("NODE_GLYPH_LOCK_ZOOM", html)
+        self.assertNotIn("glyphMetricZoom(zoom)", html)
 
     def test_zoom_declutters_labels_until_the_user_moves_closer(self):
         html = palace_html()

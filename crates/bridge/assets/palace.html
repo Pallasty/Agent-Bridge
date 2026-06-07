@@ -3133,7 +3133,10 @@ const FRESH_WINDOW_SECS = 3600;
 const STALE_WINDOW_SECS = 7 * 24 * 3600;
 
 const GRAPH_LAYOUT_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-const NODE_GLYPH_LOCK_ZOOM = 0.65;
+const NODE_GLYPH_SCREEN_SCALE = 0.28;
+const NODE_GLYPH_SCREEN_MIN = 5;
+const NODE_GLYPH_SCREEN_MAX = 14;
+const NODE_GLYPH_MODEL_MIN = 1;
 const LABEL_SHOW_ANCHOR_ZOOM = 0.42;
 const LABEL_SHOW_ALL_ZOOM = 0.82;
 
@@ -3319,21 +3322,39 @@ function labelForZoom(node, zoom) {
   return "";
 }
 
-function glyphMetricZoom(zoom) {
-  return Math.max(zoom, NODE_GLYPH_LOCK_ZOOM);
+function nodeGlyphScreenSizeFromSize(size) {
+  return clampNumber(
+    (Number(size) || 28) * NODE_GLYPH_SCREEN_SCALE,
+    NODE_GLYPH_SCREEN_MIN,
+    NODE_GLYPH_SCREEN_MAX
+  );
+}
+
+function nodeHaloScreenPadFromPad(pad) {
+  const halo = Number(pad) || 0;
+  if (halo <= 0) return 0;
+  return clampNumber(halo * NODE_GLYPH_SCREEN_SCALE, 0, NODE_GLYPH_SCREEN_MAX * 0.5);
+}
+
+function nodeGlyphScreenSize(node) {
+  return nodeGlyphScreenSizeFromSize(node.data("size"));
+}
+
+function nodeHaloScreenPad(node) {
+  return nodeHaloScreenPadFromPad(node.data("haloPad"));
 }
 
 function updateZoomScaledNodeMetrics() {
   if (!state.cy) return;
   const zoom = clampNumber(Number(state.cy.zoom()) || 1, 0.15, 4.0);
-  const maxScale = 1 / 0.15;
-  const metricZoom = glyphMetricZoom(zoom);
   state.cy.batch(() => {
     state.cy.nodes().forEach(node => {
-      const baseSize = Number(node.data("size")) || 28;
-      const baseHaloPad = Number(node.data("haloPad")) || 0;
-      node.data("displaySize", clampNumber(baseSize / metricZoom, 4, baseSize * maxScale));
-      node.data("displayHaloPad", clampNumber(baseHaloPad / metricZoom, 0, baseHaloPad * maxScale));
+      const screenGlyphSize = nodeGlyphScreenSize(node);
+      const screenHaloPad = nodeHaloScreenPad(node);
+      node.data("screenGlyphSize", screenGlyphSize);
+      node.data("screenHaloPad", screenHaloPad);
+      node.data("displaySize", clampNumber(screenGlyphSize / zoom, NODE_GLYPH_MODEL_MIN, screenGlyphSize / 0.15));
+      node.data("displayHaloPad", clampNumber(screenHaloPad / zoom, 0, screenHaloPad / 0.15));
       const displayLabel = labelForZoom(node, zoom);
       node.data("displayLabel", displayLabel);
       node.data("labelOpacity", displayLabel ? 1 : 0);
@@ -3373,6 +3394,8 @@ function buildCy(data) {
       const hub = degInfo.enableHubs && degree >= degInfo.hubThreshold ? 1 : 0;
       const size = nodeSize(n.importance, access);
       const halo = haloPad(access);
+      const screenGlyphSize = nodeGlyphScreenSizeFromSize(size);
+      const screenHaloPad = nodeHaloScreenPadFromPad(halo);
       return {
         data: {
           id: n.id,
@@ -3382,11 +3405,13 @@ function buildCy(data) {
           access,
           color: colorForKind(n.kind),
           size,
-          displaySize: size,
+          screenGlyphSize,
+          displaySize: screenGlyphSize,
           displayLabel: n.label || n.id,
           labelOpacity: 1,
           haloPad: halo,
-          displayHaloPad: halo,
+          screenHaloPad,
+          displayHaloPad: screenHaloPad,
           haloOp: haloOp(access),
           source: n.source || "sqlite",
           tags: n.tags || [],
