@@ -4243,7 +4243,7 @@ impl McpTool for SemanticBusRuntimeConformanceTool {
     }
 }
 
-async fn semantic_bus_runtime_conformance_payload(args: &Value) -> Value {
+pub(crate) async fn semantic_bus_runtime_conformance_payload(args: &Value) -> Value {
     let now_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

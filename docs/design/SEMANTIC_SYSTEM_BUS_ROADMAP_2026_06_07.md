@@ -592,6 +592,23 @@ Initial landing:
 - the harness does not implement Windows UIA locally or pretend screenshot
   fallback is runtime evidence.
 
+### SSB-14 - Remote harness export
+
+Deliverable:
+
+- read-only daemon-http endpoint for the runtime conformance snapshot;
+- tailnet-friendly JSON export surface for future remote nodes;
+- no local Windows UIA simulation on macOS.
+
+Initial landing:
+
+- [Semantic System Bus Remote Harness Export](SEMANTIC_SYSTEM_BUS_REMOTE_HARNESS_EXPORT_2026_06_07.md);
+- `GET /semantic-bus/runtime-conformance` returns
+  `agent_bridge.semantic_bus.runtime_conformance.v0`;
+- the endpoint composes the same read-only payload as
+  `semantic_bus_runtime_conformance` and does not restart services, mutate
+  Palace, capture screenshots, or write graph edges.
+
 ## 7. Non-goals
 
 - Do not make screenshots the primary architecture.
