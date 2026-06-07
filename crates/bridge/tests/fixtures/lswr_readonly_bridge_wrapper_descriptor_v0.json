@@ -1,0 +1,76 @@
+{
+  "schema": "agent_bridge.lswr.readonly_bridge_wrapper_descriptor.v0",
+  "wrapper_name": "lswr_readonly_bridge_display",
+  "state": "descriptor_only",
+  "purpose": "Describe the future read-only UI/MCP wrapper boundary for LSWR report packets without registering a tool or reading live runtime state.",
+  "schema_chain": {
+    "packet_schema": "agent_bridge.lswr.readonly_bridge_report_packet.v0",
+    "acceptance_schema": "agent_bridge.lswr.readonly_bridge_acceptance_matrix.v0",
+    "display_model_schema": "agent_bridge.lswr.readonly_bridge_display_model.v0"
+  },
+  "profile_gate": {
+    "current_exposure": "not_registered",
+    "candidate_tool_name": "lswr_readonly_bridge_display",
+    "mcp_registry_change": false,
+    "codex_essential_status": "not_exposed",
+    "minimum_profile_after_registry": "all",
+    "requires_separate_registry_change": true
+  },
+  "input_contract": {
+    "mode": "explicit_report_packet_payload",
+    "required_schema": "agent_bridge.lswr.readonly_bridge_report_packet.v0",
+    "requires_explicit_packet_payload": true,
+    "accepts_host_path": false,
+    "accepts_live_runtime": false,
+    "accepts_gui_capture": false
+  },
+  "output_contract": {
+    "schema": "agent_bridge.lswr.readonly_bridge_display_model.v0",
+    "contains_report_markdown": true,
+    "contains_display_readback": true,
+    "contains_mutating_handles": false
+  },
+  "safety_contract": {
+    "read_only": true,
+    "mutation_surface": "none",
+    "allowed_capabilities": [
+      "snapshot",
+      "query",
+      "display",
+      "report_markdown"
+    ],
+    "disallowed_capabilities": [
+      "patch",
+      "action",
+      "invoke",
+      "runtime_launch",
+      "gui_capture",
+      "host_path_read",
+      "file_system_write",
+      "memory_graph_write"
+    ]
+  },
+  "acceptance_contract": {
+    "required_overall_verdict": "accepted",
+    "required_display_status_label": "Ready for read-only display",
+    "required_display_status_tone": "success",
+    "required_wrapper_ready": true,
+    "required_matrix_gates": [
+      "schema_chain",
+      "packet_summary_consistency",
+      "read_only_safety",
+      "query_surface_contract",
+      "report_markdown_consistency",
+      "feedback_verdict_separation"
+    ],
+    "review_sensitive_gates": [
+      "detailed_readback"
+    ],
+    "all_gate_verdict": "passed"
+  },
+  "next_steps": [
+    "Keep this descriptor out of MCP registry changes until a separate exposure slice is opened.",
+    "Wrap only explicit report packet payloads; do not accept paths, launch runtime, or capture GUI state.",
+    "Expose the P30 display model only when the P29 matrix is accepted and display safety wrapper_ready is true."
+  ]
+}

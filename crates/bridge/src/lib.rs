@@ -36,6 +36,7 @@ pub mod lswr_snapshot_display;
 pub mod lswr_snapshot_report;
 pub mod lswr_snapshot_report_acceptance;
 pub mod lswr_snapshot_report_packet;
+pub mod lswr_snapshot_wrapper_descriptor;
 pub mod mcp_tools;
 pub mod notion_api;
 pub mod openai_api;
