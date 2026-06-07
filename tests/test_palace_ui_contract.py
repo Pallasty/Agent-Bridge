@@ -200,6 +200,18 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.regionNodeFilter = filter;", html)
         self.assertIn("showRegionWorkbench(regionId);", html)
 
+    def test_search_surfaces_result_navigation(self):
+        html = palace_html()
+
+        self.assertIn('id="search-nav"', html)
+        self.assertIn("searchCursor: 0", html)
+        self.assertIn("function searchResultRows(term)", html)
+        self.assertIn("function renderSearchNavigator()", html)
+        self.assertIn("function jumpToSearchResult(key)", html)
+        self.assertIn("data-search-result-key", html)
+        self.assertIn("state.searchCursor = nextCursor;", html)
+        self.assertIn("jumpToSearchResult(row.key);", html)
+
 
 if __name__ == "__main__":
     unittest.main()
