@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "export:fixture": "node scripts/export-fixture.mjs",
+    "verify:contract": "node scripts/verify-contract.mjs",
     "verify:browser": "node scripts/verify-browser.mjs"
   },
   "dependencies": {

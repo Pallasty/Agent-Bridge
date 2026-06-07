@@ -85,6 +85,11 @@ The integration fixtures intentionally cover more than one presentation shape:
   into the same ledger using event-to-event refs and Nexus evidence payloads,
   without requiring visual fields such as `screen_area` or `pixel_coverage`.
 
+The P8 fixture carries a copy of
+`prototypes/lswr-web-prototype/contract/p8_world_core_contract.json`, so the
+web export script and Rust mapping test assert the same counts, paths, and
+truth-boundary expectations.
+
 ## Local Verification
 
 From the workspace root:
