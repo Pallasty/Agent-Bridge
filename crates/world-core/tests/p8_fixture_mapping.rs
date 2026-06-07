@@ -1,7 +1,8 @@
 use ab_world_core::{
     ActionId, AdapterEvidence, AuthorityMode, BranchId, Event, EventId, EventProvenance, EventRefs,
-    Participant, ParticipantId, ParticipantKind, RollbackGroupId, RollbackRecord, TargetRef,
-    Verdict, Verification, WorldId, WorldLedger, SCHEMA_EVENT,
+    EvidenceQuery, EvidenceQueryFilters, EvidenceQueryId, Participant, ParticipantId,
+    ParticipantKind, RollbackGroupId, RollbackRecord, TargetRef, Verdict, Verification, WorldId,
+    WorldLedger, SCHEMA_EVENT, SCHEMA_EVIDENCE_QUERY,
 };
 use serde_json::{json, Value};
 
@@ -72,6 +73,44 @@ fn p8_world_export_maps_into_world_core_without_laundering_truth() {
         packet["contract"]["truth_boundary"]["not_verified_source_verified_to"]
     );
     assert_eq!(not_verified.evidence.payload["projected"], false);
+
+    let not_verified_query = EvidenceQuery::with_id(
+        EvidenceQueryId::from_raw("query:p8:not_verified"),
+        EvidenceQueryFilters {
+            verdict: Some(Verdict::NotVerified),
+            adapter_kind: Some("threejs_web".to_string()),
+            ..EvidenceQueryFilters::default()
+        },
+    );
+    let not_verified_response = ledger.query_evidence(&not_verified_query);
+    assert_eq!(not_verified_response.schema, SCHEMA_EVIDENCE_QUERY);
+    assert_eq!(not_verified_response.events.len(), 1);
+    assert_eq!(not_verified_response.verifications.len(), 1);
+    assert_eq!(
+        not_verified_response.summary.verdict_counts["not_verified"],
+        1
+    );
+    assert_eq!(
+        not_verified_response.summary.adapter_counts["threejs_web"],
+        1
+    );
+    assert_eq!(
+        not_verified_response.verifications[0].reason.as_deref(),
+        packet["contract"]["truth_boundary"]["not_verified_reason"].as_str()
+    );
+    assert!(not_verified_response.verifications[0].verified_to.is_none());
+    assert_eq!(
+        not_verified_response.verifications[0].evidence.payload["p8_original_verified_to"],
+        packet["contract"]["truth_boundary"]["not_verified_source_verified_to"]
+    );
+    assert_eq!(
+        not_verified_response.events[0]
+            .verification
+            .as_ref()
+            .expect("embedded verification")
+            .verdict,
+        Verdict::NotVerified
+    );
 
     let blocked = ledger
         .verifications()

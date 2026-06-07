@@ -328,3 +328,56 @@ fn ledger_queries_read_back_events_evidence_feedback_and_rollbacks() {
         group_id
     );
 }
+
+#[test]
+fn evidence_query_envelope_filters_and_summarizes_core_evidence() {
+    let action_id = ActionId::from_raw("act_move_cube_03");
+    let entity_id = EntityId::from_raw("cube_03");
+    let mut runtime_event =
+        Event::new("runtime.action_result", world_id(), runtime(), provenance());
+    runtime_event.event_id = EventId::from_raw("evt_move_cube_03");
+    runtime_event.refs.entities.push(entity_id.clone());
+    runtime_event.refs.actions.push(action_id.clone());
+    runtime_event.verification = Some(
+        Verification::new(
+            Some(action_id.clone()),
+            Verdict::Verified,
+            None,
+            "web_scene_projection_check",
+            Some(TargetRef::entity(&entity_id)),
+            evidence(
+                "web_scene_projection_check",
+                json!({"projected": true, "pixel_coverage": 0.1}),
+            ),
+        )
+        .unwrap(),
+    );
+
+    let mut ledger = WorldLedger::new();
+    ledger.append_event(runtime_event).unwrap();
+
+    let query = EvidenceQuery::with_id(
+        EvidenceQueryId::from_raw("query:web:move_cube_03"),
+        EvidenceQueryFilters {
+            action_id: Some(action_id),
+            verdict: Some(Verdict::Verified),
+            method: Some("web_scene_projection_check".to_string()),
+            adapter_kind: Some("threejs_web".to_string()),
+            ..EvidenceQueryFilters::default()
+        },
+    );
+    let response = ledger.query_evidence(&query);
+
+    assert_eq!(response.schema, SCHEMA_EVIDENCE_QUERY);
+    assert_eq!(response.query_id.as_str(), "query:web:move_cube_03");
+    assert_eq!(response.events.len(), 1);
+    assert_eq!(response.verifications.len(), 1);
+    assert_eq!(response.summary.event_count, 1);
+    assert_eq!(response.summary.verification_count, 1);
+    assert_eq!(response.summary.verdict_counts["verified"], 1);
+    assert_eq!(response.summary.adapter_counts["threejs_web"], 1);
+    assert_eq!(
+        response.verifications[0].verified_to.as_ref().unwrap(),
+        &TargetRef::entity(&entity_id)
+    );
+}

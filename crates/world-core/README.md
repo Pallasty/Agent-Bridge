@@ -70,10 +70,18 @@ The in-memory ledger is deliberately small. It can currently read back:
 - verification evidence by action id;
 - feedback by source event or action;
 - rollback records by action.
+- a neutral `world.evidence.query` envelope over matching events and
+  verification records.
 
 This is enough for the P8 web prototype fixture and the first adapter-facing API
 examples. More query helpers should be added only when a concrete adapter or
 review surface needs them.
+
+`EvidenceQuery` applies all supplied filters together. It can filter by event
+id, action id, entity id, participant id, rollback group, verdict, method, and
+adapter kind. The response carries the matched events, matched verification
+records, and summary counts without binding the query to MCP, storage, or a
+specific renderer.
 
 ## Fixture Pressure Tests
 
