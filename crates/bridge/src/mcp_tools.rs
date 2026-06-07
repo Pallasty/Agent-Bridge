@@ -2085,7 +2085,7 @@ impl McpTool for MacosAxProbeTool {
                         "type": "number",
                         "minimum": 0.25,
                         "maximum": 10.0,
-                        "default": 2.0,
+                        "default": 4.0,
                         "description": "Timeout for the bounded System Events/JXA read."
                     },
                     "semantic_bus": {
@@ -2128,7 +2128,7 @@ impl McpTool for MacosAxProbeTool {
         let jxa_timeout_secs = args
             .get("jxa_timeout_secs")
             .and_then(Value::as_f64)
-            .unwrap_or(2.0)
+            .unwrap_or(4.0)
             .clamp(0.25, 10.0);
         let semantic_bus = args
             .get("semantic_bus")

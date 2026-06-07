@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--compact", action="store_true", help="Accepted for MCP wrapper parity.")
     parser.add_argument("--no-windows", action="store_true", help="Skip System Events window read.")
     parser.add_argument("--max-windows", type=int, default=8)
-    parser.add_argument("--jxa-timeout-secs", type=float, default=2.0)
+    parser.add_argument("--jxa-timeout-secs", type=float, default=4.0)
     args = parser.parse_args(argv)
 
     started = time.time()

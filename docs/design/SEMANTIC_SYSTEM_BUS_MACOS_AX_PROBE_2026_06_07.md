@@ -76,7 +76,7 @@ and skips System Events window reads.
 ```text
 include_windows: boolean = true
 max_windows: integer = 8
-jxa_timeout_secs: number = 2.0
+jxa_timeout_secs: number = 4.0
 semantic_bus: boolean = false
 semantic_include_raw: boolean = false
 timeout_ms: integer = 8000
