@@ -3052,6 +3052,8 @@ const SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA: &str =
     "agent_bridge.semantic_bus.runtime_health.v0";
 const SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA: &str =
     "agent_bridge.semantic_bus.runtime_conformance.v0";
+const SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA: &str =
+    "agent_bridge.semantic_bus.peer_conformance.v0";
 
 pub struct SemanticBusAdapterReportTool {
     _hub: Hub,
@@ -3151,8 +3153,8 @@ fn semantic_bus_adapter_report_payload(args: &Value) -> Value {
         "adapters": adapters,
         "gaps": gaps,
         "next_recommended_slice": {
-            "id": "ssb-14-windows-uia-runtime-host",
-            "reason": "local daemon-http/Palace runtime health and the cross-platform conformance harness are now live; Windows UIA remains fixture/design-backed only"
+            "id": "ssb-16-windows-uia-runtime-host",
+            "reason": "local conformance and peer-query transport are live; Windows UIA remains fixture/design-backed until a Windows host exports runtime evidence"
         }
     })
 }
@@ -4405,8 +4407,543 @@ fn semantic_bus_runtime_conformance_report(
             "recover": if runtime_health_verified { "proceed" } else { "retry" }
         },
         "next_recommended_slice": {
-            "id": "ssb-14-windows-uia-runtime-host",
-            "reason": "the harness keeps Windows UIA explicit as a planned slot until a Windows host can provide runtime evidence"
+            "id": "ssb-16-windows-uia-runtime-host",
+            "reason": "the harness and peer-query transport keep Windows UIA explicit as a planned slot until a Windows host can provide runtime evidence"
+        }
+    })
+}
+
+// ===========================================================================
+//                       semantic_bus_peer_conformance
+// ===========================================================================
+
+pub struct SemanticBusPeerConformanceTool {
+    _hub: Hub,
+}
+
+impl SemanticBusPeerConformanceTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SemanticBusPeerConformanceTool {
+    fn name(&self) -> &'static str {
+        "semantic_bus_peer_conformance"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Semantic System Bus peer conformance query. \
+                 It fetches one or more daemon-http /semantic-bus/runtime-conformance \
+                 exports and returns a compact multi-node summary; it never restarts \
+                 services, captures screenshots, injects input, mutates Palace, or \
+                 writes memory graph edges."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "endpoints": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "description": "Base daemon-http URLs such as http://127.0.0.1:7878, or full /semantic-bus/runtime-conformance URLs."
+                    },
+                    "endpoint": {
+                        "type": "string",
+                        "description": "Compatibility shortcut for a single endpoint when endpoints is omitted."
+                    },
+                    "include_runtime_health": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Ask each peer endpoint to include its local runtime health summary."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 500,
+                        "maximum": 10000,
+                        "default": 2500,
+                        "description": "Per-peer HTTP timeout."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include each peer's raw conformance payload. Default false keeps the summary compact."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &semantic_bus_peer_conformance_payload(&args).await,
+        ))
+    }
+}
+
+async fn semantic_bus_peer_conformance_payload(args: &Value) -> Value {
+    let endpoints = semantic_bus_peer_conformance_endpoints(args);
+    let include_runtime_health = args
+        .get("include_runtime_health")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let include_raw = args
+        .get("include_raw")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let timeout_ms = args
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(2_500)
+        .clamp(500, 10_000);
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    if endpoints.is_empty() {
+        return semantic_bus_peer_conformance_report(
+            now_secs,
+            timeout_ms,
+            include_runtime_health,
+            Vec::new(),
+        );
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout_ms))
+        .user_agent("agent-bridge-semantic-bus-peer-conformance/0")
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            let peers = endpoints
+                .iter()
+                .enumerate()
+                .map(|(idx, endpoint)| {
+                    semantic_bus_peer_conformance_error_row(
+                        idx,
+                        endpoint,
+                        None,
+                        "client_init_error",
+                        &e.to_string(),
+                    )
+                })
+                .collect();
+            return semantic_bus_peer_conformance_report(
+                now_secs,
+                timeout_ms,
+                include_runtime_health,
+                peers,
+            );
+        }
+    };
+
+    let mut peers = Vec::with_capacity(endpoints.len());
+    for (idx, endpoint) in endpoints.iter().enumerate() {
+        peers.push(
+            semantic_bus_peer_conformance_fetch(
+                &client,
+                idx,
+                endpoint,
+                include_runtime_health,
+                timeout_ms,
+                include_raw,
+            )
+            .await,
+        );
+    }
+    semantic_bus_peer_conformance_report(now_secs, timeout_ms, include_runtime_health, peers)
+}
+
+fn semantic_bus_peer_conformance_endpoints(args: &Value) -> Vec<String> {
+    let mut endpoints = Vec::new();
+    if let Some(items) = args.get("endpoints").and_then(Value::as_array) {
+        endpoints.extend(
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+        );
+    } else if let Some(endpoint) = args
+        .get("endpoint")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        endpoints.push(endpoint.to_string());
+    }
+    endpoints.truncate(16);
+    endpoints
+}
+
+async fn semantic_bus_peer_conformance_fetch(
+    client: &reqwest::Client,
+    idx: usize,
+    endpoint: &str,
+    include_runtime_health: bool,
+    timeout_ms: u64,
+    include_raw: bool,
+) -> Value {
+    let url = match semantic_bus_peer_conformance_url(
+        endpoint,
+        include_runtime_health,
+        timeout_ms,
+    ) {
+        Ok(url) => url,
+        Err(e) => {
+            return semantic_bus_peer_conformance_error_row(
+                idx,
+                endpoint,
+                None,
+                "invalid_url",
+                &e,
+            )
+        }
+    };
+    let started = Instant::now();
+    let response = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .send()
+        .await;
+    match response {
+        Ok(resp) => {
+            let http_status = resp.status().as_u16();
+            let http_ok = resp.status().is_success();
+            let content_type = resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string);
+            match resp.text().await {
+                Ok(body) => {
+                    if !http_ok {
+                        return semantic_bus_peer_conformance_http_error_row(
+                            idx,
+                            endpoint,
+                            &url,
+                            "http_error",
+                            http_status,
+                            semantic_bus_runtime_elapsed_ms(started),
+                            content_type,
+                            body,
+                        );
+                    }
+                    match serde_json::from_str::<Value>(&body) {
+                        Ok(payload) => semantic_bus_peer_conformance_payload_row(
+                            idx,
+                            endpoint,
+                            &url,
+                            http_status,
+                            semantic_bus_runtime_elapsed_ms(started),
+                            content_type,
+                            payload,
+                            include_raw,
+                        ),
+                        Err(e) => semantic_bus_peer_conformance_http_error_row(
+                            idx,
+                            endpoint,
+                            &url,
+                            "invalid_json",
+                            http_status,
+                            semantic_bus_runtime_elapsed_ms(started),
+                            content_type,
+                            format!("response was not valid JSON: {e}"),
+                        ),
+                    }
+                }
+                Err(e) => semantic_bus_peer_conformance_http_error_row(
+                    idx,
+                    endpoint,
+                    &url,
+                    "body_error",
+                    http_status,
+                    semantic_bus_runtime_elapsed_ms(started),
+                    content_type,
+                    e.to_string(),
+                ),
+            }
+        }
+        Err(e) => semantic_bus_peer_conformance_error_row(
+            idx,
+            endpoint,
+            Some(url),
+            "unreachable",
+            &e.to_string(),
+        ),
+    }
+}
+
+fn semantic_bus_peer_conformance_url(
+    endpoint: &str,
+    include_runtime_health: bool,
+    timeout_ms: u64,
+) -> std::result::Result<String, String> {
+    let trimmed = endpoint.trim();
+    let url = if trimmed.contains("/semantic-bus/runtime-conformance") {
+        trimmed.to_string()
+    } else {
+        semantic_bus_runtime_join_url(trimmed, "/semantic-bus/runtime-conformance")?
+    };
+    let mut parsed = reqwest::Url::parse(&url)
+        .map_err(|e| format!("parse conformance URL {url}: {e}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!("unsupported URL scheme: {}", parsed.scheme()));
+    }
+    {
+        let mut qp = parsed.query_pairs_mut();
+        qp.append_pair(
+            "include_runtime_health",
+            if include_runtime_health { "true" } else { "false" },
+        );
+        qp.append_pair("timeout_ms", &timeout_ms.to_string());
+    }
+    Ok(parsed.to_string())
+}
+
+fn semantic_bus_peer_conformance_payload_row(
+    idx: usize,
+    endpoint: &str,
+    url: &str,
+    http_status: u16,
+    elapsed_ms: u64,
+    content_type: Option<String>,
+    payload: Value,
+    include_raw: bool,
+) -> Value {
+    let schema = payload.get("schema").and_then(Value::as_str).unwrap_or("unknown");
+    let schema_ok = schema == SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA;
+    let verification = payload.get("verification").cloned().unwrap_or(Value::Null);
+    let verdict = verification
+        .get("verdict")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let summary = payload.get("summary").cloned().unwrap_or_else(|| json!({}));
+    let runtime_health_summary = payload
+        .get("runtime_health_summary")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let runtime_health_status = summary
+        .get("runtime_health_status")
+        .and_then(Value::as_str)
+        .or_else(|| runtime_health_summary.get("status").and_then(Value::as_str))
+        .unwrap_or("unknown");
+    let runtime_health_verified = summary
+        .get("runtime_health_verified")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            runtime_health_summary
+                .get("verification")
+                .and_then(|v| v.get("verdict"))
+                .and_then(Value::as_str)
+                == Some("verified")
+        });
+    let windows_slot = semantic_bus_peer_conformance_windows_slot(&payload);
+
+    let mut row = json!({
+        "peer_index": idx,
+        "peer_id": semantic_bus_peer_conformance_peer_id(endpoint, url, idx),
+        "endpoint": endpoint,
+        "url": url,
+        "ok": schema_ok,
+        "status": if schema_ok { "ok" } else { "schema_mismatch" },
+        "http_status": http_status,
+        "elapsed_ms": elapsed_ms,
+        "content_type": content_type,
+        "schema": schema,
+        "current_platform": payload.get("current_platform").cloned().unwrap_or(Value::Null),
+        "verdict": verdict,
+        "runtime_health_status": runtime_health_status,
+        "runtime_health_verified": runtime_health_verified,
+        "adapter_count": summary.get("adapter_count").cloned().unwrap_or(Value::Null),
+        "live_ready_count": summary.get("live_ready_count").cloned().unwrap_or(Value::Null),
+        "gap_count": summary.get("gap_count").cloned().unwrap_or(Value::Null),
+        "windows_uia_runtime_slot": windows_slot,
+        "verification": verification
+    });
+    if include_raw {
+        if let Some(obj) = row.as_object_mut() {
+            obj.insert("raw".to_string(), payload);
+        }
+    }
+    row
+}
+
+fn semantic_bus_peer_conformance_windows_slot(payload: &Value) -> Value {
+    let slot = payload
+        .get("windows_uia_runtime_slot")
+        .cloned()
+        .unwrap_or(Value::Null);
+    json!({
+        "adapter_id": slot.get("adapter_id").cloned().unwrap_or(json!("windows_uia_runtime_adapter")),
+        "platform": slot.get("platform").cloned().unwrap_or(Value::Null),
+        "evidence_level": slot.get("evidence_level").cloned().unwrap_or(Value::Null),
+        "live_status": slot.get("live_status").cloned().unwrap_or(json!("unknown")),
+        "tool": slot.get("tool").cloned().unwrap_or(Value::Null)
+    })
+}
+
+fn semantic_bus_peer_conformance_peer_id(endpoint: &str, url: &str, idx: usize) -> String {
+    semantic_bus_runtime_url_authority(endpoint)
+        .or_else(|| semantic_bus_runtime_url_authority(url))
+        .map(|authority| format!("peer:{authority}"))
+        .unwrap_or_else(|| format!("peer:{idx}"))
+}
+
+fn semantic_bus_peer_conformance_http_error_row(
+    idx: usize,
+    endpoint: &str,
+    url: &str,
+    status: &str,
+    http_status: u16,
+    elapsed_ms: u64,
+    content_type: Option<String>,
+    error_or_body: String,
+) -> Value {
+    json!({
+        "peer_index": idx,
+        "peer_id": semantic_bus_peer_conformance_peer_id(endpoint, url, idx),
+        "endpoint": endpoint,
+        "url": url,
+        "ok": false,
+        "status": status,
+        "http_status": http_status,
+        "elapsed_ms": elapsed_ms,
+        "content_type": content_type,
+        "error": error_or_body.chars().take(512).collect::<String>(),
+        "recover": "retry"
+    })
+}
+
+fn semantic_bus_peer_conformance_error_row(
+    idx: usize,
+    endpoint: &str,
+    url: Option<String>,
+    status: &str,
+    error: &str,
+) -> Value {
+    let url_ref = url.as_deref().unwrap_or(endpoint);
+    json!({
+        "peer_index": idx,
+        "peer_id": semantic_bus_peer_conformance_peer_id(endpoint, url_ref, idx),
+        "endpoint": endpoint,
+        "url": url,
+        "ok": false,
+        "status": status,
+        "error": error,
+        "recover": if status == "invalid_url" { "replan" } else { "retry" }
+    })
+}
+
+fn semantic_bus_peer_conformance_report(
+    now_secs: u64,
+    timeout_ms: u64,
+    include_runtime_health: bool,
+    peers: Vec<Value>,
+) -> Value {
+    let peer_count = peers.len() as u64;
+    let ok_count = peers
+        .iter()
+        .filter(|row| row.get("ok").and_then(Value::as_bool) == Some(true))
+        .count() as u64;
+    let verified_count = peers
+        .iter()
+        .filter(|row| {
+            row.get("ok").and_then(Value::as_bool) == Some(true)
+                && row.get("verdict").and_then(Value::as_str) == Some("verified")
+        })
+        .count() as u64;
+    let degraded_count = peers
+        .iter()
+        .filter(|row| {
+            row.get("ok").and_then(Value::as_bool) == Some(true)
+                && row.get("verdict").and_then(Value::as_str) == Some("degraded")
+        })
+        .count() as u64;
+    let not_checked_count = peers
+        .iter()
+        .filter(|row| {
+            row.get("ok").and_then(Value::as_bool) == Some(true)
+                && row.get("verdict").and_then(Value::as_str) == Some("not_checked")
+        })
+        .count() as u64;
+    let error_count = peer_count.saturating_sub(ok_count);
+    let windows_runtime_ready_count = peers
+        .iter()
+        .filter(|row| {
+            row.get("windows_uia_runtime_slot")
+                .and_then(|slot| slot.get("live_status"))
+                .and_then(Value::as_str)
+                == Some("ready")
+        })
+        .count() as u64;
+    let verdict = if peer_count == 0 {
+        "blocked"
+    } else if error_count == 0 && verified_count == peer_count {
+        "verified"
+    } else if ok_count > 0 {
+        "degraded"
+    } else {
+        "not_verified"
+    };
+
+    json!({
+        "schema": SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA,
+        "generated_at_unix": now_secs,
+        "read_only": true,
+        "live_checks_executed": peer_count > 0,
+        "timeout_ms": timeout_ms,
+        "request": {
+            "include_runtime_health": include_runtime_health,
+            "endpoint_count": peer_count
+        },
+        "summary": {
+            "peer_count": peer_count,
+            "ok_count": ok_count,
+            "verified_count": verified_count,
+            "degraded_count": degraded_count,
+            "not_checked_count": not_checked_count,
+            "error_count": error_count,
+            "windows_runtime_ready_count": windows_runtime_ready_count
+        },
+        "peers": peers,
+        "verification": {
+            "verdict": verdict,
+            "reason": if peer_count == 0 {
+                "no peer endpoints were supplied"
+            } else if error_count == 0 && verified_count == peer_count {
+                "all queried peers returned verified runtime conformance"
+            } else if ok_count > 0 {
+                "at least one peer returned a conformance snapshot, but not every peer is verified"
+            } else {
+                "no peer returned a valid runtime conformance snapshot"
+            },
+            "recover": if verdict == "verified" {
+                "proceed"
+            } else if ok_count > 0 {
+                "retry"
+            } else {
+                "replan"
+            }
+        },
+        "next_recommended_slice": {
+            "id": if windows_runtime_ready_count > 0 {
+                "ssb-16-cross-node-windows-uia-validation"
+            } else {
+                "ssb-16-windows-uia-runtime-host"
+            },
+            "reason": if windows_runtime_ready_count > 0 {
+                "at least one peer reports a ready Windows UIA runtime slot; validate semantic snapshot/verify evidence next"
+            } else {
+                "peer query is live, but Windows UIA remains unavailable until a Windows host exports runtime evidence"
+            }
         }
     })
 }
@@ -32293,6 +32830,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // SSB runtime conformance snapshot: compact read-only aggregation of adapter
     // evidence plus local runtime health. Platform gaps remain explicit.
     "semantic_bus_runtime_conformance",
+    // SSB peer conformance query: read-only multi-node pull over daemon-http
+    // runtime-conformance exports. No service restart or graph mutation.
+    "semantic_bus_peer_conformance",
     // External browser-lite discovery: read-only probe only. This is not the
     // mutating browser_* automation surface and does not change browser routing.
     "browser_lite_probe",
@@ -34176,6 +34716,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(SemanticBusRuntimeConformanceTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SemanticBusPeerConformanceTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -39408,6 +39954,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "semantic_bus_adapter_report"));
         assert!(p.includes(Tier::Standard, "semantic_bus_runtime_health"));
         assert!(p.includes(Tier::Standard, "semantic_bus_runtime_conformance"));
+        assert!(p.includes(Tier::Standard, "semantic_bus_peer_conformance"));
         assert!(p.includes(Tier::Standard, "browser_lite_probe"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
@@ -39417,9 +39964,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 50 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 51 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(38: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(39: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_related_keys_preflight
         //      + memory_orphan_candidates + memory_orphan_inventory
@@ -39427,6 +39974,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + macos_ax_probe + macos_ax_verify + semantic_bus_adapter_report
         //      + semantic_bus_runtime_health
         //      + semantic_bus_runtime_conformance
+        //      + semantic_bus_peer_conformance
         //      + browser_lite_probe
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
         //      + agent_orchestrate_scan, added by d4fd74d).
@@ -39440,7 +39988,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // +semantic_bus_adapter_report brought DIRECT 35→36, total 47→48.
         // +semantic_bus_runtime_health brought DIRECT 36→37, total 48→49.
         // +semantic_bus_runtime_conformance brought DIRECT 37→38, total 49→50.
-        assert_eq!(extras.len(), 50);
+        // +semantic_bus_peer_conformance brought DIRECT 38→39, total 50→51.
+        assert_eq!(extras.len(), 51);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -39480,6 +40029,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"semantic_bus_adapter_report"));
         assert!(extras.contains(&"semantic_bus_runtime_health"));
         assert!(extras.contains(&"semantic_bus_runtime_conformance"));
+        assert!(extras.contains(&"semantic_bus_peer_conformance"));
         assert!(extras.contains(&"browser_lite_probe"));
         // Remote session steering (d4fd74d) — direct-exposed for Codex
         // orchestrators that already carry agent_spawn + agent_session_*.
@@ -39924,6 +40474,25 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn registry_exposes_semantic_bus_peer_conformance_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "semantic_bus_peer_conformance"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "semantic_bus_peer_conformance")
+            .expect("semantic_bus_peer_conformance schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("never restarts"));
+        assert!(tool.input_schema["properties"].get("endpoints").is_some());
+        assert!(tool.input_schema["properties"].get("include_runtime_health").is_some());
+        assert!(tool.input_schema["properties"].get("restart").is_none());
+        assert!(tool.input_schema["properties"].get("write_edges").is_none());
+    }
+
+    #[test]
     fn semantic_bus_adapter_report_classifies_adapter_evidence() {
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let payload = semantic_bus_adapter_report_payload(&json!({
@@ -40123,6 +40692,106 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .unwrap()
             .iter()
             .any(|row| row["adapter_id"].as_str() == Some("local_runtime_health")));
+    }
+
+    #[test]
+    fn semantic_bus_peer_conformance_url_accepts_base_and_full_endpoint() {
+        let from_base = semantic_bus_peer_conformance_url(
+            "http://127.0.0.1:7878",
+            false,
+            1_500,
+        )
+        .expect("base URL");
+        assert!(from_base.starts_with(
+            "http://127.0.0.1:7878/semantic-bus/runtime-conformance?"
+        ));
+        assert!(from_base.contains("include_runtime_health=false"));
+        assert!(from_base.contains("timeout_ms=1500"));
+
+        let from_full = semantic_bus_peer_conformance_url(
+            "http://example.test/semantic-bus/runtime-conformance?node=win",
+            true,
+            2_500,
+        )
+        .expect("full URL");
+        assert!(from_full.starts_with(
+            "http://example.test/semantic-bus/runtime-conformance?node=win&"
+        ));
+        assert!(from_full.contains("include_runtime_health=true"));
+        assert!(from_full.contains("timeout_ms=2500"));
+
+        let err = semantic_bus_peer_conformance_url("file:///tmp/x", true, 2_500)
+            .expect_err("unsupported scheme");
+        assert!(err.contains("unsupported URL scheme"));
+    }
+
+    #[test]
+    fn semantic_bus_peer_conformance_compacts_verified_payload() {
+        let peer = semantic_bus_peer_conformance_payload_row(
+            0,
+            "http://127.0.0.1:7878",
+            "http://127.0.0.1:7878/semantic-bus/runtime-conformance",
+            200,
+            4,
+            Some("application/json".to_string()),
+            json!({
+                "schema": SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA,
+                "current_platform": "windows",
+                "summary": {
+                    "adapter_count": 11,
+                    "live_ready_count": 2,
+                    "gap_count": 1,
+                    "runtime_health_status": "ready",
+                    "runtime_health_verified": true
+                },
+                "windows_uia_runtime_slot": {
+                    "adapter_id": "windows_uia_runtime_adapter",
+                    "platform": "windows",
+                    "evidence_level": "runtime_backed",
+                    "live_status": "ready",
+                    "tool": "windows_uia_snapshot"
+                },
+                "verification": {
+                    "verdict": "verified",
+                    "recover": "proceed"
+                }
+            }),
+            false,
+        );
+        assert_eq!(peer["ok"].as_bool(), Some(true));
+        assert_eq!(peer["status"].as_str(), Some("ok"));
+        assert_eq!(peer["peer_id"].as_str(), Some("peer:127.0.0.1:7878"));
+        assert_eq!(peer["runtime_health_status"].as_str(), Some("ready"));
+        assert_eq!(peer["runtime_health_verified"].as_bool(), Some(true));
+        assert_eq!(
+            peer["windows_uia_runtime_slot"]["live_status"].as_str(),
+            Some("ready")
+        );
+        assert!(peer.get("raw").is_none());
+
+        let report = semantic_bus_peer_conformance_report(1_000, 2_500, true, vec![peer]);
+        assert_eq!(
+            report["schema"].as_str(),
+            Some(SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA)
+        );
+        assert_eq!(report["verification"]["verdict"].as_str(), Some("verified"));
+        assert_eq!(
+            report["summary"]["windows_runtime_ready_count"].as_u64(),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_bus_peer_conformance_blocks_without_endpoints() {
+        let payload = semantic_bus_peer_conformance_payload(&json!({})).await;
+        assert_eq!(
+            payload["schema"].as_str(),
+            Some(SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA)
+        );
+        assert_eq!(payload["read_only"].as_bool(), Some(true));
+        assert_eq!(payload["live_checks_executed"].as_bool(), Some(false));
+        assert_eq!(payload["summary"]["peer_count"].as_u64(), Some(0));
+        assert_eq!(payload["verification"]["verdict"].as_str(), Some("blocked"));
     }
 
     #[tokio::test]

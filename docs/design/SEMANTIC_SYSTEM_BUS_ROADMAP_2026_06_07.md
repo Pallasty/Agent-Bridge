@@ -609,6 +609,24 @@ Initial landing:
   `semantic_bus_runtime_conformance` and does not restart services, mutate
   Palace, capture screenshots, or write graph edges.
 
+### SSB-15 - Peer conformance query
+
+Deliverable:
+
+- read-only MCP helper that queries one or more daemon-http conformance exports;
+- compact per-peer summary for schema, verdict, runtime health, adapter counts,
+  and Windows UIA runtime slot state;
+- bounded HTTP GETs only, with no service restart, desktop input, screenshot
+  capture, Palace mutation, or memory graph writes.
+
+Initial landing:
+
+- [Semantic System Bus Peer Conformance Query](SEMANTIC_SYSTEM_BUS_PEER_CONFORMANCE_QUERY_2026_06_07.md);
+- `semantic_bus_peer_conformance` pulls
+  `/semantic-bus/runtime-conformance` from supplied peer endpoints;
+- the helper lets Codex orchestrate cross-node SSB readiness without SSH or UI
+  scraping.
+
 ## 7. Non-goals
 
 - Do not make screenshots the primary architecture.

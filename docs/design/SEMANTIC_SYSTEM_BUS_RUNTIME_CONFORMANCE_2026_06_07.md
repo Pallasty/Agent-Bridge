@@ -101,13 +101,17 @@ Runtime acceptance:
 ## 5. Next Slice
 
 SSB-14 exports this conformance snapshot over daemon-http so remote nodes can
-publish the same shape. After that, the next implementation slice should run on,
-or dispatch to, a Windows host:
+publish the same shape. SSB-15 then adds an MCP helper that asks peer
+daemon-http nodes for their exported conformance state and summarizes multiple
+nodes.
+
+After those transport slices, the next implementation slice should run on, or
+dispatch to, a Windows host:
 
 ```text
 Windows UIA tree + verify predicates -> semantic bus desktop snapshot/verify
 ```
 
-If no Windows host is available, the next best slice is an MCP helper that asks
-another Agent-Bridge node for `/semantic-bus/runtime-conformance` and summarizes
-multiple nodes.
+If no Windows host is available, the next best slice is peer discovery over
+Agent-Bridge presence rows so agents can identify likely daemon-http endpoints
+without manual URLs.

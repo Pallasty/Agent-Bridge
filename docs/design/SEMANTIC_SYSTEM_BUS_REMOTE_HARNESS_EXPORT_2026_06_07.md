@@ -91,8 +91,14 @@ Runtime acceptance:
 
 ## 5. Next Slice
 
-SSB-15 should be one of:
+SSB-15 adds the MCP-side peer query helper:
+
+```text
+semantic_bus_peer_conformance -> peer /semantic-bus/runtime-conformance
+```
+
+After that, SSB-16 should be one of:
 
 - run the remote harness export on a Windows host and add Windows UIA evidence;
-- add an MCP helper that queries a peer daemon-http conformance endpoint and
-  summarizes multiple nodes.
+- add peer discovery from Agent-Bridge presence rows so agents can find likely
+  daemon-http endpoints without manual URLs.
