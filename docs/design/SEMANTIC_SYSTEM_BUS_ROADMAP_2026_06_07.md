@@ -13,6 +13,7 @@ Related documents:
 - [Work Memory Scratchpad](../DESIGN-work-memory-scratchpad-2026-05-23.md)
 - [Agent Avatar Protocol](../RFC-v24-agent-avatar-protocol.md)
 - [Palace Diff Pilot](SEMANTIC_SYSTEM_BUS_PALACE_DIFF_PILOT_2026_06_07.md)
+- [Cross-Platform Mapping](SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_MAPPING_2026_06_07.md)
 
 ## 0. Decision
 
@@ -468,6 +469,16 @@ Goal:
 
 Keep macOS/Windows as coverage adapters without letting them fragment the core
 schema.
+
+Initial landing:
+
+- [Semantic System Bus Cross-Platform Mapping](SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_MAPPING_2026_06_07.md);
+- macOS AX maps through `macos.workspace.session`, `macos.cgwindow`,
+  `macos.ax`, `macos.ax.verify`, and `macos.vision.ocr`;
+- Windows UIA maps through `windows.session`, `windows.hwnd`, `windows.uia`,
+  `windows.uia.verify`, and `windows.vision.ocr`;
+- Linux remains the reference substrate, while macOS/Windows become coverage
+  adapters into the same object/affordance/event/verification vocabulary.
 
 ## 7. Non-goals
 
