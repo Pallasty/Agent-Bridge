@@ -426,6 +426,67 @@ fn event_query_envelope_filters_and_summarizes_core_events() {
 }
 
 #[test]
+fn feedback_query_envelope_filters_and_summarizes_core_feedback() {
+    let action_id = ActionId::from_raw("act_move_cube_04");
+    let entity_id = EntityId::from_raw("cube_04");
+    let source_event_id = EventId::from_raw("evt_reject_move_cube_04");
+    let target_event_id = EventId::from_raw("evt_move_cube_04");
+
+    let mut feedback = Feedback::new(source_event_id.clone());
+    feedback.feedback_id = FeedbackId::from_raw("fb_reject_move_cube_04");
+    feedback.target.events.push(target_event_id.clone());
+    feedback.target.actions.push(action_id.clone());
+    feedback.target.entities.push(entity_id.clone());
+    feedback.target.adapter = Some("threejs_web".to_string());
+    feedback.raw = json!({"decision": "reject", "note": "movement felt wrong"});
+    feedback.normalized = json!({"decision": "reject"});
+
+    let mut ledger = WorldLedger::new();
+    ledger.append_feedback(feedback).unwrap();
+
+    let query = FeedbackQuery::with_id(
+        FeedbackQueryId::from_raw("query:feedback:move_cube_04"),
+        FeedbackQueryFilters {
+            source_event_id: Some(source_event_id),
+            target_event_id: Some(target_event_id),
+            action_id: Some(action_id.clone()),
+            entity_id: Some(entity_id),
+            adapter: Some("threejs_web".to_string()),
+            changes_world_verdict: Some(false),
+            ..FeedbackQueryFilters::default()
+        },
+    );
+    let response = ledger.query_feedback(&query);
+
+    assert_eq!(response.schema, SCHEMA_FEEDBACK_QUERY);
+    assert_eq!(response.query_id.as_str(), "query:feedback:move_cube_04");
+    assert_eq!(response.feedback.len(), 1);
+    assert_eq!(
+        response.feedback[0].feedback_id.as_str(),
+        "fb_reject_move_cube_04"
+    );
+    assert_eq!(response.feedback[0].normalized["decision"], "reject");
+    assert_eq!(response.summary.feedback_count, 1);
+    assert_eq!(response.summary.world_verdict_mutation_attempt_count, 0);
+    assert_eq!(response.summary.target_event_count, 1);
+    assert_eq!(response.summary.target_action_count, 1);
+    assert_eq!(response.summary.target_entity_count, 1);
+    assert_eq!(response.summary.adapter_counts["threejs_web"], 1);
+
+    let action_response = ledger.query_feedback(&FeedbackQuery::new(
+        FeedbackQueryFilters::by_action(action_id),
+    ));
+    assert_eq!(action_response.feedback.len(), 1);
+
+    let mut invalid_feedback = Feedback::new(EventId::from_raw("evt_accept_invalid"));
+    invalid_feedback.changes_world_verdict = true;
+    assert_eq!(
+        ledger.append_feedback(invalid_feedback).unwrap_err(),
+        WorldCoreError::HumanDecisionChangesVerification
+    );
+}
+
+#[test]
 fn evidence_query_envelope_filters_and_summarizes_core_evidence() {
     let action_id = ActionId::from_raw("act_move_cube_03");
     let entity_id = EntityId::from_raw("cube_03");

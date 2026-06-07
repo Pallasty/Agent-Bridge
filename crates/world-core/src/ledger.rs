@@ -1,5 +1,6 @@
 use crate::event_query::{EventQuery, EventQueryResponse};
 use crate::evidence_query::{EvidenceQuery, EvidenceQueryResponse};
+use crate::feedback_query::{FeedbackQuery, FeedbackQueryResponse};
 use crate::ids::{ActionId, EntityId, EventId, ParticipantId, RollbackGroupId};
 use crate::model::{Event, Feedback, RollbackRecord};
 use crate::verification::{validate_verification, Result, Verdict, Verification, WorldCoreError};
@@ -150,6 +151,16 @@ impl WorldLedger {
             .iter()
             .filter(|feedback| &feedback.source_event_id == event_id)
             .collect()
+    }
+
+    pub fn query_feedback(&self, query: &FeedbackQuery) -> FeedbackQueryResponse {
+        let feedback = self
+            .feedback
+            .iter()
+            .filter(|feedback| query.filters.matches_feedback(feedback))
+            .cloned()
+            .collect();
+        FeedbackQueryResponse::new(query, feedback)
     }
 
     pub fn query_feedback_by_action(&self, action_id: &ActionId) -> Vec<&Feedback> {
