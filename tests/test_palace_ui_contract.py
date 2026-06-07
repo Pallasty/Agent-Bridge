@@ -255,6 +255,15 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn('"width": "data(displaySize)"', html)
         self.assertIn('"height": "data(displaySize)"', html)
 
+    def test_overview_zoom_keeps_node_glyphs_small_until_user_moves_in(self):
+        html = palace_html()
+
+        self.assertIn("const NODE_GLYPH_LOCK_ZOOM", html)
+        self.assertIn("function glyphMetricZoom(zoom)", html)
+        self.assertIn("Math.max(zoom, NODE_GLYPH_LOCK_ZOOM)", html)
+        self.assertIn("const metricZoom = glyphMetricZoom(zoom);", html)
+        self.assertIn("baseSize / metricZoom", html)
+
     def test_zoom_declutters_labels_until_the_user_moves_closer(self):
         html = palace_html()
 

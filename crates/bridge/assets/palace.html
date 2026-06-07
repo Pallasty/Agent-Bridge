@@ -3133,6 +3133,7 @@ const FRESH_WINDOW_SECS = 3600;
 const STALE_WINDOW_SECS = 7 * 24 * 3600;
 
 const GRAPH_LAYOUT_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+const NODE_GLYPH_LOCK_ZOOM = 0.65;
 const LABEL_SHOW_ANCHOR_ZOOM = 0.42;
 const LABEL_SHOW_ALL_ZOOM = 0.82;
 
@@ -3318,16 +3319,21 @@ function labelForZoom(node, zoom) {
   return "";
 }
 
+function glyphMetricZoom(zoom) {
+  return Math.max(zoom, NODE_GLYPH_LOCK_ZOOM);
+}
+
 function updateZoomScaledNodeMetrics() {
   if (!state.cy) return;
   const zoom = clampNumber(Number(state.cy.zoom()) || 1, 0.15, 4.0);
   const maxScale = 1 / 0.15;
+  const metricZoom = glyphMetricZoom(zoom);
   state.cy.batch(() => {
     state.cy.nodes().forEach(node => {
       const baseSize = Number(node.data("size")) || 28;
       const baseHaloPad = Number(node.data("haloPad")) || 0;
-      node.data("displaySize", clampNumber(baseSize / zoom, 4, baseSize * maxScale));
-      node.data("displayHaloPad", clampNumber(baseHaloPad / zoom, 0, baseHaloPad * maxScale));
+      node.data("displaySize", clampNumber(baseSize / metricZoom, 4, baseSize * maxScale));
+      node.data("displayHaloPad", clampNumber(baseHaloPad / metricZoom, 0, baseHaloPad * maxScale));
       const displayLabel = labelForZoom(node, zoom);
       node.data("displayLabel", displayLabel);
       node.data("labelOpacity", displayLabel ? 1 : 0);
