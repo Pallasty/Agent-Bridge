@@ -32,6 +32,7 @@ pub mod llm_client;
 pub mod locks;
 pub mod lswr_snapshot_bridge;
 pub mod lswr_snapshot_consumer;
+pub mod lswr_snapshot_display;
 pub mod lswr_snapshot_report;
 pub mod lswr_snapshot_report_acceptance;
 pub mod lswr_snapshot_report_packet;
