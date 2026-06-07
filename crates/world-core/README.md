@@ -121,6 +121,9 @@ renderer.
 
 The integration fixtures intentionally cover more than one presentation shape:
 
+- `tests/core_query_closure.rs` proves the minimal semantic loop can be read
+  back through neutral action, event, evidence, feedback, and rollback query
+  envelopes without requiring screenshots or a live renderer.
 - `tests/fixtures/p8_world_export.json` maps the web prototype into the core
   ledger without laundering `not_verified` or `blocked` truth.
 - `tests/fixtures/nexus_causal_seed.json` maps a non-visual causal event chain
