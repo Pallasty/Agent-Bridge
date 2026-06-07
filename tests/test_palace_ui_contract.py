@@ -165,6 +165,19 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("jumpToWorkbenchNeighbor(key);", html)
         self.assertIn("open node", html)
 
+    def test_node_workbench_content_reader_has_scan_and_full_modes(self):
+        html = palace_html()
+
+        self.assertIn("contentReaderMode: \"scan\"", html)
+        self.assertIn("function contentReaderStats(content)", html)
+        self.assertIn("function contentReaderText(content, mode)", html)
+        self.assertIn("function renderWorkbenchContentReader(memory)", html)
+        self.assertIn('id="workbench-content-reader"', html)
+        self.assertIn("content-reader-controls", html)
+        self.assertIn("data-content-reader-mode", html)
+        self.assertIn("state.contentReaderMode = mode;", html)
+        self.assertIn("renderWorkbenchContentReader(m)", html)
+
 
 if __name__ == "__main__":
     unittest.main()
