@@ -20,6 +20,9 @@ pub enum WorldCoreError {
     #[error("human decision cannot set changes_world_verdict=true")]
     HumanDecisionChangesVerification,
 
+    #[error("invalid ledger snapshot schema: {0}")]
+    InvalidLedgerSnapshotSchema(String),
+
     #[error("action already exists: {0}")]
     DuplicateAction(String),
 
