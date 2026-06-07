@@ -178,6 +178,17 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.contentReaderMode = mode;", html)
         self.assertIn("renderWorkbenchContentReader(m)", html)
 
+    def test_atlas_regions_surface_health_scores(self):
+        html = palace_html()
+
+        self.assertIn("function atlasRegionHealth(region)", html)
+        self.assertIn("healthScore", html)
+        self.assertIn("healthTier", html)
+        self.assertIn("healthReason", html)
+        self.assertIn("region-health", html)
+        self.assertIn("health-bar", html)
+        self.assertIn("region.healthScore", html)
+
 
 if __name__ == "__main__":
     unittest.main()

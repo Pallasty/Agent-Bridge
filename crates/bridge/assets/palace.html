@@ -481,6 +481,35 @@
       font-size: 11px;
       font-variant-numeric: tabular-nums;
       padding-top: 1px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      min-width: 34px;
+    }
+    #atlas-panel .region-health {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: #7a7a88;
+      font-size: 9px;
+      line-height: 1;
+    }
+    #atlas-panel .region-health.good { color: #5cc88a; }
+    #atlas-panel .region-health.watch { color: #c8a96a; }
+    #atlas-panel .region-health.fragile { color: #d88080; }
+    #atlas-panel .health-bar {
+      width: 24px;
+      height: 3px;
+      overflow: hidden;
+      background: #252532;
+      border-radius: 2px;
+    }
+    #atlas-panel .health-bar span {
+      display: block;
+      height: 100%;
+      width: var(--health-width, 0%);
+      background: currentColor;
     }
     #atlas-panel .region-flags {
       grid-column: 2 / 4;
@@ -2249,6 +2278,34 @@ function computeDegrees(data) {
   return { degreeMap, hubThreshold, enableHubs, hubCount, orphanCount };
 }
 
+function atlasRegionHealth(region) {
+  const count = Math.max(0, region.count || 0);
+  if (count === 0) {
+    return {
+      healthScore: 0,
+      healthTier: "fragile",
+      healthReason: "empty region",
+    };
+  }
+  const explicitEdges = Math.max(0, (region.edgeCount || 0) - (region.coactivationCount || 0));
+  const connectedRatio = Math.max(0, Math.min(1, (count - (region.orphans || 0)) / count));
+  const freshRatio = Math.max(0, Math.min(1, (region.fresh || 0) / count));
+  const staleRatio = Math.max(0, Math.min(1, (region.stale || 0) / count));
+  const structuralDensity = Math.max(0, Math.min(1, explicitEdges / Math.max(1, count)));
+  const healthScore = Math.max(0, Math.min(100, Math.round(
+    connectedRatio * 45 +
+    structuralDensity * 20 +
+    (1 - staleRatio) * 20 +
+    freshRatio * 15
+  )));
+  const healthTier = healthScore >= 75 ? "good" : healthScore >= 50 ? "watch" : "fragile";
+  const healthReason =
+    `${Math.round(connectedRatio * 100)}% connected · ` +
+    `${Math.round(structuralDensity * 100)}% density · ` +
+    `${Math.round(staleRatio * 100)}% stale`;
+  return { healthScore, healthTier, healthReason };
+}
+
 const ATLAS_TAG_STOPWORDS = new Set([
   "palace", "auto_curated", "implicit", "session-handoff", "session_handoff",
   "handoff", "superseded", "verified", "deployed", "shipped",
@@ -2364,7 +2421,8 @@ function computeAtlasRegions(data) {
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .slice(0, 3)
         .map(([kind, count]) => `${kind}:${count}`);
-      return { ...r, topKinds };
+      const health = atlasRegionHealth(r);
+      return { ...r, topKinds, ...health };
     })
     .sort((a, b) =>
       b.count - a.count ||
@@ -2424,6 +2482,12 @@ function renderAtlasPanel() {
     return;
   }
   list.innerHTML = regions.map(r => {
+    const healthScore = Number.isFinite(r.healthScore) ? r.healthScore : 0;
+    const healthTier = r.healthTier || "fragile";
+    const healthReason = r.healthReason || "health unavailable";
+    const health = `<span class="region-health ${escapeHTML(healthTier)}" title="${escapeHTML(healthReason)}">` +
+      `<span>${healthScore}</span><span class="health-bar" style="--health-width:${healthScore}%"><span></span></span>` +
+      `</span>`;
     const flags = [
       r.fresh ? `<span class="region-flag fresh">${r.fresh} fresh</span>` : "",
       r.stale ? `<span class="region-flag stale">${r.stale} stale</span>` : "",
@@ -2437,7 +2501,7 @@ function renderAtlasPanel() {
         `<span class="region-label">${escapeHTML(r.label)}</span>` +
         `<span class="region-meta">${escapeHTML(r.topKinds.join(" · "))}</span>` +
       `</span>` +
-      `<span class="region-count">${r.count}</span>` +
+      `<span class="region-count"><span>${r.count}</span>${health}</span>` +
       `<span class="region-flags">${flags}</span>` +
     `</button>`;
   }).join("");
@@ -3740,6 +3804,7 @@ function showRegionWorkbench(regionId) {
       </div>
       <div class="workbench-body">
         <div class="workbench-grid">
+          <div class="metric"><div class="label">health</div><div class="value">${region.healthScore} · ${escapeHTML(region.healthTier || "fragile")}</div></div>
           <div class="metric"><div class="label">nodes</div><div class="value">${region.count}</div></div>
           <div class="metric"><div class="label">fresh</div><div class="value">${region.fresh || 0}</div></div>
           <div class="metric"><div class="label">stale</div><div class="value">${region.stale || 0}</div></div>
@@ -3757,6 +3822,7 @@ function showRegionWorkbench(regionId) {
           <div id="workbench-region-sources" class="source-stack">
             <div class="source-row"><span class="label">origin</span><span class="value">atlas region</span></div>
             <div class="source-row"><span class="label">region</span><span class="value" title="${escapeHTML(region.id)}">${escapeHTML(region.id)}</span></div>
+            <div class="source-row"><span class="label">health</span><span class="value" title="${escapeHTML(region.healthReason || "health unavailable")}">${region.healthScore} · ${escapeHTML(region.healthTier || "fragile")}</span></div>
             <div class="source-row"><span class="label">kinds</span><span class="value">${escapeHTML(region.topKinds.join(" · ") || "n/a")}</span></div>
           </div>
         </div>
