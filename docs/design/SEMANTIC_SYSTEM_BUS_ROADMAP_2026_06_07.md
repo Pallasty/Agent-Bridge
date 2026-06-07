@@ -16,6 +16,7 @@ Related documents:
 - [Cross-Platform Mapping](SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_MAPPING_2026_06_07.md)
 - [Cross-Platform Adapter Conformance](SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_CONFORMANCE_2026_06_07.md)
 - [macOS AX Probe](SEMANTIC_SYSTEM_BUS_MACOS_AX_PROBE_2026_06_07.md)
+- [macOS AX Verify](SEMANTIC_SYSTEM_BUS_MACOS_AX_VERIFY_2026_06_07.md)
 
 ## 0. Decision
 
@@ -79,7 +80,7 @@ uniform layer.
 | MCP tool bus | Mature tool registry, profile/toolset routing, Codex/Gemini/Claude slices, dispatch audit, tool atlas | Tools still expose separate local schemas rather than one system-state contract |
 | Memory/coordination | Memory, forum, presence, work memory, graph topology, Palace | Strong semantic state, but not all state changes emit typed events |
 | Desktop computer use | `desktop_snapshot`, `desktop_verify`, OCR grounding, gated action/invoke paths | Good act loop, but object/action/event/verdict schema differs from LSWR and mobile |
-| macOS desktop probe | `macos_ax_probe` reports AX trust and bounded frontmost app/window state without prompting or mutation | Feasibility probe only; no macOS verifier or action path yet |
+| macOS desktop probe | `macos_ax_probe` reports AX trust and bounded frontmost app/window state; `macos_ax_verify` checks one read-only predicate over the same surface | Frontmost-app scope only; no global window inventory or macOS action path yet |
 | Mobile bridge | Android/iOS health, UI snapshot, screenshot, click/input/install/log tools | Useful adapter, but not unified with desktop action/result contract |
 | LSWR | `world_query`, `world_patch`, `world_visibility_query`, `world_present` | Best current example of mutate/perceive/present; needs generalization beyond world runtime |
 | Event spine | Read-only snapshot and roadmap exist | Needs typed producers and replay/conformance gates |
