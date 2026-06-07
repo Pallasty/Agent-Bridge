@@ -70,6 +70,106 @@
     }
     #search:focus { border-color: #4a4a60; }
     #search::placeholder { color: #5a5a68; }
+    #search-nav {
+      position: absolute;
+      top: 56px;
+      left: clamp(286px, 41vw, 590px);
+      width: 420px;
+      max-width: calc(100vw - 610px);
+      background: rgba(14, 14, 20, 0.96);
+      border: 1px solid #2a2a35;
+      border-radius: 6px;
+      z-index: 28;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
+      overflow: hidden;
+    }
+    body.workbench-open #search-nav {
+      right: 452px;
+      width: auto;
+      max-width: none;
+    }
+    #search-nav.hidden { display: none; }
+    #search-nav .search-nav-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 11px;
+      border-bottom: 1px solid #1f1f2a;
+      color: #6a6a78;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    #search-nav .search-nav-count {
+      color: #5cc8c8;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    #search-nav .search-nav-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      max-height: 300px;
+      overflow-y: auto;
+      scrollbar-color: #4a4a55 #101018;
+    }
+    #search-nav .search-result {
+      width: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 9px 11px;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid #1f1f2a;
+      border-left: 2px solid transparent;
+      color: #d8d8e2;
+      text-align: left;
+      cursor: pointer;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    #search-nav .search-result:last-child { border-bottom: none; }
+    #search-nav .search-result:hover,
+    #search-nav .search-result.active {
+      color: #ffffff;
+      background: #15151f;
+      border-left-color: #ffe070;
+    }
+    #search-nav .search-result-main { min-width: 0; }
+    #search-nav .search-result-label {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    #search-nav .search-result-meta {
+      display: block;
+      margin-top: 3px;
+      color: #6a6a78;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #search-nav .search-result-score {
+      color: #ffe070;
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    #search-nav .search-empty {
+      color: #4a4a55;
+      font-size: 11px;
+      font-style: italic;
+      padding: 12px;
+    }
     #filter-btn {
       background: rgba(20, 20, 28, 0.85);
       border: 1px solid #2a2a35;
@@ -2085,6 +2185,7 @@
             title="review memories untouched for >7 days (C8)">🧊 review</button>
     <button id="filter-btn" type="button">filter</button>
   </div>
+  <div id="search-nav" class="search-nav hidden"></div>
   <!-- A↔B intent label. A · 殿堂 = palace (result layer); shown when no
        canvas is open. Click the vision link to read the source vision. -->
   <div class="mode-badge a-mode">
@@ -2647,6 +2748,7 @@ const state = {
   cy: null,
   data: null,
   search: "",
+  searchCursor: 0,
   viewPreset: "overview",
   activeRegion: null,
   atlasRegions: [],
@@ -3364,6 +3466,7 @@ function applyVisualState() {
       ego.edges().addClass("focus-edge");
     }
   }
+  renderSearchNavigator();
 }
 
 function syncRegionToFocusedNode(id) {
@@ -3401,6 +3504,128 @@ function clearFocus() {
   document.getElementById("focus-hint").textContent = "";
   applyVisualState();
   renderBreadcrumb();
+  saveViewState();
+}
+
+function nodePassesSearchScope(n) {
+  const d = n.data();
+  const sourceOk = state.enabledSources.has(d.source);
+  const kindOk = state.enabledKinds.has(d.kind);
+  const regionOk = !state.activeRegion || d.region === state.activeRegion;
+  const presetOk = nodePassesViewPreset(n);
+  return sourceOk && kindOk && regionOk && presetOk;
+}
+
+function searchResultRows(term) {
+  if (!state.cy) return [];
+  const q = String(term || "").trim().toLowerCase();
+  if (!q) return [];
+  const rows = [];
+  state.cy.nodes().forEach(n => {
+    if (!nodePassesSearchScope(n)) return;
+    const d = n.data();
+    const hay = d.searchHaystack || "";
+    if (!hay.includes(q)) return;
+    const key = n.id();
+    const label = d.label || key;
+    const keyLower = key.toLowerCase();
+    const labelLower = String(label).toLowerCase();
+    let score = 0;
+    if (keyLower === q) score += 2000;
+    else if (keyLower.startsWith(q)) score += 1400;
+    else if (keyLower.includes(q)) score += 900;
+    if (labelLower === q) score += 1200;
+    else if (labelLower.startsWith(q)) score += 700;
+    if (d.hub) score += 90;
+    if (d.fresh) score += 60;
+    score += Math.min(d.degree || 0, 60);
+    score += Math.min(Math.round((d.importance || 0) * 40), 40);
+    rows.push({
+      key,
+      label,
+      kind: d.kind || "unknown",
+      region: d.region || "",
+      role: regionNodeRole(d),
+      degree: d.degree || 0,
+      access: d.access || 0,
+      score,
+    });
+  });
+  return rows.sort((a, b) =>
+    b.score - a.score ||
+    b.access - a.access ||
+    a.label.localeCompare(b.label)
+  );
+}
+
+function renderSearchNavigator() {
+  const nav = document.getElementById("search-nav");
+  if (!nav) return;
+  const term = state.search.trim();
+  if (!term || !state.cy) {
+    nav.classList.add("hidden");
+    nav.innerHTML = "";
+    return;
+  }
+  const rows = searchResultRows(term);
+  const visibleRows = rows.slice(0, 8);
+  nav.classList.remove("hidden");
+  if (visibleRows.length === 0) {
+    state.searchCursor = 0;
+    nav.innerHTML = `
+      <div class="search-nav-head">
+        <span>Search</span>
+        <span class="search-nav-count">0 matches</span>
+      </div>
+      <div class="search-empty">no nodes match the current filters</div>
+    `;
+    return;
+  }
+  if (state.searchCursor < 0 || state.searchCursor >= visibleRows.length) {
+    state.searchCursor = 0;
+  }
+  const list = visibleRows.map((row, idx) => {
+    const regionLabel = row.region ? atlasLabel(row.region) : "unmapped";
+    const active = idx === state.searchCursor ? " active" : "";
+    return `<button type="button" class="search-result${active}" data-search-result-key="${escapeHTML(row.key)}">
+      <span class="search-result-main">
+        <span class="search-result-label" title="${escapeHTML(row.key)}">${escapeHTML(row.label)}</span>
+        <span class="search-result-meta">${escapeHTML(row.kind)} · ${escapeHTML(regionLabel)} · ${escapeHTML(row.role)}</span>
+      </span>
+      <span class="search-result-score">${row.degree}°</span>
+    </button>`;
+  }).join("");
+  nav.innerHTML = `
+    <div class="search-nav-head">
+      <span>Search</span>
+      <span class="search-nav-count">${rows.length} match${rows.length === 1 ? "" : "es"}</span>
+    </div>
+    <div class="search-nav-list">${list}</div>
+  `;
+  const active = nav.querySelector(".search-result.active");
+  if (active) active.scrollIntoView({ block: "nearest" });
+}
+
+function moveSearchCursor(delta) {
+  const rows = searchResultRows(state.search).slice(0, 8);
+  if (rows.length === 0) return;
+  const nextCursor = (state.searchCursor + delta + rows.length) % rows.length;
+  state.searchCursor = nextCursor;
+  renderSearchNavigator();
+}
+
+function activateSearchCursor() {
+  const rows = searchResultRows(state.search).slice(0, 8);
+  const row = rows[state.searchCursor] || rows[0];
+  if (row) jumpToSearchResult(row.key);
+}
+
+function jumpToSearchResult(key) {
+  if (!key) return;
+  state.relationDetailKey = null;
+  focusOnNode(key);
+  showSidePanel(key);
+  renderSearchNavigator();
   saveViewState();
 }
 
@@ -4362,10 +4587,31 @@ document.getElementById("breadcrumb").addEventListener("click", (e) => {
   }
 });
 
-document.getElementById("search").addEventListener("input", (e) => {
+const searchInput = document.getElementById("search");
+searchInput.addEventListener("input", (e) => {
   state.search = e.target.value;
+  state.searchCursor = 0;
   applyVisualState();
   saveViewState();
+});
+searchInput.addEventListener("keydown", (e) => {
+  if (!state.search.trim()) return;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    moveSearchCursor(1);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    moveSearchCursor(-1);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    activateSearchCursor();
+  }
+});
+
+document.getElementById("search-nav").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-search-result-key]");
+  if (!btn) return;
+  jumpToSearchResult(btn.dataset.searchResultKey);
 });
 
 document.getElementById("filter-btn").addEventListener("click", () => {
@@ -4629,6 +4875,7 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "Escape") {
     document.getElementById("search").value = "";
     state.search = "";
+    state.searchCursor = 0;
     clearFocus();
     saveViewState();
   }
