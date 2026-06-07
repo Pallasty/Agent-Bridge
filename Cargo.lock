@@ -29,6 +29,7 @@ dependencies = [
  "ab-seed-bridge",
  "ab-store",
  "ab-terminal",
+ "ab-world-core",
  "anyhow",
  "async-trait",
  "axum",

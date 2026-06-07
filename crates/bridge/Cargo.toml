@@ -16,6 +16,7 @@ onnx-embed = ["ab-store/onnx-embed"]
 
 [dependencies]
 ab-core.workspace = true
+ab-world-core.workspace = true
 ab-notifier.workspace = true
 ab-store.workspace = true
 ab-terminal.workspace = true
