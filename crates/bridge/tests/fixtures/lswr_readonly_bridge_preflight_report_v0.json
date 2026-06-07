@@ -1,0 +1,114 @@
+{
+  "schema": "agent_bridge.lswr.readonly_bridge_wrapper_preflight_report.v0",
+  "descriptor_schema": "agent_bridge.lswr.readonly_bridge_wrapper_descriptor.v0",
+  "dry_run_schema": "agent_bridge.lswr.readonly_bridge_wrapper_exposure_dry_run.v0",
+  "wrapper_name": "lswr_readonly_bridge_display",
+  "verdict": "ready_for_registry_review",
+  "status": {
+    "label": "Ready for separate registry review",
+    "tone": "success",
+    "detail": "Descriptor and dry-run agree; no registry mutation has been applied in this slice."
+  },
+  "registry_boundary": {
+    "current_exposure": "not_registered",
+    "requested_profile": "all",
+    "minimum_profile_after_registry": "all",
+    "applies_registry_change": false,
+    "requires_separate_registry_change": true
+  },
+  "safety_boundary": {
+    "read_only": true,
+    "input_mode": "explicit_report_packet_payload",
+    "mutation_surface": "none",
+    "no_host_path": true,
+    "no_live_runtime": true,
+    "no_gui_capture": true,
+    "allowed_capabilities": [
+      "snapshot",
+      "query",
+      "display",
+      "report_markdown"
+    ],
+    "disallowed_capabilities": [
+      "patch",
+      "action",
+      "invoke",
+      "runtime_launch",
+      "gui_capture",
+      "host_path_read",
+      "file_system_write",
+      "memory_graph_write"
+    ]
+  },
+  "check_rows": [
+    {
+      "label": "preflight_consistency",
+      "verdict": "passed",
+      "required": true,
+      "tone": "success",
+      "evidence": "descriptor_schema_match=true, wrapper_match=true, requested_tool_match=true, applies_registry_change=false"
+    },
+    {
+      "label": "descriptor_state",
+      "verdict": "passed",
+      "required": true,
+      "tone": "success",
+      "evidence": "schema=agent_bridge.lswr.readonly_bridge_wrapper_descriptor.v0, state=descriptor_only, mcp_registry_change=false, requires_separate_registry_change=true"
+    },
+    {
+      "label": "registry_mode",
+      "verdict": "passed",
+      "required": true,
+      "tone": "success",
+      "evidence": "registry_change_mode=dry_run_only, applies_registry_change=false"
+    },
+    {
+      "label": "tool_name",
+      "verdict": "passed",
+      "required": true,
+      "tone": "success",
+      "evidence": "requested=lswr_readonly_bridge_display, descriptor=lswr_readonly_bridge_display, candidate=lswr_readonly_bridge_display"
+    },
+    {
+      "label": "profile_gate",
+      "verdict": "passed",
+      "required": true,
+      "tone": "success",
+      "evidence": "requested=all, minimum_after_registry=all, codex_essential_status=not_exposed"
+    },
+    {
+      "label": "schema_contract",
+      "verdict": "passed",
+      "required": true,
+      "tone": "success",
+      "evidence": "input=agent_bridge.lswr.readonly_bridge_report_packet.v0, required_input=agent_bridge.lswr.readonly_bridge_report_packet.v0, output=agent_bridge.lswr.readonly_bridge_display_model.v0, required_output=agent_bridge.lswr.readonly_bridge_display_model.v0"
+    },
+    {
+      "label": "input_safety",
+      "verdict": "passed",
+      "required": true,
+      "tone": "success",
+      "evidence": "mode=explicit_report_packet_payload, explicit_payload=true, host_path=false, live_runtime=false, gui_capture=false"
+    },
+    {
+      "label": "mutation_safety",
+      "verdict": "passed",
+      "required": true,
+      "tone": "success",
+      "evidence": "mutation=false, patch=false, action=false, invoke=false"
+    },
+    {
+      "label": "acceptance_guard",
+      "verdict": "passed",
+      "required": true,
+      "tone": "success",
+      "evidence": "requires_wrapper_ready=true, overall=accepted, status_tone=success, all_gate_verdict=passed"
+    }
+  ],
+  "guidance": [
+    "Preflight is ready for a separate, explicit MCP registry review slice.",
+    "Do not reuse this report as proof that a real tool is already registered.",
+    "When opening registry work, preserve the dry-run rejection cases as profile/tool-policy tests."
+  ],
+  "report_markdown": "# LSWR Read-Only Bridge Wrapper Preflight\n\nStatus: Ready for separate registry review (success)\n\n## Boundary\n\n- Wrapper: `lswr_readonly_bridge_display`\n- Requested tool: `lswr_readonly_bridge_display`\n- Requested profile: `all`\n- Current exposure: `not_registered`\n- Applies registry change: `false`\n- Separate registry change required: `true`\n\n## Safety\n\n- Read-only: `true`\n- Input mode: `explicit_report_packet_payload`\n- Mutation surface: `none`\n- Host path / live runtime / GUI capture: `false` / `false` / `false`\n\n## Checks\n\n- `preflight_consistency`: `passed` (success) - descriptor_schema_match=true, wrapper_match=true, requested_tool_match=true, applies_registry_change=false\n- `descriptor_state`: `passed` (success) - schema=agent_bridge.lswr.readonly_bridge_wrapper_descriptor.v0, state=descriptor_only, mcp_registry_change=false, requires_separate_registry_change=true\n- `registry_mode`: `passed` (success) - registry_change_mode=dry_run_only, applies_registry_change=false\n- `tool_name`: `passed` (success) - requested=lswr_readonly_bridge_display, descriptor=lswr_readonly_bridge_display, candidate=lswr_readonly_bridge_display\n- `profile_gate`: `passed` (success) - requested=all, minimum_after_registry=all, codex_essential_status=not_exposed\n- `schema_contract`: `passed` (success) - input=agent_bridge.lswr.readonly_bridge_report_packet.v0, required_input=agent_bridge.lswr.readonly_bridge_report_packet.v0, output=agent_bridge.lswr.readonly_bridge_display_model.v0, required_output=agent_bridge.lswr.readonly_bridge_display_model.v0\n- `input_safety`: `passed` (success) - mode=explicit_report_packet_payload, explicit_payload=true, host_path=false, live_runtime=false, gui_capture=false\n- `mutation_safety`: `passed` (success) - mutation=false, patch=false, action=false, invoke=false\n- `acceptance_guard`: `passed` (success) - requires_wrapper_ready=true, overall=accepted, status_tone=success, all_gate_verdict=passed\n\n## Guidance\n\n- Preflight is ready for a separate, explicit MCP registry review slice.\n- Do not reuse this report as proof that a real tool is already registered.\n- When opening registry work, preserve the dry-run rejection cases as profile/tool-policy tests.\n"
+}
