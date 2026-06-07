@@ -12,6 +12,7 @@ Related documents:
 - [Cross-project Event Spine Roadmap](CROSS_PROJECT_EVENT_SPINE_ROADMAP_2026_05_27.md)
 - [Work Memory Scratchpad](../DESIGN-work-memory-scratchpad-2026-05-23.md)
 - [Agent Avatar Protocol](../RFC-v24-agent-avatar-protocol.md)
+- [Palace Diff Pilot](SEMANTIC_SYSTEM_BUS_PALACE_DIFF_PILOT_2026_06_07.md)
 
 ## 0. Decision
 
@@ -359,6 +360,12 @@ Deliverable:
 
 - one read-only semantic diff tool or report over Palace/memory/daemon state;
 - stable `event_id`, `subject_id`, `event_type`, `verdict` where applicable.
+
+Initial landing:
+
+- Palace first, via `GET /api/semantic-events`;
+- browser baseline stored in localStorage, server remains stateless/read-only;
+- footer pulse exposes object/event counts and graph deltas on the 7979 surface.
 
 Goal:
 
