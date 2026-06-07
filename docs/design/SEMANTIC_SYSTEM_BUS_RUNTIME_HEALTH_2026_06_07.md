@@ -125,6 +125,6 @@ Runtime acceptance:
 
 ## 6. Next Slice
 
-After SSB-12, the strongest remaining conformance gap is not another local
-service probe. It is a true Windows UIA runtime adapter or a cross-platform
-adapter harness that can exercise Windows UIA on a Windows host.
+After SSB-12, SSB-13 adds a compact runtime conformance harness. The strongest
+remaining runtime gap after that is a true Windows UIA adapter or a remote
+harness path that can exercise Windows UIA on a Windows host.

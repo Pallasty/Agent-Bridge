@@ -573,6 +573,25 @@ Initial landing:
 - the tool is exposed to `codex-essential` and never restarts services, mutates
   Palace, writes memory graph edges, or captures screenshots.
 
+### SSB-13 - Runtime conformance harness
+
+Deliverable:
+
+- compact read-only MCP snapshot that combines adapter evidence with local
+  runtime health;
+- per-adapter `live_status` rows for runtime-backed, fixture-only, and
+  design-only states;
+- explicit Windows UIA runtime slot that remains planned/unavailable on
+  non-Windows hosts.
+
+Initial landing:
+
+- [Semantic System Bus Runtime Conformance](SEMANTIC_SYSTEM_BUS_RUNTIME_CONFORMANCE_2026_06_07.md);
+- `semantic_bus_runtime_conformance` composes `semantic_bus_adapter_report` and
+  `semantic_bus_runtime_health`;
+- the harness does not implement Windows UIA locally or pretend screenshot
+  fallback is runtime evidence.
+
 ## 7. Non-goals
 
 - Do not make screenshots the primary architecture.

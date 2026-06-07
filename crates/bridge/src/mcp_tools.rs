@@ -3050,6 +3050,8 @@ const SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA: &str =
     "agent_bridge.semantic_bus.adapter_report.v0";
 const SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA: &str =
     "agent_bridge.semantic_bus.runtime_health.v0";
+const SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA: &str =
+    "agent_bridge.semantic_bus.runtime_conformance.v0";
 
 pub struct SemanticBusAdapterReportTool {
     _hub: Hub,
@@ -3149,8 +3151,8 @@ fn semantic_bus_adapter_report_payload(args: &Value) -> Value {
         "adapters": adapters,
         "gaps": gaps,
         "next_recommended_slice": {
-            "id": "ssb-13-windows-uia-runtime-adapter",
-            "reason": "local daemon-http and Palace now have a live read-only runtime health report; Windows UIA remains fixture/design-backed only"
+            "id": "ssb-14-windows-uia-runtime-host",
+            "reason": "local daemon-http/Palace runtime health and the cross-platform conformance harness are now live; Windows UIA remains fixture/design-backed only"
         }
     })
 }
@@ -4169,6 +4171,243 @@ fn semantic_bus_runtime_graph_stats(graph: &Value) -> Value {
         "hub_threshold": hub_threshold,
         "connected_ratio": (connected_ratio * 1000.0).round() / 1000.0,
         "explicit_density": (explicit_density * 1000.0).round() / 1000.0
+    })
+}
+
+// ===========================================================================
+//                       semantic_bus_runtime_conformance
+// ===========================================================================
+
+pub struct SemanticBusRuntimeConformanceTool {
+    _hub: Hub,
+}
+
+impl SemanticBusRuntimeConformanceTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SemanticBusRuntimeConformanceTool {
+    fn name(&self) -> &'static str {
+        "semantic_bus_runtime_conformance"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Semantic System Bus runtime conformance snapshot. \
+                 It combines adapter evidence with local runtime health into a compact \
+                 coverage report and leaves unavailable platform adapters explicit; it \
+                 never mutates host state, restarts services, or writes memory graph edges."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Agent-Bridge repo root for source-backed adapter evidence."
+                    },
+                    "include_runtime_health": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Run local daemon-http/Palace runtime health checks."
+                    },
+                    "daemon_http_url": {
+                        "type": "string",
+                        "default": "http://127.0.0.1:7878",
+                        "description": "Base URL for daemon-http healthz when include_runtime_health=true."
+                    },
+                    "palace_url": {
+                        "type": "string",
+                        "default": "http://127.0.0.1:7979",
+                        "description": "Base URL for Palace when include_runtime_health=true."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 500,
+                        "maximum": 10000,
+                        "default": 2500,
+                        "description": "Per-request timeout for runtime health checks."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &semantic_bus_runtime_conformance_payload(&args).await,
+        ))
+    }
+}
+
+async fn semantic_bus_runtime_conformance_payload(args: &Value) -> Value {
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut adapter_args = json!({
+        "include_details": false,
+        "include_design_only": true
+    });
+    if let Some(cwd) = args.get("cwd").and_then(Value::as_str) {
+        adapter_args["cwd"] = json!(cwd);
+    }
+    let adapter_report = semantic_bus_adapter_report_payload(&adapter_args);
+    let include_runtime_health = args
+        .get("include_runtime_health")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let runtime_health = if include_runtime_health {
+        let runtime_args = json!({
+            "daemon_http_url": semantic_bus_runtime_arg(args, "daemon_http_url", "http://127.0.0.1:7878"),
+            "palace_url": semantic_bus_runtime_arg(args, "palace_url", "http://127.0.0.1:7979"),
+            "timeout_ms": args.get("timeout_ms").and_then(Value::as_u64).unwrap_or(2_500),
+            "include_raw": false,
+            "check_semantic_events": true
+        });
+        Some(semantic_bus_runtime_health_payload(&runtime_args).await)
+    } else {
+        None
+    };
+    semantic_bus_runtime_conformance_report(now_secs, adapter_report, runtime_health)
+}
+
+fn semantic_bus_runtime_conformance_report(
+    now_secs: u64,
+    adapter_report: Value,
+    runtime_health: Option<Value>,
+) -> Value {
+    let current_platform = std::env::consts::OS;
+    let adapters = adapter_report
+        .get("adapters")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let runtime_health_status = runtime_health
+        .as_ref()
+        .and_then(|v| v.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or("not_checked");
+    let runtime_health_verified = runtime_health
+        .as_ref()
+        .and_then(|v| v.get("verification"))
+        .and_then(|v| v.get("verdict"))
+        .and_then(Value::as_str)
+        == Some("verified");
+
+    let mut rows = Vec::new();
+    let mut live_ready = 0u64;
+    let mut current_platform_runtime_backed = 0u64;
+    let mut fixture_only = 0u64;
+    let mut design_only = 0u64;
+    for adapter in adapters {
+        let adapter_id = adapter
+            .get("adapter_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let platform = adapter
+            .get("platform")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let evidence_level = adapter
+            .get("evidence_level")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let tool = adapter.get("tool").and_then(Value::as_str);
+        let live_status = if tool == Some("semantic_bus_runtime_health") {
+            runtime_health_status
+        } else if evidence_level == "runtime_backed" && platform == current_platform {
+            current_platform_runtime_backed += 1;
+            "runtime_backed_available_not_checked"
+        } else if evidence_level == "runtime_backed" {
+            "runtime_backed_not_current_platform"
+        } else if evidence_level == "fixture_backed" {
+            fixture_only += 1;
+            "fixture_only"
+        } else if evidence_level == "design_only" {
+            design_only += 1;
+            "design_only"
+        } else {
+            "unknown"
+        };
+        if live_status == "ready" {
+            live_ready += 1;
+        }
+        rows.push(json!({
+            "adapter_id": adapter_id,
+            "platform": platform,
+            "adapter_family": adapter.get("adapter_family").cloned().unwrap_or(Value::Null),
+            "tool": tool,
+            "evidence_level": evidence_level,
+            "ready_for_runtime": adapter.get("ready_for_runtime").cloned().unwrap_or(json!(false)),
+            "live_status": live_status,
+            "current_platform": platform == current_platform,
+            "read_only": adapter.get("read_only").cloned().unwrap_or(json!(true))
+        }));
+    }
+
+    let gaps = adapter_report
+        .get("gaps")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let windows_slot = rows
+        .iter()
+        .find(|row| row.get("adapter_id").and_then(Value::as_str) == Some("windows_uia_runtime_adapter"))
+        .cloned()
+        .unwrap_or_else(|| json!({
+            "adapter_id": "windows_uia_runtime_adapter",
+            "live_status": "missing_from_adapter_report"
+        }));
+    let verdict = if runtime_health_verified {
+        "verified"
+    } else if runtime_health.is_some() {
+        "degraded"
+    } else {
+        "not_checked"
+    };
+
+    json!({
+        "schema": SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA,
+        "generated_at_unix": now_secs,
+        "read_only": true,
+        "live_checks_executed": runtime_health.is_some(),
+        "current_platform": current_platform,
+        "summary": {
+            "adapter_count": rows.len(),
+            "live_ready_count": live_ready,
+            "current_platform_runtime_backed_count": current_platform_runtime_backed,
+            "fixture_only_count": fixture_only,
+            "design_only_count": design_only,
+            "runtime_health_status": runtime_health_status,
+            "runtime_health_verified": runtime_health_verified,
+            "gap_count": gaps.as_array().map(|g| g.len()).unwrap_or(0)
+        },
+        "runtime_health_summary": runtime_health.as_ref().map(|v| json!({
+            "status": v.get("status").cloned().unwrap_or(Value::Null),
+            "verification": v.get("verification").cloned().unwrap_or(Value::Null),
+            "summary": v.get("summary").cloned().unwrap_or(Value::Null)
+        })),
+        "adapters": rows,
+        "gaps": gaps,
+        "windows_uia_runtime_slot": windows_slot,
+        "verification": {
+            "verdict": verdict,
+            "reason": if runtime_health_verified {
+                "local runtime health is verified and adapter evidence is source-backed"
+            } else if runtime_health.is_some() {
+                "adapter evidence is source-backed but local runtime health is degraded"
+            } else {
+                "adapter evidence is source-backed but live runtime health was not checked"
+            },
+            "recover": if runtime_health_verified { "proceed" } else { "retry" }
+        },
+        "next_recommended_slice": {
+            "id": "ssb-14-windows-uia-runtime-host",
+            "reason": "the harness keeps Windows UIA explicit as a planned slot until a Windows host can provide runtime evidence"
+        }
     })
 }
 
@@ -32051,6 +32290,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // SSB live local runtime health: bounded read-only HTTP GETs for daemon-http
     // and Palace graph state. It does not restart services or write memory edges.
     "semantic_bus_runtime_health",
+    // SSB runtime conformance snapshot: compact read-only aggregation of adapter
+    // evidence plus local runtime health. Platform gaps remain explicit.
+    "semantic_bus_runtime_conformance",
     // External browser-lite discovery: read-only probe only. This is not the
     // mutating browser_* automation surface and does not change browser routing.
     "browser_lite_probe",
@@ -33928,6 +34170,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(SemanticBusRuntimeHealthTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SemanticBusRuntimeConformanceTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -39159,6 +39407,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "macos_ax_verify"));
         assert!(p.includes(Tier::Standard, "semantic_bus_adapter_report"));
         assert!(p.includes(Tier::Standard, "semantic_bus_runtime_health"));
+        assert!(p.includes(Tier::Standard, "semantic_bus_runtime_conformance"));
         assert!(p.includes(Tier::Standard, "browser_lite_probe"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
@@ -39168,15 +39417,16 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 49 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 50 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(37: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(38: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_related_keys_preflight
         //      + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
         //      + macos_ax_probe + macos_ax_verify + semantic_bus_adapter_report
         //      + semantic_bus_runtime_health
+        //      + semantic_bus_runtime_conformance
         //      + browser_lite_probe
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
         //      + agent_orchestrate_scan, added by d4fd74d).
@@ -39189,7 +39439,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // +macos_ax_verify brought DIRECT 34→35, total 46→47.
         // +semantic_bus_adapter_report brought DIRECT 35→36, total 47→48.
         // +semantic_bus_runtime_health brought DIRECT 36→37, total 48→49.
-        assert_eq!(extras.len(), 49);
+        // +semantic_bus_runtime_conformance brought DIRECT 37→38, total 49→50.
+        assert_eq!(extras.len(), 50);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -39228,6 +39479,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"macos_ax_verify"));
         assert!(extras.contains(&"semantic_bus_adapter_report"));
         assert!(extras.contains(&"semantic_bus_runtime_health"));
+        assert!(extras.contains(&"semantic_bus_runtime_conformance"));
         assert!(extras.contains(&"browser_lite_probe"));
         // Remote session steering (d4fd74d) — direct-exposed for Codex
         // orchestrators that already carry agent_spawn + agent_session_*.
@@ -39653,6 +39905,25 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn registry_exposes_semantic_bus_runtime_conformance_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "semantic_bus_runtime_conformance"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "semantic_bus_runtime_conformance")
+            .expect("semantic_bus_runtime_conformance schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("never mutates"));
+        assert!(tool.input_schema["properties"].get("include_runtime_health").is_some());
+        assert!(tool.input_schema["properties"].get("daemon_http_url").is_some());
+        assert!(tool.input_schema["properties"].get("restart").is_none());
+        assert!(tool.input_schema["properties"].get("write_edges").is_none());
+    }
+
+    #[test]
     fn semantic_bus_adapter_report_classifies_adapter_evidence() {
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let payload = semantic_bus_adapter_report_payload(&json!({
@@ -39812,6 +40083,46 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .iter()
             .any(|obj| obj["object_id"].as_str()
                 == Some("palace:memory-region:agent-bridge")));
+    }
+
+    #[tokio::test]
+    async fn semantic_bus_runtime_conformance_summarizes_without_live_checks() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let payload = semantic_bus_runtime_conformance_payload(&json!({
+            "cwd": repo_root.display().to_string(),
+            "include_runtime_health": false
+        }))
+        .await;
+
+        assert_eq!(
+            payload["schema"].as_str(),
+            Some(SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA)
+        );
+        assert_eq!(payload["read_only"].as_bool(), Some(true));
+        assert_eq!(payload["live_checks_executed"].as_bool(), Some(false));
+        assert_eq!(
+            payload["verification"]["verdict"].as_str(),
+            Some("not_checked")
+        );
+        assert_eq!(
+            payload["summary"]["runtime_health_status"].as_str(),
+            Some("not_checked")
+        );
+        assert!(payload["summary"]["adapter_count"].as_u64().unwrap_or(0) >= 11);
+        assert!(payload["summary"]["gap_count"].as_u64().unwrap_or(0) >= 2);
+        assert_eq!(
+            payload["windows_uia_runtime_slot"]["adapter_id"].as_str(),
+            Some("windows_uia_runtime_adapter")
+        );
+        assert_eq!(
+            payload["windows_uia_runtime_slot"]["live_status"].as_str(),
+            Some("design_only")
+        );
+        assert!(payload["adapters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["adapter_id"].as_str() == Some("local_runtime_health")));
     }
 
     #[tokio::test]

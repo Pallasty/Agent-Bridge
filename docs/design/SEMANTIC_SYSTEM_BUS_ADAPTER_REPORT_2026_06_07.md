@@ -90,6 +90,6 @@ daemon-http health + Palace memory region state -> read-only SSB report
 ```
 
 This closes the current gap between fixture-described product surfaces and live,
-user-visible runtime state without adding mutation. The next stronger gap is a
-real Windows UIA runtime adapter or cross-platform harness coverage for a
-Windows host.
+user-visible runtime state without adding mutation. SSB-13 then added the
+runtime conformance harness. The next stronger gap is a real Windows UIA runtime
+adapter or remote harness coverage from a Windows host.
