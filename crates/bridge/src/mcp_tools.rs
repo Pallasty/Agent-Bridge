@@ -1559,6 +1559,9 @@ fn desktop_snapshot_error(error: Value) -> ToolResult {
 // REAL desktop is safe + ungated (like desktop_snapshot); --cage-pid / --swaysock only
 // SCOPE what counts as present.
 
+const DESKTOP_VERIFY_SEMANTIC_SCHEMA: &str = "agent_bridge.semantic_bus.desktop_verify.v0";
+const DESKTOP_VERIFY_SOURCE_SCHEMA: &str = "desktop_verify/v0";
+
 pub struct DesktopVerifyTool {
     _hub: Hub,
 }
@@ -1622,6 +1625,16 @@ impl McpTool for DesktopVerifyTool {
                         "description": "Was the AT-SPI target present BEFORE the act? Splits a miss into unchanged vs diverged."
                     },
                     "before_focus": { "type": "string", "description": "Focused 'app_id|title' BEFORE the act (for focus_is)." },
+                    "semantic_bus": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, wrap the read-only desktop_verify/v0 payload as agent_bridge.semantic_bus.desktop_verify.v0. Default false preserves the existing payload exactly apart from mcp_wrapper."
+                    },
+                    "semantic_include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Only with semantic_bus=true: include the original desktop_verify payload as raw_verify. Default false keeps the semantic envelope compact."
+                    },
                     "timeout_ms": {
                         "type": "integer", "minimum": 2000, "maximum": 60000, "default": 12000,
                         "description": "Milliseconds before the verify process is killed (kept above poll_timeout_secs)."
@@ -1650,6 +1663,14 @@ impl McpTool for DesktopVerifyTool {
             .unwrap_or(12_000)
             .clamp(2_000, 60_000)
             .max(min_proc_ms);
+        let semantic_bus = args
+            .get("semantic_bus")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let semantic_include_raw = args
+            .get("semantic_include_raw")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
         let script = desktop_verify_script_path(&args, cwd.as_ref());
@@ -1739,6 +1760,9 @@ impl McpTool for DesktopVerifyTool {
                         }),
                     );
                 }
+                if semantic_bus {
+                    payload = desktop_verify_semantic_bus_payload(&payload, semantic_include_raw);
+                }
                 Ok(ToolResult::json_text(&payload))
             }
             Err(e) => Ok(desktop_verify_error(json!({
@@ -1751,6 +1775,221 @@ impl McpTool for DesktopVerifyTool {
                 "truncated": stdout_truncated || stderr_truncated
             }))),
         }
+    }
+}
+
+fn desktop_verify_semantic_bus_payload(verify: &Value, include_raw: bool) -> Value {
+    let source_schema = verify
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let ts = verify.get("ts").cloned().unwrap_or(Value::Null);
+    let ts_label = desktop_snapshot_value_label(&ts, "unknown");
+    let expect = verify
+        .get("expect")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let source_verdict = verify
+        .get("verdict")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let source_recover = verify
+        .get("recover")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| match source_verdict {
+            "verified" => "proceed",
+            "error" => "escalate",
+            "unmet" => "retry",
+            _ => "replan",
+        });
+    let selector = verify.get("selector").cloned().unwrap_or_else(|| json!({}));
+    let scope = verify.get("scope").cloned().unwrap_or_else(|| json!({}));
+    let observed = verify.get("observed").cloned().unwrap_or_else(|| json!({}));
+    let target_family = desktop_verify_target_family(expect);
+    let target_summary = desktop_verify_selector_summary(&selector);
+    let target_seed = format!("{expect}-{target_summary}");
+    let target_object_id = format!(
+        "desktop:linux:verify:{target_family}:{}",
+        desktop_snapshot_slug(&target_seed)
+    );
+    let event_id = format!(
+        "evt-desktop-verify-{ts_label}-{}",
+        desktop_snapshot_slug(expect)
+    );
+    let schema_ok = source_schema == DESKTOP_VERIFY_SOURCE_SCHEMA;
+    let semantic_verdict = if !schema_ok {
+        "not_verified"
+    } else {
+        match source_verdict {
+            "verified" => "verified",
+            "error" => "error",
+            _ => "not_verified",
+        }
+    };
+    let semantic_recover = if schema_ok { source_recover } else { "replan" };
+    let reason = if !schema_ok {
+        json!("unexpected_source_schema")
+    } else if source_verdict == "verified" {
+        Value::Null
+    } else if source_verdict == "error" {
+        verify
+            .get("error")
+            .cloned()
+            .filter(|v| !v.is_null())
+            .unwrap_or_else(|| json!("desktop_verify_error"))
+    } else if source_verdict == "unmet" {
+        json!("postcondition_unmet")
+    } else {
+        json!("unknown_source_verdict")
+    };
+    let observed_count = observed.get("count").cloned().unwrap_or(Value::Null);
+    let mut verify_args = selector.as_object().cloned().unwrap_or_default();
+    verify_args.insert("expect".to_string(), json!(expect));
+
+    let mut payload = json!({
+        "schema": DESKTOP_VERIFY_SEMANTIC_SCHEMA,
+        "source_schema": source_schema,
+        "source_adapter": "linux.desktop_verify",
+        "observed_at": ts,
+        "read_only": true,
+        "raw_available": true,
+        "raw_included": include_raw,
+        "semantic_objects": [
+            {
+                "schema": "agent_bridge.semantic_bus.object.v0",
+                "object_id": target_object_id,
+                "object_type": format!("desktop.verify.target.{target_family}"),
+                "source_adapter": "linux.desktop_verify",
+                "label": format!("desktop_verify {expect} {target_summary}"),
+                "state": {
+                    "expect": expect,
+                    "selector": selector,
+                    "scope": scope,
+                    "source_verdict": source_verdict,
+                    "recover": source_recover,
+                    "change": verify.get("change").cloned().unwrap_or(Value::Null),
+                    "held_after_ms": verify.get("held_after_ms").cloned().unwrap_or(Value::Null),
+                    "polls": verify.get("polls").cloned().unwrap_or(Value::Null),
+                    "observed": observed,
+                    "error": verify.get("error").cloned().unwrap_or(Value::Null)
+                },
+                "relations": [],
+                "confidence": if schema_ok { 0.9 } else { 0.25 },
+                "observed_at": ts,
+                "provenance": {
+                    "tool": "desktop_verify",
+                    "schema": source_schema
+                }
+            }
+        ],
+        "affordances": [
+            {
+                "affordance_id": format!("{target_object_id}:reverify"),
+                "object_id": target_object_id,
+                "action_type": "desktop.verify",
+                "args_schema": Value::Object(verify_args),
+                "risk_level": "low",
+                "requires_gate": false,
+                "expected_effect": "re-observes the same postcondition without mutating the desktop"
+            }
+        ],
+        "events": [
+            {
+                "event_id": event_id,
+                "event_type": "desktop.verify.completed",
+                "subject_id": target_object_id,
+                "source": "desktop_verify",
+                "actor": "agent",
+                "payload_json": {
+                    "expect": expect,
+                    "source_verdict": source_verdict,
+                    "recover": source_recover,
+                    "change": verify.get("change").cloned().unwrap_or(Value::Null),
+                    "observed_count": observed_count,
+                    "held_after_ms": verify.get("held_after_ms").cloned().unwrap_or(Value::Null),
+                    "polls": verify.get("polls").cloned().unwrap_or(Value::Null)
+                },
+                "source_event_ids": []
+            }
+        ],
+        "verification": {
+            "verdict": semantic_verdict,
+            "source_verdict": source_verdict,
+            "reason": reason,
+            "method": "desktop_verify.semantic_normalizer",
+            "evidence": {
+                "source_schema": source_schema,
+                "expect": expect,
+                "selector": verify.get("selector").cloned().unwrap_or_else(|| json!({})),
+                "scope": verify.get("scope").cloned().unwrap_or_else(|| json!({})),
+                "observed_count": observed.get("count").cloned().unwrap_or(Value::Null),
+                "raw_included": include_raw
+            },
+            "verified_to": if semantic_verdict == "verified" { json!("postcondition") } else { Value::Null },
+            "recover": semantic_recover,
+            "raw_available": true
+        },
+        "presentation": {
+            "presentation_id": format!("present-desktop-verify-{ts_label}"),
+            "source_event_ids": [event_id],
+            "human_summary": format!(
+                "desktop_verify {expect} returned {source_verdict}; recover={semantic_recover}."
+            ),
+            "machine_payload": {
+                "expect": expect,
+                "source_verdict": source_verdict,
+                "recover": semantic_recover,
+                "observed_count": observed.get("count").cloned().unwrap_or(Value::Null)
+            },
+            "ingestion": {
+                "allowed": false,
+                "reason": "runtime_verify_not_durable_memory"
+            },
+            "artifact": Value::Null
+        }
+    });
+    if include_raw {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("raw_verify".to_string(), verify.clone());
+        }
+    }
+    payload
+}
+
+fn desktop_verify_target_family(expect: &str) -> &'static str {
+    match expect {
+        "window_gone" | "window_appeared" | "focus_is" => "window",
+        "element_gone" | "element_appeared" | "state_is" | "state_not" => "accessible",
+        _ => "target",
+    }
+}
+
+fn desktop_verify_selector_summary(selector: &Value) -> String {
+    let mut parts = Vec::new();
+    for key in [
+        "app",
+        "role",
+        "name",
+        "state",
+        "win_app_id",
+        "win_title",
+        "win_pid",
+    ] {
+        if let Some(value) = selector.get(key) {
+            match value {
+                Value::String(s) if !s.trim().is_empty() => {
+                    parts.push(format!("{key}:{}", s.trim()));
+                }
+                Value::Number(n) => parts.push(format!("{key}:{n}")),
+                Value::Bool(b) => parts.push(format!("{key}:{b}")),
+                _ => {}
+            }
+        }
+    }
+    if parts.is_empty() {
+        "unspecified-target".to_string()
+    } else {
+        parts.join(" ")
     }
 }
 
@@ -37088,6 +37327,25 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn registry_exposes_desktop_verify_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "desktop_verify"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "desktop_verify")
+            .expect("desktop_verify schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.input_schema["properties"].get("expect").is_some());
+        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_include_raw")
+            .is_some());
+    }
+
+    #[test]
     fn registry_exposes_browser_lite_probe_to_codex_essential() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         assert!(p.includes(Tier::Standard, "browser_lite_probe"));
@@ -37332,6 +37590,145 @@ print(json.dumps(payload))
         assert_eq!(raw_payload["raw_included"], true);
         assert_eq!(raw_payload["raw_snapshot"]["schema"], DESKTOP_SNAPSHOT_SOURCE_SCHEMA);
         assert!(raw_payload["raw_snapshot"].get("mcp_wrapper").is_some());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn desktop_verify_semantic_bus_wraps_verify_without_changing_default_output() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-verify-semantic-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_verify.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+payload = {
+    "schema": "desktop_verify/v0",
+    "ts": 1780833900,
+    "expect": "element_appeared",
+    "selector": {"app": "zenity", "role": "push button", "name": "OK"},
+    "scope": {"cage_pid": None, "swaysock": None},
+    "verdict": "verified",
+    "recover": "proceed",
+    "change": None,
+    "held_after_ms": 17,
+    "polls": 2,
+    "observed": {
+        "count": 1,
+        "matches": [{
+            "role": "push button",
+            "name": "OK",
+            "app": "zenity",
+            "pid": 1234,
+            "in_scope": True,
+            "states": ["visible", "enabled"]
+        }]
+    },
+    "error": None
+}
+print(json.dumps(payload))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopVerifyTool::new(Hub::builder().build());
+        let default_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "expect": "element_appeared",
+                    "app": "zenity",
+                    "role": "push button",
+                    "name": "OK",
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("default execute");
+        let default_payload = result_text_as_json(&default_out);
+        assert_eq!(default_payload["schema"], DESKTOP_VERIFY_SOURCE_SCHEMA);
+        assert!(default_payload.get("semantic_objects").is_none());
+        assert!(default_payload.get("mcp_wrapper").is_some());
+
+        let semantic_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "expect": "element_appeared",
+                    "app": "zenity",
+                    "role": "push button",
+                    "name": "OK",
+                    "semantic_bus": true,
+                    "semantic_include_raw": false,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("semantic execute");
+        let payload = result_text_as_json(&semantic_out);
+        assert_eq!(payload["schema"], DESKTOP_VERIFY_SEMANTIC_SCHEMA);
+        assert_eq!(payload["source_schema"], DESKTOP_VERIFY_SOURCE_SCHEMA);
+        assert_eq!(payload["source_adapter"], "linux.desktop_verify");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["raw_available"], true);
+        assert_eq!(payload["raw_included"], false);
+        assert!(payload.get("raw_verify").is_none());
+        assert_eq!(payload["verification"]["verdict"], "verified");
+        assert_eq!(payload["verification"]["source_verdict"], "verified");
+        assert_eq!(payload["verification"]["verified_to"], "postcondition");
+        assert_eq!(payload["verification"]["recover"], "proceed");
+        assert_eq!(payload["verification"]["evidence"]["observed_count"], 1);
+
+        let objects = payload["semantic_objects"].as_array().expect("objects");
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0]["source_adapter"], "linux.desktop_verify");
+        assert_eq!(
+            objects[0]["object_type"],
+            "desktop.verify.target.accessible"
+        );
+        assert_eq!(objects[0]["state"]["source_verdict"], "verified");
+
+        let affordances = payload["affordances"].as_array().expect("affordances");
+        assert_eq!(affordances.len(), 1);
+        assert_eq!(affordances[0]["action_type"], "desktop.verify");
+        assert_eq!(affordances[0]["requires_gate"], false);
+        assert_eq!(
+            payload["events"][0]["event_type"],
+            "desktop.verify.completed"
+        );
+        assert_eq!(
+            payload["presentation"]["machine_payload"]["observed_count"],
+            1
+        );
+
+        let raw_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "expect": "element_appeared",
+                    "semantic_bus": true,
+                    "semantic_include_raw": true,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("raw execute");
+        let raw_payload = result_text_as_json(&raw_out);
+        assert_eq!(raw_payload["raw_included"], true);
+        assert_eq!(raw_payload["raw_verify"]["schema"], DESKTOP_VERIFY_SOURCE_SCHEMA);
+        assert!(raw_payload["raw_verify"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

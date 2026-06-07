@@ -434,7 +434,29 @@ Initial landing:
   `desktop_snapshot/v0.5` payload as `raw_snapshot`;
 - default calls still return the original snapshot payload shape.
 
-### SSB-6 - Cross-platform mapping memo
+### SSB-6 - Desktop verify runtime normalization
+
+Deliverable:
+
+- opt-in semantic wrapper for `desktop_verify`;
+- preserve existing `desktop_verify/v0` default output;
+- no host mutation.
+
+Goal:
+
+Normalize the verifier half of the desktop observe/verify loop after SSB-5
+normalized `desktop_snapshot`.
+
+Initial landing:
+
+- [Semantic System Bus Desktop Verify Runtime Normalization](SEMANTIC_SYSTEM_BUS_DESKTOP_VERIFY_RUNTIME_2026_06_07.md);
+- `desktop_verify` accepts `semantic_bus=true` to return
+  `agent_bridge.semantic_bus.desktop_verify.v0`;
+- `semantic_include_raw=true` embeds the existing wrapped `desktop_verify/v0`
+  payload as `raw_verify`;
+- default calls still return the original verifier payload shape.
+
+### SSB-7 - Cross-platform mapping memo
 
 Deliverable:
 
