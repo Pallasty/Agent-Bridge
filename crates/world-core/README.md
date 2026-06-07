@@ -75,6 +75,16 @@ This is enough for the P8 web prototype fixture and the first adapter-facing API
 examples. More query helpers should be added only when a concrete adapter or
 review surface needs them.
 
+## Fixture Pressure Tests
+
+The integration fixtures intentionally cover more than one presentation shape:
+
+- `tests/fixtures/p8_world_export.json` maps the web prototype into the core
+  ledger without laundering `not_verified` or `blocked` truth.
+- `tests/fixtures/nexus_causal_seed.json` maps a non-visual causal event chain
+  into the same ledger using event-to-event refs and Nexus evidence payloads,
+  without requiring visual fields such as `screen_area` or `pixel_coverage`.
+
 ## Local Verification
 
 From the workspace root:

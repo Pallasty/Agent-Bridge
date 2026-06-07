@@ -1,0 +1,165 @@
+{
+  "world": {
+    "schema": "agent_bridge.lswr.world.v0",
+    "world_id": "nexus_seed_01",
+    "branch_id": "turn_042",
+    "adapter": "nexus"
+  },
+  "events": [
+    {
+      "event_id": "evt_tax_change",
+      "event_type": "nexus.policy_changed",
+      "source": {
+        "participant_id": "ai:governor",
+        "participant_kind": "ai",
+        "authority_mode": "suggest",
+        "surface": "nexus_sim"
+      },
+      "refs": {
+        "entities": ["settlement:onsen"],
+        "events": [],
+        "actions": []
+      },
+      "payload": {
+        "turn": 42,
+        "policy": "tax_rate",
+        "value": 0.18
+      }
+    },
+    {
+      "event_id": "evt_food_warning",
+      "event_type": "nexus.food_warning",
+      "source": {
+        "participant_id": "runtime:nexus",
+        "participant_kind": "runtime",
+        "authority_mode": "observe",
+        "surface": "event_store"
+      },
+      "refs": {
+        "entities": ["settlement:onsen"],
+        "events": ["evt_tax_change"],
+        "actions": []
+      },
+      "payload": {
+        "turn": 43,
+        "metric": "food_stability",
+        "trend": "down",
+        "cause_event_id": "evt_tax_change"
+      }
+    },
+    {
+      "event_id": "evt_causal_edge_verified",
+      "event_type": "runtime.causal_verification",
+      "source": {
+        "participant_id": "runtime:nexus",
+        "participant_kind": "runtime",
+        "authority_mode": "observe",
+        "surface": "event_store"
+      },
+      "refs": {
+        "entities": ["settlement:onsen"],
+        "events": ["evt_tax_change", "evt_food_warning"],
+        "actions": [],
+        "adapter": "nexus"
+      },
+      "payload": {
+        "query": "expected direct causal edge",
+        "cause_event_id": "evt_tax_change",
+        "consequence_event_id": "evt_food_warning"
+      },
+      "verification": {
+        "action_id": null,
+        "verdict": "verified",
+        "reason": null,
+        "method": "nexus_event_causal_verification",
+        "verified_to": "event:evt_food_warning",
+        "evidence": {
+          "adapter_kind": "nexus",
+          "hash_chain_valid": true,
+          "expected_causal_edge": {
+            "cause_id": "evt_tax_change",
+            "consequence_id": "evt_food_warning",
+            "edge_type": "direct",
+            "present": true
+          },
+          "replay_window": {
+            "from_turn": 42,
+            "to_turn": 43
+          }
+        }
+      }
+    },
+    {
+      "event_id": "evt_causal_edge_absent",
+      "event_type": "runtime.causal_verification",
+      "source": {
+        "participant_id": "runtime:nexus",
+        "participant_kind": "runtime",
+        "authority_mode": "observe",
+        "surface": "event_store"
+      },
+      "refs": {
+        "entities": ["settlement:onsen"],
+        "events": ["evt_tax_change", "evt_trade_surge"],
+        "actions": [],
+        "adapter": "nexus"
+      },
+      "payload": {
+        "query": "expected direct causal edge",
+        "cause_event_id": "evt_tax_change",
+        "consequence_event_id": "evt_trade_surge"
+      },
+      "verification": {
+        "action_id": null,
+        "verdict": "not_verified",
+        "reason": "causal_edge_absent",
+        "method": "nexus_event_causal_verification",
+        "verified_to": "event:evt_trade_surge",
+        "evidence": {
+          "adapter_kind": "nexus",
+          "hash_chain_valid": true,
+          "expected_causal_edge": {
+            "cause_id": "evt_tax_change",
+            "consequence_id": "evt_trade_surge",
+            "edge_type": "direct",
+            "present": false
+          },
+          "candidate_paths": []
+        }
+      }
+    },
+    {
+      "event_id": "evt_autonomy_blocked",
+      "event_type": "runtime.policy_blocked",
+      "source": {
+        "participant_id": "runtime:nexus",
+        "participant_kind": "runtime",
+        "authority_mode": "observe",
+        "surface": "event_store"
+      },
+      "refs": {
+        "entities": ["settlement:onsen"],
+        "events": ["evt_tax_change"],
+        "actions": [],
+        "adapter": "nexus"
+      },
+      "payload": {
+        "query": "apply autonomous emergency rationing",
+        "blocked_action": "policy.emergency_rationing"
+      },
+      "verification": {
+        "action_id": null,
+        "verdict": "blocked",
+        "reason": "autonomy_limit",
+        "method": "nexus_policy_guard",
+        "verified_to": null,
+        "evidence": {
+          "adapter_kind": "nexus",
+          "safety_policy": "autonomy_limit",
+          "required_authority": "human.accept",
+          "current_authority": "ai.suggest"
+        }
+      }
+    }
+  ]
+}
