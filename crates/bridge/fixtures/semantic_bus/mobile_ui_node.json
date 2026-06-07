@@ -1,0 +1,86 @@
+{
+  "schema": "agent_bridge.semantic_bus.fixture.v0",
+  "fixture_id": "mobile_ui_node",
+  "semantic_object": {
+    "schema": "agent_bridge.semantic_bus.object.v0",
+    "object_id": "android:com.example:id/submit",
+    "object_type": "mobile.ui.button",
+    "source_adapter": "android.uiautomator",
+    "label": "Submit",
+    "state": {
+      "enabled": true,
+      "clickable": true,
+      "focused": false
+    },
+    "relations": [
+      {
+        "type": "belongs_to",
+        "target": "android:package:com.example"
+      }
+    ],
+    "confidence": 0.9,
+    "observed_at": "2026-06-07T10:31:00Z",
+    "provenance": {
+      "tool": "mobile_ui_snapshot",
+      "schema": "uiautomator_xml"
+    }
+  },
+  "affordances": [
+    {
+      "affordance_id": "android:com.example:id/submit:tap",
+      "object_id": "android:com.example:id/submit",
+      "action_type": "mobile.tap",
+      "args_schema": {
+        "resource_id": "com.example:id/submit"
+      },
+      "risk_level": "medium",
+      "requires_gate": false,
+      "expected_effect": "submit action starts"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt-mobile-ui-node-observed",
+      "ts": "2026-06-07T10:31:00Z",
+      "source": "mobile_ui_snapshot",
+      "actor": "agent",
+      "project": "agent-bridge",
+      "event_type": "object.observed",
+      "subject_id": "android:com.example:id/submit",
+      "payload_json": {
+        "class": "android.widget.Button",
+        "text": "Submit"
+      },
+      "source_event_ids": [],
+      "prev_hash": null,
+      "hash": "fixture"
+    }
+  ],
+  "verification": {
+    "verdict": "verified",
+    "reason": null,
+    "method": "uiautomator_node",
+    "evidence": {
+      "resource_id": "com.example:id/submit"
+    },
+    "verified_to": "android:package:com.example",
+    "recover": "proceed",
+    "raw_available": true
+  },
+  "presentation": {
+    "presentation_id": "present-mobile-ui-node",
+    "source_event_ids": [
+      "evt-mobile-ui-node-observed"
+    ],
+    "human_summary": "A mobile submit button is present and tappable.",
+    "machine_payload": {
+      "object_id": "android:com.example:id/submit"
+    },
+    "ingestion": {
+      "allowed": false,
+      "reason": "fixture_only"
+    },
+    "artifact": null,
+    "created_at": "2026-06-07T10:31:00Z"
+  }
+}

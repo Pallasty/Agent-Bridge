@@ -1,0 +1,86 @@
+{
+  "schema": "agent_bridge.semantic_bus.fixture.v0",
+  "fixture_id": "daemon_http_service",
+  "semantic_object": {
+    "schema": "agent_bridge.semantic_bus.object.v0",
+    "object_id": "service:agent-bridge:daemon-http:127.0.0.1:7878",
+    "object_type": "service.http.daemon",
+    "source_adapter": "process.http",
+    "label": "agent-bridge daemon-http",
+    "state": {
+      "listening": true,
+      "healthz": "ok",
+      "host": "127.0.0.1",
+      "port": 7878
+    },
+    "relations": [
+      {
+        "type": "serves",
+        "target": "palace:forum"
+      }
+    ],
+    "confidence": 0.98,
+    "observed_at": "2026-06-07T10:33:00Z",
+    "provenance": {
+      "tool": "capabilities",
+      "schema": "agent_bridge_capabilities"
+    }
+  },
+  "affordances": [
+    {
+      "affordance_id": "service:agent-bridge:daemon-http:health-check",
+      "object_id": "service:agent-bridge:daemon-http:127.0.0.1:7878",
+      "action_type": "service.health_check",
+      "args_schema": {
+        "url": "http://127.0.0.1:7878/healthz"
+      },
+      "risk_level": "low",
+      "requires_gate": false,
+      "expected_effect": "returns ok"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt-daemon-http-service-observed",
+      "ts": "2026-06-07T10:33:00Z",
+      "source": "daemon-http",
+      "actor": "agent",
+      "project": "agent-bridge",
+      "event_type": "service.health_observed",
+      "subject_id": "service:agent-bridge:daemon-http:127.0.0.1:7878",
+      "payload_json": {
+        "healthz": "ok"
+      },
+      "source_event_ids": [],
+      "prev_hash": null,
+      "hash": "fixture"
+    }
+  ],
+  "verification": {
+    "verdict": "verified",
+    "reason": null,
+    "method": "http_healthz",
+    "evidence": {
+      "body": "ok"
+    },
+    "verified_to": "http://127.0.0.1:7878/healthz",
+    "recover": "proceed",
+    "raw_available": true
+  },
+  "presentation": {
+    "presentation_id": "present-daemon-http-service",
+    "source_event_ids": [
+      "evt-daemon-http-service-observed"
+    ],
+    "human_summary": "The Agent-Bridge daemon HTTP service is healthy.",
+    "machine_payload": {
+      "object_id": "service:agent-bridge:daemon-http:127.0.0.1:7878"
+    },
+    "ingestion": {
+      "allowed": false,
+      "reason": "fixture_only"
+    },
+    "artifact": null,
+    "created_at": "2026-06-07T10:33:00Z"
+  }
+}

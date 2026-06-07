@@ -1,0 +1,86 @@
+{
+  "schema": "agent_bridge.semantic_bus.fixture.v0",
+  "fixture_id": "palace_memory_region",
+  "semantic_object": {
+    "schema": "agent_bridge.semantic_bus.object.v0",
+    "object_id": "palace:memory-region:agent-bridge",
+    "object_type": "memory.region",
+    "source_adapter": "palace.memory_graph",
+    "label": "agent-bridge region",
+    "state": {
+      "node_count": 128,
+      "health": "watch",
+      "orphan_count": 4
+    },
+    "relations": [
+      {
+        "type": "contains",
+        "target": "memory:project:agent-bridge"
+      }
+    ],
+    "confidence": 0.85,
+    "observed_at": "2026-06-07T10:34:00Z",
+    "provenance": {
+      "tool": "memory_graph_topology",
+      "schema": "agent_bridge_memory_graph_topology"
+    }
+  },
+  "affordances": [
+    {
+      "affordance_id": "palace:memory-region:agent-bridge:inspect",
+      "object_id": "palace:memory-region:agent-bridge",
+      "action_type": "palace.region.inspect",
+      "args_schema": {
+        "region_id": "agent-bridge"
+      },
+      "risk_level": "low",
+      "requires_gate": false,
+      "expected_effect": "relation and health detail is displayed"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt-palace-memory-region-observed",
+      "ts": "2026-06-07T10:34:00Z",
+      "source": "palace",
+      "actor": "agent",
+      "project": "agent-bridge",
+      "event_type": "object.observed",
+      "subject_id": "palace:memory-region:agent-bridge",
+      "payload_json": {
+        "health": "watch",
+        "orphan_count": 4
+      },
+      "source_event_ids": [],
+      "prev_hash": null,
+      "hash": "fixture"
+    }
+  ],
+  "verification": {
+    "verdict": "not_verified",
+    "reason": "fixture_static_example",
+    "method": "static_fixture",
+    "evidence": {
+      "note": "illustrative counts are not live data"
+    },
+    "verified_to": null,
+    "recover": "replan",
+    "raw_available": false
+  },
+  "presentation": {
+    "presentation_id": "present-palace-memory-region",
+    "source_event_ids": [
+      "evt-palace-memory-region-observed"
+    ],
+    "human_summary": "A Palace memory region can be represented as a semantic object.",
+    "machine_payload": {
+      "object_id": "palace:memory-region:agent-bridge"
+    },
+    "ingestion": {
+      "allowed": false,
+      "reason": "fixture_only"
+    },
+    "artifact": null,
+    "created_at": "2026-06-07T10:34:00Z"
+  }
+}
