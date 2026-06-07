@@ -63,8 +63,13 @@ The in-memory ledger is deliberately small. It can currently read back:
 - all verification records;
 - all feedback records;
 - rollback groups;
+- one event by event id;
 - events by event type;
-- verification evidence by action id.
+- events by entity, action, rollback group, or participant;
+- verification records by verdict;
+- verification evidence by action id;
+- feedback by source event or action;
+- rollback records by action.
 
 This is enough for the P8 web prototype fixture and the first adapter-facing API
 examples. More query helpers should be added only when a concrete adapter or
