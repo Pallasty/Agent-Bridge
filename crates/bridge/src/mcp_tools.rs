@@ -3284,10 +3284,7 @@ fn semantic_bus_adapter_specs(include_design_only: bool) -> Vec<SemanticBusAdapt
             channels: &["http_health", "palace_memory_graph", "semantic_events_optional"],
             fallback_order: &["healthz", "palace_graph", "semantic_events_optional"],
             runtime_assets: &["crates/bridge/src/mcp_tools.rs"],
-            fixture_assets: &[
-                "crates/bridge/fixtures/semantic_bus/daemon_http_service.json",
-                "crates/bridge/fixtures/semantic_bus/palace_memory_region.json",
-            ],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/daemon_http_service.json"],
             doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_RUNTIME_HEALTH_2026_06_07.md"],
             notes: &["Live read-only MCP report over daemon-http health and Palace graph state."],
         },
