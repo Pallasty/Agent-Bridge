@@ -45,4 +45,5 @@ id_newtype!(EventQueryId, "event-query");
 id_newtype!(FeedbackId, "feedback");
 id_newtype!(FeedbackQueryId, "feedback-query");
 id_newtype!(RollbackGroupId, "rollback");
+id_newtype!(RollbackQueryId, "rollback-query");
 id_newtype!(EvidenceQueryId, "evidence-query");

@@ -72,6 +72,7 @@ The in-memory ledger is deliberately small. It can currently read back:
 - feedback by source event or action;
 - a neutral `world.feedback.query` envelope over matching feedback records;
 - rollback records by action;
+- a neutral `world.rollback.query` envelope over matching rollback records;
 - a neutral `world.evidence.query` envelope over matching events and
   verification records.
 
@@ -97,6 +98,13 @@ adapter, and whether the feedback attempts to change world verification truth.
 Accepted feedback records still cannot set `changes_world_verdict=true`;
 `WorldLedger::append_feedback` keeps that invariant before any query surface can
 read the record.
+
+`RollbackQuery` applies all supplied filters together. It can filter by rollback
+group, action id, verification event id, and whether the record has a
+verification event. The response carries matched rollback records and summary
+counts for action refs, before/after payload presence, and verification-linked
+rollback records without binding the query to MCP, storage, streaming, or a
+renderer.
 
 ## Fixture Pressure Tests
 
