@@ -3,6 +3,7 @@
 //! This crate intentionally has no dependency on `ab-bridge`, MCP, browser,
 //! renderer, or engine crates. It holds portable semantic world types only.
 
+pub mod action_query;
 pub mod event_query;
 pub mod evidence_query;
 pub mod feedback_query;
@@ -13,6 +14,7 @@ pub mod rollback_query;
 pub mod schema;
 pub mod verification;
 
+pub use action_query::*;
 pub use event_query::*;
 pub use evidence_query::*;
 pub use feedback_query::*;

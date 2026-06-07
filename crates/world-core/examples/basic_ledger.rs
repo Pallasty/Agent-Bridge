@@ -122,6 +122,7 @@ fn main() -> ab_world_core::Result<()> {
     rollback.verification_event_id = Some(EventId::from_raw("event:move_cube_01"));
 
     let mut ledger = WorldLedger::new();
+    ledger.append_action(action.clone())?;
     ledger.register_rollback(rollback)?;
     ledger.append_event(runtime_event)?;
     ledger.append_event(human_event)?;
@@ -130,6 +131,7 @@ fn main() -> ab_world_core::Result<()> {
     let evidence = ledger.query_evidence_by_action(&action.action_id);
     let summary = json!({
         "world": world,
+        "actions": ledger.actions().len(),
         "events": ledger.events().len(),
         "verifications": ledger.verifications().len(),
         "feedback": ledger.feedback().len(),

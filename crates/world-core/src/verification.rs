@@ -20,6 +20,9 @@ pub enum WorldCoreError {
     #[error("human decision cannot set changes_world_verdict=true")]
     HumanDecisionChangesVerification,
 
+    #[error("action already exists: {0}")]
+    DuplicateAction(String),
+
     #[error("rollback group already exists: {0}")]
     DuplicateRollbackGroup(String),
 

@@ -1,8 +1,9 @@
+use crate::action_query::{ActionQuery, ActionQueryResponse};
 use crate::event_query::{EventQuery, EventQueryResponse};
 use crate::evidence_query::{EvidenceQuery, EvidenceQueryResponse};
 use crate::feedback_query::{FeedbackQuery, FeedbackQueryResponse};
 use crate::ids::{ActionId, EntityId, EventId, ParticipantId, RollbackGroupId};
-use crate::model::{Event, Feedback, RollbackRecord};
+use crate::model::{Action, Event, Feedback, RollbackRecord};
 use crate::rollback_query::{RollbackQuery, RollbackQueryResponse};
 use crate::verification::{validate_verification, Result, Verdict, Verification, WorldCoreError};
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct WorldLedger {
+    actions: Vec<Action>,
     events: Vec<Event>,
     verifications: Vec<Verification>,
     feedback: Vec<Feedback>,
@@ -20,6 +22,20 @@ pub struct WorldLedger {
 impl WorldLedger {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn append_action(&mut self, action: Action) -> Result<()> {
+        if self
+            .actions
+            .iter()
+            .any(|item| item.action_id.as_str() == action.action_id.as_str())
+        {
+            return Err(WorldCoreError::DuplicateAction(
+                action.action_id.to_string(),
+            ));
+        }
+        self.actions.push(action);
+        Ok(())
     }
 
     pub fn append_event(&mut self, event: Event) -> Result<()> {
@@ -62,6 +78,10 @@ impl WorldLedger {
         Ok(())
     }
 
+    pub fn actions(&self) -> &[Action] {
+        &self.actions
+    }
+
     pub fn events(&self) -> &[Event] {
         &self.events
     }
@@ -84,8 +104,31 @@ impl WorldLedger {
             .ok_or_else(|| WorldCoreError::RollbackGroupNotFound(group_id.to_string()))
     }
 
+    pub fn action_by_id(&self, action_id: &ActionId) -> Option<&Action> {
+        self.actions
+            .iter()
+            .find(|action| &action.action_id == action_id)
+    }
+
     pub fn event_by_id(&self, event_id: &EventId) -> Option<&Event> {
         self.events.iter().find(|event| &event.event_id == event_id)
+    }
+
+    pub fn query_actions(&self, query: &ActionQuery) -> ActionQueryResponse {
+        let actions = self
+            .actions
+            .iter()
+            .filter(|action| query.filters.matches_action(action))
+            .cloned()
+            .collect();
+        ActionQueryResponse::new(query, actions)
+    }
+
+    pub fn query_actions_by_type(&self, action_type: &str) -> Vec<&Action> {
+        self.actions
+            .iter()
+            .filter(|action| action.action_type == action_type)
+            .collect()
     }
 
     pub fn query_events_by_type(&self, event_type: &str) -> Vec<&Event> {
