@@ -14,6 +14,7 @@ Related documents:
 - [Agent Avatar Protocol](../RFC-v24-agent-avatar-protocol.md)
 - [Palace Diff Pilot](SEMANTIC_SYSTEM_BUS_PALACE_DIFF_PILOT_2026_06_07.md)
 - [Cross-Platform Mapping](SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_MAPPING_2026_06_07.md)
+- [Cross-Platform Adapter Conformance](SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_CONFORMANCE_2026_06_07.md)
 
 ## 0. Decision
 
@@ -479,6 +480,28 @@ Initial landing:
   `windows.uia.verify`, and `windows.vision.ocr`;
 - Linux remains the reference substrate, while macOS/Windows become coverage
   adapters into the same object/affordance/event/verification vocabulary.
+
+### SSB-8 - Cross-platform adapter conformance fixtures
+
+Deliverable:
+
+- fixture-backed macOS AX and Windows UIA conformance examples;
+- validator extension for cross-platform adapter rules;
+- no runtime adapter code.
+
+Goal:
+
+Make the SSB-7 mapping testable before adding macOS or Windows runtime adapters.
+
+Initial landing:
+
+- [Semantic System Bus Cross-Platform Adapter Conformance](SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_CONFORMANCE_2026_06_07.md);
+- added fixtures for `macos_ax_snapshot_state`,
+  `macos_ax_verify_postcondition`, `windows_uia_snapshot_state`, and
+  `windows_uia_verify_postcondition`;
+- extended the semantic bus fixture validator to enforce read-only posture,
+  platform `source_adapter` prefixes, OCR fallback, shared recover vocabulary,
+  canonical verify-target objects, and gated mutating affordance metadata.
 
 ## 7. Non-goals
 

@@ -31,6 +31,22 @@ const FIXTURES: &[(&str, &str)] = &[
         include_str!("../fixtures/semantic_bus/linux_vision_grounding_ocr_fallback.json"),
     ),
     (
+        "macos_ax_snapshot_state",
+        include_str!("../fixtures/semantic_bus/macos_ax_snapshot_state.json"),
+    ),
+    (
+        "macos_ax_verify_postcondition",
+        include_str!("../fixtures/semantic_bus/macos_ax_verify_postcondition.json"),
+    ),
+    (
+        "windows_uia_snapshot_state",
+        include_str!("../fixtures/semantic_bus/windows_uia_snapshot_state.json"),
+    ),
+    (
+        "windows_uia_verify_postcondition",
+        include_str!("../fixtures/semantic_bus/windows_uia_verify_postcondition.json"),
+    ),
+    (
         "palace_memory_region",
         include_str!("../fixtures/semantic_bus/palace_memory_region.json"),
     ),
@@ -56,6 +72,25 @@ const LINUX_ADAPTER_CONFORMANCE_FIXTURES: &[(&str, &str)] = &[
     (
         "linux_vision_grounding_ocr_fallback",
         include_str!("../fixtures/semantic_bus/linux_vision_grounding_ocr_fallback.json"),
+    ),
+];
+
+const CROSS_PLATFORM_ADAPTER_CONFORMANCE_FIXTURES: &[(&str, &str)] = &[
+    (
+        "macos_ax_snapshot_state",
+        include_str!("../fixtures/semantic_bus/macos_ax_snapshot_state.json"),
+    ),
+    (
+        "macos_ax_verify_postcondition",
+        include_str!("../fixtures/semantic_bus/macos_ax_verify_postcondition.json"),
+    ),
+    (
+        "windows_uia_snapshot_state",
+        include_str!("../fixtures/semantic_bus/windows_uia_snapshot_state.json"),
+    ),
+    (
+        "windows_uia_verify_postcondition",
+        include_str!("../fixtures/semantic_bus/windows_uia_verify_postcondition.json"),
     ),
 ];
 
@@ -310,6 +345,133 @@ fn linux_adapter_conformance_fixtures_pin_read_only_semantics() {
                 assert!(
                     bool_field(affordance, "requires_gate"),
                     "{name} {action_type} must require a gate"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn cross_platform_adapter_conformance_fixtures_pin_mapping_contract() {
+    let allowed_tools = ["desktop_snapshot", "desktop_verify"];
+    let allowed_recover = ["proceed", "retry", "replan", "escalate"];
+
+    for (name, raw) in CROSS_PLATFORM_ADAPTER_CONFORMANCE_FIXTURES {
+        let fixture: Value =
+            serde_json::from_str(raw).unwrap_or_else(|e| panic!("{name} invalid json: {e}"));
+        assert_eq!(str_field(&fixture, "fixture_id"), *name);
+
+        let contract = object_field(&fixture, "adapter_contract");
+        assert_eq!(
+            str_field(contract, "schema"),
+            "agent_bridge.semantic_bus.adapter_conformance.v0"
+        );
+        let adapter_family = str_field(contract, "adapter_family");
+        assert!(
+            matches!(adapter_family, "macos_desktop" | "windows_desktop"),
+            "{name} unexpected adapter family {adapter_family}"
+        );
+        let tool = str_field(contract, "tool");
+        assert!(
+            allowed_tools.contains(&tool),
+            "{name} unexpected tool {tool}"
+        );
+        assert!(
+            bool_field(contract, "read_only"),
+            "{name} must be read-only"
+        );
+        assert!(
+            !bool_field(contract, "broad_host_mutation"),
+            "{name} must not expose broad host mutation"
+        );
+        assert_eq!(str_field(contract, "mutation_surface"), "none");
+        assert!(!str_field(contract, "isolation").is_empty());
+
+        let channels = string_array_field(contract, "channels");
+        assert!(!channels.is_empty(), "{name} channels");
+        let fallback_order = string_array_field(contract, "fallback_order");
+        assert!(
+            fallback_order.contains("vision_grounding_ocr"),
+            "{name} should keep OCR as fallback"
+        );
+
+        let object = object_field(&fixture, "semantic_object");
+        let source_adapter = str_field(object, "source_adapter");
+        let state = object_field(object, "state");
+        assert!(state.get("platform").is_some_and(Value::is_object));
+        match adapter_family {
+            "macos_desktop" => {
+                assert!(
+                    source_adapter.starts_with("macos."),
+                    "{name} source_adapter {source_adapter}"
+                );
+                assert!(
+                    channels.contains("ax") || channels.contains("cgwindow"),
+                    "{name} macOS fixture should use AX/CGWindow channels"
+                );
+            }
+            "windows_desktop" => {
+                assert!(
+                    source_adapter.starts_with("windows."),
+                    "{name} source_adapter {source_adapter}"
+                );
+                assert!(
+                    channels.contains("uia") || channels.contains("hwnd"),
+                    "{name} Windows fixture should use UIA/HWND channels"
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        if tool == "desktop_snapshot" {
+            assert!(
+                matches!(
+                    str_field(object, "object_type"),
+                    "desktop.accessible.button" | "desktop.window"
+                ),
+                "{name} snapshot fixture should emit a canonical desktop object"
+            );
+        }
+        if tool == "desktop_verify" {
+            assert!(
+                str_field(object, "object_type").starts_with("desktop.verify.target."),
+                "{name} verify fixture should emit a canonical verify target"
+            );
+        }
+
+        let verification = object_field(&fixture, "verification");
+        let recover = str_field(verification, "recover");
+        assert!(
+            allowed_recover.contains(&recover),
+            "{name} recover hint {recover}"
+        );
+
+        for affordance in array_field(&fixture, "affordances") {
+            let action_type = str_field(affordance, "action_type");
+            let mutating_or_coordinate = matches!(
+                action_type,
+                "desktop.action"
+                    | "desktop.action.coordinate_click"
+                    | "desktop.invoke"
+                    | "desktop.set_value"
+                    | "desktop.set_range"
+                    | "desktop.focus"
+                    | "desktop.select"
+                    | "desktop.toggle"
+                    | "desktop.expand"
+                    | "desktop.collapse"
+                    | "desktop.scroll"
+            );
+            if mutating_or_coordinate {
+                assert!(
+                    bool_field(affordance, "requires_gate"),
+                    "{name} {action_type} must require a gate"
+                );
+            }
+            if action_type == "desktop.verify" {
+                assert!(
+                    !bool_field(affordance, "requires_gate"),
+                    "{name} read-only verify affordance should not require a gate"
                 );
             }
         }
