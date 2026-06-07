@@ -412,7 +412,29 @@ Initial landing:
   `vision_grounding_ocr`, and daemon HTTP health;
 - enforced that OCR is a fallback path and coordinate actions must remain gated.
 
-### SSB-5 - Cross-platform mapping memo
+### SSB-5 - Desktop snapshot runtime normalization
+
+Deliverable:
+
+- opt-in semantic wrapper for `desktop_snapshot`;
+- preserve existing `desktop_snapshot/v0.5` default output;
+- no broad host mutation.
+
+Goal:
+
+Turn fixture-backed Linux adapter conformance into one read-only runtime
+normalization proof.
+
+Initial landing:
+
+- [Semantic System Bus Desktop Snapshot Runtime Normalization](SEMANTIC_SYSTEM_BUS_DESKTOP_SNAPSHOT_RUNTIME_2026_06_07.md);
+- `desktop_snapshot` accepts `semantic_bus=true` to return
+  `agent_bridge.semantic_bus.desktop_snapshot.v0`;
+- `semantic_include_raw=true` embeds the existing wrapped
+  `desktop_snapshot/v0.5` payload as `raw_snapshot`;
+- default calls still return the original snapshot payload shape.
+
+### SSB-6 - Cross-platform mapping memo
 
 Deliverable:
 

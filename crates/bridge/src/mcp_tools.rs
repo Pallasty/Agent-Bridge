@@ -966,6 +966,9 @@ fn lossy_truncate(bytes: &[u8]) -> (String, bool) {
 //                              desktop_snapshot
 // ===========================================================================
 
+const DESKTOP_SNAPSHOT_SEMANTIC_SCHEMA: &str = "agent_bridge.semantic_bus.desktop_snapshot.v0";
+const DESKTOP_SNAPSHOT_SOURCE_SCHEMA: &str = "desktop_snapshot/v0.5";
+
 pub struct DesktopSnapshotTool {
     _hub: Hub,
 }
@@ -1035,6 +1038,16 @@ impl McpTool for DesktopSnapshotTool {
                         "maximum": 60000,
                         "default": 15000,
                         "description": "Milliseconds before the snapshot process is killed."
+                    },
+                    "semantic_bus": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, wrap the read-only desktop_snapshot/v0.5 payload as agent_bridge.semantic_bus.desktop_snapshot.v0. Default false preserves the existing payload exactly apart from mcp_wrapper."
+                    },
+                    "semantic_include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Only with semantic_bus=true: include the original desktop_snapshot payload as raw_snapshot. Default false keeps the semantic envelope compact."
                     }
                 }
             }),
@@ -1065,6 +1078,14 @@ impl McpTool for DesktopSnapshotTool {
             .and_then(|v| v.as_f64())
             .unwrap_or(2.0)
             .clamp(0.25, 10.0);
+        let semantic_bus = args
+            .get("semantic_bus")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let semantic_include_raw = args
+            .get("semantic_include_raw")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
         let script = desktop_snapshot_script_path(&args, cwd.as_ref());
@@ -1149,7 +1170,13 @@ impl McpTool for DesktopSnapshotTool {
                         }),
                     );
                 }
-                Ok(ToolResult::json_text(&payload))
+                if semantic_bus {
+                    let semantic_payload =
+                        desktop_snapshot_semantic_bus_payload(&payload, semantic_include_raw);
+                    Ok(ToolResult::json_text(&semantic_payload))
+                } else {
+                    Ok(ToolResult::json_text(&payload))
+                }
             }
             Err(e) => Ok(desktop_snapshot_error(json!({
                 "code": "invalid_json",
@@ -1161,6 +1188,330 @@ impl McpTool for DesktopSnapshotTool {
             }))),
         }
     }
+}
+
+fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) -> Value {
+    let source_schema = snapshot
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let captured_at = snapshot.get("captured_at").cloned().unwrap_or(Value::Null);
+    let captured_label = desktop_snapshot_value_label(&captured_at, "unknown");
+    let session_object_id = format!("desktop:linux:session:{captured_label}");
+    let event_id = format!("evt-desktop-snapshot-{captured_label}");
+    let verified = source_schema == DESKTOP_SNAPSHOT_SOURCE_SCHEMA;
+    let reason = if verified {
+        Value::Null
+    } else {
+        json!("unexpected_source_schema")
+    };
+
+    let windows = snapshot
+        .get("windows")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut semantic_objects = Vec::new();
+    let mut affordances = Vec::new();
+    let mut window_ids_by_pid: HashMap<String, String> = HashMap::new();
+
+    semantic_objects.push(json!({
+        "schema": "agent_bridge.semantic_bus.object.v0",
+        "object_id": session_object_id,
+        "object_type": "desktop.session",
+        "source_adapter": "linux.sway.session",
+        "label": "Linux desktop session",
+        "state": {
+            "session": snapshot.get("session").cloned().unwrap_or_else(|| json!({})),
+            "window_count": snapshot.get("window_count").cloned().unwrap_or(Value::Null),
+            "screenshots": snapshot.get("screenshots").cloned().unwrap_or(Value::Null),
+        },
+        "relations": [],
+        "confidence": if verified { 0.95 } else { 0.25 },
+        "observed_at": captured_at,
+        "provenance": {
+            "tool": "desktop_snapshot",
+            "schema": source_schema,
+        }
+    }));
+
+    for (idx, window) in windows.iter().enumerate() {
+        if window.get("error").is_some() {
+            continue;
+        }
+        let object_id = desktop_snapshot_window_object_id(window, idx);
+        if let Some(pid) = window.get("pid").and_then(Value::as_i64) {
+            window_ids_by_pid.insert(pid.to_string(), object_id.clone());
+        }
+        let title = desktop_snapshot_str(window, "name").unwrap_or("window");
+        semantic_objects.push(json!({
+            "schema": "agent_bridge.semantic_bus.object.v0",
+            "object_id": object_id,
+            "object_type": "desktop.window",
+            "source_adapter": "linux.sway.tree",
+            "label": title,
+            "state": {
+                "id": window.get("id").cloned().unwrap_or(Value::Null),
+                "app_id": window.get("app_id").cloned().unwrap_or(Value::Null),
+                "x11_class": window.get("x11_class").cloned().unwrap_or(Value::Null),
+                "pid": window.get("pid").cloned().unwrap_or(Value::Null),
+                "title": window.get("name").cloned().unwrap_or(Value::Null),
+                "focused": window.get("focused").cloned().unwrap_or(Value::Null),
+                "visible": window.get("visible").cloned().unwrap_or(Value::Null),
+                "grounding": window.get("grounding").cloned().unwrap_or(Value::Null),
+                "rect": window.get("rect").cloned().unwrap_or(Value::Null),
+                "output": window.get("output").cloned().unwrap_or(Value::Null),
+            },
+            "relations": [
+                { "type": "member_of", "target": session_object_id }
+            ],
+            "confidence": 0.9,
+            "observed_at": captured_at,
+            "provenance": {
+                "tool": "desktop_snapshot",
+                "schema": source_schema,
+                "source_path": "windows"
+            }
+        }));
+        affordances.push(json!({
+            "affordance_id": format!("{object_id}:verify-window"),
+            "object_id": object_id,
+            "action_type": "desktop.verify",
+            "args_schema": {
+                "expect": "window_appeared",
+                "win_app_id": window.get("app_id").cloned().unwrap_or(Value::Null),
+                "win_title": window.get("name").cloned().unwrap_or(Value::Null),
+                "win_pid": window.get("pid").cloned().unwrap_or(Value::Null),
+            },
+            "risk_level": "low",
+            "requires_gate": false,
+            "expected_effect": "re-observes matching window state without mutating the desktop"
+        }));
+    }
+
+    if let Some(apps) = snapshot
+        .get("atspi")
+        .and_then(|v| v.get("apps"))
+        .and_then(Value::as_array)
+    {
+        for app in apps {
+            let pid_label = app
+                .get("pid")
+                .and_then(Value::as_i64)
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            let parent_window = window_ids_by_pid.get(&pid_label).cloned();
+            if let Some(elements) = app.get("elements").and_then(Value::as_array) {
+                for (idx, element) in elements.iter().enumerate() {
+                    let role = desktop_snapshot_str(element, "role").unwrap_or("element");
+                    let name = desktop_snapshot_str(element, "name").unwrap_or("");
+                    let element_slug = desktop_snapshot_slug(&format!("{role}-{name}-{idx}"));
+                    let object_id = format!(
+                        "desktop:linux:atspi:{pid_label}:{}",
+                        element_slug
+                    );
+                    let mut relations = vec![json!({
+                        "type": "member_of",
+                        "target": session_object_id
+                    })];
+                    if let Some(parent) = &parent_window {
+                        relations.push(json!({
+                            "type": "contained_by",
+                            "target": parent
+                        }));
+                    }
+                    semantic_objects.push(json!({
+                        "schema": "agent_bridge.semantic_bus.object.v0",
+                        "object_id": object_id,
+                        "object_type": format!("desktop.accessible.{}", desktop_snapshot_slug(role)),
+                        "source_adapter": "linux.atspi",
+                        "label": if name.is_empty() { role } else { name },
+                        "state": {
+                            "app": app.get("name").cloned().unwrap_or(Value::Null),
+                            "pid": app.get("pid").cloned().unwrap_or(Value::Null),
+                            "role": role,
+                            "name": element.get("name").cloned().unwrap_or(Value::Null),
+                            "bounds": element.get("bounds").cloned().unwrap_or(Value::Null),
+                            "states": element.get("states").cloned().unwrap_or(Value::Null),
+                        },
+                        "relations": relations,
+                        "confidence": 0.88,
+                        "observed_at": captured_at,
+                        "provenance": {
+                            "tool": "desktop_snapshot",
+                            "schema": source_schema,
+                            "source_path": "atspi.apps[].elements[]"
+                        }
+                    }));
+                    affordances.push(json!({
+                        "affordance_id": format!("{object_id}:verify-element"),
+                        "object_id": object_id,
+                        "action_type": "desktop.verify",
+                        "args_schema": {
+                            "app": app.get("name").cloned().unwrap_or(Value::Null),
+                            "role": role,
+                            "name": element.get("name").cloned().unwrap_or(Value::Null),
+                            "expect": "state_is"
+                        },
+                        "risk_level": "low",
+                        "requires_gate": false,
+                        "expected_effect": "re-observes matching AT-SPI element state"
+                    }));
+                    if desktop_snapshot_role_is_actionable(role) {
+                        affordances.push(json!({
+                            "affordance_id": format!("{object_id}:invoke"),
+                            "object_id": object_id,
+                            "action_type": "desktop.invoke",
+                            "args_schema": {
+                                "app": app.get("name").cloned().unwrap_or(Value::Null),
+                                "role": role,
+                                "name": element.get("name").cloned().unwrap_or(Value::Null),
+                            },
+                            "risk_level": "medium",
+                            "requires_gate": true,
+                            "expected_effect": "semantic AT-SPI invoke; exposed here only as gated affordance metadata"
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    let object_count = semantic_objects.len();
+    let affordance_count = affordances.len();
+    let window_count = windows.iter().filter(|w| w.get("error").is_none()).count();
+    let atspi_object_count = semantic_objects
+        .iter()
+        .filter(|o| {
+            o.get("source_adapter")
+                .and_then(Value::as_str)
+                .is_some_and(|s| s == "linux.atspi")
+        })
+        .count();
+
+    let mut payload = json!({
+        "schema": DESKTOP_SNAPSHOT_SEMANTIC_SCHEMA,
+        "source_schema": source_schema,
+        "source_adapter": "linux.desktop_snapshot",
+        "captured_at": captured_at,
+        "read_only": true,
+        "raw_available": true,
+        "raw_included": include_raw,
+        "semantic_objects": semantic_objects,
+        "affordances": affordances,
+        "events": [
+            {
+                "event_id": event_id,
+                "event_type": "desktop.snapshot.observed",
+                "subject_id": session_object_id,
+                "source": "desktop_snapshot",
+                "actor": "agent",
+                "payload_json": {
+                    "object_count": object_count,
+                    "affordance_count": affordance_count,
+                    "window_count": window_count,
+                    "atspi_object_count": atspi_object_count,
+                    "screenshot_required": false
+                },
+                "source_event_ids": []
+            }
+        ],
+        "verification": {
+            "verdict": if verified { "verified" } else { "not_verified" },
+            "reason": reason,
+            "method": "desktop_snapshot.semantic_normalizer",
+            "evidence": {
+                "source_schema": source_schema,
+                "object_count": object_count,
+                "window_count": window_count,
+                "atspi_object_count": atspi_object_count,
+                "raw_included": include_raw
+            },
+            "verified_to": if verified { json!("semantic_objects") } else { Value::Null },
+            "recover": if verified { "proceed" } else { "replan" },
+            "raw_available": true
+        },
+        "presentation": {
+            "presentation_id": format!("present-desktop-snapshot-{captured_label}"),
+            "source_event_ids": [event_id],
+            "human_summary": format!(
+                "Normalized desktop_snapshot into {object_count} semantic objects and {affordance_count} affordances."
+            ),
+            "machine_payload": {
+                "object_count": object_count,
+                "affordance_count": affordance_count,
+                "window_count": window_count,
+                "atspi_object_count": atspi_object_count
+            },
+            "ingestion": {
+                "allowed": false,
+                "reason": "runtime_snapshot_not_durable_memory"
+            },
+            "artifact": Value::Null
+        }
+    });
+    if include_raw {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("raw_snapshot".to_string(), snapshot.clone());
+        }
+    }
+    payload
+}
+
+fn desktop_snapshot_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+}
+
+fn desktop_snapshot_value_label(value: &Value, fallback: &str) -> String {
+    match value {
+        Value::String(s) => desktop_snapshot_slug(s),
+        Value::Number(n) => n.to_string(),
+        _ => fallback.to_string(),
+    }
+}
+
+fn desktop_snapshot_window_object_id(window: &Value, idx: usize) -> String {
+    if let Some(id) = window.get("id").and_then(Value::as_i64) {
+        return format!("desktop:linux:sway:window:{id}");
+    }
+    if let Some(pid) = window.get("pid").and_then(Value::as_i64) {
+        return format!("desktop:linux:sway:window-pid:{pid}");
+    }
+    format!("desktop:linux:sway:window-index:{idx}")
+}
+
+fn desktop_snapshot_slug(raw: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        "unknown".to_string()
+    } else {
+        out
+    }
+}
+
+fn desktop_snapshot_role_is_actionable(role: &str) -> bool {
+    let r = role.to_ascii_lowercase();
+    r.contains("button")
+        || r.contains("menu item")
+        || r.contains("check box")
+        || r.contains("radio button")
+        || r.contains("combo box")
+        || r.contains("slider")
+        || r.contains("spin button")
+        || r == "link"
 }
 
 fn desktop_snapshot_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
@@ -36727,6 +37078,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool.input_schema["properties"]
             .get("include_screenshot")
             .is_some());
+        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_include_raw")
+            .is_some());
         assert!(tool.input_schema["properties"]
             .get("activate_a11y")
             .is_none());
@@ -36825,6 +37180,158 @@ print(json.dumps({"schema": "desktop_snapshot/v0.5", "argv": sys.argv[1:]}))
         assert!(argv.contains(&"--atspi-budget"));
         assert!(argv.contains(&"1.25"));
         assert!(!argv.contains(&"--activate-a11y"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn desktop_snapshot_semantic_bus_wraps_snapshot_without_changing_default_output() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-snapshot-semantic-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_snapshot.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+payload = {
+    "schema": "desktop_snapshot/v0.5",
+    "captured_at": 1780833000,
+    "session": {"type": "wayland", "wayland_display": "wayland-1", "compositor": "sway"},
+    "outputs": [],
+    "windows": [{
+        "id": 42,
+        "app_id": "zenity",
+        "pid": 1234,
+        "name": "AB semantic fixture",
+        "focused": False,
+        "visible": True,
+        "grounding": "atspi",
+        "rect": {"x": 10, "y": 20, "width": 300, "height": 120},
+        "output": "HEADLESS-1"
+    }],
+    "window_count": 1,
+    "screenshots": {"skipped": True},
+    "atspi": {
+        "available": True,
+        "apps": [{
+            "name": "zenity",
+            "pid": 1234,
+            "element_count": 1,
+            "coverage": "ok",
+            "elements": [{
+                "role": "push button",
+                "name": "INVOKEOK",
+                "bounds": {"x": 100, "y": 80, "width": 92, "height": 30},
+                "states": ["visible", "enabled"]
+            }]
+        }]
+    },
+    "elapsed_ms": 3
+}
+print(json.dumps(payload))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopSnapshotTool::new(Hub::builder().build());
+        let default_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "include_screenshot": false,
+                    "include_atspi": true,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("default execute");
+        let default_payload = result_text_as_json(&default_out);
+        assert_eq!(default_payload["schema"], DESKTOP_SNAPSHOT_SOURCE_SCHEMA);
+        assert!(default_payload.get("semantic_objects").is_none());
+        assert!(default_payload.get("mcp_wrapper").is_some());
+
+        let semantic_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "include_screenshot": false,
+                    "include_atspi": true,
+                    "semantic_bus": true,
+                    "semantic_include_raw": false,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("semantic execute");
+        let payload = result_text_as_json(&semantic_out);
+        assert_eq!(payload["schema"], DESKTOP_SNAPSHOT_SEMANTIC_SCHEMA);
+        assert_eq!(payload["source_schema"], DESKTOP_SNAPSHOT_SOURCE_SCHEMA);
+        assert_eq!(payload["source_adapter"], "linux.desktop_snapshot");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["raw_available"], true);
+        assert_eq!(payload["raw_included"], false);
+        assert!(payload.get("raw_snapshot").is_none());
+        assert_eq!(payload["verification"]["verdict"], "verified");
+        assert_eq!(payload["verification"]["verified_to"], "semantic_objects");
+        assert_eq!(payload["verification"]["recover"], "proceed");
+
+        let objects = payload["semantic_objects"].as_array().expect("objects");
+        assert_eq!(objects.len(), 3);
+        assert!(objects.iter().any(|o| {
+            o["object_id"] == "desktop:linux:session:1780833000"
+                && o["source_adapter"] == "linux.sway.session"
+        }));
+        assert!(objects.iter().any(|o| {
+            o["object_id"] == "desktop:linux:sway:window:42"
+                && o["source_adapter"] == "linux.sway.tree"
+        }));
+        assert!(objects.iter().any(|o| {
+            o["source_adapter"] == "linux.atspi" && o["label"] == "INVOKEOK"
+        }));
+
+        let affordances = payload["affordances"].as_array().expect("affordances");
+        assert!(affordances.iter().any(|a| {
+            a["action_type"] == "desktop.verify" && a["requires_gate"] == false
+        }));
+        assert!(affordances.iter().any(|a| {
+            a["action_type"] == "desktop.invoke" && a["requires_gate"] == true
+        }));
+        assert_eq!(
+            payload["presentation"]["machine_payload"]["atspi_object_count"],
+            1
+        );
+        assert_eq!(
+            payload["events"][0]["event_type"],
+            "desktop.snapshot.observed"
+        );
+
+        let raw_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "include_screenshot": false,
+                    "semantic_bus": true,
+                    "semantic_include_raw": true,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("raw execute");
+        let raw_payload = result_text_as_json(&raw_out);
+        assert_eq!(raw_payload["raw_included"], true);
+        assert_eq!(raw_payload["raw_snapshot"]["schema"], DESKTOP_SNAPSHOT_SOURCE_SCHEMA);
+        assert!(raw_payload["raw_snapshot"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
