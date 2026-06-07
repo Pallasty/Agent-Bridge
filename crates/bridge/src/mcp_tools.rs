@@ -966,6 +966,9 @@ fn lossy_truncate(bytes: &[u8]) -> (String, bool) {
 //                              desktop_snapshot
 // ===========================================================================
 
+const DESKTOP_SNAPSHOT_SEMANTIC_SCHEMA: &str = "agent_bridge.semantic_bus.desktop_snapshot.v0";
+const DESKTOP_SNAPSHOT_SOURCE_SCHEMA: &str = "desktop_snapshot/v0.5";
+
 pub struct DesktopSnapshotTool {
     _hub: Hub,
 }
@@ -1035,6 +1038,16 @@ impl McpTool for DesktopSnapshotTool {
                         "maximum": 60000,
                         "default": 15000,
                         "description": "Milliseconds before the snapshot process is killed."
+                    },
+                    "semantic_bus": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, wrap the read-only desktop_snapshot/v0.5 payload as agent_bridge.semantic_bus.desktop_snapshot.v0. Default false preserves the existing payload exactly apart from mcp_wrapper."
+                    },
+                    "semantic_include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Only with semantic_bus=true: include the original desktop_snapshot payload as raw_snapshot. Default false keeps the semantic envelope compact."
                     }
                 }
             }),
@@ -1065,6 +1078,14 @@ impl McpTool for DesktopSnapshotTool {
             .and_then(|v| v.as_f64())
             .unwrap_or(2.0)
             .clamp(0.25, 10.0);
+        let semantic_bus = args
+            .get("semantic_bus")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let semantic_include_raw = args
+            .get("semantic_include_raw")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
         let script = desktop_snapshot_script_path(&args, cwd.as_ref());
@@ -1149,7 +1170,13 @@ impl McpTool for DesktopSnapshotTool {
                         }),
                     );
                 }
-                Ok(ToolResult::json_text(&payload))
+                if semantic_bus {
+                    let semantic_payload =
+                        desktop_snapshot_semantic_bus_payload(&payload, semantic_include_raw);
+                    Ok(ToolResult::json_text(&semantic_payload))
+                } else {
+                    Ok(ToolResult::json_text(&payload))
+                }
             }
             Err(e) => Ok(desktop_snapshot_error(json!({
                 "code": "invalid_json",
@@ -1161,6 +1188,330 @@ impl McpTool for DesktopSnapshotTool {
             }))),
         }
     }
+}
+
+fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) -> Value {
+    let source_schema = snapshot
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let captured_at = snapshot.get("captured_at").cloned().unwrap_or(Value::Null);
+    let captured_label = desktop_snapshot_value_label(&captured_at, "unknown");
+    let session_object_id = format!("desktop:linux:session:{captured_label}");
+    let event_id = format!("evt-desktop-snapshot-{captured_label}");
+    let verified = source_schema == DESKTOP_SNAPSHOT_SOURCE_SCHEMA;
+    let reason = if verified {
+        Value::Null
+    } else {
+        json!("unexpected_source_schema")
+    };
+
+    let windows = snapshot
+        .get("windows")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut semantic_objects = Vec::new();
+    let mut affordances = Vec::new();
+    let mut window_ids_by_pid: HashMap<String, String> = HashMap::new();
+
+    semantic_objects.push(json!({
+        "schema": "agent_bridge.semantic_bus.object.v0",
+        "object_id": session_object_id,
+        "object_type": "desktop.session",
+        "source_adapter": "linux.sway.session",
+        "label": "Linux desktop session",
+        "state": {
+            "session": snapshot.get("session").cloned().unwrap_or_else(|| json!({})),
+            "window_count": snapshot.get("window_count").cloned().unwrap_or(Value::Null),
+            "screenshots": snapshot.get("screenshots").cloned().unwrap_or(Value::Null),
+        },
+        "relations": [],
+        "confidence": if verified { 0.95 } else { 0.25 },
+        "observed_at": captured_at,
+        "provenance": {
+            "tool": "desktop_snapshot",
+            "schema": source_schema,
+        }
+    }));
+
+    for (idx, window) in windows.iter().enumerate() {
+        if window.get("error").is_some() {
+            continue;
+        }
+        let object_id = desktop_snapshot_window_object_id(window, idx);
+        if let Some(pid) = window.get("pid").and_then(Value::as_i64) {
+            window_ids_by_pid.insert(pid.to_string(), object_id.clone());
+        }
+        let title = desktop_snapshot_str(window, "name").unwrap_or("window");
+        semantic_objects.push(json!({
+            "schema": "agent_bridge.semantic_bus.object.v0",
+            "object_id": object_id,
+            "object_type": "desktop.window",
+            "source_adapter": "linux.sway.tree",
+            "label": title,
+            "state": {
+                "id": window.get("id").cloned().unwrap_or(Value::Null),
+                "app_id": window.get("app_id").cloned().unwrap_or(Value::Null),
+                "x11_class": window.get("x11_class").cloned().unwrap_or(Value::Null),
+                "pid": window.get("pid").cloned().unwrap_or(Value::Null),
+                "title": window.get("name").cloned().unwrap_or(Value::Null),
+                "focused": window.get("focused").cloned().unwrap_or(Value::Null),
+                "visible": window.get("visible").cloned().unwrap_or(Value::Null),
+                "grounding": window.get("grounding").cloned().unwrap_or(Value::Null),
+                "rect": window.get("rect").cloned().unwrap_or(Value::Null),
+                "output": window.get("output").cloned().unwrap_or(Value::Null),
+            },
+            "relations": [
+                { "type": "member_of", "target": session_object_id }
+            ],
+            "confidence": 0.9,
+            "observed_at": captured_at,
+            "provenance": {
+                "tool": "desktop_snapshot",
+                "schema": source_schema,
+                "source_path": "windows"
+            }
+        }));
+        affordances.push(json!({
+            "affordance_id": format!("{object_id}:verify-window"),
+            "object_id": object_id,
+            "action_type": "desktop.verify",
+            "args_schema": {
+                "expect": "window_appeared",
+                "win_app_id": window.get("app_id").cloned().unwrap_or(Value::Null),
+                "win_title": window.get("name").cloned().unwrap_or(Value::Null),
+                "win_pid": window.get("pid").cloned().unwrap_or(Value::Null),
+            },
+            "risk_level": "low",
+            "requires_gate": false,
+            "expected_effect": "re-observes matching window state without mutating the desktop"
+        }));
+    }
+
+    if let Some(apps) = snapshot
+        .get("atspi")
+        .and_then(|v| v.get("apps"))
+        .and_then(Value::as_array)
+    {
+        for app in apps {
+            let pid_label = app
+                .get("pid")
+                .and_then(Value::as_i64)
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            let parent_window = window_ids_by_pid.get(&pid_label).cloned();
+            if let Some(elements) = app.get("elements").and_then(Value::as_array) {
+                for (idx, element) in elements.iter().enumerate() {
+                    let role = desktop_snapshot_str(element, "role").unwrap_or("element");
+                    let name = desktop_snapshot_str(element, "name").unwrap_or("");
+                    let element_slug = desktop_snapshot_slug(&format!("{role}-{name}-{idx}"));
+                    let object_id = format!(
+                        "desktop:linux:atspi:{pid_label}:{}",
+                        element_slug
+                    );
+                    let mut relations = vec![json!({
+                        "type": "member_of",
+                        "target": session_object_id
+                    })];
+                    if let Some(parent) = &parent_window {
+                        relations.push(json!({
+                            "type": "contained_by",
+                            "target": parent
+                        }));
+                    }
+                    semantic_objects.push(json!({
+                        "schema": "agent_bridge.semantic_bus.object.v0",
+                        "object_id": object_id,
+                        "object_type": format!("desktop.accessible.{}", desktop_snapshot_slug(role)),
+                        "source_adapter": "linux.atspi",
+                        "label": if name.is_empty() { role } else { name },
+                        "state": {
+                            "app": app.get("name").cloned().unwrap_or(Value::Null),
+                            "pid": app.get("pid").cloned().unwrap_or(Value::Null),
+                            "role": role,
+                            "name": element.get("name").cloned().unwrap_or(Value::Null),
+                            "bounds": element.get("bounds").cloned().unwrap_or(Value::Null),
+                            "states": element.get("states").cloned().unwrap_or(Value::Null),
+                        },
+                        "relations": relations,
+                        "confidence": 0.88,
+                        "observed_at": captured_at,
+                        "provenance": {
+                            "tool": "desktop_snapshot",
+                            "schema": source_schema,
+                            "source_path": "atspi.apps[].elements[]"
+                        }
+                    }));
+                    affordances.push(json!({
+                        "affordance_id": format!("{object_id}:verify-element"),
+                        "object_id": object_id,
+                        "action_type": "desktop.verify",
+                        "args_schema": {
+                            "app": app.get("name").cloned().unwrap_or(Value::Null),
+                            "role": role,
+                            "name": element.get("name").cloned().unwrap_or(Value::Null),
+                            "expect": "state_is"
+                        },
+                        "risk_level": "low",
+                        "requires_gate": false,
+                        "expected_effect": "re-observes matching AT-SPI element state"
+                    }));
+                    if desktop_snapshot_role_is_actionable(role) {
+                        affordances.push(json!({
+                            "affordance_id": format!("{object_id}:invoke"),
+                            "object_id": object_id,
+                            "action_type": "desktop.invoke",
+                            "args_schema": {
+                                "app": app.get("name").cloned().unwrap_or(Value::Null),
+                                "role": role,
+                                "name": element.get("name").cloned().unwrap_or(Value::Null),
+                            },
+                            "risk_level": "medium",
+                            "requires_gate": true,
+                            "expected_effect": "semantic AT-SPI invoke; exposed here only as gated affordance metadata"
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    let object_count = semantic_objects.len();
+    let affordance_count = affordances.len();
+    let window_count = windows.iter().filter(|w| w.get("error").is_none()).count();
+    let atspi_object_count = semantic_objects
+        .iter()
+        .filter(|o| {
+            o.get("source_adapter")
+                .and_then(Value::as_str)
+                .is_some_and(|s| s == "linux.atspi")
+        })
+        .count();
+
+    let mut payload = json!({
+        "schema": DESKTOP_SNAPSHOT_SEMANTIC_SCHEMA,
+        "source_schema": source_schema,
+        "source_adapter": "linux.desktop_snapshot",
+        "captured_at": captured_at,
+        "read_only": true,
+        "raw_available": true,
+        "raw_included": include_raw,
+        "semantic_objects": semantic_objects,
+        "affordances": affordances,
+        "events": [
+            {
+                "event_id": event_id,
+                "event_type": "desktop.snapshot.observed",
+                "subject_id": session_object_id,
+                "source": "desktop_snapshot",
+                "actor": "agent",
+                "payload_json": {
+                    "object_count": object_count,
+                    "affordance_count": affordance_count,
+                    "window_count": window_count,
+                    "atspi_object_count": atspi_object_count,
+                    "screenshot_required": false
+                },
+                "source_event_ids": []
+            }
+        ],
+        "verification": {
+            "verdict": if verified { "verified" } else { "not_verified" },
+            "reason": reason,
+            "method": "desktop_snapshot.semantic_normalizer",
+            "evidence": {
+                "source_schema": source_schema,
+                "object_count": object_count,
+                "window_count": window_count,
+                "atspi_object_count": atspi_object_count,
+                "raw_included": include_raw
+            },
+            "verified_to": if verified { json!("semantic_objects") } else { Value::Null },
+            "recover": if verified { "proceed" } else { "replan" },
+            "raw_available": true
+        },
+        "presentation": {
+            "presentation_id": format!("present-desktop-snapshot-{captured_label}"),
+            "source_event_ids": [event_id],
+            "human_summary": format!(
+                "Normalized desktop_snapshot into {object_count} semantic objects and {affordance_count} affordances."
+            ),
+            "machine_payload": {
+                "object_count": object_count,
+                "affordance_count": affordance_count,
+                "window_count": window_count,
+                "atspi_object_count": atspi_object_count
+            },
+            "ingestion": {
+                "allowed": false,
+                "reason": "runtime_snapshot_not_durable_memory"
+            },
+            "artifact": Value::Null
+        }
+    });
+    if include_raw {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("raw_snapshot".to_string(), snapshot.clone());
+        }
+    }
+    payload
+}
+
+fn desktop_snapshot_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+}
+
+fn desktop_snapshot_value_label(value: &Value, fallback: &str) -> String {
+    match value {
+        Value::String(s) => desktop_snapshot_slug(s),
+        Value::Number(n) => n.to_string(),
+        _ => fallback.to_string(),
+    }
+}
+
+fn desktop_snapshot_window_object_id(window: &Value, idx: usize) -> String {
+    if let Some(id) = window.get("id").and_then(Value::as_i64) {
+        return format!("desktop:linux:sway:window:{id}");
+    }
+    if let Some(pid) = window.get("pid").and_then(Value::as_i64) {
+        return format!("desktop:linux:sway:window-pid:{pid}");
+    }
+    format!("desktop:linux:sway:window-index:{idx}")
+}
+
+fn desktop_snapshot_slug(raw: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        "unknown".to_string()
+    } else {
+        out
+    }
+}
+
+fn desktop_snapshot_role_is_actionable(role: &str) -> bool {
+    let r = role.to_ascii_lowercase();
+    r.contains("button")
+        || r.contains("menu item")
+        || r.contains("check box")
+        || r.contains("radio button")
+        || r.contains("combo box")
+        || r.contains("slider")
+        || r.contains("spin button")
+        || r == "link"
 }
 
 fn desktop_snapshot_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
@@ -1207,6 +1558,9 @@ fn desktop_snapshot_error(error: Value) -> ToolResult {
 // 1:1 to the caller's next move. It never clicks/types/moves anything, so observing the
 // REAL desktop is safe + ungated (like desktop_snapshot); --cage-pid / --swaysock only
 // SCOPE what counts as present.
+
+const DESKTOP_VERIFY_SEMANTIC_SCHEMA: &str = "agent_bridge.semantic_bus.desktop_verify.v0";
+const DESKTOP_VERIFY_SOURCE_SCHEMA: &str = "desktop_verify/v0";
 
 pub struct DesktopVerifyTool {
     _hub: Hub,
@@ -1271,6 +1625,16 @@ impl McpTool for DesktopVerifyTool {
                         "description": "Was the AT-SPI target present BEFORE the act? Splits a miss into unchanged vs diverged."
                     },
                     "before_focus": { "type": "string", "description": "Focused 'app_id|title' BEFORE the act (for focus_is)." },
+                    "semantic_bus": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, wrap the read-only desktop_verify/v0 payload as agent_bridge.semantic_bus.desktop_verify.v0. Default false preserves the existing payload exactly apart from mcp_wrapper."
+                    },
+                    "semantic_include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Only with semantic_bus=true: include the original desktop_verify payload as raw_verify. Default false keeps the semantic envelope compact."
+                    },
                     "timeout_ms": {
                         "type": "integer", "minimum": 2000, "maximum": 60000, "default": 12000,
                         "description": "Milliseconds before the verify process is killed (kept above poll_timeout_secs)."
@@ -1299,6 +1663,14 @@ impl McpTool for DesktopVerifyTool {
             .unwrap_or(12_000)
             .clamp(2_000, 60_000)
             .max(min_proc_ms);
+        let semantic_bus = args
+            .get("semantic_bus")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let semantic_include_raw = args
+            .get("semantic_include_raw")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
         let script = desktop_verify_script_path(&args, cwd.as_ref());
@@ -1388,6 +1760,9 @@ impl McpTool for DesktopVerifyTool {
                         }),
                     );
                 }
+                if semantic_bus {
+                    payload = desktop_verify_semantic_bus_payload(&payload, semantic_include_raw);
+                }
                 Ok(ToolResult::json_text(&payload))
             }
             Err(e) => Ok(desktop_verify_error(json!({
@@ -1400,6 +1775,221 @@ impl McpTool for DesktopVerifyTool {
                 "truncated": stdout_truncated || stderr_truncated
             }))),
         }
+    }
+}
+
+fn desktop_verify_semantic_bus_payload(verify: &Value, include_raw: bool) -> Value {
+    let source_schema = verify
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let ts = verify.get("ts").cloned().unwrap_or(Value::Null);
+    let ts_label = desktop_snapshot_value_label(&ts, "unknown");
+    let expect = verify
+        .get("expect")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let source_verdict = verify
+        .get("verdict")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let source_recover = verify
+        .get("recover")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| match source_verdict {
+            "verified" => "proceed",
+            "error" => "escalate",
+            "unmet" => "retry",
+            _ => "replan",
+        });
+    let selector = verify.get("selector").cloned().unwrap_or_else(|| json!({}));
+    let scope = verify.get("scope").cloned().unwrap_or_else(|| json!({}));
+    let observed = verify.get("observed").cloned().unwrap_or_else(|| json!({}));
+    let target_family = desktop_verify_target_family(expect);
+    let target_summary = desktop_verify_selector_summary(&selector);
+    let target_seed = format!("{expect}-{target_summary}");
+    let target_object_id = format!(
+        "desktop:linux:verify:{target_family}:{}",
+        desktop_snapshot_slug(&target_seed)
+    );
+    let event_id = format!(
+        "evt-desktop-verify-{ts_label}-{}",
+        desktop_snapshot_slug(expect)
+    );
+    let schema_ok = source_schema == DESKTOP_VERIFY_SOURCE_SCHEMA;
+    let semantic_verdict = if !schema_ok {
+        "not_verified"
+    } else {
+        match source_verdict {
+            "verified" => "verified",
+            "error" => "error",
+            _ => "not_verified",
+        }
+    };
+    let semantic_recover = if schema_ok { source_recover } else { "replan" };
+    let reason = if !schema_ok {
+        json!("unexpected_source_schema")
+    } else if source_verdict == "verified" {
+        Value::Null
+    } else if source_verdict == "error" {
+        verify
+            .get("error")
+            .cloned()
+            .filter(|v| !v.is_null())
+            .unwrap_or_else(|| json!("desktop_verify_error"))
+    } else if source_verdict == "unmet" {
+        json!("postcondition_unmet")
+    } else {
+        json!("unknown_source_verdict")
+    };
+    let observed_count = observed.get("count").cloned().unwrap_or(Value::Null);
+    let mut verify_args = selector.as_object().cloned().unwrap_or_default();
+    verify_args.insert("expect".to_string(), json!(expect));
+
+    let mut payload = json!({
+        "schema": DESKTOP_VERIFY_SEMANTIC_SCHEMA,
+        "source_schema": source_schema,
+        "source_adapter": "linux.desktop_verify",
+        "observed_at": ts,
+        "read_only": true,
+        "raw_available": true,
+        "raw_included": include_raw,
+        "semantic_objects": [
+            {
+                "schema": "agent_bridge.semantic_bus.object.v0",
+                "object_id": target_object_id,
+                "object_type": format!("desktop.verify.target.{target_family}"),
+                "source_adapter": "linux.desktop_verify",
+                "label": format!("desktop_verify {expect} {target_summary}"),
+                "state": {
+                    "expect": expect,
+                    "selector": selector,
+                    "scope": scope,
+                    "source_verdict": source_verdict,
+                    "recover": source_recover,
+                    "change": verify.get("change").cloned().unwrap_or(Value::Null),
+                    "held_after_ms": verify.get("held_after_ms").cloned().unwrap_or(Value::Null),
+                    "polls": verify.get("polls").cloned().unwrap_or(Value::Null),
+                    "observed": observed,
+                    "error": verify.get("error").cloned().unwrap_or(Value::Null)
+                },
+                "relations": [],
+                "confidence": if schema_ok { 0.9 } else { 0.25 },
+                "observed_at": ts,
+                "provenance": {
+                    "tool": "desktop_verify",
+                    "schema": source_schema
+                }
+            }
+        ],
+        "affordances": [
+            {
+                "affordance_id": format!("{target_object_id}:reverify"),
+                "object_id": target_object_id,
+                "action_type": "desktop.verify",
+                "args_schema": Value::Object(verify_args),
+                "risk_level": "low",
+                "requires_gate": false,
+                "expected_effect": "re-observes the same postcondition without mutating the desktop"
+            }
+        ],
+        "events": [
+            {
+                "event_id": event_id,
+                "event_type": "desktop.verify.completed",
+                "subject_id": target_object_id,
+                "source": "desktop_verify",
+                "actor": "agent",
+                "payload_json": {
+                    "expect": expect,
+                    "source_verdict": source_verdict,
+                    "recover": source_recover,
+                    "change": verify.get("change").cloned().unwrap_or(Value::Null),
+                    "observed_count": observed_count,
+                    "held_after_ms": verify.get("held_after_ms").cloned().unwrap_or(Value::Null),
+                    "polls": verify.get("polls").cloned().unwrap_or(Value::Null)
+                },
+                "source_event_ids": []
+            }
+        ],
+        "verification": {
+            "verdict": semantic_verdict,
+            "source_verdict": source_verdict,
+            "reason": reason,
+            "method": "desktop_verify.semantic_normalizer",
+            "evidence": {
+                "source_schema": source_schema,
+                "expect": expect,
+                "selector": verify.get("selector").cloned().unwrap_or_else(|| json!({})),
+                "scope": verify.get("scope").cloned().unwrap_or_else(|| json!({})),
+                "observed_count": observed.get("count").cloned().unwrap_or(Value::Null),
+                "raw_included": include_raw
+            },
+            "verified_to": if semantic_verdict == "verified" { json!("postcondition") } else { Value::Null },
+            "recover": semantic_recover,
+            "raw_available": true
+        },
+        "presentation": {
+            "presentation_id": format!("present-desktop-verify-{ts_label}"),
+            "source_event_ids": [event_id],
+            "human_summary": format!(
+                "desktop_verify {expect} returned {source_verdict}; recover={semantic_recover}."
+            ),
+            "machine_payload": {
+                "expect": expect,
+                "source_verdict": source_verdict,
+                "recover": semantic_recover,
+                "observed_count": observed.get("count").cloned().unwrap_or(Value::Null)
+            },
+            "ingestion": {
+                "allowed": false,
+                "reason": "runtime_verify_not_durable_memory"
+            },
+            "artifact": Value::Null
+        }
+    });
+    if include_raw {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("raw_verify".to_string(), verify.clone());
+        }
+    }
+    payload
+}
+
+fn desktop_verify_target_family(expect: &str) -> &'static str {
+    match expect {
+        "window_gone" | "window_appeared" | "focus_is" => "window",
+        "element_gone" | "element_appeared" | "state_is" | "state_not" => "accessible",
+        _ => "target",
+    }
+}
+
+fn desktop_verify_selector_summary(selector: &Value) -> String {
+    let mut parts = Vec::new();
+    for key in [
+        "app",
+        "role",
+        "name",
+        "state",
+        "win_app_id",
+        "win_title",
+        "win_pid",
+    ] {
+        if let Some(value) = selector.get(key) {
+            match value {
+                Value::String(s) if !s.trim().is_empty() => {
+                    parts.push(format!("{key}:{}", s.trim()));
+                }
+                Value::Number(n) => parts.push(format!("{key}:{n}")),
+                Value::Bool(b) => parts.push(format!("{key}:{b}")),
+                _ => {}
+            }
+        }
+    }
+    if parts.is_empty() {
+        "unspecified-target".to_string()
+    } else {
+        parts.join(" ")
     }
 }
 
@@ -1435,6 +2025,2927 @@ fn desktop_verify_error(error: Value) -> ToolResult {
     }));
     result.is_error = true;
     result
+}
+
+// ===========================================================================
+//                              macos_ax_probe
+// ===========================================================================
+
+const MACOS_AX_PROBE_SEMANTIC_SCHEMA: &str = "agent_bridge.semantic_bus.macos_ax_probe.v0";
+const MACOS_AX_PROBE_SOURCE_SCHEMA: &str = "macos_ax_probe/v0";
+
+pub struct MacosAxProbeTool {
+    _hub: Hub,
+}
+
+impl MacosAxProbeTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MacosAxProbeTool {
+    fn name(&self) -> &'static str {
+        "macos_ax_probe"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only macOS Accessibility feasibility probe. Reports platform \
+                 support, AX trust state, frontmost app metadata, and a bounded window summary \
+                 only when Accessibility is already trusted. It never prompts for permission, \
+                 clicks, types, focuses apps, or mutates window state."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Workspace/repo root used to resolve scripts/macos_ax_probe.py. Defaults to the MCP process cwd, then the build-time repo root."
+                    },
+                    "script_path": {
+                        "type": "string",
+                        "description": "Optional explicit macos_ax_probe.py path. Use mainly for tests or alternate checkouts."
+                    },
+                    "include_windows": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, read a bounded frontmost app/window summary through System Events only if AX is already trusted."
+                    },
+                    "max_windows": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 50,
+                        "default": 8,
+                        "description": "Maximum frontmost-app windows to return."
+                    },
+                    "jxa_timeout_secs": {
+                        "type": "number",
+                        "minimum": 0.25,
+                        "maximum": 10.0,
+                        "default": 4.0,
+                        "description": "Timeout for the bounded System Events/JXA read."
+                    },
+                    "semantic_bus": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, wrap the macos_ax_probe/v0 payload as agent_bridge.semantic_bus.macos_ax_probe.v0. Default false preserves the probe payload exactly apart from mcp_wrapper."
+                    },
+                    "semantic_include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Only with semantic_bus=true: include the original macos_ax_probe payload as raw_probe. Default false keeps the semantic envelope compact."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 30000,
+                        "default": 8000,
+                        "description": "Milliseconds before the probe process is killed."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(8_000)
+            .clamp(1_000, 30_000);
+        let include_windows = args
+            .get("include_windows")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let max_windows = args
+            .get("max_windows")
+            .and_then(Value::as_u64)
+            .unwrap_or(8)
+            .min(50);
+        let jxa_timeout_secs = args
+            .get("jxa_timeout_secs")
+            .and_then(Value::as_f64)
+            .unwrap_or(4.0)
+            .clamp(0.25, 10.0);
+        let semantic_bus = args
+            .get("semantic_bus")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let semantic_include_raw = args
+            .get("semantic_include_raw")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
+        let script = macos_ax_probe_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(macos_ax_probe_error(json!({
+                "code": "script_missing",
+                "message": format!("macos_ax_probe.py not found at {}", script.display()),
+                "hint": "pass script_path or run from the Agent-Bridge repo root"
+            })));
+        }
+
+        let mut cmd = killable_command(
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "python3".to_string()),
+        );
+        cmd.arg(&script)
+            .arg("--compact")
+            .arg("--max-windows")
+            .arg(max_windows.to_string())
+            .arg("--jxa-timeout-secs")
+            .arg(jxa_timeout_secs.to_string());
+        if !include_windows {
+            cmd.arg("--no-windows");
+        }
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+
+        let started = Instant::now();
+        let output =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+                Err(_) => {
+                    return Ok(macos_ax_probe_error(json!({
+                        "code": "timeout",
+                        "message": format!("macos_ax_probe exceeded {timeout_ms} ms"),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Err(e)) => {
+                    return Ok(macos_ax_probe_error(json!({
+                        "code": "spawn_failed",
+                        "message": e.to_string(),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Ok(output)) => output,
+            };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+
+        if !output.status.success() {
+            return Ok(macos_ax_probe_error(json!({
+                "code": "script_failed",
+                "exit_code": output.status.code().unwrap_or(-1),
+                "stdout": stdout,
+                "stderr": stderr,
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            })));
+        }
+
+        match serde_json::from_str::<Value>(&stdout) {
+            Ok(mut payload) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert(
+                        "mcp_wrapper".to_string(),
+                        json!({
+                            "tool": self.name(),
+                            "read_only": true,
+                            "include_windows": include_windows,
+                            "duration_ms": duration_ms,
+                            "exit_code": output.status.code().unwrap_or(-1),
+                            "stderr": stderr,
+                            "stderr_truncated": stderr_truncated
+                        }),
+                    );
+                }
+                if semantic_bus {
+                    payload = macos_ax_probe_semantic_bus_payload(&payload, semantic_include_raw);
+                }
+                Ok(ToolResult::json_text(&payload))
+            }
+            Err(e) => Ok(macos_ax_probe_error(json!({
+                "code": "invalid_json",
+                "message": e.to_string(),
+                "stdout": stdout,
+                "stderr": stderr,
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            }))),
+        }
+    }
+}
+
+fn macos_ax_probe_semantic_bus_payload(probe: &Value, include_raw: bool) -> Value {
+    let source_schema = probe
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let captured_at = probe.get("captured_at").cloned().unwrap_or(Value::Null);
+    let captured_label = desktop_snapshot_value_label(&captured_at, "unknown");
+    let status = probe
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let schema_ok = source_schema == MACOS_AX_PROBE_SOURCE_SCHEMA;
+    let supported = status != "unsupported_platform";
+    let semantic_verdict = if !schema_ok {
+        "not_verified"
+    } else if supported {
+        "verified"
+    } else {
+        "blocked"
+    };
+    let recover = if !schema_ok {
+        "replan"
+    } else if status == "ready" || status == "degraded" {
+        "proceed"
+    } else {
+        "replan"
+    };
+    let reason = if !schema_ok {
+        json!("unexpected_source_schema")
+    } else if status == "unsupported_platform" {
+        json!("unsupported_platform")
+    } else if status == "degraded" {
+        json!("limited_accessibility_or_window_read")
+    } else {
+        Value::Null
+    };
+    let session_object_id = format!("desktop:macos:session:{captured_label}");
+    let event_id = format!("evt-macos-ax-probe-{captured_label}");
+
+    let mut semantic_objects = vec![json!({
+        "schema": "agent_bridge.semantic_bus.object.v0",
+        "object_id": session_object_id,
+        "object_type": "desktop.session",
+        "source_adapter": "macos.ax_probe",
+        "label": "macOS desktop session",
+        "state": {
+            "platform": probe.get("platform").cloned().unwrap_or_else(|| json!({})),
+            "status": status,
+            "permission": probe.get("permission").cloned().unwrap_or_else(|| json!({})),
+            "frontmost_app": probe.get("frontmost_app").cloned().unwrap_or(Value::Null),
+            "window_count": probe.get("window_count").cloned().unwrap_or(Value::Null),
+            "source_window_count": probe.get("source_window_count").cloned().unwrap_or(Value::Null),
+            "limits": probe.get("limits").cloned().unwrap_or_else(|| json!({})),
+        },
+        "relations": [],
+        "confidence": if schema_ok { 0.85 } else { 0.2 },
+        "observed_at": captured_at,
+        "provenance": {
+            "tool": "macos_ax_probe",
+            "schema": source_schema
+        }
+    })];
+    let mut affordances = Vec::new();
+
+    if let Some(app) = probe.get("frontmost_app").filter(|v| v.is_object()) {
+        let app_id = macos_ax_app_object_id(app);
+        semantic_objects.push(json!({
+            "schema": "agent_bridge.semantic_bus.object.v0",
+            "object_id": app_id,
+            "object_type": "desktop.application",
+            "source_adapter": "macos.system_events",
+            "label": app.get("name").and_then(Value::as_str).unwrap_or("frontmost app"),
+            "state": {
+                "name": app.get("name").cloned().unwrap_or(Value::Null),
+                "pid": app.get("pid").cloned().unwrap_or(Value::Null),
+                "bundle_id": app.get("bundle_id").cloned().unwrap_or(Value::Null),
+                "role": app.get("role").cloned().unwrap_or(Value::Null),
+                "frontmost": true
+            },
+            "relations": [
+                { "type": "member_of", "target": session_object_id }
+            ],
+            "confidence": 0.86,
+            "observed_at": captured_at,
+            "provenance": {
+                "tool": "macos_ax_probe",
+                "schema": source_schema,
+                "source_path": "frontmost_app"
+            }
+        }));
+    }
+
+    if let Some(windows) = probe.get("windows").and_then(Value::as_array) {
+        for (idx, window) in windows.iter().enumerate() {
+            let object_id = macos_ax_window_object_id(probe, window, idx);
+            semantic_objects.push(json!({
+                "schema": "agent_bridge.semantic_bus.object.v0",
+                "object_id": object_id,
+                "object_type": "desktop.window",
+                "source_adapter": "macos.ax.window",
+                "label": window.get("title").and_then(Value::as_str).unwrap_or("macOS window"),
+                "state": {
+                    "index": window.get("index").cloned().unwrap_or(Value::Null),
+                    "title": window.get("title").cloned().unwrap_or(Value::Null),
+                    "role": window.get("role").cloned().unwrap_or(Value::Null),
+                    "subrole": window.get("subrole").cloned().unwrap_or(Value::Null),
+                    "focused": window.get("focused").cloned().unwrap_or(Value::Null),
+                    "position": window.get("position").cloned().unwrap_or(Value::Null),
+                    "size": window.get("size").cloned().unwrap_or(Value::Null),
+                    "rect": window.get("rect").cloned().unwrap_or(Value::Null),
+                    "app": probe.get("frontmost_app").cloned().unwrap_or(Value::Null),
+                    "platform": probe.get("platform").cloned().unwrap_or_else(|| json!({})),
+                },
+                "relations": [
+                    { "type": "member_of", "target": session_object_id }
+                ],
+                "confidence": 0.82,
+                "observed_at": captured_at,
+                "provenance": {
+                    "tool": "macos_ax_probe",
+                    "schema": source_schema,
+                    "source_path": "windows"
+                }
+            }));
+            affordances.push(json!({
+                "affordance_id": format!("{object_id}:reobserve"),
+                "object_id": object_id,
+                "action_type": "macos_ax_probe.reobserve",
+                "args_schema": {
+                    "include_windows": true,
+                    "max_windows": probe
+                        .get("limits")
+                        .and_then(|v| v.get("max_windows"))
+                        .cloned()
+                        .unwrap_or_else(|| json!(8))
+                },
+                "risk_level": "low",
+                "requires_gate": false,
+                "expected_effect": "re-runs the read-only macOS AX probe without mutating app or window state"
+            }));
+        }
+    }
+
+    let object_count = semantic_objects.len();
+    let window_count = probe.get("window_count").cloned().unwrap_or(Value::Null);
+    let mut payload = json!({
+        "schema": MACOS_AX_PROBE_SEMANTIC_SCHEMA,
+        "source_schema": source_schema,
+        "source_adapter": "macos.ax_probe",
+        "captured_at": captured_at,
+        "read_only": true,
+        "raw_available": true,
+        "raw_included": include_raw,
+        "semantic_objects": semantic_objects,
+        "affordances": affordances,
+        "events": [
+            {
+                "event_id": event_id,
+                "event_type": "desktop.snapshot.observed",
+                "subject_id": session_object_id,
+                "source": "macos_ax_probe",
+                "actor": "agent",
+                "payload_json": {
+                    "status": status,
+                    "object_count": object_count,
+                    "window_count": window_count,
+                    "ax_trusted": probe
+                        .get("permission")
+                        .and_then(|v| v.get("ax_trusted"))
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                    "prompted": probe
+                        .get("permission")
+                        .and_then(|v| v.get("prompted"))
+                        .cloned()
+                        .unwrap_or(Value::Null)
+                },
+                "source_event_ids": []
+            }
+        ],
+        "verification": {
+            "verdict": semantic_verdict,
+            "reason": reason,
+            "method": "macos_ax_probe.semantic_normalizer",
+            "evidence": {
+                "source_schema": source_schema,
+                "status": status,
+                "permission": probe.get("permission").cloned().unwrap_or_else(|| json!({})),
+                "window_count": window_count,
+                "raw_included": include_raw
+            },
+            "verified_to": if semantic_verdict == "verified" { json!("semantic_objects") } else { Value::Null },
+            "recover": recover,
+            "raw_available": true
+        },
+        "presentation": {
+            "presentation_id": format!("present-macos-ax-probe-{captured_label}"),
+            "source_event_ids": [event_id],
+            "human_summary": format!(
+                "macos_ax_probe returned {status}; normalized {object_count} semantic objects."
+            ),
+            "machine_payload": {
+                "status": status,
+                "object_count": object_count,
+                "window_count": probe.get("window_count").cloned().unwrap_or(Value::Null),
+                "source_window_count": probe.get("source_window_count").cloned().unwrap_or(Value::Null)
+            },
+            "ingestion": {
+                "allowed": false,
+                "reason": "runtime_probe_not_durable_memory"
+            },
+            "artifact": Value::Null
+        }
+    });
+    if include_raw {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("raw_probe".to_string(), probe.clone());
+        }
+    }
+    payload
+}
+
+fn macos_ax_app_object_id(app: &Value) -> String {
+    if let Some(pid) = app.get("pid").and_then(Value::as_i64) {
+        return format!("desktop:macos:app:{pid}");
+    }
+    if let Some(bundle) = app.get("bundle_id").and_then(Value::as_str) {
+        return format!("desktop:macos:app:{}", desktop_snapshot_slug(bundle));
+    }
+    format!(
+        "desktop:macos:app:{}",
+        desktop_snapshot_slug(app.get("name").and_then(Value::as_str).unwrap_or("unknown"))
+    )
+}
+
+fn macos_ax_window_object_id(probe: &Value, window: &Value, idx: usize) -> String {
+    let pid = probe
+        .get("frontmost_app")
+        .and_then(|v| v.get("pid"))
+        .and_then(Value::as_i64)
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let source_index = window
+        .get("index")
+        .and_then(Value::as_i64)
+        .map(|i| i.to_string())
+        .unwrap_or_else(|| idx.to_string());
+    format!("desktop:macos:window:{pid}:{source_index}")
+}
+
+fn macos_ax_probe_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(Value::as_str) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_MACOS_AX_PROBE_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/macos_ax_probe.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/macos_ax_probe.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/macos_ax_probe.py")
+}
+
+fn macos_ax_probe_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "macos_ax_probe_mcp_error.v0",
+        "status": "error",
+        "error": error,
+    }));
+    result.is_error = true;
+    result
+}
+
+// ===========================================================================
+//                              macos_ax_verify
+// ===========================================================================
+
+const MACOS_AX_VERIFY_SEMANTIC_SCHEMA: &str = "agent_bridge.semantic_bus.macos_ax_verify.v0";
+const MACOS_AX_VERIFY_SOURCE_SCHEMA: &str = "macos_ax_verify/v0";
+
+pub struct MacosAxVerifyTool {
+    _hub: Hub,
+}
+
+impl MacosAxVerifyTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MacosAxVerifyTool {
+    fn name(&self) -> &'static str {
+        "macos_ax_verify"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only macOS Accessibility verifier. Re-observes the bounded \
+                 macOS AX/System Events surface and checks one predicate such as AX trust, \
+                 frontmost app identity, window appeared/gone, or focused window. It never \
+                 prompts for permission, activates apps, focuses windows, clicks, types, \
+                 resizes, moves, or closes windows."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Workspace/repo root used to resolve scripts/macos_ax_verify.py. Defaults to the MCP process cwd, then the build-time repo root."
+                    },
+                    "script_path": {
+                        "type": "string",
+                        "description": "Optional explicit macos_ax_verify.py path. Use mainly for tests or alternate checkouts."
+                    },
+                    "expect": {
+                        "type": "string",
+                        "enum": ["ax_trusted_is", "frontmost_app_is", "window_appeared", "window_gone", "window_focused"],
+                        "description": "The read-only postcondition to check against frontmost app/window state."
+                    },
+                    "app": {
+                        "type": "string",
+                        "description": "Frontmost app name substring."
+                    },
+                    "bundle_id": {
+                        "type": "string",
+                        "description": "Frontmost app bundle identifier substring."
+                    },
+                    "pid": {
+                        "type": "integer",
+                        "description": "Frontmost app process id."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Window title substring."
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Window AXRole substring."
+                    },
+                    "index": {
+                        "type": "integer",
+                        "description": "Window index from macos_ax_probe."
+                    },
+                    "state": {
+                        "type": "string",
+                        "description": "For ax_trusted_is: true|false."
+                    },
+                    "max_windows": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 50,
+                        "default": 8,
+                        "description": "Maximum frontmost-app windows to inspect."
+                    },
+                    "jxa_timeout_secs": {
+                        "type": "number",
+                        "minimum": 0.25,
+                        "maximum": 10.0,
+                        "default": 4.0,
+                        "description": "Timeout for each bounded System Events/JXA read."
+                    },
+                    "poll_timeout_secs": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 30.0,
+                        "default": 4.0,
+                        "description": "Poll until the predicate holds or this many seconds elapse."
+                    },
+                    "poll_interval_secs": {
+                        "type": "number",
+                        "minimum": 0.05,
+                        "maximum": 5.0,
+                        "default": 0.3
+                    },
+                    "settle_secs": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 5.0,
+                        "default": 0.0,
+                        "description": "Initial delay before the first read."
+                    },
+                    "semantic_bus": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, wrap the macos_ax_verify/v0 payload as agent_bridge.semantic_bus.macos_ax_verify.v0. Default false preserves the verify payload exactly apart from mcp_wrapper."
+                    },
+                    "semantic_include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Only with semantic_bus=true: include the original macos_ax_verify payload as raw_verify. Default false keeps the semantic envelope compact."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 2000,
+                        "maximum": 60000,
+                        "default": 12000,
+                        "description": "Milliseconds before the verifier process is killed (kept above poll_timeout_secs)."
+                    }
+                },
+                "required": ["expect"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let expect = match required_str_arg(&args, "expect") {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let poll_timeout_secs = args
+            .get("poll_timeout_secs")
+            .and_then(Value::as_f64)
+            .unwrap_or(4.0)
+            .clamp(0.0, 30.0);
+        let min_proc_ms = (poll_timeout_secs * 1000.0) as u64 + 5_000;
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(12_000)
+            .clamp(2_000, 60_000)
+            .max(min_proc_ms);
+        let max_windows = args
+            .get("max_windows")
+            .and_then(Value::as_u64)
+            .unwrap_or(8)
+            .min(50);
+        let jxa_timeout_secs = args
+            .get("jxa_timeout_secs")
+            .and_then(Value::as_f64)
+            .unwrap_or(4.0)
+            .clamp(0.25, 10.0);
+        let semantic_bus = args
+            .get("semantic_bus")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let semantic_include_raw = args
+            .get("semantic_include_raw")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
+        let script = macos_ax_verify_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(macos_ax_verify_error(json!({
+                "code": "script_missing",
+                "message": format!("macos_ax_verify.py not found at {}", script.display()),
+                "hint": "pass script_path or run from the Agent-Bridge repo root"
+            })));
+        }
+
+        let mut cmd = killable_command(
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "python3".to_string()),
+        );
+        cmd.arg(&script)
+            .arg("--compact")
+            .arg("--expect")
+            .arg(expect)
+            .arg("--max-windows")
+            .arg(max_windows.to_string())
+            .arg("--jxa-timeout-secs")
+            .arg(jxa_timeout_secs.to_string())
+            .arg("--timeout")
+            .arg(poll_timeout_secs.to_string());
+        push_optional_str_arg(&mut cmd, &args, "app", "--app");
+        push_optional_str_arg(&mut cmd, &args, "bundle_id", "--bundle-id");
+        push_optional_value_arg(&mut cmd, &args, "pid", "--pid");
+        push_optional_str_arg(&mut cmd, &args, "title", "--title");
+        push_optional_str_arg(&mut cmd, &args, "role", "--role");
+        push_optional_value_arg(&mut cmd, &args, "index", "--index");
+        push_optional_str_arg(&mut cmd, &args, "state", "--state");
+        if let Some(pi) = args.get("poll_interval_secs").and_then(Value::as_f64) {
+            cmd.arg("--poll-interval").arg(pi.clamp(0.05, 5.0).to_string());
+        }
+        if let Some(s) = args.get("settle_secs").and_then(Value::as_f64) {
+            if s > 0.0 {
+                cmd.arg("--settle").arg(s.clamp(0.0, 5.0).to_string());
+            }
+        }
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+
+        let started = Instant::now();
+        let output =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+                Err(_) => {
+                    return Ok(macos_ax_verify_error(json!({
+                        "code": "timeout",
+                        "message": format!("macos_ax_verify exceeded {timeout_ms} ms"),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Err(e)) => {
+                    return Ok(macos_ax_verify_error(json!({
+                        "code": "spawn_failed",
+                        "message": e.to_string(),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Ok(output)) => output,
+            };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+
+        match serde_json::from_str::<Value>(&stdout) {
+            Ok(mut payload) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert(
+                        "mcp_wrapper".to_string(),
+                        json!({
+                            "tool": self.name(),
+                            "read_only": true,
+                            "exit_code": output.status.code().unwrap_or(-1),
+                            "duration_ms": duration_ms,
+                            "stderr": stderr,
+                            "stderr_truncated": stderr_truncated
+                        }),
+                    );
+                }
+                if semantic_bus {
+                    payload = macos_ax_verify_semantic_bus_payload(&payload, semantic_include_raw);
+                }
+                Ok(ToolResult::json_text(&payload))
+            }
+            Err(e) => Ok(macos_ax_verify_error(json!({
+                "code": "invalid_json",
+                "message": e.to_string(),
+                "exit_code": output.status.code().unwrap_or(-1),
+                "stdout": stdout,
+                "stderr": stderr,
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            }))),
+        }
+    }
+}
+
+fn macos_ax_verify_semantic_bus_payload(verify: &Value, include_raw: bool) -> Value {
+    let source_schema = verify
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let ts = verify.get("ts").cloned().unwrap_or(Value::Null);
+    let ts_label = desktop_snapshot_value_label(&ts, "unknown");
+    let expect = verify
+        .get("expect")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let source_verdict = verify
+        .get("verdict")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let source_recover = verify
+        .get("recover")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| match source_verdict {
+            "verified" => "proceed",
+            "error" => "escalate",
+            "unmet" => "retry",
+            _ => "replan",
+        });
+    let selector = verify.get("selector").cloned().unwrap_or_else(|| json!({}));
+    let scope = verify.get("scope").cloned().unwrap_or_else(|| json!({}));
+    let observed = verify.get("observed").cloned().unwrap_or_else(|| json!({}));
+    let target_family = macos_ax_verify_target_family(expect);
+    let target_summary = macos_ax_verify_selector_summary(&selector);
+    let target_object_id = format!(
+        "desktop:macos:verify:{target_family}:{}",
+        desktop_snapshot_slug(&format!("{expect}-{target_summary}"))
+    );
+    let event_id = format!(
+        "evt-macos-ax-verify-{ts_label}-{}",
+        desktop_snapshot_slug(expect)
+    );
+    let schema_ok = source_schema == MACOS_AX_VERIFY_SOURCE_SCHEMA;
+    let semantic_verdict = if !schema_ok {
+        "not_verified"
+    } else {
+        match source_verdict {
+            "verified" => "verified",
+            "error" => "error",
+            _ => "not_verified",
+        }
+    };
+    let reason = if !schema_ok {
+        json!("unexpected_source_schema")
+    } else if source_verdict == "verified" {
+        Value::Null
+    } else if source_verdict == "error" {
+        verify
+            .get("error")
+            .cloned()
+            .filter(|v| !v.is_null())
+            .unwrap_or_else(|| json!("macos_ax_verify_error"))
+    } else if source_verdict == "unmet" {
+        json!("postcondition_unmet")
+    } else {
+        json!("unknown_source_verdict")
+    };
+    let observed_count = observed.get("count").cloned().unwrap_or(Value::Null);
+    let mut verify_args = selector.as_object().cloned().unwrap_or_default();
+    verify_args.insert("expect".to_string(), json!(expect));
+
+    let mut payload = json!({
+        "schema": MACOS_AX_VERIFY_SEMANTIC_SCHEMA,
+        "source_schema": source_schema,
+        "source_adapter": "macos.ax.verify",
+        "observed_at": ts,
+        "read_only": true,
+        "raw_available": true,
+        "raw_included": include_raw,
+        "semantic_objects": [
+            {
+                "schema": "agent_bridge.semantic_bus.object.v0",
+                "object_id": target_object_id,
+                "object_type": format!("desktop.verify.target.{target_family}"),
+                "source_adapter": "macos.ax.verify",
+                "label": format!("macos_ax_verify {expect} {target_summary}"),
+                "state": {
+                    "expect": expect,
+                    "selector": selector,
+                    "scope": scope,
+                    "source_verdict": source_verdict,
+                    "recover": source_recover,
+                    "change": verify.get("change").cloned().unwrap_or(Value::Null),
+                    "held_after_ms": verify.get("held_after_ms").cloned().unwrap_or(Value::Null),
+                    "polls": verify.get("polls").cloned().unwrap_or(Value::Null),
+                    "observed": observed,
+                    "error": verify.get("error").cloned().unwrap_or(Value::Null)
+                },
+                "relations": [],
+                "confidence": if schema_ok { 0.86 } else { 0.25 },
+                "observed_at": ts,
+                "provenance": {
+                    "tool": "macos_ax_verify",
+                    "schema": source_schema
+                }
+            }
+        ],
+        "affordances": [
+            {
+                "affordance_id": format!("{target_object_id}:reverify"),
+                "object_id": target_object_id,
+                "action_type": "macos_ax_verify",
+                "args_schema": Value::Object(verify_args),
+                "risk_level": "low",
+                "requires_gate": false,
+                "expected_effect": "re-observes the same macOS AX predicate without mutating desktop state"
+            }
+        ],
+        "events": [
+            {
+                "event_id": event_id,
+                "event_type": "desktop.verify.completed",
+                "subject_id": target_object_id,
+                "source": "macos_ax_verify",
+                "actor": "agent",
+                "payload_json": {
+                    "expect": expect,
+                    "source_verdict": source_verdict,
+                    "recover": source_recover,
+                    "observed_count": observed_count,
+                    "held_after_ms": verify.get("held_after_ms").cloned().unwrap_or(Value::Null),
+                    "polls": verify.get("polls").cloned().unwrap_or(Value::Null)
+                },
+                "source_event_ids": []
+            }
+        ],
+        "verification": {
+            "verdict": semantic_verdict,
+            "source_verdict": source_verdict,
+            "reason": reason,
+            "method": "macos_ax_verify.semantic_normalizer",
+            "evidence": {
+                "source_schema": source_schema,
+                "expect": expect,
+                "selector": verify.get("selector").cloned().unwrap_or_else(|| json!({})),
+                "scope": verify.get("scope").cloned().unwrap_or_else(|| json!({})),
+                "observed_count": observed.get("count").cloned().unwrap_or(Value::Null),
+                "probe_status": observed.get("probe_status").cloned().unwrap_or(Value::Null),
+                "raw_included": include_raw
+            },
+            "verified_to": if semantic_verdict == "verified" { json!("postcondition") } else { Value::Null },
+            "recover": if schema_ok { source_recover } else { "replan" },
+            "raw_available": true
+        },
+        "presentation": {
+            "presentation_id": format!("present-macos-ax-verify-{ts_label}"),
+            "source_event_ids": [event_id],
+            "human_summary": format!(
+                "macos_ax_verify {expect} returned {source_verdict}; recover={source_recover}."
+            ),
+            "machine_payload": {
+                "expect": expect,
+                "source_verdict": source_verdict,
+                "recover": source_recover,
+                "observed_count": observed.get("count").cloned().unwrap_or(Value::Null),
+                "probe_status": observed.get("probe_status").cloned().unwrap_or(Value::Null)
+            },
+            "ingestion": {
+                "allowed": false,
+                "reason": "runtime_verify_not_durable_memory"
+            },
+            "artifact": Value::Null
+        }
+    });
+    if include_raw {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("raw_verify".to_string(), verify.clone());
+        }
+    }
+    payload
+}
+
+fn macos_ax_verify_target_family(expect: &str) -> &'static str {
+    match expect {
+        "window_appeared" | "window_gone" | "window_focused" => "window",
+        "frontmost_app_is" => "application",
+        "ax_trusted_is" => "permission",
+        _ => "target",
+    }
+}
+
+fn macos_ax_verify_selector_summary(selector: &Value) -> String {
+    let mut parts = Vec::new();
+    for key in [
+        "app",
+        "bundle_id",
+        "pid",
+        "title",
+        "role",
+        "index",
+        "state",
+    ] {
+        if let Some(value) = selector.get(key) {
+            match value {
+                Value::String(s) if !s.trim().is_empty() => {
+                    parts.push(format!("{key}:{}", s.trim()));
+                }
+                Value::Number(n) => parts.push(format!("{key}:{n}")),
+                Value::Bool(b) => parts.push(format!("{key}:{b}")),
+                _ => {}
+            }
+        }
+    }
+    if parts.is_empty() {
+        "unspecified-target".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
+fn macos_ax_verify_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(Value::as_str) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_MACOS_AX_VERIFY_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/macos_ax_verify.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/macos_ax_verify.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/macos_ax_verify.py")
+}
+
+fn macos_ax_verify_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "macos_ax_verify_mcp_error.v0",
+        "status": "error",
+        "error": error,
+    }));
+    result.is_error = true;
+    result
+}
+
+// ===========================================================================
+//                       semantic_bus_adapter_report
+// ===========================================================================
+
+const SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA: &str =
+    "agent_bridge.semantic_bus.adapter_report.v0";
+const SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA: &str =
+    "agent_bridge.semantic_bus.runtime_health.v0";
+const SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA: &str =
+    "agent_bridge.semantic_bus.runtime_conformance.v0";
+const SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA: &str =
+    "agent_bridge.semantic_bus.peer_conformance.v0";
+
+pub struct SemanticBusAdapterReportTool {
+    _hub: Hub,
+}
+
+impl SemanticBusAdapterReportTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SemanticBusAdapterReportTool {
+    fn name(&self) -> &'static str {
+        "semantic_bus_adapter_report"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Semantic System Bus adapter conformance report. \
+                 It inspects local repo scripts, docs, and fixtures to classify adapters \
+                 as runtime-backed, fixture-backed, or design-only; it never runs probes, \
+                 restarts services, captures screenshots, or mutates host state."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Agent-Bridge repo root to inspect. Defaults to current dir when it looks like the repo, then the build-time repo root."
+                    },
+                    "include_details": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include per-row asset checks and fixture contract status."
+                    },
+                    "include_design_only": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Include planned/no-runtime rows."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(&semantic_bus_adapter_report_payload(&args)))
+    }
+}
+
+struct SemanticBusAdapterSpec {
+    adapter_id: &'static str,
+    platform: &'static str,
+    adapter_family: &'static str,
+    tool: Option<&'static str>,
+    semantic_schema: &'static str,
+    source_schema: &'static str,
+    evidence_level: &'static str,
+    status: &'static str,
+    channels: &'static [&'static str],
+    fallback_order: &'static [&'static str],
+    runtime_assets: &'static [&'static str],
+    fixture_assets: &'static [&'static str],
+    doc_assets: &'static [&'static str],
+    notes: &'static [&'static str],
+}
+
+fn semantic_bus_adapter_report_payload(args: &Value) -> Value {
+    let include_details = args
+        .get("include_details")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let include_design_only = args
+        .get("include_design_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let repo_root = semantic_bus_adapter_report_repo_root(args);
+    let adapters: Vec<Value> = semantic_bus_adapter_specs(include_design_only)
+        .into_iter()
+        .map(|spec| semantic_bus_adapter_row(&repo_root, include_details, spec))
+        .collect();
+    let summary = semantic_bus_adapter_report_summary(&adapters);
+    let gaps = semantic_bus_adapter_report_gaps(&adapters);
+
+    json!({
+        "schema": SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA,
+        "generated_at_unix": SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        "read_only": true,
+        "live_checks_executed": false,
+        "repo_root": repo_root.display().to_string(),
+        "summary": summary,
+        "adapters": adapters,
+        "gaps": gaps,
+        "next_recommended_slice": {
+            "id": "ssb-16-windows-uia-runtime-host",
+            "reason": "local conformance and peer-query transport are live; Windows UIA remains fixture/design-backed until a Windows host exports runtime evidence"
+        }
+    })
+}
+
+fn semantic_bus_adapter_specs(include_design_only: bool) -> Vec<SemanticBusAdapterSpec> {
+    let mut specs = vec![
+        SemanticBusAdapterSpec {
+            adapter_id: "linux_desktop_snapshot",
+            platform: "linux",
+            adapter_family: "linux_desktop",
+            tool: Some("desktop_snapshot"),
+            semantic_schema: "agent_bridge.semantic_bus.desktop_snapshot.v0",
+            source_schema: "desktop_snapshot/v0.5",
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["sway_tree", "atspi", "screenshot_optional"],
+            fallback_order: &["desktop_snapshot", "vision_grounding_ocr"],
+            runtime_assets: &["scripts/desktop_snapshot.py"],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/linux_desktop_snapshot_state.json"],
+            doc_assets: &[
+                "docs/design/SEMANTIC_SYSTEM_BUS_DESKTOP_SNAPSHOT_RUNTIME_2026_06_07.md",
+                "docs/design/SEMANTIC_SYSTEM_BUS_LINUX_ADAPTER_CONFORMANCE_2026_06_07.md",
+            ],
+            notes: &["Linux runtime-backed read path; screenshots remain opt-in."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "linux_desktop_verify",
+            platform: "linux",
+            adapter_family: "linux_desktop",
+            tool: Some("desktop_verify"),
+            semantic_schema: "agent_bridge.semantic_bus.desktop_verify.v0",
+            source_schema: "desktop_verify/v0",
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["sway_tree", "atspi"],
+            fallback_order: &["desktop_verify", "desktop_snapshot", "vision_grounding_ocr"],
+            runtime_assets: &["scripts/desktop_verify.py"],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/linux_desktop_verify_postcondition.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_DESKTOP_VERIFY_RUNTIME_2026_06_07.md"],
+            notes: &["Read-only postflight verifier; recover hints map to retry/replan/proceed."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "linux_vision_grounding_ocr",
+            platform: "linux",
+            adapter_family: "vision_fallback",
+            tool: Some("vision_grounding_ocr"),
+            semantic_schema: "vision_grounding_result.v0",
+            source_schema: "vision_grounding_result.v0",
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["caller_provided_image", "ocr"],
+            fallback_order: &["vision_grounding_ocr"],
+            runtime_assets: &["scripts/vision_grounding_ocr.py"],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/linux_vision_grounding_ocr_fallback.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_CONFORMANCE_2026_06_07.md"],
+            notes: &["Fallback grounding only; it does not capture screenshots by itself."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "macos_ax_probe",
+            platform: "macos",
+            adapter_family: "macos_ax",
+            tool: Some("macos_ax_probe"),
+            semantic_schema: MACOS_AX_PROBE_SEMANTIC_SCHEMA,
+            source_schema: MACOS_AX_PROBE_SOURCE_SCHEMA,
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["ax_trust", "system_events", "frontmost_app_windows"],
+            fallback_order: &["macos_ax_probe", "vision_grounding_ocr"],
+            runtime_assets: &["scripts/macos_ax_probe.py"],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/macos_ax_snapshot_state.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_MACOS_AX_PROBE_2026_06_07.md"],
+            notes: &["No permission prompt; bounded to existing Accessibility trust and frontmost-app state."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "macos_ax_verify",
+            platform: "macos",
+            adapter_family: "macos_ax",
+            tool: Some("macos_ax_verify"),
+            semantic_schema: MACOS_AX_VERIFY_SEMANTIC_SCHEMA,
+            source_schema: MACOS_AX_VERIFY_SOURCE_SCHEMA,
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["ax_trust", "system_events", "frontmost_app_windows"],
+            fallback_order: &["macos_ax_verify", "macos_ax_probe", "vision_grounding_ocr"],
+            runtime_assets: &["scripts/macos_ax_verify.py"],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/macos_ax_verify_postcondition.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_MACOS_AX_VERIFY_2026_06_07.md"],
+            notes: &["Read-only predicate verifier over the same bounded macOS AX surface."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "windows_uia_snapshot_fixture",
+            platform: "windows",
+            adapter_family: "windows_uia",
+            tool: None,
+            semantic_schema: "agent_bridge.semantic_bus.desktop_snapshot.v0",
+            source_schema: "windows.uia.snapshot.fixture",
+            evidence_level: "fixture_backed",
+            status: "fixture_backed_no_runtime_tool",
+            channels: &["uia_tree"],
+            fallback_order: &["windows_uia", "vision_grounding_ocr"],
+            runtime_assets: &[],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/windows_uia_snapshot_state.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_MAPPING_2026_06_07.md"],
+            notes: &["Pinned fixture/mapping only; no Windows runtime adapter is registered yet."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "windows_uia_verify_fixture",
+            platform: "windows",
+            adapter_family: "windows_uia",
+            tool: None,
+            semantic_schema: "agent_bridge.semantic_bus.desktop_verify.v0",
+            source_schema: "windows.uia.verify.fixture",
+            evidence_level: "fixture_backed",
+            status: "fixture_backed_no_runtime_tool",
+            channels: &["uia_tree"],
+            fallback_order: &["windows_uia", "vision_grounding_ocr"],
+            runtime_assets: &[],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/windows_uia_verify_postcondition.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_MAPPING_2026_06_07.md"],
+            notes: &["Pinned verify fixture only; runtime checker still needs a Windows host implementation."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "local_runtime_health",
+            platform: "local",
+            adapter_family: "process_and_memory_runtime",
+            tool: Some("semantic_bus_runtime_health"),
+            semantic_schema: SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA,
+            source_schema: SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA,
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["http_health", "palace_memory_graph", "semantic_events_optional"],
+            fallback_order: &["healthz", "palace_graph", "semantic_events_optional"],
+            runtime_assets: &["crates/bridge/src/mcp_tools.rs"],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/daemon_http_service.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_RUNTIME_HEALTH_2026_06_07.md"],
+            notes: &["Live read-only MCP report over daemon-http health and Palace graph state."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "daemon_http_service_fixture",
+            platform: "local",
+            adapter_family: "process_daemon",
+            tool: Some("daemon_http"),
+            semantic_schema: "agent_bridge.semantic_bus.service_state.v0",
+            source_schema: "daemon_http.fixture",
+            evidence_level: "fixture_backed",
+            status: "fixture_contract_backed_live_not_checked",
+            channels: &["http_health", "process_state"],
+            fallback_order: &["http_health", "process_state"],
+            runtime_assets: &[],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/daemon_http_service.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_CONFORMANCE_2026_06_07.md"],
+            notes: &["Fixture carries adapter_contract; this report does not call or restart daemon-http."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "palace_memory_region_fixture",
+            platform: "local",
+            adapter_family: "palace_memory_graph",
+            tool: None,
+            semantic_schema: "agent_bridge.semantic_bus.memory_region.v0",
+            source_schema: "palace.memory_graph.fixture",
+            evidence_level: "fixture_backed",
+            status: "fixture_static_example",
+            channels: &["memory_region", "memory_graph"],
+            fallback_order: &["palace_region", "memory_graph_topology"],
+            runtime_assets: &[],
+            fixture_assets: &["crates/bridge/fixtures/semantic_bus/palace_memory_region.json"],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_PALACE_DIFF_PILOT_2026_06_07.md"],
+            notes: &["Static illustrative fixture; report flags the missing adapter_contract gap."],
+        },
+    ];
+    if include_design_only {
+        specs.push(SemanticBusAdapterSpec {
+            adapter_id: "windows_uia_runtime_adapter",
+            platform: "windows",
+            adapter_family: "windows_uia",
+            tool: None,
+            semantic_schema: "agent_bridge.semantic_bus.desktop_snapshot.v0",
+            source_schema: "windows.uia.runtime.planned",
+            evidence_level: "design_only",
+            status: "planned_no_runtime_assets",
+            channels: &["uia_tree"],
+            fallback_order: &["windows_uia", "vision_grounding_ocr"],
+            runtime_assets: &[],
+            fixture_assets: &[],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_MAPPING_2026_06_07.md"],
+            notes: &["Design target only; fixture coverage exists separately, but no Windows runtime script/tool is present."],
+        });
+    }
+    specs
+}
+
+fn semantic_bus_adapter_report_repo_root(args: &Value) -> PathBuf {
+    if let Some(cwd) = args.get("cwd").and_then(Value::as_str) {
+        return PathBuf::from(cwd);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        if cwd.join("crates/bridge/fixtures/semantic_bus").exists() {
+            return cwd;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn semantic_bus_adapter_row(
+    repo_root: &Path,
+    include_details: bool,
+    spec: SemanticBusAdapterSpec,
+) -> Value {
+    let runtime_assets = semantic_bus_asset_list(repo_root, spec.runtime_assets);
+    let fixture_assets = semantic_bus_fixture_asset_list(repo_root, spec.fixture_assets);
+    let doc_assets = semantic_bus_asset_list(repo_root, spec.doc_assets);
+    let all_runtime_present = runtime_assets.iter().all(semantic_bus_asset_present);
+    let any_fixture_present = fixture_assets.iter().any(semantic_bus_asset_present);
+    let any_doc_present = doc_assets.iter().any(semantic_bus_asset_present);
+    let ready_for_runtime = spec.evidence_level == "runtime_backed"
+        && all_runtime_present
+        && any_doc_present;
+    let fixture_adapter_contract_present = fixture_assets.iter().any(|asset| {
+        asset
+            .get("has_adapter_contract")
+            .and_then(Value::as_bool)
+            == Some(true)
+    });
+    let fixture_without_adapter_contract = fixture_assets.iter().any(|asset| {
+        semantic_bus_asset_present(asset)
+            && asset
+                .get("has_adapter_contract")
+                .and_then(Value::as_bool)
+                == Some(false)
+    });
+
+    let mut row = json!({
+        "adapter_id": spec.adapter_id,
+        "platform": spec.platform,
+        "adapter_family": spec.adapter_family,
+        "tool": spec.tool,
+        "semantic_schema": spec.semantic_schema,
+        "source_schema": spec.source_schema,
+        "evidence_level": spec.evidence_level,
+        "status": spec.status,
+        "read_only": true,
+        "broad_host_mutation": false,
+        "channels": spec.channels,
+        "fallback_order": spec.fallback_order,
+        "runtime_assets": spec.runtime_assets,
+        "fixture_assets": spec.fixture_assets,
+        "doc_assets": spec.doc_assets,
+        "notes": spec.notes,
+        "ready_for_runtime": ready_for_runtime,
+        "asset_summary": {
+            "runtime_assets_present": all_runtime_present,
+            "fixture_assets_present": any_fixture_present,
+            "doc_assets_present": any_doc_present,
+            "fixture_adapter_contract_present": fixture_adapter_contract_present,
+            "fixture_without_adapter_contract": fixture_without_adapter_contract
+        }
+    });
+    if include_details {
+        if let Some(obj) = row.as_object_mut() {
+            obj.insert(
+                "assets".to_string(),
+                json!({
+                    "runtime": runtime_assets,
+                    "fixtures": fixture_assets,
+                    "docs": doc_assets
+                }),
+            );
+        }
+    }
+    row
+}
+
+fn semantic_bus_asset_list(repo_root: &Path, rels: &[&str]) -> Vec<Value> {
+    rels.iter().map(|rel| semantic_bus_asset(repo_root, rel)).collect()
+}
+
+fn semantic_bus_fixture_asset_list(repo_root: &Path, rels: &[&str]) -> Vec<Value> {
+    rels.iter()
+        .map(|rel| semantic_bus_fixture_asset(repo_root, rel))
+        .collect()
+}
+
+fn semantic_bus_asset(repo_root: &Path, rel: &str) -> Value {
+    json!({
+        "path": rel,
+        "exists": repo_root.join(rel).exists()
+    })
+}
+
+fn semantic_bus_fixture_asset(repo_root: &Path, rel: &str) -> Value {
+    let path = repo_root.join(rel);
+    let has_adapter_contract = if path.exists() {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|v| v.get("adapter_contract").cloned())
+            .is_some()
+    } else {
+        false
+    };
+    json!({
+        "path": rel,
+        "exists": path.exists(),
+        "has_adapter_contract": has_adapter_contract
+    })
+}
+
+fn semantic_bus_asset_present(asset: &Value) -> bool {
+    asset.get("exists").and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn semantic_bus_adapter_report_summary(adapters: &[Value]) -> Value {
+    let mut by_evidence = Map::new();
+    let mut by_platform = Map::new();
+    let mut ready_for_runtime = 0u64;
+    for row in adapters {
+        semantic_bus_increment_count(
+            &mut by_evidence,
+            row.get("evidence_level")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown"),
+        );
+        semantic_bus_increment_count(
+            &mut by_platform,
+            row.get("platform")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown"),
+        );
+        if row
+            .get("ready_for_runtime")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            ready_for_runtime += 1;
+        }
+    }
+    json!({
+        "adapter_count": adapters.len(),
+        "by_evidence_level": by_evidence,
+        "by_platform": by_platform,
+        "ready_for_runtime_count": ready_for_runtime
+    })
+}
+
+fn semantic_bus_increment_count(counts: &mut Map<String, Value>, key: &str) {
+    let count = counts.get(key).and_then(Value::as_u64).unwrap_or(0) + 1;
+    counts.insert(key.to_string(), json!(count));
+}
+
+fn semantic_bus_adapter_report_gaps(adapters: &[Value]) -> Vec<Value> {
+    let mut gaps = Vec::new();
+    for row in adapters {
+        let adapter_id = row
+            .get("adapter_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let evidence_level = row
+            .get("evidence_level")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let assets = row.get("asset_summary").unwrap_or(&Value::Null);
+        if evidence_level == "design_only" {
+            gaps.push(json!({
+                "adapter_id": adapter_id,
+                "gap": "design_only_no_runtime_or_fixture_contract",
+                "recommendation": "add a bounded read-only runtime adapter or downgrade expectations in planning"
+            }));
+        }
+        if assets
+            .get("fixture_without_adapter_contract")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            gaps.push(json!({
+                "adapter_id": adapter_id,
+                "gap": "fixture_missing_adapter_contract",
+                "recommendation": "add adapter_contract metadata before treating the fixture as an adapter contract"
+            }));
+        }
+        if evidence_level == "runtime_backed"
+            && !row
+                .get("ready_for_runtime")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
+            gaps.push(json!({
+                "adapter_id": adapter_id,
+                "gap": "runtime_assets_or_docs_missing",
+                "recommendation": "restore expected script/doc assets before advertising runtime-backed status"
+            }));
+        }
+    }
+    gaps
+}
+
+// ===========================================================================
+//                       semantic_bus_runtime_health
+// ===========================================================================
+
+pub struct SemanticBusRuntimeHealthTool {
+    _hub: Hub,
+}
+
+impl SemanticBusRuntimeHealthTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SemanticBusRuntimeHealthTool {
+    fn name(&self) -> &'static str {
+        "semantic_bus_runtime_health"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Semantic System Bus runtime health report for local \
+                 daemon-http and Palace memory-region state. It performs bounded HTTP GET \
+                 checks; it never restarts services, mutates Palace, captures screenshots, \
+                 or writes memory graph edges."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "daemon_http_url": {
+                        "type": "string",
+                        "default": "http://127.0.0.1:7878",
+                        "description": "Base URL for daemon-http healthz."
+                    },
+                    "palace_url": {
+                        "type": "string",
+                        "default": "http://127.0.0.1:7979",
+                        "description": "Base URL for Palace."
+                    },
+                    "include_all": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, call Palace /api/graph?all=1."
+                    },
+                    "check_semantic_events": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Also probe Palace /api/semantic-events. Missing endpoint is optional."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include parsed raw Palace graph/events JSON."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 500,
+                        "maximum": 10000,
+                        "default": 2500,
+                        "description": "Per-request HTTP timeout in milliseconds."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &semantic_bus_runtime_health_payload(&args).await,
+        ))
+    }
+}
+
+async fn semantic_bus_runtime_health_payload(args: &Value) -> Value {
+    let daemon_http_url = semantic_bus_runtime_arg(
+        args,
+        "daemon_http_url",
+        "http://127.0.0.1:7878",
+    );
+    let palace_url = semantic_bus_runtime_arg(args, "palace_url", "http://127.0.0.1:7979");
+    let include_all = args
+        .get("include_all")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let check_semantic_events = args
+        .get("check_semantic_events")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let include_raw = args
+        .get("include_raw")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let timeout_ms = args
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(2_500)
+        .clamp(500, 10_000);
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout_ms))
+        .user_agent("agent-bridge-semantic-bus-runtime-health/0")
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            return semantic_bus_runtime_health_report(
+                now_secs,
+                &daemon_http_url,
+                &palace_url,
+                timeout_ms,
+                semantic_bus_runtime_error_check("/healthz", "client_init_error", &e.to_string()),
+                None,
+                semantic_bus_runtime_error_check("/healthz", "client_init_error", &e.to_string()),
+                None,
+                semantic_bus_runtime_error_check("/api/graph", "client_init_error", &e.to_string()),
+                None,
+                semantic_bus_runtime_error_check(
+                    "/api/semantic-events",
+                    "skipped_client_init_error",
+                    &e.to_string(),
+                ),
+                None,
+                include_raw,
+            );
+        }
+    };
+    let graph_endpoint = if include_all {
+        "/api/graph?all=1"
+    } else {
+        "/api/graph"
+    };
+
+    let (daemon_health, daemon_body) =
+        semantic_bus_runtime_get_text(&client, &daemon_http_url, "/healthz").await;
+    let (palace_health, palace_body) =
+        semantic_bus_runtime_get_text(&client, &palace_url, "/healthz").await;
+    let (mut graph_check, graph_body) =
+        semantic_bus_runtime_get_text(&client, &palace_url, graph_endpoint).await;
+    let graph = semantic_bus_runtime_parse_json(&mut graph_check, graph_body.as_deref());
+    let (mut events_check, events_body) = if check_semantic_events {
+        semantic_bus_runtime_get_text(&client, &palace_url, "/api/semantic-events").await
+    } else {
+        (
+            json!({
+                "endpoint": "/api/semantic-events",
+                "url": semantic_bus_runtime_join_url(&palace_url, "/api/semantic-events").ok(),
+                "ok": null,
+                "status": "skipped",
+                "optional": true
+            }),
+            None,
+        )
+    };
+    let events = semantic_bus_runtime_parse_json(&mut events_check, events_body.as_deref());
+    semantic_bus_runtime_mark_optional(&mut events_check);
+
+    semantic_bus_runtime_health_report(
+        now_secs,
+        &daemon_http_url,
+        &palace_url,
+        timeout_ms,
+        daemon_health,
+        daemon_body,
+        palace_health,
+        palace_body,
+        graph_check,
+        graph,
+        events_check,
+        events,
+        include_raw,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn semantic_bus_runtime_health_report(
+    now_secs: u64,
+    daemon_http_url: &str,
+    palace_url: &str,
+    timeout_ms: u64,
+    daemon_health: Value,
+    daemon_body: Option<String>,
+    palace_health: Value,
+    palace_body: Option<String>,
+    graph_check: Value,
+    graph: Option<Value>,
+    events_check: Value,
+    events: Option<Value>,
+    include_raw: bool,
+) -> Value {
+    let daemon_ok = semantic_bus_runtime_health_ok(&daemon_health, daemon_body.as_deref());
+    let palace_ok = semantic_bus_runtime_health_ok(&palace_health, palace_body.as_deref());
+    let graph_ok = graph.is_some();
+    let required_ok = daemon_ok && palace_ok && graph_ok;
+    let any_ok = daemon_ok || palace_ok || graph_ok;
+    let status = if required_ok {
+        "ready"
+    } else if any_ok {
+        "degraded"
+    } else {
+        "blocked"
+    };
+    let graph_stats = graph.as_ref().map(semantic_bus_runtime_graph_stats);
+    let events_status = events_check
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+
+    let mut objects = vec![
+        semantic_bus_runtime_service_object(
+            "daemon-http",
+            "Agent-Bridge daemon-http",
+            "service.http.daemon",
+            "daemon_http.healthz",
+            daemon_http_url,
+            &daemon_health,
+            daemon_ok,
+            now_secs,
+        ),
+        semantic_bus_runtime_service_object(
+            "palace",
+            "Agent-Bridge Palace",
+            "service.http.ui",
+            "palace.healthz",
+            palace_url,
+            &palace_health,
+            palace_ok,
+            now_secs,
+        ),
+    ];
+    if let Some(stats) = graph_stats.as_ref() {
+        objects.push(json!({
+            "schema": "agent_bridge.semantic_bus.object.v0",
+            "object_id": "palace:memory-region:agent-bridge",
+            "object_type": "memory.region",
+            "source_adapter": "palace.memory_graph",
+            "label": "Agent-Bridge Palace memory region",
+            "state": {
+                "status": "observed",
+                "stats": stats
+            },
+            "relations": [
+                {
+                    "rel": "served_by",
+                    "target": semantic_bus_runtime_service_id("palace", palace_url)
+                }
+            ],
+            "confidence": 0.9,
+            "observed_at": now_secs
+        }));
+    }
+
+    let mut checks = Map::new();
+    checks.insert("daemon_http_health".into(), daemon_health.clone());
+    checks.insert("palace_health".into(), palace_health.clone());
+    checks.insert("palace_graph".into(), graph_check.clone());
+    checks.insert("palace_semantic_events".into(), events_check.clone());
+
+    let mut payload = json!({
+        "schema": SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA,
+        "source_adapter": "runtime.health.local",
+        "generated_at_unix": now_secs,
+        "read_only": true,
+        "live_checks_executed": true,
+        "timeout_ms": timeout_ms,
+        "targets": {
+            "daemon_http_url": daemon_http_url,
+            "palace_url": palace_url
+        },
+        "status": status,
+        "summary": {
+            "daemon_http_healthy": daemon_ok,
+            "palace_healthy": palace_ok,
+            "palace_graph_observed": graph_ok,
+            "palace_semantic_events_status": events_status,
+            "memory_region_stats": graph_stats
+        },
+        "verification": {
+            "verdict": if required_ok { "verified" } else { "not_verified" },
+            "reason": if required_ok {
+                "daemon-http healthz, Palace healthz, and Palace graph were observed"
+            } else {
+                "one or more required runtime health checks were unavailable"
+            },
+            "recover": if required_ok { "proceed" } else if any_ok { "retry" } else { "replan" },
+            "required_checks": {
+                "daemon_http_health": daemon_ok,
+                "palace_health": palace_ok,
+                "palace_graph": graph_ok
+            },
+            "optional_checks": {
+                "palace_semantic_events": events_status
+            }
+        },
+        "semantic_objects": objects,
+        "events": [
+            semantic_bus_runtime_event("daemon-http-health-observed", daemon_http_url, daemon_ok, &daemon_health, now_secs),
+            semantic_bus_runtime_event("palace-health-observed", palace_url, palace_ok, &palace_health, now_secs)
+        ],
+        "checks": checks
+    });
+
+    if include_raw {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert(
+                "raw".to_string(),
+                json!({
+                    "palace_graph": graph,
+                    "palace_semantic_events": events
+                }),
+            );
+        }
+    }
+    payload
+}
+
+async fn semantic_bus_runtime_get_text(
+    client: &reqwest::Client,
+    base_url: &str,
+    endpoint: &str,
+) -> (Value, Option<String>) {
+    let url = match semantic_bus_runtime_join_url(base_url, endpoint) {
+        Ok(url) => url,
+        Err(e) => return (semantic_bus_runtime_error_check(endpoint, "invalid_url", &e), None),
+    };
+    let started = Instant::now();
+    let response = client
+        .get(&url)
+        .header("Accept", "application/json, text/plain;q=0.9, */*;q=0.1")
+        .send()
+        .await;
+    match response {
+        Ok(resp) => {
+            let http_status = resp.status().as_u16();
+            let ok = resp.status().is_success();
+            let content_type = resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string);
+            match resp.text().await {
+                Ok(body) => (
+                    json!({
+                        "endpoint": endpoint,
+                        "url": url,
+                        "ok": ok,
+                        "status": if ok { "ok" } else { "http_error" },
+                        "http_status": http_status,
+                        "elapsed_ms": semantic_bus_runtime_elapsed_ms(started),
+                        "content_type": content_type,
+                        "body_preview": body.chars().take(512).collect::<String>()
+                    }),
+                    Some(body),
+                ),
+                Err(e) => (
+                    json!({
+                        "endpoint": endpoint,
+                        "url": url,
+                        "ok": false,
+                        "status": "body_error",
+                        "http_status": http_status,
+                        "elapsed_ms": semantic_bus_runtime_elapsed_ms(started),
+                        "content_type": content_type,
+                        "error": e.to_string()
+                    }),
+                    None,
+                ),
+            }
+        }
+        Err(e) => (
+            json!({
+                "endpoint": endpoint,
+                "url": url,
+                "ok": false,
+                "status": "unreachable",
+                "elapsed_ms": semantic_bus_runtime_elapsed_ms(started),
+                "error": e.to_string()
+            }),
+            None,
+        ),
+    }
+}
+
+fn semantic_bus_runtime_parse_json(check: &mut Value, body: Option<&str>) -> Option<Value> {
+    if !semantic_bus_runtime_check_ok(check) {
+        return None;
+    }
+    match body.and_then(|b| serde_json::from_str::<Value>(b).ok()) {
+        Some(value) => Some(value),
+        None => {
+            if let Some(obj) = check.as_object_mut() {
+                obj.insert("ok".to_string(), json!(false));
+                obj.insert("status".to_string(), json!("invalid_json"));
+                obj.insert(
+                    "error".to_string(),
+                    json!("response was not valid JSON"),
+                );
+            }
+            None
+        }
+    }
+}
+
+fn semantic_bus_runtime_arg(args: &Value, key: &str, default: &str) -> String {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(default)
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn semantic_bus_runtime_join_url(base_url: &str, endpoint: &str) -> std::result::Result<String, String> {
+    let base_url = base_url.trim();
+    if base_url.is_empty() {
+        return Err("base URL is empty".to_string());
+    }
+    let base = reqwest::Url::parse(&format!("{}/", base_url.trim_end_matches('/')))
+        .map_err(|e| format!("parse base URL {base_url}: {e}"))?;
+    if !matches!(base.scheme(), "http" | "https") {
+        return Err(format!("unsupported URL scheme: {}", base.scheme()));
+    }
+    base.join(endpoint.trim_start_matches('/'))
+        .map(|url| url.to_string())
+        .map_err(|e| format!("join endpoint {endpoint}: {e}"))
+}
+
+fn semantic_bus_runtime_error_check(endpoint: &str, status: &str, error: &str) -> Value {
+    json!({
+        "endpoint": endpoint,
+        "url": null,
+        "ok": false,
+        "status": status,
+        "error": error
+    })
+}
+
+fn semantic_bus_runtime_mark_optional(check: &mut Value) {
+    if let Some(obj) = check.as_object_mut() {
+        obj.insert("optional".to_string(), json!(true));
+    }
+}
+
+fn semantic_bus_runtime_elapsed_ms(started: Instant) -> u64 {
+    let elapsed = started.elapsed().as_millis();
+    elapsed.min(u128::from(u64::MAX)) as u64
+}
+
+fn semantic_bus_runtime_check_ok(check: &Value) -> bool {
+    check.get("ok").and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn semantic_bus_runtime_health_ok(check: &Value, body: Option<&str>) -> bool {
+    semantic_bus_runtime_check_ok(check) && body.map(str::trim) == Some("ok")
+}
+
+fn semantic_bus_runtime_service_id(name: &str, base_url: &str) -> String {
+    let authority = semantic_bus_runtime_url_authority(base_url)
+        .unwrap_or_else(|| "unknown".to_string());
+    format!("service:agent-bridge:{name}:{authority}")
+}
+
+fn semantic_bus_runtime_url_authority(base_url: &str) -> Option<String> {
+    let url = reqwest::Url::parse(&format!("{}/", base_url.trim_end_matches('/'))).ok()?;
+    let host = url.host_str()?;
+    let port = url
+        .port_or_known_default()
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    Some(format!("{host}:{port}"))
+}
+
+fn semantic_bus_runtime_service_object(
+    name: &str,
+    label: &str,
+    object_type: &str,
+    source_adapter: &str,
+    base_url: &str,
+    health_check: &Value,
+    healthy: bool,
+    now_secs: u64,
+) -> Value {
+    json!({
+        "schema": "agent_bridge.semantic_bus.object.v0",
+        "object_id": semantic_bus_runtime_service_id(name, base_url),
+        "object_type": object_type,
+        "source_adapter": source_adapter,
+        "label": label,
+        "state": {
+            "status": if healthy { "healthy" } else { "unhealthy" },
+            "health_endpoint": health_check.get("url").cloned().unwrap_or(Value::Null),
+            "http_status": health_check.get("http_status").cloned().unwrap_or(Value::Null)
+        },
+        "confidence": if healthy { 0.95 } else { 0.4 },
+        "observed_at": now_secs
+    })
+}
+
+fn semantic_bus_runtime_event(
+    event_type: &str,
+    base_url: &str,
+    healthy: bool,
+    health_check: &Value,
+    now_secs: u64,
+) -> Value {
+    json!({
+        "schema": "agent_bridge.semantic_bus.event.v0",
+        "event_id": format!("evt-{event_type}-{now_secs}"),
+        "event_type": event_type,
+        "object_id": semantic_bus_runtime_service_id(event_type.trim_end_matches("-health-observed"), base_url),
+        "observed_at": now_secs,
+        "source_adapter": health_check.get("endpoint").and_then(Value::as_str).unwrap_or("healthz"),
+        "severity": if healthy { "info" } else { "warning" },
+        "status": if healthy { "healthy" } else { "unhealthy" },
+        "delta": null,
+        "evidence": health_check
+    })
+}
+
+fn semantic_bus_runtime_i64(v: &Value) -> Option<i64> {
+    v.as_i64()
+        .or_else(|| v.as_u64().and_then(|n| i64::try_from(n).ok()))
+}
+
+fn semantic_bus_runtime_graph_stats(graph: &Value) -> Value {
+    let nodes = graph
+        .get("nodes")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let edges = graph
+        .get("edges")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let now_secs = semantic_bus_runtime_i64(graph.get("now").unwrap_or(&Value::Null)).unwrap_or(0);
+    let mut degree = HashMap::<String, i64>::new();
+    let mut sqlite_nodes = 0i64;
+    let mut markdown_nodes = 0i64;
+    let mut fresh_nodes = 0i64;
+    let mut stale_nodes = 0i64;
+    for node in &nodes {
+        if let Some(id) = node.get("id").and_then(Value::as_str) {
+            degree.insert(id.to_string(), 0);
+        }
+        match node.get("source").and_then(Value::as_str).unwrap_or("") {
+            "sqlite" => sqlite_nodes += 1,
+            "markdown" => markdown_nodes += 1,
+            _ => {}
+        }
+        let last_accessed = semantic_bus_runtime_i64(
+            node.get("last_accessed").unwrap_or(&Value::Null),
+        )
+        .unwrap_or(0);
+        if last_accessed > 0 {
+            let age = now_secs.saturating_sub(last_accessed);
+            if age < 3600 {
+                fresh_nodes += 1;
+            }
+            if age > 7 * 24 * 3600 {
+                stale_nodes += 1;
+            }
+        }
+    }
+
+    let mut explicit_edges = 0i64;
+    let mut coactivation_edges = 0i64;
+    for edge in &edges {
+        if edge.get("type").and_then(Value::as_str) == Some("coactivation") {
+            coactivation_edges += 1;
+            continue;
+        }
+        explicit_edges += 1;
+        for key in ["source", "target"] {
+            if let Some(id) = edge.get(key).and_then(Value::as_str) {
+                if let Some(d) = degree.get_mut(id) {
+                    *d += 1;
+                }
+            }
+        }
+    }
+    let node_count = nodes.len() as i64;
+    let edge_count = edges.len() as i64;
+    let orphan_nodes = degree.values().filter(|d| **d == 0).count() as i64;
+    let connected_ratio = if node_count > 0 {
+        (node_count - orphan_nodes) as f64 / node_count as f64
+    } else {
+        0.0
+    };
+    let explicit_density = explicit_edges as f64 / node_count.max(1) as f64;
+    let mut degrees: Vec<i64> = degree.values().copied().filter(|d| *d > 0).collect();
+    degrees.sort_unstable();
+    let hub_threshold = degrees
+        .get(degrees.len().saturating_sub(1).min(degrees.len() * 95 / 100))
+        .copied()
+        .unwrap_or(0)
+        .max(5);
+    let hub_nodes = if degrees.len() >= 20 {
+        degree.values().filter(|d| **d >= hub_threshold).count() as i64
+    } else {
+        0
+    };
+
+    json!({
+        "nodes": node_count,
+        "edges": edge_count,
+        "sqlite_nodes": sqlite_nodes,
+        "markdown_nodes": markdown_nodes,
+        "explicit_edges": explicit_edges,
+        "coactivation_edges": coactivation_edges,
+        "orphan_nodes": orphan_nodes,
+        "hub_nodes": hub_nodes,
+        "fresh_nodes": fresh_nodes,
+        "stale_nodes": stale_nodes,
+        "hub_threshold": hub_threshold,
+        "connected_ratio": (connected_ratio * 1000.0).round() / 1000.0,
+        "explicit_density": (explicit_density * 1000.0).round() / 1000.0
+    })
+}
+
+// ===========================================================================
+//                       semantic_bus_runtime_conformance
+// ===========================================================================
+
+pub struct SemanticBusRuntimeConformanceTool {
+    _hub: Hub,
+}
+
+impl SemanticBusRuntimeConformanceTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SemanticBusRuntimeConformanceTool {
+    fn name(&self) -> &'static str {
+        "semantic_bus_runtime_conformance"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Semantic System Bus runtime conformance snapshot. \
+                 It combines adapter evidence with local runtime health into a compact \
+                 coverage report and leaves unavailable platform adapters explicit; it \
+                 never mutates host state, restarts services, or writes memory graph edges."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Agent-Bridge repo root for source-backed adapter evidence."
+                    },
+                    "include_runtime_health": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Run local daemon-http/Palace runtime health checks."
+                    },
+                    "daemon_http_url": {
+                        "type": "string",
+                        "default": "http://127.0.0.1:7878",
+                        "description": "Base URL for daemon-http healthz when include_runtime_health=true."
+                    },
+                    "palace_url": {
+                        "type": "string",
+                        "default": "http://127.0.0.1:7979",
+                        "description": "Base URL for Palace when include_runtime_health=true."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 500,
+                        "maximum": 10000,
+                        "default": 2500,
+                        "description": "Per-request timeout for runtime health checks."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &semantic_bus_runtime_conformance_payload(&args).await,
+        ))
+    }
+}
+
+pub(crate) async fn semantic_bus_runtime_conformance_payload(args: &Value) -> Value {
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut adapter_args = json!({
+        "include_details": false,
+        "include_design_only": true
+    });
+    if let Some(cwd) = args.get("cwd").and_then(Value::as_str) {
+        adapter_args["cwd"] = json!(cwd);
+    }
+    let adapter_report = semantic_bus_adapter_report_payload(&adapter_args);
+    let include_runtime_health = args
+        .get("include_runtime_health")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let runtime_health = if include_runtime_health {
+        let runtime_args = json!({
+            "daemon_http_url": semantic_bus_runtime_arg(args, "daemon_http_url", "http://127.0.0.1:7878"),
+            "palace_url": semantic_bus_runtime_arg(args, "palace_url", "http://127.0.0.1:7979"),
+            "timeout_ms": args.get("timeout_ms").and_then(Value::as_u64).unwrap_or(2_500),
+            "include_raw": false,
+            "check_semantic_events": true
+        });
+        Some(semantic_bus_runtime_health_payload(&runtime_args).await)
+    } else {
+        None
+    };
+    semantic_bus_runtime_conformance_report(now_secs, adapter_report, runtime_health)
+}
+
+fn semantic_bus_runtime_conformance_report(
+    now_secs: u64,
+    adapter_report: Value,
+    runtime_health: Option<Value>,
+) -> Value {
+    let current_platform = std::env::consts::OS;
+    let adapters = adapter_report
+        .get("adapters")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let runtime_health_status = runtime_health
+        .as_ref()
+        .and_then(|v| v.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or("not_checked");
+    let runtime_health_verified = runtime_health
+        .as_ref()
+        .and_then(|v| v.get("verification"))
+        .and_then(|v| v.get("verdict"))
+        .and_then(Value::as_str)
+        == Some("verified");
+
+    let mut rows = Vec::new();
+    let mut live_ready = 0u64;
+    let mut current_platform_runtime_backed = 0u64;
+    let mut fixture_only = 0u64;
+    let mut design_only = 0u64;
+    for adapter in adapters {
+        let adapter_id = adapter
+            .get("adapter_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let platform = adapter
+            .get("platform")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let evidence_level = adapter
+            .get("evidence_level")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let tool = adapter.get("tool").and_then(Value::as_str);
+        let live_status = if tool == Some("semantic_bus_runtime_health") {
+            runtime_health_status
+        } else if evidence_level == "runtime_backed" && platform == current_platform {
+            current_platform_runtime_backed += 1;
+            "runtime_backed_available_not_checked"
+        } else if evidence_level == "runtime_backed" {
+            "runtime_backed_not_current_platform"
+        } else if evidence_level == "fixture_backed" {
+            fixture_only += 1;
+            "fixture_only"
+        } else if evidence_level == "design_only" {
+            design_only += 1;
+            "design_only"
+        } else {
+            "unknown"
+        };
+        if live_status == "ready" {
+            live_ready += 1;
+        }
+        rows.push(json!({
+            "adapter_id": adapter_id,
+            "platform": platform,
+            "adapter_family": adapter.get("adapter_family").cloned().unwrap_or(Value::Null),
+            "tool": tool,
+            "evidence_level": evidence_level,
+            "ready_for_runtime": adapter.get("ready_for_runtime").cloned().unwrap_or(json!(false)),
+            "live_status": live_status,
+            "current_platform": platform == current_platform,
+            "read_only": adapter.get("read_only").cloned().unwrap_or(json!(true))
+        }));
+    }
+
+    let gaps = adapter_report
+        .get("gaps")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let windows_slot = rows
+        .iter()
+        .find(|row| row.get("adapter_id").and_then(Value::as_str) == Some("windows_uia_runtime_adapter"))
+        .cloned()
+        .unwrap_or_else(|| json!({
+            "adapter_id": "windows_uia_runtime_adapter",
+            "live_status": "missing_from_adapter_report"
+        }));
+    let verdict = if runtime_health_verified {
+        "verified"
+    } else if runtime_health.is_some() {
+        "degraded"
+    } else {
+        "not_checked"
+    };
+
+    json!({
+        "schema": SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA,
+        "generated_at_unix": now_secs,
+        "read_only": true,
+        "live_checks_executed": runtime_health.is_some(),
+        "current_platform": current_platform,
+        "summary": {
+            "adapter_count": rows.len(),
+            "live_ready_count": live_ready,
+            "current_platform_runtime_backed_count": current_platform_runtime_backed,
+            "fixture_only_count": fixture_only,
+            "design_only_count": design_only,
+            "runtime_health_status": runtime_health_status,
+            "runtime_health_verified": runtime_health_verified,
+            "gap_count": gaps.as_array().map(|g| g.len()).unwrap_or(0)
+        },
+        "runtime_health_summary": runtime_health.as_ref().map(|v| json!({
+            "status": v.get("status").cloned().unwrap_or(Value::Null),
+            "verification": v.get("verification").cloned().unwrap_or(Value::Null),
+            "summary": v.get("summary").cloned().unwrap_or(Value::Null)
+        })),
+        "adapters": rows,
+        "gaps": gaps,
+        "windows_uia_runtime_slot": windows_slot,
+        "verification": {
+            "verdict": verdict,
+            "reason": if runtime_health_verified {
+                "local runtime health is verified and adapter evidence is source-backed"
+            } else if runtime_health.is_some() {
+                "adapter evidence is source-backed but local runtime health is degraded"
+            } else {
+                "adapter evidence is source-backed but live runtime health was not checked"
+            },
+            "recover": if runtime_health_verified { "proceed" } else { "retry" }
+        },
+        "next_recommended_slice": {
+            "id": "ssb-16-windows-uia-runtime-host",
+            "reason": "the harness and peer-query transport keep Windows UIA explicit as a planned slot until a Windows host can provide runtime evidence"
+        }
+    })
+}
+
+// ===========================================================================
+//                       semantic_bus_peer_conformance
+// ===========================================================================
+
+pub struct SemanticBusPeerConformanceTool {
+    _hub: Hub,
+}
+
+impl SemanticBusPeerConformanceTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SemanticBusPeerConformanceTool {
+    fn name(&self) -> &'static str {
+        "semantic_bus_peer_conformance"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Semantic System Bus peer conformance query. \
+                 It fetches one or more daemon-http /semantic-bus/runtime-conformance \
+                 exports and returns a compact multi-node summary; it never restarts \
+                 services, captures screenshots, injects input, mutates Palace, or \
+                 writes memory graph edges."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "endpoints": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "description": "Base daemon-http URLs such as http://127.0.0.1:7878, or full /semantic-bus/runtime-conformance URLs."
+                    },
+                    "endpoint": {
+                        "type": "string",
+                        "description": "Compatibility shortcut for a single endpoint when endpoints is omitted."
+                    },
+                    "include_runtime_health": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Ask each peer endpoint to include its local runtime health summary."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 500,
+                        "maximum": 10000,
+                        "default": 2500,
+                        "description": "Per-peer HTTP timeout."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include each peer's raw conformance payload. Default false keeps the summary compact."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &semantic_bus_peer_conformance_payload(&args).await,
+        ))
+    }
+}
+
+async fn semantic_bus_peer_conformance_payload(args: &Value) -> Value {
+    let endpoints = semantic_bus_peer_conformance_endpoints(args);
+    let include_runtime_health = args
+        .get("include_runtime_health")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let include_raw = args
+        .get("include_raw")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let timeout_ms = args
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(2_500)
+        .clamp(500, 10_000);
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    if endpoints.is_empty() {
+        return semantic_bus_peer_conformance_report(
+            now_secs,
+            timeout_ms,
+            include_runtime_health,
+            Vec::new(),
+        );
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout_ms))
+        .user_agent("agent-bridge-semantic-bus-peer-conformance/0")
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            let peers = endpoints
+                .iter()
+                .enumerate()
+                .map(|(idx, endpoint)| {
+                    semantic_bus_peer_conformance_error_row(
+                        idx,
+                        endpoint,
+                        None,
+                        "client_init_error",
+                        &e.to_string(),
+                    )
+                })
+                .collect();
+            return semantic_bus_peer_conformance_report(
+                now_secs,
+                timeout_ms,
+                include_runtime_health,
+                peers,
+            );
+        }
+    };
+
+    let mut peers = Vec::with_capacity(endpoints.len());
+    for (idx, endpoint) in endpoints.iter().enumerate() {
+        peers.push(
+            semantic_bus_peer_conformance_fetch(
+                &client,
+                idx,
+                endpoint,
+                include_runtime_health,
+                timeout_ms,
+                include_raw,
+            )
+            .await,
+        );
+    }
+    semantic_bus_peer_conformance_report(now_secs, timeout_ms, include_runtime_health, peers)
+}
+
+fn semantic_bus_peer_conformance_endpoints(args: &Value) -> Vec<String> {
+    let mut endpoints = Vec::new();
+    if let Some(items) = args.get("endpoints").and_then(Value::as_array) {
+        endpoints.extend(
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+        );
+    } else if let Some(endpoint) = args
+        .get("endpoint")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        endpoints.push(endpoint.to_string());
+    }
+    endpoints.truncate(16);
+    endpoints
+}
+
+async fn semantic_bus_peer_conformance_fetch(
+    client: &reqwest::Client,
+    idx: usize,
+    endpoint: &str,
+    include_runtime_health: bool,
+    timeout_ms: u64,
+    include_raw: bool,
+) -> Value {
+    let url = match semantic_bus_peer_conformance_url(
+        endpoint,
+        include_runtime_health,
+        timeout_ms,
+    ) {
+        Ok(url) => url,
+        Err(e) => {
+            return semantic_bus_peer_conformance_error_row(
+                idx,
+                endpoint,
+                None,
+                "invalid_url",
+                &e,
+            )
+        }
+    };
+    let started = Instant::now();
+    let response = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .send()
+        .await;
+    match response {
+        Ok(resp) => {
+            let http_status = resp.status().as_u16();
+            let http_ok = resp.status().is_success();
+            let content_type = resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string);
+            match resp.text().await {
+                Ok(body) => {
+                    if !http_ok {
+                        return semantic_bus_peer_conformance_http_error_row(
+                            idx,
+                            endpoint,
+                            &url,
+                            "http_error",
+                            http_status,
+                            semantic_bus_runtime_elapsed_ms(started),
+                            content_type,
+                            body,
+                        );
+                    }
+                    match serde_json::from_str::<Value>(&body) {
+                        Ok(payload) => semantic_bus_peer_conformance_payload_row(
+                            idx,
+                            endpoint,
+                            &url,
+                            http_status,
+                            semantic_bus_runtime_elapsed_ms(started),
+                            content_type,
+                            payload,
+                            include_raw,
+                        ),
+                        Err(e) => semantic_bus_peer_conformance_http_error_row(
+                            idx,
+                            endpoint,
+                            &url,
+                            "invalid_json",
+                            http_status,
+                            semantic_bus_runtime_elapsed_ms(started),
+                            content_type,
+                            format!("response was not valid JSON: {e}"),
+                        ),
+                    }
+                }
+                Err(e) => semantic_bus_peer_conformance_http_error_row(
+                    idx,
+                    endpoint,
+                    &url,
+                    "body_error",
+                    http_status,
+                    semantic_bus_runtime_elapsed_ms(started),
+                    content_type,
+                    e.to_string(),
+                ),
+            }
+        }
+        Err(e) => semantic_bus_peer_conformance_error_row(
+            idx,
+            endpoint,
+            Some(url),
+            "unreachable",
+            &e.to_string(),
+        ),
+    }
+}
+
+fn semantic_bus_peer_conformance_url(
+    endpoint: &str,
+    include_runtime_health: bool,
+    timeout_ms: u64,
+) -> std::result::Result<String, String> {
+    let trimmed = endpoint.trim();
+    let url = if trimmed.contains("/semantic-bus/runtime-conformance") {
+        trimmed.to_string()
+    } else {
+        semantic_bus_runtime_join_url(trimmed, "/semantic-bus/runtime-conformance")?
+    };
+    let mut parsed = reqwest::Url::parse(&url)
+        .map_err(|e| format!("parse conformance URL {url}: {e}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!("unsupported URL scheme: {}", parsed.scheme()));
+    }
+    {
+        let mut qp = parsed.query_pairs_mut();
+        qp.append_pair(
+            "include_runtime_health",
+            if include_runtime_health { "true" } else { "false" },
+        );
+        qp.append_pair("timeout_ms", &timeout_ms.to_string());
+    }
+    Ok(parsed.to_string())
+}
+
+fn semantic_bus_peer_conformance_payload_row(
+    idx: usize,
+    endpoint: &str,
+    url: &str,
+    http_status: u16,
+    elapsed_ms: u64,
+    content_type: Option<String>,
+    payload: Value,
+    include_raw: bool,
+) -> Value {
+    let schema = payload.get("schema").and_then(Value::as_str).unwrap_or("unknown");
+    let schema_ok = schema == SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA;
+    let verification = payload.get("verification").cloned().unwrap_or(Value::Null);
+    let verdict = verification
+        .get("verdict")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let summary = payload.get("summary").cloned().unwrap_or_else(|| json!({}));
+    let runtime_health_summary = payload
+        .get("runtime_health_summary")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let runtime_health_status = summary
+        .get("runtime_health_status")
+        .and_then(Value::as_str)
+        .or_else(|| runtime_health_summary.get("status").and_then(Value::as_str))
+        .unwrap_or("unknown");
+    let runtime_health_verified = summary
+        .get("runtime_health_verified")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            runtime_health_summary
+                .get("verification")
+                .and_then(|v| v.get("verdict"))
+                .and_then(Value::as_str)
+                == Some("verified")
+        });
+    let windows_slot = semantic_bus_peer_conformance_windows_slot(&payload);
+
+    let mut row = json!({
+        "peer_index": idx,
+        "peer_id": semantic_bus_peer_conformance_peer_id(endpoint, url, idx),
+        "endpoint": endpoint,
+        "url": url,
+        "ok": schema_ok,
+        "status": if schema_ok { "ok" } else { "schema_mismatch" },
+        "http_status": http_status,
+        "elapsed_ms": elapsed_ms,
+        "content_type": content_type,
+        "schema": schema,
+        "current_platform": payload.get("current_platform").cloned().unwrap_or(Value::Null),
+        "verdict": verdict,
+        "runtime_health_status": runtime_health_status,
+        "runtime_health_verified": runtime_health_verified,
+        "adapter_count": summary.get("adapter_count").cloned().unwrap_or(Value::Null),
+        "live_ready_count": summary.get("live_ready_count").cloned().unwrap_or(Value::Null),
+        "gap_count": summary.get("gap_count").cloned().unwrap_or(Value::Null),
+        "windows_uia_runtime_slot": windows_slot,
+        "verification": verification
+    });
+    if include_raw {
+        if let Some(obj) = row.as_object_mut() {
+            obj.insert("raw".to_string(), payload);
+        }
+    }
+    row
+}
+
+fn semantic_bus_peer_conformance_windows_slot(payload: &Value) -> Value {
+    let slot = payload
+        .get("windows_uia_runtime_slot")
+        .cloned()
+        .unwrap_or(Value::Null);
+    json!({
+        "adapter_id": slot.get("adapter_id").cloned().unwrap_or(json!("windows_uia_runtime_adapter")),
+        "platform": slot.get("platform").cloned().unwrap_or(Value::Null),
+        "evidence_level": slot.get("evidence_level").cloned().unwrap_or(Value::Null),
+        "live_status": slot.get("live_status").cloned().unwrap_or(json!("unknown")),
+        "tool": slot.get("tool").cloned().unwrap_or(Value::Null)
+    })
+}
+
+fn semantic_bus_peer_conformance_peer_id(endpoint: &str, url: &str, idx: usize) -> String {
+    semantic_bus_runtime_url_authority(endpoint)
+        .or_else(|| semantic_bus_runtime_url_authority(url))
+        .map(|authority| format!("peer:{authority}"))
+        .unwrap_or_else(|| format!("peer:{idx}"))
+}
+
+fn semantic_bus_peer_conformance_http_error_row(
+    idx: usize,
+    endpoint: &str,
+    url: &str,
+    status: &str,
+    http_status: u16,
+    elapsed_ms: u64,
+    content_type: Option<String>,
+    error_or_body: String,
+) -> Value {
+    json!({
+        "peer_index": idx,
+        "peer_id": semantic_bus_peer_conformance_peer_id(endpoint, url, idx),
+        "endpoint": endpoint,
+        "url": url,
+        "ok": false,
+        "status": status,
+        "http_status": http_status,
+        "elapsed_ms": elapsed_ms,
+        "content_type": content_type,
+        "error": error_or_body.chars().take(512).collect::<String>(),
+        "recover": "retry"
+    })
+}
+
+fn semantic_bus_peer_conformance_error_row(
+    idx: usize,
+    endpoint: &str,
+    url: Option<String>,
+    status: &str,
+    error: &str,
+) -> Value {
+    let url_ref = url.as_deref().unwrap_or(endpoint);
+    json!({
+        "peer_index": idx,
+        "peer_id": semantic_bus_peer_conformance_peer_id(endpoint, url_ref, idx),
+        "endpoint": endpoint,
+        "url": url,
+        "ok": false,
+        "status": status,
+        "error": error,
+        "recover": if status == "invalid_url" { "replan" } else { "retry" }
+    })
+}
+
+fn semantic_bus_peer_conformance_report(
+    now_secs: u64,
+    timeout_ms: u64,
+    include_runtime_health: bool,
+    peers: Vec<Value>,
+) -> Value {
+    let peer_count = peers.len() as u64;
+    let ok_count = peers
+        .iter()
+        .filter(|row| row.get("ok").and_then(Value::as_bool) == Some(true))
+        .count() as u64;
+    let verified_count = peers
+        .iter()
+        .filter(|row| {
+            row.get("ok").and_then(Value::as_bool) == Some(true)
+                && row.get("verdict").and_then(Value::as_str) == Some("verified")
+        })
+        .count() as u64;
+    let degraded_count = peers
+        .iter()
+        .filter(|row| {
+            row.get("ok").and_then(Value::as_bool) == Some(true)
+                && row.get("verdict").and_then(Value::as_str) == Some("degraded")
+        })
+        .count() as u64;
+    let not_checked_count = peers
+        .iter()
+        .filter(|row| {
+            row.get("ok").and_then(Value::as_bool) == Some(true)
+                && row.get("verdict").and_then(Value::as_str) == Some("not_checked")
+        })
+        .count() as u64;
+    let error_count = peer_count.saturating_sub(ok_count);
+    let windows_runtime_ready_count = peers
+        .iter()
+        .filter(|row| {
+            row.get("windows_uia_runtime_slot")
+                .and_then(|slot| slot.get("live_status"))
+                .and_then(Value::as_str)
+                == Some("ready")
+        })
+        .count() as u64;
+    let verdict = if peer_count == 0 {
+        "blocked"
+    } else if error_count == 0 && verified_count == peer_count {
+        "verified"
+    } else if ok_count > 0 {
+        "degraded"
+    } else {
+        "not_verified"
+    };
+
+    json!({
+        "schema": SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA,
+        "generated_at_unix": now_secs,
+        "read_only": true,
+        "live_checks_executed": peer_count > 0,
+        "timeout_ms": timeout_ms,
+        "request": {
+            "include_runtime_health": include_runtime_health,
+            "endpoint_count": peer_count
+        },
+        "summary": {
+            "peer_count": peer_count,
+            "ok_count": ok_count,
+            "verified_count": verified_count,
+            "degraded_count": degraded_count,
+            "not_checked_count": not_checked_count,
+            "error_count": error_count,
+            "windows_runtime_ready_count": windows_runtime_ready_count
+        },
+        "peers": peers,
+        "verification": {
+            "verdict": verdict,
+            "reason": if peer_count == 0 {
+                "no peer endpoints were supplied"
+            } else if error_count == 0 && verified_count == peer_count {
+                "all queried peers returned verified runtime conformance"
+            } else if ok_count > 0 {
+                "at least one peer returned a conformance snapshot, but not every peer is verified"
+            } else {
+                "no peer returned a valid runtime conformance snapshot"
+            },
+            "recover": if verdict == "verified" {
+                "proceed"
+            } else if ok_count > 0 {
+                "retry"
+            } else {
+                "replan"
+            }
+        },
+        "next_recommended_slice": {
+            "id": if windows_runtime_ready_count > 0 {
+                "ssb-16-cross-node-windows-uia-validation"
+            } else {
+                "ssb-16-windows-uia-runtime-host"
+            },
+            "reason": if windows_runtime_ready_count > 0 {
+                "at least one peer reports a ready Windows UIA runtime slot; validate semantic snapshot/verify evidence next"
+            } else {
+                "peer query is live, but Windows UIA remains unavailable until a Windows host exports runtime evidence"
+            }
+        }
+    })
 }
 
 // ===========================================================================
@@ -29303,6 +32814,25 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // the act loop). Never clicks/types; completes the read-only triad with
     // desktop_snapshot + vision_grounding_ocr. Mutating act tools stay out.
     "desktop_verify",
+    // macOS adapter feasibility: read-only AX trust/frontmost-window probe.
+    // No permission prompt and no host mutation; this is the first local
+    // cross-platform SSB runtime probe.
+    "macos_ax_probe",
+    // macOS adapter verifier: read-only predicate check over the same bounded
+    // AX/System Events observation surface as macos_ax_probe.
+    "macos_ax_verify",
+    // SSB conformance inventory: read-only source/fixture/doc classification.
+    // It does not execute live probes or mutate desktop/service state.
+    "semantic_bus_adapter_report",
+    // SSB live local runtime health: bounded read-only HTTP GETs for daemon-http
+    // and Palace graph state. It does not restart services or write memory edges.
+    "semantic_bus_runtime_health",
+    // SSB runtime conformance snapshot: compact read-only aggregation of adapter
+    // evidence plus local runtime health. Platform gaps remain explicit.
+    "semantic_bus_runtime_conformance",
+    // SSB peer conformance query: read-only multi-node pull over daemon-http
+    // runtime-conformance exports. No service restart or graph mutation.
+    "semantic_bus_peer_conformance",
     // External browser-lite discovery: read-only probe only. This is not the
     // mutating browser_* automation surface and does not change browser routing.
     "browser_lite_probe",
@@ -31601,6 +35131,45 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(DesktopVerifyTool::new(hub.clone())),
+    );
+    // macOS Semantic System Bus probe: read-only AX trust + bounded
+    // frontmost-window observation. Exposed to Codex via direct extras; mutating
+    // AX actions are not part of this tool.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MacosAxProbeTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MacosAxVerifyTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SemanticBusAdapterReportTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SemanticBusRuntimeHealthTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SemanticBusRuntimeConformanceTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SemanticBusPeerConformanceTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -36837,6 +40406,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "mobile_ios_list_devices"));
         assert!(p.includes(Tier::Standard, "mobile_ios_apps"));
         assert!(p.includes(Tier::Standard, "mobile_ios_syslog_tail"));
+        assert!(p.includes(Tier::Standard, "macos_ax_probe"));
+        assert!(p.includes(Tier::Standard, "macos_ax_verify"));
+        assert!(p.includes(Tier::Standard, "semantic_bus_adapter_report"));
+        assert!(p.includes(Tier::Standard, "semantic_bus_runtime_health"));
+        assert!(p.includes(Tier::Standard, "semantic_bus_runtime_conformance"));
+        assert!(p.includes(Tier::Standard, "semantic_bus_peer_conformance"));
         assert!(p.includes(Tier::Standard, "browser_lite_probe"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
@@ -36846,13 +40421,17 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 45 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 51 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(33: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(39: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_related_keys_preflight
         //      + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
+        //      + macos_ax_probe + macos_ax_verify + semantic_bus_adapter_report
+        //      + semantic_bus_runtime_health
+        //      + semantic_bus_runtime_conformance
+        //      + semantic_bus_peer_conformance
         //      + browser_lite_probe
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
         //      + agent_orchestrate_scan, added by d4fd74d).
@@ -36861,7 +40440,13 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // +desktop_verify (read-only postflight verifier) brought DIRECT 30→31, 42→43.
         // +browser_lite_probe brought DIRECT 31→32, total 43→44.
         // +memory_related_keys_preflight brought DIRECT 32→33, total 44→45.
-        assert_eq!(extras.len(), 45);
+        // +macos_ax_probe brought DIRECT 33→34, total 45→46.
+        // +macos_ax_verify brought DIRECT 34→35, total 46→47.
+        // +semantic_bus_adapter_report brought DIRECT 35→36, total 47→48.
+        // +semantic_bus_runtime_health brought DIRECT 36→37, total 48→49.
+        // +semantic_bus_runtime_conformance brought DIRECT 37→38, total 49→50.
+        // +semantic_bus_peer_conformance brought DIRECT 38→39, total 50→51.
+        assert_eq!(extras.len(), 51);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -36896,6 +40481,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"desktop_snapshot"));
         assert!(extras.contains(&"vision_grounding_ocr"));
         assert!(extras.contains(&"desktop_verify"));
+        assert!(extras.contains(&"macos_ax_probe"));
+        assert!(extras.contains(&"macos_ax_verify"));
+        assert!(extras.contains(&"semantic_bus_adapter_report"));
+        assert!(extras.contains(&"semantic_bus_runtime_health"));
+        assert!(extras.contains(&"semantic_bus_runtime_conformance"));
+        assert!(extras.contains(&"semantic_bus_peer_conformance"));
         assert!(extras.contains(&"browser_lite_probe"));
         // Remote session steering (d4fd74d) — direct-exposed for Codex
         // orchestrators that already carry agent_spawn + agent_session_*.
@@ -37184,9 +40775,32 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool.input_schema["properties"]
             .get("include_screenshot")
             .is_some());
+        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_include_raw")
+            .is_some());
         assert!(tool.input_schema["properties"]
             .get("activate_a11y")
             .is_none());
+    }
+
+    #[test]
+    fn registry_exposes_desktop_verify_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "desktop_verify"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "desktop_verify")
+            .expect("desktop_verify schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.input_schema["properties"].get("expect").is_some());
+        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_include_raw")
+            .is_some());
     }
 
     #[test]
@@ -37207,6 +40821,434 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .get("probe_mcp_tools")
             .is_some());
         assert!(tool.input_schema["properties"].get("stealth").is_none());
+    }
+
+    #[test]
+    fn registry_exposes_macos_ax_probe_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "macos_ax_probe"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "macos_ax_probe")
+            .expect("macos_ax_probe schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("never prompts"));
+        assert!(tool.input_schema["properties"]
+            .get("include_windows")
+            .is_some());
+        assert!(tool.input_schema["properties"].get("max_windows").is_some());
+        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_include_raw")
+            .is_some());
+        assert!(tool.input_schema["properties"].get("prompt").is_none());
+    }
+
+    #[test]
+    fn registry_exposes_macos_ax_verify_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "macos_ax_verify"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "macos_ax_verify")
+            .expect("macos_ax_verify schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("never"));
+        assert!(tool.input_schema["properties"].get("expect").is_some());
+        assert!(tool.input_schema["properties"].get("bundle_id").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("poll_timeout_secs")
+            .is_some());
+        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_include_raw")
+            .is_some());
+        assert!(tool.input_schema["properties"].get("click").is_none());
+    }
+
+    #[test]
+    fn registry_exposes_semantic_bus_adapter_report_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "semantic_bus_adapter_report"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "semantic_bus_adapter_report")
+            .expect("semantic_bus_adapter_report schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("never runs probes"));
+        assert!(tool.input_schema["properties"].get("cwd").is_some());
+        assert!(tool.input_schema["properties"].get("include_details").is_some());
+        assert!(tool.input_schema["properties"].get("include_design_only").is_some());
+        assert!(tool.input_schema["properties"].get("run_live").is_none());
+    }
+
+    #[test]
+    fn registry_exposes_semantic_bus_runtime_health_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "semantic_bus_runtime_health"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "semantic_bus_runtime_health")
+            .expect("semantic_bus_runtime_health schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("never"));
+        assert!(tool.input_schema["properties"].get("daemon_http_url").is_some());
+        assert!(tool.input_schema["properties"].get("palace_url").is_some());
+        assert!(tool.input_schema["properties"].get("include_raw").is_some());
+        assert!(tool.input_schema["properties"].get("restart").is_none());
+        assert!(tool.input_schema["properties"].get("write_edges").is_none());
+    }
+
+    #[test]
+    fn registry_exposes_semantic_bus_runtime_conformance_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "semantic_bus_runtime_conformance"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "semantic_bus_runtime_conformance")
+            .expect("semantic_bus_runtime_conformance schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("never mutates"));
+        assert!(tool.input_schema["properties"].get("include_runtime_health").is_some());
+        assert!(tool.input_schema["properties"].get("daemon_http_url").is_some());
+        assert!(tool.input_schema["properties"].get("restart").is_none());
+        assert!(tool.input_schema["properties"].get("write_edges").is_none());
+    }
+
+    #[test]
+    fn registry_exposes_semantic_bus_peer_conformance_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "semantic_bus_peer_conformance"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "semantic_bus_peer_conformance")
+            .expect("semantic_bus_peer_conformance schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("never restarts"));
+        assert!(tool.input_schema["properties"].get("endpoints").is_some());
+        assert!(tool.input_schema["properties"].get("include_runtime_health").is_some());
+        assert!(tool.input_schema["properties"].get("restart").is_none());
+        assert!(tool.input_schema["properties"].get("write_edges").is_none());
+    }
+
+    #[test]
+    fn semantic_bus_adapter_report_classifies_adapter_evidence() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let payload = semantic_bus_adapter_report_payload(&json!({
+            "cwd": repo_root.display().to_string(),
+            "include_details": true
+        }));
+
+        assert_eq!(
+            payload["schema"].as_str().unwrap(),
+            SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA
+        );
+        assert_eq!(payload["read_only"].as_bool(), Some(true));
+        assert_eq!(payload["live_checks_executed"].as_bool(), Some(false));
+
+        let adapters = payload["adapters"].as_array().expect("adapters array");
+        let find = |id: &str| {
+            adapters
+                .iter()
+                .find(|row| row["adapter_id"].as_str() == Some(id))
+                .unwrap_or_else(|| panic!("missing adapter row {id}"))
+        };
+
+        let runtime_health = find("local_runtime_health");
+        assert_eq!(
+            runtime_health["evidence_level"].as_str(),
+            Some("runtime_backed")
+        );
+        assert_eq!(
+            runtime_health["tool"].as_str(),
+            Some("semantic_bus_runtime_health")
+        );
+
+        let macos_verify = find("macos_ax_verify");
+        assert_eq!(
+            macos_verify["evidence_level"].as_str(),
+            Some("runtime_backed")
+        );
+        assert_eq!(macos_verify["ready_for_runtime"].as_bool(), Some(true));
+
+        let daemon = find("daemon_http_service_fixture");
+        assert_eq!(daemon["evidence_level"].as_str(), Some("fixture_backed"));
+        assert_eq!(
+            daemon["asset_summary"]["fixture_adapter_contract_present"].as_bool(),
+            Some(true)
+        );
+
+        let palace = find("palace_memory_region_fixture");
+        assert_eq!(palace["evidence_level"].as_str(), Some("fixture_backed"));
+        assert_eq!(
+            palace["asset_summary"]["fixture_without_adapter_contract"].as_bool(),
+            Some(true)
+        );
+
+        let windows_runtime = find("windows_uia_runtime_adapter");
+        assert_eq!(
+            windows_runtime["evidence_level"].as_str(),
+            Some("design_only")
+        );
+
+        let summary = &payload["summary"];
+        assert!(summary["by_evidence_level"]["runtime_backed"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 6);
+        assert!(summary["by_evidence_level"]["fixture_backed"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 4);
+        assert!(summary["by_evidence_level"]["design_only"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1);
+
+        let gaps = payload["gaps"].as_array().expect("gaps array");
+        assert!(gaps.iter().any(|gap| {
+            gap["adapter_id"].as_str() == Some("palace_memory_region_fixture")
+                && gap["gap"].as_str() == Some("fixture_missing_adapter_contract")
+        }));
+    }
+
+    #[test]
+    fn semantic_bus_runtime_health_report_keeps_semantic_events_optional() {
+        let graph = json!({
+            "now": 1_000,
+            "nodes": [
+                { "id": "a", "source": "sqlite", "last_accessed": 990 },
+                { "id": "b", "source": "markdown", "last_accessed": 0 },
+                { "id": "c", "source": "sqlite", "last_accessed": 1 }
+            ],
+            "edges": [
+                { "source": "a", "target": "b", "type": "relates", "weight": 0.8 },
+                { "source": "b", "target": "c", "type": "coactivation", "weight": 0.4 }
+            ]
+        });
+        let payload = semantic_bus_runtime_health_report(
+            1_000,
+            "http://127.0.0.1:7878",
+            "http://127.0.0.1:7979",
+            2_500,
+            json!({
+                "endpoint": "/healthz",
+                "url": "http://127.0.0.1:7878/healthz",
+                "ok": true,
+                "status": "ok",
+                "http_status": 200
+            }),
+            Some("ok".to_string()),
+            json!({
+                "endpoint": "/healthz",
+                "url": "http://127.0.0.1:7979/healthz",
+                "ok": true,
+                "status": "ok",
+                "http_status": 200
+            }),
+            Some("ok".to_string()),
+            json!({
+                "endpoint": "/api/graph",
+                "url": "http://127.0.0.1:7979/api/graph",
+                "ok": true,
+                "status": "ok",
+                "http_status": 200
+            }),
+            Some(graph),
+            json!({
+                "endpoint": "/api/semantic-events",
+                "url": "http://127.0.0.1:7979/api/semantic-events",
+                "ok": false,
+                "status": "http_error",
+                "http_status": 404,
+                "optional": true
+            }),
+            None,
+            false,
+        );
+
+        assert_eq!(
+            payload["schema"].as_str(),
+            Some(SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA)
+        );
+        assert_eq!(payload["read_only"].as_bool(), Some(true));
+        assert_eq!(payload["live_checks_executed"].as_bool(), Some(true));
+        assert_eq!(payload["status"].as_str(), Some("ready"));
+        assert_eq!(payload["verification"]["verdict"].as_str(), Some("verified"));
+        assert_eq!(
+            payload["summary"]["palace_semantic_events_status"].as_str(),
+            Some("http_error")
+        );
+        let stats = &payload["summary"]["memory_region_stats"];
+        assert_eq!(stats["nodes"].as_i64(), Some(3));
+        assert_eq!(stats["explicit_edges"].as_i64(), Some(1));
+        assert_eq!(stats["coactivation_edges"].as_i64(), Some(1));
+        assert_eq!(stats["orphan_nodes"].as_i64(), Some(1));
+        assert!(payload.get("raw").is_none());
+        assert!(payload["semantic_objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|obj| obj["object_id"].as_str()
+                == Some("palace:memory-region:agent-bridge")));
+    }
+
+    #[tokio::test]
+    async fn semantic_bus_runtime_conformance_summarizes_without_live_checks() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let payload = semantic_bus_runtime_conformance_payload(&json!({
+            "cwd": repo_root.display().to_string(),
+            "include_runtime_health": false
+        }))
+        .await;
+
+        assert_eq!(
+            payload["schema"].as_str(),
+            Some(SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA)
+        );
+        assert_eq!(payload["read_only"].as_bool(), Some(true));
+        assert_eq!(payload["live_checks_executed"].as_bool(), Some(false));
+        assert_eq!(
+            payload["verification"]["verdict"].as_str(),
+            Some("not_checked")
+        );
+        assert_eq!(
+            payload["summary"]["runtime_health_status"].as_str(),
+            Some("not_checked")
+        );
+        assert!(payload["summary"]["adapter_count"].as_u64().unwrap_or(0) >= 11);
+        assert!(payload["summary"]["gap_count"].as_u64().unwrap_or(0) >= 2);
+        assert_eq!(
+            payload["windows_uia_runtime_slot"]["adapter_id"].as_str(),
+            Some("windows_uia_runtime_adapter")
+        );
+        assert_eq!(
+            payload["windows_uia_runtime_slot"]["live_status"].as_str(),
+            Some("design_only")
+        );
+        assert!(payload["adapters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["adapter_id"].as_str() == Some("local_runtime_health")));
+    }
+
+    #[test]
+    fn semantic_bus_peer_conformance_url_accepts_base_and_full_endpoint() {
+        let from_base = semantic_bus_peer_conformance_url(
+            "http://127.0.0.1:7878",
+            false,
+            1_500,
+        )
+        .expect("base URL");
+        assert!(from_base.starts_with(
+            "http://127.0.0.1:7878/semantic-bus/runtime-conformance?"
+        ));
+        assert!(from_base.contains("include_runtime_health=false"));
+        assert!(from_base.contains("timeout_ms=1500"));
+
+        let from_full = semantic_bus_peer_conformance_url(
+            "http://example.test/semantic-bus/runtime-conformance?node=win",
+            true,
+            2_500,
+        )
+        .expect("full URL");
+        assert!(from_full.starts_with(
+            "http://example.test/semantic-bus/runtime-conformance?node=win&"
+        ));
+        assert!(from_full.contains("include_runtime_health=true"));
+        assert!(from_full.contains("timeout_ms=2500"));
+
+        let err = semantic_bus_peer_conformance_url("file:///tmp/x", true, 2_500)
+            .expect_err("unsupported scheme");
+        assert!(err.contains("unsupported URL scheme"));
+    }
+
+    #[test]
+    fn semantic_bus_peer_conformance_compacts_verified_payload() {
+        let peer = semantic_bus_peer_conformance_payload_row(
+            0,
+            "http://127.0.0.1:7878",
+            "http://127.0.0.1:7878/semantic-bus/runtime-conformance",
+            200,
+            4,
+            Some("application/json".to_string()),
+            json!({
+                "schema": SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA,
+                "current_platform": "windows",
+                "summary": {
+                    "adapter_count": 11,
+                    "live_ready_count": 2,
+                    "gap_count": 1,
+                    "runtime_health_status": "ready",
+                    "runtime_health_verified": true
+                },
+                "windows_uia_runtime_slot": {
+                    "adapter_id": "windows_uia_runtime_adapter",
+                    "platform": "windows",
+                    "evidence_level": "runtime_backed",
+                    "live_status": "ready",
+                    "tool": "windows_uia_snapshot"
+                },
+                "verification": {
+                    "verdict": "verified",
+                    "recover": "proceed"
+                }
+            }),
+            false,
+        );
+        assert_eq!(peer["ok"].as_bool(), Some(true));
+        assert_eq!(peer["status"].as_str(), Some("ok"));
+        assert_eq!(peer["peer_id"].as_str(), Some("peer:127.0.0.1:7878"));
+        assert_eq!(peer["runtime_health_status"].as_str(), Some("ready"));
+        assert_eq!(peer["runtime_health_verified"].as_bool(), Some(true));
+        assert_eq!(
+            peer["windows_uia_runtime_slot"]["live_status"].as_str(),
+            Some("ready")
+        );
+        assert!(peer.get("raw").is_none());
+
+        let report = semantic_bus_peer_conformance_report(1_000, 2_500, true, vec![peer]);
+        assert_eq!(
+            report["schema"].as_str(),
+            Some(SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA)
+        );
+        assert_eq!(report["verification"]["verdict"].as_str(), Some("verified"));
+        assert_eq!(
+            report["summary"]["windows_runtime_ready_count"].as_u64(),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_bus_peer_conformance_blocks_without_endpoints() {
+        let payload = semantic_bus_peer_conformance_payload(&json!({})).await;
+        assert_eq!(
+            payload["schema"].as_str(),
+            Some(SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA)
+        );
+        assert_eq!(payload["read_only"].as_bool(), Some(true));
+        assert_eq!(payload["live_checks_executed"].as_bool(), Some(false));
+        assert_eq!(payload["summary"]["peer_count"].as_u64(), Some(0));
+        assert_eq!(payload["verification"]["verdict"].as_str(), Some("blocked"));
     }
 
     #[tokio::test]
@@ -37282,6 +41324,698 @@ print(json.dumps({"schema": "desktop_snapshot/v0.5", "argv": sys.argv[1:]}))
         assert!(argv.contains(&"--atspi-budget"));
         assert!(argv.contains(&"1.25"));
         assert!(!argv.contains(&"--activate-a11y"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn desktop_snapshot_semantic_bus_wraps_snapshot_without_changing_default_output() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-snapshot-semantic-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_snapshot.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+payload = {
+    "schema": "desktop_snapshot/v0.5",
+    "captured_at": 1780833000,
+    "session": {"type": "wayland", "wayland_display": "wayland-1", "compositor": "sway"},
+    "outputs": [],
+    "windows": [{
+        "id": 42,
+        "app_id": "zenity",
+        "pid": 1234,
+        "name": "AB semantic fixture",
+        "focused": False,
+        "visible": True,
+        "grounding": "atspi",
+        "rect": {"x": 10, "y": 20, "width": 300, "height": 120},
+        "output": "HEADLESS-1"
+    }],
+    "window_count": 1,
+    "screenshots": {"skipped": True},
+    "atspi": {
+        "available": True,
+        "apps": [{
+            "name": "zenity",
+            "pid": 1234,
+            "element_count": 1,
+            "coverage": "ok",
+            "elements": [{
+                "role": "push button",
+                "name": "INVOKEOK",
+                "bounds": {"x": 100, "y": 80, "width": 92, "height": 30},
+                "states": ["visible", "enabled"]
+            }]
+        }]
+    },
+    "elapsed_ms": 3
+}
+print(json.dumps(payload))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopSnapshotTool::new(Hub::builder().build());
+        let default_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "include_screenshot": false,
+                    "include_atspi": true,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("default execute");
+        let default_payload = result_text_as_json(&default_out);
+        assert_eq!(default_payload["schema"], DESKTOP_SNAPSHOT_SOURCE_SCHEMA);
+        assert!(default_payload.get("semantic_objects").is_none());
+        assert!(default_payload.get("mcp_wrapper").is_some());
+
+        let semantic_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "include_screenshot": false,
+                    "include_atspi": true,
+                    "semantic_bus": true,
+                    "semantic_include_raw": false,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("semantic execute");
+        let payload = result_text_as_json(&semantic_out);
+        assert_eq!(payload["schema"], DESKTOP_SNAPSHOT_SEMANTIC_SCHEMA);
+        assert_eq!(payload["source_schema"], DESKTOP_SNAPSHOT_SOURCE_SCHEMA);
+        assert_eq!(payload["source_adapter"], "linux.desktop_snapshot");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["raw_available"], true);
+        assert_eq!(payload["raw_included"], false);
+        assert!(payload.get("raw_snapshot").is_none());
+        assert_eq!(payload["verification"]["verdict"], "verified");
+        assert_eq!(payload["verification"]["verified_to"], "semantic_objects");
+        assert_eq!(payload["verification"]["recover"], "proceed");
+
+        let objects = payload["semantic_objects"].as_array().expect("objects");
+        assert_eq!(objects.len(), 3);
+        assert!(objects.iter().any(|o| {
+            o["object_id"] == "desktop:linux:session:1780833000"
+                && o["source_adapter"] == "linux.sway.session"
+        }));
+        assert!(objects.iter().any(|o| {
+            o["object_id"] == "desktop:linux:sway:window:42"
+                && o["source_adapter"] == "linux.sway.tree"
+        }));
+        assert!(objects.iter().any(|o| {
+            o["source_adapter"] == "linux.atspi" && o["label"] == "INVOKEOK"
+        }));
+
+        let affordances = payload["affordances"].as_array().expect("affordances");
+        assert!(affordances.iter().any(|a| {
+            a["action_type"] == "desktop.verify" && a["requires_gate"] == false
+        }));
+        assert!(affordances.iter().any(|a| {
+            a["action_type"] == "desktop.invoke" && a["requires_gate"] == true
+        }));
+        assert_eq!(
+            payload["presentation"]["machine_payload"]["atspi_object_count"],
+            1
+        );
+        assert_eq!(
+            payload["events"][0]["event_type"],
+            "desktop.snapshot.observed"
+        );
+
+        let raw_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "include_screenshot": false,
+                    "semantic_bus": true,
+                    "semantic_include_raw": true,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("raw execute");
+        let raw_payload = result_text_as_json(&raw_out);
+        assert_eq!(raw_payload["raw_included"], true);
+        assert_eq!(raw_payload["raw_snapshot"]["schema"], DESKTOP_SNAPSHOT_SOURCE_SCHEMA);
+        assert!(raw_payload["raw_snapshot"].get("mcp_wrapper").is_some());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn desktop_verify_semantic_bus_wraps_verify_without_changing_default_output() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-desktop-verify-semantic-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("desktop_verify.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+payload = {
+    "schema": "desktop_verify/v0",
+    "ts": 1780833900,
+    "expect": "element_appeared",
+    "selector": {"app": "zenity", "role": "push button", "name": "OK"},
+    "scope": {"cage_pid": None, "swaysock": None},
+    "verdict": "verified",
+    "recover": "proceed",
+    "change": None,
+    "held_after_ms": 17,
+    "polls": 2,
+    "observed": {
+        "count": 1,
+        "matches": [{
+            "role": "push button",
+            "name": "OK",
+            "app": "zenity",
+            "pid": 1234,
+            "in_scope": True,
+            "states": ["visible", "enabled"]
+        }]
+    },
+    "error": None
+}
+print(json.dumps(payload))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = DesktopVerifyTool::new(Hub::builder().build());
+        let default_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "expect": "element_appeared",
+                    "app": "zenity",
+                    "role": "push button",
+                    "name": "OK",
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("default execute");
+        let default_payload = result_text_as_json(&default_out);
+        assert_eq!(default_payload["schema"], DESKTOP_VERIFY_SOURCE_SCHEMA);
+        assert!(default_payload.get("semantic_objects").is_none());
+        assert!(default_payload.get("mcp_wrapper").is_some());
+
+        let semantic_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "expect": "element_appeared",
+                    "app": "zenity",
+                    "role": "push button",
+                    "name": "OK",
+                    "semantic_bus": true,
+                    "semantic_include_raw": false,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("semantic execute");
+        let payload = result_text_as_json(&semantic_out);
+        assert_eq!(payload["schema"], DESKTOP_VERIFY_SEMANTIC_SCHEMA);
+        assert_eq!(payload["source_schema"], DESKTOP_VERIFY_SOURCE_SCHEMA);
+        assert_eq!(payload["source_adapter"], "linux.desktop_verify");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["raw_available"], true);
+        assert_eq!(payload["raw_included"], false);
+        assert!(payload.get("raw_verify").is_none());
+        assert_eq!(payload["verification"]["verdict"], "verified");
+        assert_eq!(payload["verification"]["source_verdict"], "verified");
+        assert_eq!(payload["verification"]["verified_to"], "postcondition");
+        assert_eq!(payload["verification"]["recover"], "proceed");
+        assert_eq!(payload["verification"]["evidence"]["observed_count"], 1);
+
+        let objects = payload["semantic_objects"].as_array().expect("objects");
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0]["source_adapter"], "linux.desktop_verify");
+        assert_eq!(
+            objects[0]["object_type"],
+            "desktop.verify.target.accessible"
+        );
+        assert_eq!(objects[0]["state"]["source_verdict"], "verified");
+
+        let affordances = payload["affordances"].as_array().expect("affordances");
+        assert_eq!(affordances.len(), 1);
+        assert_eq!(affordances[0]["action_type"], "desktop.verify");
+        assert_eq!(affordances[0]["requires_gate"], false);
+        assert_eq!(
+            payload["events"][0]["event_type"],
+            "desktop.verify.completed"
+        );
+        assert_eq!(
+            payload["presentation"]["machine_payload"]["observed_count"],
+            1
+        );
+
+        let raw_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "expect": "element_appeared",
+                    "semantic_bus": true,
+                    "semantic_include_raw": true,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("raw execute");
+        let raw_payload = result_text_as_json(&raw_out);
+        assert_eq!(raw_payload["raw_included"], true);
+        assert_eq!(raw_payload["raw_verify"]["schema"], DESKTOP_VERIFY_SOURCE_SCHEMA);
+        assert!(raw_payload["raw_verify"].get("mcp_wrapper").is_some());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn macos_ax_probe_wrapper_defaults_to_no_prompt_and_bounded_windows() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-macos-ax-probe-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("macos_ax_probe.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "macos_ax_probe/v0", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = MacosAxProbeTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "include_windows": false,
+                    "max_windows": 3,
+                    "jxa_timeout_secs": 1.5,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        let argv = payload["argv"].as_array().expect("argv");
+        let argv: Vec<&str> = argv.iter().filter_map(|v| v.as_str()).collect();
+
+        assert!(argv.contains(&"--compact"));
+        assert!(argv.contains(&"--no-windows"));
+        assert!(argv.contains(&"--max-windows"));
+        assert!(argv.contains(&"3"));
+        assert!(argv.contains(&"--jxa-timeout-secs"));
+        assert!(argv.contains(&"1.5"));
+        assert!(!argv.contains(&"--prompt"));
+        assert_eq!(payload["mcp_wrapper"]["read_only"], true);
+        assert_eq!(payload["mcp_wrapper"]["include_windows"], false);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn macos_ax_probe_semantic_bus_wraps_probe_without_changing_default_output() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-macos-ax-probe-semantic-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("macos_ax_probe.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+payload = {
+    "schema": "macos_ax_probe/v0",
+    "captured_at": 1780835200,
+    "platform": {"system": "Darwin", "release": "25.0.0", "machine": "arm64"},
+    "read_only": True,
+    "status": "ready",
+    "permission": {"ax_trusted": True, "method": "AXIsProcessTrusted", "prompted": False},
+    "frontmost_app": {"name": "Codex", "pid": 54862, "bundle_id": "com.openai.codex", "role": "AXApplication"},
+    "windows": [{
+        "index": 0,
+        "title": "Codex",
+        "role": "AXWindow",
+        "subrole": "AXStandardWindow",
+        "focused": True,
+        "position": [2204, 1090],
+        "size": [356, 320],
+        "rect": {"x": 2204, "y": 1090, "width": 356, "height": 320}
+    }],
+    "window_count": 1,
+    "source_window_count": 1,
+    "limits": {"max_windows": 8, "truncated": False, "include_windows": True},
+    "errors": [],
+    "elapsed_ms": 5
+}
+print(json.dumps(payload))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = MacosAxProbeTool::new(Hub::builder().build());
+        let default_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("default execute");
+        let default_payload = result_text_as_json(&default_out);
+        assert_eq!(default_payload["schema"], MACOS_AX_PROBE_SOURCE_SCHEMA);
+        assert!(default_payload.get("semantic_objects").is_none());
+        assert!(default_payload.get("mcp_wrapper").is_some());
+
+        let semantic_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "semantic_bus": true,
+                    "semantic_include_raw": false,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("semantic execute");
+        let payload = result_text_as_json(&semantic_out);
+        assert_eq!(payload["schema"], MACOS_AX_PROBE_SEMANTIC_SCHEMA);
+        assert_eq!(payload["source_schema"], MACOS_AX_PROBE_SOURCE_SCHEMA);
+        assert_eq!(payload["source_adapter"], "macos.ax_probe");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["raw_available"], true);
+        assert_eq!(payload["raw_included"], false);
+        assert!(payload.get("raw_probe").is_none());
+        assert_eq!(payload["verification"]["verdict"], "verified");
+        assert_eq!(payload["verification"]["verified_to"], "semantic_objects");
+        assert_eq!(payload["verification"]["recover"], "proceed");
+
+        let objects = payload["semantic_objects"].as_array().expect("objects");
+        assert_eq!(objects.len(), 3);
+        assert!(objects.iter().any(|o| {
+            o["object_id"] == "desktop:macos:session:1780835200"
+                && o["source_adapter"] == "macos.ax_probe"
+        }));
+        assert!(objects.iter().any(|o| {
+            o["object_id"] == "desktop:macos:app:54862"
+                && o["source_adapter"] == "macos.system_events"
+        }));
+        assert!(objects.iter().any(|o| {
+            o["object_id"] == "desktop:macos:window:54862:0"
+                && o["source_adapter"] == "macos.ax.window"
+        }));
+
+        let affordances = payload["affordances"].as_array().expect("affordances");
+        assert_eq!(affordances.len(), 1);
+        assert_eq!(affordances[0]["action_type"], "macos_ax_probe.reobserve");
+        assert_eq!(affordances[0]["requires_gate"], false);
+        assert_eq!(
+            payload["events"][0]["event_type"],
+            "desktop.snapshot.observed"
+        );
+        assert_eq!(
+            payload["presentation"]["machine_payload"]["window_count"],
+            1
+        );
+
+        let raw_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "semantic_bus": true,
+                    "semantic_include_raw": true,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("raw execute");
+        let raw_payload = result_text_as_json(&raw_out);
+        assert_eq!(raw_payload["raw_included"], true);
+        assert_eq!(raw_payload["raw_probe"]["schema"], MACOS_AX_PROBE_SOURCE_SCHEMA);
+        assert!(raw_payload["raw_probe"].get("mcp_wrapper").is_some());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn macos_ax_verify_wrapper_parses_unmet_json_and_passes_bounded_args() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-macos-ax-verify-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("macos_ax_verify.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({
+    "schema": "macos_ax_verify/v0",
+    "argv": sys.argv[1:],
+    "ts": 1780836100,
+    "expect": "window_gone",
+    "selector": {"title": "Missing"},
+    "scope": {"source": "frontmost_app_windows"},
+    "verdict": "unmet",
+    "recover": "proceed",
+    "observed": {"count": 1, "matches": [{"title": "Missing"}]},
+    "error": None
+}))
+raise SystemExit(2)
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = MacosAxVerifyTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "expect": "window_gone",
+                    "title": "Missing",
+                    "bundle_id": "com.openai.codex",
+                    "max_windows": 4,
+                    "jxa_timeout_secs": 1.25,
+                    "poll_timeout_secs": 0.5,
+                    "poll_interval_secs": 0.1,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        let argv = payload["argv"].as_array().expect("argv");
+        let argv: Vec<&str> = argv.iter().filter_map(|v| v.as_str()).collect();
+
+        assert!(argv.contains(&"--compact"));
+        assert!(argv.contains(&"--expect"));
+        assert!(argv.contains(&"window_gone"));
+        assert!(argv.contains(&"--title"));
+        assert!(argv.contains(&"Missing"));
+        assert!(argv.contains(&"--bundle-id"));
+        assert!(argv.contains(&"com.openai.codex"));
+        assert!(argv.contains(&"--max-windows"));
+        assert!(argv.contains(&"4"));
+        assert!(argv.contains(&"--jxa-timeout-secs"));
+        assert!(argv.contains(&"1.25"));
+        assert!(argv.contains(&"--timeout"));
+        assert!(argv.contains(&"0.5"));
+        assert!(!argv.contains(&"--click"));
+        assert_eq!(payload["mcp_wrapper"]["read_only"], true);
+        assert_eq!(payload["mcp_wrapper"]["exit_code"], 2);
+        assert_eq!(payload["verdict"], "unmet");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn macos_ax_verify_semantic_bus_wraps_verify_without_changing_default_output() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-macos-ax-verify-semantic-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("macos_ax_verify.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+payload = {
+    "schema": "macos_ax_verify/v0",
+    "ts": 1780836200,
+    "expect": "frontmost_app_is",
+    "selector": {"app": "Codex", "bundle_id": "com.openai.codex", "pid": 54862, "title": None, "role": None, "index": None, "state": None},
+    "scope": {"source": "frontmost_app_windows", "platform": {"system": "Darwin"}, "max_windows": 8},
+    "verdict": "verified",
+    "recover": "proceed",
+    "change": None,
+    "held_after_ms": 12,
+    "polls": 1,
+    "observed": {
+        "probe_status": "ready",
+        "permission": {"ax_trusted": True, "method": "AXIsProcessTrusted", "prompted": False},
+        "frontmost_app": {"name": "Codex", "pid": 54862, "bundle_id": "com.openai.codex", "role": "AXApplication"},
+        "count": 1,
+        "matches": [{"name": "Codex", "pid": 54862, "bundle_id": "com.openai.codex", "role": "AXApplication"}],
+        "window_count": 2,
+        "source_window_count": 2,
+        "errors": []
+    },
+    "error": None
+}
+print(json.dumps(payload))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = MacosAxVerifyTool::new(Hub::builder().build());
+        let default_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "expect": "frontmost_app_is",
+                    "app": "Codex",
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("default execute");
+        let default_payload = result_text_as_json(&default_out);
+        assert_eq!(default_payload["schema"], MACOS_AX_VERIFY_SOURCE_SCHEMA);
+        assert!(default_payload.get("semantic_objects").is_none());
+        assert!(default_payload.get("mcp_wrapper").is_some());
+
+        let semantic_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "expect": "frontmost_app_is",
+                    "app": "Codex",
+                    "semantic_bus": true,
+                    "semantic_include_raw": false,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("semantic execute");
+        let payload = result_text_as_json(&semantic_out);
+        assert_eq!(payload["schema"], MACOS_AX_VERIFY_SEMANTIC_SCHEMA);
+        assert_eq!(payload["source_schema"], MACOS_AX_VERIFY_SOURCE_SCHEMA);
+        assert_eq!(payload["source_adapter"], "macos.ax.verify");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["raw_available"], true);
+        assert_eq!(payload["raw_included"], false);
+        assert!(payload.get("raw_verify").is_none());
+        assert_eq!(payload["verification"]["verdict"], "verified");
+        assert_eq!(payload["verification"]["source_verdict"], "verified");
+        assert_eq!(payload["verification"]["verified_to"], "postcondition");
+        assert_eq!(payload["verification"]["recover"], "proceed");
+        assert_eq!(payload["verification"]["evidence"]["observed_count"], 1);
+
+        let objects = payload["semantic_objects"].as_array().expect("objects");
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0]["source_adapter"], "macos.ax.verify");
+        assert_eq!(
+            objects[0]["object_type"],
+            "desktop.verify.target.application"
+        );
+        assert_eq!(objects[0]["state"]["source_verdict"], "verified");
+
+        let affordances = payload["affordances"].as_array().expect("affordances");
+        assert_eq!(affordances.len(), 1);
+        assert_eq!(affordances[0]["action_type"], "macos_ax_verify");
+        assert_eq!(affordances[0]["requires_gate"], false);
+        assert_eq!(
+            payload["events"][0]["event_type"],
+            "desktop.verify.completed"
+        );
+        assert_eq!(
+            payload["presentation"]["machine_payload"]["observed_count"],
+            1
+        );
+
+        let raw_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "expect": "frontmost_app_is",
+                    "semantic_bus": true,
+                    "semantic_include_raw": true,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("raw execute");
+        let raw_payload = result_text_as_json(&raw_out);
+        assert_eq!(raw_payload["raw_included"], true);
+        assert_eq!(raw_payload["raw_verify"]["schema"], MACOS_AX_VERIFY_SOURCE_SCHEMA);
+        assert!(raw_payload["raw_verify"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

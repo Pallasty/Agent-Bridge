@@ -1,0 +1,88 @@
+{
+  "schema": "agent_bridge.semantic_bus.fixture.v0",
+  "fixture_id": "desktop_accessible_button",
+  "semantic_object": {
+    "schema": "agent_bridge.semantic_bus.object.v0",
+    "object_id": "desktop:app:zenity:button:invokeok",
+    "object_type": "desktop.accessible.button",
+    "source_adapter": "linux.atspi",
+    "label": "INVOKEOK",
+    "state": {
+      "enabled": true,
+      "visible": true,
+      "focused": false
+    },
+    "relations": [
+      {
+        "type": "contained_by",
+        "target": "desktop:window:zenity-dialog"
+      }
+    ],
+    "confidence": 0.94,
+    "observed_at": "2026-06-07T10:30:00Z",
+    "provenance": {
+      "tool": "desktop_snapshot",
+      "schema": "desktop_snapshot/v0.5"
+    }
+  },
+  "affordances": [
+    {
+      "affordance_id": "desktop:app:zenity:button:invokeok:invoke",
+      "object_id": "desktop:app:zenity:button:invokeok",
+      "action_type": "desktop.invoke",
+      "args_schema": {
+        "role": "button",
+        "name": "INVOKEOK"
+      },
+      "risk_level": "medium",
+      "requires_gate": true,
+      "expected_effect": "dialog exits with code 0"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt-desktop-accessible-button-observed",
+      "ts": "2026-06-07T10:30:00Z",
+      "source": "desktop_snapshot",
+      "actor": "agent",
+      "project": "agent-bridge",
+      "event_type": "object.observed",
+      "subject_id": "desktop:app:zenity:button:invokeok",
+      "payload_json": {
+        "role": "button",
+        "name": "INVOKEOK"
+      },
+      "source_event_ids": [],
+      "prev_hash": null,
+      "hash": "fixture"
+    }
+  ],
+  "verification": {
+    "verdict": "verified",
+    "reason": null,
+    "method": "atspi_tree",
+    "evidence": {
+      "role": "button",
+      "name": "INVOKEOK"
+    },
+    "verified_to": "desktop:window:zenity-dialog",
+    "recover": "proceed",
+    "raw_available": true
+  },
+  "presentation": {
+    "presentation_id": "present-desktop-accessible-button",
+    "source_event_ids": [
+      "evt-desktop-accessible-button-observed"
+    ],
+    "human_summary": "A semantic desktop button is visible and invokable.",
+    "machine_payload": {
+      "object_id": "desktop:app:zenity:button:invokeok"
+    },
+    "ingestion": {
+      "allowed": false,
+      "reason": "fixture_only"
+    },
+    "artifact": null,
+    "created_at": "2026-06-07T10:30:00Z"
+  }
+}

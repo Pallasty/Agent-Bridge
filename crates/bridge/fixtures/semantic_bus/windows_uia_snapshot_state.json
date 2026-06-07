@@ -1,0 +1,160 @@
+{
+  "schema": "agent_bridge.semantic_bus.fixture.v0",
+  "fixture_id": "windows_uia_snapshot_state",
+  "adapter_contract": {
+    "schema": "agent_bridge.semantic_bus.adapter_conformance.v0",
+    "adapter_family": "windows_desktop",
+    "tool": "desktop_snapshot",
+    "read_only": true,
+    "broad_host_mutation": false,
+    "mutation_surface": "none",
+    "channels": [
+      "session",
+      "hwnd",
+      "uia"
+    ],
+    "fallback_order": [
+      "session",
+      "hwnd",
+      "uia",
+      "vision_grounding_ocr"
+    ],
+    "isolation": "read_only_observation_respects_session_and_integrity_boundaries",
+    "notes": "Windows snapshot state should normalize HWND and UI Automation before pixels."
+  },
+  "semantic_object": {
+    "schema": "agent_bridge.semantic_bus.object.v0",
+    "object_id": "desktop:windows:accessible:5150:runtime:approve",
+    "object_type": "desktop.accessible.button",
+    "source_adapter": "windows.uia",
+    "label": "Approve",
+    "state": {
+      "platform": {
+        "raw_role": "Button",
+        "automation_id": "ApproveButton",
+        "runtime_id_hash": "runtime-approve-fixture",
+        "hwnd": "0x00070A2E",
+        "framework_id": "Win32"
+      },
+      "role": "button",
+      "name": "Approve",
+      "automation_id": "ApproveButton",
+      "enabled": true,
+      "focused": false,
+      "offscreen": false,
+      "rect": {
+        "x": 840,
+        "y": 520,
+        "width": 96,
+        "height": 32
+      },
+      "pid": 5150
+    },
+    "relations": [
+      {
+        "type": "contained_by",
+        "target": "desktop:windows:window:hwnd:0x00070A2E"
+      }
+    ],
+    "confidence": 0.9,
+    "observed_at": "2026-06-07T12:02:00Z",
+    "provenance": {
+      "tool": "desktop_snapshot",
+      "schema": "agent_bridge.semantic_bus.desktop_snapshot.v0",
+      "platform_schema": "windows.uia.fixture"
+    }
+  },
+  "affordances": [
+    {
+      "affordance_id": "desktop:windows:accessible:5150:runtime:approve:verify-enabled",
+      "object_id": "desktop:windows:accessible:5150:runtime:approve",
+      "action_type": "desktop.verify",
+      "args_schema": {
+        "platform": "windows",
+        "object_id": "desktop:windows:accessible:5150:runtime:approve",
+        "app": "AgentBridgeFixture.exe",
+        "role": "button",
+        "name": "Approve",
+        "state": "enabled",
+        "windows": {
+          "automation_id": "ApproveButton",
+          "runtime_id_hash": "runtime-approve-fixture",
+          "hwnd": "0x00070A2E"
+        }
+      },
+      "risk_level": "low",
+      "requires_gate": false,
+      "expected_effect": "re-observes the UIA button without mutating the desktop"
+    },
+    {
+      "affordance_id": "desktop:windows:accessible:5150:runtime:approve:invoke",
+      "object_id": "desktop:windows:accessible:5150:runtime:approve",
+      "action_type": "desktop.invoke",
+      "args_schema": {
+        "platform": "windows",
+        "object_id": "desktop:windows:accessible:5150:runtime:approve",
+        "windows": {
+          "pattern": "InvokePattern"
+        }
+      },
+      "risk_level": "medium",
+      "requires_gate": true,
+      "expected_effect": "would invoke the UIA control only through a gated action path"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt-windows-uia-snapshot-button-observed",
+      "ts": "2026-06-07T12:02:00Z",
+      "source": "desktop_snapshot",
+      "actor": "agent",
+      "project": "agent-bridge",
+      "event_type": "desktop.snapshot.observed",
+      "subject_id": "desktop:windows:accessible:5150:runtime:approve",
+      "payload_json": {
+        "channels": [
+          "session",
+          "hwnd",
+          "uia"
+        ],
+        "automation_id": "ApproveButton",
+        "screenshot_required": false
+      },
+      "source_event_ids": [],
+      "prev_hash": null,
+      "hash": "fixture"
+    }
+  ],
+  "verification": {
+    "verdict": "verified",
+    "reason": null,
+    "method": "windows.uia.semantic_tree",
+    "evidence": {
+      "uia_present": true,
+      "hwnd_present": true,
+      "ui_access": "available",
+      "screenshot_required": false
+    },
+    "verified_to": "agent_bridge.semantic_bus.desktop_snapshot.v0:windows.uia",
+    "recover": "proceed",
+    "raw_available": true
+  },
+  "presentation": {
+    "presentation_id": "present-windows-uia-snapshot-state",
+    "source_event_ids": [
+      "evt-windows-uia-snapshot-button-observed"
+    ],
+    "human_summary": "Windows UIA snapshot state is represented as a cross-platform accessible button object.",
+    "machine_payload": {
+      "object_id": "desktop:windows:accessible:5150:runtime:approve",
+      "adapter_contract": "agent_bridge.semantic_bus.adapter_conformance.v0",
+      "mutating_affordance_requires_gate": true
+    },
+    "ingestion": {
+      "allowed": false,
+      "reason": "fixture_only"
+    },
+    "artifact": null,
+    "created_at": "2026-06-07T12:02:00Z"
+  }
+}

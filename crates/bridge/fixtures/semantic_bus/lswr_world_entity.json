@@ -1,0 +1,89 @@
+{
+  "schema": "agent_bridge.semantic_bus.fixture.v0",
+  "fixture_id": "lswr_world_entity",
+  "semantic_object": {
+    "schema": "agent_bridge.semantic_bus.object.v0",
+    "object_id": "lswr:onsen:entity:bath",
+    "object_type": "world.entity",
+    "source_adapter": "lswr.onsen",
+    "label": "bath",
+    "state": {
+      "visible": true,
+      "selected": false,
+      "space": "onsen_live_root_viewport"
+    },
+    "relations": [
+      {
+        "type": "located_in",
+        "target": "lswr:onsen:space:root_viewport"
+      }
+    ],
+    "confidence": 0.97,
+    "observed_at": "2026-06-07T10:32:00Z",
+    "provenance": {
+      "tool": "world_visibility_query",
+      "schema": "agent_bridge.world_tool.v0"
+    }
+  },
+  "affordances": [
+    {
+      "affordance_id": "lswr:onsen:entity:bath:patch",
+      "object_id": "lswr:onsen:entity:bath",
+      "action_type": "world.patch",
+      "args_schema": {
+        "op": "move_facility",
+        "entity": "bath"
+      },
+      "risk_level": "medium",
+      "requires_gate": false,
+      "expected_effect": "bath position changes in the live viewport"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt-lswr-world-entity-observed",
+      "ts": "2026-06-07T10:32:00Z",
+      "source": "world_visibility_query",
+      "actor": "agent",
+      "project": "agent-bridge",
+      "event_type": "object.observed",
+      "subject_id": "lswr:onsen:entity:bath",
+      "payload_json": {
+        "visible_entities": [
+          "bath"
+        ]
+      },
+      "source_event_ids": [],
+      "prev_hash": null,
+      "hash": "fixture"
+    }
+  ],
+  "verification": {
+    "verdict": "verified",
+    "reason": null,
+    "method": "live_viewport_pixel_coverage",
+    "evidence": {
+      "entity": "bath",
+      "visible": true
+    },
+    "verified_to": "onsen_live_root_viewport",
+    "recover": "proceed",
+    "raw_available": false
+  },
+  "presentation": {
+    "presentation_id": "present-lswr-world-entity",
+    "source_event_ids": [
+      "evt-lswr-world-entity-observed"
+    ],
+    "human_summary": "The LSWR bath entity is verified in the live viewport.",
+    "machine_payload": {
+      "object_id": "lswr:onsen:entity:bath"
+    },
+    "ingestion": {
+      "allowed": false,
+      "reason": "fixture_only"
+    },
+    "artifact": null,
+    "created_at": "2026-06-07T10:32:00Z"
+  }
+}

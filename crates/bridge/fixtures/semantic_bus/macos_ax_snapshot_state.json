@@ -1,0 +1,157 @@
+{
+  "schema": "agent_bridge.semantic_bus.fixture.v0",
+  "fixture_id": "macos_ax_snapshot_state",
+  "adapter_contract": {
+    "schema": "agent_bridge.semantic_bus.adapter_conformance.v0",
+    "adapter_family": "macos_desktop",
+    "tool": "desktop_snapshot",
+    "read_only": true,
+    "broad_host_mutation": false,
+    "mutation_surface": "none",
+    "channels": [
+      "workspace_session",
+      "cgwindow",
+      "ax"
+    ],
+    "fallback_order": [
+      "workspace_session",
+      "cgwindow",
+      "ax",
+      "vision_grounding_ocr"
+    ],
+    "isolation": "read_only_observation_requires_accessibility_permission",
+    "notes": "macOS snapshot state should normalize NSWorkspace/CGWindow/AXUIElement sources before pixels."
+  },
+  "semantic_object": {
+    "schema": "agent_bridge.semantic_bus.object.v0",
+    "object_id": "desktop:macos:accessible:4242:axid-approve",
+    "object_type": "desktop.accessible.button",
+    "source_adapter": "macos.ax",
+    "label": "Approve",
+    "state": {
+      "platform": {
+        "raw_role": "AXButton",
+        "ax_identifier": "approve",
+        "bundle_id": "com.example.AgentBridgeFixture",
+        "cg_window_number": 8801
+      },
+      "role": "button",
+      "title": "Approve",
+      "identifier": "approve",
+      "enabled": true,
+      "focused": false,
+      "rect": {
+        "x": 640,
+        "y": 420,
+        "width": 92,
+        "height": 30
+      },
+      "pid": 4242
+    },
+    "relations": [
+      {
+        "type": "contained_by",
+        "target": "desktop:macos:window:cg:8801"
+      }
+    ],
+    "confidence": 0.92,
+    "observed_at": "2026-06-07T12:00:00Z",
+    "provenance": {
+      "tool": "desktop_snapshot",
+      "schema": "agent_bridge.semantic_bus.desktop_snapshot.v0",
+      "platform_schema": "macos.ax.fixture"
+    }
+  },
+  "affordances": [
+    {
+      "affordance_id": "desktop:macos:accessible:4242:axid-approve:verify-enabled",
+      "object_id": "desktop:macos:accessible:4242:axid-approve",
+      "action_type": "desktop.verify",
+      "args_schema": {
+        "platform": "macos",
+        "object_id": "desktop:macos:accessible:4242:axid-approve",
+        "app": "AgentBridgeFixture",
+        "role": "button",
+        "name": "Approve",
+        "state": "enabled",
+        "macos": {
+          "bundle_id": "com.example.AgentBridgeFixture",
+          "ax_identifier": "approve"
+        }
+      },
+      "risk_level": "low",
+      "requires_gate": false,
+      "expected_effect": "re-observes the AX button without mutating the desktop"
+    },
+    {
+      "affordance_id": "desktop:macos:accessible:4242:axid-approve:invoke",
+      "object_id": "desktop:macos:accessible:4242:axid-approve",
+      "action_type": "desktop.invoke",
+      "args_schema": {
+        "platform": "macos",
+        "object_id": "desktop:macos:accessible:4242:axid-approve",
+        "macos": {
+          "ax_action": "AXPress"
+        }
+      },
+      "risk_level": "medium",
+      "requires_gate": true,
+      "expected_effect": "would perform AXPress only through a gated action path"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt-macos-ax-snapshot-button-observed",
+      "ts": "2026-06-07T12:00:00Z",
+      "source": "desktop_snapshot",
+      "actor": "agent",
+      "project": "agent-bridge",
+      "event_type": "desktop.snapshot.observed",
+      "subject_id": "desktop:macos:accessible:4242:axid-approve",
+      "payload_json": {
+        "channels": [
+          "workspace_session",
+          "cgwindow",
+          "ax"
+        ],
+        "bundle_id": "com.example.AgentBridgeFixture",
+        "screenshot_required": false
+      },
+      "source_event_ids": [],
+      "prev_hash": null,
+      "hash": "fixture"
+    }
+  ],
+  "verification": {
+    "verdict": "verified",
+    "reason": null,
+    "method": "macos.ax.semantic_tree",
+    "evidence": {
+      "ax_present": true,
+      "cgwindow_present": true,
+      "accessibility_permission": "available",
+      "screenshot_required": false
+    },
+    "verified_to": "agent_bridge.semantic_bus.desktop_snapshot.v0:macos.ax",
+    "recover": "proceed",
+    "raw_available": true
+  },
+  "presentation": {
+    "presentation_id": "present-macos-ax-snapshot-state",
+    "source_event_ids": [
+      "evt-macos-ax-snapshot-button-observed"
+    ],
+    "human_summary": "macOS AX snapshot state is represented as a cross-platform accessible button object.",
+    "machine_payload": {
+      "object_id": "desktop:macos:accessible:4242:axid-approve",
+      "adapter_contract": "agent_bridge.semantic_bus.adapter_conformance.v0",
+      "mutating_affordance_requires_gate": true
+    },
+    "ingestion": {
+      "allowed": false,
+      "reason": "fixture_only"
+    },
+    "artifact": null,
+    "created_at": "2026-06-07T12:00:00Z"
+  }
+}

@@ -51,6 +51,9 @@
 //!   - `GET  /agent/inbox`    — XM v0.1: read this node's inbox for a
 //!                              given `to_session`. Both endpoints are
 //!                              tailnet-trusted; see R-XM-A/B in §3.
+//!   - `GET /semantic-bus/runtime-conformance?...` — SSB remote harness export:
+//!                                                    read-only conformance
+//!                                                    snapshot for this node.
 //!
 //! Bind to a tailnet-reachable address (`0.0.0.0:7878` by default). The
 //! tailscale ACL handles peer auth — this daemon trusts whoever can reach
@@ -225,6 +228,10 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         .route("/embed", post(embed_endpoint))
         .route("/agent/messages", post(agent_message_write))
         .route("/agent/inbox", get(agent_inbox_read))
+        .route(
+            "/semantic-bus/runtime-conformance",
+            get(semantic_bus_runtime_conformance_endpoint),
+        )
         .with_state(state);
 
     // Bind all listeners up-front so any bind failure fails the whole
@@ -262,6 +269,40 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
 
 async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, "ok")
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct SemanticBusRuntimeConformanceQuery {
+    cwd: Option<String>,
+    include_runtime_health: Option<bool>,
+    daemon_http_url: Option<String>,
+    palace_url: Option<String>,
+    timeout_ms: Option<u64>,
+}
+
+async fn semantic_bus_runtime_conformance_endpoint(
+    Query(q): Query<SemanticBusRuntimeConformanceQuery>,
+) -> Json<Value> {
+    let mut args = serde_json::Map::new();
+    if let Some(cwd) = q.cwd.filter(|s| !s.trim().is_empty()) {
+        args.insert("cwd".into(), json!(cwd));
+    }
+    if let Some(include_runtime_health) = q.include_runtime_health {
+        args.insert("include_runtime_health".into(), json!(include_runtime_health));
+    }
+    if let Some(daemon_http_url) = q.daemon_http_url.filter(|s| !s.trim().is_empty()) {
+        args.insert("daemon_http_url".into(), json!(daemon_http_url));
+    }
+    if let Some(palace_url) = q.palace_url.filter(|s| !s.trim().is_empty()) {
+        args.insert("palace_url".into(), json!(palace_url));
+    }
+    if let Some(timeout_ms) = q.timeout_ms {
+        args.insert("timeout_ms".into(), json!(timeout_ms));
+    }
+    Json(crate::mcp_tools::semantic_bus_runtime_conformance_payload(
+        &Value::Object(args),
+    )
+    .await)
 }
 
 /// Serve the A2A AgentCard for a single session_id.
@@ -7351,6 +7392,32 @@ mod tests {
         assert_eq!(payload["posts"][0]["body_total_chars"], json!(6));
         assert_eq!(payload["posts"][0]["refs_omitted"], json!(true));
         assert!(payload["posts"][0].get("refs").is_none());
+    }
+
+    #[tokio::test]
+    async fn semantic_bus_runtime_conformance_endpoint_is_read_only_json() {
+        let Json(payload) = semantic_bus_runtime_conformance_endpoint(Query(
+            SemanticBusRuntimeConformanceQuery {
+                include_runtime_health: Some(false),
+                ..Default::default()
+            },
+        ))
+        .await;
+
+        assert_eq!(
+            payload["schema"].as_str(),
+            Some("agent_bridge.semantic_bus.runtime_conformance.v0")
+        );
+        assert_eq!(payload["read_only"].as_bool(), Some(true));
+        assert_eq!(payload["live_checks_executed"].as_bool(), Some(false));
+        assert_eq!(
+            payload["verification"]["verdict"].as_str(),
+            Some("not_checked")
+        );
+        assert_eq!(
+            payload["windows_uia_runtime_slot"]["adapter_id"].as_str(),
+            Some("windows_uia_runtime_adapter")
+        );
     }
 
     #[test]
