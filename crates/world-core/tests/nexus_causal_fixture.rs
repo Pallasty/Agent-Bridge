@@ -1,8 +1,9 @@
 use ab_world_core::{
     ActionId, AdapterEvidence, AuthorityMode, BranchId, EntityId, Event, EventId, EventProvenance,
     EventQuery, EventQueryFilters, EventQueryId, EventRefs, EvidenceQuery, EvidenceQueryFilters,
-    EvidenceQueryId, Participant, ParticipantId, ParticipantKind, TargetRef, Verdict, Verification,
-    WorldId, WorldLedger, SCHEMA_EVENT, SCHEMA_EVENT_QUERY, SCHEMA_EVIDENCE_QUERY,
+    EvidenceQueryId, Feedback, FeedbackQuery, FeedbackQueryFilters, FeedbackQueryId, Participant,
+    ParticipantId, ParticipantKind, TargetRef, Verdict, Verification, WorldId, WorldLedger,
+    SCHEMA_EVENT, SCHEMA_EVENT_QUERY, SCHEMA_EVIDENCE_QUERY, SCHEMA_FEEDBACK_QUERY,
 };
 use serde_json::{json, Value};
 
@@ -173,6 +174,60 @@ fn nexus_causal_seed_maps_into_world_core_without_visual_fields() {
     assert_eq!(
         blocked[0].evidence.payload["required_authority"],
         "human.accept"
+    );
+
+    let mut governance_feedback = Feedback::new(EventId::from_raw("evt_autonomy_blocked"));
+    governance_feedback
+        .target
+        .events
+        .push(EventId::from_raw("evt_tax_change"));
+    governance_feedback
+        .target
+        .entities
+        .push(EntityId::from_raw("settlement:onsen"));
+    governance_feedback.target.adapter = Some("nexus".to_string());
+    governance_feedback.raw = json!({
+        "blocked_event": "evt_autonomy_blocked",
+        "required_authority": "human.accept"
+    });
+    governance_feedback.normalized = json!({
+        "decision": "needs_human_accept",
+        "reason": "autonomy_limit"
+    });
+    ledger
+        .append_feedback(governance_feedback)
+        .expect("governance feedback");
+
+    let governance_feedback_query = FeedbackQuery::with_id(
+        FeedbackQueryId::from_raw("query:nexus:governance_feedback"),
+        FeedbackQueryFilters {
+            source_event_id: Some(EventId::from_raw("evt_autonomy_blocked")),
+            target_event_id: Some(EventId::from_raw("evt_tax_change")),
+            entity_id: Some(EntityId::from_raw("settlement:onsen")),
+            adapter: Some("nexus".to_string()),
+            changes_world_verdict: Some(false),
+            ..FeedbackQueryFilters::default()
+        },
+    );
+    let governance_feedback_response = ledger.query_feedback(&governance_feedback_query);
+    assert_eq!(governance_feedback_response.schema, SCHEMA_FEEDBACK_QUERY);
+    assert_eq!(governance_feedback_response.feedback.len(), 1);
+    assert_eq!(
+        governance_feedback_response.feedback[0].normalized["decision"],
+        "needs_human_accept"
+    );
+    assert_eq!(governance_feedback_response.summary.feedback_count, 1);
+    assert_eq!(
+        governance_feedback_response
+            .summary
+            .world_verdict_mutation_attempt_count,
+        0
+    );
+    assert_eq!(governance_feedback_response.summary.target_event_count, 1);
+    assert_eq!(governance_feedback_response.summary.target_entity_count, 1);
+    assert_eq!(
+        governance_feedback_response.summary.adapter_counts["nexus"],
+        1
     );
 }
 

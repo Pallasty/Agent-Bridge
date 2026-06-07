@@ -1,9 +1,10 @@
 use ab_world_core::{
     ActionId, AdapterEvidence, AuthorityMode, BranchId, Event, EventId, EventProvenance,
     EventQuery, EventQueryFilters, EventQueryId, EventRefs, EvidenceQuery, EvidenceQueryFilters,
-    EvidenceQueryId, Participant, ParticipantId, ParticipantKind, RollbackGroupId, RollbackRecord,
-    TargetRef, Verdict, Verification, WorldId, WorldLedger, SCHEMA_EVENT, SCHEMA_EVENT_QUERY,
-    SCHEMA_EVIDENCE_QUERY,
+    EvidenceQueryId, Feedback, FeedbackQuery, FeedbackQueryFilters, FeedbackQueryId, Participant,
+    ParticipantId, ParticipantKind, RollbackGroupId, RollbackRecord, TargetRef, Verdict,
+    Verification, WorldId, WorldLedger, SCHEMA_EVENT, SCHEMA_EVENT_QUERY, SCHEMA_EVIDENCE_QUERY,
+    SCHEMA_FEEDBACK_QUERY,
 };
 use serde_json::{json, Value};
 
@@ -137,8 +138,10 @@ fn p8_world_export_maps_into_world_core_without_laundering_truth() {
         reject.payload["does_not_change_verification"],
         Value::Bool(true)
     );
-    let rejected_action = &reject.refs.actions[0];
-    let rejected_verification = ledger.query_evidence_by_action(rejected_action);
+    let reject_event_id = reject.event_id.clone();
+    let rejected_action = reject.refs.actions[0].clone();
+    let rejected_entity = reject.refs.entities[0].clone();
+    let rejected_verification = ledger.query_evidence_by_action(&rejected_action);
     assert_eq!(rejected_verification.len(), 1);
     assert_eq!(rejected_verification[0].verdict, Verdict::Verified);
 
@@ -185,6 +188,54 @@ fn p8_world_export_maps_into_world_core_without_laundering_truth() {
         .events
         .iter()
         .any(|event| event.event_type == "human.reject"));
+
+    let mut reject_feedback = Feedback::new(reject_event_id.clone());
+    reject_feedback.target.actions.push(rejected_action.clone());
+    reject_feedback
+        .target
+        .entities
+        .push(rejected_entity.clone());
+    reject_feedback.target.adapter = Some("threejs_web".to_string());
+    reject_feedback.raw = reject.payload.clone();
+    reject_feedback.normalized = json!({
+        "decision": "reject",
+        "does_not_change_verification": true
+    });
+    ledger
+        .append_feedback(reject_feedback)
+        .expect("reject feedback");
+
+    let reject_feedback_query = FeedbackQuery::with_id(
+        FeedbackQueryId::from_raw("query:p8:reject_feedback"),
+        FeedbackQueryFilters {
+            source_event_id: Some(reject_event_id),
+            action_id: Some(rejected_action),
+            entity_id: Some(rejected_entity),
+            adapter: Some("threejs_web".to_string()),
+            changes_world_verdict: Some(false),
+            ..FeedbackQueryFilters::default()
+        },
+    );
+    let reject_feedback_response = ledger.query_feedback(&reject_feedback_query);
+    assert_eq!(reject_feedback_response.schema, SCHEMA_FEEDBACK_QUERY);
+    assert_eq!(reject_feedback_response.feedback.len(), 1);
+    assert_eq!(
+        reject_feedback_response.feedback[0].normalized["decision"],
+        "reject"
+    );
+    assert_eq!(reject_feedback_response.summary.feedback_count, 1);
+    assert_eq!(
+        reject_feedback_response
+            .summary
+            .world_verdict_mutation_attempt_count,
+        0
+    );
+    assert_eq!(reject_feedback_response.summary.target_action_count, 1);
+    assert_eq!(reject_feedback_response.summary.target_entity_count, 1);
+    assert_eq!(
+        reject_feedback_response.summary.adapter_counts["threejs_web"],
+        1
+    );
 
     let rollback_verification = ledger
         .verifications()
