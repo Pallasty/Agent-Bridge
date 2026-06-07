@@ -31,6 +31,7 @@ pub mod instinct;
 pub mod llm_client;
 pub mod locks;
 pub mod lswr_snapshot_bridge;
+pub mod lswr_snapshot_consumer;
 pub mod mcp_tools;
 pub mod notion_api;
 pub mod openai_api;
