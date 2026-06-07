@@ -573,6 +573,79 @@
       border-top: 1px solid #1f1f2a;
       padding-top: 14px;
     }
+    #panel .content-reader {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #panel .content-reader-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+    #panel .content-reader-head .workbench-section-title {
+      margin-bottom: 0;
+    }
+    #panel .content-reader-meta {
+      min-width: 0;
+      color: #5a5a68;
+      font-size: 9px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    #panel .content-reader-controls {
+      display: flex;
+      gap: 4px;
+      padding: 6px;
+      background: #0f0f16;
+      border: 1px solid #1f1f2a;
+      border-radius: 5px;
+    }
+    #panel .content-reader-controls button {
+      background: transparent;
+      border: 1px solid #252532;
+      color: #8a8a9c;
+      border-radius: 3px;
+      padding: 3px 8px;
+      font-size: 10px;
+      line-height: 1.2;
+      letter-spacing: 0.04em;
+      font-family: inherit;
+      cursor: pointer;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    #panel .content-reader-controls button:hover {
+      color: #e8e8ee;
+      border-color: #5a5a72;
+    }
+    #panel .content-reader-controls button.active {
+      color: #ffffff;
+      border-color: #5cc8c8;
+      background: #101b1d;
+    }
+    #panel .content-reader-body.content {
+      max-height: 260px;
+      overflow: auto;
+      margin: 0;
+      padding: 10px;
+      background: #0f0f16;
+      border: 1px solid #1f1f2a;
+      border-left: 2px solid #5cc8c8;
+      border-radius: 4px;
+      scrollbar-color: #4a4a55 #101018;
+    }
+    #panel .content-reader-body.full {
+      max-height: none;
+    }
+    #panel .content-reader-body.truncated {
+      border-left-color: #a87cff;
+    }
     #panel .placeholder {
       color: #4a4a55;
       font-size: 11px;
@@ -2432,6 +2505,7 @@ const VALID_REGION_NODE_FILTERS = new Set(["all", "fresh", "stale", "hubs", "orp
 const VALID_REGION_NODE_SORTS = new Set(["rank", "degree", "recent", "key"]);
 const VALID_NEIGHBOR_FILTERS = new Set(["all", "structural", "coactivation"]);
 const VALID_NEIGHBOR_SORTS = new Set(["weight", "type", "key"]);
+const VALID_CONTENT_READER_MODES = new Set(["scan", "full"]);
 const state = {
   cy: null,
   data: null,
@@ -2452,6 +2526,7 @@ const state = {
   neighborFilter: "all",
   neighborSort: "weight",
   relationDetailKey: null,
+  contentReaderMode: "scan",
   // ζ-13: degree info computed once per loadGraph, consumed by both the
   // footer badge and buildCy's per-node hub/orphan marker. Stashed here
   // (rather than recomputed twice) so the two surfaces can't drift.
@@ -2469,6 +2544,7 @@ function serializeViewState() {
     regionNodeSort: state.regionNodeSort,
     neighborFilter: state.neighborFilter,
     neighborSort: state.neighborSort,
+    contentReaderMode: state.contentReaderMode,
     sources: Array.from(state.enabledSources),
     kinds: Array.from(state.enabledKinds),
     edgeTypes: Array.from(state.enabledEdgeTypes),
@@ -2535,6 +2611,7 @@ function restoreViewStateFromUrlOrStorage() {
   if (VALID_REGION_NODE_SORTS.has(restored.regionNodeSort)) state.regionNodeSort = restored.regionNodeSort;
   if (VALID_NEIGHBOR_FILTERS.has(restored.neighborFilter)) state.neighborFilter = restored.neighborFilter;
   if (VALID_NEIGHBOR_SORTS.has(restored.neighborSort)) state.neighborSort = restored.neighborSort;
+  if (VALID_CONTENT_READER_MODES.has(restored.contentReaderMode)) state.contentReaderMode = restored.contentReaderMode;
   if (restoreSet(state.enabledSources, restored.sources)) {
     if (state.enabledSources.size === 0) {
       state.enabledSources.add("sqlite");
@@ -3441,6 +3518,66 @@ function refreshWorkbenchNeighborSection(panel, memory) {
   bindWorkbenchNeighborActions(panel, memory);
 }
 
+function contentReaderStats(content) {
+  const text = String(content || "");
+  const trimmed = text.trim();
+  return {
+    chars: text.length,
+    words: trimmed ? (trimmed.match(/\S+/g) || []).length : 0,
+    lines: text ? text.split(/\r\n|\n|\r/).length : 0,
+  };
+}
+
+function formatReaderCount(n) {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1).replace(/\.0$/, "")}m`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return String(n);
+}
+
+function contentReaderText(content, mode) {
+  const text = String(content || "");
+  if (mode === "full") return text;
+  const limit = 1800;
+  const maxLines = 18;
+  const lines = text.split(/\r\n|\n|\r/);
+  let scan = lines.slice(0, maxLines).join("\n");
+  if (scan.length > limit) scan = scan.slice(0, limit);
+  if (scan.length < text.length) scan = scan.replace(/\s+$/, "") + "\n\n...";
+  return scan;
+}
+
+function renderWorkbenchContentReader(memory) {
+  const mode = VALID_CONTENT_READER_MODES.has(state.contentReaderMode)
+    ? state.contentReaderMode
+    : "scan";
+  const content = String(memory.content || "");
+  const stats = contentReaderStats(content);
+  const text = contentReaderText(content, mode);
+  const truncated = mode === "scan" && text.endsWith("\n\n...");
+  const buttons = [
+    ["scan", "scan"],
+    ["full", "full"],
+  ].map(([value, label]) =>
+    `<button type="button" data-content-reader-mode="${value}" class="${mode === value ? "active" : ""}">${label}</button>`
+  ).join("");
+  const statLine = `${formatReaderCount(stats.lines)} lines · ${formatReaderCount(stats.words)} words · ${formatReaderCount(stats.chars)} chars`;
+  return `<div class="workbench-section content-reader" id="workbench-content-reader">
+    <div class="content-reader-head">
+      <div class="workbench-section-title">Content</div>
+      <div class="content-reader-meta">${escapeHTML(statLine)}</div>
+    </div>
+    <div class="content-reader-controls">${buttons}</div>
+    <div class="content content-reader-body ${mode}${truncated ? " truncated" : ""}" data-content-reader-mode="${escapeHTML(mode)}">${escapeHTML(text || "(empty)")}</div>
+  </div>`;
+}
+
+function refreshWorkbenchContentReader(panel, memory) {
+  const section = panel.querySelector("#workbench-content-reader");
+  if (!section) return;
+  section.outerHTML = renderWorkbenchContentReader(memory);
+  bindWorkbenchContentActions(panel, memory);
+}
+
 function renderWorkbenchSourceStack(memory, graphData, region) {
   const sourceLabel = memory.source === "markdown" ? "markdown file" : "sqlite memory";
   const role = graphData.hub
@@ -3723,10 +3860,7 @@ async function showSidePanel(id) {
               ${(m.tags || []).map(t => `<span class="tag">${escapeHTML(t)}</span>`).join("") || `<span class="tag">none</span>`}
             </div>
           </div>
-          <div class="workbench-section">
-            <div class="workbench-section-title">Content</div>
-            <div class="content">${escapeHTML(m.content || "")}</div>
-          </div>
+          ${renderWorkbenchContentReader(m)}
           <div class="reports-section" id="reports-section" style="display:none">
             <div class="reports-title">related reports</div>
             <div class="reports-list" id="reports-list"></div>
@@ -3845,8 +3979,21 @@ function bindWorkbenchNeighborActions(panel, memory) {
   });
 }
 
+function bindWorkbenchContentActions(panel, memory) {
+  panel.querySelectorAll("button[data-content-reader-mode]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.contentReaderMode;
+      if (!VALID_CONTENT_READER_MODES.has(mode)) return;
+      state.contentReaderMode = mode;
+      refreshWorkbenchContentReader(panel, memory);
+      saveViewState();
+    });
+  });
+}
+
 function bindWorkbenchActions(panel, memory) {
   bindWorkbenchNeighborActions(panel, memory);
+  bindWorkbenchContentActions(panel, memory);
   const copyBtn = panel.querySelector(".copy-key-btn");
   if (copyBtn) {
     copyBtn.addEventListener("click", async () => {
