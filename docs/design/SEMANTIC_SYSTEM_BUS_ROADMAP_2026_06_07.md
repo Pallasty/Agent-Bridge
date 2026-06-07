@@ -404,6 +404,14 @@ Goal:
 
 Make Linux the reference substrate for semantic bus behavior.
 
+Initial landing:
+
+- [Semantic System Bus Linux Adapter Conformance](SEMANTIC_SYSTEM_BUS_LINUX_ADAPTER_CONFORMANCE_2026_06_07.md);
+- added `agent_bridge.semantic_bus.adapter_conformance.v0` fixture metadata;
+- pinned read-only contracts for `desktop_snapshot`, `desktop_verify`,
+  `vision_grounding_ocr`, and daemon HTTP health;
+- enforced that OCR is a fallback path and coordinate actions must remain gated.
+
 ### SSB-5 - Cross-platform mapping memo
 
 Deliverable:

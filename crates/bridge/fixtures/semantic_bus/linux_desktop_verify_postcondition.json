@@ -1,0 +1,118 @@
+{
+  "schema": "agent_bridge.semantic_bus.fixture.v0",
+  "fixture_id": "linux_desktop_verify_postcondition",
+  "adapter_contract": {
+    "schema": "agent_bridge.semantic_bus.adapter_conformance.v0",
+    "adapter_family": "linux_desktop",
+    "tool": "desktop_verify",
+    "read_only": true,
+    "broad_host_mutation": false,
+    "mutation_surface": "none",
+    "channels": [
+      "atspi",
+      "sway_tree"
+    ],
+    "fallback_order": [
+      "atspi",
+      "sway_tree",
+      "vision_grounding_ocr"
+    ],
+    "isolation": "read_only_polling",
+    "notes": "Verification reuses the same selector after an action and maps misses to recover hints."
+  },
+  "semantic_object": {
+    "schema": "agent_bridge.semantic_bus.object.v0",
+    "object_id": "desktop:linux:atspi:button:invokeok",
+    "object_type": "desktop.accessible.postcondition",
+    "source_adapter": "linux.atspi.verify",
+    "label": "INVOKEOK postcondition",
+    "state": {
+      "selector": {
+        "app": "zenity",
+        "role": "button",
+        "name": "INVOKEOK"
+      },
+      "expect": "element_gone",
+      "held_after_ms": 180
+    },
+    "relations": [
+      {
+        "type": "verified_after",
+        "target": "desktop:linux:sway:window:zenity-dialog"
+      }
+    ],
+    "confidence": 0.93,
+    "observed_at": "2026-06-07T11:01:00Z",
+    "provenance": {
+      "tool": "desktop_verify",
+      "schema": "desktop_verify/v0"
+    }
+  },
+  "affordances": [
+    {
+      "affordance_id": "desktop:linux:atspi:button:invokeok:verify-gone",
+      "object_id": "desktop:linux:atspi:button:invokeok",
+      "action_type": "desktop.verify",
+      "args_schema": {
+        "app": "zenity",
+        "role": "button",
+        "name": "INVOKEOK",
+        "expect": "element_gone"
+      },
+      "risk_level": "low",
+      "requires_gate": false,
+      "expected_effect": "polls until the selected element is gone or returns a recover hint"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt-linux-desktop-verify-postcondition",
+      "ts": "2026-06-07T11:01:00Z",
+      "source": "desktop_verify",
+      "actor": "agent",
+      "project": "agent-bridge",
+      "event_type": "verification.completed",
+      "subject_id": "desktop:linux:atspi:button:invokeok",
+      "payload_json": {
+        "expect": "element_gone",
+        "verdict": "verified",
+        "recover": "proceed"
+      },
+      "source_event_ids": [
+        "evt-linux-desktop-snapshot-window-observed"
+      ],
+      "prev_hash": null,
+      "hash": "fixture"
+    }
+  ],
+  "verification": {
+    "verdict": "verified",
+    "reason": null,
+    "method": "desktop_verify.polling_atspi",
+    "evidence": {
+      "expect": "element_gone",
+      "polling": true,
+      "held_after_ms": 180
+    },
+    "verified_to": "desktop:linux:atspi:button:invokeok:element_gone",
+    "recover": "proceed",
+    "raw_available": true
+  },
+  "presentation": {
+    "presentation_id": "present-linux-desktop-verify-postcondition",
+    "source_event_ids": [
+      "evt-linux-desktop-verify-postcondition"
+    ],
+    "human_summary": "desktop_verify confirms an AT-SPI postcondition and returns a direct recover hint.",
+    "machine_payload": {
+      "object_id": "desktop:linux:atspi:button:invokeok",
+      "recover": "proceed"
+    },
+    "ingestion": {
+      "allowed": false,
+      "reason": "fixture_only"
+    },
+    "artifact": null,
+    "created_at": "2026-06-07T11:01:00Z"
+  }
+}

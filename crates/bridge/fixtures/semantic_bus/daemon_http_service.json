@@ -1,6 +1,24 @@
 {
   "schema": "agent_bridge.semantic_bus.fixture.v0",
   "fixture_id": "daemon_http_service",
+  "adapter_contract": {
+    "schema": "agent_bridge.semantic_bus.adapter_conformance.v0",
+    "adapter_family": "process_daemon",
+    "tool": "daemon_http",
+    "read_only": true,
+    "broad_host_mutation": false,
+    "mutation_surface": "none",
+    "channels": [
+      "http_health",
+      "process_state"
+    ],
+    "fallback_order": [
+      "http_health",
+      "process_state"
+    ],
+    "isolation": "localhost_only",
+    "notes": "Daemon health is a semantic service object; localhost-only HTTP checks are read-only conformance evidence."
+  },
   "semantic_object": {
     "schema": "agent_bridge.semantic_bus.object.v0",
     "object_id": "service:agent-bridge:daemon-http:127.0.0.1:7878",
