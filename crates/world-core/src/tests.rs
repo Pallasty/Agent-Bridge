@@ -240,6 +240,84 @@ fn rollback_group_registration_and_query_are_ledger_visible() {
 }
 
 #[test]
+fn action_query_envelope_filters_and_summarizes_core_actions() {
+    let ai_id = ParticipantId::from_raw("ai:codex");
+    let human_id = ParticipantId::from_raw("human:owner");
+    let entity_id = EntityId::from_raw("cube_action");
+    let group_id = RollbackGroupId::from_raw("rb_action");
+
+    let mut ai_action = Action::new(
+        "entity.move",
+        Participant::ai(ai_id.clone(), AuthorityMode::Autonomous),
+    );
+    ai_action.action_id = ActionId::from_raw("act_move_cube_action");
+    ai_action.target_refs.push(TargetRef::entity(&entity_id));
+    ai_action.expected_effect = json!({"position": [1, 1, 0], "human_visible": true});
+    ai_action.rollback_group = Some(group_id.clone());
+
+    let mut human_action = Action::new(
+        "entity.select",
+        Participant::human(human_id.clone(), "web_scene"),
+    );
+    human_action.action_id = ActionId::from_raw("act_select_cube_action");
+    human_action.target_refs.push(TargetRef::entity(&entity_id));
+
+    let mut ledger = WorldLedger::new();
+    ledger.append_action(ai_action.clone()).unwrap();
+    ledger.append_action(human_action).unwrap();
+
+    assert_eq!(ledger.actions().len(), 2);
+    assert_eq!(
+        ledger
+            .action_by_id(&ai_action.action_id)
+            .unwrap()
+            .action_type,
+        "entity.move"
+    );
+    assert_eq!(ledger.query_actions_by_type("entity.select").len(), 1);
+    assert_eq!(
+        ledger.append_action(ai_action.clone()).unwrap_err(),
+        WorldCoreError::DuplicateAction(ai_action.action_id.to_string())
+    );
+
+    let query = ActionQuery::with_id(
+        ActionQueryId::from_raw("query:actions:move_cube"),
+        ActionQueryFilters {
+            action_type: Some("entity.move".to_string()),
+            source_participant_id: Some(ai_id),
+            participant_kind: Some(ParticipantKind::Ai),
+            authority_mode: Some(AuthorityMode::Autonomous),
+            target_ref_kind: Some("entity".to_string()),
+            target_ref_id: Some(entity_id.to_string()),
+            rollback_group: Some(group_id),
+            has_expected_effect: Some(true),
+            ..ActionQueryFilters::default()
+        },
+    );
+    let response = ledger.query_actions(&query);
+    assert_eq!(response.schema, SCHEMA_ACTION_QUERY);
+    assert_eq!(response.actions.len(), 1);
+    assert_eq!(response.actions[0].action_id, ai_action.action_id);
+    assert_eq!(response.summary.action_count, 1);
+    assert_eq!(response.summary.target_ref_count, 1);
+    assert_eq!(response.summary.rollback_linked_action_count, 1);
+    assert_eq!(response.summary.expected_effect_payload_count, 1);
+    assert_eq!(response.summary.action_type_counts["entity.move"], 1);
+    assert_eq!(response.summary.participant_kind_counts["ai"], 1);
+    assert_eq!(response.summary.authority_mode_counts["autonomous"], 1);
+
+    let no_effect_response = ledger.query_actions(&ActionQuery::new(ActionQueryFilters::by_type(
+        "entity.select",
+    )));
+    assert_eq!(no_effect_response.actions.len(), 1);
+    assert_eq!(no_effect_response.summary.expected_effect_payload_count, 0);
+    assert_eq!(
+        no_effect_response.summary.participant_kind_counts["human"],
+        1
+    );
+}
+
+#[test]
 fn rollback_query_envelope_filters_and_summarizes_rollback_records() {
     let action_id = ActionId::from_raw("act_move_cube_rollback");
     let verified_group_id = RollbackGroupId::from_raw("rb_verified");

@@ -1,11 +1,12 @@
 use ab_world_core::{
-    ActionId, AdapterEvidence, AuthorityMode, BranchId, Event, EventId, EventProvenance,
-    EventQuery, EventQueryFilters, EventQueryId, EventRefs, EvidenceQuery, EvidenceQueryFilters,
+    Action, ActionId, ActionQuery, ActionQueryFilters, ActionQueryId, AdapterEvidence,
+    AuthorityMode, BranchId, EntityId, Event, EventId, EventProvenance, EventQuery,
+    EventQueryFilters, EventQueryId, EventRefs, EvidenceQuery, EvidenceQueryFilters,
     EvidenceQueryId, Feedback, FeedbackQuery, FeedbackQueryFilters, FeedbackQueryId, Participant,
     ParticipantId, ParticipantKind, RollbackGroupId, RollbackQuery, RollbackQueryFilters,
     RollbackQueryId, RollbackRecord, TargetRef, Verdict, Verification, WorldId, WorldLedger,
-    SCHEMA_EVENT, SCHEMA_EVENT_QUERY, SCHEMA_EVIDENCE_QUERY, SCHEMA_FEEDBACK_QUERY,
-    SCHEMA_ROLLBACK_QUERY,
+    SCHEMA_ACTION_QUERY, SCHEMA_EVENT, SCHEMA_EVENT_QUERY, SCHEMA_EVIDENCE_QUERY,
+    SCHEMA_FEEDBACK_QUERY, SCHEMA_ROLLBACK_QUERY,
 };
 use serde_json::{json, Value};
 
@@ -30,6 +31,9 @@ fn p8_world_export_maps_into_world_core_without_laundering_truth() {
     }
 
     for raw_event in packet["events"].as_array().expect("events") {
+        if let Some(action) = map_action_from_event(raw_event) {
+            ledger.append_action(action).expect("action mapping");
+        }
         ledger
             .append_event(map_event(raw_event, &world_id, &branch_id))
             .expect("event mapping");
@@ -54,6 +58,7 @@ fn p8_world_export_maps_into_world_core_without_laundering_truth() {
             .expect("contract rollback_group_count")
     );
     assert_eq!(ledger.query_events_by_type("human.reject").len(), 1);
+    assert_eq!(ledger.actions().len(), 5);
     assert_eq!(
         ledger
             .query_events_by_type("runtime.rollback_applied")
@@ -129,6 +134,39 @@ fn p8_world_export_maps_into_world_core_without_laundering_truth() {
         .rollback_group(&rollback_id)
         .expect("rollback rb_004");
     assert_eq!(rollback.actions[0].as_str(), "act_add_entity_004");
+
+    let action_query = ActionQuery::with_id(
+        ActionQueryId::from_raw("query:p8:action_add_entity_004"),
+        ActionQueryFilters {
+            action_id: Some(ActionId::from_raw("act_add_entity_004")),
+            action_type: Some("add_entity".to_string()),
+            source_participant_id: Some(ParticipantId::from_raw("ai:codex")),
+            participant_kind: Some(ParticipantKind::Ai),
+            authority_mode: Some(AuthorityMode::Coedit),
+            target_ref_kind: Some("entity".to_string()),
+            target_ref_id: Some("cube_003".to_string()),
+            rollback_group: Some(rollback_id.clone()),
+            has_expected_effect: Some(true),
+        },
+    );
+    let action_response = ledger.query_actions(&action_query);
+    assert_eq!(action_response.schema, SCHEMA_ACTION_QUERY);
+    assert_eq!(action_response.actions.len(), 1);
+    assert_eq!(
+        action_response.actions[0].action_id.as_str(),
+        "act_add_entity_004"
+    );
+    assert_eq!(
+        action_response.actions[0].expected_effect["human_visible"],
+        true
+    );
+    assert_eq!(action_response.summary.action_count, 1);
+    assert_eq!(action_response.summary.target_ref_count, 1);
+    assert_eq!(action_response.summary.rollback_linked_action_count, 1);
+    assert_eq!(action_response.summary.expected_effect_payload_count, 1);
+    assert_eq!(action_response.summary.action_type_counts["add_entity"], 1);
+    assert_eq!(action_response.summary.participant_kind_counts["ai"], 1);
+    assert_eq!(action_response.summary.authority_mode_counts["coedit"], 1);
 
     let rollback_query = RollbackQuery::with_id(
         RollbackQueryId::from_raw("query:p8:rb_004"),
@@ -313,6 +351,31 @@ fn assert_p8_contract(packet: &Value) {
         contract["truth_boundary"]["core_mapping_must_clear_not_verified_to"],
         true
     );
+}
+
+fn map_action_from_event(raw: &Value) -> Option<Action> {
+    let raw_action = raw.get("payload")?.get("action")?;
+    let mut action = Action::new(
+        raw_action["action_type"].as_str()?,
+        map_participant(&raw_action["source"], &raw["event_type"]),
+    );
+    action.action_id = ActionId::from_raw(raw_action["action_id"].as_str()?);
+    action.expected_effect = raw_action
+        .get("expected_effect")
+        .cloned()
+        .unwrap_or(Value::Null);
+    action.rollback_group = raw_action["rollback_group"]
+        .as_str()
+        .map(RollbackGroupId::from_raw);
+    action.target_refs = raw["refs"]["entities"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(EntityId::from_raw)
+        .map(|entity_id| TargetRef::entity(&entity_id))
+        .collect();
+    Some(action)
 }
 
 fn map_event(raw: &Value, world_id: &WorldId, branch_id: &BranchId) -> Event {

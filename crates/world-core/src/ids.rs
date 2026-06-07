@@ -40,6 +40,7 @@ id_newtype!(BranchId, "branch");
 id_newtype!(EntityId, "entity");
 id_newtype!(ParticipantId, "participant");
 id_newtype!(ActionId, "action");
+id_newtype!(ActionQueryId, "action-query");
 id_newtype!(EventId, "event");
 id_newtype!(EventQueryId, "event-query");
 id_newtype!(FeedbackId, "feedback");

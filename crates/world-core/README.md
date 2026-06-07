@@ -29,12 +29,13 @@ The common adapter flow is:
 1. Build a `Participant` for the AI, human, runtime, or adapter.
 2. Build an `Action` with semantic `target_refs`, `expected_effect`, and an
    optional `rollback_group`.
-3. Build a runtime `Event` that references the action, entities, rollback group,
+3. Append the `Action` when the adapter needs intent-level readback.
+4. Build a runtime `Event` that references the action, entities, rollback group,
    and adapter provenance.
-4. Attach a `Verification` when the event claims a grounded result.
-5. Append human accept/reject as separate event or feedback records; do not use
+5. Attach a `Verification` when the event claims a grounded result.
+6. Append human accept/reject as separate event or feedback records; do not use
    human acceptance to mutate the original runtime verification.
-6. Register a `RollbackRecord` when a change has a reversible before/after
+7. Register a `RollbackRecord` when a change has a reversible before/after
    snapshot.
 
 See `examples/basic_ledger.rs` for a complete executable example.
@@ -62,8 +63,12 @@ The in-memory ledger is deliberately small. It can currently read back:
 - all events;
 - all verification records;
 - all feedback records;
+- all action records;
 - rollback groups;
+- one action by action id;
 - one event by event id;
+- actions by action type;
+- a neutral `world.actions.query` envelope over matching action records;
 - events by event type;
 - events by entity, action, rollback group, or participant;
 - a neutral `world.events.query` envelope over matching event records;
@@ -79,6 +84,12 @@ The in-memory ledger is deliberately small. It can currently read back:
 This is enough for the P8 web prototype fixture and the first adapter-facing API
 examples. More query helpers should be added only when a concrete adapter or
 review surface needs them.
+
+`ActionQuery` applies all supplied filters together. It can filter by action id,
+action type, source participant id, participant kind, authority mode, target ref
+kind/id, rollback group, and whether the action has an expected-effect payload.
+The response carries matched actions and summary counts without binding the
+intent readback path to MCP, storage, streaming, or a renderer.
 
 `EventQuery` applies all supplied filters together. It can filter by event id,
 related event id, event type, world id, branch id, entity id, action id,

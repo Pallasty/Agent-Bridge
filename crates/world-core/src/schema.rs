@@ -1,5 +1,6 @@
 pub const SCHEMA_WORLD: &str = "agent_bridge.lswr.world.v0";
 pub const SCHEMA_ACTION: &str = "agent_bridge.lswr.action.v0";
+pub const SCHEMA_ACTION_QUERY: &str = "agent_bridge.lswr.action_query.v0";
 pub const SCHEMA_EVENT: &str = "agent_bridge.lswr.event.v0";
 pub const SCHEMA_EVENT_QUERY: &str = "agent_bridge.lswr.event_query.v0";
 pub const SCHEMA_VERIFICATION: &str = "agent_bridge.lswr.verification.v0";
