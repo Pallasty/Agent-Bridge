@@ -5,6 +5,8 @@ use crate::feedback_query::{FeedbackQuery, FeedbackQueryResponse};
 use crate::ids::{ActionId, EntityId, EventId, ParticipantId, RollbackGroupId};
 use crate::model::{Action, Event, Feedback, RollbackRecord};
 use crate::rollback_query::{RollbackQuery, RollbackQueryResponse};
+use crate::schema::SCHEMA_LEDGER_SNAPSHOT;
+use crate::snapshot::WorldLedgerSnapshot;
 use crate::verification::{validate_verification, Result, Verdict, Verification, WorldCoreError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -76,6 +78,53 @@ impl WorldLedger {
         self.rollback_groups
             .insert(record.rollback_group.clone(), record);
         Ok(())
+    }
+
+    pub fn to_snapshot(&self) -> WorldLedgerSnapshot {
+        let mut rollback_records: Vec<_> = self.rollback_groups.values().cloned().collect();
+        rollback_records.sort_by(|left, right| {
+            left.rollback_group
+                .as_str()
+                .cmp(right.rollback_group.as_str())
+        });
+        WorldLedgerSnapshot::new(
+            self.actions.clone(),
+            self.events.clone(),
+            self.verifications.clone(),
+            self.feedback.clone(),
+            rollback_records,
+        )
+    }
+
+    pub fn from_snapshot(snapshot: WorldLedgerSnapshot) -> Result<Self> {
+        if snapshot.schema != SCHEMA_LEDGER_SNAPSHOT {
+            return Err(WorldCoreError::InvalidLedgerSnapshotSchema(snapshot.schema));
+        }
+
+        let mut ledger = Self::new();
+        for action in snapshot.actions {
+            ledger.append_action(action)?;
+        }
+        for event in &snapshot.events {
+            validate_event_for_import(event)?;
+        }
+        for verification in &snapshot.verifications {
+            validate_verification(
+                verification.verdict,
+                verification.reason.as_deref(),
+                verification.verified_to.as_ref(),
+            )?;
+        }
+        for feedback in &snapshot.feedback {
+            validate_feedback_for_import(feedback)?;
+        }
+        for record in snapshot.rollback_records {
+            ledger.register_rollback(record)?;
+        }
+        ledger.events = snapshot.events;
+        ledger.verifications = snapshot.verifications;
+        ledger.feedback = snapshot.feedback;
+        Ok(ledger)
     }
 
     pub fn actions(&self) -> &[Action] {
@@ -253,4 +302,25 @@ fn payload_changes_world_verdict(payload: &Value) -> bool {
         .get("changes_world_verdict")
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+fn validate_event_for_import(event: &Event) -> Result<()> {
+    if event.is_human_decision() && payload_changes_world_verdict(&event.payload) {
+        return Err(WorldCoreError::HumanDecisionChangesVerification);
+    }
+    if let Some(verification) = &event.verification {
+        validate_verification(
+            verification.verdict,
+            verification.reason.as_deref(),
+            verification.verified_to.as_ref(),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_feedback_for_import(feedback: &Feedback) -> Result<()> {
+    if feedback.changes_world_verdict {
+        return Err(WorldCoreError::HumanDecisionChangesVerification);
+    }
+    Ok(())
 }

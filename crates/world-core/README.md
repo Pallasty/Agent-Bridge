@@ -79,7 +79,9 @@ The in-memory ledger is deliberately small. It can currently read back:
 - rollback records by action;
 - a neutral `world.rollback.query` envelope over matching rollback records;
 - a neutral `world.evidence.query` envelope over matching events and
-  verification records.
+  verification records;
+- a stable `WorldLedgerSnapshot` export/import contract for transporting the
+  in-memory ledger without exposing private storage layout.
 
 This is enough for the P8 web prototype fixture and the first adapter-facing API
 examples. More query helpers should be added only when a concrete adapter or
@@ -117,6 +119,13 @@ counts for action refs, before/after payload presence, and verification-linked
 rollback records without binding the query to MCP, storage, streaming, or a
 renderer.
 
+`WorldLedger::to_snapshot()` exports actions, events, verifications, feedback,
+and rollback records under `agent_bridge.lswr.ledger_snapshot.v0`.
+`WorldLedger::from_snapshot(...)` imports that transport shape while validating
+the existing truth-boundary and no-laundering invariants. Rollback records are
+sorted by rollback group on export so the internal `HashMap` order does not leak
+into transport output.
+
 ## Fixture Pressure Tests
 
 The integration fixtures intentionally cover more than one presentation shape:
@@ -124,6 +133,9 @@ The integration fixtures intentionally cover more than one presentation shape:
 - `tests/core_query_closure.rs` proves the minimal semantic loop can be read
   back through neutral action, event, evidence, feedback, and rollback query
   envelopes without requiring screenshots or a live renderer.
+- `tests/ledger_snapshot.rs` proves the same semantic loop survives
+  export/import through `WorldLedgerSnapshot` and reruns the neutral query
+  envelopes after JSON round-trip.
 - `tests/fixtures/p8_world_export.json` maps the web prototype into the core
   ledger without laundering `not_verified` or `blocked` truth.
 - `tests/fixtures/nexus_causal_seed.json` maps a non-visual causal event chain

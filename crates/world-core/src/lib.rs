@@ -12,6 +12,7 @@ pub mod ledger;
 pub mod model;
 pub mod rollback_query;
 pub mod schema;
+pub mod snapshot;
 pub mod verification;
 
 pub use action_query::*;
@@ -23,6 +24,7 @@ pub use ledger::*;
 pub use model::*;
 pub use rollback_query::*;
 pub use schema::*;
+pub use snapshot::*;
 pub use verification::*;
 
 #[cfg(test)]
