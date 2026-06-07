@@ -4,3 +4,4 @@ pub const SCHEMA_EVENT: &str = "agent_bridge.lswr.event.v0";
 pub const SCHEMA_VERIFICATION: &str = "agent_bridge.lswr.verification.v0";
 pub const SCHEMA_FEEDBACK: &str = "agent_bridge.lswr.feedback.v0";
 pub const SCHEMA_ROLLBACK: &str = "agent_bridge.lswr.rollback.v0";
+pub const SCHEMA_EVIDENCE_QUERY: &str = "agent_bridge.lswr.evidence_query.v0";

@@ -1,3 +1,4 @@
+use crate::evidence_query::{EvidenceQuery, EvidenceQueryResponse};
 use crate::ids::{ActionId, EntityId, EventId, ParticipantId, RollbackGroupId};
 use crate::model::{Event, Feedback, RollbackRecord};
 use crate::verification::{validate_verification, Result, Verdict, Verification, WorldCoreError};
@@ -152,6 +153,22 @@ impl WorldLedger {
             .values()
             .filter(|record| record.actions.iter().any(|id| id == action_id))
             .collect()
+    }
+
+    pub fn query_evidence(&self, query: &EvidenceQuery) -> EvidenceQueryResponse {
+        let events = self
+            .events
+            .iter()
+            .filter(|event| query.filters.matches_event(event))
+            .cloned()
+            .collect();
+        let verifications = self
+            .verifications
+            .iter()
+            .filter(|verification| query.filters.matches_verification(verification))
+            .cloned()
+            .collect();
+        EvidenceQueryResponse::new(query, events, verifications)
     }
 }
 

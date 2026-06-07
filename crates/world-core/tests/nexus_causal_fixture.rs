@@ -1,7 +1,8 @@
 use ab_world_core::{
     ActionId, AdapterEvidence, AuthorityMode, BranchId, EntityId, Event, EventId, EventProvenance,
-    EventRefs, Participant, ParticipantId, ParticipantKind, TargetRef, Verdict, Verification,
-    WorldId, WorldLedger, SCHEMA_EVENT,
+    EventRefs, EvidenceQuery, EvidenceQueryFilters, EvidenceQueryId, Participant, ParticipantId,
+    ParticipantKind, TargetRef, Verdict, Verification, WorldId, WorldLedger, SCHEMA_EVENT,
+    SCHEMA_EVIDENCE_QUERY,
 };
 use serde_json::{json, Value};
 
@@ -62,6 +63,46 @@ fn nexus_causal_seed_maps_into_world_core_without_visual_fields() {
     );
     assert!(verified[0].evidence.payload.get("screen_area").is_none());
     assert!(verified[0].evidence.payload.get("pixel_coverage").is_none());
+
+    let causal_query = EvidenceQuery::with_id(
+        EvidenceQueryId::from_raw("query:nexus:food_warning"),
+        EvidenceQueryFilters {
+            event_id: Some(EventId::from_raw("evt_food_warning")),
+            method: Some("nexus_event_causal_verification".to_string()),
+            adapter_kind: Some("nexus".to_string()),
+            ..EvidenceQueryFilters::default()
+        },
+    );
+    let causal_response = ledger.query_evidence(&causal_query);
+    assert_eq!(causal_response.schema, SCHEMA_EVIDENCE_QUERY);
+    assert_eq!(
+        causal_response.query_id.as_str(),
+        "query:nexus:food_warning"
+    );
+    assert_eq!(causal_response.events.len(), 1);
+    assert_eq!(
+        causal_response.events[0].event_type,
+        "runtime.causal_verification"
+    );
+    assert_eq!(causal_response.verifications.len(), 1);
+    assert_eq!(causal_response.summary.verdict_counts["verified"], 1);
+    assert_eq!(causal_response.summary.adapter_counts["nexus"], 1);
+    assert_eq!(
+        causal_response.verifications[0]
+            .verified_to
+            .as_ref()
+            .unwrap(),
+        &TargetRef::event(&EventId::from_raw("evt_food_warning"))
+    );
+    assert_eq!(
+        causal_response.verifications[0].evidence.payload["expected_causal_edge"]["present"],
+        true
+    );
+    assert!(causal_response.verifications[0]
+        .evidence
+        .payload
+        .get("pixel_coverage")
+        .is_none());
 
     let not_verified = ledger.query_verifications_by_verdict(Verdict::NotVerified);
     assert_eq!(not_verified.len(), 1);
