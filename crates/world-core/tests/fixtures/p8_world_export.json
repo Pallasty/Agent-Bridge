@@ -1886,5 +1886,49 @@
       }
     ],
     "unprojected_entities": []
+  },
+  "contract": {
+    "schema": "agent_bridge.lswr.web_core_contract.v0",
+    "contract_id": "p8_web_prototype_to_ab_world_core_v0",
+    "fixture_id": "p8_world_export",
+    "producer": {
+      "prototype": "prototypes/lswr-web-prototype",
+      "export_surface": "window.lswr.world_export",
+      "script": "prototypes/lswr-web-prototype/scripts/export-fixture.mjs"
+    },
+    "consumer": {
+      "crate": "ab-world-core",
+      "test": "crates/world-core/tests/p8_fixture_mapping.rs"
+    },
+    "paths": {
+      "fixture": "crates/world-core/tests/fixtures/p8_world_export.json",
+      "contract": "prototypes/lswr-web-prototype/contract/p8_world_core_contract.json"
+    },
+    "expectations": {
+      "world_id": "lswr_web_proto_01",
+      "branch_id": "main",
+      "projection_adapter": "threejs_web",
+      "event_count": 14,
+      "verification_count": 6,
+      "rollback_group_count": 4,
+      "required_event_types": [
+        "runtime.action_result",
+        "human.select",
+        "human.reject",
+        "runtime.rollback_applied"
+      ],
+      "required_verdicts": [
+        "verified",
+        "not_verified",
+        "blocked"
+      ]
+    },
+    "truth_boundary": {
+      "not_verified_reason": "projection_object_absent",
+      "not_verified_source_verified_to": "entity:cube_003",
+      "core_mapping_must_clear_not_verified_to": true,
+      "blocked_reason": "locked_entity",
+      "human_reject_must_not_rewrite_verification": true
+    }
   }
 }

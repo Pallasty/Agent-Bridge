@@ -10,6 +10,8 @@ const P8_FIXTURE: &str = include_str!("fixtures/p8_world_export.json");
 #[test]
 fn p8_world_export_maps_into_world_core_without_laundering_truth() {
     let packet: Value = serde_json::from_str(P8_FIXTURE).expect("fixture json");
+    assert_p8_contract(&packet);
+
     let world_id = WorldId::from_raw(packet["world"]["world_id"].as_str().expect("world_id"));
     let branch_id = BranchId::from_raw(packet["world"]["branch_id"].as_str().expect("branch_id"));
 
@@ -29,9 +31,24 @@ fn p8_world_export_maps_into_world_core_without_laundering_truth() {
             .expect("event mapping");
     }
 
-    assert_eq!(ledger.events().len(), 14);
-    assert_eq!(ledger.verifications().len(), 6);
-    assert_eq!(ledger.rollback_groups().count(), 4);
+    assert_eq!(
+        ledger.events().len() as u64,
+        packet["contract"]["expectations"]["event_count"]
+            .as_u64()
+            .expect("contract event_count")
+    );
+    assert_eq!(
+        ledger.verifications().len() as u64,
+        packet["contract"]["expectations"]["verification_count"]
+            .as_u64()
+            .expect("contract verification_count")
+    );
+    assert_eq!(
+        ledger.rollback_groups().count() as u64,
+        packet["contract"]["expectations"]["rollback_group_count"]
+            .as_u64()
+            .expect("contract rollback_group_count")
+    );
     assert_eq!(ledger.query_events_by_type("human.reject").len(), 1);
     assert_eq!(
         ledger
@@ -47,12 +64,12 @@ fn p8_world_export_maps_into_world_core_without_laundering_truth() {
         .expect("not_verified record");
     assert_eq!(
         not_verified.reason.as_deref(),
-        Some("projection_object_absent")
+        packet["contract"]["truth_boundary"]["not_verified_reason"].as_str()
     );
     assert!(not_verified.verified_to.is_none());
     assert_eq!(
         not_verified.evidence.payload["p8_original_verified_to"],
-        "entity:cube_003"
+        packet["contract"]["truth_boundary"]["not_verified_source_verified_to"]
     );
     assert_eq!(not_verified.evidence.payload["projected"], false);
 
@@ -93,6 +110,41 @@ fn p8_world_export_maps_into_world_core_without_laundering_truth() {
     assert_eq!(rollback_verification.verdict, Verdict::Verified);
     assert_eq!(
         rollback_verification.evidence.payload["semantic_state_restored"],
+        true
+    );
+}
+
+fn assert_p8_contract(packet: &Value) {
+    let contract = &packet["contract"];
+    assert_eq!(contract["schema"], "agent_bridge.lswr.web_core_contract.v0");
+    assert_eq!(
+        contract["contract_id"],
+        "p8_web_prototype_to_ab_world_core_v0"
+    );
+    assert_eq!(contract["fixture_id"], "p8_world_export");
+    assert_eq!(
+        contract["producer"]["export_surface"],
+        "window.lswr.world_export"
+    );
+    assert_eq!(contract["consumer"]["crate"], "ab-world-core");
+    assert_eq!(
+        contract["paths"]["fixture"],
+        "crates/world-core/tests/fixtures/p8_world_export.json"
+    );
+    assert_eq!(
+        packet["world"]["world_id"],
+        contract["expectations"]["world_id"]
+    );
+    assert_eq!(
+        packet["world"]["branch_id"],
+        contract["expectations"]["branch_id"]
+    );
+    assert_eq!(
+        packet["projection"]["adapter"],
+        contract["expectations"]["projection_adapter"]
+    );
+    assert_eq!(
+        contract["truth_boundary"]["core_mapping_must_clear_not_verified_to"],
         true
     );
 }
