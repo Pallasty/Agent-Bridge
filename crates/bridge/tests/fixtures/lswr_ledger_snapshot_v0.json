@@ -1,0 +1,232 @@
+{
+  "schema": "agent_bridge.lswr.ledger_snapshot.v0",
+  "actions": [
+    {
+      "schema": "agent_bridge.lswr.action.v0",
+      "action_id": "action:move_cube_readonly_fixture",
+      "action_type": "entity.move",
+      "source": {
+        "participant_id": "ai:codex",
+        "participant_kind": "ai",
+        "authority_mode": "autonomous",
+        "surface": null
+      },
+      "target_refs": [
+        {
+          "kind": "entity",
+          "id": "entity:cube_readonly_fixture"
+        }
+      ],
+      "expected_effect": {
+        "entity_present": "entity:cube_readonly_fixture",
+        "semantic_position": [
+          1.5,
+          0.0,
+          -0.5
+        ],
+        "human_visible": true
+      },
+      "rollback_group": "rollback:move_cube_readonly_fixture"
+    }
+  ],
+  "events": [
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "event:move_cube_readonly_fixture_result",
+      "event_type": "runtime.action_result",
+      "world_id": "world:readonly_bridge_fixture",
+      "branch_id": "branch:readonly_bridge_fixture",
+      "tick": null,
+      "source": {
+        "participant_id": "runtime:semantic_scene",
+        "participant_kind": "runtime",
+        "authority_mode": "coedit",
+        "surface": "core"
+      },
+      "refs": {
+        "entities": [
+          "entity:cube_readonly_fixture"
+        ],
+        "actions": [
+          "action:move_cube_readonly_fixture"
+        ],
+        "events": [],
+        "feedback": [],
+        "rollback_groups": [
+          "rollback:move_cube_readonly_fixture"
+        ],
+        "adapter": null
+      },
+      "payload": {
+        "action_type": "entity.move",
+        "applied": true,
+        "semantic_position": [
+          1.5,
+          0.0,
+          -0.5
+        ]
+      },
+      "verification": {
+        "schema": "agent_bridge.lswr.verification.v0",
+        "action_id": "action:move_cube_readonly_fixture",
+        "verdict": "verified",
+        "reason": null,
+        "method": "semantic_state_query",
+        "verified_to": {
+          "kind": "entity",
+          "id": "entity:cube_readonly_fixture"
+        },
+        "evidence": {
+          "adapter_kind": "semantic_scene",
+          "method": "semantic_state_query",
+          "summary": "semantic state reports the expected transform",
+          "raw_available": true,
+          "payload": {
+            "entity_present": true,
+            "position": [
+              1.5,
+              0.0,
+              -0.5
+            ]
+          }
+        }
+      },
+      "provenance": {
+        "adapter": "semantic_scene",
+        "source_schema": "agent_bridge.lswr.event.v0",
+        "raw_available": true
+      }
+    },
+    {
+      "schema": "agent_bridge.lswr.event.v0",
+      "event_id": "event:move_cube_readonly_fixture_accept",
+      "event_type": "human.accept",
+      "world_id": "world:readonly_bridge_fixture",
+      "branch_id": null,
+      "tick": null,
+      "source": {
+        "participant_id": "human:owner",
+        "participant_kind": "human",
+        "authority_mode": "coedit",
+        "surface": "core_review"
+      },
+      "refs": {
+        "entities": [
+          "entity:cube_readonly_fixture"
+        ],
+        "actions": [
+          "action:move_cube_readonly_fixture"
+        ],
+        "events": [
+          "event:move_cube_readonly_fixture_result"
+        ],
+        "feedback": [],
+        "rollback_groups": [],
+        "adapter": null
+      },
+      "payload": {
+        "decision": "accept",
+        "does_not_change_verification": true
+      },
+      "verification": null,
+      "provenance": {
+        "adapter": "core_review",
+        "source_schema": "agent_bridge.lswr.event.v0",
+        "raw_available": true
+      }
+    }
+  ],
+  "verifications": [
+    {
+      "schema": "agent_bridge.lswr.verification.v0",
+      "action_id": "action:move_cube_readonly_fixture",
+      "verdict": "verified",
+      "reason": null,
+      "method": "semantic_state_query",
+      "verified_to": {
+        "kind": "entity",
+        "id": "entity:cube_readonly_fixture"
+      },
+      "evidence": {
+        "adapter_kind": "semantic_scene",
+        "method": "semantic_state_query",
+        "summary": "semantic state reports the expected transform",
+        "raw_available": true,
+        "payload": {
+          "entity_present": true,
+          "position": [
+            1.5,
+            0.0,
+            -0.5
+          ]
+        }
+      }
+    }
+  ],
+  "feedback": [
+    {
+      "schema": "agent_bridge.lswr.feedback.v0",
+      "feedback_id": "feedback:readonly_bridge_fixture_accept",
+      "source_event_id": "event:move_cube_readonly_fixture_accept",
+      "target": {
+        "entities": [
+          "entity:cube_readonly_fixture"
+        ],
+        "actions": [
+          "action:move_cube_readonly_fixture"
+        ],
+        "events": [
+          "event:move_cube_readonly_fixture_result"
+        ],
+        "feedback": [],
+        "rollback_groups": [
+          "rollback:move_cube_readonly_fixture"
+        ],
+        "adapter": null
+      },
+      "raw": {
+        "decision": "accept",
+        "surface": "core_review"
+      },
+      "normalized": {
+        "decision": "accept",
+        "does_not_change_verification": true
+      },
+      "changes_world_verdict": false
+    }
+  ],
+  "rollback_records": [
+    {
+      "schema": "agent_bridge.lswr.rollback.v0",
+      "rollback_group": "rollback:move_cube_readonly_fixture",
+      "before": {
+        "entities": [
+          {
+            "entity_id": "entity:cube_readonly_fixture",
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        ]
+      },
+      "after": {
+        "entities": [
+          {
+            "entity_id": "entity:cube_readonly_fixture",
+            "position": [
+              1.5,
+              0.0,
+              -0.5
+            ]
+          }
+        ]
+      },
+      "actions": [
+        "action:move_cube_readonly_fixture"
+      ],
+      "verification_event_id": "event:move_cube_readonly_fixture_result"
+    }
+  ]
+}
