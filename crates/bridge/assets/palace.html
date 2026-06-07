@@ -1057,6 +1057,78 @@
       border: 1px dashed #252532;
       border-radius: 4px;
     }
+    #panel .maintenance-preview {
+      margin-top: 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    #panel .maintenance-preview-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: #6a6a78;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    #panel .maintenance-preview-status {
+      color: #5cc8c8;
+      white-space: nowrap;
+    }
+    #panel .maintenance-preview-row {
+      width: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 9px;
+      background: #0f0f16;
+      border: 1px solid #252532;
+      border-left: 2px solid #5cc8c8;
+      border-radius: 4px;
+      color: #d8d8e2;
+      text-align: left;
+      cursor: pointer;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    #panel .maintenance-preview-row:hover {
+      color: #ffffff;
+      border-color: #5a5a72;
+      background: #13131d;
+    }
+    #panel .maintenance-preview-row.fragile { border-left-color: #d88080; }
+    #panel .maintenance-preview-row.watch { border-left-color: #c8a96a; }
+    #panel .maintenance-preview-row.good { border-left-color: #5cc89a; }
+    #panel .maintenance-preview-main { min-width: 0; }
+    #panel .maintenance-preview-label,
+    #panel .maintenance-preview-meta {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .maintenance-preview-label {
+      font-size: 11px;
+      font-weight: 600;
+    }
+    #panel .maintenance-preview-meta {
+      margin-top: 3px;
+      color: #6a6a78;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+    }
+    #panel .maintenance-preview-action {
+      color: #5cc8c8;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    #panel .maintenance-preview-row.fragile .maintenance-preview-action { color: #d88080; }
+    #panel .maintenance-preview-row.watch .maintenance-preview-action { color: #c8a96a; }
+    #panel .maintenance-preview-row.good .maintenance-preview-action { color: #5cc89a; }
     #panel .neighbor-list,
     #panel .region-node-list,
     #panel .source-stack {
@@ -2771,12 +2843,14 @@ const state = {
   staleKindFilter: null, // C10: null = show all kinds, string = restrict stale panel rows
   regionNodeFilter: "all",
   regionNodeSort: "rank",
+  maintenancePreviewFilter: "all",
   neighborFilter: "all",
   neighborSort: "weight",
   relationDetailKey: null,
   contentReaderMode: "scan",
   lastVisualPassMs: 0,
   lastLayoutOverlapCount: 0,
+  zoomMetricsRaf: 0,
   // ζ-13: degree info computed once per loadGraph, consumed by both the
   // footer badge and buildCy's per-node hub/orphan marker. Stashed here
   // (rather than recomputed twice) so the two surfaces can't drift.
@@ -2792,6 +2866,7 @@ function serializeViewState() {
     focused: state.focused,
     regionNodeFilter: state.regionNodeFilter,
     regionNodeSort: state.regionNodeSort,
+    maintenancePreviewFilter: state.maintenancePreviewFilter,
     neighborFilter: state.neighborFilter,
     neighborSort: state.neighborSort,
     contentReaderMode: state.contentReaderMode,
@@ -2858,6 +2933,7 @@ function restoreViewStateFromUrlOrStorage() {
   }
   if (typeof restored.includeSkills === "boolean") state.includeSkills = restored.includeSkills;
   if (VALID_REGION_NODE_FILTERS.has(restored.regionNodeFilter)) state.regionNodeFilter = restored.regionNodeFilter;
+  if (VALID_REGION_NODE_FILTERS.has(restored.maintenancePreviewFilter)) state.maintenancePreviewFilter = restored.maintenancePreviewFilter;
   if (VALID_REGION_NODE_SORTS.has(restored.regionNodeSort)) state.regionNodeSort = restored.regionNodeSort;
   if (VALID_NEIGHBOR_FILTERS.has(restored.neighborFilter)) state.neighborFilter = restored.neighborFilter;
   if (VALID_NEIGHBOR_SORTS.has(restored.neighborSort)) state.neighborSort = restored.neighborSort;
@@ -3231,6 +3307,28 @@ function runPalaceLayout(data) {
   layout.run();
 }
 
+function updateZoomScaledNodeMetrics() {
+  if (!state.cy) return;
+  const zoom = clampNumber(Number(state.cy.zoom()) || 1, 0.15, 4.0);
+  const maxScale = 1 / 0.15;
+  state.cy.batch(() => {
+    state.cy.nodes().forEach(node => {
+      const baseSize = Number(node.data("size")) || 28;
+      const baseHaloPad = Number(node.data("haloPad")) || 0;
+      node.data("displaySize", clampNumber(baseSize / zoom, 4, baseSize * maxScale));
+      node.data("displayHaloPad", clampNumber(baseHaloPad / zoom, 0, baseHaloPad * maxScale));
+    });
+  });
+}
+
+function scheduleZoomScaledNodeMetrics() {
+  if (!state.cy || state.zoomMetricsRaf) return;
+  state.zoomMetricsRaf = requestAnimationFrame(() => {
+    state.zoomMetricsRaf = 0;
+    updateZoomScaledNodeMetrics();
+  });
+}
+
 function buildCy(data) {
   if (state.cy) state.cy.destroy();
   const nowSecs = data.now || Math.floor(Date.now() / 1000);
@@ -3253,6 +3351,8 @@ function buildCy(data) {
       const degree = degInfo.degreeMap[n.id] || 0;
       const orphan = degree === 0 ? 1 : 0;
       const hub = degInfo.enableHubs && degree >= degInfo.hubThreshold ? 1 : 0;
+      const size = nodeSize(n.importance, access);
+      const halo = haloPad(access);
       return {
         data: {
           id: n.id,
@@ -3261,8 +3361,10 @@ function buildCy(data) {
           importance: n.importance,
           access,
           color: colorForKind(n.kind),
-          size: nodeSize(n.importance, access),
-          haloPad: haloPad(access),
+          size,
+          displaySize: size,
+          haloPad: halo,
+          displayHaloPad: halo,
           haloOp: haloOp(access),
           source: n.source || "sqlite",
           tags: n.tags || [],
@@ -3297,7 +3399,7 @@ function buildCy(data) {
     style: [
       { selector: "node", style: {
         "background-color": "data(color)",
-        "width": "data(size)", "height": "data(size)",
+        "width": "data(displaySize)", "height": "data(displaySize)",
         "label": "data(label)",
         "color": "#9a9aa8", "font-size": "9px", "font-family": "system-ui, sans-serif",
         "text-valign": "bottom", "text-halign": "center",
@@ -3307,7 +3409,7 @@ function buildCy(data) {
         // C3.5 access-driven halo. Overlay sits behind the node and tinted
         // by its kind color, so attention pattern is visible at a glance.
         "overlay-color": "data(color)",
-        "overlay-padding": "data(haloPad)",
+        "overlay-padding": "data(displayHaloPad)",
         "overlay-opacity": "data(haloOp)",
       }},
       { selector: "node[source='markdown']", style: {
@@ -3447,6 +3549,8 @@ function buildCy(data) {
   });
 
   // Bind interactions
+  updateZoomScaledNodeMetrics();
+  state.cy.on("zoom", scheduleZoomScaledNodeMetrics);
   state.cy.on("tap", "node", (evt) => {
     const id = evt.target.id();
     focusOnNode(id);
@@ -4349,7 +4453,7 @@ function renderRegionMaintenanceActions(region) {
   return `<div id="region-maintenance-actions" class="maintenance-actions">` + actions.map(action => {
     const filter = VALID_REGION_NODE_FILTERS.has(action.filter) ? action.filter : "all";
     const tier = ["fragile", "watch", "good"].includes(action.tier) ? action.tier : "watch";
-    const active = state.regionNodeFilter === filter ? " active" : "";
+    const active = state.maintenancePreviewFilter === filter ? " active" : "";
     return `<button type="button" class="maintenance-action ${tier}${active}" data-maintenance-filter="${escapeHTML(filter)}">
       <span class="maintenance-main">
         <span class="maintenance-label">${escapeHTML(action.label)}</span>
@@ -4358,6 +4462,93 @@ function renderRegionMaintenanceActions(region) {
       <span class="maintenance-badge">${escapeHTML(filter)}</span>
     </button>`;
   }).join("") + `</div>`;
+}
+
+function maintenancePreviewReason(d) {
+  if (d.orphan) return "no explicit graph edge";
+  if (d.stale) return "stale touch history";
+  if (d.hub) return `${d.degree || 0} degree anchor`;
+  if (d.fresh) return "recent attention";
+  return "normal topology";
+}
+
+function maintenancePreviewAction(d) {
+  if (d.orphan) return "link";
+  if (d.stale) return "review";
+  if (d.hub) return "audit";
+  if (d.fresh) return "watch";
+  return "scan";
+}
+
+function maintenancePreviewTier(d) {
+  if (d.orphan || d.stale) return "fragile";
+  if (d.hub) return "watch";
+  return "good";
+}
+
+function maintenancePreviewRank(d) {
+  return (d.orphan ? 4000 : 0) +
+    (d.stale ? 3000 : 0) +
+    (d.hub ? 1800 : 0) +
+    (d.fresh ? 500 : 0) +
+    (d.degree || 0);
+}
+
+function regionMaintenancePreviewRows(regionId) {
+  const filter = VALID_REGION_NODE_FILTERS.has(state.maintenancePreviewFilter)
+    ? state.maintenancePreviewFilter
+    : "all";
+  const nodes = regionNodesFor(regionId);
+  let candidates = nodes.filter(node => {
+    const d = node.data();
+    if (filter === "fresh") return !!d.fresh;
+    if (filter === "stale") return !!d.stale;
+    if (filter === "hubs") return !!d.hub;
+    if (filter === "orphans") return !!d.orphan;
+    return !!(d.orphan || d.stale || d.hub || d.fresh);
+  });
+  if (candidates.length === 0 && filter === "all") candidates = nodes.slice();
+  return candidates.slice().sort((a, b) => {
+    const ad = a.data();
+    const bd = b.data();
+    return maintenancePreviewRank(bd) - maintenancePreviewRank(ad) ||
+      String(ad.label || ad.id).localeCompare(String(bd.label || bd.id));
+  }).slice(0, 8).map(node => {
+    const d = node.data();
+    return {
+      key: node.id(),
+      label: d.label || node.id(),
+      kind: d.kind || "unknown",
+      role: regionNodeRole(d),
+      degree: d.degree || 0,
+      reason: maintenancePreviewReason(d),
+      action: maintenancePreviewAction(d),
+      tier: maintenancePreviewTier(d),
+    };
+  });
+}
+
+function renderRegionMaintenancePreview(regionId) {
+  const filter = VALID_REGION_NODE_FILTERS.has(state.maintenancePreviewFilter)
+    ? state.maintenancePreviewFilter
+    : "all";
+  const rows = regionMaintenancePreviewRows(regionId);
+  const body = rows.length === 0
+    ? `<div class="maintenance-empty">no read-only candidates for ${escapeHTML(filter)}</div>`
+    : rows.map(row => `<button type="button" class="maintenance-preview-row ${escapeHTML(row.tier)}" data-preview-node-key="${escapeHTML(row.key)}">
+      <span class="maintenance-preview-main">
+        <span class="maintenance-preview-label" title="${escapeHTML(row.key)}">${escapeHTML(row.label)}</span>
+        <span class="maintenance-preview-meta">${escapeHTML(row.kind)} · ${escapeHTML(row.role)} · ${row.degree}° · ${escapeHTML(row.reason)}</span>
+      </span>
+      <span class="maintenance-preview-action">${escapeHTML(row.action)}</span>
+    </button>`).join("");
+  return `<div id="region-maintenance-preview" class="maintenance-preview" aria-label="read-only maintenance preview">
+    <div class="maintenance-preview-head">
+      <span>preview · ${escapeHTML(filter)}</span>
+      <span class="maintenance-preview-status">read-only</span>
+    </div>
+    ${body}
+  </div>`;
 }
 
 function renderRegionNodeList(regionId) {
@@ -4417,6 +4608,7 @@ function showRegionWorkbench(regionId) {
         <div class="workbench-section">
           <div class="workbench-section-title">Maintenance</div>
           ${renderRegionMaintenanceActions(region)}
+          ${renderRegionMaintenancePreview(regionId)}
         </div>
         <div class="workbench-section">
           <div class="workbench-section-title">Region nodes</div>
@@ -4465,6 +4657,7 @@ async function showSidePanel(id) {
         n.data("size", nodeSize(m.importance, access));
         n.data("haloPad", haloPad(access));
         n.data("haloOp", haloOp(access));
+        updateZoomScaledNodeMetrics();
         // C5: this click bumped last_accessed_at server-side, so the node
         // is fresh by definition. Light up the cyan ring without waiting
         // for the next /api/graph refresh. C7: clear the stale flag too —
@@ -4581,6 +4774,7 @@ function bindRegionWorkbenchActions(panel, regionId) {
       const filter = btn.dataset.regionNodeFilter;
       if (!VALID_REGION_NODE_FILTERS.has(filter)) return;
       state.regionNodeFilter = filter;
+      state.maintenancePreviewFilter = filter;
       showRegionWorkbench(regionId);
       saveViewState();
     });
@@ -4590,6 +4784,7 @@ function bindRegionWorkbenchActions(panel, regionId) {
       const filter = btn.dataset.maintenanceFilter;
       if (!VALID_REGION_NODE_FILTERS.has(filter)) return;
       state.regionNodeFilter = filter;
+      state.maintenancePreviewFilter = filter;
       showRegionWorkbench(regionId);
       saveViewState();
     });
@@ -4606,6 +4801,12 @@ function bindRegionWorkbenchActions(panel, regionId) {
   panel.querySelectorAll(".region-node-link").forEach(btn => {
     btn.addEventListener("click", () => {
       const key = btn.dataset.regionNodeKey;
+      jumpToRegionNode(key);
+    });
+  });
+  panel.querySelectorAll("[data-preview-node-key]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.previewNodeKey;
       jumpToRegionNode(key);
     });
   });

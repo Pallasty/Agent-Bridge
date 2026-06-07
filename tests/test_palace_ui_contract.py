@@ -200,6 +200,17 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.regionNodeFilter = filter;", html)
         self.assertIn("showRegionWorkbench(regionId);", html)
 
+    def test_region_workbench_previews_maintenance_candidates_read_only(self):
+        html = palace_html()
+
+        self.assertIn("function regionMaintenancePreviewRows(regionId)", html)
+        self.assertIn("function renderRegionMaintenancePreview(regionId)", html)
+        self.assertIn('id="region-maintenance-preview"', html)
+        self.assertIn("maintenance-preview-row", html)
+        self.assertIn("data-preview-node-key", html)
+        self.assertIn("state.maintenancePreviewFilter = filter;", html)
+        self.assertIn("read-only", html)
+
     def test_search_surfaces_result_navigation(self):
         html = palace_html()
 
@@ -232,6 +243,17 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("lastLayoutOverlapCount", html)
         self.assertIn("layoutstop", html)
         self.assertIn("overlap", html)
+
+    def test_zoom_keeps_node_glyphs_screen_sized(self):
+        html = palace_html()
+
+        self.assertIn("displaySize", html)
+        self.assertIn("displayHaloPad", html)
+        self.assertIn("function updateZoomScaledNodeMetrics()", html)
+        self.assertIn("function scheduleZoomScaledNodeMetrics()", html)
+        self.assertIn('state.cy.on("zoom"', html)
+        self.assertIn('"width": "data(displaySize)"', html)
+        self.assertIn('"height": "data(displaySize)"', html)
 
 
 if __name__ == "__main__":
