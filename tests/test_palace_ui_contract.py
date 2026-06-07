@@ -189,6 +189,17 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("health-bar", html)
         self.assertIn("region.healthScore", html)
 
+    def test_region_workbench_offers_maintenance_actions(self):
+        html = palace_html()
+
+        self.assertIn("function regionMaintenanceActions(region)", html)
+        self.assertIn("function renderRegionMaintenanceActions(region)", html)
+        self.assertIn('id="region-maintenance-actions"', html)
+        self.assertIn("maintenance-action", html)
+        self.assertIn("data-maintenance-filter", html)
+        self.assertIn("state.regionNodeFilter = filter;", html)
+        self.assertIn("showRegionWorkbench(regionId);", html)
+
 
 if __name__ == "__main__":
     unittest.main()
