@@ -2776,6 +2776,7 @@ const state = {
   relationDetailKey: null,
   contentReaderMode: "scan",
   lastVisualPassMs: 0,
+  lastLayoutOverlapCount: 0,
   // ζ-13: degree info computed once per loadGraph, consumed by both the
   // footer badge and buildCy's per-node hub/orphan marker. Stashed here
   // (rather than recomputed twice) so the two surfaces can't drift.
@@ -3054,12 +3055,189 @@ const FRESH_WINDOW_SECS = 3600;
 // last_accessed > 0 guard keeps markdown / never-accessed nodes at full
 // opacity (those aren't "stale", they just aren't access-tracked).
 const STALE_WINDOW_SECS = 7 * 24 * 3600;
+
+const GRAPH_LAYOUT_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function seededGraphPositions(data) {
+  const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+  const byRegion = new Map();
+  for (const n of nodes) {
+    const region = atlasRegionForNode(n);
+    if (!byRegion.has(region)) byRegion.set(region, []);
+    byRegion.get(region).push(n);
+  }
+
+  const regionRank = new Map((state.atlasRegions || []).map((r, idx) => [r.id, idx]));
+  const regions = Array.from(byRegion.entries()).sort((a, b) => {
+    const ar = regionRank.has(a[0]) ? regionRank.get(a[0]) : Number.MAX_SAFE_INTEGER;
+    const br = regionRank.has(b[0]) ? regionRank.get(b[0]) : Number.MAX_SAFE_INTEGER;
+    return ar - br || b[1].length - a[1].length || a[0].localeCompare(b[0]);
+  });
+  const degreeMap = (state.degrees && state.degrees.degreeMap) || {};
+  const positions = new Map();
+  const regionCount = Math.max(1, regions.length);
+  const totalNodes = Math.max(1, nodes.length);
+  const atlasRadius = regionCount <= 1 ? 0 : clampNumber(Math.sqrt(totalNodes) * 58, 520, 1700);
+
+  regions.forEach(([regionId, group], regionIdx) => {
+    const regionAngle = -Math.PI / 2 + (regionIdx / regionCount) * Math.PI * 2;
+    const center = regionCount <= 1
+      ? { x: 0, y: 0 }
+      : {
+          x: Math.cos(regionAngle) * atlasRadius,
+          y: Math.sin(regionAngle) * atlasRadius,
+        };
+    const sorted = group.slice().sort((a, b) => {
+      const ad = degreeMap[a.id] || 0;
+      const bd = degreeMap[b.id] || 0;
+      return bd - ad ||
+        (b.access || 0) - (a.access || 0) ||
+        String(a.id).localeCompare(String(b.id));
+    });
+    sorted.forEach((n, idx) => {
+      const localAngle = idx * GRAPH_LAYOUT_GOLDEN_ANGLE + regionAngle * 0.35;
+      const shellRadius = idx === 0 ? 0 : Math.sqrt(idx) * 58 + (idx % 5) * 4;
+      positions.set(n.id, {
+        x: center.x + Math.cos(localAngle) * shellRadius,
+        y: center.y + Math.sin(localAngle) * shellRadius,
+      });
+    });
+  });
+
+  return positions;
+}
+
+function palaceLayoutOptions(data) {
+  const count = Math.max(1, (data.nodes || []).length);
+  const scale = Math.sqrt(count);
+  return {
+    name: "cose",
+    idealEdgeLength: clampNumber(100 + scale * 4.2, 130, 220),
+    nodeOverlap: clampNumber(44 + scale * 0.9, 52, 72),
+    refresh: 24,
+    fit: true,
+    padding: 86,
+    randomize: false,
+    componentSpacing: clampNumber(120 + scale * 4.5, 150, 260),
+    nodeRepulsion: Math.round(clampNumber(650000 + count * 3000, 900000, 2600000)),
+    edgeElasticity: 80,
+    nestingFactor: 5,
+    gravity: clampNumber(42 - scale * 0.65, 18, 36),
+    numIter: Math.round(clampNumber(1000 + count * 1.6, 1400, 2400)),
+    initialTemp: clampNumber(260 + scale * 8, 320, 520),
+    coolingFactor: 0.94,
+    minTemp: 1.0,
+  };
+}
+
+function graphNodeRadius(node) {
+  const size = Number(node.data("size")) || 28;
+  const halo = Math.min(Number(node.data("haloPad")) || 0, 10);
+  return size / 2 + halo;
+}
+
+function countNodeOverlaps(nodes, padding = 2) {
+  const list = Array.isArray(nodes) ? nodes : nodes.toArray();
+  let count = 0;
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i];
+    const ap = a.position();
+    const ar = graphNodeRadius(a);
+    for (let j = i + 1; j < list.length; j++) {
+      const b = list[j];
+      const bp = b.position();
+      const wanted = ar + graphNodeRadius(b) + padding;
+      const dx = bp.x - ap.x;
+      const dy = bp.y - ap.y;
+      if (dx * dx + dy * dy < wanted * wanted) count += 1;
+    }
+  }
+  return count;
+}
+
+function relaxNodeOverlaps(cy, options = {}) {
+  if (!cy) return { remainingOverlapCount: 0, passes: 0 };
+  const nodes = cy.nodes().toArray();
+  if (nodes.length < 2) {
+    state.lastLayoutOverlapCount = 0;
+    return { remainingOverlapCount: 0, passes: 0 };
+  }
+  const padding = options.padding == null ? 14 : options.padding;
+  const maxIterations = options.maxIterations || (nodes.length > 700 ? 8 : 12);
+  const positions = new Map(nodes.map(n => [n.id(), { ...n.position() }]));
+  const radii = new Map(nodes.map(n => [n.id(), graphNodeRadius(n)]));
+  let passes = 0;
+
+  for (let iter = 0; iter < maxIterations; iter++) {
+    let moved = 0;
+    passes = iter + 1;
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i];
+      const ap = positions.get(a.id());
+      const ar = radii.get(a.id());
+      for (let j = i + 1; j < nodes.length; j++) {
+        const b = nodes[j];
+        const bp = positions.get(b.id());
+        const wanted = ar + radii.get(b.id()) + padding;
+        let dx = bp.x - ap.x;
+        let dy = bp.y - ap.y;
+        let distSq = dx * dx + dy * dy;
+        if (distSq >= wanted * wanted) continue;
+        if (distSq < 0.01) {
+          const angle = ((i * 131 + j * 17) % 360) * Math.PI / 180;
+          dx = Math.cos(angle) * 0.1;
+          dy = Math.sin(angle) * 0.1;
+          distSq = dx * dx + dy * dy;
+        }
+        const dist = Math.sqrt(distSq);
+        const push = (wanted - dist) * 0.54;
+        const ux = dx / dist;
+        const uy = dy / dist;
+        ap.x -= ux * push;
+        ap.y -= uy * push;
+        bp.x += ux * push;
+        bp.y += uy * push;
+        moved += push;
+      }
+    }
+    if (moved < 0.5) break;
+  }
+
+  nodes.forEach(n => n.position(positions.get(n.id())));
+  const remainingOverlapCount = countNodeOverlaps(nodes, 2);
+  state.lastLayoutOverlapCount = remainingOverlapCount;
+  return { remainingOverlapCount, passes };
+}
+
+function runPalaceLayout(data) {
+  if (!state.cy) return;
+  const cy = state.cy;
+  const layout = cy.layout(palaceLayoutOptions(data));
+  layout.on("layoutstop", () => {
+    relaxNodeOverlaps(cy);
+    if (state.focused && cy.getElementById(state.focused).length > 0) {
+      cy.center(cy.getElementById(state.focused));
+    } else if (state.activeRegion) {
+      zoomToAtlasRegion(state.activeRegion);
+    } else {
+      zoomToVisibleGraph();
+    }
+    renderViewHealth(graphViewportStats());
+  });
+  layout.run();
+}
+
 function buildCy(data) {
   if (state.cy) state.cy.destroy();
   const nowSecs = data.now || Math.floor(Date.now() / 1000);
   // ζ-13: degree state was stamped by loadGraph; fall back to a fresh
   // compute if buildCy is ever called outside that path (defensive).
   const degInfo = state.degrees || computeDegrees(data);
+  const seededPositions = seededGraphPositions(data);
 
   const elements = [
     ...data.nodes.map(n => {
@@ -3099,7 +3277,8 @@ function buildCy(data) {
             n.id, n.kind, ...(n.tags || []),
             n.description || "",
           ].join(" ").toLowerCase(),
-        }
+        },
+        position: seededPositions.get(n.id) || { x: 0, y: 0 },
       };
     }),
     ...data.edges.map(e => ({
@@ -3261,11 +3440,8 @@ function buildCy(data) {
       }},
     ],
     layout: {
-      name: "cose",
-      idealEdgeLength: 100, nodeOverlap: 20, refresh: 20, fit: true, padding: 40,
-      randomize: false, componentSpacing: 80, nodeRepulsion: 400000,
-      edgeElasticity: 100, nestingFactor: 5, gravity: 80,
-      numIter: 1000, initialTemp: 200, coolingFactor: 0.95, minTemp: 1.0,
+      name: "preset",
+      fit: false,
     },
     minZoom: 0.15, maxZoom: 4.0, wheelSensitivity: 0.2,
   });
@@ -3289,6 +3465,7 @@ function buildCy(data) {
   });
 
   applyVisualState();
+  runPalaceLayout(data);
 }
 
 // ── Filter panel rendering ──────────────────────────────────────
@@ -3418,6 +3595,7 @@ function graphViewportStats() {
     edgeVisibleCount: 0,
     matchCount: 0,
     visualMs: state.lastVisualPassMs,
+    overlapCount: state.lastLayoutOverlapCount,
   };
   if (!state.cy) return base;
   const nodes = state.cy.nodes();
@@ -3428,6 +3606,7 @@ function graphViewportStats() {
     edgeVisibleCount: edges.filter(e => !e.hasClass("faded")).length,
     matchCount: nodes.filter(n => n.hasClass("match") && !n.hasClass("faded")).length,
     visualMs: state.lastVisualPassMs,
+    overlapCount: state.lastLayoutOverlapCount,
   };
 }
 
@@ -3437,10 +3616,12 @@ function renderViewHealth(stats) {
   const s = stats || graphViewportStats();
   const visualMs = Number.isFinite(s.visualMs) ? s.visualMs : 0;
   const msLabel = visualMs < 10 ? visualMs.toFixed(1) : Math.round(visualMs).toString();
-  const tier = visualMs > 32 ? "slow" : visualMs > 16 ? "warn" : "good";
+  const overlapCount = Math.max(0, s.overlapCount || 0);
+  const tier = overlapCount > 0 || visualMs > 32 ? "slow" : visualMs > 16 ? "warn" : "good";
   const matchText = s.matchCount > 0 ? ` · match:${s.matchCount}` : "";
-  el.textContent = `view:${s.visibleCount}/${s.totalCount}${matchText} · ${msLabel}ms`;
-  el.title = `${s.visibleCount} visible nodes · ${s.edgeVisibleCount} visible edges · ${s.matchCount} search matches · ${msLabel}ms visual pass`;
+  const overlapText = overlapCount > 0 ? ` · overlap:${overlapCount}` : "";
+  el.textContent = `view:${s.visibleCount}/${s.totalCount}${matchText}${overlapText} · ${msLabel}ms`;
+  el.title = `${s.visibleCount} visible nodes · ${s.edgeVisibleCount} visible edges · ${s.matchCount} search matches · ${overlapCount} remaining overlaps · ${msLabel}ms visual pass`;
   el.className = `view-health ${tier}`;
 }
 
