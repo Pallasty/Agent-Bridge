@@ -1,8 +1,8 @@
 use ab_world_core::{
     ActionId, AdapterEvidence, AuthorityMode, BranchId, EntityId, Event, EventId, EventProvenance,
-    EventRefs, EvidenceQuery, EvidenceQueryFilters, EvidenceQueryId, Participant, ParticipantId,
-    ParticipantKind, TargetRef, Verdict, Verification, WorldId, WorldLedger, SCHEMA_EVENT,
-    SCHEMA_EVIDENCE_QUERY,
+    EventQuery, EventQueryFilters, EventQueryId, EventRefs, EvidenceQuery, EvidenceQueryFilters,
+    EvidenceQueryId, Participant, ParticipantId, ParticipantKind, TargetRef, Verdict, Verification,
+    WorldId, WorldLedger, SCHEMA_EVENT, SCHEMA_EVENT_QUERY, SCHEMA_EVIDENCE_QUERY,
 };
 use serde_json::{json, Value};
 
@@ -103,6 +103,48 @@ fn nexus_causal_seed_maps_into_world_core_without_visual_fields() {
         .payload
         .get("pixel_coverage")
         .is_none());
+
+    let causal_events_query = EventQuery::with_id(
+        EventQueryId::from_raw("query:nexus:tax_change_causal_events"),
+        EventQueryFilters {
+            related_event_id: Some(EventId::from_raw("evt_tax_change")),
+            event_type: Some("runtime.causal_verification".to_string()),
+            adapter: Some("nexus".to_string()),
+            ..EventQueryFilters::default()
+        },
+    );
+    let causal_events_response = ledger.query_events(&causal_events_query);
+    assert_eq!(causal_events_response.schema, SCHEMA_EVENT_QUERY);
+    assert_eq!(
+        causal_events_response.query_id.as_str(),
+        "query:nexus:tax_change_causal_events"
+    );
+    assert_eq!(causal_events_response.events.len(), 2);
+    assert_eq!(
+        causal_events_response.summary.event_type_counts["runtime.causal_verification"],
+        2
+    );
+    assert_eq!(
+        causal_events_response.summary.participant_kind_counts["runtime"],
+        2
+    );
+    assert_eq!(causal_events_response.summary.adapter_counts["nexus"], 2);
+    assert_eq!(
+        causal_events_response.summary.embedded_verdict_counts["verified"],
+        1
+    );
+    assert_eq!(
+        causal_events_response.summary.embedded_verdict_counts["not_verified"],
+        1
+    );
+    assert!(causal_events_response.events.iter().all(|event| event
+        .verification
+        .as_ref()
+        .unwrap()
+        .evidence
+        .payload
+        .get("pixel_coverage")
+        .is_none()));
 
     let not_verified = ledger.query_verifications_by_verdict(Verdict::NotVerified);
     assert_eq!(not_verified.len(), 1);

@@ -1,8 +1,9 @@
 use ab_world_core::{
-    ActionId, AdapterEvidence, AuthorityMode, BranchId, Event, EventId, EventProvenance, EventRefs,
-    EvidenceQuery, EvidenceQueryFilters, EvidenceQueryId, Participant, ParticipantId,
-    ParticipantKind, RollbackGroupId, RollbackRecord, TargetRef, Verdict, Verification, WorldId,
-    WorldLedger, SCHEMA_EVENT, SCHEMA_EVIDENCE_QUERY,
+    ActionId, AdapterEvidence, AuthorityMode, BranchId, Event, EventId, EventProvenance,
+    EventQuery, EventQueryFilters, EventQueryId, EventRefs, EvidenceQuery, EvidenceQueryFilters,
+    EvidenceQueryId, Participant, ParticipantId, ParticipantKind, RollbackGroupId, RollbackRecord,
+    TargetRef, Verdict, Verification, WorldId, WorldLedger, SCHEMA_EVENT, SCHEMA_EVENT_QUERY,
+    SCHEMA_EVIDENCE_QUERY,
 };
 use serde_json::{json, Value};
 
@@ -140,6 +141,50 @@ fn p8_world_export_maps_into_world_core_without_laundering_truth() {
     let rejected_verification = ledger.query_evidence_by_action(rejected_action);
     assert_eq!(rejected_verification.len(), 1);
     assert_eq!(rejected_verification[0].verdict, Verdict::Verified);
+
+    let rejected_action_query = EventQuery::with_id(
+        EventQueryId::from_raw("query:p8:rejected_action_events"),
+        EventQueryFilters {
+            action_id: Some(rejected_action.clone()),
+            adapter: Some("threejs_web".to_string()),
+            ..EventQueryFilters::default()
+        },
+    );
+    let rejected_action_response = ledger.query_events(&rejected_action_query);
+    assert_eq!(rejected_action_response.schema, SCHEMA_EVENT_QUERY);
+    assert_eq!(rejected_action_response.events.len(), 3);
+    assert_eq!(
+        rejected_action_response.summary.event_type_counts["runtime.action_attempted"],
+        1
+    );
+    assert_eq!(
+        rejected_action_response.summary.event_type_counts["runtime.action_result"],
+        1
+    );
+    assert_eq!(
+        rejected_action_response.summary.event_type_counts["human.reject"],
+        1
+    );
+    assert_eq!(
+        rejected_action_response.summary.participant_kind_counts["runtime"],
+        2
+    );
+    assert_eq!(
+        rejected_action_response.summary.participant_kind_counts["human"],
+        1
+    );
+    assert_eq!(
+        rejected_action_response.summary.adapter_counts["threejs_web"],
+        3
+    );
+    assert_eq!(
+        rejected_action_response.summary.embedded_verdict_counts["verified"],
+        1
+    );
+    assert!(rejected_action_response
+        .events
+        .iter()
+        .any(|event| event.event_type == "human.reject"));
 
     let rollback_verification = ledger
         .verifications()
