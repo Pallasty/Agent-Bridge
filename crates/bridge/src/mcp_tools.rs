@@ -2028,6 +2028,500 @@ fn desktop_verify_error(error: Value) -> ToolResult {
 }
 
 // ===========================================================================
+//                              macos_ax_probe
+// ===========================================================================
+
+const MACOS_AX_PROBE_SEMANTIC_SCHEMA: &str = "agent_bridge.semantic_bus.macos_ax_probe.v0";
+const MACOS_AX_PROBE_SOURCE_SCHEMA: &str = "macos_ax_probe/v0";
+
+pub struct MacosAxProbeTool {
+    _hub: Hub,
+}
+
+impl MacosAxProbeTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MacosAxProbeTool {
+    fn name(&self) -> &'static str {
+        "macos_ax_probe"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only macOS Accessibility feasibility probe. Reports platform \
+                 support, AX trust state, frontmost app metadata, and a bounded window summary \
+                 only when Accessibility is already trusted. It never prompts for permission, \
+                 clicks, types, focuses apps, or mutates window state."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Workspace/repo root used to resolve scripts/macos_ax_probe.py. Defaults to the MCP process cwd, then the build-time repo root."
+                    },
+                    "script_path": {
+                        "type": "string",
+                        "description": "Optional explicit macos_ax_probe.py path. Use mainly for tests or alternate checkouts."
+                    },
+                    "include_windows": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, read a bounded frontmost app/window summary through System Events only if AX is already trusted."
+                    },
+                    "max_windows": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 50,
+                        "default": 8,
+                        "description": "Maximum frontmost-app windows to return."
+                    },
+                    "jxa_timeout_secs": {
+                        "type": "number",
+                        "minimum": 0.25,
+                        "maximum": 10.0,
+                        "default": 2.0,
+                        "description": "Timeout for the bounded System Events/JXA read."
+                    },
+                    "semantic_bus": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, wrap the macos_ax_probe/v0 payload as agent_bridge.semantic_bus.macos_ax_probe.v0. Default false preserves the probe payload exactly apart from mcp_wrapper."
+                    },
+                    "semantic_include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Only with semantic_bus=true: include the original macos_ax_probe payload as raw_probe. Default false keeps the semantic envelope compact."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 30000,
+                        "default": 8000,
+                        "description": "Milliseconds before the probe process is killed."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(8_000)
+            .clamp(1_000, 30_000);
+        let include_windows = args
+            .get("include_windows")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let max_windows = args
+            .get("max_windows")
+            .and_then(Value::as_u64)
+            .unwrap_or(8)
+            .min(50);
+        let jxa_timeout_secs = args
+            .get("jxa_timeout_secs")
+            .and_then(Value::as_f64)
+            .unwrap_or(2.0)
+            .clamp(0.25, 10.0);
+        let semantic_bus = args
+            .get("semantic_bus")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let semantic_include_raw = args
+            .get("semantic_include_raw")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
+        let script = macos_ax_probe_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(macos_ax_probe_error(json!({
+                "code": "script_missing",
+                "message": format!("macos_ax_probe.py not found at {}", script.display()),
+                "hint": "pass script_path or run from the Agent-Bridge repo root"
+            })));
+        }
+
+        let mut cmd = killable_command(
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "python3".to_string()),
+        );
+        cmd.arg(&script)
+            .arg("--compact")
+            .arg("--max-windows")
+            .arg(max_windows.to_string())
+            .arg("--jxa-timeout-secs")
+            .arg(jxa_timeout_secs.to_string());
+        if !include_windows {
+            cmd.arg("--no-windows");
+        }
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+
+        let started = Instant::now();
+        let output =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+                Err(_) => {
+                    return Ok(macos_ax_probe_error(json!({
+                        "code": "timeout",
+                        "message": format!("macos_ax_probe exceeded {timeout_ms} ms"),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Err(e)) => {
+                    return Ok(macos_ax_probe_error(json!({
+                        "code": "spawn_failed",
+                        "message": e.to_string(),
+                        "duration_ms": started.elapsed().as_millis() as u64
+                    })));
+                }
+                Ok(Ok(output)) => output,
+            };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+
+        if !output.status.success() {
+            return Ok(macos_ax_probe_error(json!({
+                "code": "script_failed",
+                "exit_code": output.status.code().unwrap_or(-1),
+                "stdout": stdout,
+                "stderr": stderr,
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            })));
+        }
+
+        match serde_json::from_str::<Value>(&stdout) {
+            Ok(mut payload) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert(
+                        "mcp_wrapper".to_string(),
+                        json!({
+                            "tool": self.name(),
+                            "read_only": true,
+                            "include_windows": include_windows,
+                            "duration_ms": duration_ms,
+                            "exit_code": output.status.code().unwrap_or(-1),
+                            "stderr": stderr,
+                            "stderr_truncated": stderr_truncated
+                        }),
+                    );
+                }
+                if semantic_bus {
+                    payload = macos_ax_probe_semantic_bus_payload(&payload, semantic_include_raw);
+                }
+                Ok(ToolResult::json_text(&payload))
+            }
+            Err(e) => Ok(macos_ax_probe_error(json!({
+                "code": "invalid_json",
+                "message": e.to_string(),
+                "stdout": stdout,
+                "stderr": stderr,
+                "duration_ms": duration_ms,
+                "truncated": stdout_truncated || stderr_truncated
+            }))),
+        }
+    }
+}
+
+fn macos_ax_probe_semantic_bus_payload(probe: &Value, include_raw: bool) -> Value {
+    let source_schema = probe
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let captured_at = probe.get("captured_at").cloned().unwrap_or(Value::Null);
+    let captured_label = desktop_snapshot_value_label(&captured_at, "unknown");
+    let status = probe
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let schema_ok = source_schema == MACOS_AX_PROBE_SOURCE_SCHEMA;
+    let supported = status != "unsupported_platform";
+    let semantic_verdict = if !schema_ok {
+        "not_verified"
+    } else if supported {
+        "verified"
+    } else {
+        "blocked"
+    };
+    let recover = if !schema_ok {
+        "replan"
+    } else if status == "ready" || status == "degraded" {
+        "proceed"
+    } else {
+        "replan"
+    };
+    let reason = if !schema_ok {
+        json!("unexpected_source_schema")
+    } else if status == "unsupported_platform" {
+        json!("unsupported_platform")
+    } else if status == "degraded" {
+        json!("limited_accessibility_or_window_read")
+    } else {
+        Value::Null
+    };
+    let session_object_id = format!("desktop:macos:session:{captured_label}");
+    let event_id = format!("evt-macos-ax-probe-{captured_label}");
+
+    let mut semantic_objects = vec![json!({
+        "schema": "agent_bridge.semantic_bus.object.v0",
+        "object_id": session_object_id,
+        "object_type": "desktop.session",
+        "source_adapter": "macos.ax_probe",
+        "label": "macOS desktop session",
+        "state": {
+            "platform": probe.get("platform").cloned().unwrap_or_else(|| json!({})),
+            "status": status,
+            "permission": probe.get("permission").cloned().unwrap_or_else(|| json!({})),
+            "frontmost_app": probe.get("frontmost_app").cloned().unwrap_or(Value::Null),
+            "window_count": probe.get("window_count").cloned().unwrap_or(Value::Null),
+            "source_window_count": probe.get("source_window_count").cloned().unwrap_or(Value::Null),
+            "limits": probe.get("limits").cloned().unwrap_or_else(|| json!({})),
+        },
+        "relations": [],
+        "confidence": if schema_ok { 0.85 } else { 0.2 },
+        "observed_at": captured_at,
+        "provenance": {
+            "tool": "macos_ax_probe",
+            "schema": source_schema
+        }
+    })];
+    let mut affordances = Vec::new();
+
+    if let Some(app) = probe.get("frontmost_app").filter(|v| v.is_object()) {
+        let app_id = macos_ax_app_object_id(app);
+        semantic_objects.push(json!({
+            "schema": "agent_bridge.semantic_bus.object.v0",
+            "object_id": app_id,
+            "object_type": "desktop.application",
+            "source_adapter": "macos.system_events",
+            "label": app.get("name").and_then(Value::as_str).unwrap_or("frontmost app"),
+            "state": {
+                "name": app.get("name").cloned().unwrap_or(Value::Null),
+                "pid": app.get("pid").cloned().unwrap_or(Value::Null),
+                "bundle_id": app.get("bundle_id").cloned().unwrap_or(Value::Null),
+                "role": app.get("role").cloned().unwrap_or(Value::Null),
+                "frontmost": true
+            },
+            "relations": [
+                { "type": "member_of", "target": session_object_id }
+            ],
+            "confidence": 0.86,
+            "observed_at": captured_at,
+            "provenance": {
+                "tool": "macos_ax_probe",
+                "schema": source_schema,
+                "source_path": "frontmost_app"
+            }
+        }));
+    }
+
+    if let Some(windows) = probe.get("windows").and_then(Value::as_array) {
+        for (idx, window) in windows.iter().enumerate() {
+            let object_id = macos_ax_window_object_id(probe, window, idx);
+            semantic_objects.push(json!({
+                "schema": "agent_bridge.semantic_bus.object.v0",
+                "object_id": object_id,
+                "object_type": "desktop.window",
+                "source_adapter": "macos.ax.window",
+                "label": window.get("title").and_then(Value::as_str).unwrap_or("macOS window"),
+                "state": {
+                    "index": window.get("index").cloned().unwrap_or(Value::Null),
+                    "title": window.get("title").cloned().unwrap_or(Value::Null),
+                    "role": window.get("role").cloned().unwrap_or(Value::Null),
+                    "subrole": window.get("subrole").cloned().unwrap_or(Value::Null),
+                    "focused": window.get("focused").cloned().unwrap_or(Value::Null),
+                    "position": window.get("position").cloned().unwrap_or(Value::Null),
+                    "size": window.get("size").cloned().unwrap_or(Value::Null),
+                    "rect": window.get("rect").cloned().unwrap_or(Value::Null),
+                    "app": probe.get("frontmost_app").cloned().unwrap_or(Value::Null),
+                    "platform": probe.get("platform").cloned().unwrap_or_else(|| json!({})),
+                },
+                "relations": [
+                    { "type": "member_of", "target": session_object_id }
+                ],
+                "confidence": 0.82,
+                "observed_at": captured_at,
+                "provenance": {
+                    "tool": "macos_ax_probe",
+                    "schema": source_schema,
+                    "source_path": "windows"
+                }
+            }));
+            affordances.push(json!({
+                "affordance_id": format!("{object_id}:reobserve"),
+                "object_id": object_id,
+                "action_type": "macos_ax_probe.reobserve",
+                "args_schema": {
+                    "include_windows": true,
+                    "max_windows": probe
+                        .get("limits")
+                        .and_then(|v| v.get("max_windows"))
+                        .cloned()
+                        .unwrap_or_else(|| json!(8))
+                },
+                "risk_level": "low",
+                "requires_gate": false,
+                "expected_effect": "re-runs the read-only macOS AX probe without mutating app or window state"
+            }));
+        }
+    }
+
+    let object_count = semantic_objects.len();
+    let window_count = probe.get("window_count").cloned().unwrap_or(Value::Null);
+    let mut payload = json!({
+        "schema": MACOS_AX_PROBE_SEMANTIC_SCHEMA,
+        "source_schema": source_schema,
+        "source_adapter": "macos.ax_probe",
+        "captured_at": captured_at,
+        "read_only": true,
+        "raw_available": true,
+        "raw_included": include_raw,
+        "semantic_objects": semantic_objects,
+        "affordances": affordances,
+        "events": [
+            {
+                "event_id": event_id,
+                "event_type": "desktop.snapshot.observed",
+                "subject_id": session_object_id,
+                "source": "macos_ax_probe",
+                "actor": "agent",
+                "payload_json": {
+                    "status": status,
+                    "object_count": object_count,
+                    "window_count": window_count,
+                    "ax_trusted": probe
+                        .get("permission")
+                        .and_then(|v| v.get("ax_trusted"))
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                    "prompted": probe
+                        .get("permission")
+                        .and_then(|v| v.get("prompted"))
+                        .cloned()
+                        .unwrap_or(Value::Null)
+                },
+                "source_event_ids": []
+            }
+        ],
+        "verification": {
+            "verdict": semantic_verdict,
+            "reason": reason,
+            "method": "macos_ax_probe.semantic_normalizer",
+            "evidence": {
+                "source_schema": source_schema,
+                "status": status,
+                "permission": probe.get("permission").cloned().unwrap_or_else(|| json!({})),
+                "window_count": window_count,
+                "raw_included": include_raw
+            },
+            "verified_to": if semantic_verdict == "verified" { json!("semantic_objects") } else { Value::Null },
+            "recover": recover,
+            "raw_available": true
+        },
+        "presentation": {
+            "presentation_id": format!("present-macos-ax-probe-{captured_label}"),
+            "source_event_ids": [event_id],
+            "human_summary": format!(
+                "macos_ax_probe returned {status}; normalized {object_count} semantic objects."
+            ),
+            "machine_payload": {
+                "status": status,
+                "object_count": object_count,
+                "window_count": probe.get("window_count").cloned().unwrap_or(Value::Null),
+                "source_window_count": probe.get("source_window_count").cloned().unwrap_or(Value::Null)
+            },
+            "ingestion": {
+                "allowed": false,
+                "reason": "runtime_probe_not_durable_memory"
+            },
+            "artifact": Value::Null
+        }
+    });
+    if include_raw {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("raw_probe".to_string(), probe.clone());
+        }
+    }
+    payload
+}
+
+fn macos_ax_app_object_id(app: &Value) -> String {
+    if let Some(pid) = app.get("pid").and_then(Value::as_i64) {
+        return format!("desktop:macos:app:{pid}");
+    }
+    if let Some(bundle) = app.get("bundle_id").and_then(Value::as_str) {
+        return format!("desktop:macos:app:{}", desktop_snapshot_slug(bundle));
+    }
+    format!(
+        "desktop:macos:app:{}",
+        desktop_snapshot_slug(app.get("name").and_then(Value::as_str).unwrap_or("unknown"))
+    )
+}
+
+fn macos_ax_window_object_id(probe: &Value, window: &Value, idx: usize) -> String {
+    let pid = probe
+        .get("frontmost_app")
+        .and_then(|v| v.get("pid"))
+        .and_then(Value::as_i64)
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let source_index = window
+        .get("index")
+        .and_then(Value::as_i64)
+        .map(|i| i.to_string())
+        .unwrap_or_else(|| idx.to_string());
+    format!("desktop:macos:window:{pid}:{source_index}")
+}
+
+fn macos_ax_probe_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(Value::as_str) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_MACOS_AX_PROBE_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/macos_ax_probe.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/macos_ax_probe.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/macos_ax_probe.py")
+}
+
+fn macos_ax_probe_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "macos_ax_probe_mcp_error.v0",
+        "status": "error",
+        "error": error,
+    }));
+    result.is_error = true;
+    result
+}
+
+// ===========================================================================
 //                            vision_grounding_ocr
 // ===========================================================================
 
@@ -29893,6 +30387,10 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // the act loop). Never clicks/types; completes the read-only triad with
     // desktop_snapshot + vision_grounding_ocr. Mutating act tools stay out.
     "desktop_verify",
+    // macOS adapter feasibility: read-only AX trust/frontmost-window probe.
+    // No permission prompt and no host mutation; this is the first local
+    // cross-platform SSB runtime probe.
+    "macos_ax_probe",
     // External browser-lite discovery: read-only probe only. This is not the
     // mutating browser_* automation surface and does not change browser routing.
     "browser_lite_probe",
@@ -31743,6 +32241,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(DesktopVerifyTool::new(hub.clone())),
+    );
+    // macOS Semantic System Bus probe: read-only AX trust + bounded
+    // frontmost-window observation. Exposed to Codex via direct extras; mutating
+    // AX actions are not part of this tool.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MacosAxProbeTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -36970,6 +37477,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "mobile_ios_list_devices"));
         assert!(p.includes(Tier::Standard, "mobile_ios_apps"));
         assert!(p.includes(Tier::Standard, "mobile_ios_syslog_tail"));
+        assert!(p.includes(Tier::Standard, "macos_ax_probe"));
         assert!(p.includes(Tier::Standard, "browser_lite_probe"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
@@ -36979,14 +37487,14 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 45 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 46 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(33: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(34: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_related_keys_preflight
         //      + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
-        //      + browser_lite_probe
+        //      + macos_ax_probe + browser_lite_probe
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
         //      + agent_orchestrate_scan, added by d4fd74d).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
@@ -36994,7 +37502,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // +desktop_verify (read-only postflight verifier) brought DIRECT 30→31, 42→43.
         // +browser_lite_probe brought DIRECT 31→32, total 43→44.
         // +memory_related_keys_preflight brought DIRECT 32→33, total 44→45.
-        assert_eq!(extras.len(), 45);
+        // +macos_ax_probe brought DIRECT 33→34, total 45→46.
+        assert_eq!(extras.len(), 46);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -37029,6 +37538,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"desktop_snapshot"));
         assert!(extras.contains(&"vision_grounding_ocr"));
         assert!(extras.contains(&"desktop_verify"));
+        assert!(extras.contains(&"macos_ax_probe"));
         assert!(extras.contains(&"browser_lite_probe"));
         // Remote session steering (d4fd74d) — direct-exposed for Codex
         // orchestrators that already carry agent_spawn + agent_session_*.
@@ -37363,6 +37873,30 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .get("probe_mcp_tools")
             .is_some());
         assert!(tool.input_schema["properties"].get("stealth").is_none());
+    }
+
+    #[test]
+    fn registry_exposes_macos_ax_probe_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "macos_ax_probe"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "macos_ax_probe")
+            .expect("macos_ax_probe schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("never prompts"));
+        assert!(tool.input_schema["properties"]
+            .get("include_windows")
+            .is_some());
+        assert!(tool.input_schema["properties"].get("max_windows").is_some());
+        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_include_raw")
+            .is_some());
+        assert!(tool.input_schema["properties"].get("prompt").is_none());
     }
 
     #[tokio::test]
@@ -37729,6 +38263,194 @@ print(json.dumps(payload))
         assert_eq!(raw_payload["raw_included"], true);
         assert_eq!(raw_payload["raw_verify"]["schema"], DESKTOP_VERIFY_SOURCE_SCHEMA);
         assert!(raw_payload["raw_verify"].get("mcp_wrapper").is_some());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn macos_ax_probe_wrapper_defaults_to_no_prompt_and_bounded_windows() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-macos-ax-probe-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("macos_ax_probe.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "macos_ax_probe/v0", "argv": sys.argv[1:]}))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = MacosAxProbeTool::new(Hub::builder().build());
+        let out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "include_windows": false,
+                    "max_windows": 3,
+                    "jxa_timeout_secs": 1.5,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        let argv = payload["argv"].as_array().expect("argv");
+        let argv: Vec<&str> = argv.iter().filter_map(|v| v.as_str()).collect();
+
+        assert!(argv.contains(&"--compact"));
+        assert!(argv.contains(&"--no-windows"));
+        assert!(argv.contains(&"--max-windows"));
+        assert!(argv.contains(&"3"));
+        assert!(argv.contains(&"--jxa-timeout-secs"));
+        assert!(argv.contains(&"1.5"));
+        assert!(!argv.contains(&"--prompt"));
+        assert_eq!(payload["mcp_wrapper"]["read_only"], true);
+        assert_eq!(payload["mcp_wrapper"]["include_windows"], false);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn macos_ax_probe_semantic_bus_wraps_probe_without_changing_default_output() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-macos-ax-probe-semantic-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let script = temp_dir.join("macos_ax_probe.py");
+        tokio::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+payload = {
+    "schema": "macos_ax_probe/v0",
+    "captured_at": 1780835200,
+    "platform": {"system": "Darwin", "release": "25.0.0", "machine": "arm64"},
+    "read_only": True,
+    "status": "ready",
+    "permission": {"ax_trusted": True, "method": "AXIsProcessTrusted", "prompted": False},
+    "frontmost_app": {"name": "Codex", "pid": 54862, "bundle_id": "com.openai.codex", "role": "AXApplication"},
+    "windows": [{
+        "index": 0,
+        "title": "Codex",
+        "role": "AXWindow",
+        "subrole": "AXStandardWindow",
+        "focused": True,
+        "position": [2204, 1090],
+        "size": [356, 320],
+        "rect": {"x": 2204, "y": 1090, "width": 356, "height": 320}
+    }],
+    "window_count": 1,
+    "source_window_count": 1,
+    "limits": {"max_windows": 8, "truncated": False, "include_windows": True},
+    "errors": [],
+    "elapsed_ms": 5
+}
+print(json.dumps(payload))
+"#,
+        )
+        .await
+        .expect("write script");
+
+        let tool = MacosAxProbeTool::new(Hub::builder().build());
+        let default_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("default execute");
+        let default_payload = result_text_as_json(&default_out);
+        assert_eq!(default_payload["schema"], MACOS_AX_PROBE_SOURCE_SCHEMA);
+        assert!(default_payload.get("semantic_objects").is_none());
+        assert!(default_payload.get("mcp_wrapper").is_some());
+
+        let semantic_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "semantic_bus": true,
+                    "semantic_include_raw": false,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("semantic execute");
+        let payload = result_text_as_json(&semantic_out);
+        assert_eq!(payload["schema"], MACOS_AX_PROBE_SEMANTIC_SCHEMA);
+        assert_eq!(payload["source_schema"], MACOS_AX_PROBE_SOURCE_SCHEMA);
+        assert_eq!(payload["source_adapter"], "macos.ax_probe");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["raw_available"], true);
+        assert_eq!(payload["raw_included"], false);
+        assert!(payload.get("raw_probe").is_none());
+        assert_eq!(payload["verification"]["verdict"], "verified");
+        assert_eq!(payload["verification"]["verified_to"], "semantic_objects");
+        assert_eq!(payload["verification"]["recover"], "proceed");
+
+        let objects = payload["semantic_objects"].as_array().expect("objects");
+        assert_eq!(objects.len(), 3);
+        assert!(objects.iter().any(|o| {
+            o["object_id"] == "desktop:macos:session:1780835200"
+                && o["source_adapter"] == "macos.ax_probe"
+        }));
+        assert!(objects.iter().any(|o| {
+            o["object_id"] == "desktop:macos:app:54862"
+                && o["source_adapter"] == "macos.system_events"
+        }));
+        assert!(objects.iter().any(|o| {
+            o["object_id"] == "desktop:macos:window:54862:0"
+                && o["source_adapter"] == "macos.ax.window"
+        }));
+
+        let affordances = payload["affordances"].as_array().expect("affordances");
+        assert_eq!(affordances.len(), 1);
+        assert_eq!(affordances[0]["action_type"], "macos_ax_probe.reobserve");
+        assert_eq!(affordances[0]["requires_gate"], false);
+        assert_eq!(
+            payload["events"][0]["event_type"],
+            "desktop.snapshot.observed"
+        );
+        assert_eq!(
+            payload["presentation"]["machine_payload"]["window_count"],
+            1
+        );
+
+        let raw_out = tool
+            .execute(
+                json!({
+                    "script_path": script.to_string_lossy(),
+                    "semantic_bus": true,
+                    "semantic_include_raw": true,
+                    "timeout_ms": 5000
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("raw execute");
+        let raw_payload = result_text_as_json(&raw_out);
+        assert_eq!(raw_payload["raw_included"], true);
+        assert_eq!(raw_payload["raw_probe"]["schema"], MACOS_AX_PROBE_SOURCE_SCHEMA);
+        assert!(raw_payload["raw_probe"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
