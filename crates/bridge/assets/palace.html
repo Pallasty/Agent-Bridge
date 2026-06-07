@@ -884,6 +884,79 @@
       border-color: #5cc8c8;
       background: #101b1d;
     }
+    #panel .maintenance-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    #panel .maintenance-action {
+      width: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 9px 10px;
+      background: #0f0f16;
+      border: 1px solid #252532;
+      border-left: 2px solid #5cc8c8;
+      border-radius: 4px;
+      color: #d8d8e2;
+      text-align: left;
+      cursor: pointer;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    #panel .maintenance-action:hover {
+      color: #ffffff;
+      border-color: #5a5a72;
+      background: #13131d;
+    }
+    #panel .maintenance-action.active {
+      color: #ffffff;
+      background: #171525;
+      border-color: #a87cff;
+      border-left-color: #a87cff;
+    }
+    #panel .maintenance-action.fragile { border-left-color: #d88080; }
+    #panel .maintenance-action.watch { border-left-color: #c8a96a; }
+    #panel .maintenance-action.good { border-left-color: #5cc89a; }
+    #panel .maintenance-main { min-width: 0; }
+    #panel .maintenance-label {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    #panel .maintenance-detail {
+      display: block;
+      margin-top: 3px;
+      color: #6a6a78;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .maintenance-badge {
+      color: #5cc8c8;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    #panel .maintenance-action.fragile .maintenance-badge { color: #d88080; }
+    #panel .maintenance-action.watch .maintenance-badge { color: #c8a96a; }
+    #panel .maintenance-action.good .maintenance-badge { color: #5cc89a; }
+    #panel .maintenance-empty {
+      color: #4a4a55;
+      font-size: 11px;
+      font-style: italic;
+      padding: 9px 10px;
+      background: #0f0f16;
+      border: 1px dashed #252532;
+      border-radius: 4px;
+    }
     #panel .neighbor-list,
     #panel .region-node-list,
     #panel .source-stack {
@@ -3758,6 +3831,80 @@ function renderRegionNodeControls() {
   </div>`;
 }
 
+function regionMaintenanceActions(region) {
+  if (!region || !region.count) return [];
+  const actions = [];
+  const stale = region.stale || 0;
+  const orphans = region.orphans || 0;
+  const hubs = region.hubs || 0;
+  const fresh = region.fresh || 0;
+  const healthScore = Number.isFinite(region.healthScore) ? region.healthScore : 0;
+  const healthTier = region.healthTier || "fragile";
+
+  if (healthTier === "fragile" || healthScore < 50) {
+    actions.push({
+      filter: "all",
+      label: "triage region",
+      detail: `${healthScore} health score · ${region.healthReason || "review topology"}`,
+      tier: "fragile",
+    });
+  }
+  if (orphans > 0) {
+    actions.push({
+      filter: "orphans",
+      label: "inspect orphans",
+      detail: `${orphans} memories have no explicit graph edge`,
+      tier: "fragile",
+    });
+  }
+  if (stale > 0) {
+    actions.push({
+      filter: "stale",
+      label: "review stale",
+      detail: `${stale} memories untouched beyond the stale window`,
+      tier: stale > Math.max(3, Math.floor(region.count * 0.25)) ? "watch" : "good",
+    });
+  }
+  if (hubs > 0) {
+    actions.push({
+      filter: "hubs",
+      label: "inspect hubs",
+      detail: `${hubs} high-degree anchors shape this region`,
+      tier: "watch",
+    });
+  }
+  if (actions.length === 0 && fresh > 0) {
+    actions.push({
+      filter: "fresh",
+      label: "scan fresh",
+      detail: `${fresh} recently touched memories are active here`,
+      tier: "good",
+    });
+  }
+  return actions;
+}
+
+function renderRegionMaintenanceActions(region) {
+  const actions = regionMaintenanceActions(region);
+  if (actions.length === 0) {
+    return `<div id="region-maintenance-actions" class="maintenance-actions">
+      <div class="maintenance-empty">no maintenance signals for this region</div>
+    </div>`;
+  }
+  return `<div id="region-maintenance-actions" class="maintenance-actions">` + actions.map(action => {
+    const filter = VALID_REGION_NODE_FILTERS.has(action.filter) ? action.filter : "all";
+    const tier = ["fragile", "watch", "good"].includes(action.tier) ? action.tier : "watch";
+    const active = state.regionNodeFilter === filter ? " active" : "";
+    return `<button type="button" class="maintenance-action ${tier}${active}" data-maintenance-filter="${escapeHTML(filter)}">
+      <span class="maintenance-main">
+        <span class="maintenance-label">${escapeHTML(action.label)}</span>
+        <span class="maintenance-detail">${escapeHTML(action.detail)}</span>
+      </span>
+      <span class="maintenance-badge">${escapeHTML(filter)}</span>
+    </button>`;
+  }).join("") + `</div>`;
+}
+
 function renderRegionNodeList(regionId) {
   const nodes = filteredRegionNodesFor(regionId).slice(0, 24);
   const empty = `<div id="workbench-region-nodes" class="region-node-list">
@@ -3811,6 +3958,10 @@ function showRegionWorkbench(regionId) {
           <div class="metric"><div class="label">hubs</div><div class="value">${region.hubs || 0}</div></div>
           <div class="metric"><div class="label">orphans</div><div class="value">${region.orphans || 0}</div></div>
           <div class="metric"><div class="label">edges</div><div class="value">${explicitEdges}</div></div>
+        </div>
+        <div class="workbench-section">
+          <div class="workbench-section-title">Maintenance</div>
+          ${renderRegionMaintenanceActions(region)}
         </div>
         <div class="workbench-section">
           <div class="workbench-section-title">Region nodes</div>
@@ -3973,6 +4124,15 @@ function bindRegionWorkbenchActions(panel, regionId) {
   panel.querySelectorAll("[data-region-node-filter]").forEach(btn => {
     btn.addEventListener("click", () => {
       const filter = btn.dataset.regionNodeFilter;
+      if (!VALID_REGION_NODE_FILTERS.has(filter)) return;
+      state.regionNodeFilter = filter;
+      showRegionWorkbench(regionId);
+      saveViewState();
+    });
+  });
+  panel.querySelectorAll("[data-maintenance-filter]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const filter = btn.dataset.maintenanceFilter;
       if (!VALID_REGION_NODE_FILTERS.has(filter)) return;
       state.regionNodeFilter = filter;
       showRegionWorkbench(regionId);
