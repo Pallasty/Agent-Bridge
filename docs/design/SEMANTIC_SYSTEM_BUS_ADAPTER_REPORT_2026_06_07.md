@@ -52,6 +52,7 @@ Runtime-backed rows:
 - `linux_vision_grounding_ocr`
 - `macos_ax_probe`
 - `macos_ax_verify`
+- `local_runtime_health`
 
 Fixture-backed rows:
 
@@ -82,11 +83,13 @@ contract metadata or a live read-only report surface.
 
 ## 4. Next Slice
 
-The strongest SSB-12 target is a runtime health adapter for local service state:
+SSB-12 landed the runtime health adapter for local service state:
 
 ```text
 daemon-http health + Palace memory region state -> read-only SSB report
 ```
 
-That would close the current gap between fixture-described product surfaces and
-live, user-visible runtime state without adding mutation.
+This closes the current gap between fixture-described product surfaces and live,
+user-visible runtime state without adding mutation. The next stronger gap is a
+real Windows UIA runtime adapter or cross-platform harness coverage for a
+Windows host.

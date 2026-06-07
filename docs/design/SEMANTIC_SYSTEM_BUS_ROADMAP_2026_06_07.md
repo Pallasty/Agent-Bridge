@@ -556,6 +556,23 @@ Initial landing:
 - the report does not execute live probes, restart services, capture
   screenshots, or mutate host state.
 
+### SSB-12 - Runtime health adapter
+
+Deliverable:
+
+- live read-only MCP report for local daemon-http and Palace service state;
+- Palace graph statistics normalized as a `memory.region` semantic object;
+- optional `/api/semantic-events` probe treated as non-blocking for older Palace
+  services.
+
+Initial landing:
+
+- [Semantic System Bus Runtime Health](SEMANTIC_SYSTEM_BUS_RUNTIME_HEALTH_2026_06_07.md);
+- `semantic_bus_runtime_health` performs bounded HTTP GET checks against
+  daemon-http `/healthz`, Palace `/healthz`, and Palace `/api/graph`;
+- the tool is exposed to `codex-essential` and never restarts services, mutates
+  Palace, writes memory graph edges, or captures screenshots.
+
 ## 7. Non-goals
 
 - Do not make screenshots the primary architecture.

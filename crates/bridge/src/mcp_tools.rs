@@ -3048,6 +3048,8 @@ fn macos_ax_verify_error(error: Value) -> ToolResult {
 
 const SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA: &str =
     "agent_bridge.semantic_bus.adapter_report.v0";
+const SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA: &str =
+    "agent_bridge.semantic_bus.runtime_health.v0";
 
 pub struct SemanticBusAdapterReportTool {
     _hub: Hub,
@@ -3147,8 +3149,8 @@ fn semantic_bus_adapter_report_payload(args: &Value) -> Value {
         "adapters": adapters,
         "gaps": gaps,
         "next_recommended_slice": {
-            "id": "ssb-12-runtime-health-adapter",
-            "reason": "daemon_http and Palace are fixture-described but not yet backed by a compact live read-only SSB report surface"
+            "id": "ssb-13-windows-uia-runtime-adapter",
+            "reason": "local daemon-http and Palace now have a live read-only runtime health report; Windows UIA remains fixture/design-backed only"
         }
     })
 }
@@ -3269,6 +3271,25 @@ fn semantic_bus_adapter_specs(include_design_only: bool) -> Vec<SemanticBusAdapt
             fixture_assets: &["crates/bridge/fixtures/semantic_bus/windows_uia_verify_postcondition.json"],
             doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_CROSS_PLATFORM_MAPPING_2026_06_07.md"],
             notes: &["Pinned verify fixture only; runtime checker still needs a Windows host implementation."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "local_runtime_health",
+            platform: "local",
+            adapter_family: "process_and_memory_runtime",
+            tool: Some("semantic_bus_runtime_health"),
+            semantic_schema: SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA,
+            source_schema: SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA,
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["http_health", "palace_memory_graph", "semantic_events_optional"],
+            fallback_order: &["healthz", "palace_graph", "semantic_events_optional"],
+            runtime_assets: &["crates/bridge/src/mcp_tools.rs"],
+            fixture_assets: &[
+                "crates/bridge/fixtures/semantic_bus/daemon_http_service.json",
+                "crates/bridge/fixtures/semantic_bus/palace_memory_region.json",
+            ],
+            doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_RUNTIME_HEALTH_2026_06_07.md"],
+            notes: &["Live read-only MCP report over daemon-http health and Palace graph state."],
         },
         SemanticBusAdapterSpec {
             adapter_id: "daemon_http_service_fixture",
@@ -3526,6 +3547,632 @@ fn semantic_bus_adapter_report_gaps(adapters: &[Value]) -> Vec<Value> {
         }
     }
     gaps
+}
+
+// ===========================================================================
+//                       semantic_bus_runtime_health
+// ===========================================================================
+
+pub struct SemanticBusRuntimeHealthTool {
+    _hub: Hub,
+}
+
+impl SemanticBusRuntimeHealthTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SemanticBusRuntimeHealthTool {
+    fn name(&self) -> &'static str {
+        "semantic_bus_runtime_health"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Semantic System Bus runtime health report for local \
+                 daemon-http and Palace memory-region state. It performs bounded HTTP GET \
+                 checks; it never restarts services, mutates Palace, captures screenshots, \
+                 or writes memory graph edges."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "daemon_http_url": {
+                        "type": "string",
+                        "default": "http://127.0.0.1:7878",
+                        "description": "Base URL for daemon-http healthz."
+                    },
+                    "palace_url": {
+                        "type": "string",
+                        "default": "http://127.0.0.1:7979",
+                        "description": "Base URL for Palace."
+                    },
+                    "include_all": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, call Palace /api/graph?all=1."
+                    },
+                    "check_semantic_events": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Also probe Palace /api/semantic-events. Missing endpoint is optional."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include parsed raw Palace graph/events JSON."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 500,
+                        "maximum": 10000,
+                        "default": 2500,
+                        "description": "Per-request HTTP timeout in milliseconds."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &semantic_bus_runtime_health_payload(&args).await,
+        ))
+    }
+}
+
+async fn semantic_bus_runtime_health_payload(args: &Value) -> Value {
+    let daemon_http_url = semantic_bus_runtime_arg(
+        args,
+        "daemon_http_url",
+        "http://127.0.0.1:7878",
+    );
+    let palace_url = semantic_bus_runtime_arg(args, "palace_url", "http://127.0.0.1:7979");
+    let include_all = args
+        .get("include_all")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let check_semantic_events = args
+        .get("check_semantic_events")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let include_raw = args
+        .get("include_raw")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let timeout_ms = args
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(2_500)
+        .clamp(500, 10_000);
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout_ms))
+        .user_agent("agent-bridge-semantic-bus-runtime-health/0")
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            return semantic_bus_runtime_health_report(
+                now_secs,
+                &daemon_http_url,
+                &palace_url,
+                timeout_ms,
+                semantic_bus_runtime_error_check("/healthz", "client_init_error", &e.to_string()),
+                None,
+                semantic_bus_runtime_error_check("/healthz", "client_init_error", &e.to_string()),
+                None,
+                semantic_bus_runtime_error_check("/api/graph", "client_init_error", &e.to_string()),
+                None,
+                semantic_bus_runtime_error_check(
+                    "/api/semantic-events",
+                    "skipped_client_init_error",
+                    &e.to_string(),
+                ),
+                None,
+                include_raw,
+            );
+        }
+    };
+    let graph_endpoint = if include_all {
+        "/api/graph?all=1"
+    } else {
+        "/api/graph"
+    };
+
+    let (daemon_health, daemon_body) =
+        semantic_bus_runtime_get_text(&client, &daemon_http_url, "/healthz").await;
+    let (palace_health, palace_body) =
+        semantic_bus_runtime_get_text(&client, &palace_url, "/healthz").await;
+    let (mut graph_check, graph_body) =
+        semantic_bus_runtime_get_text(&client, &palace_url, graph_endpoint).await;
+    let graph = semantic_bus_runtime_parse_json(&mut graph_check, graph_body.as_deref());
+    let (mut events_check, events_body) = if check_semantic_events {
+        semantic_bus_runtime_get_text(&client, &palace_url, "/api/semantic-events").await
+    } else {
+        (
+            json!({
+                "endpoint": "/api/semantic-events",
+                "url": semantic_bus_runtime_join_url(&palace_url, "/api/semantic-events").ok(),
+                "ok": null,
+                "status": "skipped",
+                "optional": true
+            }),
+            None,
+        )
+    };
+    let events = semantic_bus_runtime_parse_json(&mut events_check, events_body.as_deref());
+    semantic_bus_runtime_mark_optional(&mut events_check);
+
+    semantic_bus_runtime_health_report(
+        now_secs,
+        &daemon_http_url,
+        &palace_url,
+        timeout_ms,
+        daemon_health,
+        daemon_body,
+        palace_health,
+        palace_body,
+        graph_check,
+        graph,
+        events_check,
+        events,
+        include_raw,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn semantic_bus_runtime_health_report(
+    now_secs: u64,
+    daemon_http_url: &str,
+    palace_url: &str,
+    timeout_ms: u64,
+    daemon_health: Value,
+    daemon_body: Option<String>,
+    palace_health: Value,
+    palace_body: Option<String>,
+    graph_check: Value,
+    graph: Option<Value>,
+    events_check: Value,
+    events: Option<Value>,
+    include_raw: bool,
+) -> Value {
+    let daemon_ok = semantic_bus_runtime_health_ok(&daemon_health, daemon_body.as_deref());
+    let palace_ok = semantic_bus_runtime_health_ok(&palace_health, palace_body.as_deref());
+    let graph_ok = graph.is_some();
+    let required_ok = daemon_ok && palace_ok && graph_ok;
+    let any_ok = daemon_ok || palace_ok || graph_ok;
+    let status = if required_ok {
+        "ready"
+    } else if any_ok {
+        "degraded"
+    } else {
+        "blocked"
+    };
+    let graph_stats = graph.as_ref().map(semantic_bus_runtime_graph_stats);
+    let events_status = events_check
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+
+    let mut objects = vec![
+        semantic_bus_runtime_service_object(
+            "daemon-http",
+            "Agent-Bridge daemon-http",
+            "service.http.daemon",
+            "daemon_http.healthz",
+            daemon_http_url,
+            &daemon_health,
+            daemon_ok,
+            now_secs,
+        ),
+        semantic_bus_runtime_service_object(
+            "palace",
+            "Agent-Bridge Palace",
+            "service.http.ui",
+            "palace.healthz",
+            palace_url,
+            &palace_health,
+            palace_ok,
+            now_secs,
+        ),
+    ];
+    if let Some(stats) = graph_stats.as_ref() {
+        objects.push(json!({
+            "schema": "agent_bridge.semantic_bus.object.v0",
+            "object_id": "palace:memory-region:agent-bridge",
+            "object_type": "memory.region",
+            "source_adapter": "palace.memory_graph",
+            "label": "Agent-Bridge Palace memory region",
+            "state": {
+                "status": "observed",
+                "stats": stats
+            },
+            "relations": [
+                {
+                    "rel": "served_by",
+                    "target": semantic_bus_runtime_service_id("palace", palace_url)
+                }
+            ],
+            "confidence": 0.9,
+            "observed_at": now_secs
+        }));
+    }
+
+    let mut checks = Map::new();
+    checks.insert("daemon_http_health".into(), daemon_health.clone());
+    checks.insert("palace_health".into(), palace_health.clone());
+    checks.insert("palace_graph".into(), graph_check.clone());
+    checks.insert("palace_semantic_events".into(), events_check.clone());
+
+    let mut payload = json!({
+        "schema": SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA,
+        "source_adapter": "runtime.health.local",
+        "generated_at_unix": now_secs,
+        "read_only": true,
+        "live_checks_executed": true,
+        "timeout_ms": timeout_ms,
+        "targets": {
+            "daemon_http_url": daemon_http_url,
+            "palace_url": palace_url
+        },
+        "status": status,
+        "summary": {
+            "daemon_http_healthy": daemon_ok,
+            "palace_healthy": palace_ok,
+            "palace_graph_observed": graph_ok,
+            "palace_semantic_events_status": events_status,
+            "memory_region_stats": graph_stats
+        },
+        "verification": {
+            "verdict": if required_ok { "verified" } else { "not_verified" },
+            "reason": if required_ok {
+                "daemon-http healthz, Palace healthz, and Palace graph were observed"
+            } else {
+                "one or more required runtime health checks were unavailable"
+            },
+            "recover": if required_ok { "proceed" } else if any_ok { "retry" } else { "replan" },
+            "required_checks": {
+                "daemon_http_health": daemon_ok,
+                "palace_health": palace_ok,
+                "palace_graph": graph_ok
+            },
+            "optional_checks": {
+                "palace_semantic_events": events_status
+            }
+        },
+        "semantic_objects": objects,
+        "events": [
+            semantic_bus_runtime_event("daemon-http-health-observed", daemon_http_url, daemon_ok, &daemon_health, now_secs),
+            semantic_bus_runtime_event("palace-health-observed", palace_url, palace_ok, &palace_health, now_secs)
+        ],
+        "checks": checks
+    });
+
+    if include_raw {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert(
+                "raw".to_string(),
+                json!({
+                    "palace_graph": graph,
+                    "palace_semantic_events": events
+                }),
+            );
+        }
+    }
+    payload
+}
+
+async fn semantic_bus_runtime_get_text(
+    client: &reqwest::Client,
+    base_url: &str,
+    endpoint: &str,
+) -> (Value, Option<String>) {
+    let url = match semantic_bus_runtime_join_url(base_url, endpoint) {
+        Ok(url) => url,
+        Err(e) => return (semantic_bus_runtime_error_check(endpoint, "invalid_url", &e), None),
+    };
+    let started = Instant::now();
+    let response = client
+        .get(&url)
+        .header("Accept", "application/json, text/plain;q=0.9, */*;q=0.1")
+        .send()
+        .await;
+    match response {
+        Ok(resp) => {
+            let http_status = resp.status().as_u16();
+            let ok = resp.status().is_success();
+            let content_type = resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string);
+            match resp.text().await {
+                Ok(body) => (
+                    json!({
+                        "endpoint": endpoint,
+                        "url": url,
+                        "ok": ok,
+                        "status": if ok { "ok" } else { "http_error" },
+                        "http_status": http_status,
+                        "elapsed_ms": semantic_bus_runtime_elapsed_ms(started),
+                        "content_type": content_type,
+                        "body_preview": body.chars().take(512).collect::<String>()
+                    }),
+                    Some(body),
+                ),
+                Err(e) => (
+                    json!({
+                        "endpoint": endpoint,
+                        "url": url,
+                        "ok": false,
+                        "status": "body_error",
+                        "http_status": http_status,
+                        "elapsed_ms": semantic_bus_runtime_elapsed_ms(started),
+                        "content_type": content_type,
+                        "error": e.to_string()
+                    }),
+                    None,
+                ),
+            }
+        }
+        Err(e) => (
+            json!({
+                "endpoint": endpoint,
+                "url": url,
+                "ok": false,
+                "status": "unreachable",
+                "elapsed_ms": semantic_bus_runtime_elapsed_ms(started),
+                "error": e.to_string()
+            }),
+            None,
+        ),
+    }
+}
+
+fn semantic_bus_runtime_parse_json(check: &mut Value, body: Option<&str>) -> Option<Value> {
+    if !semantic_bus_runtime_check_ok(check) {
+        return None;
+    }
+    match body.and_then(|b| serde_json::from_str::<Value>(b).ok()) {
+        Some(value) => Some(value),
+        None => {
+            if let Some(obj) = check.as_object_mut() {
+                obj.insert("ok".to_string(), json!(false));
+                obj.insert("status".to_string(), json!("invalid_json"));
+                obj.insert(
+                    "error".to_string(),
+                    json!("response was not valid JSON"),
+                );
+            }
+            None
+        }
+    }
+}
+
+fn semantic_bus_runtime_arg(args: &Value, key: &str, default: &str) -> String {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(default)
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn semantic_bus_runtime_join_url(base_url: &str, endpoint: &str) -> std::result::Result<String, String> {
+    let base_url = base_url.trim();
+    if base_url.is_empty() {
+        return Err("base URL is empty".to_string());
+    }
+    let base = reqwest::Url::parse(&format!("{}/", base_url.trim_end_matches('/')))
+        .map_err(|e| format!("parse base URL {base_url}: {e}"))?;
+    if !matches!(base.scheme(), "http" | "https") {
+        return Err(format!("unsupported URL scheme: {}", base.scheme()));
+    }
+    base.join(endpoint.trim_start_matches('/'))
+        .map(|url| url.to_string())
+        .map_err(|e| format!("join endpoint {endpoint}: {e}"))
+}
+
+fn semantic_bus_runtime_error_check(endpoint: &str, status: &str, error: &str) -> Value {
+    json!({
+        "endpoint": endpoint,
+        "url": null,
+        "ok": false,
+        "status": status,
+        "error": error
+    })
+}
+
+fn semantic_bus_runtime_mark_optional(check: &mut Value) {
+    if let Some(obj) = check.as_object_mut() {
+        obj.insert("optional".to_string(), json!(true));
+    }
+}
+
+fn semantic_bus_runtime_elapsed_ms(started: Instant) -> u64 {
+    let elapsed = started.elapsed().as_millis();
+    elapsed.min(u128::from(u64::MAX)) as u64
+}
+
+fn semantic_bus_runtime_check_ok(check: &Value) -> bool {
+    check.get("ok").and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn semantic_bus_runtime_health_ok(check: &Value, body: Option<&str>) -> bool {
+    semantic_bus_runtime_check_ok(check) && body.map(str::trim) == Some("ok")
+}
+
+fn semantic_bus_runtime_service_id(name: &str, base_url: &str) -> String {
+    let authority = semantic_bus_runtime_url_authority(base_url)
+        .unwrap_or_else(|| "unknown".to_string());
+    format!("service:agent-bridge:{name}:{authority}")
+}
+
+fn semantic_bus_runtime_url_authority(base_url: &str) -> Option<String> {
+    let url = reqwest::Url::parse(&format!("{}/", base_url.trim_end_matches('/'))).ok()?;
+    let host = url.host_str()?;
+    let port = url
+        .port_or_known_default()
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    Some(format!("{host}:{port}"))
+}
+
+fn semantic_bus_runtime_service_object(
+    name: &str,
+    label: &str,
+    object_type: &str,
+    source_adapter: &str,
+    base_url: &str,
+    health_check: &Value,
+    healthy: bool,
+    now_secs: u64,
+) -> Value {
+    json!({
+        "schema": "agent_bridge.semantic_bus.object.v0",
+        "object_id": semantic_bus_runtime_service_id(name, base_url),
+        "object_type": object_type,
+        "source_adapter": source_adapter,
+        "label": label,
+        "state": {
+            "status": if healthy { "healthy" } else { "unhealthy" },
+            "health_endpoint": health_check.get("url").cloned().unwrap_or(Value::Null),
+            "http_status": health_check.get("http_status").cloned().unwrap_or(Value::Null)
+        },
+        "confidence": if healthy { 0.95 } else { 0.4 },
+        "observed_at": now_secs
+    })
+}
+
+fn semantic_bus_runtime_event(
+    event_type: &str,
+    base_url: &str,
+    healthy: bool,
+    health_check: &Value,
+    now_secs: u64,
+) -> Value {
+    json!({
+        "schema": "agent_bridge.semantic_bus.event.v0",
+        "event_id": format!("evt-{event_type}-{now_secs}"),
+        "event_type": event_type,
+        "object_id": semantic_bus_runtime_service_id(event_type.trim_end_matches("-health-observed"), base_url),
+        "observed_at": now_secs,
+        "source_adapter": health_check.get("endpoint").and_then(Value::as_str).unwrap_or("healthz"),
+        "severity": if healthy { "info" } else { "warning" },
+        "status": if healthy { "healthy" } else { "unhealthy" },
+        "delta": null,
+        "evidence": health_check
+    })
+}
+
+fn semantic_bus_runtime_i64(v: &Value) -> Option<i64> {
+    v.as_i64()
+        .or_else(|| v.as_u64().and_then(|n| i64::try_from(n).ok()))
+}
+
+fn semantic_bus_runtime_graph_stats(graph: &Value) -> Value {
+    let nodes = graph
+        .get("nodes")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let edges = graph
+        .get("edges")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let now_secs = semantic_bus_runtime_i64(graph.get("now").unwrap_or(&Value::Null)).unwrap_or(0);
+    let mut degree = HashMap::<String, i64>::new();
+    let mut sqlite_nodes = 0i64;
+    let mut markdown_nodes = 0i64;
+    let mut fresh_nodes = 0i64;
+    let mut stale_nodes = 0i64;
+    for node in &nodes {
+        if let Some(id) = node.get("id").and_then(Value::as_str) {
+            degree.insert(id.to_string(), 0);
+        }
+        match node.get("source").and_then(Value::as_str).unwrap_or("") {
+            "sqlite" => sqlite_nodes += 1,
+            "markdown" => markdown_nodes += 1,
+            _ => {}
+        }
+        let last_accessed = semantic_bus_runtime_i64(
+            node.get("last_accessed").unwrap_or(&Value::Null),
+        )
+        .unwrap_or(0);
+        if last_accessed > 0 {
+            let age = now_secs.saturating_sub(last_accessed);
+            if age < 3600 {
+                fresh_nodes += 1;
+            }
+            if age > 7 * 24 * 3600 {
+                stale_nodes += 1;
+            }
+        }
+    }
+
+    let mut explicit_edges = 0i64;
+    let mut coactivation_edges = 0i64;
+    for edge in &edges {
+        if edge.get("type").and_then(Value::as_str) == Some("coactivation") {
+            coactivation_edges += 1;
+            continue;
+        }
+        explicit_edges += 1;
+        for key in ["source", "target"] {
+            if let Some(id) = edge.get(key).and_then(Value::as_str) {
+                if let Some(d) = degree.get_mut(id) {
+                    *d += 1;
+                }
+            }
+        }
+    }
+    let node_count = nodes.len() as i64;
+    let edge_count = edges.len() as i64;
+    let orphan_nodes = degree.values().filter(|d| **d == 0).count() as i64;
+    let connected_ratio = if node_count > 0 {
+        (node_count - orphan_nodes) as f64 / node_count as f64
+    } else {
+        0.0
+    };
+    let explicit_density = explicit_edges as f64 / node_count.max(1) as f64;
+    let mut degrees: Vec<i64> = degree.values().copied().filter(|d| *d > 0).collect();
+    degrees.sort_unstable();
+    let hub_threshold = degrees
+        .get(degrees.len().saturating_sub(1).min(degrees.len() * 95 / 100))
+        .copied()
+        .unwrap_or(0)
+        .max(5);
+    let hub_nodes = if degrees.len() >= 20 {
+        degree.values().filter(|d| **d >= hub_threshold).count() as i64
+    } else {
+        0
+    };
+
+    json!({
+        "nodes": node_count,
+        "edges": edge_count,
+        "sqlite_nodes": sqlite_nodes,
+        "markdown_nodes": markdown_nodes,
+        "explicit_edges": explicit_edges,
+        "coactivation_edges": coactivation_edges,
+        "orphan_nodes": orphan_nodes,
+        "hub_nodes": hub_nodes,
+        "fresh_nodes": fresh_nodes,
+        "stale_nodes": stale_nodes,
+        "hub_threshold": hub_threshold,
+        "connected_ratio": (connected_ratio * 1000.0).round() / 1000.0,
+        "explicit_density": (explicit_density * 1000.0).round() / 1000.0
+    })
 }
 
 // ===========================================================================
@@ -31404,6 +32051,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // SSB conformance inventory: read-only source/fixture/doc classification.
     // It does not execute live probes or mutate desktop/service state.
     "semantic_bus_adapter_report",
+    // SSB live local runtime health: bounded read-only HTTP GETs for daemon-http
+    // and Palace graph state. It does not restart services or write memory edges.
+    "semantic_bus_runtime_health",
     // External browser-lite discovery: read-only probe only. This is not the
     // mutating browser_* automation surface and does not change browser routing.
     "browser_lite_probe",
@@ -33275,6 +33925,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(SemanticBusAdapterReportTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SemanticBusRuntimeHealthTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -38505,6 +39161,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "macos_ax_probe"));
         assert!(p.includes(Tier::Standard, "macos_ax_verify"));
         assert!(p.includes(Tier::Standard, "semantic_bus_adapter_report"));
+        assert!(p.includes(Tier::Standard, "semantic_bus_runtime_health"));
         assert!(p.includes(Tier::Standard, "browser_lite_probe"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
@@ -38514,14 +39171,15 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 48 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 49 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(36: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(37: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_related_keys_preflight
         //      + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
         //      + macos_ax_probe + macos_ax_verify + semantic_bus_adapter_report
+        //      + semantic_bus_runtime_health
         //      + browser_lite_probe
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
         //      + agent_orchestrate_scan, added by d4fd74d).
@@ -38533,7 +39191,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // +macos_ax_probe brought DIRECT 33→34, total 45→46.
         // +macos_ax_verify brought DIRECT 34→35, total 46→47.
         // +semantic_bus_adapter_report brought DIRECT 35→36, total 47→48.
-        assert_eq!(extras.len(), 48);
+        // +semantic_bus_runtime_health brought DIRECT 36→37, total 48→49.
+        assert_eq!(extras.len(), 49);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -38571,6 +39230,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"macos_ax_probe"));
         assert!(extras.contains(&"macos_ax_verify"));
         assert!(extras.contains(&"semantic_bus_adapter_report"));
+        assert!(extras.contains(&"semantic_bus_runtime_health"));
         assert!(extras.contains(&"browser_lite_probe"));
         // Remote session steering (d4fd74d) — direct-exposed for Codex
         // orchestrators that already carry agent_spawn + agent_session_*.
@@ -38976,6 +39636,26 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn registry_exposes_semantic_bus_runtime_health_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "semantic_bus_runtime_health"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "semantic_bus_runtime_health")
+            .expect("semantic_bus_runtime_health schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("never"));
+        assert!(tool.input_schema["properties"].get("daemon_http_url").is_some());
+        assert!(tool.input_schema["properties"].get("palace_url").is_some());
+        assert!(tool.input_schema["properties"].get("include_raw").is_some());
+        assert!(tool.input_schema["properties"].get("restart").is_none());
+        assert!(tool.input_schema["properties"].get("write_edges").is_none());
+    }
+
+    #[test]
     fn semantic_bus_adapter_report_classifies_adapter_evidence() {
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let payload = semantic_bus_adapter_report_payload(&json!({
@@ -38997,6 +39677,16 @@ com.example.multiline, , \"Line one\nLine two\"\n";
                 .find(|row| row["adapter_id"].as_str() == Some(id))
                 .unwrap_or_else(|| panic!("missing adapter row {id}"))
         };
+
+        let runtime_health = find("local_runtime_health");
+        assert_eq!(
+            runtime_health["evidence_level"].as_str(),
+            Some("runtime_backed")
+        );
+        assert_eq!(
+            runtime_health["tool"].as_str(),
+            Some("semantic_bus_runtime_health")
+        );
 
         let macos_verify = find("macos_ax_verify");
         assert_eq!(
@@ -39029,7 +39719,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(summary["by_evidence_level"]["runtime_backed"]
             .as_u64()
             .unwrap_or(0)
-            >= 5);
+            >= 6);
         assert!(summary["by_evidence_level"]["fixture_backed"]
             .as_u64()
             .unwrap_or(0)
@@ -39044,6 +39734,87 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             gap["adapter_id"].as_str() == Some("palace_memory_region_fixture")
                 && gap["gap"].as_str() == Some("fixture_missing_adapter_contract")
         }));
+    }
+
+    #[test]
+    fn semantic_bus_runtime_health_report_keeps_semantic_events_optional() {
+        let graph = json!({
+            "now": 1_000,
+            "nodes": [
+                { "id": "a", "source": "sqlite", "last_accessed": 990 },
+                { "id": "b", "source": "markdown", "last_accessed": 0 },
+                { "id": "c", "source": "sqlite", "last_accessed": 1 }
+            ],
+            "edges": [
+                { "source": "a", "target": "b", "type": "relates", "weight": 0.8 },
+                { "source": "b", "target": "c", "type": "coactivation", "weight": 0.4 }
+            ]
+        });
+        let payload = semantic_bus_runtime_health_report(
+            1_000,
+            "http://127.0.0.1:7878",
+            "http://127.0.0.1:7979",
+            2_500,
+            json!({
+                "endpoint": "/healthz",
+                "url": "http://127.0.0.1:7878/healthz",
+                "ok": true,
+                "status": "ok",
+                "http_status": 200
+            }),
+            Some("ok".to_string()),
+            json!({
+                "endpoint": "/healthz",
+                "url": "http://127.0.0.1:7979/healthz",
+                "ok": true,
+                "status": "ok",
+                "http_status": 200
+            }),
+            Some("ok".to_string()),
+            json!({
+                "endpoint": "/api/graph",
+                "url": "http://127.0.0.1:7979/api/graph",
+                "ok": true,
+                "status": "ok",
+                "http_status": 200
+            }),
+            Some(graph),
+            json!({
+                "endpoint": "/api/semantic-events",
+                "url": "http://127.0.0.1:7979/api/semantic-events",
+                "ok": false,
+                "status": "http_error",
+                "http_status": 404,
+                "optional": true
+            }),
+            None,
+            false,
+        );
+
+        assert_eq!(
+            payload["schema"].as_str(),
+            Some(SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA)
+        );
+        assert_eq!(payload["read_only"].as_bool(), Some(true));
+        assert_eq!(payload["live_checks_executed"].as_bool(), Some(true));
+        assert_eq!(payload["status"].as_str(), Some("ready"));
+        assert_eq!(payload["verification"]["verdict"].as_str(), Some("verified"));
+        assert_eq!(
+            payload["summary"]["palace_semantic_events_status"].as_str(),
+            Some("http_error")
+        );
+        let stats = &payload["summary"]["memory_region_stats"];
+        assert_eq!(stats["nodes"].as_i64(), Some(3));
+        assert_eq!(stats["explicit_edges"].as_i64(), Some(1));
+        assert_eq!(stats["coactivation_edges"].as_i64(), Some(1));
+        assert_eq!(stats["orphan_nodes"].as_i64(), Some(1));
+        assert!(payload.get("raw").is_none());
+        assert!(payload["semantic_objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|obj| obj["object_id"].as_str()
+                == Some("palace:memory-region:agent-bridge")));
     }
 
     #[tokio::test]
