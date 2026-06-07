@@ -384,6 +384,14 @@ Best candidate:
 - LSWR `world_*` plus `world_present`, because no-laundering and presentation
   are already tested.
 
+Initial landing:
+
+- [Semantic System Bus LSWR Action Result Pilot](SEMANTIC_SYSTEM_BUS_LSWR_ACTION_RESULT_2026_06_07.md);
+- `world_query`, `world_visibility_query`, and `world_patch` now emit
+  `agent_bridge.semantic_bus.action_result.v0`;
+- `world_present` preserves the normalized action result in the machine packet
+  while keeping verdicts tied to the original world tool verification.
+
 ### SSB-4 - Linux-first adapter conformance
 
 Deliverable:
